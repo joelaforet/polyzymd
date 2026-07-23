@@ -14,8 +14,8 @@ from polyzymd.builders.conjugation._linkage import (
     LinkageBond,
     PabloCrosslinkRequirement,
     PdbAtomSelector,
+    ReactionProduct,
     ReactiveEndpoint,
-    ResolvedAttachmentPlan,
 )
 from polyzymd.builders.conjugation.construction import ModifierConstructionSettings
 from polyzymd.builders.conjugation.pablo.ingestion import PabloAvailability, PabloIngestionResult
@@ -29,6 +29,7 @@ from polyzymd.builders.conjugation.polymer import (
     PolymerFragmentResidue,
     PolymerMonomerRecipe,
     PolymerRecipe,
+    PreparedFragment,
 )
 from polyzymd.builders.conjugation.structure.pdb import (
     CrosslinkedPdbAssemblyResult,
@@ -43,6 +44,8 @@ from polyzymd.builders.conjugation.system_workflow import (
     _apply_pdb_atom_identity_to_topology,
     _apply_pdb_atom_names_to_topology,
     _build_direct_solvated_system,
+    _build_isolated_conjugate_system,
+    _build_native_to_baseline_atom_mapping,
     _build_solvated_system,
     _policy_with_resolved_crosslink,
     _prepared_protein_pdb_path,
@@ -51,9 +54,133 @@ from polyzymd.builders.conjugation.system_workflow import (
 )
 from polyzymd.builders.conjugation.validation import ValidationStatus
 from polyzymd.config.schema import (
+    BuildScope,
     ConjugationCcdPabloPolicyConfig,
     ConjugationChainPolicyConfig,
 )
+
+
+def test_structure_scope_stops_before_parameterization_and_system_build(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The structure checkpoint must not enter Pablo, relaxation, or solvation stages."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+    from polyzymd.builders.conjugation.models import ConjugationResult
+
+    source = tmp_path / "protein.pdb"
+    source.write_text("END\n", encoding="utf-8")
+    assembled = tmp_path / "out" / "conjugate-construction" / "assembled_crosslinked.pdb"
+    forbidden_calls: list[str] = []
+
+    def forbid(name: str):
+        def fail(*args: object, **kwargs: object) -> object:
+            forbidden_calls.append(name)
+            raise AssertionError(f"forbidden structure-scope stage called: {name}")
+
+        return fail
+
+    def fake_structure_result(**kwargs: object) -> ConjugationResult:
+        assert kwargs["output_name"] == "assembled_crosslinked.pdb"
+        assert kwargs["status"] == "structure"
+        assembled.parent.mkdir(parents=True)
+        assembled.write_text("END\n", encoding="utf-8")
+        return ConjugationResult(
+            status="structure",
+            output_dir=tmp_path / "out",
+            crosslinked_conjugate_pdb_path=assembled,
+            final_interchange_created=False,
+        )
+
+    monkeypatch.setattr(
+        workflow_module, "_enabled_supported_attachments", lambda value: (object(),)
+    )
+    monkeypatch.setattr(workflow_module, "_log_attachment_additions", lambda value: None)
+    monkeypatch.setattr(
+        workflow_module,
+        "_prepared_protein_pdb_path",
+        lambda *args, **kwargs: (source, None),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "_build_attachment_spec",
+        lambda *args, **kwargs: (SimpleNamespace(fragment=object()), None, 0, {}),
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "_build_pdb_fragment_coordinate_only_result",
+        fake_structure_result,
+    )
+    monkeypatch.setattr(workflow_module, "resolve_conjugate_force_fields", forbid("force_fields"))
+    monkeypatch.setattr(workflow_module, "native_glycam_enabled", forbid("native_glycam"))
+    monkeypatch.setattr(workflow_module, "_construct_conjugate_from_specs", forbid("pablo"))
+    monkeypatch.setattr(workflow_module, "_build_solvated_system", forbid("solvation"))
+
+    result = workflow_module.build_conjugated_polymer_system_from_config(
+        SimpleNamespace(enzyme=SimpleNamespace(pdb_path=source), conjugation=object()),
+        output_dir=tmp_path / "out",
+        settings=workflow_module.ConjugatedPolymerSystemSettings(
+            build_scope=BuildScope.STRUCTURE,
+            canonicalize_source_protein_hydrogens=False,
+        ),
+    )
+
+    assert result.crosslinked_conjugate_pdb_path == assembled
+    assert result.workflow_json_path is not None and result.workflow_json_path.is_file()
+    assert forbidden_calls == []
+
+
+def test_isolated_conjugate_parameterizes_primary_without_full_assembly(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The solute helper must not build secondary components or solvate."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    primary = SimpleNamespace(n_molecules=1)
+    calls: list[str] = []
+
+    class FakeBuilder:
+        interchange = None
+        solvated_topology = None
+
+        def combine_solutes(self) -> object:
+            calls.append("combine_primary")
+            self._combined_topology = self._enzyme_topology
+            return self._combined_topology
+
+        def _assign_pdb_identifiers(self) -> None:
+            calls.append("assign_ids")
+
+        def build_substrate(self, *args: object, **kwargs: object) -> None:
+            raise AssertionError("substrate build entered")
+
+        def solvate(self, *args: object, **kwargs: object) -> None:
+            raise AssertionError("solvation entered")
+
+    builder = FakeBuilder()
+    monkeypatch.setattr(
+        workflow_module.SystemBuilder,
+        "from_config",
+        lambda config: builder,
+    )
+
+    def fake_parameterize(target: FakeBuilder, **kwargs: object) -> None:
+        calls.append("parameterize")
+        target.interchange = "isolated-interchange"
+
+    monkeypatch.setattr(workflow_module, "create_final_conjugated_interchange", fake_parameterize)
+
+    result = _build_isolated_conjugate_system(
+        SimpleNamespace(substrate=object(), polymers=object(), solvent=object()),
+        relaxed_conjugate_topology=primary,
+        working_dir=tmp_path,
+    )
+
+    assert result is builder
+    assert builder._solvated_topology is primary
+    assert builder.interchange == "isolated-interchange"
+    assert calls == ["combine_primary", "assign_ids", "parameterize"]
 
 
 class _AtomDouble:
@@ -200,15 +327,131 @@ def test_system_workflow_settings_enable_public_product_state_defaults():
     assert settings.protein_canonicalization.ph == pytest.approx(7.0)
 
 
+def test_system_workflow_reads_packmol_timeout_from_public_config():
+    """A YAML-backed conjugation placement timeout should reach the Packmol settings."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    config = SimpleNamespace(
+        conjugation=SimpleNamespace(placement=SimpleNamespace(timeout_seconds=12.5)),
+        openmm=None,
+    )
+
+    settings = workflow_module._settings_with_config_defaults(None, config)
+
+    assert settings.placement.timeout_seconds == pytest.approx(12.5)
+
+
+def test_explicit_workflow_settings_override_public_packmol_timeout():
+    """Programmatic workflow settings should retain their historical override priority."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    config = SimpleNamespace(
+        conjugation=SimpleNamespace(placement=SimpleNamespace(timeout_seconds=12.5)),
+        openmm=None,
+    )
+    explicit = workflow_module.ConjugatedPolymerSystemSettings(
+        placement=workflow_module.PackmolModifierPlacementSettings(timeout_seconds=44.0)
+    )
+
+    settings = workflow_module._settings_with_config_defaults(explicit, config)
+
+    assert settings.placement.timeout_seconds == pytest.approx(44.0)
+
+
+def test_native_reference_overlay_mapping_is_strict() -> None:
+    """Native-to-baseline mapping should reject unmapped and ambiguous atoms."""
+
+    baseline = _openmm_mapping_topology([("A", "1", "NAG", ("C1",)), ("A", "2", "NAG", ("C1",))])
+    native = _openmm_mapping_topology([("A", "1", "NAG", ("C1",))])
+    assert _build_native_to_baseline_atom_mapping(baseline, native) == {0: 0}
+
+    missing_native = _openmm_mapping_topology([("A", "3", "NAG", ("C1",))])
+    with pytest.raises(ValueError, match="could not map native atoms"):
+        _build_native_to_baseline_atom_mapping(baseline, missing_native)
+
+    ambiguous_baseline = _openmm_mapping_topology(
+        [("A", "1", "NAG", ("C1",)), ("A", "1", "NAG", ("C1",))]
+    )
+    with pytest.raises(ValueError, match="Ambiguous native-to-baseline"):
+        _build_native_to_baseline_atom_mapping(ambiguous_baseline, native)
+
+
+def test_mixed_overlay_native_reference_build_disables_relaxation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Native reference construction should not perform a second relaxation pass."""
+
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    captured: dict[str, object] = {}
+
+    def fake_resolve(_config: object) -> object:
+        return SimpleNamespace(
+            attachments=(
+                SimpleNamespace(attachment_name="glycan", is_glycam=True),
+                SimpleNamespace(attachment_name="polymer", is_glycam=False),
+            )
+        )
+
+    def fake_build(_config: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return SimpleNamespace(exact_export_bundle=SimpleNamespace(system="system"))
+
+    monkeypatch.setattr(workflow_module, "resolve_conjugate_force_fields", fake_resolve)
+    monkeypatch.setattr(workflow_module, "build_conjugated_polymer_system_from_config", fake_build)
+    config = SimpleNamespace(
+        model_copy=lambda deep=True: SimpleNamespace(
+            conjugation=SimpleNamespace(
+                attachments=[
+                    SimpleNamespace(
+                        name="glycan",
+                        enabled=True,
+                        model_copy=lambda update, deep=True: SimpleNamespace(
+                            name="glycan", enabled=update["enabled"]
+                        ),
+                    ),
+                    SimpleNamespace(
+                        name="polymer",
+                        enabled=True,
+                        model_copy=lambda update, deep=True: SimpleNamespace(
+                            name="polymer", enabled=update["enabled"]
+                        ),
+                    ),
+                ],
+                model_copy=lambda update, deep=True: SimpleNamespace(
+                    attachments=update["attachments"]
+                ),
+            ),
+            polymers=SimpleNamespace(
+                model_copy=lambda update, deep=True: SimpleNamespace(enabled=update["enabled"])
+            ),
+        )
+    )
+
+    workflow_module._build_mixed_overlay_native_reference(
+        config=config,
+        output_dir=tmp_path,
+        free_polymer_seed=None,
+        workflow_settings=workflow_module.ConjugatedPolymerSystemSettings(),
+    )
+
+    assert captured["settings"].run_relaxation is False
+
+
 def test_relaxed_conjugate_pdb_prefers_final_conjugate_relaxation_artifact(tmp_path):
     """Downstream solvation should consume the Stage B relaxed PDB."""
     import polyzymd.builders.conjugation.system_workflow as workflow_module
 
+    crosslinked = tmp_path / "crosslinked_product.pdb"
     minimized = tmp_path / "conjugate_minimized.pdb"
     relaxed = tmp_path / "conjugate_relaxed.pdb"
+    crosslinked.write_text(
+        "ATOM      1  CA  ALA A   1       0.000   0.000   0.000\nEND\n", encoding="utf-8"
+    )
     minimized.write_text("END\n", encoding="utf-8")
     relaxed.write_text("END\n", encoding="utf-8")
     construction = SimpleNamespace(
+        crosslinked_pdb_path=crosslinked,
         relaxation=SimpleNamespace(
             minimized_pdb_path=minimized,
             relaxed_pdb_path=relaxed,
@@ -253,7 +496,7 @@ def test_build_solvated_system_uses_conjugation_final_interchange(monkeypatch, t
 
     result = _build_solvated_system(
         config,
-        relaxed_conjugate_topology=object(),
+        relaxed_conjugate_topology=SimpleNamespace(n_molecules=2),
         working_dir=tmp_path,
         polymer_seed=123,
         create_interchange=True,
@@ -261,7 +504,10 @@ def test_build_solvated_system_uses_conjugation_final_interchange(monkeypatch, t
     )
 
     assert result is fake_builder
+    assert fake_builder._n_enzyme_molecules == 2
     assert fake_builder.create_interchange_calls == 0
+    assert fake_builder.assign_pdb_identifiers_calls == 1
+    assert fake_builder.identifiers_assigned_before_interchange is True
     assert calls["builder"] is fake_builder
     assert calls["product_state_pablo_library"] is product_library
 
@@ -285,7 +531,7 @@ def test_build_direct_solvated_system_uses_conjugation_final_interchange(
     )
 
     result = _build_direct_solvated_system(
-        relaxed_conjugate_topology=object(),
+        relaxed_conjugate_topology=SimpleNamespace(n_molecules=2),
         working_dir=tmp_path,
         create_interchange=True,
         product_state_pablo_library=product_library,
@@ -294,7 +540,10 @@ def test_build_direct_solvated_system_uses_conjugation_final_interchange(
     )
 
     assert result is fake_builder
+    assert fake_builder._n_enzyme_molecules == 2
     assert fake_builder.create_interchange_calls == 0
+    assert fake_builder.assign_pdb_identifiers_calls == 1
+    assert fake_builder.identifiers_assigned_before_interchange is True
     assert fake_builder.solvation_settings == {
         "padding": 1.7,
         "box_shape": "truncated_octahedron",
@@ -460,9 +709,6 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
         return SimpleNamespace(success=True)
 
     monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
-    monkeypatch.setattr(
-        workflow_module, "placed_fragment_from_resolved_plan", lambda fragment, plan: fragment
-    )
     monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
     monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
     monkeypatch.setattr(
@@ -481,15 +727,13 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     )
 
     specs = tuple(
-        SimpleNamespace(
-            attachment_id=f"attachment_{index:02d}",
-            attachment_index=index,
-            reaction_name="n_glycosylation",
-            generated_fragment=modifier,
-            source_fragment=moiety,
-            resolved_plan=plan,
-            source_sidecars={},
-            fragment=SimpleNamespace(source_kind="moiety"),
+        plan.model_copy(
+            update={
+                "attachment_id": f"attachment_{index:02d}",
+                "attachment_index": index,
+                "reaction_name": "n_glycosylation",
+                "fragment": modifier,
+            }
         )
         for index, (modifier, moiety, plan) in enumerate(
             zip(modifiers, moieties, plans, strict=True),
@@ -508,7 +752,7 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     )
 
     assert topology is not None
-    assert len(construction.resolved_plans) == 2
+    assert len(construction.reaction_products) == 2
     assert calls["placements"] == 1
     assert calls["placed_modifier_count"] == 2
     assert calls["placed_plan_count"] == 2
@@ -517,6 +761,345 @@ def test_multi_modifier_construction_places_parameterizes_and_relaxes_once(
     assert calls["protein_products"] == ("ASX", "ASX")
     assert calls["parameterize"] == 1
     assert calls["validation"] == 0
+
+
+@pytest.mark.parametrize("overlap", [True, False])
+@pytest.mark.parametrize("outcome", ["timeout_candidate", "imperfect_candidate"])
+def test_multi_fragment_coordinate_output_validates_joint_clashes(
+    monkeypatch, tmp_path: Path, overlap: bool, outcome: str
+) -> None:
+    """Joint placement acceptance must include cross-fragment final-graph clashes."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    work_dir = tmp_path / "construction" / "packmol_modifier_placement"
+    work_dir.mkdir(parents=True)
+    status_path = work_dir / "packmol_run_status.json"
+    status_path.write_text(
+        json.dumps(
+            {
+                "timed_out": outcome == "timeout_candidate",
+                "return_code": -15 if outcome == "timeout_candidate" else 173,
+                "outcome": outcome,
+                "accepted_after_validation": True,
+            }
+        )
+    )
+    fragments = tuple(
+        _generated_fragment(residue_name="NAG", residue_number=index) for index in (1, 2)
+    )
+    placements = tuple(
+        PackmolModifierPlacementResult(
+            placed_modifier=fragment.to_placed_fragment(),
+            packmol_input_path=work_dir / "packmol.inp",
+            packmol_output_path=work_dir / "packmol_output.pdb",
+            protein_sterics_pdb_path=work_dir / "protein.pdb",
+            modifier_pdb_path=work_dir / f"modifier_{index}.pdb",
+            packmol_input_text="",
+            target_bond_length_angstrom=1.45,
+            placed_bond_length_angstrom=1.45,
+            min_modifier_protein_distance_angstrom=2.5,
+            packmol_exit_status=(
+                "timeout_accepted" if outcome == "timeout_candidate" else "173_imperfect_accepted"
+            ),
+        )
+        for index, fragment in enumerate(fragments, start=1)
+    )
+    specs = tuple(
+        SimpleNamespace(
+            fragment=SimpleNamespace(name=fragment.name, sidecars={}),
+            to_pdb_linkage_attachment=lambda: object(),
+        )
+        for fragment in fragments
+    )
+
+    def fake_write(_protein, _fragments, _attachments, output_path, _options):
+        second_x = 1.45 if overlap else 11.45
+        Path(output_path).write_text(
+            _pdb_line(1, "ND2 ", "NLN", "A", 1, x=0.0, element="N")
+            + _pdb_line(2, "ND2 ", "NLN", "A", 2, x=10.0, element="N")
+            + _pdb_line(3, "C1  ", "NAG", "C", 3, x=1.45, element="C")
+            + _pdb_line(4, "C1  ", "NAG", "C", 4, x=second_x, element="C")
+            + "CONECT    1    3\nCONECT    2    4\nEND\n"
+        )
+        return CrosslinkedPdbAssemblyResult(
+            output_path=Path(output_path),
+            protein_atom_count=2,
+            polymer_atom_count=2,
+            removed_protein_atom_count=0,
+            removed_polymer_atom_count=0,
+            removed_atom_serials=(),
+            removed_atom_names=(),
+            added_conect_pair=(1, 3),
+            added_conect_pairs=((1, 3), (2, 4)),
+            atom_mappings={
+                "fragment_1:1:C1": {"target_serial": 3},
+                "fragment_2:1:C1": {"target_serial": 4},
+            },
+        )
+
+    monkeypatch.setattr(
+        workflow_module, "place_modifiers_with_resolved_plans", lambda *args, **kwargs: placements
+    )
+    monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
+
+    def call():
+        return workflow_module._write_pdb_fragment_coordinate_artifacts(
+            protein_pdb_path=tmp_path / "protein.pdb",
+            specs=specs,
+            construction_dir=tmp_path / "construction",
+        )
+
+    if overlap:
+        with pytest.raises(RuntimeError, match="fragment-fragment"):
+            call()
+    else:
+        _, _, accepted_placements = call()
+        assert all(item.final_conect_graph_valid is True for item in accepted_placements)
+    status = json.loads(status_path.read_text())
+    assert status["accepted_after_validation"] is not overlap
+    assert status["validation"]["final_conect_graph_valid"] is True
+    contact_count = status["validation"]["true_nonbonded_heavy_contact_count_below_2_angstrom"]
+    assert (contact_count > 0) is overlap
+
+
+def test_product_state_specs_use_exact_assembly_serial_pairs(tmp_path: Path):
+    """Multi-attachment product specs should bind repeated modifier names by serial."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    product_pdb = tmp_path / "product.pdb"
+    product_pdb.write_text(
+        _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+        + _pdb_line(2, "C001", "NAG", "C", 10, element="C")
+        + _pdb_line(3, "ND2 ", "ASX", "A", 87, element="N")
+        + _pdb_line(4, "C001", "NAG", "C", 20, element="C")
+        + "CONECT    1    2\n"
+        + "CONECT    2    1\n"
+        + "CONECT    3    4\n"
+        + "CONECT    4    3\n"
+        + "END\n",
+        encoding="utf-8",
+    )
+    assembly = SimpleNamespace(
+        added_conect_pairs=((1, 2), (3, 4)),
+        attachment_endpoint_records=(
+            {
+                "attachment_index": 1,
+                "conect_pair": {"protein_serial": 1, "modifier_serial": 2},
+                "protein_endpoint": {"serial": 1, "atom_name": "ND2"},
+                "modifier_endpoint": {"serial": 2, "atom_name": "C001"},
+            },
+            {
+                "attachment_index": 2,
+                "conect_pair": {"protein_serial": 3, "modifier_serial": 4},
+                "protein_endpoint": {"serial": 3, "atom_name": "ND2"},
+                "modifier_endpoint": {"serial": 4, "atom_name": "C001"},
+            },
+        ),
+        atom_mappings={
+            "fragment_1:1:C001": {"source_serial": 1, "target_serial": 2},
+            "fragment_2:1:C001": {"source_serial": 1, "target_serial": 4},
+        },
+        residue_mappings={
+            "fragment_1:1": {"source_residue_number": 1, "target_residue_number": 10},
+            "fragment_2:1": {"source_residue_number": 1, "target_residue_number": 20},
+        },
+    )
+
+    updated = workflow_module._product_state_specs_with_assembly_mappings(
+        _product_mapping_specs(),
+        assembly_result=assembly,
+        product_pdb_path=product_pdb,
+    )
+
+    assert [spec.protein_link_atom.serial for spec in updated] == [42, 87]
+    assert [spec.modifier_link_atom.serial for spec in updated] == [1, 1]
+    assert [spec.modifier_link_atom.residue_number for spec in updated] == [1, 1]
+    assert updated[0].endpoint_provenance["conect_pair"] == {
+        "protein_serial": 1,
+        "modifier_serial": 2,
+    }
+    assert (
+        updated[1].endpoint_provenance["atom_mappings"]["fragment_2:1:C001"]["target_serial"] == 4
+    )
+    assert updated[0].product_residue_mappings["1"]["target_residue_number"] == 10
+    assert updated[1].product_residue_mappings["1"]["target_residue_number"] == 20
+    assert updated[0].product_residue_mappings["1"]["canonical_residue_name"] == "NAG"
+    assert updated[1].product_residue_mappings["1"]["canonical_residue_name"] == "NAG"
+    assert (
+        updated[0].product_residue_mappings["1"]["scoped_residue_name"]
+        != updated[1].product_residue_mappings["1"]["scoped_residue_name"]
+    )
+
+
+def test_product_endpoint_validation_maps_source_chain_b_to_canonical_chain_a() -> None:
+    """A user-facing chain-B selector should validate against canonical protein chain A."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    plan = _generic_resolved_plan(
+        residue_number=567,
+        modifier_residue_number=1,
+        modifier_atom="C001",
+    )
+    plan.protein_link_atom.chain_id = "B"
+    plan.contract.protein_endpoint.selector.chain_id = "B"
+    output_atom = plan.protein_link_atom.model_copy(
+        update={"serial": 8794, "chain_id": "A", "residue_name": "ASX"}
+    )
+
+    workflow_module._validate_product_protein_atom(
+        plan,
+        output_atom,
+        19,
+        expected_chain_id="A",
+    )
+
+
+def test_scoped_pablo_residue_aliases_remain_pdb_width_at_decimal_boundary() -> None:
+    """Large glycans must not produce four-character PDB residue aliases."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    assert workflow_module._scoped_pablo_residue_name(99) == "Z99"
+    assert workflow_module._scoped_pablo_residue_name(100) == "Y00"
+    assert workflow_module._scoped_pablo_residue_name(899) == "R99"
+
+
+def test_product_state_specs_reject_missing_provenance_conect_pair(tmp_path: Path):
+    """Endpoint provenance should prove that emitted CONECT records carry every link."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    product_pdb = tmp_path / "product.pdb"
+    product_pdb.write_text(
+        _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+        + _pdb_line(2, "C001", "NAG", "C", 10, element="C")
+        + "END\n",
+        encoding="utf-8",
+    )
+    assembly = SimpleNamespace(
+        added_conect_pairs=((1, 2),),
+        attachment_endpoint_records=(
+            {
+                "attachment_index": 1,
+                "conect_pair": {"protein_serial": 1, "modifier_serial": 2},
+            },
+        ),
+        atom_mappings={},
+        residue_mappings={
+            "fragment_1:1": {"source_residue_number": 1, "target_residue_number": 10}
+        },
+    )
+
+    with pytest.raises(ValueError, match="CONECT records do not contain pair"):
+        workflow_module._product_state_specs_with_assembly_mappings(
+            (_product_mapping_specs()[0],),
+            assembly_result=assembly,
+            product_pdb_path=product_pdb,
+        )
+
+
+def test_product_state_specs_reject_swapped_or_mismatched_pairs(tmp_path: Path):
+    """Assembly pairs must be ordered as protein then matching modifier endpoints."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    product_pdb = tmp_path / "product.pdb"
+    product_pdb.write_text(
+        _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+        + _pdb_line(2, "C001", "NAG", "C", 10, element="C")
+        + _pdb_line(3, "ND2 ", "ASX", "A", 87, element="N")
+        + _pdb_line(4, "C001", "NAG", "C", 20, element="C")
+        + "END\n",
+        encoding="utf-8",
+    )
+    assembly = SimpleNamespace(
+        added_conect_pairs=((2, 1), (3, 4)),
+        attachment_endpoint_records=(),
+        atom_mappings={},
+        residue_mappings={},
+    )
+
+    with pytest.raises(ValueError, match="protein endpoint"):
+        workflow_module._product_state_specs_with_assembly_mappings(
+            _product_mapping_specs(),
+            assembly_result=assembly,
+            product_pdb_path=product_pdb,
+        )
+
+
+def test_product_state_specs_reject_crossed_identical_modifier_endpoints(tmp_path: Path):
+    """Assembly pairs must bind each protein to its own mapped modifier residue."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    product_pdb = tmp_path / "product.pdb"
+    product_pdb.write_text(
+        _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+        + _pdb_line(2, "C001", "NAG", "C", 10, element="C")
+        + _pdb_line(3, "ND2 ", "ASX", "A", 87, element="N")
+        + _pdb_line(4, "C001", "NAG", "C", 20, element="C")
+        + "END\n",
+        encoding="utf-8",
+    )
+    assembly = SimpleNamespace(
+        added_conect_pairs=((1, 4), (3, 2)),
+        attachment_endpoint_records=(),
+        atom_mappings={},
+        residue_mappings={
+            "fragment_1:1": {
+                "source_residue_number": 1,
+                "source_insertion_code": "",
+                "target_chain": "C",
+                "target_residue_number": 10,
+                "target_insertion_code": "",
+            },
+            "fragment_2:1": {
+                "source_residue_number": 1,
+                "source_insertion_code": "",
+                "target_chain": "C",
+                "target_residue_number": 20,
+                "target_insertion_code": "",
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="modifier endpoint"):
+        workflow_module._product_state_specs_with_assembly_mappings(
+            _product_mapping_specs(),
+            assembly_result=assembly,
+            product_pdb_path=product_pdb,
+        )
+
+
+def test_product_state_specs_are_idempotent_after_product_mapping(tmp_path: Path):
+    """Already product-mapped specs should not use target residues as source keys."""
+    import polyzymd.builders.conjugation.system_workflow as workflow_module
+
+    product_pdb = tmp_path / "product.pdb"
+    product_pdb.write_text(
+        _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+        + _pdb_line(2, "C001", "NAG", "C", 10, element="C")
+        + _pdb_line(3, "ND2 ", "ASX", "A", 87, element="N")
+        + _pdb_line(4, "C001", "NAG", "C", 20, element="C")
+        + "END\n",
+        encoding="utf-8",
+    )
+    assembly = SimpleNamespace(
+        added_conect_pairs=((1, 2), (3, 4)),
+        attachment_endpoint_records=(),
+        atom_mappings={},
+        residue_mappings={},
+    )
+    once = workflow_module._product_state_specs_with_assembly_mappings(
+        _product_mapping_specs(),
+        assembly_result=assembly,
+        product_pdb_path=product_pdb,
+    )
+
+    twice = workflow_module._product_state_specs_with_assembly_mappings(
+        once,
+        assembly_result=assembly,
+        product_pdb_path=product_pdb,
+    )
+
+    assert [spec.modifier_link_atom.serial for spec in twice] == [1, 1]
+    assert [spec.modifier_link_atom.residue_number for spec in twice] == [1, 1]
 
 
 @pytest.mark.parametrize(
@@ -551,14 +1134,13 @@ def test_relaxation_receives_product_path_and_attachment_specs(
         modifier_atom="C001",
     )
     modifier = _generated_fragment(residue_name="NAG", residue_number=1)
-    spec = SimpleNamespace(
-        attachment_id="n_gly_attachment_01",
-        attachment_index=1,
-        reaction_name="n_glycosylation",
-        generated_fragment=modifier,
-        resolved_plan=plan,
-        source_sidecars={},
-        fragment=SimpleNamespace(source_kind="moiety"),
+    spec = plan.model_copy(
+        update={
+            "attachment_id": "n_gly_attachment_01",
+            "attachment_index": 1,
+            "reaction_name": "n_glycosylation",
+            "fragment": modifier,
+        }
     )
     calls = {}
 
@@ -579,7 +1161,9 @@ def test_relaxation_receives_product_path_and_attachment_specs(
 
     def fake_write(protein_pdb_path, polymer_fragment, attachment, output_path, options):
         Path(output_path).write_text(
-            _pdb_line(1, "C001", "NAG", "C", 1, element="C") + "END\n",
+            _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+            + _pdb_line(2, "C001", "NAG", "C", 1, element="C")
+            + "END\n",
             encoding="utf-8",
         )
         return CrosslinkedPdbAssemblyResult(
@@ -637,9 +1221,6 @@ def test_relaxation_receives_product_path_and_attachment_specs(
         )
 
     monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
-    monkeypatch.setattr(
-        workflow_module, "placed_fragment_from_resolved_plan", lambda fragment, plan: fragment
-    )
     monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
     monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
     monkeypatch.setattr(
@@ -691,7 +1272,14 @@ def test_relaxation_receives_product_path_and_attachment_specs(
     assert ("relaxation_product_pdb_path" in calls) is expect_relaxation
     if expect_relaxation:
         assert calls["relaxation_product_pdb_path"] == construction.crosslinked_pdb_path
-        assert calls["relaxation_attachment_specs"] == (spec,)
+        relaxation_spec = calls["relaxation_attachment_specs"][0]
+        assert relaxation_spec.attachment_id == spec.attachment_id
+        assert relaxation_spec.protein_link_atom.serial == 42
+        assert relaxation_spec.modifier_link_atom.serial == 1
+        assert relaxation_spec.endpoint_provenance["conect_pair"] == {
+            "protein_serial": 1,
+            "modifier_serial": 2,
+        }
     assert "interchange" not in calls["validation_kwargs"]
 
 
@@ -712,15 +1300,16 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
         modifier_atom="C001",
     )
     modifier = _generated_fragment(residue_name="NAG", residue_number=1)
-    spec = SimpleNamespace(
-        attachment_id="n_gly_attachment_01",
-        attachment_index=1,
-        reaction_name="n_glycosylation",
-        generated_fragment=modifier,
-        resolved_plan=plan,
-        source_sidecars={},
-        fragment=SimpleNamespace(source_kind="moiety"),
+    spec = plan.model_copy(
+        update={
+            "attachment_id": "n_gly_attachment_01",
+            "attachment_index": 1,
+            "reaction_name": "n_glycosylation",
+            "fragment": modifier,
+        }
     )
+    protein_template = _charged_molecule_like("protein", residue_name="ASX")
+    protein_template.atoms[0].metadata["atom_name"] = "ND2"
     product_template = _charged_molecule_like("product", residue_name="NAG")
     product_template.properties = {"polyzymd_charge_provenance": "charge-bridge:test"}
     standard_template = _charged_molecule_like("water", residue_name="HOH")
@@ -747,7 +1336,9 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
 
     def fake_write(protein_pdb_path, polymer_fragment, attachment, output_path, options):
         Path(output_path).write_text(
-            _pdb_line(1, "C001", "NAG", "C", 1, element="C") + "END\n",
+            _pdb_line(1, "ND2 ", "ASX", "A", 42, element="N")
+            + _pdb_line(2, "C001", "NAG", "C", 1, element="C")
+            + "END\n",
             encoding="utf-8",
         )
         return CrosslinkedPdbAssemblyResult(
@@ -774,7 +1365,7 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
                 path=Path(path),
                 suffix=".pdb",
                 pablo=PabloAvailability(available=True),
-                topology=SimpleNamespace(molecules=(product_template,)),
+                topology=SimpleNamespace(molecules=(protein_template, product_template)),
             )
 
     intermediate = {}
@@ -796,9 +1387,6 @@ def test_construction_final_interchange_uses_strict_charge_bridge(
         )
 
     monkeypatch.setattr(workflow_module, "place_modifiers_with_resolved_plans", fake_place)
-    monkeypatch.setattr(
-        workflow_module, "placed_fragment_from_resolved_plan", lambda fragment, plan: fragment
-    )
     monkeypatch.setattr(workflow_module, "write_crosslinked_pdb", fake_write)
     monkeypatch.setattr(workflow_module, "PabloIngestor", FakeIngestor)
     monkeypatch.setattr(
@@ -872,29 +1460,27 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
     attachments = tuple(_direct_n_gly_attachment(index) for index in (1, 2))
     built_specs = []
     calls = {}
-    real_spec_builder = workflow_module.attachment_spec_from_generated_polymer_plan
 
     class FakeReaction:
         coordinate_backend_mechanism = "n_glycosylation"
 
         @staticmethod
-        def resolve_plan(protein_pdb_path, site, fragment, *, settings=None):
-            return _generic_resolved_plan(
+        def resolve_plan(
+            protein_pdb_path, site, fragment, *, prepared_fragment, settings=None, **metadata
+        ):
+            product = _generic_resolved_plan(
                 residue_number=site.residue_number,
                 modifier_residue_number=fragment.residues[0].residue_number,
                 modifier_atom="C001",
-            )
-
-    def counting_spec_builder(*args, **kwargs):
-        spec = real_spec_builder(*args, **kwargs)
-        built_specs.append(spec)
-        return spec
+            ).model_copy(update={"fragment": prepared_fragment, **metadata})
+            built_specs.append(product)
+            return product
 
     def fake_construct(**kwargs):
         calls["construct_spec_count"] = len(built_specs)
         calls["spec_count"] = len(kwargs["specs"])
         calls["attachment_specs"] = kwargs["specs"]
-        calls["resolved_plan_count"] = len([spec.resolved_plan for spec in kwargs["specs"]])
+        calls["resolved_plan_count"] = len(kwargs["specs"])
         return (
             SimpleNamespace(
                 relaxation=SimpleNamespace(minimized_pdb_path=relaxed, relaxed_pdb_path=relaxed),
@@ -912,21 +1498,17 @@ def test_direct_n_gly_path_builds_specs_before_construction(monkeypatch, tmp_pat
             residue_number=attachment_index,
         )
         return SimpleNamespace(
-            fragment=fragment,
-            source_fragment=fragment,
+            reaction_fragment=fragment,
             source_kind="smiles",
             sidecars={},
             generation=None,
             reactive_sequence_index=None,
             reactive_selector=None,
+            provenance={},
+            diagnostics=(),
         )
 
     monkeypatch.setattr(workflow_module, "resolve_moiety_source", fake_resolve_source)
-    monkeypatch.setattr(
-        workflow_module,
-        "attachment_spec_from_generated_polymer_plan",
-        counting_spec_builder,
-    )
     monkeypatch.setattr(
         workflow_module,
         "_prepared_protein_pdb_path",
@@ -985,6 +1567,10 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     )
     config = SimpleNamespace(
         enzyme=SimpleNamespace(pdb_path=source),
+        force_field=SimpleNamespace(
+            protein="amber14/protein.ff14SB.xml",
+            small_molecule="openff-2.2.0.offxml",
+        ),
         conjugation=SimpleNamespace(
             enabled=True,
             attachments=attachments,
@@ -1004,28 +1590,26 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     )
     built_specs = []
     calls = {}
-    real_spec_builder = workflow_module.attachment_spec_from_generated_polymer_plan
 
     class FakeReaction:
         name = "nhs_lys"
         coordinate_backend_mechanism = "nhs_lys_amide"
 
         @staticmethod
-        def resolve_plan(protein_pdb_path, site, fragment, *, settings=None):
+        def resolve_plan(
+            protein_pdb_path, site, fragment, *, prepared_fragment, settings=None, **metadata
+        ):
             calls.setdefault("reaction_fragments", []).append(fragment)
-            return _resolved_plan(
+            product = _resolved_plan(
                 PabloCrosslinkRequirement(
                     residues=("LYX", "NHX"),
                     linking_atoms=("NZ", "C047"),
                     leaving_atoms=((), ()),
                     bond_order=1,
                 )
-            )
-
-    def counting_spec_builder(*args, **kwargs):
-        spec = real_spec_builder(*args, **kwargs)
-        built_specs.append(spec)
-        return spec
+            ).model_copy(update={"fragment": prepared_fragment, **metadata})
+            built_specs.append(product)
+            return product
 
     def fake_construct(**kwargs):
         calls["construct_spec_count"] = len(built_specs)
@@ -1042,19 +1626,14 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
         workflow_module,
         "resolve_moiety_source",
         lambda *args, **kwargs: SimpleNamespace(
-            fragment=_generated_fragment(residue_name="NHS", residue_number=1),
-            source_fragment=_generated_fragment(residue_name="NHS", residue_number=1),
+            reaction_fragment=_generated_fragment(residue_name="NHS", residue_number=1),
             source_kind="polymer",
             sidecars={"sdf": polymer_sdf},
             generation=generation,
             reactive_sequence_index=0,
             reactive_selector={"residue_name": "NHS", "residue_number": 1},
+            diagnostics=(),
         ),
-    )
-    monkeypatch.setattr(
-        workflow_module,
-        "attachment_spec_from_generated_polymer_plan",
-        counting_spec_builder,
     )
     monkeypatch.setattr(workflow_module, "_construct_conjugate_from_specs", fake_construct)
     monkeypatch.setattr(workflow_module, "_relaxed_conjugate_pdb", lambda construction: relaxed)
@@ -1086,7 +1665,7 @@ def test_config_nhs_lys_path_builds_specs_before_shared_construction(
     assert calls["specs"] == tuple(built_specs)
     assert result.generated_sequences == ("AA", "AA")
     assert result.reactive_sequence_indices == (0, 0)
-    assert result.modifiers == tuple(spec.generated_fragment for spec in built_specs)
+    assert result.modifiers == tuple(spec.fragment for spec in built_specs)
     assert result.workflow_json_path.exists()
     payload = json.loads(result.workflow_json_path.read_text(encoding="utf-8"))
     assert payload["workflow_json_path"] == str(result.workflow_json_path)
@@ -1112,6 +1691,10 @@ def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path:
     attachment = _config_nhs_attachment("nhs_polymer", residue_number=23)
     config = SimpleNamespace(
         enzyme=SimpleNamespace(pdb_path=source),
+        force_field=SimpleNamespace(
+            protein="amber14/protein.ff14SB.xml",
+            small_molecule="openff-2.2.0.offxml",
+        ),
         conjugation=SimpleNamespace(
             enabled=True,
             attachments=(attachment,),
@@ -1139,7 +1722,9 @@ def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path:
         coordinate_backend_mechanism = "nhs_lys_amide"
 
         @staticmethod
-        def resolve_plan(protein_pdb_path, site, fragment, *, settings=None):
+        def resolve_plan(
+            protein_pdb_path, site, fragment, *, prepared_fragment, settings=None, **metadata
+        ):
             return _resolved_plan(
                 PabloCrosslinkRequirement(
                     residues=("LYX", "NHX"),
@@ -1147,7 +1732,7 @@ def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path:
                     leaving_atoms=((), ()),
                     bond_order=1,
                 )
-            )
+            ).model_copy(update={"fragment": prepared_fragment, **metadata})
 
     monkeypatch.setattr(workflow_module, "get_reaction", lambda name: FakeReaction())
     monkeypatch.setattr(
@@ -1155,12 +1740,13 @@ def test_config_nhs_lys_path_still_accepts_one_attachment(monkeypatch, tmp_path:
         "resolve_moiety_source",
         lambda *args, **kwargs: SimpleNamespace(
             fragment=_generated_fragment(residue_name="NHS", residue_number=1),
-            source_fragment=_generated_fragment(residue_name="NHS", residue_number=1),
+            reaction_fragment=_generated_fragment(residue_name="NHS", residue_number=1),
             source_kind="polymer",
             sidecars={"sdf": generation.sdf_path},
             generation=generation,
             reactive_sequence_index=0,
             reactive_selector={"residue_name": "NHS", "residue_number": 1},
+            diagnostics=(),
         ),
     )
     monkeypatch.setattr(
@@ -1215,17 +1801,25 @@ def test_attachment_spec_uses_generic_reaction_and_smiles_provider(monkeypatch, 
         coordinate_backend_mechanism = "n_glycosylation"
 
         @staticmethod
-        def resolve_plan(protein_pdb_path, site, fragment, *, settings=None):
+        def resolve_plan(protein_pdb_path, site, fragment, *, settings=None, **kwargs):
             calls["protein_pdb_path"] = protein_pdb_path
             calls["site"] = site
             calls["fragment"] = fragment
-            return plan
+            prepared_fragment = kwargs.pop("prepared_fragment")
+            return plan.model_copy(
+                update={"fragment": prepared_fragment, "reaction_name": "n_glycosylation", **kwargs}
+            )
 
     attachment = SimpleNamespace(
         name="glycan",
         enabled=True,
         site=SimpleNamespace(chain_id="A", residue_name="ASN", residue_number=42, atom_name="ND2"),
-        moiety=SimpleNamespace(name="nag", smiles="CO", residue_name="NAG"),
+        moiety=SimpleNamespace(
+            name="nag",
+            smiles="CO",
+            residue_name="NAG",
+            force_field="openff-2.0.0.offxml",
+        ),
         mechanism=SimpleNamespace(name="n_glycosylation", reaction_smarts=None),
     )
 
@@ -1235,20 +1829,16 @@ def test_attachment_spec_uses_generic_reaction_and_smiles_provider(monkeypatch, 
         "resolve_moiety_source",
         lambda *args, **kwargs: SimpleNamespace(
             fragment=generated_fragment,
-            source_fragment=source_fragment,
+            reaction_fragment=source_fragment,
             source_kind="smiles",
             sidecars={"sdf": tmp_path / "nag.sdf"},
+            provenance={},
+            diagnostics=(),
             generation=None,
             reactive_sequence_index=None,
             reactive_selector=None,
         ),
     )
-    monkeypatch.setattr(
-        workflow_module,
-        "generated_fragment_for_resolved_source",
-        lambda source, resolved_plan: generated_fragment,
-    )
-
     spec, generation, reactive_index, reactive_selector, reaction = (
         workflow_module._build_attachment_spec(
             attachment,
@@ -1260,9 +1850,9 @@ def test_attachment_spec_uses_generic_reaction_and_smiles_provider(monkeypatch, 
     )
 
     assert spec.reaction_name == "n_glycosylation"
-    assert spec.fragment.source_kind == "moiety"
-    assert spec.source_fragment is source_fragment
-    assert spec.generated_fragment is generated_fragment
+    assert spec.fragment.source_kind == "smiles"
+    assert spec.fragment.source_identity == str(tmp_path / "nag.sdf")
+    assert spec.fragment.atoms == generated_fragment.atoms
     assert generation is None
     assert reactive_index == 0
     assert reactive_selector == {}
@@ -1365,6 +1955,8 @@ class _NoKwargInterchangeBuilder(_FakeSystemBuilder):
             solvate_from_config=lambda topology, solvent: None,
         )
         self.create_interchange_calls = 0
+        self.assign_pdb_identifiers_calls = 0
+        self.identifiers_assigned_before_interchange = False
 
     def combine_solutes(self):
         """Record solute combination without building real OpenFF objects."""
@@ -1373,6 +1965,11 @@ class _NoKwargInterchangeBuilder(_FakeSystemBuilder):
     def solvate(self, *, padding, box_shape):
         """Record direct solvation without building real OpenFF objects."""
         self.solvation_settings = {"padding": padding, "box_shape": box_shape}
+
+    def _assign_pdb_identifiers(self):
+        """Record canonical identity assignment before final parameterization."""
+        self.assign_pdb_identifiers_calls += 1
+        self.identifiers_assigned_before_interchange = getattr(self, "_interchange", None) is None
 
     def create_interchange(self):
         """Record final Interchange creation while accepting no kwargs."""
@@ -1406,6 +2003,7 @@ def _direct_n_gly_attachment(index: int) -> SimpleNamespace:
             smiles="CO",
             residue_name="NAG",
             name=f"nag_{index}",
+            force_field=None,
         ),
         mechanism=SimpleNamespace(name="n_glycosylation"),
     )
@@ -1432,7 +2030,11 @@ def _config_nhs_attachment(
     return SimpleNamespace(
         name=name,
         enabled=True,
-        moiety=SimpleNamespace(name=name, polymer_recipe=recipe),
+        moiety=SimpleNamespace(
+            name=name,
+            force_field="openff-2.2.0.offxml",
+            polymer_recipe=recipe,
+        ),
         mechanism=SimpleNamespace(name="nhs_lys_amide", reaction_smarts=None),
         site=SimpleNamespace(
             chain_id="A",
@@ -1452,15 +2054,16 @@ def _pdb_line(
     residue_number: int,
     *,
     element: str = "C",
+    x: float = 0.0,
 ) -> str:
     return (
         f"ATOM  {serial:5d} {atom_name_field[:4]} {residue_name:>3} {chain_id}"
-        f"{residue_number:4d}       0.000   0.000   0.000  1.00  0.00"
+        f"{residue_number:4d}    {x:8.3f}   0.000   0.000  1.00  0.00"
         f"          {element:>2}  \n"
     )
 
 
-def _resolved_plan(requirement: PabloCrosslinkRequirement) -> ResolvedAttachmentPlan:
+def _resolved_plan(requirement: PabloCrosslinkRequirement) -> ReactionProduct:
     protein_selector = PdbAtomSelector(
         chain_id="A",
         residue_name="LYS",
@@ -1473,7 +2076,7 @@ def _resolved_plan(requirement: PabloCrosslinkRequirement) -> ResolvedAttachment
         residue_number=5,
         atom_name="C047",
     )
-    return ResolvedAttachmentPlan(
+    return ReactionProduct(
         contract=ExplicitLinkageContract(
             protein_endpoint=ReactiveEndpoint(
                 participant="protein",
@@ -1539,6 +2142,7 @@ def _resolved_plan(requirement: PabloCrosslinkRequirement) -> ResolvedAttachment
         protein_product_residue_name="LYX",
         modifier_product_residue_name="NHX",
         pablo_crosslink_requirement=requirement,
+        fragment=_prepared_test_fragment("C047", "NHX", 5),
     )
 
 
@@ -1547,7 +2151,7 @@ def _generic_resolved_plan(
     residue_number: int,
     modifier_residue_number: int,
     modifier_atom: str,
-) -> ResolvedAttachmentPlan:
+) -> ReactionProduct:
     requirement = PabloCrosslinkRequirement(
         residues=("ASX", "NAG"),
         linking_atoms=("ND2", modifier_atom),
@@ -1588,7 +2192,7 @@ def _generic_resolved_plan(
         ),
         mechanism_name="n_glycosylation",
     )
-    return ResolvedAttachmentPlan(
+    return ReactionProduct(
         contract=contract,
         protein_link_atom=PdbAtomRecord(
             serial=residue_number,
@@ -1618,6 +2222,61 @@ def _generic_resolved_plan(
         modifier_product_residue_name="NAG",
         pablo_crosslink_requirement=requirement,
         target_bond_length_angstrom=1.45,
+        fragment=_prepared_test_fragment(modifier_atom, "NAG", modifier_residue_number),
+    )
+
+
+def _prepared_test_fragment(
+    atom_name: str, residue_name: str, residue_number: int
+) -> PreparedFragment:
+    return PreparedFragment(
+        atoms=(
+            PolymerFragmentAtom(
+                atom_index=0,
+                serial=1,
+                atom_name=atom_name,
+                residue_name=residue_name,
+                residue_number=residue_number,
+                x=1.0,
+                y=0.0,
+                z=0.0,
+                element="C",
+            ),
+        ),
+        source_identity="test_fragment",
+        source_kind="pdb_fragment",
+    )
+
+
+def _openmm_mapping_topology(
+    residues: list[tuple[str, str, str, tuple[str, ...]]],
+) -> object:
+    """Return a minimal OpenMM topology for overlay mapping tests."""
+
+    from openmm import app
+
+    topology = app.Topology()
+    for chain_id, residue_id, residue_name, atom_names in residues:
+        chain = topology.addChain(chain_id)
+        residue = topology.addResidue(residue_name, chain, residue_id)
+        for atom_name in atom_names:
+            topology.addAtom(atom_name, app.Element.getBySymbol("C"), residue)
+    return topology
+
+
+def _product_mapping_specs() -> tuple[ReactionProduct, ReactionProduct]:
+    """Return two reaction products with repeated modifier atom names."""
+    return (
+        _generic_resolved_plan(
+            residue_number=42,
+            modifier_residue_number=1,
+            modifier_atom="C001",
+        ).model_copy(update={"attachment_id": "attachment_01", "attachment_index": 1}),
+        _generic_resolved_plan(
+            residue_number=87,
+            modifier_residue_number=1,
+            modifier_atom="C001",
+        ).model_copy(update={"attachment_id": "attachment_02", "attachment_index": 2}),
     )
 
 

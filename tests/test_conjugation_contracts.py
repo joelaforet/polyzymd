@@ -14,9 +14,10 @@ from polyzymd.builders.conjugation._linkage import (
     PdbAtomSelector,
     ReactiveEndpoint,
     explicit_linkage_contract_from_config,
+    parse_pdb_atom_records,
     resolve_explicit_linkage_contract,
 )
-from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment, PreparedFragment
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 from polyzymd.config.schema import ConjugationAttachmentConfig
 
@@ -27,7 +28,9 @@ def test_explicit_contract_resolves_multi_residue_modifier_atoms(tmp_path: Path)
     modifier_path = _multi_residue_modifier_pdb(tmp_path)
     contract = _generic_contract()
 
-    plan = resolve_explicit_linkage_contract(protein_path, modifier_path, contract)
+    plan = resolve_explicit_linkage_contract(
+        protein_path, modifier_path, contract, fragment=_prepared_modifier(modifier_path)
+    )
 
     assert plan.protein_link_atom.atom_name == "NZ"
     assert plan.modifier_link_atom.residue_number == 2
@@ -41,6 +44,7 @@ def test_leaving_atom_names_are_scoped_to_selected_residue(tmp_path: Path):
         _protein_pdb(tmp_path),
         _multi_residue_modifier_pdb(tmp_path),
         _generic_contract(),
+        fragment=_prepared_modifier(_multi_residue_modifier_pdb(tmp_path)),
     )
 
     assert tuple(atom.atom_name for atom in plan.modifier_leaving_atoms) == ("LG",)
@@ -64,6 +68,7 @@ def test_missing_and_ambiguous_selectors_fail_clearly(tmp_path: Path):
             protein_path,
             _multi_residue_modifier_pdb(tmp_path),
             missing_contract,
+            fragment=_prepared_modifier(_multi_residue_modifier_pdb(tmp_path)),
         )
 
     ambiguous_path = tmp_path / "ambiguous_modifier.pdb"
@@ -87,7 +92,12 @@ def test_missing_and_ambiguous_selectors_fail_clearly(tmp_path: Path):
     )
 
     with pytest.raises(ValueError, match="found 2"):
-        resolve_explicit_linkage_contract(protein_path, ambiguous_path, _generic_contract())
+        resolve_explicit_linkage_contract(
+            protein_path,
+            ambiguous_path,
+            _generic_contract(),
+            fragment=_prepared_modifier(ambiguous_path),
+        )
 
 
 def test_resolved_plan_produces_pablo_crosslink_requirement(tmp_path: Path):
@@ -96,6 +106,7 @@ def test_resolved_plan_produces_pablo_crosslink_requirement(tmp_path: Path):
         _protein_pdb(tmp_path),
         _multi_residue_modifier_pdb(tmp_path),
         _generic_contract(),
+        fragment=_prepared_modifier(_multi_residue_modifier_pdb(tmp_path)),
     )
 
     requirement = plan.pablo_crosslink_requirement
@@ -265,7 +276,17 @@ def test_explicit_hz_contract_fails_against_poc_hydrogen_names(tmp_path: Path):
             _protein_pdb_with_poc_hydrogen_names(tmp_path),
             _multi_residue_modifier_pdb(tmp_path),
             _generic_contract(),
+            fragment=_prepared_modifier(_multi_residue_modifier_pdb(tmp_path)),
         )
+
+
+def _prepared_modifier(path: Path) -> PreparedFragment:
+    """Build selector-free source metadata for explicit-contract tests."""
+    return PreparedFragment(
+        atoms=tuple(atom.model_dump() for atom in parse_pdb_atom_records(path)),
+        source_identity=str(path),
+        source_kind="pdb_fragment",
+    )
 
 
 def _generic_contract(

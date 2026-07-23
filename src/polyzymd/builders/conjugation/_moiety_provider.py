@@ -7,16 +7,22 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from polyzymd.builders.conjugation._specs import _generated_fragment_from_moiety_plan
+from polyzymd.builders.conjugation._pdb_fragment import PdbFragmentLoadResult, load_pdb_fragment
+from polyzymd.builders.conjugation._specs import (
+    prepare_generated_fragment,
+    prepared_fragment_from_moiety,
+)
 from polyzymd.builders.conjugation.polymer import (
     GeneratedMoietyFragment,
     GeneratedPolymerFragment,
     MultiResidueGenerationResult,
     PolymerRecipe,
+    PreparedFragment,
     build_smiles_moiety_fragment,
     generate_multi_residue_molecule,
 )
 from polyzymd.builders.conjugation.polymer.polymerist import generated_fragment_from_polymerist_pdb
+from polyzymd.builders.conjugation.reactions.library import get_reaction
 
 
 class ResolvedMoietySource(BaseModel):
@@ -24,14 +30,15 @@ class ResolvedMoietySource(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    fragment: GeneratedPolymerFragment | None = Field(default=None, exclude=True)
-    source_fragment: Any | None = Field(default=None, exclude=True)
-    source_kind: Literal["polymer", "smiles"]
+    reaction_fragment: GeneratedMoietyFragment | GeneratedPolymerFragment = Field(exclude=True)
+    source_kind: Literal["polymer", "smiles", "pdb_fragment"]
     sidecars: dict[str, Path] = Field(default_factory=dict)
     generation: MultiResidueGenerationResult | None = None
     reactive_sequence_index: int | None = None
     reactive_selector: dict[str, int | str] | None = None
+    provenance: dict[str, Any] = Field(default_factory=dict)
     diagnostics: tuple[str, ...] = Field(default_factory=tuple)
+    pdb_fragment: PdbFragmentLoadResult | None = None
 
 
 def resolve_moiety_source(
@@ -72,7 +79,15 @@ def resolve_moiety_source(
         Provider-neutral fragment and provenance metadata.
     """
     moiety = getattr(attachment, "moiety", None)
-    source_names = validate_moiety_source_config(moiety)
+    source_names = validate_moiety_source_config(
+        moiety,
+        mechanism_name=getattr(getattr(attachment, "mechanism", None), "name", None),
+    )
+    if source_names[0] == "input_path":
+        return _resolve_pdb_fragment_source(
+            attachment,
+            output_dir=output_dir,
+        )
     if source_names[0] == "polymer_recipe":
         return _resolve_polymer_recipe_source(
             attachment,
@@ -91,7 +106,7 @@ def resolve_moiety_source(
     )
 
 
-def validate_moiety_source_config(moiety: Any) -> list[str]:
+def validate_moiety_source_config(moiety: Any, *, mechanism_name: str | None = None) -> list[str]:
     """Validate a moiety source configuration without generating coordinates."""
     if moiety is None:
         raise ValueError("attachment.moiety is required")
@@ -100,12 +115,16 @@ def validate_moiety_source_config(moiety: Any) -> list[str]:
         joined = ", ".join(source_names) if source_names else "none"
         raise ValueError(
             "attachment.moiety must define exactly one supported source: "
-            "polymer_recipe or smiles with residue_name. "
+            "polymer_recipe, input_path, or smiles with residue_name. "
             f"Configured sources: {joined}"
         )
-    if source_names[0] == "input_path":
-        raise ValueError("attachment.moiety.input_path sources are not supported by this provider")
     return source_names
+
+
+def attachment_uses_pdb_fragment(attachment: Any) -> bool:
+    """Return whether an attachment uses the PDB-fragment input path."""
+    moiety = getattr(attachment, "moiety", None)
+    return getattr(moiety, "input_path", None) is not None
 
 
 def _configured_source_names(moiety: Any) -> list[str]:
@@ -173,8 +192,7 @@ def _resolve_polymer_recipe_source(
     if charged_sdf_path is not None:
         sidecars["charged_sdf"] = Path(charged_sdf_path)
     return ResolvedMoietySource(
-        fragment=fragment,
-        source_fragment=fragment,
+        reaction_fragment=fragment,
         source_kind="polymer",
         sidecars=sidecars,
         generation=generation,
@@ -202,24 +220,87 @@ def _resolve_smiles_source(
     )
     sidecars = _moiety_sidecars(source_fragment)
     return ResolvedMoietySource(
-        fragment=None,
-        source_fragment=source_fragment,
+        reaction_fragment=source_fragment,
         source_kind="smiles",
         sidecars=sidecars,
         diagnostics=("Resolved SMILES moiety source",),
     )
 
 
-def generated_fragment_for_resolved_source(
-    source: ResolvedMoietySource,
-    plan: Any,
-) -> GeneratedPolymerFragment:
-    """Return the construction fragment updated with resolved reactive atoms."""
-    if isinstance(source.source_fragment, GeneratedMoietyFragment):
-        return _generated_fragment_from_moiety_plan(source.source_fragment, plan)
-    if source.fragment is None:
-        raise RuntimeError("Resolved moiety source is missing a construction fragment")
-    return source.fragment
+def _resolve_pdb_fragment_source(
+    attachment: Any,
+    *,
+    output_dir: Path,
+) -> ResolvedMoietySource:
+    """Resolve a residue-resolved PDB fragment source for a compatible mechanism."""
+    moiety = attachment.moiety
+    mechanism_name = str(getattr(getattr(attachment, "mechanism", None), "name", "") or "")
+    source_path = Path(moiety.input_path)
+    pdb_fragment = load_pdb_fragment(source_path)
+    reaction_template = get_reaction(mechanism_name.strip().lower())
+    settings_builder = getattr(reaction_template, "settings_from_attachment", None)
+    reaction_settings = settings_builder(attachment) if callable(settings_builder) else None
+    compatibility = reaction_template.resolve_pdb_fragment_source(
+        pdb_fragment,
+        attachment,
+        settings=reaction_settings,
+    )
+    sidecar_path = (
+        output_dir / f"{_safe_attachment_token(attachment.name)}_pdb_fragment_ingestion.json"
+    )
+    pdb_fragment.write_sidecar(sidecar_path)
+    _annotate_pdb_fragment_sidecar(sidecar_path, compatibility.sidecar_payload)
+    sidecars = {"pdb": source_path, "pdb_fragment_ingestion": sidecar_path}
+    return ResolvedMoietySource(
+        reaction_fragment=compatibility.fragment,
+        source_kind="pdb_fragment",
+        sidecars=sidecars,
+        reactive_sequence_index=compatibility.reactive_sequence_index,
+        reactive_selector=compatibility.reactive_selector,
+        diagnostics=compatibility.diagnostics,
+        pdb_fragment=pdb_fragment,
+    )
+
+
+def prepare_resolved_moiety_source(source: ResolvedMoietySource) -> PreparedFragment:
+    """Return a prepared source fragment without reaction-derived identity."""
+    if isinstance(source.reaction_fragment, GeneratedMoietyFragment):
+        prepared = prepared_fragment_from_moiety(source.reaction_fragment)
+        sidecars = {**prepared.sidecars, **source.sidecars}
+        return prepared.model_copy(
+            update={
+                "source_identity": str(
+                    sidecars.get("sdf") or sidecars.get("pdb") or prepared.source_identity
+                ),
+                "sidecars": sidecars,
+                "provenance": {
+                    **prepared.provenance,
+                    **source.provenance,
+                    "reactive_selector": source.reactive_selector or {},
+                },
+                "diagnostics": (*prepared.diagnostics, *source.diagnostics),
+            }
+        )
+    return prepare_generated_fragment(
+        source.reaction_fragment,
+        source.sidecars.get("sdf"),
+        charged_sdf_path=source.sidecars.get("charged_sdf"),
+        source_kind=source.source_kind,
+        sidecars=source.sidecars,
+        provenance={"reactive_selector": source.reactive_selector or {}},
+        diagnostics=source.diagnostics,
+    )
+
+
+def _annotate_pdb_fragment_sidecar(sidecar_path: Path, annotation: dict[str, Any]) -> None:
+    """Add mechanism-owned compatibility diagnostics to a sidecar."""
+    import json
+
+    if not annotation:
+        return
+    payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    payload.update(annotation)
+    sidecar_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _moiety_sidecars(fragment: GeneratedMoietyFragment) -> dict[str, Path]:

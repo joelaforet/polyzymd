@@ -198,8 +198,10 @@ def build_product_state_charge_bridge(
                 "thresholds. Inspect product_state_charge_bridge_local_reconciliation.json."
             )
         diagnostics.append(
-            "Applied strict peptide-capped residual closure over "
-            f"{local_reconciliation['corrected_atom_count']} modified product residue atom(s): "
+            "Applied strict peptide-capped residual closure with formal target scope "
+            "all emitted mapped local product atoms (NLN + glycan) and correction domain "
+            "modified-protein chain-A NLN/local closure atoms only: "
+            f"{local_reconciliation['corrected_atom_count']} corrected atom(s), "
             f"{correction:.8f} e total, "
             f"{local_reconciliation['per_atom_correction_e']:.8f} e per atom"
         )
@@ -238,7 +240,8 @@ def build_product_state_charge_bridge(
             "Canonical protein atoms retain ff14SB-style charges from the prepared source protein.",
             "Attached polymer atoms retain existing charged polymer/template charges when mapping is stable.",
             "Modified residue and moiety atoms are overridden by peptide-capped product-state NAGL charges.",
-            "Any bridge-local charge residual is reconciled only over modified product residue atoms within strict first-release thresholds.",
+            "The formal target scope is all emitted mapped local product atoms: NLN plus the retained glycan/moiety atoms.",
+            "Any bridge-local charge residual correction is reconciled only over modified-protein chain-A NLN/local closure atoms within strict first-release thresholds.",
             "The complete covalent conjugate is emitted as one charged OpenFF Molecule template.",
             "This bridge is not whole-conjugate AM1-BCC and does not use Gasteiger or formal charges.",
         ),
@@ -327,6 +330,9 @@ def _apply_local_patch_reconciliation(
         "applied": True,
         "status": status,
         "formal_charge_e": formal_total,
+        "formal_target_scope": "all_emitted_mapped_local_product_atoms_nln_plus_glycan",
+        "correction_scope": "modified_protein_chain_a_nln_local_closure_atoms_only",
+        "correction_domain": "modified_protein_chain_a_nln_local_closure_atoms_only",
         "total_partial_charge_before_reconciliation_e": partial_before_correction,
         "total_correction_e": correction,
         "linkage_count": linkage_count,
@@ -415,7 +421,14 @@ def _write_local_reconciliation_diagnostic(
     source_stats = _source_role_charge_stats(records, target_identities)
     payload = {
         "success": bool(reconciliation.get("success", False)),
-        "policy": "residual charge is reconciled equally over real local NAGL patch atoms",
+        "policy": (
+            "formal target scope is all emitted mapped local product atoms (NLN + glycan); "
+            "residual charge correction is reconciled equally only over modified-protein "
+            "chain-A NLN/local closure atoms"
+        ),
+        "formal_target_scope": "all_emitted_mapped_local_product_atoms_nln_plus_glycan",
+        "correction_scope": "modified_protein_chain_a_nln_local_closure_atoms_only",
+        "correction_domain": "modified_protein_chain_a_nln_local_closure_atoms_only",
         "local_reconciliation": dict(reconciliation),
         "per_source_role": source_stats,
         "diagnostic_details": dict(diagnostic_details or {}),
@@ -868,7 +881,7 @@ def _log_lys_product_record_diagnostics(
 
 def _spec_site_identifier(spec: Any) -> str:
     """Return a compact attachment site identifier for diagnostics."""
-    plan = getattr(spec, "resolved_plan", None)
+    plan = spec
     atom = getattr(plan, "protein_link_atom", None) if plan is not None else None
     if atom is None:
         return "unknown"
@@ -893,13 +906,9 @@ def _polymer_template_records(
         sidecar = _source_sdf_path(spec)
         if sidecar is None:
             continue
-        generated_fragment = getattr(spec, "generated_fragment", None)
-        if generated_fragment is None:
-            raise ValueError(
-                "Attached polymer charge transfer requires generated_fragment metadata"
-            )
-        fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
-        template_charges = _charged_sdf_atom_charges(sidecar, generated_fragment=generated_fragment)
+        fragment = spec.fragment
+        fragment_atoms = tuple(fragment.atoms)
+        template_charges = _charged_sdf_atom_charges(sidecar, generated_fragment=fragment)
         if len(template_charges) != len(fragment_atoms):
             raise ValueError(
                 "Attached polymer charged SDF atom count does not match generated fragment: "
@@ -907,9 +916,7 @@ def _polymer_template_records(
             )
         fragment_atoms_by_sdf_order = fragment_atoms_in_sdf_order(fragment_atoms)
         mappings = getattr(spec, "product_residue_mappings", {}) or {}
-        leaving_names = {
-            str(name).strip() for name in getattr(generated_fragment, "leaving_atom_names", ())
-        }
+        leaving_names = {str(name).strip() for name in fragment.leaving_atom_names}
         retained_count = 0
         retained_total = 0.0
         leaving_count = 0
@@ -1064,18 +1071,16 @@ def _local_nagl_patch_records(
 
 def _source_sdf_path(spec: Any) -> Path | None:
     """Return the validated charged SDF path from an attachment spec."""
-    if getattr(getattr(spec, "fragment", None), "source_kind", None) == "moiety":
+    if spec.fragment.source_kind == "smiles":
         return None
-    sidecars = getattr(spec, "source_sidecars", {}) or {}
-    if not isinstance(sidecars, Mapping):
-        return None
+    sidecars = spec.fragment.sidecars
     path = sidecars.get("charged_sdf")
     if path is not None:
         return Path(path)
     raw_path = sidecars.get("bond_sdf") or sidecars.get("sdf")
     if raw_path is not None:
         raise ValueError(
-            "Attached polymer validated charge transfer requires source_sidecars['charged_sdf']; "
+            "Attached polymer validated charge transfer requires fragment.sidecars['charged_sdf']; "
             f"refusing raw bond/geometry SDF {raw_path} as a partial-charge source"
         )
     return None
@@ -1083,13 +1088,13 @@ def _source_sdf_path(spec: Any) -> Path | None:
 
 def _charged_sdf_atom_charges(path: Path, *, generated_fragment: Any) -> tuple[float, ...]:
     """Read partial charges from a validated charged SDF."""
-    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+    fragment_atoms = generated_fragment.atoms
     return charged_sdf_partial_charges(path, fragment_atoms=fragment_atoms)
 
 
 def _validate_charged_sdf_matches_fragment(path: Path, *, generated_fragment: Any) -> None:
     """Validate that a charged SDF preserves generated-fragment atom order."""
-    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+    fragment_atoms = generated_fragment.atoms
     if not fragment_atoms:
         raise ValueError("Attached polymer charge transfer requires generated-fragment atoms")
     validated_charged_sdf_molecule(

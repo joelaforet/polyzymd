@@ -66,7 +66,11 @@ def _minimal_attachment_data(enabled: bool = True) -> dict:
         "name": "lys23-peg",
         "enabled": enabled,
         "site": {"chain_id": "A", "residue_name": "LYS", "residue_number": 23},
-        "moiety": {"name": "PEG", "smiles": "COCCO"},
+        "moiety": {
+            "name": "PEG",
+            "force_field": "openff-2.0.0.offxml",
+            "smiles": "COCCO",
+        },
         "mechanism": {"name": "amide"},
     }
 
@@ -119,6 +123,17 @@ class TestConjugationConfigParsing:
         with pytest.raises(ValidationError, match="at least one enabled attachment"):
             ConjugationConfig(enabled=True, attachments=[_minimal_attachment_data(enabled=False)])
 
+    def test_disabled_attachment_does_not_require_force_field_owner(self):
+        """Disabled attachments remain inert without force-field ownership."""
+        enabled = _minimal_attachment_data()
+        disabled = _minimal_attachment_data(enabled=False)
+        disabled["name"] = "disabled"
+        disabled["moiety"].pop("force_field")
+
+        config = ConjugationConfig(enabled=True, attachments=[enabled, disabled])
+
+        assert config.attachments[1].moiety.force_field is None
+
     def test_stale_mode_rejected_as_extra_field(self):
         """Old mode fields are rejected by the public conjugation config."""
         data = _minimal_simulation_config_data()
@@ -138,6 +153,19 @@ class TestConjugationConfigParsing:
             "enabled": True,
             "structure_path": "prebuilt_conjugate.pdb",
             "attachments": [_minimal_attachment_data()],
+        }
+
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            SimulationConfig.model_validate(data)
+
+    def test_stale_moiety_role_rejected_as_extra_field(self):
+        """Old moiety role labels are rejected by the public conjugation config."""
+        data = _minimal_simulation_config_data()
+        attachment = _minimal_attachment_data()
+        attachment["moiety"]["role"] = "moiety"
+        data["conjugation"] = {
+            "enabled": True,
+            "attachments": [attachment],
         }
 
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):

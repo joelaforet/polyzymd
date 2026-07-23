@@ -16,7 +16,13 @@ import yaml
 from click.testing import CliRunner
 from jinja2 import UndefinedError
 
-from polyzymd.cli.main import _resolve_replicates_option, _run_openmm_impl, cli
+from polyzymd.cli.main import (
+    _print_build_export_summary,
+    _publish_staged_export,
+    _resolve_replicates_option,
+    _run_openmm_impl,
+    cli,
+)
 from polyzymd.utils.templates import render_package_template
 
 BRANDING_LINE = "PolyzyMD: Created by Joseph R. Laforet Jr."
@@ -390,6 +396,358 @@ class TestBuildCommandReplicateFlags:
 class TestBuildCommandConjugationRouting:
     """Tests for build command conjugation workflow routing."""
 
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_scope_cli_override_takes_priority_over_yaml(
+        self, mock_from_yaml, tmp_path: Path
+    ) -> None:
+        """An explicit CLI endpoint should override the configured build endpoint."""
+        sim_config = _make_build_config(conjugation_enabled=True)
+        sim_config.build = SimpleNamespace(scope="structure")
+        mock_from_yaml.return_value = sim_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            cli,
+            ["build", "-c", str(config_path), "--scope", "system", "--dry-run"],
+        )
+
+        assert result.exit_code == 0
+        assert "Scope: system" in result.output
+        assert "system.xml" in result.output
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_structure_scope_dry_run_reports_only_checkpoint(
+        self, mock_from_yaml, tmp_path: Path
+    ) -> None:
+        """The YAML structure endpoint should preview only structure artifacts."""
+        sim_config = _make_build_config(conjugation_enabled=True)
+        sim_config.build = SimpleNamespace(scope="structure")
+        mock_from_yaml.return_value = sim_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["build", "-c", str(config_path), "--dry-run"])
+
+        assert result.exit_code == 0
+        assert "Scope: structure" in result.output
+        assert "assembled_crosslinked.pdb" in result.output
+        assert "system.xml" not in result.output
+        assert "solvated_conjugate_free_polymers.pdb" not in result.output
+        assert "stops before parameterization and export" in result.output
+        assert "Final Interchange" not in result.output
+        assert "OpenMM/GROMACS" not in result.output
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_structure_scope_still_rejects_format(self, mock_from_yaml, tmp_path: Path) -> None:
+        """Structure checkpoints must remain unavailable to format exporters."""
+        sim_config = _make_build_config(conjugation_enabled=True)
+        sim_config.build = SimpleNamespace(scope="structure")
+        mock_from_yaml.return_value = sim_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            cli, ["build", "-c", str(config_path), "--format", "gromacs", "--dry-run"]
+        )
+
+        assert result.exit_code == 1
+        assert "unavailable for build scope 'structure'" in result.output
+
+    @patch("polyzymd.exporters.interchange.export_system")
+    @patch("polyzymd.builders.openmm_artifacts.build_openmm_artifacts")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_solute_gromacs_routes_to_topology_only_subtree(
+        self, mock_from_yaml, mock_build, mock_export, tmp_path: Path
+    ) -> None:
+        """CLI should isolate solute GROMACS output and request handoff-only export."""
+        from polyzymd.config.schema import BuildScope
+
+        sim_config = _make_build_config(conjugation_enabled=False)
+        sim_config.build = SimpleNamespace(scope="solute")
+        working_dir = tmp_path / "run_1"
+        sim_config.get_working_directory = lambda _rep: working_dir
+        mock_from_yaml.return_value = sim_config
+        interchange = object()
+        artifacts = MagicMock()
+        artifacts.require_final_interchange.return_value = interchange
+        export_dir = working_dir / "solute" / "gromacs"
+
+        def build_side_effect(**kwargs: object) -> MagicMock:
+            staging_root = Path(kwargs["working_dir"])
+            source_dir = staging_root / "solute"
+            source_dir.mkdir(parents=True)
+            for name in ("solute.pdb", "system.xml", "openmm_build_audit.json"):
+                (source_dir / name).write_text("source\n")
+            return artifacts
+
+        def export_side_effect(**kwargs: object) -> dict[str, object]:
+            output_dir = Path(kwargs["output_dir"])
+            output_dir.mkdir(parents=True, exist_ok=True)
+            gro = output_dir / "system.gro"
+            top = output_dir / "system.top"
+            itp = output_dir / "system_MOL.itp"
+            for path in (gro, top, itp):
+                path.write_text("handoff\n")
+            return {"gro": gro, "top": top, "component_itps": [itp]}
+
+        mock_build.side_effect = build_side_effect
+        mock_export.side_effect = export_side_effect
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["build", "-c", str(config_path), "--format", "gromacs"])
+
+        assert result.exit_code == 0
+        build_kwargs = mock_build.call_args.kwargs
+        assert build_kwargs["sim_config"] is sim_config
+        assert build_kwargs["working_dir"] != working_dir
+        assert not Path(build_kwargs["working_dir"]).exists()
+        assert build_kwargs["polymer_seed"] == 1
+        assert build_kwargs["write_system"] is False
+        assert build_kwargs["scope"] is BuildScope.SOLUTE
+        artifacts.get_component_info.assert_not_called()
+        export_kwargs = dict(mock_export.call_args.kwargs)
+        staged_output = Path(export_kwargs.pop("output_dir"))
+        assert staged_output.parent == export_dir.parent
+        assert staged_output.name.startswith(".gromacs-staging-")
+        assert not staged_output.exists()
+        assert export_kwargs == {
+            "interchange": interchange,
+            "config": sim_config,
+            "fmt": "gromacs",
+            "component_info": None,
+            "handoff_only": True,
+        }
+        assert "no runnable dynamics files generated" in result.output
+        assert "system_MOL.itp" in result.output
+        assert {
+            path.relative_to(working_dir) for path in working_dir.rglob("*") if path.is_file()
+        } == {
+            Path("solute/gromacs/system.gro"),
+            Path("solute/gromacs/system.top"),
+            Path("solute/gromacs/system_MOL.itp"),
+        }
+
+    @patch("polyzymd.cli.main._print_build_export_summary")
+    @patch("polyzymd.exporters.interchange.export_system")
+    @patch("polyzymd.builders.openmm_artifacts.build_openmm_artifacts")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_exact_handoff_metadata_points_to_published_sidecar(
+        self, mock_from_yaml, mock_build, mock_export, mock_summary, tmp_path: Path
+    ) -> None:
+        """Exact bundle and returned metadata must share the live sidecar path."""
+        sim_config = _make_build_config(conjugation_enabled=False)
+        sim_config.build = SimpleNamespace(scope="solute")
+        working_dir = tmp_path / "run_1"
+        sim_config.get_working_directory = lambda _rep: working_dir
+        mock_from_yaml.return_value = sim_config
+        build_staging = tmp_path / "separate-build-staging"
+        exact_bundle = SimpleNamespace(
+            sidecar_path=build_staging / "exact_openmm_exceptions.json",
+            audit_path=build_staging / "native_openmm_glycam_audit.json",
+        )
+        route_result = SimpleNamespace(
+            artifact_paths={
+                "exact_openmm_exceptions": exact_bundle.sidecar_path,
+                "native_openmm_glycam_audit": exact_bundle.audit_path,
+            }
+        )
+        artifacts = MagicMock(result=route_result)
+        artifacts.require_final_interchange.return_value = exact_bundle
+        mock_build.return_value = artifacts
+
+        def export_exact(**kwargs: object) -> dict[str, object]:
+            staged_dir = Path(kwargs["output_dir"])
+            paths = {
+                "gro": staged_dir / "exact.gro",
+                "top": staged_dir / "exact.top",
+                "sidecar": staged_dir / "exact_exceptions.json",
+                "audit": staged_dir / "exact_audit.json",
+            }
+            for path in paths.values():
+                path.write_text("exact\n")
+            return {
+                "gro": paths["gro"],
+                "top": paths["top"],
+                "component_itps": [],
+                "exact_exception_sidecar": paths["sidecar"],
+                "exact_gromacs_audit": paths["audit"],
+            }
+
+        mock_export.side_effect = export_exact
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["build", "-c", str(config_path), "--format", "gromacs"])
+
+        assert result.exit_code == 0
+        published = mock_summary.call_args.kwargs["export_result"]
+        live_sidecar = working_dir / "solute" / "gromacs" / "exact_exceptions.json"
+        assert published["exact_exception_sidecar"] == live_sidecar
+        assert exact_bundle.sidecar_path == live_sidecar
+        assert exact_bundle.audit_path is None
+        live_audit = working_dir / "solute" / "gromacs" / "exact_audit.json"
+        assert route_result.artifact_paths == {
+            "exact_openmm_exceptions": live_sidecar,
+            "exact_gromacs_audit": live_audit,
+        }
+        assert live_sidecar.is_file()
+        assert live_audit.is_file()
+        assert all(path.is_file() for path in route_result.artifact_paths.values())
+        assert not Path(mock_export.call_args.kwargs["output_dir"]).exists()
+
+    @pytest.mark.parametrize(
+        ("old_files", "new_files"),
+        [
+            (
+                {"system.gro", "system.top", "system_MOL.itp", "em.mdp", "run.sh", "posre.itp"},
+                {
+                    "exact.gro",
+                    "exact.top",
+                    "exact_exact_openmm_exceptions.json",
+                    "exact_exact_gromacs_audit.json",
+                },
+            ),
+            (
+                {
+                    "exact.gro",
+                    "exact.top",
+                    "exact_exact_openmm_exceptions.json",
+                    "exact_exact_gromacs_audit.json",
+                },
+                {"system.gro", "system.top", "system_MOL.itp"},
+            ),
+        ],
+    )
+    def test_repeat_handoff_replaces_cross_route_artifacts(
+        self, tmp_path: Path, old_files: set[str], new_files: set[str]
+    ) -> None:
+        """Successful repeat exports should publish only the newly generated route."""
+        live_dir = tmp_path / "solute" / "gromacs"
+        live_dir.mkdir(parents=True)
+        for name in old_files:
+            (live_dir / name).write_text("old\n")
+        staged_dir = tmp_path / "solute" / ".gromacs-staging-test"
+        staged_dir.mkdir()
+        for name in new_files:
+            (staged_dir / name).write_text("new\n")
+        result = {
+            "gro": staged_dir / sorted(name for name in new_files if name.endswith(".gro"))[0],
+            "top": staged_dir / sorted(name for name in new_files if name.endswith(".top"))[0],
+            "component_itps": [
+                staged_dir / name for name in sorted(new_files) if name.endswith(".itp")
+            ],
+        }
+        sidecars = [name for name in new_files if name.endswith("exceptions.json")]
+        audits = [name for name in new_files if name.endswith("audit.json")]
+        if sidecars:
+            result["exact_exception_sidecar"] = staged_dir / sidecars[0]
+        if audits:
+            result["exact_gromacs_audit"] = staged_dir / audits[0]
+
+        published = _publish_staged_export(staged_dir, live_dir, result)
+
+        assert {path.name for path in live_dir.iterdir()} == new_files
+        assert published["gro"].parent == live_dir
+        assert published["top"].parent == live_dir
+        assert all(path.parent == live_dir for path in published["component_itps"])
+        if sidecars:
+            assert published["exact_exception_sidecar"].parent == live_dir
+        if audits:
+            assert published["exact_gromacs_audit"].parent == live_dir
+        assert not list(live_dir.parent.glob(".gromacs-backup-*"))
+
+    @patch("polyzymd.exporters.interchange.export_system")
+    @patch("polyzymd.builders.openmm_artifacts.build_openmm_artifacts")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_failed_repeat_handoff_preserves_last_good_export(
+        self, mock_from_yaml, mock_build, mock_export, tmp_path: Path
+    ) -> None:
+        """A failed staged export must leave the prior live bundle untouched."""
+        sim_config = _make_build_config(conjugation_enabled=False)
+        sim_config.build = SimpleNamespace(scope="solute")
+        working_dir = tmp_path / "run_1"
+        sim_config.get_working_directory = lambda _rep: working_dir
+        mock_from_yaml.return_value = sim_config
+        artifacts = MagicMock()
+        artifacts.require_final_interchange.return_value = object()
+        mock_build.return_value = artifacts
+        live_dir = working_dir / "solute" / "gromacs"
+        live_dir.mkdir(parents=True)
+        old_files = {"exact.gro", "exact.top", "exact_exceptions.json", "exact_audit.json"}
+        for name in old_files:
+            (live_dir / name).write_text("last-good\n")
+
+        def fail_export(**kwargs: object) -> None:
+            staged_dir = Path(kwargs["output_dir"])
+            (staged_dir / "partial.gro").write_text("partial\n")
+            raise RuntimeError("synthetic export failure")
+
+        mock_export.side_effect = fail_export
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["build", "-c", str(config_path), "--format", "gromacs"])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, RuntimeError)
+        assert {path.name for path in live_dir.iterdir()} == old_files
+        assert all(path.read_text() == "last-good\n" for path in live_dir.iterdir())
+        assert not list(live_dir.parent.glob(".gromacs-staging-*"))
+
+    def test_exact_handoff_summary_lists_only_returned_files(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        """Monolithic exact summaries must not promise nonexistent component ITPs."""
+        result = {
+            "gro": tmp_path / "exact.gro",
+            "top": tmp_path / "exact.top",
+            "component_itps": [],
+            "exact_exception_sidecar": tmp_path / "exact_exceptions.json",
+            "exact_gromacs_audit": tmp_path / "exact_audit.json",
+        }
+
+        _print_build_export_summary(
+            export_format="gromacs", export_dir=tmp_path, export_result=result
+        )
+        output = capsys.readouterr().out
+
+        assert "exact.gro" in output
+        assert "exact.top" in output
+        assert "exact_exceptions.json" in output
+        assert "exact_audit.json" in output
+        assert "*.itp" not in output
+
+    @patch("polyzymd.builders.openmm_artifacts.build_openmm_artifacts")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_solute_openmm_build_keeps_persistent_artifacts(
+        self, mock_from_yaml, mock_build, tmp_path: Path
+    ) -> None:
+        """Unformatted solute scope should keep its established OpenMM output route."""
+        from polyzymd.config.schema import BuildScope
+
+        sim_config = _make_build_config(conjugation_enabled=False)
+        sim_config.build = SimpleNamespace(scope="solute")
+        working_dir = tmp_path / "run_1"
+        sim_config.get_working_directory = lambda _rep: working_dir
+        mock_from_yaml.return_value = sim_config
+        mock_build.return_value = SimpleNamespace(conjugation_enabled=False)
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["build", "-c", str(config_path)])
+
+        assert result.exit_code == 0
+        mock_build.assert_called_once_with(
+            sim_config=sim_config,
+            working_dir=working_dir,
+            polymer_seed=1,
+            write_system=True,
+            scope=BuildScope.SOLUTE,
+        )
+        assert str(working_dir / "solute") in result.output
+
     @patch("polyzymd.exporters.interchange.export_system")
     @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
     @patch("polyzymd.builders.conjugation.build_conjugate_from_config")
@@ -734,6 +1092,73 @@ class TestInternalCommandsUnchanged:
         result = runner.invoke(cli, [cmd, "--help"])
         assert result.exit_code == 0
         assert "--replicate" in result.output
+
+
+class TestRuntimeBuildScopeGuard:
+    """Runtime commands require artifacts from a complete system build."""
+
+    @pytest.mark.parametrize(
+        ("command", "scope"),
+        [
+            (["run", "--engine", "openmm"], "structure"),
+            (["run", "--engine", "openmm"], "solute"),
+            (["submit"], "structure"),
+            (["submit"], "solute"),
+            (["run-segment"], "structure"),
+            (["run-segment"], "solute"),
+            (["recover"], "structure"),
+            (["recover"], "solute"),
+        ],
+    )
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_partial_scopes_are_rejected_before_runtime_work(
+        self,
+        mock_from_yaml,
+        command: list[str],
+        scope: str,
+        tmp_path: Path,
+    ) -> None:
+        """Every execution path should reject structure and solute scopes early."""
+        from polyzymd.config.schema import BuildScope
+
+        configured_scope = BuildScope.STRUCTURE if scope == "structure" else scope
+        mock_from_yaml.return_value = SimpleNamespace(
+            build=SimpleNamespace(scope=configured_scope),
+        )
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, [*command, "-c", str(config_path)])
+
+        assert result.exit_code != 0
+        assert "require 'build.scope: system'" in result.output
+        assert f"configured scope is '{scope}'" in result.output
+
+    @pytest.mark.parametrize("configured_scope", ["system", None, MagicMock()])
+    @patch("polyzymd.cli.main._run_openmm_impl")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_run_accepts_system_and_default_scope(
+        self,
+        mock_from_yaml,
+        mock_run_openmm,
+        configured_scope: object,
+        tmp_path: Path,
+    ) -> None:
+        """Concrete system, absent, and mock-valued scopes retain runtime access."""
+        sim_config = _make_dry_run_config()
+        if configured_scope is not None:
+            sim_config.build = SimpleNamespace(scope=configured_scope)
+        mock_from_yaml.return_value = sim_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            cli,
+            ["run", "-c", str(config_path), "--engine", "openmm"],
+        )
+
+        assert result.exit_code == 0
+        mock_run_openmm.assert_called_once_with(sim_config=sim_config, replicate=1)
 
 
 class TestInitCommand:

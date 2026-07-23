@@ -18,6 +18,12 @@ if TYPE_CHECKING:
 
     from polyzymd.config.schema import SimulationConfig
 
+from polyzymd.builders._pdb_identity import (
+    CHAIN_LETTERS,
+    SOLVENT_START_CHAIN_INDEX,
+    normalize_topology_pdb_identifiers,
+    require_classic_pdb_atom_capacity,
+)
 from polyzymd.builders.enzyme import EnzymeBuilder
 from polyzymd.builders.polymer import PolymerBuilder
 from polyzymd.builders.solvent import SolventBuilder, SolventComposition
@@ -677,113 +683,18 @@ class SystemBuilder:
         if self._solvated_topology is None:
             raise RuntimeError("No solvated topology. Call solvate() first.")
 
-        CHAIN_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        mol_idx = 0
-
-        # Fixed chain letter assignments per component type
-        # A=protein, B=substrate, C=polymer, D+=solvent — regardless of whether
-        # a component is present. This ensures downstream code (SystemComponentInfo,
-        # AtomGroupResolver, from_topology()) always sees the expected chain IDs.
-        PROTEIN_CHAIN = "A"
-        SUBSTRATE_CHAIN = "B"
-        POLYMER_CHAIN = "C"
-        SOLVENT_START_IDX = 3  # index of 'D' in CHAIN_LETTERS
-
-        # 1. Protein molecules always use chain A with continuous unique residues
-        if self._n_enzyme_molecules > 0:
-            LOGGER.debug(
-                f"Assigning chain {PROTEIN_CHAIN} to "
-                f"{self._n_enzyme_molecules} protein molecule(s)"
-            )
-
-            protein_residue_num = 1
-
-            # Sometimes, we have more than one unique protein molecule in the loaded pdb file
-            # such as in loading a homodimer enzyme, as in https://www.rcsb.org/structure/1HXW
-            # We must ensure all of the protein loads into polyzymd.
-            # Here, we enforce that unique protein chains
-            # monomer 1 == Chain A, monomer 2 == Chain B
-            # have unique residue labels.
-            # So if the chains are 100 AA long, monomer 1 will be
-            # residues 1-101, and then monomer 2 will be RENUMBERED
-            # to residues 102-202. Adjust your downstream analysis accordingly!!!
-
-            for _ in range(self._n_enzyme_molecules):
-                mol = self._solvated_topology.molecule(mol_idx)
-                residue_map: dict[str, int] = {}
-                for atom_index, atom in enumerate(mol.atoms):
-                    if self._preserve_enzyme_chain_ids:
-                        atom.metadata.setdefault("chain_id", PROTEIN_CHAIN)
-                        if "residue_number" in atom.metadata:
-                            atom.metadata["residue_number"] = str(atom.metadata["residue_number"])
-                    else:
-                        atom.metadata["chain_id"] = PROTEIN_CHAIN
-                        residue_token = self._get_original_residue_token(atom, atom_index)
-                        if residue_token not in residue_map:
-                            residue_map[residue_token] = protein_residue_num
-                            protein_residue_num += 1
-                        atom.metadata["residue_number"] = str(residue_map[residue_token])
-                mol_idx += 1
-
-        # 2. Substrate always uses chain B and residue 1
-        if self._n_substrate_molecules > 0:
-            LOGGER.debug(f"Assigning chain {SUBSTRATE_CHAIN} to substrate")
-
-            for _ in range(self._n_substrate_molecules):
-                mol = self._solvated_topology.molecule(mol_idx)
-                for atom in mol.atoms:
-                    atom.metadata["chain_id"] = SUBSTRATE_CHAIN
-                    atom.metadata["residue_number"] = "1"
-                mol_idx += 1
-
-        # 3. Polymers always use chain C and continue residue numbering across chains
-        if self._n_polymer_chains > 0:
-            LOGGER.debug(
-                f"Assigning chain {POLYMER_CHAIN} to {self._n_polymer_chains} polymer chain(s)"
-            )
-
-            # Track residue number across all polymer chains (continue, don't restart)
-            polymer_residue_num = self._next_residue_number_for_chain(
-                POLYMER_CHAIN,
-                end_mol_idx=mol_idx,
-            )
-
-            for _ in range(self._n_polymer_chains):
-                mol = self._solvated_topology.molecule(mol_idx)
-
-                # Group atoms by their current residue_number to identify monomers
-                # Polymer molecules have per-monomer residue metadata from SDF
-                current_monomer_residue = None
-
-                for atom in mol.atoms:
-                    atom.metadata["chain_id"] = POLYMER_CHAIN
-
-                    # Check if this atom belongs to a new monomer
-                    atom_residue = atom.metadata.get("residue_number", "0")
-                    if atom_residue != current_monomer_residue:
-                        # New monomer - increment our counter
-                        if current_monomer_residue is not None:
-                            polymer_residue_num += 1
-                        current_monomer_residue = atom_residue
-
-                    # Assign the sequential residue number
-                    atom.metadata["residue_number"] = str(polymer_residue_num)
-
-                # After processing this polymer chain, increment for next chain's first monomer
-                polymer_residue_num += 1
-                mol_idx += 1
-
-        # 4. Solvent always starts at chain D
-        self._assign_solvent_identifiers(
-            start_mol_idx=mol_idx,
-            start_chain_idx=SOLVENT_START_IDX,
-            chain_letters=CHAIN_LETTERS,
+        normalize_topology_pdb_identifiers(
+            self._solvated_topology,
+            n_enzyme_molecules=self._n_enzyme_molecules,
+            n_substrate_molecules=self._n_substrate_molecules,
+            n_polymer_chains=self._n_polymer_chains,
+            preserve_enzyme_chain_ids=self._preserve_enzyme_chain_ids,
         )
 
         LOGGER.info(
             f"PDB identifiers assigned: protein={self._n_enzyme_molecules}, "
             f"substrate={self._n_substrate_molecules}, polymers={self._n_polymer_chains}, "
-            f"solvent molecules start at chain {CHAIN_LETTERS[SOLVENT_START_IDX]}"
+            f"solvent molecules start at chain {CHAIN_LETTERS[SOLVENT_START_CHAIN_INDEX]}"
         )
 
     @staticmethod
@@ -872,11 +783,13 @@ class SystemBuilder:
                 residue_num = 1
 
                 if chain_idx >= len(chain_letters):
-                    LOGGER.warning(
-                        f"Exceeded {len(chain_letters)} chain letters - cycling. "
-                        "Consider using a topology format with larger chain ID capacity."
+                    capacity = (len(chain_letters) - start_chain_idx) * max_residue
+                    raise ValueError(
+                        "Classic PDB chain/residue capacity exceeded for solvent/ion molecules: "
+                        f"requires more than {capacity} molecules across chains "
+                        f"{chain_letters[start_chain_idx]}-{chain_letters[-1]}. Write mmCIF for "
+                        "OpenMM workflows or GRO for GROMACS workflows instead of classic PDB."
                     )
-                    chain_idx = chain_idx % len(chain_letters)
 
             chain_id = chain_letters[chain_idx]
             mol = self._solvated_topology.molecule(mol_idx)
@@ -919,6 +832,8 @@ class SystemBuilder:
         # This ensures unique (chain_id, residue_number, atom_name) tuples
         if topology is self._solvated_topology:
             self._assign_pdb_identifiers()
+        if str(Path(path).suffix).lower() == ".pdb":
+            require_classic_pdb_atom_capacity(topology)
 
         path = Path(path)
         topology.to_file(str(path), keep_ids=True)
@@ -1044,6 +959,20 @@ class SystemBuilder:
 
         return self._interchange
 
+    def build_isolated_primary_from_config(self, config: "SimulationConfig") -> Interchange:
+        """Parameterize only the configured primary component.
+
+        The primary component for the standard route is the assembled enzyme
+        topology. Optional substrate, free-polymer, packing, solvent, and ion
+        stages are intentionally not entered.
+        """
+        LOGGER.info("Building isolated primary component: %s", config.enzyme.name)
+        self.build_enzyme(config.enzyme.pdb_path)
+        self.combine_solutes()
+        self._solvated_topology = self._combined_topology
+        self.create_interchange()
+        return self._interchange
+
     def get_openmm_components(self) -> Tuple[Any, Any, Any]:
         """Extract OpenMM components from the Interchange.
 
@@ -1054,6 +983,13 @@ class SystemBuilder:
             RuntimeError: If Interchange not created.
         """
         if self._interchange is None:
+            exact_export_bundle = getattr(self, "_exact_export_bundle", None)
+            if exact_export_bundle is not None:
+                return (
+                    exact_export_bundle.to_openmm_topology(),
+                    exact_export_bundle.to_openmm(),
+                    exact_export_bundle.to_openmm_positions(),
+                )
             raise RuntimeError("Interchange not created. Call create_interchange() first.")
 
         from openff.interchange.interop.openmm._positions import to_openmm_positions
@@ -1138,9 +1074,15 @@ class SystemBuilder:
             >>> print(f"Run: cd {result['gro'].parent} && ./{result['run_script'].name}")
         """
         if self._interchange is None:
-            raise RuntimeError(
-                "Interchange not created. Call create_interchange() or build_from_config() first."
-            )
+            exact_export_bundle = getattr(self, "_exact_export_bundle", None)
+            if exact_export_bundle is not None:
+                export_source = exact_export_bundle
+            else:
+                raise RuntimeError(
+                    "Interchange not created. Call create_interchange() or build_from_config() first."
+                )
+        else:
+            export_source = self._interchange
 
         if self._solvated_topology is not None:
             self._assign_pdb_identifiers()
@@ -1178,7 +1120,7 @@ class SystemBuilder:
                 )
 
             exporter = GromacsExporter(
-                interchange=self._interchange,
+                interchange=export_source,
                 config=config,
                 component_info=component_info,
             )
@@ -1191,6 +1133,8 @@ class SystemBuilder:
 
             return result
         # Build-only export without MDP generation
+        if export_source is not self._interchange:
+            raise RuntimeError("Exact GLYCAM bundle export requires generate_mdps=True")
         return self._export_gromacs_minimal(output_dir, prefix)
 
     def _export_gromacs_minimal(

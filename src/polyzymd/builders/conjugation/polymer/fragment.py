@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Literal
+from pathlib import Path
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -80,7 +81,7 @@ class PolymerFragmentAtom(BaseModel):
             temp_factor=atom.temp_factor,
             element=atom.element,
             charge=atom.charge,
-            formal_charge=None,
+            formal_charge=_pdb_formal_charge(atom.charge),
             alt_loc=atom.alt_loc,
             record_name=atom.record_name,
         )
@@ -113,8 +114,26 @@ class PolymerFragmentAtom(BaseModel):
         )
 
 
+def _pdb_formal_charge(value: str) -> int | None:
+    """Parse a PDB formal-charge field into an integer when specified."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    if len(text) == 2 and text[0].isdigit() and text[1] in "+-":
+        magnitude = int(text[0])
+        return magnitude if text[1] == "+" else -magnitude
+    if len(text) == 2 and text[0] in "+-" and text[1].isdigit():
+        magnitude = int(text[1])
+        return magnitude if text[0] == "+" else -magnitude
+    if text in {"+", "-"}:
+        return 1 if text == "+" else -1
+    return int(text)
+
+
 class GeneratedPolymerFragment(BaseModel):
     """Generated multi-residue polymer fragment with assembly selectors."""
+
+    requires_reactive_selector: ClassVar[bool] = True
 
     atoms: tuple[PolymerFragmentAtom, ...] = Field(..., min_length=1)
     bonds: tuple[tuple[int | str, int | str], ...] = Field(default_factory=tuple)
@@ -280,6 +299,8 @@ class GeneratedPolymerFragment(BaseModel):
             and self.reactive_atom_index is None
             and self.reactive_atom_name is None
         ):
+            if not self.requires_reactive_selector:
+                return self
             raise ValueError("Generated polymer fragments require a reactive atom selector")
 
         if len(_matching_atoms(self, reactive=True)) != 1:
@@ -316,6 +337,69 @@ class GeneratedPolymerFragment(BaseModel):
             reactive_atom_index=self.reactive_atom_index,
             reactive_atom_name=self.reactive_atom_name,
             name=name or self.name,
+        )
+
+
+class PreparedFragment(GeneratedPolymerFragment):
+    """Authoritative provider-neutral fragment used by conjugation construction."""
+
+    requires_reactive_selector: ClassVar[bool] = False
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    source_identity: str = Field(..., min_length=1)
+    source_kind: Literal["polymer", "smiles", "pdb_fragment"]
+    sidecars: dict[str, Path] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    diagnostics: tuple[str, ...] = Field(default_factory=tuple)
+
+    @model_validator(mode="after")
+    def reject_reaction_selectors(self) -> PreparedFragment:
+        """Keep reaction endpoints out of the provider-neutral fragment contract."""
+        if any(
+            (
+                self.reactive_atom_serial is not None,
+                self.reactive_atom_index is not None,
+                self.reactive_atom_name is not None,
+                bool(self.leaving_atom_serials),
+                bool(self.leaving_atom_indices),
+                bool(self.leaving_atom_names),
+            )
+        ):
+            raise ValueError(
+                "PreparedFragment cannot contain reactive or leaving-atom selectors; "
+                "reaction endpoints belong to ReactionProduct"
+            )
+        return self
+
+    @classmethod
+    def from_generated_fragment(
+        cls,
+        fragment: GeneratedPolymerFragment,
+        *,
+        source_identity: str,
+        source_kind: Literal["polymer", "smiles", "pdb_fragment"],
+        sidecars: Mapping[str, Path] | None = None,
+        provenance: Mapping[str, Any] | None = None,
+        diagnostics: Sequence[str] = (),
+    ) -> PreparedFragment:
+        """Promote generation output into the construction contract once."""
+        return cls(
+            **fragment.model_dump(
+                exclude={
+                    "reactive_atom_serial",
+                    "reactive_atom_index",
+                    "reactive_atom_name",
+                    "leaving_atom_serials",
+                    "leaving_atom_indices",
+                    "leaving_atom_names",
+                }
+            ),
+            source_identity=source_identity,
+            source_kind=source_kind,
+            sidecars=dict(sidecars or {}),
+            provenance=dict(provenance or {}),
+            diagnostics=tuple(diagnostics),
         )
 
 

@@ -1339,6 +1339,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/1a/3a/aa07b056117926ecdd1b26f490980bc058070cece1c90493b8872729481a/lammps-2024.8.29.0.0-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/70/ae/6e1c0c4693cb839bdf55a6c019f55280d8f0c245d9a259a15f8d1cf0b98e/polymerist-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/84/c6/92730898236872d856066e180283291786e2dc4649491141b5b9efe0fa4c/openmmforcefields-0.15.1.tar.gz
       osx-64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/alabaster-1.0.0-pyhd8ed1ab_1.conda
@@ -1686,6 +1687,7 @@ environments:
       - pypi: git+https://github.com/openforcefield/openff-pablo.git?tag=v0.2.2#fb364e9a9c0bdbde1262d1e822fe13d823033f40
       - pypi: https://files.pythonhosted.org/packages/70/ae/6e1c0c4693cb839bdf55a6c019f55280d8f0c245d9a259a15f8d1cf0b98e/polymerist-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/84/c6/92730898236872d856066e180283291786e2dc4649491141b5b9efe0fa4c/openmmforcefields-0.15.1.tar.gz
       - pypi: https://files.pythonhosted.org/packages/99/ef/80e7f3adc714f271fd6af5f7e14aaa0a7d78b47bf426618be8bd2eb10766/lammps-2024.8.29.0.0-py2.py3-none-macosx_10_9_x86_64.whl
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_2.conda
@@ -2032,6 +2034,7 @@ environments:
       - pypi: git+https://github.com/openforcefield/openff-pablo.git?tag=v0.2.2#fb364e9a9c0bdbde1262d1e822fe13d823033f40
       - pypi: https://files.pythonhosted.org/packages/70/ae/6e1c0c4693cb839bdf55a6c019f55280d8f0c245d9a259a15f8d1cf0b98e/polymerist-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/84/c6/92730898236872d856066e180283291786e2dc4649491141b5b9efe0fa4c/openmmforcefields-0.15.1.tar.gz
       - pypi: https://files.pythonhosted.org/packages/b9/cc/e6eeff951a3e15148fac78dead7c50f2d6891f99efd80da599fbf6821b87/lammps-2024.8.29.0.0-py2.py3-none-macosx_11_0_arm64.whl
       p1:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-7_kmp_llvm.conda
@@ -2434,6 +2437,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/1a/3a/aa07b056117926ecdd1b26f490980bc058070cece1c90493b8872729481a/lammps-2024.8.29.0.0-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/70/ae/6e1c0c4693cb839bdf55a6c019f55280d8f0c245d9a259a15f8d1cf0b98e/polymerist-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/84/c6/92730898236872d856066e180283291786e2dc4649491141b5b9efe0fa4c/openmmforcefields-0.15.1.tar.gz
       p2:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-7_kmp_llvm.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/alsa-lib-1.2.15.3-hb03c661_0.conda
@@ -2835,6 +2839,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/1a/3a/aa07b056117926ecdd1b26f490980bc058070cece1c90493b8872729481a/lammps-2024.8.29.0.0-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/70/ae/6e1c0c4693cb839bdf55a6c019f55280d8f0c245d9a259a15f8d1cf0b98e/polymerist-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/84/c6/92730898236872d856066e180283291786e2dc4649491141b5b9efe0fa4c/openmmforcefields-0.15.1.tar.gz
   build-cuda-12-6:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
@@ -3271,6 +3276,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/1a/3a/aa07b056117926ecdd1b26f490980bc058070cece1c90493b8872729481a/lammps-2024.8.29.0.0-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/70/ae/6e1c0c4693cb839bdf55a6c019f55280d8f0c245d9a259a15f8d1cf0b98e/polymerist-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/84/c6/92730898236872d856066e180283291786e2dc4649491141b5b9efe0fa4c/openmmforcefields-0.15.1.tar.gz
   default:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
@@ -3804,6 +3810,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/1a/3a/aa07b056117926ecdd1b26f490980bc058070cece1c90493b8872729481a/lammps-2024.8.29.0.0-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/70/ae/6e1c0c4693cb839bdf55a6c019f55280d8f0c245d9a259a15f8d1cf0b98e/polymerist-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/84/c6/92730898236872d856066e180283291786e2dc4649491141b5b9efe0fa4c/openmmforcefields-0.15.1.tar.gz
       osx-64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/alabaster-1.0.0-pyhd8ed1ab_1.conda
@@ -4135,6 +4142,7 @@ environments:
       - pypi: git+https://github.com/openforcefield/openff-pablo.git?tag=v0.2.2#fb364e9a9c0bdbde1262d1e822fe13d823033f40
       - pypi: https://files.pythonhosted.org/packages/70/ae/6e1c0c4693cb839bdf55a6c019f55280d8f0c245d9a259a15f8d1cf0b98e/polymerist-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/84/c6/92730898236872d856066e180283291786e2dc4649491141b5b9efe0fa4c/openmmforcefields-0.15.1.tar.gz
       - pypi: https://files.pythonhosted.org/packages/99/ef/80e7f3adc714f271fd6af5f7e14aaa0a7d78b47bf426618be8bd2eb10766/lammps-2024.8.29.0.0-py2.py3-none-macosx_10_9_x86_64.whl
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_2.conda
@@ -4465,6 +4473,7 @@ environments:
       - pypi: git+https://github.com/openforcefield/openff-pablo.git?tag=v0.2.2#fb364e9a9c0bdbde1262d1e822fe13d823033f40
       - pypi: https://files.pythonhosted.org/packages/70/ae/6e1c0c4693cb839bdf55a6c019f55280d8f0c245d9a259a15f8d1cf0b98e/polymerist-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/84/c6/92730898236872d856066e180283291786e2dc4649491141b5b9efe0fa4c/openmmforcefields-0.15.1.tar.gz
       - pypi: https://files.pythonhosted.org/packages/b9/cc/e6eeff951a3e15148fac78dead7c50f2d6891f99efd80da599fbf6821b87/lammps-2024.8.29.0.0-py2.py3-none-macosx_11_0_arm64.whl
       p1:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-7_kmp_llvm.conda
@@ -4848,6 +4857,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/1a/3a/aa07b056117926ecdd1b26f490980bc058070cece1c90493b8872729481a/lammps-2024.8.29.0.0-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/70/ae/6e1c0c4693cb839bdf55a6c019f55280d8f0c245d9a259a15f8d1cf0b98e/polymerist-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/84/c6/92730898236872d856066e180283291786e2dc4649491141b5b9efe0fa4c/openmmforcefields-0.15.1.tar.gz
       p2:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-7_kmp_llvm.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/alsa-lib-1.2.15.3-hb03c661_0.conda
@@ -5230,6 +5240,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/1a/3a/aa07b056117926ecdd1b26f490980bc058070cece1c90493b8872729481a/lammps-2024.8.29.0.0-py2.py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/70/ae/6e1c0c4693cb839bdf55a6c019f55280d8f0c245d9a259a15f8d1cf0b98e/polymerist-1.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/7b/98/f6aa7fe0783e42be3093d8ef1b0ecdc22c34c0d69640dfb37f56925cb141/anytree-2.13.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/84/c6/92730898236872d856066e180283291786e2dc4649491141b5b9efe0fa4c/openmmforcefields-0.15.1.tar.gz
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
   build_number: 20
@@ -18105,6 +18116,10 @@ packages:
   version: 2.13.0
   sha256: 4cbcf10df36b1f1cba131b7e487ff3edafc9d6e932a3c70071b5b768bab901ff
   requires_python: '>=3.9.2,<4.0'
+- pypi: https://files.pythonhosted.org/packages/84/c6/92730898236872d856066e180283291786e2dc4649491141b5b9efe0fa4c/openmmforcefields-0.15.1.tar.gz
+  name: openmmforcefields
+  version: 0.15.1
+  sha256: c8c5e806ed89c81691e742fb86f768f4c3c06f0173f7343e8420b78ee8645595
 - pypi: https://files.pythonhosted.org/packages/99/ef/80e7f3adc714f271fd6af5f7e14aaa0a7d78b47bf426618be8bd2eb10766/lammps-2024.8.29.0.0-py2.py3-none-macosx_10_9_x86_64.whl
   name: lammps
   version: 2024.8.29.0.0

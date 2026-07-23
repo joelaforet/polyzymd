@@ -87,6 +87,9 @@ Open `config.yaml` and replace the template contents with:
 name: "my_first_simulation"
 description: "First PolyzyMD tutorial run"
 
+build:
+  scope: "system"  # Default: complete solvated simulation system
+
 enzyme:
   name: "MyEnzyme"
   pdb_path: "structures/enzyme.pdb"
@@ -149,6 +152,11 @@ output:
 
 This is intentionally small, but it still uses the staged equilibration model
 that PolyzyMD now requires for all simulations.
+
+`build.scope: system` is optional because it is the default. It is shown here
+to make the tutorial's endpoint explicit. The partial `structure` and `solute`
+scopes are preparation handoffs and are not accepted by simulation or
+submission commands; see {ref}`build-scope-artifacts`.
 
 ## Step 4: Validate the config
 

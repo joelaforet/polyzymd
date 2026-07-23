@@ -11,13 +11,17 @@ from polyzymd.builders.conjugation._linkage import (
     ExplicitLinkageContract,
     LinkageBond,
     PdbAtomSelector,
+    ReactionProduct,
     ReactiveEndpoint,
-    ResolvedAttachmentPlan,
     parse_pdb_atom_records,
     resolve_explicit_linkage_contract,
 )
-from polyzymd.builders.conjugation.polymer import GeneratedMoietyFragment
-from polyzymd.builders.conjugation.reactions.base import ReactionTemplate
+from polyzymd.builders.conjugation._pdb_fragment import PdbFragmentLoadResult
+from polyzymd.builders.conjugation.polymer import GeneratedMoietyFragment, GeneratedPolymerFragment
+from polyzymd.builders.conjugation.reactions.base import (
+    PdbFragmentCompatibilityResult,
+    ReactionTemplate,
+)
 from polyzymd.builders.conjugation.structure.pdb import PdbAtomRecord
 
 
@@ -36,6 +40,33 @@ class GlycanAnomericGroup(BaseModel):
     evidence: dict[str, Any] = Field(default_factory=dict)
 
 
+class PdbFragmentLinkageDiagnostic(BaseModel):
+    """Residue-level diagnostic for one inter-residue glycan bond."""
+
+    atom_1_serial: int
+    atom_1_name: str
+    atom_1_residue: str
+    atom_2_serial: int
+    atom_2_name: str
+    atom_2_residue: str
+    plausible_glycosidic: bool
+
+
+class ResidueResolvedGlycanPdbProfileResult(BaseModel):
+    """N-glycosylation profile resolved from a residue-resolved glycan PDB fragment."""
+
+    fragment: GeneratedPolymerFragment
+    reducing_c1_atom_index: int
+    reducing_c1_serial: int
+    hydroxyl_oxygen_atom_index: int
+    hydroxyl_hydrogen_atom_index: int
+    retained_ring_oxygen_atom_index: int
+    retained_ring_oxygen_serial: int
+    leaving_atom_indices: tuple[int, int]
+    leaving_group_representation: str
+    linkage_diagnostics: tuple[PdbFragmentLinkageDiagnostic, ...]
+
+
 class NGlycosylationReactionSettings(BaseModel):
     """Settings owned by the built-in N-glycosylation reaction template."""
 
@@ -46,7 +77,7 @@ class NGlycosylationReactionSettings(BaseModel):
         description="Input protein residue expected at the attachment site",
     )
     product_site_residue_name: str = Field(
-        "ASX",
+        "NLN",
         min_length=1,
         max_length=4,
         description="Product residue name for the linked asparagine site",
@@ -98,6 +129,8 @@ class NGlycosylationReaction(ReactionTemplate):
     Settings: ClassVar[type[NGlycosylationReactionSettings]] = NGlycosylationReactionSettings
     coordinate_backend_mechanism: ClassVar[str] = "n_glycosylation"
     supports_coordinate_assembly: ClassVar[bool] = True
+    profile_sidecar_key: ClassVar[str] = "n_glycosylation_profile"
+    site_participant_name: ClassVar[str] = "asparagine site"
     mapped_reaction_smarts: ClassVar[str] = (
         "[N:1]([H:2]).[C:3]([O:4][H:5])([O:6])>>[N:1][C:3]([O:6])"
     )
@@ -189,11 +222,43 @@ class NGlycosylationReaction(ReactionTemplate):
             name=cls.coordinate_backend_mechanism,
             reaction_smarts=cls.reaction_smarts(),
             participants=(
-                ReactionParticipant(name="asparagine site", role="site", reactant_index=0),
+                ReactionParticipant(name=cls.site_participant_name, role="site", reactant_index=0),
                 ReactionParticipant(name="reducing-end glycan", role="moiety", reactant_index=1),
             ),
             atom_roles=tuple(AtomRoleSpec.model_validate(role) for role in cls.role_metadata()),
             description=cls.description,
+        )
+
+    @classmethod
+    def resolve_pdb_fragment_source(
+        cls,
+        pdb_fragment: PdbFragmentLoadResult,
+        attachment: Any,
+        *,
+        settings: NGlycosylationReactionSettings | None = None,
+    ) -> PdbFragmentCompatibilityResult:
+        """Validate and resolve a residue-resolved glycan PDB fragment."""
+        profile = residue_resolved_glycan_pdb_profile_from_fragment(
+            pdb_fragment,
+            link_site=_field(_field(attachment, "moiety"), "link_site"),
+            leaving_atom_names=tuple(
+                _field(_field(_field(attachment, "mechanism"), "leaving_atoms"), "moiety", ()) or ()
+            ),
+        )
+        return PdbFragmentCompatibilityResult(
+            fragment=profile.fragment,
+            reactive_sequence_index=0,
+            reactive_selector={
+                "chain_id": "C",
+                "residue_name": _reactive_residue_name(profile),
+                "residue_number": _reactive_residue_number(profile),
+                "atom_name": _reactive_atom_name(profile),
+                "atom_serial": profile.reducing_c1_serial,
+            },
+            sidecar_payload={
+                cls.profile_sidecar_key: profile.model_dump(mode="json", exclude={"fragment"})
+            },
+            diagnostics=(f"Resolved residue-resolved glycan PDB fragment for {cls.name}",),
         )
 
     @classmethod
@@ -203,18 +268,49 @@ class NGlycosylationReaction(ReactionTemplate):
         return detect_glycan_anomeric_group(mol)
 
     @classmethod
+    def site_selector_from_config(
+        cls,
+        site_config: Any,
+        *,
+        settings: NGlycosylationReactionSettings,
+    ) -> PdbAtomSelector:
+        """Resolve and validate this mechanism's protein endpoint."""
+        return _site_selector_from_config(
+            site_config,
+            settings=settings,
+            mechanism_name=cls.name,
+        )
+
+    @classmethod
+    def resolve_protein_leaving_atom(
+        cls,
+        protein_pdb_path: Path | str,
+        selector: PdbAtomSelector,
+    ) -> PdbAtomRecord:
+        """Resolve the deterministic Asn ND2 hydrogen removed by N-glycosylation."""
+        return _resolve_bonded_site_hydrogen(
+            protein_pdb_path,
+            selector,
+            mechanism_name=cls.name,
+            preferred_name="HD21",
+        )
+
+    @classmethod
     def build_contract(
         cls,
         site_config: Any,
-        moiety_fragment: GeneratedMoietyFragment,
+        moiety_fragment: GeneratedMoietyFragment | GeneratedPolymerFragment,
         *,
         protein_pdb_path: Path | str | None = None,
         settings: NGlycosylationReactionSettings | None = None,
     ) -> ExplicitLinkageContract:
         """Build a generic linkage contract for an Asn-glycan attachment."""
         resolved = settings or cls.default_settings()
-        site_selector = _site_selector_from_config(site_config, settings=resolved)
-        group = cls.detect_anomeric_group(moiety_fragment)
+        site_selector = cls.site_selector_from_config(site_config, settings=resolved)
+        if isinstance(moiety_fragment, GeneratedMoietyFragment):
+            group = cls.detect_anomeric_group(moiety_fragment)
+        else:
+            group = _anomeric_group_from_pdb_fragment(moiety_fragment)
         moiety_atoms = _moiety_pdb_atoms(moiety_fragment)
         atoms_by_index = {atom.atom_index: atom for atom in moiety_atoms}
         reactive_atom = atoms_by_index.get(group.reactive_carbon_index)
@@ -226,10 +322,12 @@ class NGlycosylationReaction(ReactionTemplate):
         protein_leaving_selectors: tuple[PdbAtomSelector, ...] = ()
         if protein_pdb_path is not None:
             protein_leaving_selectors = (
-                _selector_from_pdb_atom(_resolve_asn_nd2_hydrogen(protein_pdb_path, site_selector)),
+                _selector_from_pdb_atom(
+                    cls.resolve_protein_leaving_atom(protein_pdb_path, site_selector)
+                ),
             )
 
-        product_site, product_moiety = resolved.product_residue_names(moiety_fragment.residue_name)
+        product_site, product_moiety = resolved.product_residue_names(reactive_atom.residue_name)
         modifier_selector = _selector_from_pdb_atom(reactive_atom)
         return ExplicitLinkageContract(
             protein_endpoint=ReactiveEndpoint(
@@ -244,6 +342,9 @@ class NGlycosylationReaction(ReactionTemplate):
                 product_residue_name=product_moiety,
                 leaving_atom_selectors=tuple(
                     _selector_from_pdb_atom(atom) for atom in leaving_atoms
+                ),
+                allow_external_leaving_residue=not isinstance(
+                    moiety_fragment, GeneratedMoietyFragment
                 ),
             ),
             bond=LinkageBond(
@@ -260,11 +361,19 @@ class NGlycosylationReaction(ReactionTemplate):
         cls,
         protein_pdb_path: Path | str,
         site_config: Any,
-        moiety_fragment: GeneratedMoietyFragment,
+        moiety_fragment: GeneratedMoietyFragment | GeneratedPolymerFragment,
         *,
+        prepared_fragment: Any | None = None,
+        attachment_id: str = "",
+        attachment_index: int = 1,
+        attachment_config: Any = None,
+        attachment_force_field_domain: str = "",
+        diagnostics: tuple[str, ...] = (),
         settings: NGlycosylationReactionSettings | None = None,
-    ) -> ResolvedAttachmentPlan:
+    ) -> ReactionProduct:
         """Resolve an Asn-glycan attachment plan against protein and moiety records."""
+        from polyzymd.builders.conjugation._specs import resolve_prepared_reaction_fragment
+
         contract = cls.build_contract(
             site_config,
             moiety_fragment,
@@ -275,21 +384,30 @@ class NGlycosylationReaction(ReactionTemplate):
             protein_pdb_path,
             _moiety_pdb_atoms(moiety_fragment),
             contract,
+            fragment=resolve_prepared_reaction_fragment(moiety_fragment, prepared_fragment),
+            attachment_id=attachment_id,
+            attachment_index=attachment_index,
+            attachment_config=attachment_config,
+            reaction_name=cls.name,
+            attachment_force_field_domain=attachment_force_field_domain,
+            diagnostics=diagnostics,
         )
 
     def resolve_attachment(
         self,
         protein_pdb_path: Path | str,
         site_config: Any,
-        fragment: GeneratedMoietyFragment,
+        fragment: GeneratedMoietyFragment | GeneratedPolymerFragment,
         *,
+        prepared_fragment: Any | None = None,
         settings: NGlycosylationReactionSettings | None = None,
-    ) -> ResolvedAttachmentPlan:
+    ) -> ReactionProduct:
         """Resolve an experimental N-glycosylation generic attachment plan."""
         return self.resolve_plan(
             protein_pdb_path,
             site_config,
             fragment,
+            prepared_fragment=prepared_fragment,
             settings=settings,
         )
 
@@ -363,6 +481,534 @@ def detect_glycan_anomeric_group(mol: Any) -> GlycanAnomericGroup:
     return next(iter(unique.values()))
 
 
+def residue_resolved_glycan_pdb_profile_from_fragment(
+    load_result: PdbFragmentLoadResult,
+    *,
+    link_site: Any | None = None,
+    leaving_atom_names: tuple[str, ...] = (),
+) -> ResidueResolvedGlycanPdbProfileResult:
+    """Validate a residue-resolved glycan PDB fragment for N-glycosylation.
+
+    Parameters
+    ----------
+    load_result : PdbFragmentLoadResult
+        Generic PDB-fragment ingestion result.
+
+    Returns
+    -------
+    ResidueResolvedGlycanPdbProfileResult
+        Mechanism-compatible fragment and glycan-specific diagnostics.
+
+    Raises
+    ------
+    ValueError
+        If the fragment lacks a valid reducing-end anomeric C1 hydroxyl group.
+    """
+    serial_to_atom = {
+        atom.serial: atom for atom in load_result.source_atoms if atom.serial is not None
+    }
+    atoms_by_index = {atom.atom_index: atom for atom in load_result.source_atoms}
+    group, c1_atom, hydroxyl_oxygen, hydroxyl_hydrogen, representation = _resolve_pdb_reducing_end(
+        load_result.source_atoms,
+        load_result.serial_bonds,
+        serial_to_atom,
+        link_site=link_site,
+        leaving_atom_names=leaving_atom_names,
+    )
+    diagnostics = _linkage_diagnostics(load_result.serial_bonds, serial_to_atom)
+    if not any(item.plausible_glycosidic for item in diagnostics):
+        raise ValueError(
+            "Residue-resolved glycan PDB fragment lacks plausible inter-residue C-O "
+            f"glycosidic bonds in {load_result.source_path}"
+        )
+    fragment = load_result.to_fragment(
+        reactive_atom_serial=c1_atom.serial,
+        reactive_atom_index=c1_atom.atom_index,
+        leaving_atom_serials=(hydroxyl_oxygen.serial, hydroxyl_hydrogen.serial),
+        leaving_atom_indices=(hydroxyl_oxygen.atom_index, hydroxyl_hydrogen.atom_index),
+    )
+    return ResidueResolvedGlycanPdbProfileResult(
+        fragment=fragment,
+        reducing_c1_atom_index=c1_atom.atom_index,
+        reducing_c1_serial=c1_atom.serial,
+        hydroxyl_oxygen_atom_index=hydroxyl_oxygen.atom_index,
+        hydroxyl_hydrogen_atom_index=hydroxyl_hydrogen.atom_index,
+        retained_ring_oxygen_atom_index=group.ring_oxygen_index,
+        retained_ring_oxygen_serial=atoms_by_index[group.ring_oxygen_index].serial,
+        leaving_atom_indices=(hydroxyl_oxygen.atom_index, hydroxyl_hydrogen.atom_index),
+        leaving_group_representation=representation,
+        linkage_diagnostics=diagnostics,
+    )
+
+
+def _reactive_residue_name(profile: ResidueResolvedGlycanPdbProfileResult) -> str:
+    """Return the residue name for the glycan reactive atom."""
+    atom = profile.fragment.atoms[profile.reducing_c1_atom_index]
+    return atom.residue_name
+
+
+def _reactive_residue_number(profile: ResidueResolvedGlycanPdbProfileResult) -> int:
+    """Return the residue number for the glycan reactive atom."""
+    atom = profile.fragment.atoms[profile.reducing_c1_atom_index]
+    return atom.residue_number
+
+
+def _reactive_atom_name(profile: ResidueResolvedGlycanPdbProfileResult) -> str:
+    """Return the atom name for the graph-detected glycan reactive atom."""
+    atom = profile.fragment.atoms[profile.reducing_c1_atom_index]
+    return atom.atom_name
+
+
+def _anomeric_group_from_pdb_fragment(fragment: GeneratedPolymerFragment) -> GlycanAnomericGroup:
+    """Detect an anomeric group from a generated fragment graph."""
+    group = _detect_pdb_anomeric_group(
+        _moiety_pdb_atoms(fragment),
+        _fragment_serial_bonds(fragment),
+        link_site=_fragment_reactive_selector(fragment),
+    )
+    leaving_indices = set(group.leaving_atom_indices)
+    if leaving_indices != set(fragment.leaving_atom_indices):
+        raise ValueError(
+            "Residue-resolved glycan PDB N-glycosylation leaving selectors do not match "
+            "the graph-detected O/H leaving group"
+        )
+    return group
+
+
+def _resolve_roh_leaving_atoms(
+    atoms: tuple[PdbAtomRecord, ...],
+) -> tuple[PdbAtomRecord, PdbAtomRecord]:
+    """Resolve the supported separate-residue hydroxyl-cap O1 and HO1 atoms."""
+    roh_atoms = [atom for atom in atoms if atom.residue_name.upper() == "ROH"]
+    if not roh_atoms:
+        raise ValueError(
+            "N-glycosylation PDB fragment profile requires one ROH residue with O1 and HO1 "
+            "leaving atoms"
+        )
+    residues = {(atom.chain_id, atom.residue_number, atom.insertion_code) for atom in roh_atoms}
+    if len(residues) != 1:
+        raise ValueError(
+            "Separate-residue hydroxyl-cap representation requires exactly one ROH residue"
+        )
+    o1 = [atom for atom in roh_atoms if atom.atom_name.upper() == "O1"]
+    ho1 = [atom for atom in roh_atoms if atom.atom_name.upper() == "HO1"]
+    if len(o1) != 1 or len(ho1) != 1:
+        raise ValueError("ROH leaving group must contain unique atoms named O1 and HO1")
+    if _normalized_element(o1[0]) != "O" or _normalized_element(ho1[0]) != "H":
+        raise ValueError("ROH leaving group requires O1 element O and HO1 element H")
+    return o1[0], ho1[0]
+
+
+def _resolve_pdb_reducing_end(
+    atoms: tuple[PdbAtomRecord, ...],
+    bonds: tuple[tuple[int, int], ...],
+    serial_to_atom: dict[int, PdbAtomRecord],
+    *,
+    link_site: Any | None = None,
+    leaving_atom_names: tuple[str, ...] = (),
+) -> tuple[GlycanAnomericGroup, PdbAtomRecord, PdbAtomRecord, PdbAtomRecord, str]:
+    """Resolve a structural reducing-end C1 and hydroxyl leaving group."""
+    group = _detect_pdb_anomeric_group(
+        atoms,
+        bonds,
+        link_site=link_site,
+        leaving_atom_names=leaving_atom_names,
+    )
+    atoms_by_index = {atom.atom_index: atom for atom in atoms}
+    c1_atom = atoms_by_index[group.reactive_carbon_index]
+    hydroxyl_oxygen = atoms_by_index[group.hydroxyl_oxygen_index]
+    hydroxyl_hydrogens = [
+        atoms_by_index[index]
+        for index in group.leaving_atom_indices
+        if index != group.hydroxyl_oxygen_index
+    ]
+    if len(hydroxyl_hydrogens) != 1:
+        raise ValueError("Graph-detected glycan leaving group must contain exactly one hydrogen")
+    representation = (
+        "separate_residue_hydroxyl_cap"
+        if _residue_key(c1_atom) != _residue_key(hydroxyl_oxygen)
+        else "local_oh"
+    )
+    return group, c1_atom, hydroxyl_oxygen, hydroxyl_hydrogens[0], representation
+
+
+def _detect_pdb_anomeric_group(
+    atoms: tuple[PdbAtomRecord, ...],
+    bonds: tuple[tuple[int, int], ...],
+    *,
+    link_site: Any | None = None,
+    leaving_atom_names: tuple[str, ...] = (),
+) -> GlycanAnomericGroup:
+    """Detect an anomeric C from explicit graph chemistry, not atom names."""
+    serial_to_atom = {atom.serial: atom for atom in atoms if atom.serial is not None}
+    neighbors = _serial_neighbors(bonds)
+    link_matches = _matching_link_site_atoms(atoms, link_site)
+    candidate_atoms = link_matches or atoms
+    candidates: list[GlycanAnomericGroup] = []
+
+    for carbon in candidate_atoms:
+        if carbon.serial is None or carbon.atom_index is None or _normalized_element(carbon) != "C":
+            continue
+        oxygen_neighbors = [
+            serial_to_atom[serial]
+            for serial in neighbors.get(carbon.serial, set())
+            if serial in serial_to_atom and _normalized_element(serial_to_atom[serial]) == "O"
+        ]
+        hydroxyl_pairs = [
+            (oxygen, hydrogen)
+            for oxygen in oxygen_neighbors
+            for hydrogen in _bonded_hydrogens(oxygen, neighbors, serial_to_atom)
+            if oxygen.serial is not None
+            and hydrogen.serial is not None
+            and neighbors.get(oxygen.serial, set()) == {carbon.serial, hydrogen.serial}
+            if _leaving_names_match((oxygen, hydrogen), leaving_atom_names)
+        ]
+        retained_oxygens = [
+            oxygen
+            for oxygen in oxygen_neighbors
+            if not _bonded_hydrogens(oxygen, neighbors, serial_to_atom)
+            and _oxygen_connects_into_sugar_graph(oxygen, carbon, neighbors, serial_to_atom)
+        ]
+        for hydroxyl_oxygen, hydroxyl_hydrogen in hydroxyl_pairs:
+            for retained_oxygen in retained_oxygens:
+                if retained_oxygen.serial == hydroxyl_oxygen.serial:
+                    continue
+                candidates.append(
+                    GlycanAnomericGroup(
+                        reactive_carbon_index=carbon.atom_index,
+                        hydroxyl_oxygen_index=hydroxyl_oxygen.atom_index,
+                        ring_oxygen_index=retained_oxygen.atom_index,
+                        leaving_atom_indices=(
+                            hydroxyl_oxygen.atom_index,
+                            hydroxyl_hydrogen.atom_index,
+                        ),
+                        candidate_atom_indices=tuple(
+                            sorted(
+                                atom.atom_index
+                                for atom in candidate_atoms
+                                if atom.atom_index is not None and _normalized_element(atom) == "C"
+                            )
+                        ),
+                        evidence={
+                            "source": "pdb_conect_graph",
+                            "reactive_carbon_serial": carbon.serial,
+                            "hydroxyl_oxygen_serial": hydroxyl_oxygen.serial,
+                            "hydroxyl_hydrogen_serial": hydroxyl_hydrogen.serial,
+                            "retained_ring_oxygen_serial": retained_oxygen.serial,
+                        },
+                    )
+                )
+
+    unique = {
+        (
+            candidate.reactive_carbon_index,
+            candidate.hydroxyl_oxygen_index,
+            candidate.ring_oxygen_index,
+        ): candidate
+        for candidate in candidates
+    }
+    if not unique:
+        message = (
+            "No glycan anomeric motif was found. Expected one graph-detected carbon bonded "
+            "to a hydroxyl O-H leaving group and a retained ring oxygen."
+        )
+        if leaving_atom_names:
+            message += f" Configured leaving atoms: {', '.join(leaving_atom_names)}."
+        raise ValueError(message)
+    if len(unique) > 1 and not link_matches:
+        assignments = ", ".join(
+            f"C{carbon}/O{hydroxyl}/O{ring}" for carbon, hydroxyl, ring in sorted(unique)
+        )
+        raise ValueError(
+            "Ambiguous glycan anomeric motif assignments; configure the existing moiety.link_site "
+            f"reactive atom selector to choose one: {assignments}"
+        )
+    if len(unique) > 1:
+        assignments = ", ".join(
+            f"C{carbon}/O{hydroxyl}/O{ring}" for carbon, hydroxyl, ring in sorted(unique)
+        )
+        raise ValueError(f"Configured moiety.link_site still leaves ambiguous motif: {assignments}")
+    return next(iter(unique.values()))
+
+
+def _oxygen_connects_into_sugar_graph(
+    oxygen: PdbAtomRecord,
+    carbon: PdbAtomRecord,
+    neighbors: dict[int, set[int]],
+    serial_to_atom: dict[int, PdbAtomRecord],
+) -> bool:
+    """Return whether an oxygen is retained in a nonterminal ring-like graph."""
+    if oxygen.serial is None or carbon.serial is None:
+        return False
+    retained_neighbors = neighbors.get(oxygen.serial, set()) - {carbon.serial}
+    heavy_neighbors = {
+        serial
+        for serial in retained_neighbors
+        if (atom := serial_to_atom.get(serial)) is not None and _normalized_element(atom) != "H"
+    }
+    if not heavy_neighbors:
+        return False
+    return _has_alternate_heavy_path_to_carbon(
+        starts=heavy_neighbors,
+        target=carbon.serial,
+        excluded_edge=frozenset((oxygen.serial, carbon.serial)),
+        neighbors=neighbors,
+        serial_to_atom=serial_to_atom,
+    )
+
+
+def _has_alternate_heavy_path_to_carbon(
+    *,
+    starts: set[int],
+    target: int,
+    excluded_edge: frozenset[int],
+    neighbors: dict[int, set[int]],
+    serial_to_atom: dict[int, PdbAtomRecord],
+) -> bool:
+    """Return whether a heavy-atom path reaches target without one excluded edge."""
+    visited: set[int] = set()
+    queue = list(starts)
+    while queue:
+        current = queue.pop(0)
+        if current in visited:
+            continue
+        visited.add(current)
+        if current == target:
+            return True
+        for neighbor in neighbors.get(current, set()):
+            if frozenset((current, neighbor)) == excluded_edge:
+                continue
+            atom = serial_to_atom.get(neighbor)
+            if atom is None or _normalized_element(atom) == "H" or neighbor in visited:
+                continue
+            queue.append(neighbor)
+    return False
+
+
+def _resolve_local_reducing_hydroxyl(
+    atoms: tuple[PdbAtomRecord, ...],
+    bonds: tuple[tuple[int, int], ...],
+    *,
+    link_site: Any | None = None,
+    leaving_atom_names: tuple[str, ...] = (),
+) -> tuple[PdbAtomRecord, PdbAtomRecord, PdbAtomRecord]:
+    """Resolve an ordinary residue-local anomeric C1 hydroxyl from graph connectivity."""
+    serial_to_atom = {atom.serial: atom for atom in atoms if atom.serial is not None}
+    neighbors = _serial_neighbors(bonds)
+    link_matches = _matching_link_site_atoms(atoms, link_site)
+    c1_candidates = link_matches or [
+        atom
+        for atom in atoms
+        if atom.atom_name.upper() == "C1" and _normalized_element(atom) == "C"
+    ]
+    candidates: list[tuple[PdbAtomRecord, PdbAtomRecord, PdbAtomRecord]] = []
+    for carbon in c1_candidates:
+        if _normalized_element(carbon) != "C":
+            continue
+        oxygen_neighbors = [
+            serial_to_atom[serial]
+            for serial in neighbors.get(carbon.serial, set())
+            if serial in serial_to_atom and _normalized_element(serial_to_atom[serial]) == "O"
+        ]
+        residue_local_oxygens = [
+            atom for atom in oxygen_neighbors if _residue_key(atom) == _residue_key(carbon)
+        ]
+        hydroxyl_pairs = [
+            (oxygen, hydrogen)
+            for oxygen in residue_local_oxygens
+            for hydrogen in _bonded_hydrogens(oxygen, neighbors, serial_to_atom)
+            if _leaving_names_match((oxygen, hydrogen), leaving_atom_names)
+        ]
+        ring_like_oxygens = [
+            atom
+            for atom in residue_local_oxygens
+            if not _bonded_hydrogens(atom, neighbors, serial_to_atom)
+            and _oxygen_connects_into_sugar_graph(atom, carbon, neighbors, serial_to_atom)
+        ]
+        for oxygen, hydrogen in hydroxyl_pairs:
+            if any(ring_oxygen.serial != oxygen.serial for ring_oxygen in ring_like_oxygens):
+                candidates.append((carbon, oxygen, hydrogen))
+
+    if len(candidates) != 1:
+        raise ValueError(
+            "Residue-resolved glycan PDB fragment requires a unique reducing-end C1 bonded "
+            f"to an explicit hydroxyl O/H group; found {len(candidates)} candidates"
+        )
+    return candidates[0]
+
+
+def _has_explicit_roh_cap(atoms: tuple[PdbAtomRecord, ...]) -> bool:
+    """Return whether the supported separate-residue hydroxyl cap is present."""
+    return any(atom.residue_name.upper() == "ROH" for atom in atoms)
+
+
+def _resolve_reducing_c1(
+    bonds: tuple[tuple[int, int], ...],
+    serial_to_atom: dict[int, PdbAtomRecord],
+    roh_o1: PdbAtomRecord,
+    *,
+    link_site: Any | None = None,
+) -> PdbAtomRecord:
+    """Resolve the reducing sugar C1 bonded to ROH O1."""
+    link_matches = _matching_link_site_atoms(tuple(serial_to_atom.values()), link_site)
+    candidates = []
+    for left, right in bonds:
+        if roh_o1.serial not in {left, right}:
+            continue
+        other = right if left == roh_o1.serial else left
+        atom = serial_to_atom[other]
+        if (
+            atom.residue_name.upper() != "ROH"
+            and atom.atom_name.upper() == "C1"
+            and _normalized_element(atom) == "C"
+            and (not link_matches or atom.serial == link_matches[0].serial)
+        ):
+            candidates.append(atom)
+    if len(candidates) != 1:
+        raise ValueError(
+            "Residue-resolved glycan PDB fragment requires a unique reducing sugar C1 "
+            f"bonded to hydroxyl-cap O1; found {len(candidates)} candidates"
+        )
+    return candidates[0]
+
+
+def _serial_neighbors(bonds: tuple[tuple[int, int], ...]) -> dict[int, set[int]]:
+    """Return an undirected adjacency map keyed by PDB atom serial."""
+    neighbors: dict[int, set[int]] = {}
+    for left, right in bonds:
+        neighbors.setdefault(left, set()).add(right)
+        neighbors.setdefault(right, set()).add(left)
+    return neighbors
+
+
+def _bonded_hydrogens(
+    atom: PdbAtomRecord,
+    neighbors: dict[int, set[int]],
+    serial_to_atom: dict[int, PdbAtomRecord],
+) -> tuple[PdbAtomRecord, ...]:
+    """Return explicit hydrogens directly bonded to an atom."""
+    hydrogens = [
+        serial_to_atom[serial]
+        for serial in neighbors.get(atom.serial, set())
+        if serial in serial_to_atom and _is_hydrogen_atom(serial_to_atom[serial])
+    ]
+    return tuple(sorted(hydrogens, key=lambda item: (item.serial, item.atom_name)))
+
+
+def _leaving_names_match(
+    atoms: tuple[PdbAtomRecord, ...], leaving_atom_names: tuple[str, ...]
+) -> bool:
+    """Return whether a candidate hydroxyl matches configured leaving atom names."""
+    if not leaving_atom_names:
+        return True
+    expected = sorted(name.strip().upper() for name in leaving_atom_names)
+    observed = sorted(atom.atom_name.strip().upper() for atom in atoms)
+    return observed == expected
+
+
+def _matching_link_site_atoms(
+    atoms: tuple[PdbAtomRecord, ...], link_site: Any | None
+) -> tuple[PdbAtomRecord, ...]:
+    """Return atoms matching an optional configured moiety link-site selector."""
+    if link_site is None:
+        return ()
+    selector = PdbAtomSelector(
+        chain_id=_coalesce_text(_field(link_site, "chain_id"), "C"),
+        residue_name=_coalesce_text(_field(link_site, "residue_name")),
+        residue_number=int(_required_selector_field(link_site, "residue_number")),
+        atom_name=_coalesce_text(_field(link_site, "atom_name")),
+        insertion_code=str(_field(link_site, "insertion_code", "") or ""),
+        atom_serial=_field(link_site, "atom_serial"),
+        atom_index=_field(link_site, "atom_index"),
+    )
+    matches = tuple(atom for atom in atoms if selector.matches(atom))
+    if len(matches) != 1:
+        raise ValueError(
+            "Configured moiety.link_site must resolve exactly one glycan atom; "
+            f"found {len(matches)}"
+        )
+    return matches
+
+
+def _validate_roh_reducing_subgraph(
+    bonds: tuple[tuple[int, int], ...],
+    *,
+    roh_o1: PdbAtomRecord,
+    roh_ho1: PdbAtomRecord,
+    c1_atom: PdbAtomRecord,
+) -> None:
+    """Validate the exact ROH leaving-group subgraph accepted for cleavage."""
+    if c1_atom.residue_name.upper() == "ROH":
+        raise ValueError("Reducing sugar C1 must belong to a non-ROH residue")
+    if _normalized_element(c1_atom) != "C":
+        raise ValueError("Reducing sugar C1 must have element C")
+    bond_set = {frozenset(bond) for bond in bonds}
+    required = {
+        frozenset((roh_ho1.serial, roh_o1.serial)),
+        frozenset((roh_o1.serial, c1_atom.serial)),
+    }
+    if not required.issubset(bond_set):
+        raise ValueError(
+            "Separate-residue hydroxyl-cap representation requires exact ROH:HO1-ROH:O1-C1 "
+            "reducing subgraph"
+        )
+
+    neighbors: dict[int, set[int]] = {
+        roh_ho1.serial: set(),
+        roh_o1.serial: set(),
+        c1_atom.serial: set(),
+    }
+    for left, right in bonds:
+        if left in neighbors:
+            neighbors[left].add(right)
+        if right in neighbors:
+            neighbors[right].add(left)
+    if neighbors[roh_ho1.serial] != {roh_o1.serial}:
+        raise ValueError("Hydroxyl-cap ROH:HO1 must be bonded only to ROH:O1")
+    if neighbors[roh_o1.serial] != {roh_ho1.serial, c1_atom.serial}:
+        raise ValueError("Hydroxyl-cap ROH:O1 must be bonded exactly to ROH:HO1 and reducing C1")
+
+
+def _linkage_diagnostics(
+    bonds: tuple[tuple[int, int], ...], serial_to_atom: dict[int, PdbAtomRecord]
+) -> tuple[PdbFragmentLinkageDiagnostic, ...]:
+    """Build inter-residue glycan linkage diagnostics from graph bonds."""
+    diagnostics = []
+    for left, right in bonds:
+        atom_1 = serial_to_atom[left]
+        atom_2 = serial_to_atom[right]
+        if _residue_key(atom_1) == _residue_key(atom_2):
+            continue
+        pair = {_normalized_element(atom_1), _normalized_element(atom_2)}
+        diagnostics.append(
+            PdbFragmentLinkageDiagnostic(
+                atom_1_serial=left,
+                atom_1_name=atom_1.atom_name,
+                atom_1_residue=_residue_label(atom_1),
+                atom_2_serial=right,
+                atom_2_name=atom_2.atom_name,
+                atom_2_residue=_residue_label(atom_2),
+                plausible_glycosidic=pair == {"C", "O"},
+            )
+        )
+    return tuple(diagnostics)
+
+
+def _residue_key(atom: PdbAtomRecord) -> tuple[str, int, str, str]:
+    """Return a residue identity key."""
+    return (atom.chain_id, atom.residue_number, atom.insertion_code, atom.residue_name)
+
+
+def _residue_label(atom: PdbAtomRecord) -> str:
+    """Return a compact residue label for diagnostics."""
+    return f"{atom.chain_id}:{atom.residue_name}{atom.residue_number}{atom.insertion_code}"
+
+
+def _normalized_element(atom: PdbAtomRecord) -> str:
+    """Return an uppercase element symbol for validation."""
+    return atom.element.strip().upper()
+
+
 def _rdkit_mol_from_moiety_fragment(fragment: GeneratedMoietyFragment) -> Any:
     """Return an RDKit molecule for a generated moiety fragment."""
     from rdkit import Chem
@@ -423,20 +1069,21 @@ def _site_selector_from_config(
     site_config: Any,
     *,
     settings: NGlycosylationReactionSettings,
+    mechanism_name: str,
 ) -> PdbAtomSelector:
-    """Build the protein endpoint selector, defaulting the omitted atom to ND2."""
+    """Build and validate a glycosylation protein endpoint selector."""
     residue_name = _coalesce_text(
         _field(site_config, "residue_name"), settings.source_site_residue_name
     )
     atom_name = _coalesce_text(_field(site_config, "atom_name"), settings.target_atom_name)
     if residue_name != settings.source_site_residue_name:
         raise ValueError(
-            "N-glycosylation target residue must be "
+            f"{mechanism_name} target residue must be "
             f"{settings.source_site_residue_name}, got {residue_name}"
         )
     if atom_name != settings.target_atom_name:
         raise ValueError(
-            "N-glycosylation target atom must be " f"{settings.target_atom_name}, got {atom_name}"
+            f"{mechanism_name} target atom must be {settings.target_atom_name}, got {atom_name}"
         )
     return PdbAtomSelector(
         chain_id=_coalesce_text(_field(site_config, "chain_id"), "A"),
@@ -449,59 +1096,74 @@ def _site_selector_from_config(
     )
 
 
-def _resolve_asn_nd2_hydrogen(
+def _resolve_bonded_site_hydrogen(
     protein_pdb_path: Path | str,
     selector: PdbAtomSelector,
+    *,
+    mechanism_name: str,
+    preferred_name: str | None = None,
+    residue_library: Any | None = None,
 ) -> PdbAtomRecord:
-    """Resolve one leaving hydrogen bound to the selected Asn ND2 atom."""
+    """Resolve one leaving hydrogen from Pablo residue-template connectivity."""
+    from polyzymd.builders.conjugation.pablo.residue_library import bonded_hydrogen_names
+
     atoms = parse_pdb_atom_records(protein_pdb_path)
-    nd2_matches = [atom for atom in atoms if selector.matches(atom)]
-    if len(nd2_matches) != 1:
+    site_matches = [atom for atom in atoms if selector.matches(atom)]
+    if len(site_matches) != 1:
         raise ValueError(
-            "Expected exactly one ASN ND2 atom for N-glycosylation site "
+            f"Expected exactly one {selector.residue_name} {selector.atom_name} atom for "
+            f"{mechanism_name} site "
             f"{selector.chain_id}:{selector.residue_number}:{selector.atom_name}, "
-            f"found {len(nd2_matches)}"
+            f"found {len(site_matches)}"
         )
-    nd2_atom = nd2_matches[0]
-    hydrogens = _geometry_bound_hydrogens(atoms, nd2_atom)
-    if not hydrogens:
-        raise ValueError(
-            "N-glycosylation requires one explicit Asn ND2 hydrogen to remove; "
-            f"found none for {selector.chain_id}:ASN{selector.residue_number}:ND2"
-        )
-    return hydrogens[0]
-
-
-def _geometry_bound_hydrogens(
-    atoms: tuple[PdbAtomRecord, ...], target_atom: PdbAtomRecord, *, cutoff: float = 1.35
-) -> tuple[PdbAtomRecord, ...]:
-    """Return same-residue hydrogens within a local N-H distance cutoff."""
-    from math import dist
-
-    target_xyz = (target_atom.x, target_atom.y, target_atom.z)
-    hydrogens = [
+    site_atom = site_matches[0]
+    template_hydrogen_names = bonded_hydrogen_names(
+        selector.residue_name,
+        selector.atom_name,
+        residue_library=residue_library,
+    )
+    residue_atoms = [atom for atom in atoms if _same_residue(atom, site_atom)]
+    observed = [
         atom
-        for atom in atoms
-        if atom.chain_id.upper() == target_atom.chain_id.upper()
-        and atom.residue_name.upper() == target_atom.residue_name.upper()
-        and atom.residue_number == target_atom.residue_number
-        and atom.insertion_code.upper() == target_atom.insertion_code.upper()
-        and _is_hydrogen_atom(atom)
-        and dist(target_xyz, (atom.x, atom.y, atom.z)) <= cutoff
+        for atom in residue_atoms
+        if atom.atom_name.strip().upper() in template_hydrogen_names and _is_hydrogen_atom(atom)
     ]
-    return tuple(
-        sorted(
-            hydrogens,
-            key=lambda atom: (
-                atom.atom_index if atom.atom_index is not None else 10**9,
-                atom.serial if atom.serial is not None else 10**9,
-                atom.atom_name.upper(),
-            ),
+    if len(observed) == 1:
+        return observed[0]
+
+    preferred = (preferred_name or "").strip().upper()
+    if preferred and len(observed) > 1:
+        preferred_matches = [
+            atom for atom in observed if atom.atom_name.strip().upper() == preferred
+        ]
+        if len(preferred_matches) == 1:
+            return preferred_matches[0]
+
+    if len(observed) != 1:
+        raise ValueError(
+            f"{mechanism_name} requires exactly one explicit hydrogen bonded to "
+            f"{selector.residue_name} {selector.atom_name}"
+            + (f", or an unambiguous preferred {preferred} hydrogen; " if preferred else "; ")
+            + f"found {len(observed)} for {selector.chain_id}:{selector.residue_name}"
+            f"{selector.residue_number}:{selector.atom_name}. "
+            f"Template bonded H names: {', '.join(template_hydrogen_names)}. No coordinate "
+            "geometry fallback is used."
         )
+
+
+def _same_residue(left: PdbAtomRecord, right: PdbAtomRecord) -> bool:
+    """Return whether two atoms share a PDB residue identity."""
+    return (
+        left.chain_id.upper() == right.chain_id.upper()
+        and left.residue_name.upper() == right.residue_name.upper()
+        and left.residue_number == right.residue_number
+        and left.insertion_code.upper() == right.insertion_code.upper()
     )
 
 
-def _moiety_pdb_atoms(fragment: GeneratedMoietyFragment) -> tuple[PdbAtomRecord, ...]:
+def _moiety_pdb_atoms(
+    fragment: GeneratedMoietyFragment | GeneratedPolymerFragment,
+) -> tuple[PdbAtomRecord, ...]:
     """Convert a generated moiety fragment to PDB atom records."""
     atoms: list[PdbAtomRecord] = []
     for atom in fragment.atoms:
@@ -510,6 +1172,66 @@ def _moiety_pdb_atoms(fragment: GeneratedMoietyFragment) -> tuple[PdbAtomRecord,
             pdb_atom = pdb_atom.model_copy(update={"chain_id": "C"})
         atoms.append(pdb_atom)
     return tuple(atoms)
+
+
+def _fragment_serial_bonds(fragment: GeneratedPolymerFragment) -> tuple[tuple[int, int], ...]:
+    """Return generated-fragment bonds normalized to atom serial pairs."""
+    atoms_by_index = {atom.atom_index: atom for atom in fragment.atoms}
+    atoms_by_serial = {atom.serial: atom for atom in fragment.atoms if atom.serial is not None}
+    atoms_by_name = {atom.atom_name.upper(): atom for atom in fragment.atoms}
+    serial_bonds = []
+    for left, right in fragment.bonds:
+        left_atom = _fragment_bond_atom(left, atoms_by_index, atoms_by_serial, atoms_by_name)
+        right_atom = _fragment_bond_atom(right, atoms_by_index, atoms_by_serial, atoms_by_name)
+        if left_atom.serial is None or right_atom.serial is None:
+            raise ValueError("Generated glycan fragment graph requires serial-numbered atoms")
+        serial_bonds.append(tuple(sorted((left_atom.serial, right_atom.serial))))
+    if not serial_bonds:
+        raise ValueError("Generated glycan fragment graph requires explicit bonds")
+    return tuple(sorted(set(serial_bonds)))
+
+
+def _fragment_bond_atom(
+    value: int | str,
+    atoms_by_index: dict[int, Any],
+    atoms_by_serial: dict[int, Any],
+    atoms_by_name: dict[str, Any],
+) -> Any:
+    """Resolve a generated-fragment bond endpoint to an atom record."""
+    if isinstance(value, int):
+        if value in atoms_by_serial:
+            return atoms_by_serial[value]
+        if value in atoms_by_index:
+            return atoms_by_index[value]
+    else:
+        atom = atoms_by_name.get(value.strip().upper())
+        if atom is not None:
+            return atom
+    raise ValueError(f"Generated glycan fragment bond references unknown atom {value!r}")
+
+
+def _fragment_reactive_selector(fragment: GeneratedPolymerFragment) -> PdbAtomSelector | None:
+    """Return the existing reactive selector as a graph-disambiguation hint."""
+    matches = [
+        atom
+        for atom in fragment.atoms
+        if (
+            fragment.reactive_atom_serial is not None
+            and atom.serial == fragment.reactive_atom_serial
+        )
+        or (
+            fragment.reactive_atom_index is not None
+            and atom.atom_index == fragment.reactive_atom_index
+        )
+        or (
+            fragment.reactive_atom_name is not None
+            and atom.atom_name.upper() == fragment.reactive_atom_name.upper()
+        )
+    ]
+    if len(matches) != 1:
+        return None
+    atom = matches[0].to_pdb_atom()
+    return _selector_from_pdb_atom(atom)
 
 
 def _atoms_for_indices(
@@ -579,6 +1301,14 @@ def _required_field(obj: Any, name: str) -> Any:
     return value
 
 
+def _required_selector_field(obj: Any, name: str) -> Any:
+    """Return a required field from an atom selector mapping or object."""
+    value = _field(obj, name)
+    if value is None:
+        raise ValueError(f"moiety.link_site.{name} is required for N-glycosylation")
+    return value
+
+
 def _coalesce_text(*values: str | None) -> str:
     """Return the first non-empty normalized text value."""
     for value in values:
@@ -603,7 +1333,10 @@ def _coalesce_optional_text(*values: str | None) -> str | None:
 
 __all__ = [
     "GlycanAnomericGroup",
+    "PdbFragmentLinkageDiagnostic",
+    "ResidueResolvedGlycanPdbProfileResult",
     "NGlycosylationReaction",
     "NGlycosylationReactionSettings",
     "detect_glycan_anomeric_group",
+    "residue_resolved_glycan_pdb_profile_from_fragment",
 ]

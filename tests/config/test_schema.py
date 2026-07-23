@@ -1,11 +1,18 @@
 """Test that all public modules can be imported."""
 
+import warnings
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from polyzymd.config.schema import SimulationConfig
+from polyzymd.config.schema import (
+    BoxConfig,
+    BoxShape,
+    BuildScope,
+    ConjugationConfig,
+    SimulationConfig,
+)
 
 
 @pytest.fixture
@@ -46,9 +53,11 @@ class TestImports:
 
     def test_import_config(self):
         """Test config module import."""
-        from polyzymd.config import SimulationConfig
+        from polyzymd.config import BuildConfig, BuildScope, SimulationConfig
 
         assert SimulationConfig is not None
+        assert BuildConfig is not None
+        assert BuildScope is not None
 
     def test_import_conjugation_public_api_without_rdkit(self, monkeypatch):
         """Importing the conjugation public API should not require RDKit."""
@@ -100,6 +109,92 @@ class TestImports:
         assert len(parts) >= 2, f"Version {version} should have at least major.minor"
         assert parts[0].isdigit(), f"Major version should be numeric: {parts[0]}"
         assert parts[1].isdigit(), f"Minor version should be numeric: {parts[1]}"
+
+
+class TestConjugationPlacementConfig:
+    """Test the public Packmol timeout policy."""
+
+    def test_packmol_timeout_defaults_to_fifteen_minutes(self):
+        """Conjugation placement should be bounded by default."""
+        config = ConjugationConfig()
+
+        assert config.placement.timeout_seconds == pytest.approx(900.0)
+
+    def test_packmol_timeout_accepts_seconds_or_null(self):
+        """Users should be able to shorten or explicitly disable the timeout."""
+        bounded = ConjugationConfig(placement={"timeout_seconds": 30.0})
+        unbounded = ConjugationConfig(placement={"timeout_seconds": None})
+
+        assert bounded.placement.timeout_seconds == pytest.approx(30.0)
+        assert unbounded.placement.timeout_seconds is None
+
+    def test_packmol_timeout_rejects_nonpositive_values(self):
+        """A configured timeout must be positive."""
+        with pytest.raises(ValidationError, match="timeout_seconds"):
+            ConjugationConfig(placement={"timeout_seconds": 0.0})
+
+
+class TestBuildConfig:
+    """Test the public construction endpoint contract."""
+
+    def test_build_scope_defaults_to_system(self, minimal_config_data):
+        """Existing configurations should continue to build complete systems."""
+        config = SimulationConfig(**minimal_config_data)
+
+        assert config.build.scope is BuildScope.SYSTEM
+        assert config.model_dump(mode="json")["build"] == {"scope": "system"}
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("structure", BuildScope.STRUCTURE),
+            ("solute", BuildScope.SOLUTE),
+            ("system", BuildScope.SYSTEM),
+        ],
+    )
+    def test_build_scope_accepts_each_public_endpoint(self, minimal_config_data, value, expected):
+        """Each documented endpoint should validate from configuration data."""
+        minimal_config_data["build"] = {"scope": value}
+
+        config = SimulationConfig(**minimal_config_data)
+
+        assert config.build.scope is expected
+
+    def test_build_scope_rejects_unknown_endpoint(self, minimal_config_data):
+        """Typos should fail before construction starts."""
+        minimal_config_data["build"] = {"scope": "parameterized"}
+
+        with pytest.raises(ValidationError, match="build.scope"):
+            SimulationConfig(**minimal_config_data)
+
+    def test_build_config_rejects_unknown_fields(self, minimal_config_data):
+        """Build-only options should not be silently ignored."""
+        minimal_config_data["build"] = {"scope": "solute", "through": "parameterization"}
+
+        with pytest.raises(ValidationError, match="build.through"):
+            SimulationConfig(**minimal_config_data)
+
+
+class TestBoxConfig:
+    """Test canonical rectangular-box configuration."""
+
+    def test_orthorhombic_is_canonical(self):
+        """The explicit rectangular name should validate without migration."""
+        config = BoxConfig(shape="orthorhombic")
+
+        assert config.shape is BoxShape.ORTHORHOMBIC
+        assert config.model_dump(mode="json")["shape"] == "orthorhombic"
+
+    def test_cube_migrates_with_one_deprecation_warning(self):
+        """Legacy cube input should retain behavior while naming it accurately."""
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            config = BoxConfig(shape="cube")
+
+        deprecations = [item for item in caught if item.category is DeprecationWarning]
+        assert len(deprecations) == 1
+        assert "orthorhombic" in str(deprecations[0].message)
+        assert config.shape is BoxShape.ORTHORHOMBIC
 
 
 class TestConfigValidation:
@@ -306,6 +401,12 @@ class TestConjugationReactionSmartsConfig:
 
         assert attachment.mechanism.reaction_smarts == "[N:1].[C:2]>>[N:1]-[C:2]"
         assert len(attachment.mechanism.atom_roles) == 2
+
+
+def test_conjugation_rejects_attachment_sources_by_raw_key_presence():
+    """Even an empty inline list is ambiguous with attachments_file."""
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        ConjugationConfig.model_validate({"attachments_file": "attachments.csv", "attachments": []})
 
 
 class TestCoSolventCompositionValidation:

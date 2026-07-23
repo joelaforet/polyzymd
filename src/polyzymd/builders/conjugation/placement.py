@@ -11,9 +11,9 @@ from pydantic import BaseModel, Field
 from polyzymd.builders.conjugation._linkage import (
     ModifierLinker,
     ProteinLinkSite,
-    ResolvedAttachmentPlan,
+    ReactionProduct,
 )
-from polyzymd.builders.conjugation.polymer import GeneratedPolymerFragment
+from polyzymd.builders.conjugation.polymer import PreparedFragment
 from polyzymd.builders.conjugation.structure.parsing import (
     parse_pdb_atom_records as parse_structure_pdb_atom_records,
 )
@@ -27,6 +27,64 @@ _SHIFT_PADDING_ANGSTROM = 10.0
 _BOX_PADDING_ANGSTROM = 30.0
 
 
+class PackmolOutputValidationError(RuntimeError):
+    """Packmol output was absent, unreadable, or inconsistent with inputs."""
+
+    def __init__(
+        self,
+        *,
+        message: str,
+        output_path: Path,
+        input_path: Path,
+        error_log_path: Path,
+        exit_code: int | None,
+        output_exists: bool,
+        atom_count: int | None,
+        expected_atom_count: int,
+    ) -> None:
+        """Initialize a Packmol output validation failure.
+
+        Parameters
+        ----------
+        message : str
+            Human-readable validation failure.
+        output_path : pathlib.Path
+            Expected Packmol output PDB path.
+        input_path : pathlib.Path
+            Packmol input path for diagnostics.
+        error_log_path : pathlib.Path
+            Packmol stdout/error log path for diagnostics.
+        exit_code : int or None
+            Parsed Packmol exit code when available.
+        output_exists : bool
+            Whether the expected output file existed.
+        atom_count : int or None
+            Parsed atom count when the output was readable.
+        expected_atom_count : int
+            Required atom count for the placement input.
+        """
+        self.output_path = output_path
+        self.input_path = input_path
+        self.error_log_path = error_log_path
+        self.exit_code = exit_code
+        self.output_exists = output_exists
+        self.atom_count = atom_count
+        self.expected_atom_count = expected_atom_count
+        super().__init__(message)
+
+    def diagnostic(self, attempt_index: int | None = None) -> str:
+        """Return an actionable single-attempt diagnostic string."""
+        prefix = f"attempt {attempt_index}: " if attempt_index is not None else ""
+        exit_code = "unknown" if self.exit_code is None else str(self.exit_code)
+        atom_count = "unreadable" if self.atom_count is None else str(self.atom_count)
+        return (
+            f"{prefix}Packmol output validation failed: exit code {exit_code}, "
+            f"output exists={self.output_exists}, atoms={atom_count}/"
+            f"{self.expected_atom_count}, input={self.input_path}, "
+            f"error log={self.error_log_path}, output={self.output_path}"
+        )
+
+
 class PackmolModifierPlacementSettings(BaseModel):
     """Settings for constrained modifier placement with Packmol."""
 
@@ -35,6 +93,7 @@ class PackmolModifierPlacementSettings(BaseModel):
     target_bond_length_angstrom: float = Field(1.33, gt=0)
     movebadrandom: bool = True
     nloop: int = Field(500, gt=0)
+    timeout_seconds: float | None = Field(900.0, gt=0)
     work_dir_name: str = "packmol_modifier_placement"
 
 
@@ -51,11 +110,16 @@ class PackmolModifierPlacementResult(BaseModel):
     placed_bond_length_angstrom: float
     min_modifier_protein_distance_angstrom: float
     excluded_protein_atom_names: tuple[str, ...] = Field(default_factory=tuple)
+    min_true_nonbonded_heavy_distance_angstrom: float | None = None
+    min_true_nonbonded_heavy_pair: str | None = None
+    true_nonbonded_heavy_contact_count_below_2_angstrom: int | None = None
+    final_conect_graph_valid: bool | None = None
+    packmol_exit_status: str | None = None
 
 
 def place_modifier_with_packmol(
     protein_pdb_path: Path | str,
-    modifier: GeneratedPolymerFragment,
+    modifier: PreparedFragment,
     linker: ModifierLinker,
     output_dir: Path | str,
     *,
@@ -109,8 +173,8 @@ def place_modifier_with_packmol(
 
 def place_modifier_with_resolved_plan(
     protein_pdb_path: Path | str,
-    modifier: GeneratedPolymerFragment,
-    plan: ResolvedAttachmentPlan,
+    modifier: PreparedFragment,
+    plan: ReactionProduct,
     output_dir: Path | str,
     *,
     settings: PackmolModifierPlacementSettings | None = None,
@@ -124,7 +188,7 @@ def place_modifier_with_resolved_plan(
         Protein PDB containing the resolved protein link atom.
     modifier : GeneratedPolymerFragment
         Generated modifier or polymer fragment before placement.
-    plan : ResolvedAttachmentPlan
+    plan : ReactionProduct
         Resolved atom-level protein/modifier linkage plan.
     output_dir : pathlib.Path or str
         Directory for Packmol artifacts.
@@ -171,15 +235,11 @@ def place_modifier_with_resolved_plan(
 
     reactive_local_index = _retained_local_index(retained_modifier_atoms, reactive_atom)
     structure_extra_lines = [
-        [
-            f"atoms {reactive_local_index + 1}",
-            (
-                "inside sphere "
-                f"{shifted_site[0]:.6f} {shifted_site[1]:.6f} {shifted_site[2]:.6f} "
-                f"{placement_settings.reactive_sphere_radius_angstrom:.1f}"
-            ),
-            "end atoms",
-        ]
+        _reactive_site_constraint_lines(
+            reactive_local_index=reactive_local_index,
+            shifted_site=shifted_site,
+            placement_settings=placement_settings,
+        )
     ]
 
     packmol_input_text = build_packmol_input(
@@ -196,15 +256,23 @@ def place_modifier_with_resolved_plan(
     packmol_input_path = work_dir / "packmol.inp"
     packmol_input_path.write_text(packmol_input_text, encoding="utf-8")
 
-    executor = run_packmol_func or run_packmol
-    packmol_output_path = Path(executor(packmol_input_text, work_dir))
-    packed_coords = _read_pdb_coords(packmol_output_path)
-    expected_atoms = len(shifted_protein) + len(retained_modifier_atoms)
-    if len(packed_coords) != expected_atoms:
-        raise RuntimeError(
-            f"Packmol output has {len(packed_coords)} atoms, expected {expected_atoms} "
-            f"(protein={len(shifted_protein)}, modifier={len(retained_modifier_atoms)})"
+    packmol_output_path = Path(
+        _execute_packmol(
+            packmol_input_text,
+            work_dir,
+            timeout_seconds=placement_settings.timeout_seconds,
+            run_packmol_func=run_packmol_func,
+            default_executor=run_packmol,
         )
+    )
+    expected_atoms = len(shifted_protein) + len(retained_modifier_atoms)
+    packed_coords = _read_packmol_output_coords(
+        packmol_output_path,
+        expected_atom_count=expected_atoms,
+        expected_structure_paths=(protein_sterics_path, modifier_path),
+        input_path=packmol_input_path,
+        error_log_path=work_dir / "packmol_error.log",
+    )
 
     packed_modifier_coords = packed_coords[len(shifted_protein) :] - coord_shift
     transformed_full_coords = _transform_full_modifier(
@@ -218,15 +286,21 @@ def place_modifier_with_resolved_plan(
         plan.protein_link_atom,
         plan.target_bond_length_angstrom,
     )
-    placed_fragment = _placed_fragment_from_coords(modifier, transformed_full_coords)
+    placed_fragment = _placed_fragment_from_coords(modifier, transformed_full_coords, plan=plan)
 
-    placed_reactive = _coord(resolve_modifier_reactive_atom_from_placed(placed_fragment))
+    placed_reactive = _coord(_product_modifier_atom(placed_fragment, plan))
     placed_bond_length = float(np.linalg.norm(placed_reactive - _coord(plan.protein_link_atom)))
+    _validate_placed_bond_length(placed_bond_length, plan.target_bond_length_angstrom)
     min_distance = _minimum_distance(
         _coords_from_atoms(tuple(placed_fragment.atoms)),
         _coords_from_atoms(protein_steric_atoms),
     )
 
+    _record_validated_packmol_candidate(
+        work_dir,
+        atom_count=expected_atoms,
+        placed_bond_lengths=(placed_bond_length,),
+    )
     return PackmolModifierPlacementResult(
         placed_modifier=placed_fragment,
         packmol_input_path=packmol_input_path,
@@ -238,13 +312,14 @@ def place_modifier_with_resolved_plan(
         placed_bond_length_angstrom=placed_bond_length,
         min_modifier_protein_distance_angstrom=min_distance,
         excluded_protein_atom_names=excluded_names,
+        packmol_exit_status=_packmol_exit_status(work_dir),
     )
 
 
 def place_modifiers_with_resolved_plans(
     protein_pdb_path: Path | str,
-    modifiers: tuple[GeneratedPolymerFragment, ...],
-    plans: tuple[ResolvedAttachmentPlan, ...],
+    modifiers: tuple[PreparedFragment, ...],
+    plans: tuple[ReactionProduct, ...],
     output_dir: Path | str,
     *,
     settings: PackmolModifierPlacementSettings | None = None,
@@ -316,15 +391,11 @@ def place_modifiers_with_resolved_plans(
         reactive_local_index = _retained_local_index(retained_atoms, plan.modifier_link_atom)
         shifted_site = _coord(plan.protein_link_atom) + coord_shift
         structure_extra_lines.append(
-            [
-                f"atoms {reactive_local_index + 1}",
-                (
-                    "inside sphere "
-                    f"{shifted_site[0]:.6f} {shifted_site[1]:.6f} {shifted_site[2]:.6f} "
-                    f"{placement_settings.reactive_sphere_radius_angstrom:.1f}"
-                ),
-                "end atoms",
-            ]
+            _reactive_site_constraint_lines(
+                reactive_local_index=reactive_local_index,
+                shifted_site=shifted_site,
+                placement_settings=placement_settings,
+            )
         )
 
     packmol_input_text = build_packmol_input(
@@ -341,18 +412,27 @@ def place_modifiers_with_resolved_plans(
     packmol_input_path = work_dir / "packmol.inp"
     packmol_input_path.write_text(packmol_input_text, encoding="utf-8")
 
-    executor = run_packmol_func or run_packmol
-    packmol_output_path = Path(executor(packmol_input_text, work_dir))
-    packed_coords = _read_pdb_coords(packmol_output_path)
+    packmol_output_path = Path(
+        _execute_packmol(
+            packmol_input_text,
+            work_dir,
+            timeout_seconds=placement_settings.timeout_seconds,
+            run_packmol_func=run_packmol_func,
+            default_executor=run_packmol,
+        )
+    )
     retained_counts = tuple(len(atoms) for atoms in retained_atom_groups)
     expected_atoms = len(shifted_protein) + sum(retained_counts)
-    if len(packed_coords) != expected_atoms:
-        raise RuntimeError(
-            f"Packmol output has {len(packed_coords)} atoms, expected {expected_atoms} "
-            f"(protein={len(shifted_protein)}, modifiers={retained_counts})"
-        )
+    packed_coords = _read_packmol_output_coords(
+        packmol_output_path,
+        expected_atom_count=expected_atoms,
+        expected_structure_paths=(protein_sterics_path, *modifier_paths),
+        input_path=packmol_input_path,
+        error_log_path=work_dir / "packmol_error.log",
+    )
 
     results: list[PackmolModifierPlacementResult] = []
+    placed_bond_lengths: list[float] = []
     start = len(shifted_protein)
     for modifier, plan, retained_coords, full_coords, count, modifier_path in zip(
         modifiers,
@@ -377,10 +457,12 @@ def place_modifiers_with_resolved_plans(
             plan.protein_link_atom,
             plan.target_bond_length_angstrom,
         )
-        placed_fragment = _placed_fragment_from_coords(modifier, transformed_full_coords)
+        placed_fragment = _placed_fragment_from_coords(modifier, transformed_full_coords, plan=plan)
 
-        placed_reactive = _coord(resolve_modifier_reactive_atom_from_placed(placed_fragment))
+        placed_reactive = _coord(_product_modifier_atom(placed_fragment, plan))
         placed_bond_length = float(np.linalg.norm(placed_reactive - _coord(plan.protein_link_atom)))
+        _validate_placed_bond_length(placed_bond_length, plan.target_bond_length_angstrom)
+        placed_bond_lengths.append(placed_bond_length)
         min_distance = _minimum_distance(
             _coords_from_atoms(tuple(placed_fragment.atoms)),
             _coords_from_atoms(protein_steric_atoms),
@@ -397,32 +479,26 @@ def place_modifiers_with_resolved_plans(
                 placed_bond_length_angstrom=placed_bond_length,
                 min_modifier_protein_distance_angstrom=min_distance,
                 excluded_protein_atom_names=excluded_names,
+                packmol_exit_status=_packmol_exit_status(work_dir),
             )
         )
 
+    _record_validated_packmol_candidate(
+        work_dir,
+        atom_count=expected_atoms,
+        placed_bond_lengths=tuple(placed_bond_lengths),
+    )
     return tuple(results)
 
 
-def resolve_modifier_reactive_atom_from_placed(fragment: PlacedPolymerFragment) -> PdbAtomRecord:
-    """Resolve a reactive atom from a placed fragment."""
-    matches = [
-        atom
-        for atom in fragment.atoms
-        if (
-            fragment.reactive_atom_serial is not None
-            and atom.serial == fragment.reactive_atom_serial
-        )
-        or (
-            fragment.reactive_atom_index is not None
-            and atom.atom_index == fragment.reactive_atom_index
-        )
-        or (
-            fragment.reactive_atom_name is not None
-            and atom.atom_name.upper() == fragment.reactive_atom_name.upper()
-        )
-    ]
+def _product_modifier_atom(
+    fragment: PlacedPolymerFragment, product: ReactionProduct
+) -> PdbAtomRecord:
+    """Return the placed atom matching the resolved product endpoint."""
+    endpoint_key = _modifier_source_atom_key(product.modifier_link_atom)
+    matches = [atom for atom in fragment.atoms if _modifier_source_atom_key(atom) == endpoint_key]
     if len(matches) != 1:
-        raise ValueError(f"Placed modifier reactive atom selector resolved {len(matches)} atoms")
+        raise ValueError(f"Reaction product modifier endpoint resolved {len(matches)} placed atoms")
     return matches[0]
 
 
@@ -447,7 +523,7 @@ def _protein_steric_atoms(
 
 
 def _protein_steric_atoms_from_plan(
-    atoms: tuple[PdbAtomRecord, ...], plan: ResolvedAttachmentPlan
+    atoms: tuple[PdbAtomRecord, ...], plan: ReactionProduct
 ) -> tuple[tuple[PdbAtomRecord, ...], tuple[str, ...]]:
     """Return fixed protein sterics after excluding resolved linkage atoms."""
     excluded_identities = {_atom_identity(plan.protein_link_atom)}
@@ -460,7 +536,7 @@ def _protein_steric_atoms_from_plan(
 
 
 def _protein_steric_atoms_from_plans(
-    atoms: tuple[PdbAtomRecord, ...], plans: tuple[ResolvedAttachmentPlan, ...]
+    atoms: tuple[PdbAtomRecord, ...], plans: tuple[ReactionProduct, ...]
 ) -> tuple[tuple[PdbAtomRecord, ...], tuple[str, ...]]:
     """Return fixed protein sterics after excluding all resolved linkage atoms."""
     excluded_identities = set()
@@ -475,29 +551,15 @@ def _protein_steric_atoms_from_plans(
 
 
 def _retained_modifier_atoms(
-    modifier: GeneratedPolymerFragment,
+    modifier: PreparedFragment,
     *,
-    plan: ResolvedAttachmentPlan | None = None,
+    plan: ReactionProduct,
 ) -> tuple[PdbAtomRecord, ...]:
     """Return modifier atoms retained for Packmol placement."""
-    placed = modifier.to_placed_fragment()
-    if plan is not None:
-        leaving_identities = {_atom_identity(atom) for atom in plan.modifier_leaving_atoms}
-        return tuple(
-            atom for atom in placed.atoms if _atom_identity(atom) not in leaving_identities
-        )
-
-    leaving_serials = set(placed.leaving_atom_serials)
-    leaving_indices = set(placed.leaving_atom_indices)
-    leaving_names = {name.upper() for name in placed.leaving_atom_names}
+    leaving_identities = {_modifier_source_atom_key(atom) for atom in plan.modifier_leaving_atoms}
+    atoms = tuple(atom.to_pdb_atom() for atom in modifier.atoms)
     return tuple(
-        atom
-        for atom in placed.atoms
-        if not (
-            (atom.serial is not None and atom.serial in leaving_serials)
-            or atom.atom_index in leaving_indices
-            or atom.atom_name.upper() in leaving_names
-        )
+        atom for atom in atoms if _modifier_source_atom_key(atom) not in leaving_identities
     )
 
 
@@ -532,9 +594,162 @@ def _write_simple_pdb(path: Path, coords: np.ndarray, elements: list[str]) -> No
     path.write_text("".join(lines), encoding="utf-8")
 
 
+def _reactive_site_constraint_lines(
+    *,
+    reactive_local_index: int,
+    shifted_site: np.ndarray,
+    placement_settings: PackmolModifierPlacementSettings,
+) -> list[str]:
+    """Return Packmol atom constraints for covalent-site placement.
+
+    Packmol chooses the modifier pose and orientation with only the reactive
+    atom constrained near the protein site. The shared final bond snap sets the
+    exact covalent bond length after Packmol placement.
+    """
+    site = f"{shifted_site[0]:.6f} {shifted_site[1]:.6f} {shifted_site[2]:.6f}"
+    return [
+        f"atoms {reactive_local_index + 1}",
+        f"inside sphere {site} {placement_settings.reactive_sphere_radius_angstrom:.2f}",
+        "end atoms",
+    ]
+
+
 def _read_pdb_coords(path: Path) -> np.ndarray:
     """Read coordinates from PDB atom records."""
     return np.asarray(pdb_coordinates(path, require_atoms=False), dtype=float)
+
+
+def _read_packmol_output_coords(
+    path: Path,
+    *,
+    expected_atom_count: int,
+    expected_structure_paths: tuple[Path, ...],
+    input_path: Path,
+    error_log_path: Path,
+) -> np.ndarray:
+    """Read and validate a Packmol output PDB before accepting placement.
+
+    Packmol exit code 173 can still leave a usable best-effort PDB. The output
+    is accepted only when the expected file exists, is readable, and contains
+    exactly the atoms implied by the input structures.
+    """
+    output_path = Path(path)
+    output_exists = output_path.exists()
+    atom_count: int | None = None
+    try:
+        output_atoms = parse_structure_pdb_atom_records(output_path, require_atoms=True)
+        coords = _coords_from_atoms(output_atoms)
+        atom_count = int(len(output_atoms))
+    except (OSError, ValueError) as error:
+        raise PackmolOutputValidationError(
+            message=str(error),
+            output_path=output_path,
+            input_path=input_path,
+            error_log_path=error_log_path,
+            exit_code=_packmol_exit_code(error_log_path),
+            output_exists=output_exists,
+            atom_count=atom_count,
+            expected_atom_count=expected_atom_count,
+        ) from error
+    if atom_count != expected_atom_count:
+        raise PackmolOutputValidationError(
+            message=(f"Packmol output has {atom_count} atoms, expected {expected_atom_count}"),
+            output_path=output_path,
+            input_path=input_path,
+            error_log_path=error_log_path,
+            exit_code=_packmol_exit_code(error_log_path),
+            output_exists=output_exists,
+            atom_count=atom_count,
+            expected_atom_count=expected_atom_count,
+        )
+    expected_atoms = tuple(
+        atom
+        for structure_path in expected_structure_paths
+        for atom in parse_structure_pdb_atom_records(structure_path, require_atoms=True)
+    )
+    expected_order = tuple(_packmol_atom_order_identity(atom) for atom in expected_atoms)
+    observed_order = tuple(_packmol_atom_order_identity(atom) for atom in output_atoms)
+    if observed_order != expected_order:
+        raise PackmolOutputValidationError(
+            message="Packmol output atom identities or ordering differ from its input structures",
+            output_path=output_path,
+            input_path=input_path,
+            error_log_path=error_log_path,
+            exit_code=_packmol_exit_code(error_log_path),
+            output_exists=output_exists,
+            atom_count=atom_count,
+            expected_atom_count=expected_atom_count,
+        )
+    if not np.isfinite(coords).all():
+        raise PackmolOutputValidationError(
+            message="Packmol output contains non-finite coordinates",
+            output_path=output_path,
+            input_path=input_path,
+            error_log_path=error_log_path,
+            exit_code=_packmol_exit_code(error_log_path),
+            output_exists=output_exists,
+            atom_count=atom_count,
+            expected_atom_count=expected_atom_count,
+        )
+    return coords
+
+
+def _packmol_atom_order_identity(atom: PdbAtomRecord) -> tuple[str, str]:
+    """Return the atom fields Packmol must preserve in input order.
+
+    Residue labels are intentionally excluded because Packmol and established
+    test executors may rewrite placeholder residue names while preserving the
+    ordered atoms themselves.
+    """
+    return (
+        atom.atom_name.strip().upper(),
+        (atom.element or "").strip().upper(),
+    )
+
+
+def _execute_packmol(
+    input_text: str,
+    work_dir: Path,
+    *,
+    timeout_seconds: float | None,
+    run_packmol_func: Any | None,
+    default_executor: Any,
+) -> Path:
+    """Run Packmol while preserving the historical two-argument test hook."""
+    if run_packmol_func is not None:
+        return Path(run_packmol_func(input_text, work_dir))
+    return Path(default_executor(input_text, work_dir, timeout_seconds=timeout_seconds))
+
+
+def _validate_placed_bond_length(observed: float, expected: float) -> None:
+    """Require a finite post-snap covalent endpoint distance."""
+    if not np.isfinite(observed) or not np.isclose(observed, expected, atol=1.0e-6, rtol=0.0):
+        raise RuntimeError(
+            "Placed modifier reactive endpoint failed post-snap bond validation: "
+            f"observed={observed!r} A, expected={expected:.6f} A"
+        )
+
+
+def _record_validated_packmol_candidate(
+    work_dir: Path,
+    *,
+    atom_count: int,
+    placed_bond_lengths: tuple[float, ...],
+) -> Path:
+    """Persist placement-level validation for a Packmol candidate."""
+    from polyzymd.utils.packmol import record_packmol_validation
+
+    return record_packmol_validation(
+        work_dir,
+        accepted=True,
+        diagnostics={
+            "atom_count": atom_count,
+            "atom_order_valid": True,
+            "coordinates_finite": True,
+            "placed_bond_lengths_angstrom": list(placed_bond_lengths),
+            "placed_bond_lengths_valid": True,
+        },
+    )
 
 
 def _retained_local_index(
@@ -595,19 +810,37 @@ def _snap_reactive_atom_to_bond_length(
 
 
 def _placed_fragment_from_coords(
-    modifier: GeneratedPolymerFragment, coords: np.ndarray
+    modifier: PreparedFragment,
+    coords: np.ndarray,
+    *,
+    plan: ReactionProduct,
 ) -> PlacedPolymerFragment:
     """Build a placed fragment preserving atom identity and connectivity."""
     placed_atoms = []
-    for atom in modifier.to_placed_fragment().atoms:
+    for source_atom in modifier.atoms:
+        atom = source_atom.to_pdb_atom()
         if atom.atom_index is None:
             raise ValueError("Modifier atom_index is required to restore placed coordinates")
         x_coord, y_coord, z_coord = coords[atom.atom_index]
         placed_atoms.append(
             atom.model_copy(update={"x": float(x_coord), "y": float(y_coord), "z": float(z_coord)})
         )
-    placed = modifier.to_placed_fragment()
-    return placed.model_copy(update={"atoms": tuple(placed_atoms)})
+    return PlacedPolymerFragment(
+        atoms=tuple(placed_atoms),
+        bonds=modifier.bonds,
+        bond_orders=modifier.bond_orders,
+        reactive_atom_serial=plan.modifier_link_atom.serial,
+        reactive_atom_index=plan.modifier_link_atom.atom_index,
+        reactive_atom_name=plan.modifier_link_atom.atom_name,
+        leaving_atom_serials=tuple(
+            atom.serial for atom in plan.modifier_leaving_atoms if atom.serial is not None
+        ),
+        leaving_atom_indices=tuple(
+            atom.atom_index for atom in plan.modifier_leaving_atoms if atom.atom_index is not None
+        ),
+        leaving_atom_names=tuple(atom.atom_name for atom in plan.modifier_leaving_atoms),
+        name=modifier.name,
+    )
 
 
 def _minimum_distance(points_a: np.ndarray, points_b: np.ndarray) -> float:
@@ -665,6 +898,42 @@ def _minimum_distance_numpy(points_a: np.ndarray, points_b: np.ndarray) -> float
     return float(np.min(distances))
 
 
+def _packmol_exit_status(work_dir: Path) -> str:
+    """Return the accepted Packmol exit status from retained Packmol artifacts."""
+    from polyzymd.utils.packmol import load_packmol_status
+
+    status = load_packmol_status(work_dir)
+    if status.get("timed_out") is True:
+        return "timeout_accepted"
+    if status.get("return_code") == 173:
+        return "173_imperfect_accepted"
+    if status.get("return_code") == 0:
+        return "0_success"
+    error_log_path = work_dir / "packmol_error.log"
+    if not error_log_path.exists():
+        return "0_success"
+    text = error_log_path.read_text(encoding="utf-8", errors="replace")
+    if "173" in text:
+        return "173_imperfect_accepted"
+    return "nonzero_accepted_output"
+
+
+def _packmol_exit_code(error_log_path: Path) -> int | None:
+    """Return the Packmol exit code recorded in an error log when available."""
+    from polyzymd.utils.packmol import load_packmol_status
+
+    status = load_packmol_status(error_log_path.parent)
+    return_code = status.get("return_code")
+    if isinstance(return_code, int):
+        return return_code
+    if not error_log_path.exists():
+        return 0
+    text = error_log_path.read_text(encoding="utf-8", errors="replace")
+    if "173" in text:
+        return 173
+    return None
+
+
 def _same_atom(atom_a: PdbAtomRecord, atom_b: PdbAtomRecord) -> bool:
     """Return whether two PDB atom records have the same source identity."""
     if atom_a.atom_index is not None and atom_b.atom_index is not None:
@@ -684,4 +953,17 @@ def _atom_identity(atom: PdbAtomRecord) -> tuple[int | None, int | None, str, in
         atom.insertion_code.upper(),
         atom.residue_name.upper(),
         atom.chain_id.upper(),
+    )
+
+
+def _modifier_source_atom_key(atom: PdbAtomRecord) -> tuple[str, int | str]:
+    """Return a chain-independent atom key within one prepared modifier source."""
+    if atom.atom_index is not None:
+        return ("index", atom.atom_index)
+    if atom.serial is not None:
+        return ("serial", atom.serial)
+    return (
+        "pdb",
+        f"{atom.residue_name.upper()}:{atom.residue_number}:"
+        f"{atom.insertion_code.upper()}:{atom.atom_name.upper()}",
     )

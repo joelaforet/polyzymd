@@ -253,7 +253,7 @@ class SimulationRunner:
 
     def minimize(
         self,
-        max_iterations: int = 1000,
+        max_iterations: int = 0,
         tolerance: float = 10.0,
     ) -> float:
         """Run energy minimization.

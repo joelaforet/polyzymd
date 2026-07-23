@@ -16,6 +16,7 @@ Typical usage
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -37,6 +38,9 @@ _PACKMOL_INPUT_FILE = "packmol_input.txt"
 _PACKMOL_OUTPUT_FILE = "packmol_output.pdb"
 _PACKMOL_SOLUTE_FILE = "_PACKING_SOLUTE.pdb"
 _PACKMOL_MOLECULE_PREFIX = "_PACKING_MOLECULE"
+_PACKMOL_STATUS_FILE = "packmol_run_status.json"
+_PACKMOL_EXIT_IMPERFECT = 173
+_PACKMOL_TERMINATION_GRACE_SECONDS = 5.0
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +213,8 @@ def run_packmol(
     input_text: str,
     working_directory: str | Path,
     retain_working_files: bool = True,
+    *,
+    timeout_seconds: float | None = None,
 ) -> Path:
     """Write a Packmol input file and execute Packmol.
 
@@ -223,6 +229,11 @@ def run_packmol(
         When ``True`` (default), all files in *working_directory* are kept
         after the run.  When ``False`` the directory is removed on success
         (mimicking OpenFF behaviour for temporary directories).
+    timeout_seconds : float or None, optional
+        Maximum Packmol wall time. On timeout PolyzyMD terminates the process,
+        escalates to a kill after a short grace period, and preserves any best
+        output for downstream structural validation. ``None`` disables the
+        timeout.
 
     Returns
     -------
@@ -234,8 +245,9 @@ def run_packmol(
     OSError
         If the ``packmol`` binary cannot be found on ``PATH``.
     RuntimeError
-        If Packmol exits with a non-zero return code or does not print
-        ``'Success!'`` in its output.
+        If Packmol exits with an unsupported non-zero return code or does not
+        print ``'Success!'`` in its output. Exit 173 and timeouts return any
+        best-output path for mandatory downstream validation.
     """
     packmol_binary = shutil.which("packmol")
     if packmol_binary is None:
@@ -253,6 +265,7 @@ def run_packmol(
     input_path = working_directory / _PACKMOL_INPUT_FILE
     output_path = working_directory / _PACKMOL_OUTPUT_FILE
     error_log_path = working_directory / "packmol_error.log"
+    status_path = working_directory / _PACKMOL_STATUS_FILE
 
     input_path.write_text(input_text)
 
@@ -260,42 +273,94 @@ def run_packmol(
     logger.debug("Input file:\n%s", input_text)
 
     original_cwd = Path.cwd()
+    timed_out = False
     try:
         os.chdir(working_directory)
         with input_path.open() as fh:
-            result = subprocess.run(
-                packmol_binary,
-                stdin=fh,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
+            if timeout_seconds is None:
+                result = subprocess.run(
+                    packmol_binary,
+                    stdin=fh,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+                stdout_bytes = result.stdout
+                return_code = result.returncode
+            else:
+                process = subprocess.Popen(
+                    packmol_binary,
+                    stdin=fh,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+                try:
+                    stdout_bytes, _ = process.communicate(timeout=timeout_seconds)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    process.terminate()
+                    try:
+                        stdout_bytes, _ = process.communicate(
+                            timeout=_PACKMOL_TERMINATION_GRACE_SECONDS
+                        )
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        stdout_bytes, _ = process.communicate()
+                return_code = process.returncode
     finally:
         os.chdir(original_cwd)
 
-    stdout = result.stdout.decode("utf-8", errors="replace")
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
+    outcome = "success"
+    if timed_out:
+        outcome = "timeout_candidate"
+    elif return_code == _PACKMOL_EXIT_IMPERFECT:
+        outcome = "imperfect_candidate"
+    elif return_code != 0:
+        outcome = "error"
+    elif "Success!" not in stdout:
+        outcome = "missing_success_marker"
+    _write_packmol_status(
+        status_path,
+        {
+            "timed_out": timed_out,
+            "return_code": return_code,
+            "outcome": outcome,
+            "output_path": str(output_path.resolve()),
+            "output_exists": output_path.exists(),
+            "accepted_after_validation": None,
+        },
+    )
 
-    # Exit code 173 means "ended without perfect packing".  Packmol still
-    # writes its best solution to the output file.  Since systems are
-    # energy-minimised before MD, minor steric violations are acceptable.
-    # Treat 173 as a warning rather than a fatal error.
-    _PACKMOL_EXIT_IMPERFECT = 173
-
-    if result.returncode == _PACKMOL_EXIT_IMPERFECT:
+    if timed_out:
         error_log_path.write_text(stdout)
         logger.warning(
-            "Packmol exited with code %d (imperfect packing). "
-            "The best solution was written to %s and will be used. "
-            "Minor steric clashes will be resolved during energy minimisation. "
+            "Packmol exceeded its %.1f-second timeout and was stopped. "
+            "Any complete best solution at %s will undergo mandatory structural validation. "
             "See %s for details.",
-            _PACKMOL_EXIT_IMPERFECT,
-            output_path.name,
+            timeout_seconds,
+            output_path,
             error_log_path,
         )
-    elif result.returncode != 0:
+    elif return_code == _PACKMOL_EXIT_IMPERFECT:
+        error_log_path.write_text(stdout)
+        output_message = (
+            f"The best solution was written to {output_path.name} and will be validated."
+            if output_path.exists()
+            else f"The expected best-solution file {output_path.name} was not written."
+        )
+        logger.warning(
+            "Packmol exited with code %d (imperfect packing). "
+            "%s "
+            "The candidate must pass downstream structural validation before use. "
+            "See %s for details.",
+            _PACKMOL_EXIT_IMPERFECT,
+            output_message,
+            error_log_path,
+        )
+    elif return_code != 0:
         error_log_path.write_text(stdout)
         raise RuntimeError(
-            f"Packmol exited with return code {result.returncode}. "
-            f"See {error_log_path} for details."
+            f"Packmol exited with return code {return_code}. " f"See {error_log_path} for details."
         )
     elif "Success!" not in stdout:
         raise RuntimeError(
@@ -308,6 +373,45 @@ def run_packmol(
         shutil.rmtree(_actual_dir, ignore_errors=True)
 
     return output_path.resolve()
+
+
+def load_packmol_status(working_directory: str | Path) -> dict[str, object]:
+    """Load machine-readable Packmol execution and validation status."""
+    status_path = Path(working_directory) / _PACKMOL_STATUS_FILE
+    if not status_path.exists():
+        return {}
+    return json.loads(status_path.read_text(encoding="utf-8"))
+
+
+def record_packmol_validation(
+    working_directory: str | Path,
+    *,
+    accepted: bool,
+    diagnostics: dict[str, object],
+) -> Path:
+    """Persist the structural validation decision for one Packmol candidate."""
+    directory = Path(working_directory)
+    status_path = directory / _PACKMOL_STATUS_FILE
+    status = load_packmol_status(directory)
+    previous_validation = status.get("validation")
+    merged_diagnostics = (
+        {**previous_validation, **diagnostics}
+        if isinstance(previous_validation, dict)
+        else diagnostics
+    )
+    status.update(
+        {
+            "accepted_after_validation": accepted,
+            "validation": merged_diagnostics,
+        }
+    )
+    _write_packmol_status(status_path, status)
+    return status_path.resolve()
+
+
+def _write_packmol_status(path: Path, payload: dict[str, object]) -> None:
+    """Write one stable, machine-readable Packmol status artifact."""
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

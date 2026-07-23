@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -191,6 +192,28 @@ def _conjugation_enabled(sim_config: object) -> bool:
     return conjugation_enabled(sim_config)
 
 
+def _require_runtime_system_scope(sim_config: object) -> None:
+    """Require a complete system build for simulation execution commands.
+
+    Missing or duck-typed mock build settings retain the historical default
+    of ``system``. Concrete enum and string values are always enforced.
+    """
+    from polyzymd.config.schema import BuildScope
+
+    configured_scope = getattr(getattr(sim_config, "build", None), "scope", BuildScope.SYSTEM)
+    if isinstance(configured_scope, (BuildScope, str)):
+        build_scope = BuildScope(configured_scope)
+    else:
+        build_scope = BuildScope.SYSTEM
+
+    if build_scope is not BuildScope.SYSTEM:
+        raise click.UsageError(
+            "Simulation runtime commands require 'build.scope: system'; "
+            f"the configured scope is '{build_scope.value}'. Set 'build.scope: system' "
+            "before running or submitting simulations."
+        )
+
+
 def _print_build_export_summary(
     *,
     export_format: str,
@@ -213,7 +236,17 @@ def _print_build_export_summary(
     colored_echo("Files generated:", phase="export")
     colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
     colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
-    colored_echo("  - *.itp (molecule parameters)", phase="export")
+    for component_itp in export_result.get("component_itps", []):
+        colored_echo(f"  - {component_itp.name} (component parameters)", phase="export")
+    if "run_script" not in export_result:
+        sidecar = export_result.get("exact_exception_sidecar")
+        if sidecar is not None:
+            colored_echo(f"  - {sidecar.name} (exact exception sidecar)", phase="export")
+        audit = export_result.get("exact_gromacs_audit")
+        if audit is not None:
+            colored_echo(f"  - {audit.name} (semantic audit)", phase="export")
+        colored_echo("Topology-only handoff; no runnable dynamics files generated.", phase="export")
+        return
     colored_echo("Convenience defaults generated:", phase="export")
     colored_echo(f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export")
     for eq_mdp in export_result.get("eq_mdps", []):
@@ -226,6 +259,66 @@ def _print_build_export_summary(
     colored_echo(f"  - {export_result['run_script'].name} (convenience run script)", phase="export")
     colored_echo(phase="export")
     colored_echo(f"To run: cd {export_dir} && ./{export_result['run_script'].name}", phase="export")
+
+
+def _remap_staged_paths(value: Any, staged_dir: Path, export_dir: Path) -> Any:
+    """Recursively replace paths under a staged tree with live export paths."""
+    if isinstance(value, Path) and value.is_relative_to(staged_dir):
+        return export_dir / value.relative_to(staged_dir)
+    if isinstance(value, list):
+        return [_remap_staged_paths(item, staged_dir, export_dir) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _remap_staged_paths(item, staged_dir, export_dir) for key, item in value.items()
+        }
+    return value
+
+
+def _canonicalize_handoff_metadata(
+    export_input: Any,
+    route_result: Any,
+    export_result: dict[str, Any],
+) -> None:
+    """Make exact-route metadata describe only the published GROMACS handoff."""
+    sidecar_path = export_result.get("exact_exception_sidecar")
+    audit_path = export_result.get("exact_gromacs_audit")
+    if sidecar_path is None:
+        return
+    if hasattr(export_input, "sidecar_path"):
+        export_input.sidecar_path = sidecar_path
+    if hasattr(export_input, "audit_path"):
+        export_input.audit_path = None
+    artifact_paths = getattr(route_result, "artifact_paths", None)
+    if isinstance(artifact_paths, dict):
+        artifact_paths["exact_openmm_exceptions"] = sidecar_path
+        artifact_paths.pop("native_openmm_glycam_audit", None)
+        if audit_path is not None:
+            artifact_paths["exact_gromacs_audit"] = audit_path
+
+
+def _publish_staged_export(
+    staged_dir: Path,
+    export_dir: Path,
+    export_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Replace a live export tree and remap returned paths after success."""
+
+    backup_dir = None
+    if export_dir.exists():
+        backup_dir = Path(
+            tempfile.mkdtemp(prefix=f".{export_dir.name}-backup-", dir=export_dir.parent)
+        )
+        backup_dir.rmdir()
+        export_dir.replace(backup_dir)
+    try:
+        staged_dir.replace(export_dir)
+    except Exception:
+        if backup_dir is not None:
+            backup_dir.replace(export_dir)
+        raise
+    if backup_dir is not None:
+        shutil.rmtree(backup_dir)
+    return _remap_staged_paths(export_result, staged_dir, export_dir)
 
 
 def _write_openmm_build_artifacts(
@@ -292,6 +385,17 @@ def _print_conjugation_dry_run_file_summary() -> None:
     colored_echo("    - solvated_conjugate_free_polymers.pdb", phase="build")
     colored_echo("    - conjugated_polymer_system_workflow.json", phase="build")
     colored_echo("    - system.xml (OpenMM system with restraints)", phase="build")
+
+
+def _print_conjugation_structure_build_summary(artifacts: Any, working_dir: Path) -> None:
+    """Print the successful conjugate structure checkpoint."""
+    colored_echo("Conjugate structure built successfully!", phase="build")
+    colored_echo(f"Output directory: {working_dir}", phase="build")
+    colored_echo("Files saved:", phase="build")
+    colored_echo(f"  - assembled_crosslinked.pdb: {artifacts.pdb_path}", phase="build")
+    workflow_path = getattr(artifacts.result, "workflow_json_path", None)
+    if workflow_path is not None:
+        colored_echo(f"  - workflow_json: {workflow_path}", phase="build")
 
 
 def _print_conjugation_openmm_build_summary(result: Any, working_dir: Path) -> None:
@@ -535,6 +639,12 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     help="Validate config without building",
 )
 @click.option(
+    "--scope",
+    type=click.Choice(["structure", "solute", "system"], case_sensitive=False),
+    default=None,
+    help="Build endpoint. Overrides build.scope from YAML (default: system).",
+)
+@click.option(
     "--format",
     "export_format",
     default=None,
@@ -550,6 +660,7 @@ def build(
     scratch_dir: str | None,
     projects_dir: str | None,
     dry_run: bool,
+    scope: str | None,
     export_format: str | None,
 ) -> None:
     """Build simulation input files from configuration.
@@ -559,10 +670,10 @@ def build(
     artifacts for one or more replicates. No simulation is executed.
 
     By default, this prepares OpenMM inputs in the working directory. Use
-    ``--format gromacs`` to export core GROMACS handoff files (``.gro``,
-    ``.top``, ``.itp``). MDP files and a run script may also be generated as
-    convenience defaults, but they are not required to continue outside
-    PolyzyMD. AMBER and LAMMPS export are not yet supported.
+    ``--format gromacs`` to export GROMACS files. System scope retains the
+    complete setup defaults; solute scope emits a topology-only handoff
+    (``.gro``, ``.top``, ``.itp``) without runnable dynamics files. AMBER and
+    LAMMPS export are not yet supported.
 
     Use ``run --engine gromacs`` if you want PolyzyMD to build and then
     execute the full local GROMACS workflow. Use ``run --engine openmm`` for
@@ -585,7 +696,7 @@ def build(
 
     from pydantic import ValidationError as PydanticValidationError
 
-    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.config.schema import BuildScope, SimulationConfig
 
     replicate_list = _resolve_replicates_option(replicates)
 
@@ -594,6 +705,22 @@ def build(
     try:
         sim_config = SimulationConfig.from_yaml(config)
         colored_echo(f"Configuration validated: {sim_config.name}", phase="build")
+        configured_scope = getattr(getattr(sim_config, "build", None), "scope", BuildScope.SYSTEM)
+        if scope is not None:
+            build_scope = BuildScope(scope)
+        elif isinstance(configured_scope, (BuildScope, str)):
+            build_scope = BuildScope(configured_scope)
+        else:
+            # Some programmatic callers and tests provide a partial duck-typed
+            # configuration without the optional build section. Preserve the
+            # historical full-system default for those callers.
+            build_scope = BuildScope.SYSTEM
+        if build_scope is BuildScope.STRUCTURE and not _conjugation_enabled(sim_config):
+            raise ValueError("build scope 'structure' requires conjugation.enabled: true")
+        if build_scope is BuildScope.STRUCTURE and export_format is not None:
+            raise ValueError("--format export is unavailable for build scope 'structure'")
+        if build_scope is BuildScope.SOLUTE and export_format not in (None, "gromacs"):
+            raise ValueError("build scope 'solute' supports only --format gromacs")
 
         # Override directories if provided via CLI
         if scratch_dir:
@@ -621,9 +748,17 @@ def build(
             colored_echo(phase="build")
 
             colored_echo("Build route:", phase="build")
+            colored_echo(f"  Scope: {build_scope.value}", phase="build")
             if _conjugation_enabled(sim_config):
                 colored_echo("  Conjugation workflow (enabled conjugation)", phase="build")
-                colored_echo("  Final Interchange: create for OpenMM/GROMACS output", phase="build")
+                if build_scope is BuildScope.STRUCTURE:
+                    colored_echo(
+                        "  Checkpoint: stops before parameterization and export", phase="build"
+                    )
+                else:
+                    colored_echo(
+                        "  Final Interchange: create for OpenMM/GROMACS output", phase="build"
+                    )
             else:
                 colored_echo("  Standard SystemBuilder workflow", phase="build")
             colored_echo(phase="build")
@@ -714,10 +849,37 @@ def build(
                 colored_echo(f"    Working dir: {working_dir}", phase="build")
                 if export_format:
                     export_dir = sim_config.get_working_directory(rep) / export_format
+                    if build_scope is BuildScope.SOLUTE:
+                        export_dir = (
+                            sim_config.get_working_directory(rep) / "solute" / export_format
+                        )
                     colored_echo(f"    Export dir:  {export_dir}", phase="build")
             colored_echo(phase="build")
 
-            if export_format:
+            if build_scope is BuildScope.SOLUTE and export_format == "gromacs":
+                colored_echo("Files to Generate (GROMACS Topology Handoff):", phase="build")
+                colored_echo("  Per replicate under solute/gromacs/:", phase="build")
+                colored_echo("    - *.gro (coordinates)", phase="build")
+                colored_echo("    - *.top (topology)", phase="build")
+                colored_echo("    - *.itp (component parameters, when split)", phase="build")
+                colored_echo("    - Exact sidecar/audit files when applicable", phase="build")
+                colored_echo(
+                    "    - No MDP, run-script, or position-restraint artifacts", phase="build"
+                )
+            elif build_scope is BuildScope.SOLUTE:
+                colored_echo("Files to Generate (Isolated Primary Component):", phase="build")
+                colored_echo("  Per replicate:", phase="build")
+                colored_echo("    - solute/solute.pdb", phase="build")
+                colored_echo("    - solute/system.xml", phase="build")
+                colored_echo("    - solute/openmm_build_audit.json", phase="build")
+            elif build_scope is BuildScope.STRUCTURE:
+                colored_echo("Files to Generate (Conjugate Structure):", phase="build")
+                colored_echo("  Per replicate:", phase="build")
+                colored_echo(
+                    "    - conjugate-construction/assembled_crosslinked.pdb", phase="build"
+                )
+                colored_echo("    - conjugated_polymer_system_workflow.json", phase="build")
+            elif export_format:
                 colored_echo(f"Files to Generate ({export_format.upper()}):", phase="build")
                 colored_echo("  Per replicate:", phase="build")
                 if export_format == "gromacs":
@@ -788,45 +950,87 @@ def build(
         for rep in replicate_list:
             colored_echo(f"Building system for replicate {rep}...", phase="build")
             working_dir = sim_config.get_working_directory(rep)
+            handoff_only = build_scope is BuildScope.SOLUTE and export_format == "gromacs"
+            staging_dir = None
+            build_working_dir = working_dir
+            if handoff_only:
+                staging_dir = tempfile.TemporaryDirectory(prefix="polyzymd-gromacs-handoff-")
+                build_working_dir = Path(staging_dir.name)
 
             from polyzymd.builders.openmm_artifacts import build_openmm_artifacts
 
-            if _conjugation_enabled(sim_config):
-                colored_echo("Conjugation enabled; using conjugation workflow...", phase="build")
+            try:
+                if _conjugation_enabled(sim_config):
+                    colored_echo(
+                        "Conjugation enabled; using conjugation workflow...", phase="build"
+                    )
 
-            artifacts = build_openmm_artifacts(
-                sim_config=sim_config,
-                working_dir=working_dir,
-                polymer_seed=rep,
-                write_system=export_format is None,
-            )
-
-            # Branch based on export format
-            if export_format:
-                # Export to requested engine format
-                from polyzymd.exporters.interchange import export_system
-
-                colored_echo(f"Exporting to {export_format.upper()} format...", phase="export")
-                export_dir = sim_config.get_working_directory(rep) / export_format
-                export_result = export_system(
-                    interchange=artifacts.require_final_interchange(),
-                    config=sim_config,
-                    output_dir=export_dir,
-                    fmt=export_format,
-                    component_info=artifacts.get_component_info(),
+                artifacts = build_openmm_artifacts(
+                    sim_config=sim_config,
+                    working_dir=build_working_dir,
+                    polymer_seed=rep,
+                    write_system=export_format is None,
+                    scope=build_scope,
                 )
 
-                _print_build_export_summary(
-                    export_format=export_format,
-                    export_dir=export_dir,
-                    export_result=export_result,
-                )
+                if export_format:
+                    from polyzymd.exporters.interchange import export_system
 
-            else:
-                if artifacts.conjugation_enabled:
-                    _print_conjugation_openmm_build_summary(artifacts.result, working_dir)
+                    colored_echo(f"Exporting to {export_format.upper()} format...", phase="export")
+                    export_dir = working_dir / export_format
+                    staged_export_dir = None
+                    if handoff_only:
+                        export_dir = working_dir / "solute" / export_format
+                        export_dir.parent.mkdir(parents=True, exist_ok=True)
+                        staged_export_dir = Path(
+                            tempfile.mkdtemp(
+                                prefix=f".{export_format}-staging-", dir=export_dir.parent
+                            )
+                        )
+                    export_kwargs = {"handoff_only": True} if handoff_only else {}
+                    export_input = artifacts.require_final_interchange()
+                    try:
+                        export_result = export_system(
+                            interchange=export_input,
+                            config=sim_config,
+                            output_dir=staged_export_dir or export_dir,
+                            fmt=export_format,
+                            component_info=None if handoff_only else artifacts.get_component_info(),
+                            **export_kwargs,
+                        )
+                        if staged_export_dir is not None:
+                            export_result = _publish_staged_export(
+                                staged_export_dir, export_dir, export_result
+                            )
+                            _canonicalize_handoff_metadata(
+                                export_input,
+                                getattr(artifacts, "result", None),
+                                export_result,
+                            )
+                    finally:
+                        if staged_export_dir is not None and staged_export_dir.exists():
+                            shutil.rmtree(staged_export_dir)
+
+                    _print_build_export_summary(
+                        export_format=export_format,
+                        export_dir=export_dir,
+                        export_result=export_result,
+                    )
                 else:
-                    _print_openmm_build_summary(working_dir)
+                    if build_scope is BuildScope.SOLUTE:
+                        colored_echo(
+                            "Isolated primary component built successfully!", phase="build"
+                        )
+                        colored_echo(f"Output directory: {working_dir / 'solute'}", phase="build")
+                    elif build_scope is BuildScope.STRUCTURE:
+                        _print_conjugation_structure_build_summary(artifacts, working_dir)
+                    elif artifacts.conjugation_enabled:
+                        _print_conjugation_openmm_build_summary(artifacts.result, working_dir)
+                    else:
+                        _print_openmm_build_summary(working_dir)
+            finally:
+                if staging_dir is not None:
+                    staging_dir.cleanup()
 
     except PydanticValidationError as e:
         colored_echo("Configuration error:", err=True, level=logging.ERROR)
@@ -1017,6 +1221,7 @@ def run(
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
+        _require_runtime_system_scope(sim_config)
         colored_echo(f"Running local simulation: {sim_config.name}", phase="simulation")
         colored_echo(f"Engine: {engine}", phase="simulation")
 
@@ -1519,6 +1724,7 @@ def submit(
         raise click.UsageError("Cannot use both --dry-run and --generate-only")
 
     sim_config = SimulationConfig.from_yaml(config)
+    _require_runtime_system_scope(sim_config)
     engine_name = _resolve_engine_name(sim_config, override=engine)
     resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
     _warn_for_submission_pixi_env(
@@ -1802,6 +2008,7 @@ def run_segment(
     except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
         colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
         sys.exit(1)
+    _require_runtime_system_scope(sim_config)
     engine_name = str(getattr(sim_config, "engine", "openmm") or "openmm").lower()
     if engine_name == "gromacs":
         warn_if_wrong_pixi_env(
@@ -3295,6 +3502,8 @@ def recover(
     except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
         colored_echo(f"Failed to load config: {e}", err=True, phase="workflow", level=logging.ERROR)
         sys.exit(1)
+
+    _require_runtime_system_scope(sim_config)
 
     engine_name = _resolve_engine_name(sim_config, override=engine)
     engine_impl = create_engine(sim_config, override=engine_name, defer_binary=True)

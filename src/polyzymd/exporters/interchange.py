@@ -73,6 +73,7 @@ def export_system(
     component_info: "SystemComponentInfo | None" = None,
     prefix: str | None = None,
     gmx_command: str = "gmx",
+    handoff_only: bool = False,
 ) -> dict[str, Any]:
     """Export a parameterized system to a requested MD engine format.
 
@@ -92,6 +93,9 @@ def export_system(
         Filename prefix for exported files. If None, exporter derives a default
     gmx_command : str, optional
         GROMACS executable command used by generated run scripts, by default ``"gmx"``
+    handoff_only : bool, optional
+        Emit only engine-neutral handoff topology artifacts. For GROMACS this
+        omits MDPs, run scripts, and position-restraint postprocessing.
 
     Returns
     -------
@@ -115,7 +119,15 @@ def export_system(
         )
 
     if fmt_str == "gromacs":
-        return _export_gromacs(interchange, config, output_dir, component_info, prefix, gmx_command)
+        return _export_gromacs(
+            interchange,
+            config,
+            output_dir,
+            component_info,
+            prefix,
+            gmx_command,
+            handoff_only,
+        )
     if fmt_str == "lammps":
         return _export_lammps(interchange, config, output_dir, prefix)
     if fmt_str == "amber":
@@ -132,6 +144,7 @@ def _export_gromacs(
     component_info: "SystemComponentInfo | None",
     prefix: str | None,
     gmx_command: str,
+    handoff_only: bool,
 ) -> dict[str, Any]:
     """Export to GROMACS format via :class:`GromacsExporter`.
 
@@ -149,6 +162,8 @@ def _export_gromacs(
         Optional filename prefix
     gmx_command : str
         GROMACS executable command for run-script generation
+    handoff_only : bool
+        Whether to omit dynamics-specific files and topology restraints
 
     Returns
     -------
@@ -167,6 +182,7 @@ def _export_gromacs(
         output_dir=output_dir,
         prefix=prefix,
         gmx_command=gmx_command,
+        handoff_only=handoff_only,
     )
 
 

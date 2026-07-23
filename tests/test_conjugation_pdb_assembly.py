@@ -275,6 +275,7 @@ def test_generic_writer_removes_resolved_non_hydrogen_leaving_atom(tmp_path):
         target_residue_name="CYS",
         target_residue_number=10,
         target_atom_name="SG",
+        modifier_link_atom=_generic_polymer_fragment().atoms[1],
         protein_leaving_atoms_to_remove=(
             PdbAtomRecord(
                 serial=4,
@@ -321,6 +322,8 @@ def test_generic_writer_preserves_unlinked_modifier_residue_names(tmp_path):
         target_residue_name="CYS",
         target_residue_number=10,
         target_atom_name="SG",
+        modifier_link_atom=_generic_polymer_fragment().atoms[1],
+        modifier_leaving_atoms_to_remove=(_generic_polymer_fragment().atoms[2],),
         protein_target_resname="CYX",
         modifier_target_resname="MXL",
     )
@@ -335,6 +338,39 @@ def test_generic_writer_preserves_unlinked_modifier_residue_names(tmp_path):
 
     assert [line[12:16].strip() for line in polymer_lines] == ["S1", "RC", "S2"]
     assert [line[17:20].strip() for line in polymer_lines] == ["SB1", "MXL", "SB2"]
+
+
+def test_duplicate_modifier_names_use_serial_selectors_for_reactive_and_leaving(tmp_path):
+    """Serial selectors should disambiguate repeated modifier reactive and leaving names."""
+    protein_path = tmp_path / "generic_protein.pdb"
+    protein_path.write_text(
+        _pdb_atom(1, "SG", "CYS", "A", 10, 0.0, 0.0, 0.0, element="S") + "END\n"
+    )
+    fragment = _duplicate_name_polymer_fragment()
+    output_path = tmp_path / "generic_assembled.pdb"
+    attachment = PdbLinkageAttachment(
+        target_chain="A",
+        target_residue_name="CYS",
+        target_residue_number=10,
+        target_atom_name="SG",
+        modifier_link_atom=fragment.atoms[2],
+        modifier_leaving_atoms_to_remove=(fragment.atoms[1],),
+        protein_target_resname="CYX",
+        modifier_target_resname="MXL",
+    )
+
+    write_crosslinked_pdb(protein_path, fragment, attachment, output_path)
+
+    polymer_lines = [
+        line
+        for line in output_path.read_text().splitlines()
+        if line.startswith("HETATM") and line[21] == "C"
+    ]
+    rc_residues = [line[17:20].strip() for line in polymer_lines if line[12:16].strip() == "RC"]
+    lg_x_coords = [line[30:38].strip() for line in polymer_lines if line[12:16].strip() == "LG"]
+
+    assert rc_residues == ["SB1", "MXL"]
+    assert lg_x_coords == ["6.000"]
 
 
 def test_crosslinked_writer_emits_reciprocal_conect_without_removed_atoms(tmp_path):
@@ -378,6 +414,93 @@ def test_crosslinked_writer_does_not_modify_input_protein(tmp_path):
     write_crosslinked_pdb(protein_path, _polymer_fragment(), attachment, output_path)
 
     assert protein_path.read_text() == original
+
+
+def test_crosslinked_writer_preserves_source_components_and_chain_b_selector(tmp_path):
+    """Canonical chain A output must retain source boundaries and chain-B selection."""
+    from openmm.app import PDBFile
+
+    protein_path = tmp_path / "multichain_protein.pdb"
+    protein_path.write_text(
+        _pdb_atom(1, "N", "CYS", "A", 1, 0.0, 0.0, 0.0, element="N")
+        + _pdb_atom(2, "CA", "CYS", "A", 1, 1.4, 0.0, 0.0)
+        + _pdb_atom(3, "C", "CYS", "A", 1, 2.8, 0.0, 0.0)
+        + _pdb_atom(4, "O", "CYS", "A", 1, 3.4, 1.0, 0.0, element="O")
+        + _pdb_atom(5, "CB", "CYS", "A", 1, 1.4, -1.4, 0.0)
+        + _pdb_atom(6, "SG", "CYS", "A", 1, 1.4, -2.8, 0.0, element="S")
+        + "TER\n"
+        + _pdb_atom(7, "N", "CYS", "B", 2, 4.1, 0.0, 0.0, element="N")
+        + _pdb_atom(8, "CA", "CYS", "B", 2, 5.5, 0.0, 0.0)
+        + _pdb_atom(9, "C", "CYS", "B", 2, 6.9, 0.0, 0.0)
+        + _pdb_atom(10, "O", "CYS", "B", 2, 7.5, 1.0, 0.0, element="O")
+        + _pdb_atom(11, "CB", "CYS", "B", 2, 5.5, -1.4, 0.0)
+        + _pdb_atom(12, "SG", "CYS", "B", 2, 2.9, -2.8, 0.0, element="S")
+        + _pdb_atom(13, "N", "ASN", "B", 3, 8.2, 0.0, 0.0, element="N")
+        + _pdb_atom(14, "CA", "ASN", "B", 3, 9.6, 0.0, 0.0)
+        + _pdb_atom(15, "C", "ASN", "B", 3, 11.0, 0.0, 0.0)
+        + _pdb_atom(16, "O", "ASN", "B", 3, 11.6, 1.0, 0.0, element="O")
+        + _pdb_atom(17, "CB", "ASN", "B", 3, 9.6, -1.4, 0.0)
+        + _pdb_atom(18, "CG", "ASN", "B", 3, 10.8, -2.1, 0.0)
+        + _pdb_atom(19, "OD1", "ASN", "B", 3, 11.9, -1.6, 0.0, element="O")
+        + _pdb_atom(20, "ND2", "ASN", "B", 3, 10.7, -3.4, 0.0, element="N")
+        + _pdb_atom(21, "HD21", "ASN", "B", 3, 11.5, -4.0, 0.0, element="H")
+        + _pdb_atom(22, "HD22", "ASN", "B", 3, 9.8, -3.8, 0.0, element="H")
+        + "CONECT    6   12\n"
+        + "END\n"
+    )
+    fragment = _generic_polymer_fragment()
+    output_path = tmp_path / "multichain_assembled.pdb"
+    attachment = PdbLinkageAttachment(
+        target_chain="B",
+        target_residue_name="ASN",
+        target_residue_number=3,
+        target_atom_name="ND2",
+        modifier_link_atom=fragment.atoms[1],
+        protein_leaving_atoms_to_remove=(
+            PdbAtomRecord(
+                serial=21,
+                atom_index=20,
+                atom_name="HD21",
+                residue_name="ASN",
+                chain_id="B",
+                residue_number=3,
+                x=11.5,
+                y=-4.0,
+                z=0.0,
+                element="H",
+            ),
+        ),
+        protein_target_resname="NLN",
+        modifier_target_resname="MXL",
+    )
+
+    write_crosslinked_pdb(protein_path, fragment, attachment, output_path)
+
+    lines = output_path.read_text().splitlines()
+    atom_lines = [line for line in lines if line.startswith(("ATOM", "HETATM"))]
+    assert {line[21] for line in atom_lines if line.startswith("ATOM")} == {"A"}
+    assert any(line.startswith("TER") and line[22:26].strip() == "1" for line in lines)
+    nln_atoms = {
+        line[12:16].strip()
+        for line in atom_lines
+        if line[17:20].strip() == "NLN" and line[22:26].strip() == "3"
+    }
+    assert "HD21" in nln_atoms
+    assert "HD22" not in nln_atoms
+
+    topology = PDBFile(str(output_path)).topology
+    residue_by_id = {
+        (residue.name, residue.id): residue
+        for residue in topology.residues()
+        if residue.chain.id == "A"
+    }
+    chain_a_c = next(atom for atom in residue_by_id[("CYS", "1")].atoms() if atom.name == "C")
+    chain_b_n = next(atom for atom in residue_by_id[("CYS", "2")].atoms() if atom.name == "N")
+    chain_a_sg = next(atom for atom in residue_by_id[("CYS", "1")].atoms() if atom.name == "SG")
+    chain_b_sg = next(atom for atom in residue_by_id[("CYS", "2")].atoms() if atom.name == "SG")
+    inferred_bonds = {frozenset((left, right)) for left, right in topology.bonds()}
+    assert frozenset((chain_a_c, chain_b_n)) not in inferred_bonds
+    assert frozenset((chain_a_sg, chain_b_sg)) in inferred_bonds
 
 
 def test_crosslinked_writer_matches_residue_name_number_and_insertion_code(tmp_path):
@@ -517,4 +640,71 @@ def _generic_polymer_fragment() -> PlacedPolymerFragment:
         leaving_atom_serials=(203,),
         reactive_atom_serial=202,
         name="generic_modifier_test",
+    )
+
+
+def _duplicate_name_polymer_fragment() -> PlacedPolymerFragment:
+    """Create a modifier with duplicate reactive and leaving atom names."""
+    atoms = (
+        PdbAtomRecord(
+            serial=301,
+            atom_index=0,
+            atom_name="RC",
+            residue_name="SB1",
+            chain_id="Z",
+            residue_number=20,
+            x=5.0,
+            y=0.0,
+            z=0.0,
+            element="C",
+            record_name="HETATM",
+        ),
+        PdbAtomRecord(
+            serial=302,
+            atom_index=1,
+            atom_name="LG",
+            residue_name="LNK",
+            chain_id="Z",
+            residue_number=21,
+            x=5.5,
+            y=0.0,
+            z=0.0,
+            element="O",
+            record_name="HETATM",
+        ),
+        PdbAtomRecord(
+            serial=303,
+            atom_index=2,
+            atom_name="RC",
+            residue_name="LNK",
+            chain_id="Z",
+            residue_number=21,
+            x=3.3,
+            y=0.0,
+            z=0.0,
+            element="C",
+            record_name="HETATM",
+        ),
+        PdbAtomRecord(
+            serial=304,
+            atom_index=3,
+            atom_name="LG",
+            residue_name="SB2",
+            chain_id="Z",
+            residue_number=22,
+            x=6.0,
+            y=0.0,
+            z=0.0,
+            element="O",
+            record_name="HETATM",
+        ),
+    )
+    return PlacedPolymerFragment(
+        atoms=atoms,
+        bonds=((301, 303), (302, 303), (303, 304)),
+        leaving_atom_serials=(302,),
+        reactive_atom_serial=303,
+        reactive_atom_name="RC",
+        leaving_atom_names=("LG",),
+        name="duplicate_name_modifier_test",
     )

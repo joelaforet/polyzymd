@@ -31,6 +31,8 @@ outside the managed pixi environment.
 
 - **Branches:** `main` (released), `release/*` (release integration), short-lived
   `fix/*` and `feature/*` branches (atomic work)
+- Resolve the current branch dynamically with `git branch --show-current`; do
+  not rely on a static branch name in this file.
 - Until the branch migration is complete, treat `feature/v1.3.0-rc5` as
   `release/1.3` and `conjugation-engine-refactor` as `release/1.4`.
 - Mark beta snapshots with immutable SemVer prerelease tags such as

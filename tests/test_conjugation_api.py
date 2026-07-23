@@ -21,8 +21,8 @@ from polyzymd.builders.conjugation._linkage import (
     LinkageBond,
     PabloCrosslinkRequirement,
     PdbAtomSelector,
+    ReactionProduct,
     ReactiveEndpoint,
-    ResolvedAttachmentPlan,
 )
 from polyzymd.builders.conjugation.polymer import (
     GeneratedMoietyFragment,
@@ -310,9 +310,11 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
         )
         return SimpleNamespace(
             fragment=fragment,
-            source_fragment=fragment,
+            reaction_fragment=fragment,
             source_kind="smiles",
             sidecars={},
+            provenance={},
+            diagnostics=(),
             generation=None,
             reactive_sequence_index=None,
             reactive_selector=None,
@@ -326,13 +328,15 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
             return SimpleNamespace(target_atom_name="ND2")
 
         @staticmethod
-        def resolve_plan(protein, site, fragment, *, settings=None):
+        def resolve_plan(protein, site, fragment, *, settings=None, **kwargs):
             calls["plans"].append((Path(protein), site.residue_number, site.atom_name, settings))
+            prepared_fragment = kwargs.pop("prepared_fragment")
             return _resolved_plan(
                 residue_number=site.residue_number,
                 modifier_residue_name=fragment.residue_name,
                 modifier_atom_name="C001",
-            )
+                fragment=prepared_fragment,
+            ).model_copy(update=kwargs)
 
     def fake_get_reaction(name):
         assert name == "n_glycosylation"
@@ -341,7 +345,7 @@ def test_direct_request_builds_two_smiles_n_glycosylation_plans_once(
     def fake_construct(**kwargs):
         calls["construct"] += 1
         assert len(kwargs["specs"]) == 2
-        assert len([spec.resolved_plan for spec in kwargs["specs"]]) == 2
+        assert len(kwargs["specs"]) == 2
         crosslinked = Path(kwargs["output_dir"]) / "assembled_crosslinked.pdb"
         relaxed = Path(kwargs["output_dir"]) / "conjugate_relaxed.pdb"
         crosslinked.write_text("END\n", encoding="utf-8")
@@ -505,6 +509,7 @@ def test_package_facade_exports_public_api_only():
         "ConjugationEngine",
         "build_conjugate",
         "build_conjugate_from_config",
+        "ConjugatedPolymerSystemSettings",
     }
 
     assert set(conjugation.__all__) == expected
@@ -578,7 +583,8 @@ def _resolved_plan(
     residue_number: int,
     modifier_residue_name: str,
     modifier_atom_name: str,
-) -> ResolvedAttachmentPlan:
+    fragment,
+) -> ReactionProduct:
     protein_selector = PdbAtomSelector(
         chain_id="A",
         residue_name="ASN",
@@ -635,7 +641,7 @@ def _resolved_plan(
         leaving_atoms=((), ()),
         bond_order=1,
     )
-    return ResolvedAttachmentPlan(
+    return ReactionProduct(
         contract=contract,
         protein_link_atom=protein_atom,
         modifier_link_atom=modifier_atom,
@@ -643,6 +649,7 @@ def _resolved_plan(
         modifier_product_residue_name=modifier_residue_name,
         pablo_crosslink_requirement=requirement,
         target_bond_length_angstrom=1.45,
+        fragment=fragment,
     )
 
 

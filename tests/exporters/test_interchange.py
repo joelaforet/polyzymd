@@ -207,5 +207,6 @@ class TestExportSystemGromacsPath:
             output_dir=output_dir,
             prefix="test",
             gmx_command="gmx",
+            handoff_only=False,
         )
         assert result == expected

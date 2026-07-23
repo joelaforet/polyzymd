@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import re
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -95,9 +96,9 @@ def build_product_state_pablo_library(
     product_pdb: Path | str,
     source_protein_pdb: Path | str | None = None,
     polymer_sdf: Path | str | None = None,
-    generated_fragment: Any | None = None,
-    resolved_plan: Any | None = None,
+    product: Any = None,
     product_residue_mappings: Mapping[str, Mapping[str, Any]] | None = None,
+    endpoint_provenance: Mapping[str, Any] | None = None,
     *,
     charged_polymer_sdf: Path | str | None = None,
     pablo_module: Any | None = None,
@@ -121,20 +122,31 @@ def build_product_state_pablo_library(
     product_atoms = parse_pdb_atom_records(product_path)
     source_atoms = parse_pdb_atom_records(source_path) if source_path is not None else []
     conect_pairs = parse_pdb_conect_pairs(product_path)
-    requirement = _coerce_requirement(resolved_plan)
+    if product is None:
+        raise ValueError("ReactionProduct is required")
+    generated_fragment = product.fragment
+    requirement = product.pablo_crosslink_requirement
     diagnostics: list[str] = []
 
     protein_key = _locate_residue_key(
         product_atoms,
         residue_name=requirement.residues[0],
         atom_name=requirement.linking_atoms[0],
-        resolved_atom=getattr(resolved_plan, "protein_link_atom", None),
+        resolved_atom=product.protein_link_atom,
+        endpoint_provenance=endpoint_provenance,
+        endpoint_role="protein",
+        diagnostics=diagnostics,
+        allow_legacy_serial_fallback=False,
     )
     modifier_key = _locate_residue_key(
         product_atoms,
         residue_name=requirement.residues[1],
         atom_name=requirement.linking_atoms[1],
-        resolved_atom=getattr(resolved_plan, "modifier_link_atom", None),
+        resolved_atom=product.modifier_link_atom,
+        endpoint_provenance=endpoint_provenance,
+        endpoint_role="modifier",
+        diagnostics=diagnostics,
+        allow_legacy_serial_fallback=False,
     )
 
     definitions: list[Any] = []
@@ -148,10 +160,17 @@ def build_product_state_pablo_library(
         product_atoms=_atoms_for_key(product_atoms, protein_key),
         source_atoms=source_atoms,
         requirement=requirement,
-        source_residue_name=_source_protein_residue_name(resolved_plan, source_atoms),
+        source_residue_name=_source_protein_residue_name(product, source_atoms),
+        modifier_crosslink_atom=_pablo_modifier_crosslink_atom(requirement.linking_atoms[1]),
     )
     definitions.append(protein_definition)
-    summaries.append(_summarize_definition(protein_definition, protein_key))
+    summaries.append(
+        _summarize_definition(
+            protein_definition,
+            protein_key,
+            raw_crosslink=(requirement.linking_atoms[0], requirement.linking_atoms[1]),
+        )
+    )
 
     polymer_residue_keys = _product_residue_keys_from_mappings(
         product_atoms,
@@ -198,34 +217,56 @@ def build_product_state_pablo_library(
         diagnostics.append("No generated-fragment bond graph was available; using PDB CONECT bonds")
 
     for key, residue_atoms in _product_polymer_residues(polymer_atoms):
-        is_modified = key == modifier_key
-        link_plan = polymer_link_plans.get(key, _EMPTY_POLYMER_LINK_PLAN)
-        definition = _build_pdb_residue_definition(
-            atom_cls,
-            bond_cls,
-            residue_cls,
-            residue_atoms=residue_atoms,
-            bonds=product_bonds.get(key, ()),
-            formal_charges=product_formal_charges.get(key, {}),
-            linking_bond=link_plan.linking_bond,
-            leaving_atoms=_leaving_atoms_for_residue(
-                resolved_plan,
-                side="modifier" if is_modified else "none",
-            ),
-            crosslink=(
-                (requirement.linking_atoms[1], requirement.linking_atoms[0])
-                if is_modified
-                else link_plan.crosslink
-            ),
-            extra_leaving_bonds=link_plan.extra_leaving_bonds,
-            atom_name_aliases=dict(link_plan.atom_name_aliases),
-            bond_order=int(requirement.bond_order),
-            description="PolyzyMD product-state polymer residue definition",
-        )
+        try:
+            is_modified = key == modifier_key
+            link_plan = polymer_link_plans.get(key, _EMPTY_POLYMER_LINK_PLAN)
+            atom_name_aliases = dict(link_plan.atom_name_aliases)
+            raw_crosslink = None
+            if is_modified:
+                atom_name_aliases.update(
+                    _modifier_crosslink_atom_aliases(
+                        requirement.linking_atoms[1],
+                        residue_atoms=residue_atoms,
+                        existing_aliases=atom_name_aliases,
+                    )
+                )
+                raw_crosslink = (requirement.linking_atoms[1], requirement.linking_atoms[0])
+            definition = _build_pdb_residue_definition(
+                atom_cls,
+                bond_cls,
+                residue_cls,
+                residue_atoms=residue_atoms,
+                bonds=product_bonds.get(key, ()),
+                formal_charges=product_formal_charges.get(key, {}),
+                linking_bond=link_plan.linking_bond,
+                leaving_atoms=_leaving_atoms_for_residue(
+                    product,
+                    side="modifier" if is_modified else "none",
+                ),
+                crosslink=(
+                    (
+                        _pablo_modifier_crosslink_atom(requirement.linking_atoms[1]),
+                        requirement.linking_atoms[0],
+                    )
+                    if is_modified
+                    else link_plan.crosslink
+                ),
+                extra_leaving_bonds=link_plan.extra_leaving_bonds,
+                atom_name_aliases=atom_name_aliases,
+                bond_order=int(requirement.bond_order),
+                description="PolyzyMD product-state polymer residue definition",
+            )
+        except Exception as exc:  # noqa: BLE001 - wrap Pablo residue construction context
+            raise ValueError(
+                "Product-state Pablo residue definition failed for "
+                f"residue={key}, link={requirement.linking_atoms}, "
+                f"leaving={requirement.leaving_atoms}, glycan_source={product_path}: {exc}"
+            ) from exc
         definitions.append(definition)
-        summaries.append(_summarize_definition(definition, key))
+        summaries.append(_summarize_definition(definition, key, raw_crosslink=raw_crosslink))
 
     _validate_no_whole_polymer_collapse(summaries)
+    definitions = list(_deduplicate_product_definitions(definitions))
     residue_library = pablo.STD_CCD_CACHE.with_(definitions)
     diagnostics.append(
         "Product-state residue definitions were added directly; Pablo with_crosslink() was not used"
@@ -253,19 +294,19 @@ def build_product_state_pablo_library_for_specs(
 
     libraries = []
     for spec in attachment_specs:
-        generated_fragment = _spec_generated_fragment(spec)
+        fragment = spec.fragment
         sdf_path = _spec_sdf_path(spec)
         charged_sdf_path = _spec_charged_sdf_path(spec)
-        _validate_spec_sidecars(spec, sdf_path=sdf_path, generated_fragment=generated_fragment)
+        _validate_spec_sidecars(spec, sdf_path=sdf_path, generated_fragment=fragment)
         libraries.append(
             build_product_state_pablo_library(
                 product_pdb=product_pdb,
                 source_protein_pdb=source_protein_pdb,
                 polymer_sdf=sdf_path,
                 charged_polymer_sdf=charged_sdf_path,
-                generated_fragment=generated_fragment,
-                resolved_plan=getattr(spec, "resolved_plan", None),
+                product=spec,
                 product_residue_mappings=_spec_product_residue_mappings(spec),
+                endpoint_provenance=spec.endpoint_provenance or None,
                 pablo_module=pablo_module,
             )
         )
@@ -283,54 +324,37 @@ def build_product_state_pablo_library_for_specs(
     diagnostics = tuple(
         diagnostic for library in libraries for diagnostic in getattr(library, "diagnostics", ())
     )
+    definitions = _deduplicate_product_definitions(definitions)
     return ProductStatePabloLibrary(
         residue_library=pablo.STD_CCD_CACHE.with_(definitions),
         definitions=definitions,
         summaries=summaries,
-        crosslink_requirement=attachment_specs[0].resolved_plan.pablo_crosslink_requirement,
+        crosslink_requirement=attachment_specs[0].pablo_crosslink_requirement,
         diagnostics=diagnostics,
     )
 
 
-def _spec_generated_fragment(spec: Any) -> Any:
-    """Return a product-library-compatible fragment adapter from a resolved spec."""
-    generated_fragment = getattr(spec, "generated_fragment", None)
-    if generated_fragment is not None:
-        return generated_fragment
-    fragment = getattr(spec, "fragment", None)
-    to_generated = getattr(fragment, "to_generated_polymer_fragment", None)
-    if callable(to_generated):
-        return to_generated()
-    return fragment
-
-
 def _spec_sdf_path(spec: Any) -> Path | None:
     """Return the bond-order SDF sidecar recorded on a resolved spec, if present."""
-    for sidecars in (
-        getattr(spec, "source_sidecars", None),
-        getattr(getattr(spec, "fragment", None), "sidecars", None),
-    ):
-        if sidecars and sidecars.get("bond_sdf") is not None:
-            return Path(sidecars["bond_sdf"])
-        if sidecars and sidecars.get("sdf") is not None:
-            return Path(sidecars["sdf"])
+    sidecars = spec.fragment.sidecars
+    if sidecars.get("bond_sdf") is not None:
+        return Path(sidecars["bond_sdf"])
+    if sidecars.get("sdf") is not None:
+        return Path(sidecars["sdf"])
     return None
 
 
 def _spec_charged_sdf_path(spec: Any) -> Path | None:
     """Return the validated charged SDF sidecar recorded on a resolved spec."""
-    for sidecars in (
-        getattr(spec, "source_sidecars", None),
-        getattr(getattr(spec, "fragment", None), "sidecars", None),
-    ):
-        if sidecars and sidecars.get("charged_sdf") is not None:
-            return Path(sidecars["charged_sdf"])
+    sidecars = spec.fragment.sidecars
+    if sidecars.get("charged_sdf") is not None:
+        return Path(sidecars["charged_sdf"])
     return None
 
 
 def _spec_product_residue_mappings(spec: Any) -> Mapping[str, Mapping[str, Any]] | None:
     """Return assembly residue mappings recorded for one attachment spec."""
-    mappings = getattr(spec, "product_residue_mappings", None)
+    mappings = spec.product_residue_mappings
     return mappings or None
 
 
@@ -346,11 +370,11 @@ def _validate_spec_sidecars(
             raise ValueError(f"Product-state Pablo SDF sidecar does not exist: {sdf_path}")
         return
 
-    fragment = getattr(spec, "fragment", None)
-    if getattr(fragment, "source_kind", None) != "polymer":
+    fragment = spec.fragment
+    if fragment.source_kind != "polymer":
         return
     if not _fragment_has_complete_bond_orders(generated_fragment):
-        attachment_id = getattr(spec, "attachment_id", "<unknown>")
+        attachment_id = spec.attachment_id
         raise ValueError(
             "Product-state Pablo library generation for polymer attachment "
             f"{attachment_id!r} requires an SDF sidecar or complete generated-fragment "
@@ -361,14 +385,12 @@ def _validate_spec_sidecars(
 
 def _fragment_has_complete_bond_orders(generated_fragment: Any) -> bool:
     """Return whether every generated-fragment bond has an explicit bond order."""
-    bonds = {
-        frozenset((atom1, atom2)) for atom1, atom2 in getattr(generated_fragment, "bonds", ()) or ()
-    }
+    bonds = {frozenset((atom1, atom2)) for atom1, atom2 in generated_fragment.bonds}
     if not bonds:
         return True
     bond_orders = {
         frozenset((entry[0], entry[1]))
-        for entry in getattr(generated_fragment, "bond_orders", ()) or ()
+        for entry in generated_fragment.bond_orders
         if len(entry) >= 3
     }
     return bonds.issubset(bond_orders)
@@ -382,16 +404,6 @@ def _pablo_residue_module(pablo_module: Any) -> Any:
     return importlib.import_module("openff.pablo.residue")
 
 
-def _coerce_requirement(resolved_plan: Any | None) -> PabloCrosslinkRequirement:
-    """Extract the reactant-state Pablo requirement from a resolved plan."""
-    requirement = getattr(resolved_plan, "pablo_crosslink_requirement", None)
-    if requirement is None:
-        raise ValueError("resolved_plan.pablo_crosslink_requirement is required")
-    if isinstance(requirement, PabloCrosslinkRequirement):
-        return requirement
-    return PabloCrosslinkRequirement.model_validate(requirement)
-
-
 def _residue_key(atom: PdbAtomRecord) -> tuple[str, str, int, str]:
     """Return the exact PDB residue key used by the product definitions."""
     return (atom.chain_id, atom.residue_name, atom.residue_number, atom.insertion_code)
@@ -403,8 +415,46 @@ def _locate_residue_key(
     residue_name: str,
     atom_name: str,
     resolved_atom: Any | None,
+    endpoint_provenance: Mapping[str, Any] | None = None,
+    endpoint_role: str | None = None,
+    diagnostics: list[str] | None = None,
+    allow_legacy_serial_fallback: bool = False,
 ) -> tuple[str, str, int, str]:
     """Find the concrete product-PDB residue containing a crosslink endpoint."""
+    legacy_serial_fallback_reason: str | None = None
+    provenance_match = _locate_endpoint_from_provenance(
+        atoms,
+        endpoint_provenance=endpoint_provenance,
+        endpoint_role=endpoint_role,
+        atom_name=atom_name,
+    )
+    if provenance_match is not None:
+        return _residue_key(provenance_match)
+
+    if resolved_atom is not None and getattr(resolved_atom, "serial", None) is not None:
+        serial_matches = [atom for atom in atoms if atom.serial == int(resolved_atom.serial)]
+        if len(serial_matches) == 1:
+            match = serial_matches[0]
+            if match.atom_name.upper() != atom_name.upper():
+                legacy_serial_fallback_reason = (
+                    "Legacy direct product-state endpoint serial fallback used after source "
+                    f"serial {resolved_atom.serial} resolved to product atom {match.atom_name!r} "
+                    f"instead of {atom_name!r}"
+                )
+                if diagnostics is not None and not allow_legacy_serial_fallback:
+                    diagnostics.append(
+                        "Product-state endpoint ignored stale source serial after serial "
+                        f"serial {resolved_atom.serial} resolved to product atom {match.atom_name!r} "
+                        f"instead of {atom_name!r}"
+                    )
+            else:
+                return _residue_key(match)
+        if len(serial_matches) > 1:
+            raise ValueError(
+                "Serial-first product-state endpoint resolution found multiple atoms at "
+                f"serial {resolved_atom.serial}"
+            )
+
     candidates = [
         atom
         for atom in atoms
@@ -414,6 +464,16 @@ def _locate_residue_key(
     if resolved_atom is not None:
         resolved_number = getattr(resolved_atom, "residue_number", None)
         resolved_chain = getattr(resolved_atom, "chain_id", None)
+        scoped_by_location = [
+            atom
+            for atom in atoms
+            if atom.atom_name.upper() == atom_name.upper()
+            and (resolved_chain in (None, "") or atom.chain_id == resolved_chain)
+            and (resolved_number is None or atom.residue_number == resolved_number)
+        ]
+        if (allow_legacy_serial_fallback and scoped_by_location) or len(scoped_by_location) == 1:
+            candidates = scoped_by_location
+
         scoped = [
             atom
             for atom in candidates
@@ -423,11 +483,65 @@ def _locate_residue_key(
         if scoped:
             candidates = scoped
     if len(candidates) != 1:
+        if not allow_legacy_serial_fallback:
+            raise ValueError(
+                "Mapped product-state endpoint resolution requires exact assembly provenance; "
+                f"endpoint {residue_name}:{atom_name} matched {len(candidates)} product atoms"
+            )
         raise ValueError(
             "Expected exactly one product-state crosslink endpoint "
             f"{residue_name}:{atom_name}, found {len(candidates)}"
         )
+    if legacy_serial_fallback_reason is not None and diagnostics is not None:
+        diagnostics.append(legacy_serial_fallback_reason)
     return _residue_key(candidates[0])
+
+
+def _locate_endpoint_from_provenance(
+    atoms: list[PdbAtomRecord],
+    *,
+    endpoint_provenance: Mapping[str, Any] | None,
+    endpoint_role: str | None,
+    atom_name: str,
+) -> PdbAtomRecord | None:
+    """Return a product endpoint atom from assembly provenance when present."""
+    if not endpoint_provenance or endpoint_role not in {"protein", "modifier"}:
+        return None
+    serial = _endpoint_provenance_serial(endpoint_provenance, endpoint_role)
+    if serial is None:
+        return None
+    matches = [atom for atom in atoms if atom.serial == serial]
+    if len(matches) != 1:
+        raise ValueError(
+            "Assembly product-state endpoint provenance did not identify exactly one atom: "
+            f"role={endpoint_role!r}, serial={serial}, matches={len(matches)}"
+        )
+    match = matches[0]
+    if match.atom_name.upper() != atom_name.upper():
+        raise ValueError(
+            "Assembly product-state endpoint provenance resolved the wrong atom: "
+            f"role={endpoint_role!r}, serial={serial}, atom={match.atom_name!r}, "
+            f"expected={atom_name!r}"
+        )
+    return match
+
+
+def _endpoint_provenance_serial(
+    endpoint_provenance: Mapping[str, Any], endpoint_role: str | None
+) -> int | None:
+    """Return the emitted product serial recorded for one endpoint role."""
+    if endpoint_role not in {"protein", "modifier"}:
+        return None
+    endpoint = endpoint_provenance.get(f"{endpoint_role}_endpoint")
+    if isinstance(endpoint, Mapping):
+        serial = _parse_int(endpoint.get("serial"))
+        if serial is not None:
+            return serial
+    pair = endpoint_provenance.get("conect_pair")
+    if isinstance(pair, Mapping):
+        key = f"{endpoint_role}_serial"
+        return _parse_int(pair.get(key))
+    return None
 
 
 def _atoms_for_key(
@@ -438,21 +552,15 @@ def _atoms_for_key(
     return tuple(atom for atom in atoms if _residue_key(atom) == key)
 
 
-def _source_protein_residue_name(
-    resolved_plan: Any | None, source_atoms: list[PdbAtomRecord]
-) -> str:
+def _source_protein_residue_name(product: Any, source_atoms: list[PdbAtomRecord]) -> str:
     """Return the source protein residue name used to seed LYX definitions."""
-    selector = getattr(getattr(resolved_plan, "contract", None), "protein_endpoint", None)
-    selector = getattr(selector, "selector", None)
-    if selector is not None:
-        return str(getattr(selector, "residue_name", "LYS") or "LYS").upper()
-    link_atom = getattr(resolved_plan, "protein_link_atom", None)
-    if link_atom is not None:
-        for atom in source_atoms:
-            if atom.chain_id == getattr(
-                link_atom, "chain_id", None
-            ) and atom.residue_number == getattr(link_atom, "residue_number", None):
-                return atom.residue_name.upper()
+    selector = product.contract.protein_endpoint.selector
+    if selector is not None and selector.residue_name:
+        return str(selector.residue_name).upper()
+    link_atom = product.protein_link_atom
+    for atom in source_atoms:
+        if atom.chain_id == link_atom.chain_id and atom.residue_number == link_atom.residue_number:
+            return atom.residue_name.upper()
     return "LYS"
 
 
@@ -466,6 +574,7 @@ def _build_protein_product_definition(
     source_atoms: list[PdbAtomRecord],
     requirement: PabloCrosslinkRequirement,
     source_residue_name: str,
+    modifier_crosslink_atom: str,
 ) -> Any:
     """Build the modified protein residue definition from the source residue template."""
     product_names = {atom.atom_name for atom in product_atoms}
@@ -526,7 +635,7 @@ def _build_protein_product_definition(
     )
     crosslink = bond_cls.with_defaults(
         requirement.linking_atoms[0],
-        requirement.linking_atoms[1],
+        modifier_crosslink_atom,
         order=int(requirement.bond_order),
     )
     return residue_cls(
@@ -589,13 +698,13 @@ def _fragment_bonds(generated_fragment: Any | None) -> tuple[tuple[Any, Any, int
     atom_lookup = _fragment_atom_lookup(generated_fragment)
     unique_atom_names = _unique_fragment_atom_names(generated_fragment)
     order_lookup: dict[frozenset[Any], int] = {}
-    for entry in getattr(generated_fragment, "bond_orders", ()) or ():
+    for entry in generated_fragment.bond_orders:
         if len(entry) >= 3:
             order_lookup[frozenset((entry[0], entry[1]))] = explicit_bond_order(
                 entry[2], source="generated polymer fragment"
             )
     bonds = []
-    for atom1, atom2 in getattr(generated_fragment, "bonds", ()) or ():
+    for atom1, atom2 in generated_fragment.bonds:
         resolved1 = (
             _fragment_atom_descriptor(atom_lookup.get(atom1), unique_atom_names=unique_atom_names)
             or atom1
@@ -626,7 +735,7 @@ def _polymer_sdf_bonds(
         raise ValueError(f"Polymer SDF sidecar does not exist: {sdf_path}")
 
     molecules = read_sdf_molecules(sdf_path, source_label="Polymer SDF")
-    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+    fragment_atoms = generated_fragment.atoms
     atoms_by_index = validate_fragment_atom_indices(
         fragment_atoms,
         source_label="Generated polymer fragment atoms for SDF bond orders",
@@ -760,10 +869,10 @@ def _product_formal_charges(
         source_residue_aliases=source_residue_aliases,
     )
     charges: dict[tuple[str, str, int, str], dict[str, int]] = defaultdict(dict)
-    for fallback_index, atom in enumerate(getattr(generated_fragment, "atoms", ()) or ()):
-        raw_atom_index = getattr(atom, "atom_index", None)
+    for fallback_index, atom in enumerate(generated_fragment.atoms):
+        raw_atom_index = atom.atom_index
         atom_index = int(raw_atom_index) if raw_atom_index is not None else fallback_index
-        charge = charged_formal_charges.get(atom_index, getattr(atom, "formal_charge", None))
+        charge = charged_formal_charges.get(atom_index, atom.formal_charge)
         if charge in (None, 0):
             continue
         descriptor = _fragment_atom_descriptor(atom, unique_atom_names=unique_atom_names)
@@ -784,7 +893,7 @@ def _charged_sdf_formal_charges(
     """Return non-zero formal charges from a validated charged SDF sidecar."""
     if charged_polymer_sdf is None:
         return {}
-    fragment_atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
+    fragment_atoms = generated_fragment.atoms
     return charged_sdf_formal_charges(charged_polymer_sdf, fragment_atoms=fragment_atoms)
 
 
@@ -795,14 +904,14 @@ def _explicit_bond_order(value: Any, *, source: str) -> int:
 
 def _fragment_atom_lookup(generated_fragment: Any) -> dict[Any, Any]:
     """Build lookups for generated-fragment atom references."""
-    atoms = tuple(getattr(generated_fragment, "atoms", ()) or ())
-    atom_names = [getattr(atom, "atom_name", None) for atom in atoms]
+    atoms = generated_fragment.atoms
+    atom_names = [atom.atom_name for atom in atoms]
     unique_atom_names = {name for name in atom_names if name and atom_names.count(name) == 1}
     lookup: dict[Any, Any] = {}
     for atom in atoms:
-        serial = getattr(atom, "serial", None)
-        atom_index = getattr(atom, "atom_index", None)
-        atom_name = getattr(atom, "atom_name", None)
+        serial = atom.serial
+        atom_index = atom.atom_index
+        atom_name = atom.atom_name
         if serial is not None:
             lookup.setdefault(serial, atom)
         if atom_index is not None:
@@ -816,9 +925,7 @@ def _unique_fragment_atom_names(generated_fragment: Any | None) -> set[str]:
     """Return atom names that uniquely identify generated-fragment atoms."""
     if generated_fragment is None:
         return set()
-    atom_names = [
-        getattr(atom, "atom_name", None) for atom in getattr(generated_fragment, "atoms", ()) or ()
-    ]
+    atom_names = [atom.atom_name for atom in generated_fragment.atoms]
     return {name for name in atom_names if name and atom_names.count(name) == 1}
 
 
@@ -835,7 +942,13 @@ def _fragment_atom_descriptor(
         return None
     if unique_atom_names is not None and atom_name in unique_atom_names:
         return atom_name
-    return (getattr(atom, "residue_number", None), atom_name)
+    residue_number = getattr(atom, "residue_number", None)
+    if residue_number is not None:
+        return (residue_number, atom_name)
+    residue_name = getattr(atom, "residue_name", None)
+    if residue_name:
+        return (residue_name, atom_name)
+    return None
 
 
 def _protein_linking_bond(
@@ -864,6 +977,8 @@ def _product_bonds_and_links_by_residue(
     serial_to_atom = {atom.serial: atom for atom in product_atoms if atom.serial is not None}
     by_residue: dict[tuple[str, str, int, str], dict[tuple[str, str], int]] = defaultdict(dict)
     external_bonds: set[_PolymerExternalBond] = set()
+    conect_intra_bonds: dict[tuple[str, str, int, str], set[tuple[str, str]]] = defaultdict(set)
+    conect_external_edges: set[frozenset[tuple[str, str, int, str]]] = set()
     for serial1, serial2 in conect_pairs:
         atom1 = serial_to_atom.get(serial1)
         atom2 = serial_to_atom.get(serial2)
@@ -871,8 +986,11 @@ def _product_bonds_and_links_by_residue(
             continue
         if _residue_key(atom1) == _residue_key(atom2):
             key = _residue_key(atom1)
-            by_residue[key].setdefault(_ordered_bond_key(atom1.atom_name, atom2.atom_name), 1)
+            bond_key = _ordered_bond_key(atom1.atom_name, atom2.atom_name)
+            conect_intra_bonds[key].add(bond_key)
+            by_residue[key].setdefault(bond_key, 1)
         else:
+            conect_external_edges.add(frozenset((_residue_key(atom1), _residue_key(atom2))))
             _record_external_polymer_bond(external_bonds, atom1, atom2, 1)
 
     product_lookup = _product_lookup(
@@ -885,11 +1003,23 @@ def _product_bonds_and_links_by_residue(
         if atom1 is None or atom2 is None:
             continue
         if _residue_key(atom1) == _residue_key(atom2):
-            by_residue[_residue_key(atom1)][
-                _ordered_bond_key(atom1.atom_name, atom2.atom_name)
-            ] = order
+            residue_key = _residue_key(atom1)
+            bond_key = _ordered_bond_key(atom1.atom_name, atom2.atom_name)
+            if (
+                conect_intra_bonds.get(residue_key)
+                and bond_key not in conect_intra_bonds[residue_key]
+            ):
+                continue
+            by_residue[residue_key][bond_key] = order
         else:
+            if conect_external_edges:
+                continue
             _record_external_polymer_bond(external_bonds, atom1, atom2, order)
+
+    for residue_bonds in by_residue.values():
+        carbonyl_key = _ordered_bond_key("C2N", "O2N")
+        if carbonyl_key in residue_bonds:
+            residue_bonds[carbonyl_key] = 2
 
     return {
         key: tuple((atom1, atom2, order) for (atom1, atom2), order in sorted(bonds.items()))
@@ -937,7 +1067,61 @@ def _record_external_polymer_bond(
 
 _POLYMER_LINK_EXIT_ATOM = "POU"
 _POLYMER_LINK_ENTRY_ATOM = "PIN"
+_MODIFIER_CROSSLINK_ATOM = "CXL"
+_GENERATED_CARBON_ATOM_PATTERN = re.compile(r"^C\d{3}$")
 _EMPTY_POLYMER_LINK_PLAN = _PolymerLinkPlan(None, None, (), ())
+
+
+def _pablo_modifier_crosslink_atom(raw_atom_name: str) -> str:
+    """Return Pablo's canonical modifier crosslink atom name when needed.
+
+    Product PDB emitters often assign attachment-local names such as ``C063``
+    or ``C071`` to chemically equivalent modifier crosslink carbons. Pablo uses
+    one internal atom name for those templates, while raw PDB names remain
+    accepted through atom synonyms.
+    """
+    if _GENERATED_CARBON_ATOM_PATTERN.fullmatch(raw_atom_name.upper()):
+        return _MODIFIER_CROSSLINK_ATOM
+    return raw_atom_name
+
+
+def _modifier_crosslink_atom_aliases(
+    raw_atom_name: str,
+    *,
+    residue_atoms: tuple[PdbAtomRecord, ...],
+    existing_aliases: Mapping[str, str],
+) -> dict[str, str]:
+    """Return guarded atom-name aliases needed by the modifier definition."""
+    canonical_name = _pablo_modifier_crosslink_atom(raw_atom_name)
+    if canonical_name == raw_atom_name:
+        return {}
+
+    matching_raw_atoms = [atom for atom in residue_atoms if atom.atom_name == raw_atom_name]
+    if len(matching_raw_atoms) != 1:
+        raise ValueError(
+            "Product-state Pablo C### crosslink alias requires exactly one raw product atom "
+            f"named {raw_atom_name!r} in residue {residue_atoms[0].residue_name!r}; "
+            f"found {len(matching_raw_atoms)}."
+        )
+    cxl_atoms = [atom for atom in residue_atoms if atom.atom_name == canonical_name]
+    if cxl_atoms:
+        raise ValueError(
+            "Product-state Pablo cannot alias generated crosslink atom "
+            f"{raw_atom_name!r} to {canonical_name!r} because the product residue already "
+            "contains a real atom with that name."
+        )
+    conflicting_aliases = [
+        raw_name
+        for raw_name, target_name in existing_aliases.items()
+        if target_name == canonical_name
+    ]
+    if conflicting_aliases:
+        preview = ", ".join(sorted(conflicting_aliases))
+        raise ValueError(
+            "Product-state Pablo cannot map multiple raw atom names to internal "
+            f"{canonical_name!r}: {preview}, {raw_atom_name}."
+        )
+    return {raw_atom_name: canonical_name}
 
 
 def _plan_polymer_external_links(
@@ -953,18 +1137,26 @@ def _plan_polymer_external_links(
     diagnostics: list[str] = []
     leaving_index = 1
 
-    polymer_link_edges = _polymer_link_edge_keys(external_bonds, diagnostics)
+    polymer_link_edges = _polymer_link_edge_keys(
+        external_bonds,
+        diagnostics,
+        root_keys=reserved_crosslink_keys,
+    )
+    _reject_unsupported_polymer_graph_degree(
+        external_bonds,
+        reserved_crosslink_keys=reserved_crosslink_keys,
+    )
     linking_edges = []
     for bond in external_bonds:
         if _polymer_external_edge_key(bond) in polymer_link_edges:
             linking_edges.append(bond)
             continue
         if bond.left_key in reserved_crosslink_keys or bond.right_key in reserved_crosslink_keys:
-            diagnostics.append(
-                "Nonsequential product polymer bond touches a residue whose Pablo crosslink "
-                f"slot is reserved: {bond.left_key}:{bond.left_atom}-{bond.right_key}:{bond.right_atom}"
+            raise ValueError(
+                "Product-state Pablo glycan graph requires a branch crosslink on a residue whose "
+                "crosslink slot is already reserved for the protein attachment: "
+                f"{bond.left_key}:{bond.left_atom}-{bond.right_key}:{bond.right_atom}"
             )
-            continue
         if bond.left_key in crosslinks or bond.right_key in crosslinks:
             diagnostics.append(
                 "Multiple product polymer crosslinks requested for one residue; "
@@ -1021,11 +1213,48 @@ def _plan_polymer_external_links(
     }, diagnostics
 
 
+def _reject_unsupported_polymer_graph_degree(
+    external_bonds: tuple[_PolymerExternalBond, ...],
+    *,
+    reserved_crosslink_keys: set[tuple[str, str, int, str]] | None = None,
+) -> None:
+    """Reject glycan residue graphs Pablo 0.2.2 cannot represent."""
+    reserved_crosslink_keys = reserved_crosslink_keys or set()
+    adjacency: dict[tuple[str, str, int, str], set[tuple[str, str, int, str]]] = defaultdict(set)
+    atom_edges: dict[tuple[str, str, int, str], list[str]] = defaultdict(list)
+    for bond in external_bonds:
+        adjacency[bond.left_key].add(bond.right_key)
+        adjacency[bond.right_key].add(bond.left_key)
+        atom_edges[bond.left_key].append(bond.left_atom)
+        atom_edges[bond.right_key].append(bond.right_atom)
+    for key, neighbors in adjacency.items():
+        if key in reserved_crosslink_keys and len(neighbors) > 2:
+            atoms = ", ".join(sorted(atom_edges[key]))
+            raise ValueError(
+                "Product-state Pablo glycan graph for attachment-local residue "
+                f"{key} has {len(neighbors)} glycan neighbors through atoms {atoms} plus a "
+                "reserved protein crosslink. Pablo 0.2.2 can represent prior/posterior "
+                "plus one crosslink only; move the branch away from the reducing residue or "
+                "curate this glycan before strict ingestion."
+            )
+        if len(neighbors) > 3:
+            atoms = ", ".join(sorted(atom_edges[key]))
+            raise ValueError(
+                "Product-state Pablo glycan graph for attachment-local residue "
+                f"{key} has degree {len(neighbors)} through atoms {atoms}. Pablo 0.2.2 "
+                "can represent prior/posterior plus one crosslink only; split or curate "
+                "this branched glycan before strict ingestion."
+            )
+
+
 def _polymer_link_edge_keys(
     external_bonds: tuple[_PolymerExternalBond, ...],
     diagnostics: list[str],
+    *,
+    root_keys: set[tuple[str, str, int, str]] | None = None,
 ) -> set[frozenset[tuple[str, str, int, str]]]:
-    """Identify polymer backbone links from chain-C connectivity, not residue numbers."""
+    """Identify Pablo prior/posterior links from rooted chain-C connectivity."""
+    root_keys = root_keys or set()
     adjacency: dict[
         tuple[str, str, int, str],
         list[tuple[tuple[str, str, int, str], str, str, int]],
@@ -1064,15 +1293,136 @@ def _polymer_link_edge_keys(
             continue
 
         diagnostics.append(
-            "Branched product polymer connectivity detected; residue-number-adjacent "
-            "bonds were treated as polymer links"
+            "Branched product polymer connectivity detected; rooted tree edges were assigned "
+            "to Pablo prior/posterior links and remaining branch edges were assigned to crosslinks"
         )
-        link_edges.update(
-            edge_key
-            for edge_key, bond in bonds_by_component_edge.items()
-            if edge_key in component_edges and abs(bond.left_key[2] - bond.right_key[2]) == 1
-        )
+        root = _polymer_component_root(component, root_keys)
+        link_edges.update(_polymer_tree_link_edges(root, adjacency, component))
     return link_edges
+
+
+def _polymer_component_root(
+    component: set[tuple[str, str, int, str]],
+    root_keys: set[tuple[str, str, int, str]],
+) -> tuple[str, str, int, str]:
+    """Return the deterministic root for one attachment-local glycan graph."""
+    rooted = sorted(component & root_keys, key=_polymer_residue_sort_key)
+    if rooted:
+        return rooted[0]
+    endpoints = sorted(
+        (key for key in component if key in component), key=_polymer_residue_sort_key
+    )
+    return endpoints[0]
+
+
+def _polymer_longest_path_edges(
+    root: tuple[str, str, int, str],
+    adjacency: dict[
+        tuple[str, str, int, str],
+        list[tuple[tuple[str, str, int, str], str, str, int]],
+    ],
+    component: set[tuple[str, str, int, str]],
+) -> set[frozenset[tuple[str, str, int, str]]]:
+    """Return rooted longest-path edges for Pablo prior/posterior metadata."""
+    stack: list[
+        tuple[
+            tuple[str, str, int, str],
+            tuple[str, str, int, str] | None,
+            tuple[tuple[str, str, int, str], ...],
+        ]
+    ] = [(root, None, (root,))]
+    paths: list[tuple[tuple[str, str, int, str], ...]] = []
+    while stack:
+        current, previous, path = stack.pop()
+        next_keys = sorted(
+            (
+                neighbor
+                for neighbor, *_rest in adjacency[current]
+                if neighbor != previous and neighbor in component and neighbor not in path
+            ),
+            key=_polymer_residue_sort_key,
+            reverse=True,
+        )
+        if not next_keys:
+            paths.append(path)
+            continue
+        for neighbor in next_keys:
+            stack.append((neighbor, current, (*path, neighbor)))
+    longest = sorted(
+        paths,
+        key=lambda item: (-len(item), tuple(_polymer_residue_sort_key(key) for key in item)),
+    )[0]
+    return {frozenset((left, right)) for left, right in zip(longest, longest[1:], strict=False)}
+
+
+def _polymer_tree_link_edges(
+    root: tuple[str, str, int, str],
+    adjacency: dict[
+        tuple[str, str, int, str],
+        list[tuple[tuple[str, str, int, str], str, str, int]],
+    ],
+    component: set[tuple[str, str, int, str]],
+) -> set[frozenset[tuple[str, str, int, str]]]:
+    """Return deterministic link edges for a rooted glycan tree."""
+    subtree_sizes = _polymer_subtree_sizes(root, None, adjacency, component)
+    link_edges: set[frozenset[tuple[str, str, int, str]]] = set()
+
+    def visit(
+        current: tuple[str, str, int, str],
+        parent: tuple[str, str, int, str] | None,
+        parent_is_link: bool,
+        seen: set[tuple[str, str, int, str]],
+    ) -> None:
+        seen.add(current)
+        children = [
+            neighbor
+            for neighbor, *_rest in adjacency[current]
+            if neighbor != parent and neighbor in component and neighbor not in seen
+        ]
+        children = sorted(
+            children,
+            key=lambda key: (-subtree_sizes.get(key, 1), _polymer_residue_sort_key(key)),
+        )
+        link_slots = 1 if parent_is_link else 2
+        linked_children = set(children[:link_slots])
+        for child in children:
+            child_is_link = child in linked_children
+            if child_is_link:
+                link_edges.add(frozenset((current, child)))
+            visit(child, current, child_is_link, seen)
+
+    visit(root, None, False, set())
+    return link_edges
+
+
+def _polymer_subtree_sizes(
+    current: tuple[str, str, int, str],
+    parent: tuple[str, str, int, str] | None,
+    adjacency: dict[
+        tuple[str, str, int, str],
+        list[tuple[tuple[str, str, int, str], str, str, int]],
+    ],
+    component: set[tuple[str, str, int, str]],
+) -> dict[tuple[str, str, int, str], int]:
+    """Return subtree sizes for deterministic branch selection."""
+    sizes: dict[tuple[str, str, int, str], int] = {}
+
+    def visit(
+        key: tuple[str, str, int, str],
+        previous: tuple[str, str, int, str] | None,
+        seen: set[tuple[str, str, int, str]],
+    ) -> int:
+        seen.add(key)
+        total = 1
+        for neighbor, *_rest in adjacency[key]:
+            if neighbor == previous or neighbor not in component or neighbor in seen:
+                continue
+            total += visit(neighbor, key, seen)
+        sizes[key] = total
+        return total
+
+    visit(current, parent, set())
+    return sizes
 
 
 def _polymer_external_edge_key(
@@ -1214,6 +1564,7 @@ def _product_lookup(
             lookup.setdefault(atom.atom_index, atom)
         if atom_name_counts[atom.atom_name] == 1:
             lookup.setdefault(atom.atom_name, atom)
+        lookup.setdefault((atom.residue_name, atom.atom_name), atom)
         lookup.setdefault((atom.residue_number, atom.atom_name), atom)
         lookup.setdefault((atom.chain_id, atom.residue_number, atom.atom_name), atom)
         if source_residue_aliases:
@@ -1251,14 +1602,12 @@ def _product_polymer_residues(
     return tuple((key, tuple(atoms)) for key, atoms in grouped.items())
 
 
-def _leaving_atoms_for_residue(
-    resolved_plan: Any | None, *, side: str
-) -> tuple[PdbAtomRecord, ...]:
+def _leaving_atoms_for_residue(product: Any, *, side: str) -> tuple[PdbAtomRecord, ...]:
     """Return reactant-state leaving atoms for one product residue side."""
     if side == "modifier":
-        return tuple(getattr(resolved_plan, "modifier_leaving_atoms", ()) or ())
+        return tuple(product.modifier_leaving_atoms)
     if side == "protein":
-        return tuple(getattr(resolved_plan, "protein_leaving_atoms", ()) or ())
+        return tuple(product.protein_leaving_atoms)
     return ()
 
 
@@ -1325,10 +1674,20 @@ def _build_pdb_residue_definition(
                 bond_cls.with_defaults(link_atom, leaving_atom.atom_name, order=bond_order)
             )
     for link_atom, leaving_name in extra_leaving_bonds:
+        canonical_link_atom = atom_name_aliases.get(link_atom, link_atom)
+        if canonical_link_atom not in existing:
+            atoms.append(
+                atom_cls.with_defaults(
+                    canonical_link_atom,
+                    _guess_element(canonical_link_atom),
+                    leaving=True,
+                )
+            )
+            existing.add(canonical_link_atom)
         if leaving_name not in existing:
             atoms.append(atom_cls.with_defaults(leaving_name, "H", leaving=True))
             existing.add(leaving_name)
-        bond_defs.append(bond_cls.with_defaults(link_atom, leaving_name, order=1))
+        bond_defs.append(bond_cls.with_defaults(canonical_link_atom, leaving_name, order=1))
     crosslink_def = (
         bond_cls.with_defaults(crosslink[0], crosslink[1], order=bond_order)
         if crosslink is not None
@@ -1348,6 +1707,17 @@ def _build_pdb_residue_definition(
                 leaving_names={atom.name for atom in atoms if getattr(atom, "leaving", False)},
             )
         )
+    if linking_bond is not None:
+        leaving_names = {atom.name for atom in atoms if getattr(atom, "leaving", False)}
+        for linking_atom in linking_bond[:2]:
+            bond_defs = list(
+                _coalesce_leaving_bonds(
+                    bond_cls,
+                    tuple(bond_defs),
+                    linking_atom=linking_atom,
+                    leaving_names=leaving_names,
+                )
+            )
     return residue_cls(
         residue_name=residue_name,
         description=description,
@@ -1401,23 +1771,164 @@ def _coalesce_leaving_bonds(
 def _summarize_definition(
     definition: Any,
     key: tuple[str, str, int, str],
+    *,
+    raw_crosslink: tuple[str, str] | None = None,
 ) -> ProductStatePabloDefinitionSummary:
     """Build a JSON-safe summary for one Pablo definition."""
     crosslink = getattr(definition, "crosslink", None)
     linking_bond = getattr(definition, "linking_bond", None)
+    summary_crosslink = raw_crosslink
+    if summary_crosslink is None and crosslink is not None:
+        summary_crosslink = (crosslink.atom1, crosslink.atom2)
     return ProductStatePabloDefinitionSummary(
         residue_name=str(getattr(definition, "residue_name", key[1])),
         chain_id=key[0],
         residue_number=key[2],
-        atom_names=tuple(atom.name for atom in getattr(definition, "atoms", ())),
+        atom_names=tuple(_summary_atom_name(atom) for atom in getattr(definition, "atoms", ())),
         leaving_atom_names=tuple(
-            atom.name
+            _summary_atom_name(atom)
             for atom in getattr(definition, "atoms", ())
             if getattr(atom, "leaving", False)
         ),
         bond_count=len(tuple(getattr(definition, "bonds", ()))),
         linking_bond=(linking_bond.atom1, linking_bond.atom2) if linking_bond is not None else None,
-        crosslink=(crosslink.atom1, crosslink.atom2) if crosslink is not None else None,
+        crosslink=summary_crosslink,
+    )
+
+
+def _summary_atom_name(atom: Any) -> str:
+    """Return the raw product-PDB atom name for user-facing summaries."""
+    synonyms = tuple(getattr(atom, "synonyms", ()) or ())
+    if getattr(atom, "name", None) == _MODIFIER_CROSSLINK_ATOM and synonyms:
+        return str(synonyms[0])
+    return str(getattr(atom, "name", ""))
+
+
+def _deduplicate_product_definitions(definitions: Iterable[Any]) -> tuple[Any, ...]:
+    """Collapse exact duplicate Pablo definitions and reject ambiguous chemistry.
+
+    Pablo can host same-name residue definitions only when non-leaving atom-name
+    selectors are distinguishable. Repeated product attachments therefore share
+    one generated definition when the internal chemistry is identical, but a
+    same-name/same-selector chemistry conflict is raised before Pablo emits a
+    lower-level matching error.
+    """
+    by_selector: dict[tuple[str, tuple[str, ...]], Any] = {}
+    index_by_selector: dict[tuple[str, tuple[str, ...]], int] = {}
+    signatures: dict[tuple[str, tuple[str, ...]], tuple[Any, ...]] = {}
+    deduplicated: list[Any] = []
+    for definition in definitions:
+        selector = _definition_selector(definition)
+        signature = _definition_chemistry_signature(definition)
+        existing = by_selector.get(selector)
+        if existing is None:
+            by_selector[selector] = definition
+            index_by_selector[selector] = len(deduplicated)
+            signatures[selector] = signature
+            deduplicated.append(definition)
+            continue
+        if signatures[selector] != signature:
+            residue_name, atom_names = selector
+            preview = ", ".join(atom_names[:8])
+            raise ValueError(
+                "Product-state Pablo definitions are ambiguous: residue "
+                f"{residue_name!r} has the same non-leaving atom-name selector "
+                f"({preview}) but different chemistry, including leaving-group chemistry. "
+                "Use distinct residue names or atom names for chemically different "
+                "product-state templates."
+            )
+        merged = _merge_definition_synonyms(existing, definition)
+        by_selector[selector] = merged
+        deduplicated[index_by_selector[selector]] = merged
+    return tuple(deduplicated)
+
+
+def _definition_selector(definition: Any) -> tuple[str, tuple[str, ...]]:
+    """Return a residue selector that preserves distinct leaving chemistry."""
+    residue_name = str(getattr(definition, "residue_name", ""))
+    atom_names = tuple(
+        sorted(
+            str(atom.name)
+            for atom in getattr(definition, "atoms", ())
+            if not getattr(atom, "leaving", False)
+        )
+    )
+    leaving_names = tuple(
+        sorted(
+            str(atom.name)
+            for atom in getattr(definition, "atoms", ())
+            if getattr(atom, "leaving", False)
+        )
+    )
+    if not residue_name or not atom_names:
+        return (f"<opaque:{id(definition)}>", ())
+    return (residue_name, (*atom_names, "<leaving>", *leaving_names))
+
+
+def _definition_chemistry_signature(definition: Any) -> tuple[Any, ...]:
+    """Return a synonym-insensitive chemistry signature for one definition."""
+    atoms = tuple(
+        sorted(
+            (
+                str(atom.name),
+                str(getattr(atom, "symbol", "") or ""),
+                int(getattr(atom, "charge", 0) or 0),
+                bool(getattr(atom, "leaving", False)),
+            )
+            for atom in getattr(definition, "atoms", ())
+        )
+    )
+    bonds = tuple(
+        sorted(
+            _ordered_bond(str(bond.atom1), str(bond.atom2), int(getattr(bond, "order", 1) or 1))
+            for bond in getattr(definition, "bonds", ())
+        )
+    )
+    linking_bond = _bond_signature(getattr(definition, "linking_bond", None))
+    crosslink = _bond_signature(getattr(definition, "crosslink", None))
+    return (atoms, bonds, linking_bond, crosslink)
+
+
+def _bond_signature(bond: Any | None) -> tuple[str, str, int] | None:
+    """Return a stable bond signature for optional Pablo metadata bonds."""
+    if bond is None:
+        return None
+    return _ordered_bond(str(bond.atom1), str(bond.atom2), int(getattr(bond, "order", 1) or 1))
+
+
+def _merge_definition_synonyms(existing: Any, duplicate: Any) -> Any:
+    """Merge raw PDB atom-name synonyms from an exact duplicate definition."""
+    duplicate_atoms = {atom.name: atom for atom in getattr(duplicate, "atoms", ())}
+    merged_atoms = []
+    changed = False
+    for atom in getattr(existing, "atoms", ()):
+        duplicate_atom = duplicate_atoms.get(atom.name)
+        if duplicate_atom is None:
+            merged_atoms.append(atom)
+            continue
+        synonyms = tuple(
+            sorted(
+                set(getattr(atom, "synonyms", ()) or ())
+                | set(getattr(duplicate_atom, "synonyms", ()) or ())
+            )
+        )
+        if synonyms != tuple(getattr(atom, "synonyms", ()) or ()):
+            atom = atom.replace(synonyms=synonyms)
+            changed = True
+        merged_atoms.append(atom)
+    if not changed:
+        return existing
+    replace = getattr(existing, "replace", None)
+    if callable(replace):
+        return replace(atoms=tuple(merged_atoms))
+    return type(existing)(
+        residue_name=existing.residue_name,
+        description=getattr(existing, "description", ""),
+        linking_bond=getattr(existing, "linking_bond", None),
+        crosslink=getattr(existing, "crosslink", None),
+        atoms=tuple(merged_atoms),
+        bonds=tuple(getattr(existing, "bonds", ())),
+        virtual_sites=tuple(getattr(existing, "virtual_sites", ())),
     )
 
 

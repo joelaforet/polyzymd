@@ -39,6 +39,27 @@ Run the normal build in a full PolyzyMD build environment:
 pixi run -e build polyzymd build -c config.yaml
 ```
 
+This uses the default `system` scope and performs the complete workflow. For
+checkpointed inspection or downstream parameter handoff, choose an explicit
+scope:
+
+| Command | Stops after | Primary artifacts |
+|---------|-------------|-------------------|
+| `polyzymd build -c config.yaml --scope structure` | Covalent coordinate assembly, before parameterization | `conjugate-construction/assembled_crosslinked.pdb` and workflow metadata |
+| `polyzymd build -c config.yaml --scope solute` | Parameterization of only the modified primary component | `solute/solute.pdb`, `solute/system.xml`, and `solute/openmm_build_audit.json` |
+| `polyzymd build -c config.yaml --scope system` | Solvation and complete system parameterization | Standard solvated PDB, OpenMM XML, and validation evidence |
+
+The `structure` scope requires enabled conjugation and cannot be exported. The
+`solute` scope excludes substrate, free polymers, solvent, ions, barostats, and
+configured simulation-stage restraints. It is a preparation artifact, not a
+runnable MD system. Exact charged-solute routes may preserve periodic PME for
+parameter fidelity; inspect `openmm_build_audit.json` and the route-specific
+audit before building a physical simulation environment.
+
+To transfer the solute topology to GROMACS, add `--format gromacs`. The output
+contains `.gro`, `.top`, `.itp`, and applicable exact audit/sidecar files, but
+no MDP, run script, or position-restraint artifacts.
+
 Do not run full conjugation builds in lean simulation-only environments such as
 `sim-cuda-12-4`. Those environments are intended for already prepared runtime
 inputs. See {doc}`hpc_cuda_conjugation` for the two-stage HPC pattern and its

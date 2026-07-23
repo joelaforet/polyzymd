@@ -36,6 +36,10 @@ def collect_reference_warnings(config: Any) -> list[str]:
     if polymers is not None and bool(getattr(polymers, "enabled", False)):
         _check_polymer_references(warnings, polymers)
 
+    conjugation = getattr(config, "conjugation", None)
+    if conjugation is not None and bool(getattr(conjugation, "enabled", False)):
+        _check_conjugation_references(warnings, conjugation)
+
     return warnings
 
 
@@ -96,4 +100,19 @@ def _check_cached_polymer_sdfs(warnings: list[str], polymers: Any, sdf_directory
     if not any(sdf_directory.glob(pattern)):
         warnings.append(
             "Missing cached polymer SDF files: " f"no files matching {sdf_directory / pattern}"
+        )
+
+
+def _check_conjugation_references(warnings: list[str], conjugation: Any) -> None:
+    """Check conjugation attachment moiety file references."""
+
+    for index, attachment in enumerate(getattr(conjugation, "attachments", ()) or (), start=1):
+        if not bool(getattr(attachment, "enabled", True)):
+            continue
+        moiety = getattr(attachment, "moiety", None)
+        label = getattr(attachment, "name", None) or f"attachment {index}"
+        _check_file(
+            warnings,
+            getattr(moiety, "input_path", None),
+            f"conjugation moiety {label} input_path",
         )

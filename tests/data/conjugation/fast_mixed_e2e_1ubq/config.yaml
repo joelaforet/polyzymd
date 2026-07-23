@@ -43,6 +43,7 @@ conjugation:
         atom_name: "NZ"
       moiety:
         name: "ABC_3mer"
+        force_field: "openff-2.3.0.offxml"
         polymer_recipe:
           name: "SBMA-EGPMA-NHS"
           length: 3
@@ -77,6 +78,7 @@ conjugation:
         atom_name: "ND2"
       moiety:
         name: "three_branch_nglycan"
+        force_field: "glycam06"
         residue_name: "NAG"
         smiles: "CC(=O)N[C@@H]1[C@H]([C@@H]([C@H](O[C@H]1O)CO)O[C@H]2[C@@H]([C@H]([C@@H]([C@H](O2)CO)O[C@H]3[C@H]([C@H]([C@@H]([C@H](O3)CO[C@@H]4[C@H]([C@H]([C@@H]([C@H](O4)CO[C@@H]5[C@H]([C@H]([C@@H]([C@H](O5)CO)O)O)O)O)O[C@@H]6[C@H]([C@H]([C@@H]([C@H](O6)CO)O)O)O[C@@H]7[C@H]([C@H]([C@@H]([C@H](O7)CO)O)O)O)O)O)O[C@@H]8[C@H]([C@H]([C@@H]([C@H](O8)CO)O)O)O[C@@H]9[C@H]([C@H]([C@@H]([C@H](O9)CO)O)O)O[C@@H]1[C@H]([C@H]([C@@H]([C@H](O1)CO)O)O)O)O)O)NC(=O)C)O"
       mechanism:

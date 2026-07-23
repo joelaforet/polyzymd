@@ -23,9 +23,9 @@ def _matching_topology_atom_index(
     if source_atom is None:
         return None
     target_resname = (
-        getattr(plan, "protein_product_residue_name", None)
+        plan.protein_product_residue_name
         if role == "protein"
-        else getattr(plan, "modifier_product_residue_name", None)
+        else plan.modifier_product_residue_name
     )
     source_chain = str(getattr(source_atom, "chain_id", "") or "").strip()
     source_number = getattr(source_atom, "residue_number", None)
@@ -72,20 +72,19 @@ def resolve_product_linkage_pairs(
     product_atoms = parse_pdb_atom_records(Path(product_pdb_path))
     topology_atoms = tuple(topology.atoms())
     serial_to_index = _product_serial_to_topology_index(product_atoms, topology_atoms)
-    assembly_pairs = tuple(getattr(assembly, "added_conect_pairs", ()) or ())
-    if not assembly_pairs:
-        pair = getattr(assembly, "added_conect_pair", None)
-        assembly_pairs = (pair,) if pair is not None else ()
+    assembly_pairs = tuple(assembly.added_conect_pairs) if assembly is not None else ()
 
     resolved: list[ProductLinkage] = []
+    require_validated_assembly_pairs = len(attachment_specs) > 1
     for plan_index, spec in enumerate(attachment_specs, start=1):
-        plan = getattr(spec, "resolved_plan", spec)
+        plan = spec
         serial_pair = _serial_pair_for_attachment(
             plan,
             spec,
             plan_index=plan_index,
             product_atoms=product_atoms,
             assembly_pairs=assembly_pairs,
+            require_validated_assembly_pair=require_validated_assembly_pairs,
         )
         if serial_pair is None:
             raise RuntimeError(
@@ -97,7 +96,7 @@ def resolve_product_linkage_pairs(
                 "Product linkage serials could not be mapped to OpenMM topology indices: "
                 f"{protein_serial}, {modifier_serial}"
             )
-        target = getattr(plan, "target_bond_length_angstrom", None)
+        target = plan.target_bond_length_angstrom
         used_fallback = False
         if target is None:
             used_fallback = True
@@ -109,8 +108,8 @@ def resolve_product_linkage_pairs(
                 )
         resolved.append(
             ProductLinkage(
-                attachment_id=getattr(spec, "attachment_id", None),
-                attachment_index=getattr(spec, "attachment_index", plan_index),
+                attachment_id=spec.attachment_id,
+                attachment_index=spec.attachment_index,
                 protein_atom_index=serial_to_index[protein_serial],
                 modifier_atom_index=serial_to_index[modifier_serial],
                 protein_serial=protein_serial,
@@ -127,6 +126,7 @@ def _product_serial_to_topology_index(
     topology_atoms: tuple[Any, ...],
 ) -> dict[int, int]:
     """Map product PDB atom serials to OpenMM topology atom indices."""
+    _validate_unique_product_serials(product_atoms)
     identity_to_serials: dict[tuple[str, str, str, str], list[int]] = {}
     for atom in product_atoms:
         if atom.serial is None:
@@ -151,6 +151,26 @@ def _product_serial_to_topology_index(
     return serial_to_index
 
 
+def _validate_unique_product_serials(product_atoms: tuple[PdbAtomRecord, ...]) -> None:
+    """Reject duplicate non-empty product PDB atom serials before mapping."""
+    seen: dict[int, PdbAtomRecord] = {}
+    duplicates: list[int] = []
+    for atom in product_atoms:
+        if atom.serial is None:
+            continue
+        serial = int(atom.serial)
+        if serial in seen:
+            duplicates.append(serial)
+            continue
+        seen[serial] = atom
+    if duplicates:
+        duplicate_text = ", ".join(str(serial) for serial in sorted(set(duplicates)))
+        raise RuntimeError(
+            "Product PDB atom serials must be unique before topology mapping: "
+            f"duplicate serials={duplicate_text}"
+        )
+
+
 def _pdb_product_identity(atom: PdbAtomRecord) -> tuple[str, str, str, str]:
     """Return identity fields shared by PDB atoms and OpenMM topology atoms."""
     residue_id = f"{atom.residue_number}{atom.insertion_code.strip()}".strip()
@@ -169,28 +189,119 @@ def _serial_pair_for_attachment(
     plan_index: int,
     product_atoms: tuple[PdbAtomRecord, ...],
     assembly_pairs: tuple[Any, ...],
+    require_validated_assembly_pair: bool,
 ) -> tuple[int, int] | None:
     """Resolve product serials for one attachment from assembly or plan metadata."""
-    if 1 <= plan_index <= len(assembly_pairs):
-        normalized = _normalize_serial_pair(assembly_pairs[plan_index - 1])
-        if normalized is not None:
-            return normalized
-    protein = _matching_product_atom(
-        product_atoms, getattr(plan, "protein_link_atom", None), plan, role="protein"
+    expected_pair = _spec_endpoint_serial_pair(plan, product_atoms)
+    if require_validated_assembly_pair and expected_pair is None:
+        _raise_unresolved_multi_attachment_pair(plan, spec, plan_index=plan_index)
+
+    has_positional_pair = 1 <= plan_index <= len(assembly_pairs)
+    normalized = (
+        _normalize_serial_pair(assembly_pairs[plan_index - 1]) if has_positional_pair else None
     )
+    if require_validated_assembly_pair and normalized is None:
+        _raise_missing_multi_attachment_pair(
+            spec,
+            plan_index=plan_index,
+            raw_pair=assembly_pairs[plan_index - 1] if has_positional_pair else None,
+            expected=expected_pair,
+        )
+    if normalized is not None:
+        if expected_pair is not None and normalized != expected_pair:
+            _raise_linkage_pair_mismatch(
+                plan,
+                spec,
+                plan_index=plan_index,
+                observed=normalized,
+                expected=expected_pair,
+            )
+        return normalized
+    if expected_pair is not None:
+        return expected_pair
+    return None
+
+
+def _raise_unresolved_multi_attachment_pair(plan: Any, spec: Any, *, plan_index: int) -> None:
+    """Raise when a multi-attachment product lacks resolvable endpoint serials."""
+    attachment_id = spec.attachment_id
+    attachment_index = spec.attachment_index
+    protein_detail = _pdb_atom_identity(plan.protein_link_atom)
+    modifier_detail = _pdb_atom_identity(plan.modifier_link_atom)
+    raise RuntimeError(
+        "Could not validate multi-attachment product linkage endpoints: "
+        f"attachment_id={attachment_id!r}, attachment_index={attachment_index}, "
+        "expected pair could not be resolved from product atom identity; "
+        f"protein_endpoint={protein_detail}, modifier_endpoint={modifier_detail}"
+    )
+
+
+def _raise_missing_multi_attachment_pair(
+    spec: Any,
+    *,
+    plan_index: int,
+    raw_pair: Any,
+    expected: tuple[int, int] | None,
+) -> None:
+    """Raise when multi-attachment assembly metadata cannot validate one pair."""
+    attachment_id = spec.attachment_id
+    attachment_index = spec.attachment_index
+    raise RuntimeError(
+        "Could not validate multi-attachment product linkage pair from assembly metadata: "
+        f"attachment_id={attachment_id!r}, attachment_index={attachment_index}, "
+        f"observed_pair={raw_pair!r}, expected_pair={expected}"
+    )
+
+
+def _spec_endpoint_serial_pair(
+    plan: Any,
+    product_atoms: tuple[PdbAtomRecord, ...],
+) -> tuple[int, int] | None:
+    """Resolve exact product PDB endpoint serials from one mapped attachment spec."""
+    provenance = plan.endpoint_provenance
+    conect_pair = provenance.get("conect_pair", {})
+    protein_serial = conect_pair.get("protein_serial")
+    modifier_serial = conect_pair.get("modifier_serial")
+    if protein_serial is not None and modifier_serial is not None:
+        pair = (int(protein_serial), int(modifier_serial))
+        serials = {atom.serial for atom in product_atoms}
+        if pair[0] not in serials or pair[1] not in serials:
+            raise RuntimeError(
+                "Attachment endpoint provenance references serials absent from product PDB: "
+                f"{pair}"
+            )
+        return pair
+    protein = _matching_product_atom(product_atoms, plan.protein_link_atom, plan, role="protein")
     modifier = _matching_product_atom(
         product_atoms,
-        getattr(plan, "modifier_link_atom", None),
+        plan.modifier_link_atom,
         plan,
         role="modifier",
     )
     if protein is not None and modifier is not None and protein.serial and modifier.serial:
         return int(protein.serial), int(modifier.serial)
-    mappings = getattr(spec, "product_residue_mappings", {}) or {}
-    if mappings:
-        # Preserve generic metadata for future richer disambiguation without guessing chemistry
-        return None
     return None
+
+
+def _raise_linkage_pair_mismatch(
+    plan: Any,
+    spec: Any,
+    *,
+    plan_index: int,
+    observed: tuple[int, int],
+    expected: tuple[int, int],
+) -> None:
+    """Raise a strict attachment-pair mismatch with endpoint diagnostics."""
+    attachment_id = spec.attachment_id
+    attachment_index = spec.attachment_index
+    protein_detail = _pdb_atom_identity(plan.protein_link_atom)
+    modifier_detail = _pdb_atom_identity(plan.modifier_link_atom)
+    raise RuntimeError(
+        "Assembly CONECT pair does not match attachment spec endpoints: "
+        f"attachment_id={attachment_id!r}, attachment_index={attachment_index}, "
+        f"observed_pair={observed}, expected_pair={expected}, "
+        f"protein_endpoint={protein_detail}, modifier_endpoint={modifier_detail}"
+    )
 
 
 def _normalize_serial_pair(pair: Any) -> tuple[int, int] | None:
@@ -209,30 +320,87 @@ def _matching_product_atom(
     *,
     role: str,
 ) -> PdbAtomRecord | None:
-    """Find a product PDB atom corresponding to a resolved link atom."""
+    """Find a product PDB atom corresponding to a resolved link atom.
+
+    The source atom may carry stale serial metadata from a pre-assembly fragment.
+    Serial matches are accepted only when their full product identity still matches;
+    otherwise resolution falls back to one exact identity match.
+    """
     if source_atom is None:
         return None
+    expected_identity = _expected_product_atom_identity(source_atom, plan, role=role)
+    source_serial = getattr(source_atom, "serial", None)
+    if source_serial is not None:
+        serial_matches = [atom for atom in atoms if atom.serial == int(source_serial)]
+        if len(serial_matches) > 1:
+            raise RuntimeError(
+                "Product linkage serial is not unique in product PDB: "
+                f"serial={int(source_serial)}, role={role!r}"
+            )
+        if len(serial_matches) == 1 and _atom_matches_expected_identity(
+            serial_matches[0], expected_identity
+        ):
+            return serial_matches[0]
+
+    identity_matches = [
+        atom for atom in atoms if _atom_matches_expected_identity(atom, expected_identity)
+    ]
+    if len(identity_matches) > 1:
+        raise RuntimeError(
+            "Product linkage atom identity is ambiguous in product PDB: "
+            f"role={role!r}, identity={expected_identity}"
+        )
+    if len(identity_matches) == 1:
+        return identity_matches[0]
+    return None
+
+
+def _expected_product_atom_identity(
+    source_atom: Any,
+    plan: Any,
+    *,
+    role: str,
+) -> tuple[str, str, int | None, str, str, str]:
+    """Return normalized product identity expected for one mapped link atom."""
     target_resname = (
-        getattr(plan, "protein_product_residue_name", None)
+        plan.protein_product_residue_name
         if role == "protein"
-        else getattr(plan, "modifier_product_residue_name", None)
+        else plan.modifier_product_residue_name
     )
     source_chain = str(getattr(source_atom, "chain_id", "") or "").strip()
     source_number = getattr(source_atom, "residue_number", None)
     source_insertion = str(getattr(source_atom, "insertion_code", "") or "").strip()
     source_name = str(getattr(source_atom, "atom_name", "") or "").strip()
-    for atom in atoms:
-        if source_chain and atom.chain_id.strip() != source_chain:
-            continue
-        if source_number is not None and atom.residue_number != source_number:
-            continue
-        if source_insertion and atom.insertion_code.strip() != source_insertion:
-            continue
-        if target_resname and atom.residue_name.strip().upper() != str(target_resname).upper():
-            continue
-        if atom.atom_name.strip().upper() == source_name.upper():
-            return atom
-    return None
+    source_element = str(getattr(source_atom, "element", "") or "").strip()
+    return (
+        source_chain.upper(),
+        str(target_resname or getattr(source_atom, "residue_name", "") or "").strip().upper(),
+        source_number,
+        source_insertion.upper(),
+        source_name.upper(),
+        source_element.upper(),
+    )
+
+
+def _atom_matches_expected_identity(
+    atom: PdbAtomRecord,
+    expected_identity: tuple[str, str, int | None, str, str, str],
+) -> bool:
+    """Return whether a product atom matches all available expected identity fields."""
+    chain_id, residue_name, residue_number, insertion_code, atom_name, element = expected_identity
+    if chain_id and atom.chain_id.strip().upper() != chain_id:
+        return False
+    if residue_name and atom.residue_name.strip().upper() != residue_name:
+        return False
+    if residue_number is not None and atom.residue_number != residue_number:
+        return False
+    if insertion_code and atom.insertion_code.strip().upper() != insertion_code:
+        return False
+    if atom.atom_name.strip().upper() != atom_name:
+        return False
+    if element and atom.element.strip().upper() != element:
+        return False
+    return True
 
 
 def _pdb_atom_identity(atom: Any | None) -> str | None:

@@ -184,7 +184,11 @@ def test_simulation_config_accepts_yaml_polymer_recipe(tmp_path):
             {
                 "name": "lys23-sbma-egpma-nhs",
                 "site": {"chain_id": "A", "residue_name": "LYS", "residue_number": 23},
-                "moiety": {"name": "SBMA-EGPMA-NHS", "polymer_recipe": _recipe_dict()},
+                "moiety": {
+                    "name": "SBMA-EGPMA-NHS",
+                    "force_field": "openff-2.0.0.offxml",
+                    "polymer_recipe": _recipe_dict(),
+                },
                 "mechanism": {"name": "nhs_lys_amide"},
             }
         ],
@@ -229,6 +233,7 @@ conjugation:
         residue_number: 23
       moiety:
         name: SBMA-EGPMA-NHS
+        force_field: openff-2.0.0.offxml
         recipe:
           name: SBMA-EGPMA-NHS
           length: 9

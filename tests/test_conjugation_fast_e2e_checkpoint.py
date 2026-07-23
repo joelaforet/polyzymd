@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import json
 import os
+from collections import Counter
+from pathlib import Path
 
 import pytest
 
 from tests._support.conjugation_fast_e2e import (
+    _pdb_atom_records,
     run_fast_mixed_build_export,
+    validate_fast_mixed_o_summary,
     validate_fast_mixed_summary,
 )
 
 RUN_FAST_E2E = "POLYZYMD_RUN_CONJUGATION_FAST_E2E"
 RUN_FAST_E2E_CUDA = "POLYZYMD_RUN_CONJUGATION_FAST_E2E_CUDA"
+RUN_FAST_O_E2E = "POLYZYMD_RUN_CONJUGATION_FAST_O_E2E"
+RUN_FAST_O_THR_E2E = "POLYZYMD_RUN_CONJUGATION_FAST_O_THR_E2E"
 
 
 @pytest.mark.slow
@@ -35,6 +42,63 @@ def test_fast_mixed_conjugation_cuda_checkpoint(tmp_path):
     summary = run_fast_mixed_build_export(tmp_path, run_cuda=True)
 
     validate_fast_mixed_summary(summary, require_cuda=True)
+
+
+@pytest.mark.slow
+def test_fast_mixed_o_glycosylation_build_export_checkpoint(tmp_path):
+    """Build the mixed NHS-Lys plus Ser O-glycosylation checkpoint when opted in."""
+    if os.environ.get(RUN_FAST_O_E2E) != "1":
+        pytest.skip(f"Set {RUN_FAST_O_E2E}=1 to run the O-glycosylation E2E checkpoint")
+
+    summary = run_fast_mixed_build_export(tmp_path, glycosylation="o_ser")
+
+    validate_fast_mixed_o_summary(summary)
+
+
+@pytest.mark.slow
+def test_fast_mixed_thr_o_glycosylation_build_export_checkpoint(tmp_path):
+    """Build the mixed NHS-Lys plus Thr O-glycosylation checkpoint when opted in."""
+    if os.environ.get(RUN_FAST_O_THR_E2E) != "1":
+        pytest.skip(f"Set {RUN_FAST_O_THR_E2E}=1 to run the Thr O-glycosylation E2E")
+
+    summary = run_fast_mixed_build_export(tmp_path, glycosylation="o_thr")
+
+    validate_fast_mixed_o_summary(
+        summary, product_residue="OLT", residue_number=60, site_atom="OG1"
+    )
+    atoms = _pdb_atom_records(summary["solvated_pdb"])
+    assert {atom["chain_id"] for atom in atoms if atom["residue_name"] == "LYX"} == {"A"}
+    assert {
+        atom["chain_id"]
+        for atom in atoms
+        if atom["residue_name"] in {"SBM", "SB1", "EG1", "NHX", "0VA"}
+    } == {"C"}
+    solvent = [
+        atom
+        for atom in atoms
+        if atom["residue_name"] in {"HOH", "WAT", "DMS", "NA", "Na+", "CL", "Cl-"}
+    ]
+    assert solvent
+    assert {atom["chain_id"] for atom in solvent} <= set("DEFGHIJKLMNOPQRSTUVWXYZ")
+    solvent_identities = {
+        (atom["chain_id"], atom["residue_number"], atom["residue_name"]) for atom in solvent
+    }
+    solvent_atom_counts = Counter(atom["residue_name"] for atom in solvent)
+    expected_solvent_molecules = (
+        sum(solvent_atom_counts[name] for name in {"NA", "Na+", "CL", "Cl-"})
+        + sum(solvent_atom_counts[name] // 3 for name in {"HOH", "WAT"})
+        + solvent_atom_counts["DMS"] // 10
+    )
+    assert len(solvent_identities) == expected_solvent_molecules
+    assert not ({"", "X"} | set("0123456789")) & {atom["chain_id"] for atom in atoms}
+    sidecar = json.loads(
+        (Path(summary["solvated_pdb"]).parent / "exact_openmm_exceptions.json").read_text()
+    )
+    authoritative_atoms = sidecar["atoms"]
+    assert {atom["chain_id"] for atom in authoritative_atoms if atom["residue_name"] == "SBM"} == {
+        "C"
+    }
+    assert not ({"", "X"} | set("0123456789")) & {atom["chain_id"] for atom in authoritative_atoms}
 
 
 def test_fast_mixed_summary_validation_accepts_expected_payload():
@@ -84,12 +148,12 @@ def _summary_payload() -> dict[str, object]:
             "leaving_atom_indices": [10, 126],
             "leaving_atom_count": 2,
         },
-        "final_interchange_created": True,
+        "authoritative_system_created": True,
         "resolved_attachment_count": 2,
         "solvated_atom_count": 2_500,
         "crosslinked_atom_count": 1_500,
         "finite_coordinates": True,
-        "residue_counts": {"LYX": 10, "ASX": 8, "NAG": 223},
+        "residue_counts": {"LYX": 10, "NLN": 8, "NAG": 223},
         "product_glycan": {
             "residue_name": "NAG",
             "source_atom_count": 225,
@@ -99,13 +163,13 @@ def _summary_payload() -> dict[str, object]:
         "n_glycosylation_linkage": {
             "mechanism_name": "n_glycosylation",
             "site_residue_number": 60,
-            "protein_product_residue_name": "ASX",
+            "protein_product_residue_name": "NLN",
             "modifier_product_residue_name": "NAG",
             "protein_link_atom_name": "ND2",
-            "product_asn60_nd2_present": True,
+            "product_site_atom_present": True,
             "protein_leaving_atom_names": ["HD21"],
             "modifier_leaving_atom_count": 2,
-            "crosslink_residues": ["ASX", "NAG"],
+            "crosslink_residues": ["NLN", "NAG"],
             "crosslink_linking_atoms": ["ND2", "C1"],
         },
         "export_exists": {"gro": True, "top": True, "em_mdp": True, "prod_mdp": True},

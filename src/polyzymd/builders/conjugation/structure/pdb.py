@@ -16,6 +16,7 @@ from polyzymd.builders.conjugation.structure.parsing import (
     PdbAtomRecord,
     parse_pdb_atom_lines,
     parse_pdb_atom_records,
+    parse_pdb_conect_pairs,
 )
 
 _MAX_CONECT_TARGETS = 4
@@ -332,6 +333,8 @@ class PdbLinkageAttachment(BaseModel):
     target_insertion_code: str = Field("", max_length=1)
     target_atom_name: str
     protein_leaving_atoms_to_remove: tuple[PdbAtomRecord, ...] = Field(default_factory=tuple)
+    modifier_link_atom: PdbAtomRecord
+    modifier_leaving_atoms_to_remove: tuple[PdbAtomRecord, ...] = Field(default_factory=tuple)
     protein_target_resname: str
     modifier_target_resname: str
 
@@ -363,6 +366,10 @@ class CrosslinkedPdbAssemblyResult(BaseModel):
     added_conect_pairs: tuple[tuple[int, int], ...] = Field(default_factory=tuple)
     warnings: tuple[str, ...] = Field(default_factory=tuple)
     residue_mappings: dict[str, dict[str, int | str]] = Field(default_factory=dict)
+    atom_mappings: dict[str, dict[str, int | str]] = Field(default_factory=dict)
+    attachment_endpoint_records: tuple[dict[str, int | str | dict[str, int | str]], ...] = Field(
+        default_factory=tuple
+    )
 
 
 def canonicalize_poc_residue_name(raw_residue_name: str, *, crosslinked: bool = False) -> str:
@@ -436,6 +443,7 @@ def write_crosslinked_pdb(
     warnings: list[str] = []
 
     protein_atoms = _parse_pdb_atoms(protein_path)
+    protein_component_by_atom_index = _protein_component_by_atom_index(protein_path)
     kept_protein_atoms, removed_protein_atoms = _prepare_protein_atoms(
         protein_atoms,
         attachments,
@@ -447,6 +455,7 @@ def write_crosslinked_pdb(
     atom_lines: list[str] = []
     conect_map: dict[int, set[int]] = {}
     residue_mappings: dict[str, dict[str, int | str]] = {}
+    atom_mappings: dict[str, dict[str, int | str]] = {}
     removed_polymer_atoms: list[PdbAtomRecord] = []
     crosslink_pair: tuple[int, int] | None = None
     crosslink_pairs: list[tuple[int, int]] = []
@@ -456,7 +465,17 @@ def write_crosslinked_pdb(
     protein_serial_by_index: dict[int, int] = {}
     protein_serial_by_input_serial: dict[int, int] = {}
 
+    previous_protein_atom: PdbAtomRecord | None = None
+    previous_protein_component: int | None = None
     for atom in kept_protein_atoms:
+        protein_component = protein_component_by_atom_index.get(atom.atom_index, 0)
+        if (
+            writer_options.append_ter_records
+            and previous_protein_atom is not None
+            and protein_component != previous_protein_component
+        ):
+            ter_serial, next_serial = _next_ter_serial(next_serial, used_serials)
+            atom_lines.append(_format_ter_line(previous_protein_atom, ter_serial))
         new_serial, next_serial = _next_atom_serial(atom, next_serial, used_serials, writer_options)
         updated = atom.model_copy(
             update={"serial": new_serial, "chain_id": writer_options.protein_chain}
@@ -467,10 +486,20 @@ def write_crosslinked_pdb(
             protein_serial_by_index[atom.atom_index] = new_serial
         if atom.serial is not None:
             protein_serial_by_input_serial[atom.serial] = new_serial
+        previous_protein_atom = updated
+        previous_protein_component = protein_component
 
-    if writer_options.append_ter_records and output_atoms:
-        atom_lines.append(_format_ter_line(output_atoms[-1], next_serial))
-        next_serial += 1
+    if writer_options.append_ter_records and previous_protein_atom is not None:
+        ter_serial, next_serial = _next_ter_serial(next_serial, used_serials)
+        atom_lines.append(_format_ter_line(previous_protein_atom, ter_serial))
+
+    for source_left, source_right in parse_pdb_conect_pairs(protein_path):
+        output_left = protein_serial_by_input_serial.get(source_left)
+        output_right = protein_serial_by_input_serial.get(source_right)
+        if output_left is None or output_right is None:
+            continue
+        conect_map.setdefault(output_left, set()).add(output_right)
+        conect_map.setdefault(output_right, set()).add(output_left)
 
     next_polymer_residue_number = 1
     for fragment_index, (fragment, fragment_attachment) in enumerate(
@@ -499,6 +528,7 @@ def write_crosslinked_pdb(
         output_atoms.extend(fragment_result.atoms)
         removed_polymer_atoms.extend(fragment_result.removed_atoms)
         residue_mappings.update(fragment_result.residue_mappings)
+        atom_mappings.update(fragment_result.atom_mappings)
 
         conect_map.setdefault(target_serial, set()).add(fragment_result.reactive_serial)
         conect_map.setdefault(fragment_result.reactive_serial, set()).add(target_serial)
@@ -506,8 +536,8 @@ def write_crosslinked_pdb(
         crosslink_pairs.append(crosslink_pair)
 
         if writer_options.append_ter_records and fragment_result.atoms:
-            atom_lines.append(_format_ter_line(fragment_result.atoms[-1], next_serial))
-            next_serial += 1
+            ter_serial, next_serial = _next_ter_serial(next_serial, used_serials)
+            atom_lines.append(_format_ter_line(fragment_result.atoms[-1], ter_serial))
 
     if crosslink_pair is None:
         raise ValueError("No polymer fragment was available for crosslinked PDB assembly")
@@ -528,6 +558,15 @@ def write_crosslinked_pdb(
         handle.write("END\n")
 
     removed_atoms = [*removed_protein_atoms, *removed_polymer_atoms]
+    endpoint_records = tuple(
+        _attachment_endpoint_record(
+            fragment_index=index,
+            protein_atom=_product_atom_by_serial(output_atoms, pair[0]),
+            modifier_atom=_product_atom_by_serial(output_atoms, pair[1]),
+            conect_pair=pair,
+        )
+        for index, pair in enumerate(crosslink_pairs, start=1)
+    )
     return CrosslinkedPdbAssemblyResult(
         output_path=destination,
         protein_atom_count=len(kept_protein_atoms),
@@ -544,6 +583,8 @@ def write_crosslinked_pdb(
         added_conect_pairs=tuple(crosslink_pairs),
         warnings=tuple(warnings),
         residue_mappings=residue_mappings,
+        atom_mappings=atom_mappings,
+        attachment_endpoint_records=endpoint_records,
     )
 
 
@@ -557,6 +598,7 @@ class _PolymerAppendResult(BaseModel):
     next_serial: int
     next_residue_number: int
     residue_mappings: dict[str, dict[str, int | str]]
+    atom_mappings: dict[str, dict[str, int | str]]
 
 
 def _append_polymer_fragment(
@@ -572,10 +614,14 @@ def _append_polymer_fragment(
     warnings: list[str],
 ) -> _PolymerAppendResult:
     """Append retained polymer atoms and internal connectivity for one fragment."""
-    removed_atoms = [atom for atom in fragment.atoms if _is_removed_polymer_atom(atom, fragment)]
+    if isinstance(attachment, NhsLysPdbAttachment):
+        _validate_polymer_leaving_selectors(fragment)
+    removed_atoms = [
+        atom for atom in fragment.atoms if _is_removed_polymer_atom(atom, fragment, attachment)
+    ]
     removed_keys = {_atom_identity(atom) for atom in removed_atoms}
     kept_atoms = [atom for atom in fragment.atoms if _atom_identity(atom) not in removed_keys]
-    reactive_atom = _resolve_reactive_polymer_atom(fragment)
+    reactive_atom = _resolve_reactive_polymer_atom(fragment, attachment)
     if _atom_identity(reactive_atom) in removed_keys:
         raise ValueError("The polymer reactive atom cannot be listed as a leaving-group atom")
     kept_atoms = _order_polymer_atoms_by_connectivity(
@@ -586,6 +632,7 @@ def _append_polymer_fragment(
 
     residue_key_to_number: dict[tuple[int, str], int] = {}
     residue_mappings: dict[str, dict[str, int | str]] = {}
+    atom_mappings: dict[str, dict[str, int | str]] = {}
     reactive_residue_key = _polymer_residue_key(reactive_atom)
     atom_serial_by_index: dict[int, int] = {}
     atom_serial_by_input_serial: dict[int, int] = {}
@@ -600,7 +647,9 @@ def _append_polymer_fragment(
             residue_key_to_number[residue_key] = residue_cursor
             residue_mappings[f"fragment_{fragment_index}:{residue_key[0]}{residue_key[1]}"] = {
                 "source_residue_number": residue_key[0],
+                "source_insertion_code": residue_key[1] or "",
                 "target_residue_number": residue_cursor,
+                "target_insertion_code": "",
                 "target_chain": options.polymer_chain,
             }
             residue_cursor += 1
@@ -628,6 +677,22 @@ def _append_polymer_fragment(
         if atom.serial is not None:
             atom_serial_by_input_serial[atom.serial] = new_serial
         atom_serial_by_name.setdefault(atom.atom_name, new_serial)
+        atom_mappings[
+            f"fragment_{fragment_index}:{residue_key[0]}{residue_key[1]}:{atom.atom_name}"
+        ] = {
+            "source_serial": int(atom.serial) if atom.serial is not None else "",
+            "source_atom_index": int(atom.atom_index) if atom.atom_index is not None else "",
+            "source_atom_name": atom.atom_name,
+            "source_residue_name": atom.residue_name,
+            "source_residue_number": residue_key[0],
+            "source_insertion_code": residue_key[1] or "",
+            "target_serial": new_serial,
+            "target_atom_name": updated.atom_name,
+            "target_residue_name": updated.residue_name,
+            "target_residue_number": updated.residue_number,
+            "target_insertion_code": updated.insertion_code or "",
+            "target_chain": updated.chain_id,
+        }
 
     retained_keys = {_atom_identity(atom) for atom in kept_atoms}
     for atom_1_ref, atom_2_ref in fragment.bonds:
@@ -673,7 +738,58 @@ def _append_polymer_fragment(
         next_serial=next_serial,
         next_residue_number=residue_cursor,
         residue_mappings=residue_mappings,
+        atom_mappings=atom_mappings,
     )
+
+
+def _product_atom_by_serial(atoms: list[PdbAtomRecord], serial: int) -> PdbAtomRecord:
+    """Return an emitted atom by exact output serial."""
+    for atom in atoms:
+        if atom.serial == serial:
+            return atom
+    raise ValueError(f"Crosslinked PDB assembly recorded missing output serial {serial}")
+
+
+def _attachment_endpoint_record(
+    *,
+    fragment_index: int,
+    protein_atom: PdbAtomRecord,
+    modifier_atom: PdbAtomRecord,
+    conect_pair: tuple[int, int],
+) -> dict[str, int | str | dict[str, int | str]]:
+    """Build serial-first endpoint provenance for one emitted attachment."""
+    return {
+        "attachment_index": fragment_index,
+        "conect_pair": {"protein_serial": conect_pair[0], "modifier_serial": conect_pair[1]},
+        "protein_endpoint": _endpoint_atom_payload(protein_atom),
+        "modifier_endpoint": _endpoint_atom_payload(modifier_atom),
+    }
+
+
+def _endpoint_atom_payload(atom: PdbAtomRecord) -> dict[str, int | str]:
+    """Return a JSON-safe atom endpoint record."""
+    return {
+        "serial": int(atom.serial) if atom.serial is not None else "",
+        "atom_name": atom.atom_name,
+        "residue_name": atom.residue_name,
+        "chain_id": atom.chain_id,
+        "residue_number": atom.residue_number,
+        "insertion_code": atom.insertion_code or "",
+    }
+
+
+def _validate_polymer_leaving_selectors(fragment: PlacedPolymerFragment) -> None:
+    """Validate name-only polymer leaving selectors before atom removal."""
+    if fragment.leaving_atom_serials or fragment.leaving_atom_indices:
+        return
+    for name in fragment.leaving_atom_names:
+        matches = [atom for atom in fragment.atoms if atom.atom_name.upper() == name.upper()]
+        unique = _unique_atoms(matches)
+        if len(unique) != 1:
+            raise ValueError(
+                f"Expected exactly one leaving atom named {name} in {fragment.name}, "
+                f"found {len(unique)}"
+            )
 
 
 def _order_polymer_atoms_by_connectivity(
@@ -782,6 +898,30 @@ def _parse_pdb_atoms(path: Path) -> list[PdbAtomRecord]:
     return atoms
 
 
+def _protein_component_by_atom_index(path: Path) -> dict[int, int]:
+    """Map source atom indices to chain/TER-delimited protein components."""
+    component = 0
+    atom_index = 0
+    previous_chain: str | None = None
+    boundary_pending = False
+    component_by_atom_index: dict[int, int] = {}
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("TER"):
+                boundary_pending = atom_index > 0
+                continue
+            if not line.startswith(_ATOM_RECORD_PREFIXES):
+                continue
+            chain_id = line[21:22].strip()
+            if atom_index > 0 and (boundary_pending or chain_id != previous_chain):
+                component += 1
+            component_by_atom_index[atom_index] = component
+            atom_index += 1
+            previous_chain = chain_id
+            boundary_pending = False
+    return component_by_atom_index
+
+
 def _prepare_protein_atoms(
     atoms: Sequence[PdbAtomRecord],
     attachment: PdbAssemblyAttachment | Sequence[PdbAssemblyAttachment],
@@ -802,12 +942,33 @@ def _prepare_protein_atoms(
         update = {"chain_id": options.protein_chain}
         for item in attachments:
             if _matches_attachment_residue(atom, item):
-                update["residue_name"] = _pdb_safe_residue_name(
+                product_residue_name = _pdb_safe_residue_name(
                     _attachment_protein_product_resname(item)
                 )
+                update["residue_name"] = product_residue_name
+                if (
+                    product_residue_name == "NLN"
+                    and atom.atom_name.upper() == "HD22"
+                    and not _retained_nln_hd21_exists(atoms, atom_indices_to_remove, item)
+                ):
+                    update["atom_name"] = "HD21"
                 break
         kept_atoms.append(atom.model_copy(update=update))
     return kept_atoms, removed_atoms
+
+
+def _retained_nln_hd21_exists(
+    atoms: Sequence[PdbAtomRecord],
+    removed_atom_indices: set[int],
+    attachment: PdbAssemblyAttachment,
+) -> bool:
+    """Return whether an NLN product already retains its canonical HD21 atom."""
+    return any(
+        _matches_attachment_residue(atom, attachment)
+        and atom.atom_name.upper() == "HD21"
+        and atom.atom_index not in removed_atom_indices
+        for atom in atoms
+    )
 
 
 def _select_protein_atoms_to_remove(
@@ -987,33 +1148,45 @@ def _is_hydrogen_atom(atom: PdbAtomRecord) -> bool:
     return (atom.element or "").upper() == "H" or atom.atom_name.upper().startswith("H")
 
 
-def _is_removed_polymer_atom(atom: PdbAtomRecord, fragment: PlacedPolymerFragment) -> bool:
+def _is_removed_polymer_atom(
+    atom: PdbAtomRecord,
+    fragment: PlacedPolymerFragment,
+    attachment: PdbAssemblyAttachment,
+) -> bool:
     """Return whether a polymer atom is selected as leaving group."""
-    return (
-        (atom.serial is not None and atom.serial in fragment.leaving_atom_serials)
-        or (atom.atom_index is not None and atom.atom_index in fragment.leaving_atom_indices)
-        or atom.atom_name.upper() in {name.upper() for name in fragment.leaving_atom_names}
-    )
+    if isinstance(attachment, PdbLinkageAttachment):
+        leaving = {_atom_identity(item) for item in attachment.modifier_leaving_atoms_to_remove}
+        return _atom_identity(atom) in leaving
+    if fragment.leaving_atom_serials:
+        return atom.serial is not None and atom.serial in fragment.leaving_atom_serials
+    if fragment.leaving_atom_indices:
+        return atom.atom_index is not None and atom.atom_index in fragment.leaving_atom_indices
+    if fragment.leaving_atom_names:
+        return atom.atom_name.upper() in {name.upper() for name in fragment.leaving_atom_names}
+    return False
 
 
-def _resolve_reactive_polymer_atom(fragment: PlacedPolymerFragment) -> PdbAtomRecord:
+def _resolve_reactive_polymer_atom(
+    fragment: PlacedPolymerFragment, attachment: PdbAssemblyAttachment
+) -> PdbAtomRecord:
     """Resolve the polymer reactive atom from explicit selectors."""
-    matches = [
-        atom
-        for atom in fragment.atoms
-        if (
-            fragment.reactive_atom_serial is not None
-            and atom.serial == fragment.reactive_atom_serial
-        )
-        or (
-            fragment.reactive_atom_index is not None
-            and atom.atom_index == fragment.reactive_atom_index
-        )
-        or (
-            fragment.reactive_atom_name is not None
-            and atom.atom_name.upper() == fragment.reactive_atom_name.upper()
-        )
-    ]
+    if isinstance(attachment, PdbLinkageAttachment):
+        target = _atom_identity(attachment.modifier_link_atom)
+        matches = [atom for atom in fragment.atoms if _atom_identity(atom) == target]
+    elif fragment.reactive_atom_serial is not None:
+        matches = [atom for atom in fragment.atoms if atom.serial == fragment.reactive_atom_serial]
+    elif fragment.reactive_atom_index is not None:
+        matches = [
+            atom for atom in fragment.atoms if atom.atom_index == fragment.reactive_atom_index
+        ]
+    elif fragment.reactive_atom_name is not None:
+        matches = [
+            atom
+            for atom in fragment.atoms
+            if atom.atom_name.upper() == fragment.reactive_atom_name.upper()
+        ]
+    else:
+        matches = []
     unique = _unique_atoms(matches)
     if len(unique) != 1:
         raise ValueError(
@@ -1100,6 +1273,14 @@ def _next_atom_serial(
     serial = next_serial
     used_serials.add(serial)
     return serial, next_serial + 1
+
+
+def _next_ter_serial(next_serial: int, used_serials: set[int]) -> tuple[int, int]:
+    """Allocate a TER serial that cannot collide with emitted atom records."""
+    while next_serial in used_serials:
+        next_serial += 1
+    used_serials.add(next_serial)
+    return next_serial, next_serial + 1
 
 
 def _output_serial_for_atom(

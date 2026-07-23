@@ -36,6 +36,17 @@ engine: "openmm"
 description: "Description of your simulation system"
 
 # ============================================================================
+# Build Endpoint (OPTIONAL)
+# ============================================================================
+# "system" (default): complete solvated simulation inputs
+# "solute": parameterized primary covalent component only; preparation handoff
+# "structure": assembled conjugate coordinates only; requires conjugation
+# A command-line --scope value overrides this setting for one build.
+#
+# build:
+#   scope: "system"
+
+# ============================================================================
 # Enzyme Configuration (REQUIRED)
 # ============================================================================
 # Your protein structure file. Must be:
@@ -174,7 +185,11 @@ description: "Description of your simulation system"
 # Water model, ions, and box settings.
 #
 # water model options: tip3p, spce, tip4pew, opc
-# box shape options: cube, rhombic_dodecahedron, truncated_octahedron
+# box shape options: orthorhombic, rhombic_dodecahedron, truncated_octahedron
+# orthorhombic applies padding independently on both faces of each axis:
+#   box length_i = coordinate extent_i + 2 * padding
+# Legacy "cube" is accepted as a deprecated alias for orthorhombic; it does
+# not force all three box lengths to be equal.
 #
 # solvent:
 #   primary:
@@ -382,3 +397,22 @@ description: "Description of your simulation system"
 # force_field:
 #   protein: "ff14sb_off_impropers_0.0.4.offxml"
 #   small_molecule: "openff-2.0.0.offxml"
+#
+# Conjugation moiety force fields are attachment scoped:
+#
+# conjugation:
+#   enabled: true
+#   attachments:
+#     - name: "asn60_glycan"
+#       moiety:
+#         name: "n_glycan"
+#         force_field: "glycam06"          # Canonical GLYCAM value
+#     - name: "lys63_polymer"
+#       moiety:
+#         name: "polymer"
+#         force_field: "openff-2.0.0.offxml" # Explicit OpenFF owner
+#
+# Unknown moiety.force_field values fail loudly; PolyzyMD does not fall back from
+# GLYCAM to OpenFF. Post-overlay restraints may target glycans and other atoms.
+# Exact mixed-overlay builds write ownership_manifest.json and
+# overlay_diagnostics.json; final OpenMM minimization uses maxIterations=0.

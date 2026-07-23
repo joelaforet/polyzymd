@@ -63,6 +63,41 @@ exports the final OpenFF Interchange to GROMACS.
 Use `polyzymd run --engine gromacs` instead when you want PolyzyMD to build and
 execute the full local GROMACS workflow.
 
+### Export only the covalently modified primary component
+
+For a topology handoff without solvent, ions, substrate, or free polymer, use
+solute scope:
+
+```bash
+pixi run -e build polyzymd build \
+    -c config.yaml \
+    --scope solute \
+    --format gromacs
+```
+
+The command writes the following under `replicate_N/solute/gromacs/`:
+
+- a `.gro` coordinate file;
+- a `.top` topology file;
+- component `.itp` files when the topology is split;
+- exact-parameter sidecar and semantic audit files when required by the route.
+
+It intentionally writes **no** `.mdp`, run script, or position-restraint
+artifact. Solute scope contains only the protein/primary component and its
+covalently attached moieties. It excludes substrate, free polymers, solvent,
+ions, barostats, and configured simulation-stage restraints. Treat the result
+as topology preparation for a downstream workflow, not as a ready-to-run
+GROMACS simulation.
+
+Exact charged-solute routes may retain a periodic PME representation to
+preserve force-field semantics during export. The audit records this condition.
+You must place the component in an appropriate environment and establish a
+physical box, electrostatics treatment, ions, and run protocol before MD.
+
+Omit `--scope solute` (or set `build.scope: system`) for the existing complete
+solvated GROMACS handoff with convenience MDP and run files. A CLI `--scope`
+value overrides the YAML setting for that invocation.
+
 ---
 
 ## Quick Start: GPU

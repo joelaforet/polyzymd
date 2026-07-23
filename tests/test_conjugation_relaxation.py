@@ -26,8 +26,12 @@ from polyzymd.builders.conjugation.relaxation._openmm_system import (
     _remove_barostats,
     _restore_particle_masses,
     _run_fixed_product_md,
+    _write_relaxed_product_pdb,
 )
-from polyzymd.builders.conjugation.relaxation.geometry import positions_to_numpy
+from polyzymd.builders.conjugation.relaxation.geometry import (
+    positions_to_numpy,
+    replace_pdb_coordinates,
+)
 from polyzymd.builders.conjugation.relaxation.models import (
     ConjugateRelaxationDiagnostics,
     ConjugateRelaxationSettings,
@@ -69,19 +73,22 @@ class _AtomDouble:
 
 
 def _pdb_line(
-    serial: int,
+    serial: int | None,
     atom_name: str,
     residue_name: str,
     chain_id: str,
     residue_number: int,
     x: float,
+    *,
+    element: str | None = None,
 ) -> str:
     """Build a compact PDB atom line for product-linkage tests."""
-    element = atom_name[0]
+    serial_field = "" if serial is None else str(serial)
+    atom_element = element or atom_name[0]
     return (
-        f"ATOM  {serial:5d} {atom_name:<4s} {residue_name:>3s} {chain_id:1s}"
+        f"ATOM  {serial_field:>5s} {atom_name:<4s} {residue_name:>3s} {chain_id:1s}"
         f"{residue_number:4d}    {x:8.3f}{0.0:8.3f}{0.0:8.3f}  1.00  0.00"
-        f"          {element:>2s}\n"
+        f"          {atom_element:>2s}\n"
     )
 
 
@@ -103,6 +110,102 @@ def test_validate_finite_energy_accepts_finite_values():
     validate_finite_energy(-123.4, label="test_energy")
 
 
+def test_write_relaxed_product_pdb_preserves_identity_and_connectivity(tmp_path):
+    """Relaxed coordinate export should preserve product PDB identity records."""
+    product = tmp_path / "product.pdb"
+    relaxed = tmp_path / "relaxed.pdb"
+    product.write_text(
+        "".join(
+            (
+                _pdb_line(1, "CA", "ALA", "A", 1, 0.0, element="C"),
+                "TER       2      ALA A   1\n",
+                _pdb_line(3, "C1", "PEG", "C", 2, 1.0, element="C"),
+                "LINK         CA  ALA A   1                 C1  PEG C   2     1555   1555"
+                "  1.50\n",
+                "CONECT    1    3\n",
+                "END\n",
+            )
+        ),
+        encoding="utf-8",
+    )
+    final_positions_nm = np.array([[0.25, -0.5, 1.0], [1.5, 2.0, -0.25]])
+    unit = SimpleNamespace(nanometer=1.0)
+
+    _write_relaxed_product_pdb(
+        product,
+        final_positions_nm,
+        relaxed,
+        unit,
+        expected_atom_count=2,
+    )
+
+    original_lines = product.read_text(encoding="utf-8").splitlines()
+    lines = relaxed.read_text(encoding="utf-8").splitlines()
+    assert lines[0][:30] == original_lines[0][:30]
+    assert lines[2][:30] == original_lines[2][:30]
+    assert lines[0][21] == "A"
+    assert lines[2][21] == "C"
+    assert lines[1].startswith("TER")
+    assert lines[3].startswith("LINK")
+    assert lines[4] == "CONECT    1    3"
+    assert lines[0][30:54] == "   2.500  -5.000  10.000"
+    assert lines[2][30:54] == "  15.000  20.000  -2.500"
+
+
+def test_replace_pdb_coordinates_accepts_valid_fixed_width_edge_fields(tmp_path):
+    """Fixed-width coordinate replacement should accept exactly fitting edge fields."""
+    product = tmp_path / "product.pdb"
+    relaxed = tmp_path / "relaxed.pdb"
+    product.write_text(_pdb_line(1, "CA", "ALA", "A", 1, 0.0, element="C"), encoding="utf-8")
+
+    replace_pdb_coordinates(product, np.array([[-999.999, 9999.999, 0.0]]), relaxed)
+
+    line = relaxed.read_text(encoding="utf-8").splitlines()[0]
+    assert line[30:54] == "-999.9999999.999   0.000"
+    assert all(len(line[start : start + 8]) == 8 for start in (30, 38, 46))
+
+
+@pytest.mark.parametrize("coordinate", [-1000.0, 9999.9996])
+def test_replace_pdb_coordinates_rejects_fixed_width_overflow(tmp_path, coordinate):
+    """Coordinate replacement should reject raw and rounded PDB field overflow."""
+    product = tmp_path / "product.pdb"
+    relaxed = tmp_path / "relaxed.pdb"
+    product.write_text(_pdb_line(1, "CA", "ALA", "A", 1, 0.0, element="C"), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="8-character PDB field"):
+        replace_pdb_coordinates(product, np.array([[coordinate, 0.0, 0.0]]), relaxed)
+
+
+def test_write_relaxed_product_pdb_rejects_atom_count_mismatch(tmp_path):
+    """Relaxed coordinate export should require one final position per product atom."""
+    product = tmp_path / "product.pdb"
+    product.write_text(_pdb_line(1, "CA", "ALA", "A", 1, 0.0, element="C"), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="atom count"):
+        _write_relaxed_product_pdb(
+            product,
+            np.array([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0]]),
+            tmp_path / "relaxed.pdb",
+            SimpleNamespace(nanometer=1.0),
+            expected_atom_count=1,
+        )
+
+
+def test_write_relaxed_product_pdb_rejects_nonfinite_positions(tmp_path):
+    """Relaxed coordinate export should reject non-finite final coordinates."""
+    product = tmp_path / "product.pdb"
+    product.write_text(_pdb_line(1, "CA", "ALA", "A", 1, 0.0, element="C"), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="non-finite"):
+        _write_relaxed_product_pdb(
+            product,
+            np.array([[math.nan, 0.0, 0.0]]),
+            tmp_path / "relaxed.pdb",
+            SimpleNamespace(nanometer=1.0),
+            expected_atom_count=1,
+        )
+
+
 def test_resolve_product_linkage_pairs_uses_generic_assembly_metadata(tmp_path):
     """Arbitrary residue and atom names should resolve from CONECT metadata."""
     product = tmp_path / "product.pdb"
@@ -122,11 +225,35 @@ def test_resolve_product_linkage_pairs_uses_generic_assembly_metadata(tmp_path):
             _topology_atom(1, "Z9", "MNO", "C", "42"),
         )
     )
-    plan = type("PlanDouble", (), {"target_bond_length_angstrom": 1.4})()
     spec = type(
         "SpecDouble",
         (),
-        {"resolved_plan": plan, "attachment_id": "x", "attachment_index": 1},
+        {
+                "target_bond_length_angstrom": 1.4,
+                "attachment_id": "x",
+                "attachment_index": 1,
+                "endpoint_provenance": {},
+            "protein_product_residue_name": "ABC",
+            "modifier_product_residue_name": "MNO",
+            "protein_link_atom": SimpleNamespace(
+                serial=1,
+                atom_index=0,
+                atom_name="Q1",
+                residue_name="ABC",
+                chain_id="A",
+                residue_number=7,
+                insertion_code="",
+            ),
+            "modifier_link_atom": SimpleNamespace(
+                serial=2,
+                atom_index=1,
+                atom_name="Z9",
+                residue_name="MNO",
+                chain_id="C",
+                residue_number=42,
+                insertion_code="",
+            ),
+        },
     )()
     assembly = type("AssemblyDouble", (), {"added_conect_pairs": ((1, 2),)})()
 
@@ -165,14 +292,23 @@ def test_resolve_product_linkage_pairs_disambiguates_duplicate_moieties(tmp_path
             _topology_atom(3, "Z9", "MNO", "C", "43"),
         )
     )
-    plan = type("PlanDouble", (), {"target_bond_length_angstrom": 1.4})()
-    specs = tuple(
-        type(
-            "SpecDouble",
-            (),
-            {"resolved_plan": plan, "attachment_id": f"x{index}", "attachment_index": index},
-        )()
-        for index in (1, 2)
+    specs = (
+        _generic_product_mapped_relaxation_spec(
+            attachment_id="x1",
+            attachment_index=1,
+            protein_serial=1,
+            protein_residue_number=7,
+            modifier_serial=2,
+            modifier_residue_number=42,
+        ),
+        _generic_product_mapped_relaxation_spec(
+            attachment_id="x2",
+            attachment_index=2,
+            protein_serial=3,
+            protein_residue_number=8,
+            modifier_serial=4,
+            modifier_residue_number=43,
+        ),
     )
     assembly = type("AssemblyDouble", (), {"added_conect_pairs": ((1, 2), (3, 4))})()
 
@@ -187,6 +323,318 @@ def test_resolve_product_linkage_pairs_disambiguates_duplicate_moieties(tmp_path
         (0, 1),
         (2, 3),
     ]
+
+
+def test_resolve_product_linkage_pairs_validates_distinct_product_mapped_specs(tmp_path):
+    """Product-mapped specs should keep distinct ordered serial pairs and targets."""
+    product = tmp_path / "product.pdb"
+    product.write_text(
+        "".join(
+            (
+                _pdb_line(1, "ND2", "ASX", "A", 42, 0.0),
+                _pdb_line(2, "C1", "NAG", "C", 10, 1.4),
+                _pdb_line(3, "ND2", "ASX", "A", 87, 3.0),
+                _pdb_line(4, "C1", "NAG", "C", 20, 4.6),
+                "END\n",
+            )
+        ),
+        encoding="utf-8",
+    )
+    topology = _TopologyDouble(
+        (
+            _topology_atom(0, "ND2", "ASX", "A", "42"),
+            _topology_atom(1, "C1", "NAG", "C", "10"),
+            _topology_atom(2, "ND2", "ASX", "A", "87"),
+            _topology_atom(3, "C1", "NAG", "C", "20"),
+        )
+    )
+    assembly = SimpleNamespace(added_conect_pairs=((1, 2), (3, 4)))
+
+    pairs = resolve_product_linkage_pairs(
+        topology,
+        product_pdb_path=product,
+        attachment_specs=_product_mapped_relaxation_specs(),
+        assembly=assembly,
+    )
+
+    assert [(pair.protein_serial, pair.modifier_serial) for pair in pairs] == [(1, 2), (3, 4)]
+    assert [pair.target_bond_length_angstrom for pair in pairs] == [
+        pytest.approx(1.4),
+        pytest.approx(1.6),
+    ]
+
+
+def test_resolve_product_linkage_pairs_rejects_swapped_product_mapped_pair(tmp_path):
+    """A positional assembly pair cannot be swapped away from exact spec endpoints."""
+    product = tmp_path / "product.pdb"
+    product.write_text(
+        "".join(
+            (
+                _pdb_line(1, "ND2", "ASX", "A", 42, 0.0),
+                _pdb_line(2, "C1", "NAG", "C", 10, 1.4),
+                _pdb_line(3, "ND2", "ASX", "A", 87, 3.0),
+                _pdb_line(4, "C1", "NAG", "C", 20, 4.6),
+                "END\n",
+            )
+        ),
+        encoding="utf-8",
+    )
+    topology = _TopologyDouble(
+        (
+            _topology_atom(0, "ND2", "ASX", "A", "42"),
+            _topology_atom(1, "C1", "NAG", "C", "10"),
+            _topology_atom(2, "ND2", "ASX", "A", "87"),
+            _topology_atom(3, "C1", "NAG", "C", "20"),
+        )
+    )
+    assembly = SimpleNamespace(added_conect_pairs=((2, 1), (3, 4)))
+
+    with pytest.raises(RuntimeError, match=r"attachment_id='first'.*observed_pair=\(2, 1\)"):
+        resolve_product_linkage_pairs(
+            topology,
+            product_pdb_path=product,
+            attachment_specs=_product_mapped_relaxation_specs(),
+            assembly=assembly,
+        )
+
+
+def test_resolve_product_linkage_pairs_accepts_valid_mapped_serials(tmp_path):
+    """Mapped source serials should resolve when the product atom identity matches."""
+    product = tmp_path / "product.pdb"
+    product.write_text(
+        "".join(
+            (
+                _pdb_line(10, "ND2", "ASX", "A", 42, 0.0, element="N"),
+                _pdb_line(20, "C1", "NAG", "C", 10, 1.4, element="C"),
+                "END\n",
+            )
+        ),
+        encoding="utf-8",
+    )
+    topology = _TopologyDouble(
+        (
+            _topology_atom(0, "ND2", "ASX", "A", "42"),
+            _topology_atom(1, "C1", "NAG", "C", "10"),
+        )
+    )
+
+    pairs = resolve_product_linkage_pairs(
+        topology,
+        product_pdb_path=product,
+        attachment_specs=(
+            _single_product_mapped_relaxation_spec(protein_serial=10, modifier_serial=20),
+        ),
+    )
+
+    assert (pairs[0].protein_serial, pairs[0].modifier_serial) == (10, 20)
+    assert (pairs[0].protein_atom_index, pairs[0].modifier_atom_index) == (0, 1)
+
+
+def test_resolve_product_linkage_pairs_falls_back_from_stale_serial_collision(tmp_path):
+    """A stale serial pointing at another product atom should use unique identity fallback."""
+    product = tmp_path / "product.pdb"
+    product.write_text(
+        "".join(
+            (
+                _pdb_line(9, "CA", "GLY", "A", 1, -1.0, element="C"),
+                _pdb_line(10, "ND2", "ASX", "A", 42, 0.0, element="N"),
+                _pdb_line(20, "C1", "NAG", "C", 10, 1.4, element="C"),
+                "END\n",
+            )
+        ),
+        encoding="utf-8",
+    )
+    topology = _TopologyDouble(
+        (
+            _topology_atom(0, "CA", "GLY", "A", "1"),
+            _topology_atom(1, "ND2", "ASX", "A", "42"),
+            _topology_atom(2, "C1", "NAG", "C", "10"),
+        )
+    )
+
+    pairs = resolve_product_linkage_pairs(
+        topology,
+        product_pdb_path=product,
+        attachment_specs=(
+            _single_product_mapped_relaxation_spec(protein_serial=9, modifier_serial=20),
+        ),
+    )
+
+    assert (pairs[0].protein_serial, pairs[0].modifier_serial) == (10, 20)
+    assert (pairs[0].protein_atom_index, pairs[0].modifier_atom_index) == (1, 2)
+
+
+def test_resolve_product_linkage_pairs_falls_back_when_serial_absent(tmp_path):
+    """Missing source serial metadata should resolve through one exact identity match."""
+    product = tmp_path / "product.pdb"
+    product.write_text(
+        "".join(
+            (
+                _pdb_line(10, "ND2", "ASX", "A", 42, 0.0, element="N"),
+                _pdb_line(20, "C1", "NAG", "C", 10, 1.4, element="C"),
+                "END\n",
+            )
+        ),
+        encoding="utf-8",
+    )
+    topology = _TopologyDouble(
+        (
+            _topology_atom(0, "ND2", "ASX", "A", "42"),
+            _topology_atom(1, "C1", "NAG", "C", "10"),
+        )
+    )
+
+    pairs = resolve_product_linkage_pairs(
+        topology,
+        product_pdb_path=product,
+        attachment_specs=(
+            _single_product_mapped_relaxation_spec(protein_serial=None, modifier_serial=None),
+        ),
+    )
+
+    assert (pairs[0].protein_serial, pairs[0].modifier_serial) == (10, 20)
+
+
+def test_resolve_product_linkage_pairs_rejects_duplicate_product_serial(tmp_path):
+    """Duplicate product serials should be rejected instead of accepting a wrong atom."""
+    product = tmp_path / "product.pdb"
+    product.write_text(
+        "".join(
+            (
+                _pdb_line(10, "ND2", "ASX", "A", 42, 0.0, element="N"),
+                _pdb_line(10, "CA", "GLY", "A", 1, -1.0, element="C"),
+                _pdb_line(20, "C1", "NAG", "C", 10, 1.4, element="C"),
+                "END\n",
+            )
+        ),
+        encoding="utf-8",
+    )
+    topology = _TopologyDouble(
+        (
+            _topology_atom(0, "ND2", "ASX", "A", "42"),
+            _topology_atom(1, "CA", "GLY", "A", "1"),
+            _topology_atom(2, "C1", "NAG", "C", "10"),
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="duplicate serials=10"):
+        resolve_product_linkage_pairs(
+            topology,
+            product_pdb_path=product,
+            attachment_specs=(
+                _single_product_mapped_relaxation_spec(protein_serial=10, modifier_serial=20),
+            ),
+        )
+
+
+def test_resolve_product_linkage_pairs_rejects_unrelated_duplicate_product_serial(tmp_path):
+    """Duplicate product serials should be rejected before serial-to-topology mapping."""
+    product = tmp_path / "product.pdb"
+    product.write_text(
+        "".join(
+            (
+                _pdb_line(10, "ND2", "ASX", "A", 42, 0.0, element="N"),
+                _pdb_line(20, "C1", "NAG", "C", 10, 1.4, element="C"),
+                _pdb_line(99, "CA", "GLY", "A", 1, -1.0, element="C"),
+                _pdb_line(99, "CB", "GLY", "A", 1, -1.2, element="C"),
+                "END\n",
+            )
+        ),
+        encoding="utf-8",
+    )
+    topology = _TopologyDouble(
+        (
+            _topology_atom(0, "ND2", "ASX", "A", "42"),
+            _topology_atom(1, "C1", "NAG", "C", "10"),
+            _topology_atom(2, "CA", "GLY", "A", "1"),
+            _topology_atom(3, "CB", "GLY", "A", "1"),
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="duplicate serials=99"):
+        resolve_product_linkage_pairs(
+            topology,
+            product_pdb_path=product,
+            attachment_specs=(
+                _single_product_mapped_relaxation_spec(protein_serial=10, modifier_serial=20),
+            ),
+        )
+
+
+def test_resolve_product_linkage_pairs_rejects_ambiguous_product_identity(tmp_path):
+    """Ambiguous identity fallback should reject instead of guessing one atom."""
+    product = tmp_path / "product.pdb"
+    product.write_text(
+        "".join(
+            (
+                _pdb_line(10, "ND2", "ASX", "A", 42, 0.0, element="N"),
+                _pdb_line(11, "ND2", "ASX", "A", 42, 0.2, element="N"),
+                _pdb_line(20, "C1", "NAG", "C", 10, 1.4, element="C"),
+                "END\n",
+            )
+        ),
+        encoding="utf-8",
+    )
+    topology = _TopologyDouble(
+        (
+            _topology_atom(0, "ND2", "ASX", "A", "42"),
+            _topology_atom(1, "ND2", "ASX", "A", "42"),
+            _topology_atom(2, "C1", "NAG", "C", "10"),
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="identity is ambiguous"):
+        resolve_product_linkage_pairs(
+            topology,
+            product_pdb_path=product,
+            attachment_specs=(
+                _single_product_mapped_relaxation_spec(protein_serial=None, modifier_serial=20),
+            ),
+        )
+
+
+def test_resolve_product_linkage_pairs_rejects_multi_attachment_unresolved_pair(tmp_path):
+    """Multi-attachment products should not accept positional pairs without endpoint proof."""
+    product, topology = _write_mapped_multi_attachment_product(tmp_path)
+    specs = _product_mapped_relaxation_specs()
+    specs[0].protein_link_atom.residue_number = 999
+    assembly = SimpleNamespace(added_conect_pairs=((1, 2), (3, 4)))
+
+    with pytest.raises(RuntimeError, match="expected pair could not be resolved"):
+        resolve_product_linkage_pairs(
+            topology,
+            product_pdb_path=product,
+            attachment_specs=specs,
+            assembly=assembly,
+        )
+
+
+def test_resolve_product_linkage_pairs_rejects_multi_attachment_missing_pair(tmp_path):
+    """Multi-attachment products should require assembly pairs for every attachment."""
+    product, topology = _write_mapped_multi_attachment_product(tmp_path)
+    assembly = SimpleNamespace(added_conect_pairs=((1, 2),))
+
+    with pytest.raises(RuntimeError, match="assembly metadata"):
+        resolve_product_linkage_pairs(
+            topology,
+            product_pdb_path=product,
+            attachment_specs=_product_mapped_relaxation_specs(),
+            assembly=assembly,
+        )
+
+
+def test_resolve_product_linkage_pairs_rejects_multi_attachment_invalid_pair(tmp_path):
+    """Multi-attachment products should reject malformed assembly pair metadata."""
+    product, topology = _write_mapped_multi_attachment_product(tmp_path)
+    assembly = SimpleNamespace(added_conect_pairs=((1, 2), "bad"))
+
+    with pytest.raises(RuntimeError, match="observed_pair='bad'"):
+        resolve_product_linkage_pairs(
+            topology,
+            product_pdb_path=product,
+            attachment_specs=_product_mapped_relaxation_specs(),
+            assembly=assembly,
+        )
 
 
 def test__freeze_protein_chain_masses_supports_chain_a_and_multiple_chains():
@@ -332,7 +780,9 @@ def test_conjugate_relaxation_stage_b_uses_fresh_fixed_system(monkeypatch, tmp_p
     )
     monkeypatch.setattr(relaxation_workflows, "_force_group_energies", lambda *_args: {})
     monkeypatch.setattr(relaxation_workflows, "_add_linkage_anchor_restraints", lambda *_args: 0)
-    monkeypatch.setattr(relaxation_workflows, "_write_openmm_pdb", lambda *_args: None)
+    monkeypatch.setattr(
+        relaxation_workflows, "_write_relaxed_product_pdb", lambda *_args, **_kwargs: None
+    )
 
     topology = _relaxation_topology()
     interchange = _RelaxationInterchange(topology)
@@ -357,6 +807,38 @@ def test_conjugate_relaxation_stage_b_uses_fresh_fixed_system(monkeypatch, tmp_p
     assert interchange.systems[1].masses == [12.0, 16.0]
     assert sys.modules["openmm"] is openmm
     assert sys.modules["openmm.app"] is openmm_app
+    assert openmm.minimize_calls[0]["maxIterations"] == 0
+
+
+def test_conjugate_relaxation_uses_uncapped_minimization(monkeypatch, tmp_path):
+    """Stage A minimization should pass the OpenMM uncapped iteration sentinel."""
+    calls: list[tuple[str, str, tuple[float, ...]]] = []
+    openmm, _openmm_app = _install_fake_openmm(monkeypatch, calls)
+    monkeypatch.setattr(
+        relaxation_workflows,
+        "_select_platform",
+        lambda *_args: SimpleNamespace(getName=lambda: "CPU"),
+    )
+    monkeypatch.setattr(relaxation_workflows, "_assign_force_groups", lambda _system: {})
+    monkeypatch.setattr(
+        relaxation_workflows, "_force_group_labels", lambda _system, *, existing_labels: {}
+    )
+    monkeypatch.setattr(relaxation_workflows, "_force_group_energies", lambda *_args: {})
+    monkeypatch.setattr(relaxation_workflows, "_add_linkage_anchor_restraints", lambda *_args: 0)
+    monkeypatch.setattr(
+        relaxation_workflows, "_write_relaxed_product_pdb", lambda *_args, **_kwargs: None
+    )
+
+    relax_conjugate(
+        _RelaxationInterchange(_relaxation_topology()),
+        tmp_path,
+        product_pdb_path=tmp_path / "product.pdb",
+        attachment_specs=(),
+        settings=ConjugateRelaxationSettings(md_steps=1),
+    )
+
+    assert openmm.minimize_calls
+    assert openmm.minimize_calls[0]["maxIterations"] == 0
 
 
 def test_conjugate_relaxation_restores_masses_after_stage_b_error(monkeypatch, tmp_path):
@@ -374,7 +856,9 @@ def test_conjugate_relaxation_restores_masses_after_stage_b_error(monkeypatch, t
     )
     monkeypatch.setattr(relaxation_workflows, "_force_group_energies", lambda *_args: {})
     monkeypatch.setattr(relaxation_workflows, "_add_linkage_anchor_restraints", lambda *_args: 0)
-    monkeypatch.setattr(relaxation_workflows, "_write_openmm_pdb", lambda *_args: None)
+    monkeypatch.setattr(
+        relaxation_workflows, "_write_relaxed_product_pdb", lambda *_args, **_kwargs: None
+    )
 
     def fail_md(*_args, **_kwargs):
         raise RuntimeError("backend instability")
@@ -409,7 +893,9 @@ def test_conjugate_relaxation_stage_b_tolerance_violation_fails(monkeypatch, tmp
     )
     monkeypatch.setattr(relaxation_workflows, "_force_group_energies", lambda *_args: {})
     monkeypatch.setattr(relaxation_workflows, "_add_linkage_anchor_restraints", lambda *_args: 0)
-    monkeypatch.setattr(relaxation_workflows, "_write_openmm_pdb", lambda *_args: None)
+    monkeypatch.setattr(
+        relaxation_workflows, "_write_relaxed_product_pdb", lambda *_args, **_kwargs: None
+    )
 
     def moving_md(*_args, **_kwargs):
         """Return final coordinates with an immobilized-protein displacement violation."""
@@ -707,11 +1193,19 @@ def _install_fake_openmm(monkeypatch, calls: list[tuple[str, str, tuple[float, .
             """Record masses used during MD integration."""
             calls.append((self.system.label, "step", tuple(self.system.masses)))
 
+    minimize_calls = []
+
+    def minimize(*_args, **kwargs) -> None:
+        """Record minimization kwargs."""
+
+        minimize_calls.append(kwargs)
+
     openmm = SimpleNamespace(
         VerletIntegrator=lambda *_args: object(),
         LangevinMiddleIntegrator=lambda *_args: object(),
-        LocalEnergyMinimizer=SimpleNamespace(minimize=lambda *_args, **_kwargs: None),
+        LocalEnergyMinimizer=SimpleNamespace(minimize=minimize),
         OpenMMException=RuntimeError,
+        minimize_calls=minimize_calls,
     )
     openmm_app = SimpleNamespace(
         Simulation=FakeSimulation,
@@ -732,6 +1226,156 @@ def _install_fake_openmm(monkeypatch, calls: list[tuple[str, str, tuple[float, .
     monkeypatch.setitem(sys.modules, "openmm.app", openmm_app)
     monkeypatch.setitem(sys.modules, "openmm.unit", openmm_unit)
     return openmm, openmm_app
+
+
+def _write_mapped_multi_attachment_product(tmp_path: Path) -> tuple[Path, _TopologyDouble]:
+    """Write a two-attachment product PDB and matching topology double."""
+    product = tmp_path / "product.pdb"
+    product.write_text(
+        "".join(
+            (
+                _pdb_line(1, "ND2", "ASX", "A", 42, 0.0),
+                _pdb_line(2, "C1", "NAG", "C", 10, 1.4),
+                _pdb_line(3, "ND2", "ASX", "A", 87, 3.0),
+                _pdb_line(4, "C1", "NAG", "C", 20, 4.6),
+                "END\n",
+            )
+        ),
+        encoding="utf-8",
+    )
+    topology = _TopologyDouble(
+        (
+            _topology_atom(0, "ND2", "ASX", "A", "42"),
+            _topology_atom(1, "C1", "NAG", "C", "10"),
+            _topology_atom(2, "ND2", "ASX", "A", "87"),
+            _topology_atom(3, "C1", "NAG", "C", "20"),
+        )
+    )
+    return product, topology
+
+
+def _generic_product_mapped_relaxation_spec(
+    *,
+    attachment_id: str,
+    attachment_index: int,
+    protein_serial: int,
+    protein_residue_number: int,
+    modifier_serial: int,
+    modifier_residue_number: int,
+) -> SimpleNamespace:
+    """Return one generic mapped spec for duplicate-moiety linkage tests."""
+    return SimpleNamespace(
+        attachment_id=attachment_id,
+        attachment_index=attachment_index,
+        endpoint_provenance={},
+        protein_link_atom=SimpleNamespace(
+            serial=protein_serial,
+            chain_id="A",
+            residue_name="ABC",
+            residue_number=protein_residue_number,
+            insertion_code="",
+            atom_name="Q1",
+        ),
+        modifier_link_atom=SimpleNamespace(
+            serial=modifier_serial,
+            chain_id="C",
+            residue_name="MNO",
+            residue_number=modifier_residue_number,
+            insertion_code="",
+            atom_name="Z9",
+        ),
+        protein_product_residue_name="ABC",
+        modifier_product_residue_name="MNO",
+        target_bond_length_angstrom=1.4,
+    )
+
+
+def _product_mapped_relaxation_specs() -> tuple[SimpleNamespace, SimpleNamespace]:
+    """Return two mapped attachment specs with distinct targets and IDs."""
+    return (
+        SimpleNamespace(
+            attachment_id="first",
+            attachment_index=1,
+            endpoint_provenance={},
+            protein_link_atom=SimpleNamespace(
+                serial=1,
+                chain_id="A",
+                residue_name="ASX",
+                residue_number=42,
+                insertion_code="",
+                atom_name="ND2",
+            ),
+            modifier_link_atom=SimpleNamespace(
+                serial=2,
+                chain_id="C",
+                residue_name="NAG",
+                residue_number=10,
+                insertion_code="",
+                atom_name="C1",
+            ),
+            protein_product_residue_name="ASX",
+            modifier_product_residue_name="NAG",
+            target_bond_length_angstrom=1.4,
+        ),
+        SimpleNamespace(
+            attachment_id="second",
+            attachment_index=2,
+            endpoint_provenance={},
+            protein_link_atom=SimpleNamespace(
+                serial=3,
+                chain_id="A",
+                residue_name="ASX",
+                residue_number=87,
+                insertion_code="",
+                atom_name="ND2",
+            ),
+            modifier_link_atom=SimpleNamespace(
+                serial=4,
+                chain_id="C",
+                residue_name="NAG",
+                residue_number=20,
+                insertion_code="",
+                atom_name="C1",
+            ),
+            protein_product_residue_name="ASX",
+            modifier_product_residue_name="NAG",
+            target_bond_length_angstrom=1.6,
+        ),
+    )
+
+
+def _single_product_mapped_relaxation_spec(
+    *,
+    protein_serial: int | None,
+    modifier_serial: int | None,
+) -> SimpleNamespace:
+    """Return one mapped attachment spec for product-linkage resolution tests."""
+    return SimpleNamespace(
+        attachment_id="single",
+        attachment_index=1,
+        endpoint_provenance={},
+        protein_link_atom=SimpleNamespace(
+            serial=protein_serial,
+            chain_id="A",
+            residue_name="ASX",
+            residue_number=42,
+            insertion_code="",
+            atom_name="ND2",
+            element="N",
+        ),
+        modifier_link_atom=SimpleNamespace(
+            serial=modifier_serial,
+            chain_id="C",
+            residue_name="NAG",
+            residue_number=10,
+            insertion_code="",
+            atom_name="C1",
+            element="C",
+        ),
+        protein_product_residue_name="ASX",
+        modifier_product_residue_name="NAG",
+        target_bond_length_angstrom=1.4,
+    )
 
 
 @pytest.mark.slow

@@ -10,6 +10,7 @@ from polyzymd.builders.conjugation.polymer import (
     GeneratedPolymerFragment,
     PolymerFragmentAtom,
     PolymerFragmentResidue,
+    PreparedFragment,
 )
 from polyzymd.builders.conjugation.structure.pdb import NhsLysPdbAttachment, write_crosslinked_pdb
 
@@ -150,6 +151,27 @@ def test_generated_fragment_converts_to_placed_fragment_with_index_mapping():
     assert [atom.atom_index for atom in placed.atoms] == [0, 1, 2, 3]
     assert [atom.serial for atom in placed.atoms] == [101, 102, 103, 104]
     assert [residue.label for residue in generated.residues] == ["A", "C", "B"]
+
+
+def test_prepared_fragment_preserves_source_identity_and_construction_data(tmp_path: Path):
+    """Preparation should add provenance without changing construction data."""
+    generated = _generated_fragment()
+    sdf_path = tmp_path / "fragment.sdf"
+
+    prepared = PreparedFragment.from_generated_fragment(
+        generated,
+        source_identity="recipe:sbma-nhs-egpma",
+        source_kind="polymer",
+        sidecars={"sdf": sdf_path},
+        provenance={"recipe": "sbma-nhs-egpma"},
+    )
+
+    assert prepared.source_identity == "recipe:sbma-nhs-egpma"
+    assert prepared.atoms == generated.atoms
+    assert prepared.bond_orders == generated.bond_orders
+    assert prepared.sidecars == {"sdf": sdf_path}
+    assert prepared.reactive_atom_index is None
+    assert prepared.leaving_atom_indices == ()
 
 
 def test_generated_fragment_writes_crosslinked_nhx_lyx_pdb(tmp_path):

@@ -66,6 +66,7 @@ Prepare build inputs and configure your enzyme-polymer conjugate systems.
 
 Add Polymers to a Simulation <polymers>
 Generate Polymers from SMILES <dynamic_polymers>
+Build an N-glycosylated GLYCAM/OpenMM System <glygen_glycan_conjugation>
 Validate Conjugate Build Artifacts <validate_conjugates>
 Troubleshoot OpenFF PDB Ingestion <troubleshoot_openff_pdb_ingestion>
 Extend Protein Modifications <extend_protein_modifications>

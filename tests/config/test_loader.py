@@ -2,6 +2,121 @@
 
 from pathlib import Path
 
+import pytest
+import yaml
+from pydantic import ValidationError
+
+
+def _write_config(path: Path, conjugation: dict) -> None:
+    """Write a minimal simulation config containing conjugation data."""
+    data = {
+        "name": "csv-attachments",
+        "engine": "openmm",
+        "enzyme": {"name": "TestEnzyme", "pdb_path": "enzyme.pdb"},
+        "thermodynamics": {"temperature": 300.0},
+        "simulation_phases": {
+            "equilibration_stages": [
+                {
+                    "name": "eq1",
+                    "duration": 0.1,
+                    "temperature": 300.0,
+                    "ensemble": "NVT",
+                }
+            ],
+            "production": {
+                "ensemble": "NPT",
+                "duration": 1.0,
+                "samples": 10,
+                "checkpoint_interval": 60.0,
+            },
+        },
+        "conjugation": conjugation,
+    }
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+class TestAttachmentCsvLoading:
+    """Attachment CSV files are materialized before schema validation."""
+
+    def test_loads_bom_rows_in_order_and_resolves_csv_relative_moiety_path(
+        self, tmp_path: Path
+    ) -> None:
+        """CSV rows preserve order and use the CSV directory for moiety paths."""
+        from polyzymd.config.loader import load_config, save_config
+
+        csv_dir = tmp_path / "tables"
+        csv_dir.mkdir()
+        csv_path = csv_dir / "attachments.csv"
+        csv_path.write_text(
+            "\ufeffname,moiety.name,moiety.input_path,site.residue_number,site.atom_name\n"
+            "first,modifier-one,structures/one.pdb,10,NZ\n"
+            "second,modifier-two,,11,SG\n",
+            encoding="utf-8",
+        )
+        yaml_path = tmp_path / "config.yaml"
+        _write_config(yaml_path, {"attachments_file": "tables/attachments.csv"})
+
+        config = load_config(yaml_path)
+
+        assert [item.name for item in config.conjugation.attachments] == ["first", "second"]
+        assert config.conjugation.attachments[0].moiety.input_path == (
+            csv_dir / "structures/one.pdb"
+        )
+        assert config.conjugation.attachments[1].moiety.input_path is None
+
+        saved_path = tmp_path / "saved.yaml"
+        save_config(config, saved_path)
+        saved = yaml.safe_load(saved_path.read_text(encoding="utf-8"))
+        assert "attachments_file" not in saved["conjugation"]
+        assert [item["name"] for item in saved["conjugation"]["attachments"]] == [
+            "first",
+            "second",
+        ]
+
+    @pytest.mark.parametrize(
+        ("csv_text", "message"),
+        [
+            ("name,name,moiety.name\na,b,c\n", "Duplicate attachments CSV header"),
+            ("name,unknown\na,b\n", "Unsupported attachments CSV header"),
+            (
+                "name,mechanism.leaving_atoms.site\na,OW\n",
+                "does not support list-valued header",
+            ),
+            ("name,moiety.name\na,b,extra\n", "row 2 has extra cells"),
+        ],
+    )
+    def test_rejects_malformed_csv_shapes(
+        self, tmp_path: Path, csv_text: str, message: str
+    ) -> None:
+        """Ambiguous or non-scalar CSV shapes fail with targeted messages."""
+        from polyzymd.config.loader import load_config
+
+        (tmp_path / "attachments.csv").write_text(csv_text, encoding="utf-8")
+        yaml_path = tmp_path / "config.yaml"
+        _write_config(yaml_path, {"attachments_file": "attachments.csv"})
+
+        with pytest.raises(ValidationError, match=message):
+            load_config(yaml_path)
+
+    def test_pydantic_reports_inflated_attachment_field_location(self, tmp_path: Path) -> None:
+        """Semantic cell errors retain the ordinary attachment field location."""
+        from polyzymd.config.loader import load_config
+
+        (tmp_path / "attachments.csv").write_text(
+            "name,moiety.name,site.residue_number\ninvalid,modifier,not-an-integer\n",
+            encoding="utf-8",
+        )
+        yaml_path = tmp_path / "config.yaml"
+        _write_config(yaml_path, {"attachments_file": "attachments.csv"})
+
+        with pytest.raises(ValidationError) as exc_info:
+            load_config(yaml_path)
+
+        assert any(
+            error["loc"] == ("conjugation", "attachments", 0, "site", "residue_number")
+            for error in exc_info.value.errors()
+        )
+
 
 class TestSaveConfigYamlDumper:
     """save_config uses a local Dumper subclass, not the global yaml.Dumper."""

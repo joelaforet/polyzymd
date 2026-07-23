@@ -32,6 +32,7 @@ LOGGER = logging.getLogger(__name__)
 
 _TOKEN_UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
 _TOKEN_UNDERSCORES = re.compile(r"_+")
+_MOIETY_GLYCAM_FORCE_FIELD_ALIASES = {"glycam06", "glycam_06", "glycam-06", "glycam", "glycam06j"}
 
 
 def _format_safe_token(value: object) -> str:
@@ -70,6 +71,33 @@ def _format_decimal_token(value: float) -> str:
     return formatted.replace(".", "p")
 
 
+def _canonicalize_moiety_force_field(value: str | None) -> str | None:
+    """Return a canonical attachment-scoped moiety force-field value.
+
+    Missing values intentionally remain ``None`` so disabled conjugation and
+    attachments can remain inert. Enabled attachments are validated separately.
+    """
+
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("moiety.force_field must not be blank")
+    label = normalized.lower().replace("_", "-")
+    alias_key = normalized.lower().replace("-", "_")
+    if (
+        label in _MOIETY_GLYCAM_FORCE_FIELD_ALIASES
+        or alias_key in _MOIETY_GLYCAM_FORCE_FIELD_ALIASES
+    ):
+        return "glycam06"
+    if normalized.lower().endswith(".offxml") or Path(normalized).suffix.lower() == ".offxml":
+        return normalized
+    raise ValueError(
+        "Unknown moiety.force_field "
+        f"{value!r}; use canonical 'glycam06' or an OpenFF .offxml force-field source"
+    )
+
+
 class ChargeMethod(str, Enum):
     """Supported charge assignment methods for small molecules."""
 
@@ -91,9 +119,18 @@ class WaterModel(str, Enum):
 class BoxShape(str, Enum):
     """Supported simulation box shapes."""
 
+    ORTHORHOMBIC = "orthorhombic"
     CUBE = "cube"
     RHOMBIC_DODECAHEDRON = "rhombic_dodecahedron"
     TRUNCATED_OCTAHEDRON = "truncated_octahedron"
+
+
+class BuildScope(str, Enum):
+    """Supported endpoints for system construction."""
+
+    STRUCTURE = "structure"
+    SOLUTE = "solute"
+    SYSTEM = "system"
 
 
 class Ensemble(str, Enum):
@@ -685,7 +722,17 @@ class ConjugationPdbAtomSelectorConfig(BaseModel):
 class ConjugationMoietyConfig(BaseModel):
     """Placeholder for a covalent moiety, PTM, glycan, or polymer."""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., description="Moiety identifier")
+    force_field: str | None = Field(
+        None,
+        description=(
+            "Attachment-scoped moiety force field, required for enabled attachments. "
+            "Use canonical 'glycam06' for GLYCAM; OpenFF OFFXML names and paths use "
+            "the generic Interchange route."
+        ),
+    )
     residue_name: str | None = Field(None, max_length=4, description="Residue name for the moiety")
     input_path: Path | None = Field(None, description="Optional PDB/SDF path for the moiety")
     smiles: str | None = Field(
@@ -700,7 +747,6 @@ class ConjugationMoietyConfig(BaseModel):
         None,
         description="Explicit PDB atom selector for the moiety linkage site",
     )
-    role: str = Field("moiety", description="User-facing component role label")
 
     @field_validator("polymer_recipe", mode="before")
     @classmethod
@@ -729,6 +775,12 @@ class ConjugationMoietyConfig(BaseModel):
     def normalize_optional_moiety_residue_name(cls, value: str | None) -> str | None:
         """Normalize optional moiety residue names."""
         return value.strip().upper() if value is not None else None
+
+    @field_validator("force_field")
+    @classmethod
+    def canonicalize_force_field(cls, value: str | None) -> str | None:
+        """Canonicalize approved moiety force-field values."""
+        return _canonicalize_moiety_force_field(value)
 
 
 class ConjugationProductResiduesConfig(BaseModel):
@@ -863,7 +915,7 @@ class ConjugationMechanismConfig(BaseModel):
 
 
 class ConjugationPlacementConfig(BaseModel):
-    """Placeholder for covalent moiety placement settings."""
+    """User-facing covalent moiety placement policy."""
 
     strategy: str = Field("preserve_existing", description="Placement strategy placeholder")
     target_bond_length_angstrom: float | None = Field(
@@ -875,6 +927,14 @@ class ConjugationPlacementConfig(BaseModel):
         1.5,
         gt=0.0,
         description="Steric clash cutoff for future placement workflows",
+    )
+    timeout_seconds: float | None = Field(
+        900.0,
+        gt=0.0,
+        description=(
+            "Maximum wall time for each Packmol placement attempt; null disables the timeout. "
+            "A timed-out best candidate proceeds only after structural validation."
+        ),
     )
 
 
@@ -975,14 +1035,40 @@ class ConjugationConfig(BaseModel):
         default_factory=ConjugationChainPolicyConfig,
         description="Component chain assignment policy",
     )
+    placement: ConjugationPlacementConfig = Field(
+        default_factory=ConjugationPlacementConfig,
+        description="Global placement execution policy for all enabled attachments",
+    )
     attachments: list[ConjugationAttachmentConfig] = Field(
         default_factory=list,
         description="Requested covalent attachments; at least one must be enabled when enabled=true",
+    )
+    attachments_file: Path | None = Field(
+        None,
+        exclude=True,
+        description="Optional CSV source for covalent attachments",
     )
     diagnostics: ConjugationDiagnosticsConfig = Field(
         default_factory=ConjugationDiagnosticsConfig,
         description="Diagnostics output policy",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def load_attachment_csv(cls, value: Any) -> Any:
+        """Materialize a CSV attachment source while preserving raw-key exclusivity."""
+        if not isinstance(value, dict):
+            return value
+        if "attachments_file" in value and "attachments" in value:
+            raise ValueError("attachments_file and attachments are mutually exclusive")
+        if "attachments_file" not in value or value["attachments_file"] is None:
+            return value
+
+        from polyzymd.config.loader import _load_attachments_csv
+
+        materialized = dict(value)
+        materialized["attachments"] = _load_attachments_csv(value["attachments_file"])
+        return materialized
 
     @model_validator(mode="after")
     def validate_enabled_attachment_contract(self) -> "ConjugationConfig":
@@ -998,6 +1084,17 @@ class ConjugationConfig(BaseModel):
 
         if not any(attachment.enabled for attachment in self.attachments):
             raise ValueError("enabled conjugation requires at least one enabled attachment")
+        missing_owners = [
+            attachment.name
+            for attachment in self.attachments
+            if attachment.enabled and attachment.moiety.force_field is None
+        ]
+        if missing_owners:
+            names = ", ".join(repr(name) for name in missing_owners)
+            raise ValueError(
+                "enabled conjugation attachments must explicitly declare "
+                f"moiety.force_field; missing for: {names}"
+            )
         return self
 
 
@@ -1152,6 +1249,20 @@ class BoxConfig(BaseModel):
     shape: BoxShape = Field(BoxShape.RHOMBIC_DODECAHEDRON, description="Box shape")
     target_density: float = Field(1.0, gt=0.0, description="Target density (g/mL)")
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
+
+    @field_validator("shape", mode="before")
+    @classmethod
+    def migrate_legacy_cube_shape(cls, value: Any) -> Any:
+        """Map the legacy ``cube`` label to the rectangular box behavior."""
+        if value == "cube":
+            warnings.warn(
+                "Box shape 'cube' is deprecated because PolyzyMD preserves independent "
+                "axis lengths; use 'orthorhombic' instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return BoxShape.ORTHORHOMBIC
+        return value
 
 
 class SolventConfig(BaseModel):
@@ -1868,6 +1979,8 @@ class ForceFieldConfig(BaseModel):
         water: Water model force field (derived from solvent config)
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     protein: str = Field("ff14sb_off_impropers_0.0.4.offxml", description="Protein force field")
     small_molecule: str = Field("openff-2.0.0.offxml", description="Small molecule force field")
 
@@ -2070,6 +2183,17 @@ class GromacsEngineConfig(BaseModel):
 # =============================================================================
 
 
+class BuildConfig(BaseModel):
+    """Configuration for the system-construction endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: BuildScope = Field(
+        BuildScope.SYSTEM,
+        description="Endpoint for system construction",
+    )
+
+
 class SimulationConfig(BaseModel):
     """Complete simulation configuration.
 
@@ -2097,6 +2221,7 @@ class SimulationConfig(BaseModel):
 
     name: str = Field(..., description="Simulation identifier")
     description: str | None = Field(None, description="Simulation description")
+    build: BuildConfig = Field(default_factory=BuildConfig, description="Build settings")
 
     enzyme: EnzymeConfig = Field(..., description="Enzyme configuration")
     substrate: SubstrateConfig | None = Field(None, description="Substrate configuration")
