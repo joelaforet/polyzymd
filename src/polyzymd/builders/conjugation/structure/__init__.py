@@ -33,6 +33,9 @@ from polyzymd.builders.conjugation.structure.preparation import (
     ProteinCanonicalizationSettings,
     canonicalize_protein_hydrogens,
 )
+from polyzymd.builders.conjugation.structure.prepared_identity import (
+    canonicalize_prepared_protein_identity,
+)
 
 __all__ = [
     "CrosslinkedPdbAssemblyOptions",
@@ -54,6 +57,7 @@ __all__ = [
     "build_rdkit_input_bundle",
     "default_cleaned_pdb_path",
     "canonicalize_protein_hydrogens",
+    "canonicalize_prepared_protein_identity",
     "inspect_pdb_structure",
     "load_pdb_as_rdkit_input",
     "pdb_atom_records_as_dicts",
