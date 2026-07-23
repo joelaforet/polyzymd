@@ -292,7 +292,8 @@ class NGlycosylationReaction(ReactionTemplate):
             protein_pdb_path,
             selector,
             mechanism_name=cls.name,
-            preferred_name="HD21",
+            preferred_name="HD22",
+            required_names=("HD21", "HD22"),
         )
 
     @classmethod
@@ -1102,6 +1103,7 @@ def _resolve_bonded_site_hydrogen(
     *,
     mechanism_name: str,
     preferred_name: str | None = None,
+    required_names: tuple[str, ...] = (),
     residue_library: Any | None = None,
 ) -> PdbAtomRecord:
     """Resolve one leaving hydrogen from Pablo residue-template connectivity."""
@@ -1128,6 +1130,24 @@ def _resolve_bonded_site_hydrogen(
         for atom in residue_atoms
         if atom.atom_name.strip().upper() in template_hydrogen_names and _is_hydrogen_atom(atom)
     ]
+    required = tuple(name.strip().upper() for name in required_names)
+    if required:
+        observed_names = tuple(atom.atom_name.strip().upper() for atom in observed)
+        if len(observed_names) != len(required) or set(observed_names) != set(required):
+            raise ValueError(
+                f"{mechanism_name} requires canonical {selector.residue_name} "
+                f"{selector.atom_name} hydrogens {list(required)} before reaction; "
+                f"observed {list(observed_names)}"
+            )
+        preferred = (preferred_name or "").strip().upper()
+        preferred_matches = [atom for atom in observed if atom.atom_name.upper() == preferred]
+        if len(preferred_matches) != 1:
+            raise ValueError(
+                f"{mechanism_name} requires exactly one leaving hydrogen named "
+                f"{preferred or '<unspecified>'} on {selector.residue_name} {selector.atom_name}"
+            )
+        return preferred_matches[0]
+
     if len(observed) == 1:
         return observed[0]
 

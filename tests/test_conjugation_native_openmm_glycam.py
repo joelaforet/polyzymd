@@ -215,9 +215,9 @@ def test_native_conversion_preserves_direct_nln_hd21_identity() -> None:
 
     source_names = [atom.metadata["atom_name"] for atom in topology.molecules[0].atoms]
     native_names = [atom.name for atom in converted.modified_site_residues[0].atoms()]
-    assert "HD21" in source_names
+    assert source_names.count("HD21") == 1
     assert "HD22" not in source_names
-    assert "HD21" in native_names
+    assert native_names.count("HD21") == 1
     assert "HD22" not in native_names
     assert converted.renamed_atoms == ()
 

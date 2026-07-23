@@ -167,7 +167,7 @@ def _summary_payload() -> dict[str, object]:
             "modifier_product_residue_name": "NAG",
             "protein_link_atom_name": "ND2",
             "product_site_atom_present": True,
-            "protein_leaving_atom_names": ["HD21"],
+            "protein_leaving_atom_names": ["HD22"],
             "modifier_leaving_atom_count": 2,
             "crosslink_residues": ["NLN", "NAG"],
             "crosslink_linking_atoms": ["ND2", "C1"],

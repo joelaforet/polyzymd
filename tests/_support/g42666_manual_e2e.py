@@ -291,7 +291,7 @@ def _validate_summary(summary: dict[str, Any]) -> None:
         if item["mechanism_name"] == "n_glycosylation"
     )
     assert n_glycan["protein_link_atom"] == "ND2"
-    assert n_glycan["protein_leaving_atoms"] == ["HD21"]
+    assert n_glycan["protein_leaving_atoms"] == ["HD22"]
     assert n_glycan["modifier_link_serial"] == 4
     assert n_glycan["modifier_leaving_serials"] == [1, 2]
     if summary.get("native_glycam"):

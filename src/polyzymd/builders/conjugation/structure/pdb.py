@@ -942,33 +942,12 @@ def _prepare_protein_atoms(
         update = {"chain_id": options.protein_chain}
         for item in attachments:
             if _matches_attachment_residue(atom, item):
-                product_residue_name = _pdb_safe_residue_name(
+                update["residue_name"] = _pdb_safe_residue_name(
                     _attachment_protein_product_resname(item)
                 )
-                update["residue_name"] = product_residue_name
-                if (
-                    product_residue_name == "NLN"
-                    and atom.atom_name.upper() == "HD22"
-                    and not _retained_nln_hd21_exists(atoms, atom_indices_to_remove, item)
-                ):
-                    update["atom_name"] = "HD21"
                 break
         kept_atoms.append(atom.model_copy(update=update))
     return kept_atoms, removed_atoms
-
-
-def _retained_nln_hd21_exists(
-    atoms: Sequence[PdbAtomRecord],
-    removed_atom_indices: set[int],
-    attachment: PdbAssemblyAttachment,
-) -> bool:
-    """Return whether an NLN product already retains its canonical HD21 atom."""
-    return any(
-        _matches_attachment_residue(atom, attachment)
-        and atom.atom_name.upper() == "HD21"
-        and atom.atom_index not in removed_atom_indices
-        for atom in atoms
-    )
 
 
 def _select_protein_atoms_to_remove(

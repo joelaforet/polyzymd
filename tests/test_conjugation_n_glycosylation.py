@@ -194,36 +194,37 @@ def test_resolve_plan_builds_nln_to_user_glycan_residue_linkage(tmp_path: Path):
     assert plan.protein_link_atom.atom_name == "ND2"
     assert plan.protein_product_residue_name == "NLN"
     assert plan.modifier_product_residue_name == "NAG"
-    assert tuple(atom.atom_name for atom in plan.protein_leaving_atoms) == ("HD21",)
+    assert tuple(atom.atom_name for atom in plan.protein_leaving_atoms) == ("HD22",)
     assert plan.pablo_crosslink_requirement.residues == ("NLN", "NAG")
     assert plan.pablo_crosslink_requirement.linking_atoms == (
         "ND2",
         plan.modifier_link_atom.atom_name,
     )
-    assert plan.pablo_crosslink_requirement.leaving_atoms[0] == ("HD21",)
+    assert plan.pablo_crosslink_requirement.leaving_atoms[0] == ("HD22",)
     assert len(plan.modifier_leaving_atoms) >= 2
 
 
-def test_asn_nd2_hydrogen_resolution_selects_hd21_from_canonical_pair(
+def test_asn_nd2_hydrogen_resolution_selects_hd22_from_canonical_pair(
     tmp_path: Path,
 ) -> None:
-    """Canonical HD21/HD22 candidates should remove HD21 by name, not file order."""
+    """Canonical HD21/HD22 candidates should remove HD22 by name, not file order."""
     protein_path = _asn_pdb(tmp_path, hydrogens=("HD22", "HD21"))
 
     hydrogen = NGlycosylationReaction.resolve_protein_leaving_atom(protein_path, _asn_selector())
 
-    assert hydrogen.atom_name == "HD21"
-
-
-def test_asn_nd2_hydrogen_resolution_returns_single_candidate_unchanged(
-    tmp_path: Path,
-) -> None:
-    """A single Pablo-template ND2 hydrogen should be accepted as supplied."""
-    protein_path = _asn_pdb(tmp_path, hydrogens=("HD22",))
-
-    hydrogen = NGlycosylationReaction.resolve_protein_leaving_atom(protein_path, _asn_selector())
-
     assert hydrogen.atom_name == "HD22"
+
+
+@pytest.mark.parametrize("hydrogens", [("HD21",), ("HD22",)])
+def test_asn_nd2_hydrogen_resolution_rejects_incomplete_canonical_pair(
+    tmp_path: Path,
+    hydrogens: tuple[str, ...],
+) -> None:
+    """Prepared ASN must contain both canonical ND2 hydrogens before reaction."""
+    protein_path = _asn_pdb(tmp_path, hydrogens=hydrogens)
+
+    with pytest.raises(ValueError, match="requires canonical ASN ND2 hydrogens.*HD21.*HD22"):
+        NGlycosylationReaction.resolve_protein_leaving_atom(protein_path, _asn_selector())
 
 
 def test_asn_nd2_hydrogen_resolution_rejects_ambiguous_noncanonical_candidates(
@@ -295,8 +296,8 @@ def _fake_asn_nd2_hydrogen_library(
     return {"ASN": (SimpleNamespace(atoms=atoms, bonds=bonds),)}
 
 
-def _asn_pdb(tmp_path: Path, *, hydrogens: tuple[str, ...] = ("HD21",)) -> Path:
-    """Create a small Asn residue with one explicit ND2 leaving hydrogen."""
+def _asn_pdb(tmp_path: Path, *, hydrogens: tuple[str, ...] = ("HD21", "HD22")) -> Path:
+    """Create a small Asn residue with its canonical ND2 hydrogens."""
     path = tmp_path / "asn.pdb"
     lines = [
         _pdb_atom(1, "N", "ASN", "A", 42, 0.0, 0.0, 0.0, element="N"),

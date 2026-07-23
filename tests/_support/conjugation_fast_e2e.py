@@ -104,7 +104,7 @@ def validate_fast_mixed_summary(summary: dict[str, Any], *, require_cuda: bool =
     assert n_glycan["modifier_product_residue_name"] == "NAG"
     assert n_glycan["protein_link_atom_name"] == "ND2"
     assert n_glycan["product_site_atom_present"] is True
-    assert n_glycan["protein_leaving_atom_names"] == ["HD21"]
+    assert n_glycan["protein_leaving_atom_names"] == ["HD22"]
     assert n_glycan["modifier_leaving_atom_count"] == 2
     assert n_glycan["crosslink_residues"] == ["NLN", "NAG"]
     assert n_glycan["crosslink_linking_atoms"][0] == "ND2"

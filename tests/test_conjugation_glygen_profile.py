@@ -127,39 +127,39 @@ def test_g42666_resolve_plan_removes_one_asn_h_and_keeps_link_atom(tmp_path: Pat
     )
 
     assert plan.protein_link_atom.atom_name == "ND2"
-    assert tuple(atom.atom_name for atom in plan.protein_leaving_atoms) == ("HD21",)
+    assert tuple(atom.atom_name for atom in plan.protein_leaving_atoms) == ("HD22",)
     assert plan.modifier_link_atom.serial == 4
     assert tuple(atom.serial for atom in plan.modifier_leaving_atoms) == (1, 2)
     assert plan.pablo_crosslink_requirement.linking_atoms == ("ND2", "C1")
-    assert plan.pablo_crosslink_requirement.leaving_atoms[0] == ("HD21",)
+    assert plan.pablo_crosslink_requirement.leaving_atoms[0] == ("HD22",)
 
 
-def test_asn_nd2_hydrogen_resolution_uses_template_not_coordinates(tmp_path: Path) -> None:
+def test_asn_nd2_hydrogen_resolution_uses_names_not_coordinates(tmp_path: Path) -> None:
     """Pablo ASN topology should select ND2 H even when coordinates are nonbondlike."""
-    protein_path = _write_asn_fixture(tmp_path / "asn_far_h.pdb", hydrogens=("HD21",))
+    protein_path = _write_asn_fixture(tmp_path / "asn_far_h.pdb", hydrogens=("HD21", "HD22"))
 
     hydrogen = NGlycosylationReaction.resolve_protein_leaving_atom(protein_path, _asn_selector())
 
-    assert hydrogen.atom_name == "HD21"
+    assert hydrogen.atom_name == "HD22"
 
 
 def test_asn_nd2_hydrogen_resolution_rejects_missing_template_h(tmp_path: Path) -> None:
     """Missing Pablo-template ND2 H names should fail without geometry fallback."""
     protein_path = _write_asn_fixture(tmp_path / "asn_no_h.pdb", hydrogens=())
 
-    with pytest.raises(ValueError, match="exactly one explicit hydrogen bonded to ASN ND2"):
+    with pytest.raises(ValueError, match="requires canonical ASN ND2 hydrogens"):
         NGlycosylationReaction.resolve_protein_leaving_atom(protein_path, _asn_selector())
 
 
-def test_asn_nd2_hydrogen_resolution_selects_hd21_from_canonical_template_pair(
+def test_asn_nd2_hydrogen_resolution_selects_hd22_from_canonical_template_pair(
     tmp_path: Path,
 ) -> None:
-    """Canonical Pablo-template ND2 H names should resolve deterministically to HD21."""
+    """Canonical Pablo-template ND2 H names should resolve deterministically to HD22."""
     protein_path = _write_asn_fixture(tmp_path / "asn_two_h.pdb", hydrogens=("HD22", "HD21"))
 
     hydrogen = NGlycosylationReaction.resolve_protein_leaving_atom(protein_path, _asn_selector())
 
-    assert hydrogen.atom_name == "HD21"
+    assert hydrogen.atom_name == "HD22"
 
 
 def test_g42666_product_pablo_definitions_retain_carbonyl_order_two(tmp_path: Path) -> None:
@@ -490,7 +490,8 @@ def test_coordinate_only_workflow_removes_roh_and_links_asn(tmp_path: Path) -> N
     assert " MAN C" in output
     assert "CONECT" in output
     assert " NLN A" in output
-    assert "HD21" not in output
+    assert "HD21" in output
+    assert "HD22" not in output
     assert Path(result.artifact_paths["pdb_fragment_pdb_fragment_ingestion"]).exists()
     assert packmol_calls == [tmp_path / "construction" / "packmol_modifier_placement"]
     assert result.construction.placement.packmol_input_path.exists()
@@ -1038,7 +1039,7 @@ def _element(atom: Any) -> str:
     return (atom.element or atom.atom_name[:1]).strip().upper()
 
 
-def _write_asn_fixture(path: Path, *, hydrogens: tuple[str, ...] = ("HD21",)) -> Path:
+def _write_asn_fixture(path: Path, *, hydrogens: tuple[str, ...] = ("HD21", "HD22")) -> Path:
     """Write a tiny explicit-hydrogen ASN residue fixture."""
     atoms = [
         (1, "N", "ASN", "A", 1, 0.0, 0.0, 0.0, "N"),

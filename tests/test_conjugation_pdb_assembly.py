@@ -458,14 +458,14 @@ def test_crosslinked_writer_preserves_source_components_and_chain_b_selector(tmp
         modifier_link_atom=fragment.atoms[1],
         protein_leaving_atoms_to_remove=(
             PdbAtomRecord(
-                serial=21,
-                atom_index=20,
-                atom_name="HD21",
+                serial=22,
+                atom_index=21,
+                atom_name="HD22",
                 residue_name="ASN",
                 chain_id="B",
                 residue_number=3,
-                x=11.5,
-                y=-4.0,
+                x=9.8,
+                y=-3.8,
                 z=0.0,
                 element="H",
             ),
@@ -474,7 +474,7 @@ def test_crosslinked_writer_preserves_source_components_and_chain_b_selector(tmp
         modifier_target_resname="MXL",
     )
 
-    write_crosslinked_pdb(protein_path, fragment, attachment, output_path)
+    result = write_crosslinked_pdb(protein_path, fragment, attachment, output_path)
 
     lines = output_path.read_text().splitlines()
     atom_lines = [line for line in lines if line.startswith(("ATOM", "HETATM"))]
@@ -487,6 +487,22 @@ def test_crosslinked_writer_preserves_source_components_and_chain_b_selector(tmp
     }
     assert "HD21" in nln_atoms
     assert "HD22" not in nln_atoms
+    assert "HD22" in result.removed_atom_names
+    assert "HD21" not in result.removed_atom_names
+    retained_hd21 = next(
+        line
+        for line in atom_lines
+        if line[17:20].strip() == "NLN"
+        and line[22:26].strip() == "3"
+        and line[12:16].strip() == "HD21"
+    )
+    assert tuple(
+        float(retained_hd21[start:end]) for start, end in ((30, 38), (38, 46), (46, 54))
+    ) == (
+        11.5,
+        -4.0,
+        0.0,
+    )
 
     topology = PDBFile(str(output_path)).topology
     residue_by_id = {
