@@ -274,18 +274,26 @@ def _remap_staged_paths(value: Any, staged_dir: Path, export_dir: Path) -> Any:
     return value
 
 
-def _remap_published_metadata(owner: Any, staged_dir: Path, export_dir: Path) -> None:
-    """Update route metadata that an exporter mutated to staged paths."""
-    if owner is None:
+def _canonicalize_handoff_metadata(
+    export_input: Any,
+    route_result: Any,
+    export_result: dict[str, Any],
+) -> None:
+    """Make exact-route metadata describe only the published GROMACS handoff."""
+    sidecar_path = export_result.get("exact_exception_sidecar")
+    audit_path = export_result.get("exact_gromacs_audit")
+    if sidecar_path is None:
         return
-    for attribute in ("sidecar_path", "audit_path"):
-        current = getattr(owner, attribute, None)
-        remapped = _remap_staged_paths(current, staged_dir, export_dir)
-        if remapped != current:
-            setattr(owner, attribute, remapped)
-    artifact_paths = getattr(owner, "artifact_paths", None)
+    if hasattr(export_input, "sidecar_path"):
+        export_input.sidecar_path = sidecar_path
+    if hasattr(export_input, "audit_path"):
+        export_input.audit_path = None
+    artifact_paths = getattr(route_result, "artifact_paths", None)
     if isinstance(artifact_paths, dict):
-        artifact_paths.update(_remap_staged_paths(artifact_paths, staged_dir, export_dir))
+        artifact_paths["exact_openmm_exceptions"] = sidecar_path
+        artifact_paths.pop("native_openmm_glycam_audit", None)
+        if audit_path is not None:
+            artifact_paths["exact_gromacs_audit"] = audit_path
 
 
 def _publish_staged_export(
@@ -994,11 +1002,10 @@ def build(
                             export_result = _publish_staged_export(
                                 staged_export_dir, export_dir, export_result
                             )
-                            _remap_published_metadata(export_input, staged_export_dir, export_dir)
-                            _remap_published_metadata(
+                            _canonicalize_handoff_metadata(
+                                export_input,
                                 getattr(artifacts, "result", None),
-                                staged_export_dir,
-                                export_dir,
+                                export_result,
                             )
                     finally:
                         if staged_export_dir is not None and staged_export_dir.exists():

@@ -542,8 +542,17 @@ class TestBuildCommandConjugationRouting:
         working_dir = tmp_path / "run_1"
         sim_config.get_working_directory = lambda _rep: working_dir
         mock_from_yaml.return_value = sim_config
-        exact_bundle = SimpleNamespace(sidecar_path=tmp_path / "source-sidecar.json")
-        route_result = SimpleNamespace(artifact_paths={})
+        build_staging = tmp_path / "separate-build-staging"
+        exact_bundle = SimpleNamespace(
+            sidecar_path=build_staging / "exact_openmm_exceptions.json",
+            audit_path=build_staging / "native_openmm_glycam_audit.json",
+        )
+        route_result = SimpleNamespace(
+            artifact_paths={
+                "exact_openmm_exceptions": exact_bundle.sidecar_path,
+                "native_openmm_glycam_audit": exact_bundle.audit_path,
+            }
+        )
         artifacts = MagicMock(result=route_result)
         artifacts.require_final_interchange.return_value = exact_bundle
         mock_build.return_value = artifacts
@@ -558,8 +567,6 @@ class TestBuildCommandConjugationRouting:
             }
             for path in paths.values():
                 path.write_text("exact\n")
-            exact_bundle.sidecar_path = paths["sidecar"]
-            route_result.artifact_paths["exact_gromacs_audit"] = paths["audit"]
             return {
                 "gro": paths["gro"],
                 "top": paths["top"],
@@ -579,10 +586,15 @@ class TestBuildCommandConjugationRouting:
         live_sidecar = working_dir / "solute" / "gromacs" / "exact_exceptions.json"
         assert published["exact_exception_sidecar"] == live_sidecar
         assert exact_bundle.sidecar_path == live_sidecar
-        assert route_result.artifact_paths["exact_gromacs_audit"] == (
-            working_dir / "solute" / "gromacs" / "exact_audit.json"
-        )
+        assert exact_bundle.audit_path is None
+        live_audit = working_dir / "solute" / "gromacs" / "exact_audit.json"
+        assert route_result.artifact_paths == {
+            "exact_openmm_exceptions": live_sidecar,
+            "exact_gromacs_audit": live_audit,
+        }
         assert live_sidecar.is_file()
+        assert live_audit.is_file()
+        assert all(path.is_file() for path in route_result.artifact_paths.values())
         assert not Path(mock_export.call_args.kwargs["output_dir"]).exists()
 
     @pytest.mark.parametrize(
