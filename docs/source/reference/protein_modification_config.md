@@ -5,7 +5,8 @@ by the current `polyzymd build` workflow. Protein modifications are configured
 under `conjugation:` because the supported implementation began as covalent
 polymer-protein conjugation.
 
-Current validated vertical-slice support covers NHS-lysine polymer attachments.
+Current validated vertical-slice support covers NHS-lysine polymer attachments
+and strict GLYCAM N-glycosylation under the input contract below.
 The active architecture is generic: a moiety provider resolves each source, a
 mechanism resolves a product-state attachment plan, and the workflow carries an
 attachment spec through shared assembly, Pablo/OpenFF parameterization, charge
@@ -26,13 +27,86 @@ conjugation:
 | Field | Type | Meaning |
 |-------|------|---------|
 | `enabled` | boolean | Turns conjugation handling on or off. This remains opt-in. |
-| `attachments` | list | Ordered list of requested covalent attachments. |
+| `attachments` | list | Ordered inline list of requested covalent attachments. Mutually exclusive with `attachments_file`. |
+| `attachments_file` | path | CSV containing an ordered list of attachments. Mutually exclusive with `attachments`; resolved relative to the YAML file. |
 | `ccd_pablo` | mapping | Pablo/CCD policy for structure ingestion and custom residues. |
 | `chain_policy` | mapping | Chain assignment policy for protein and attached moieties. |
-| `charge` | mapping | Charge patching and total-charge policy. |
+| `placement` | mapping | Global Packmol execution policy, including `timeout_seconds`. |
 | `diagnostics` | mapping | Controls diagnostic sidecar output. |
 
 When `enabled: true`, at least one attachment must be present and enabled.
+
+### Attachment CSV
+
+Use `attachments_file` when each attachment already has a structure and can be
+described with scalar fields. Each nonblank CSV row becomes one ordinary
+attachment, in file order. Headers use dotted YAML paths:
+
+```text
+name,site.chain_id,site.residue_name,site.residue_number,site.atom_name,moiety.name,moiety.force_field,moiety.input_path,mechanism.name
+asn25_glycan,A,ASN,25,ND2,G42666,glycam06,structures/G42666.pdb,n_glycosylation
+asn60_glycan,B,ASN,60,ND2,G80966,glycam06,structures/G80966.pdb,n_glycosylation
+```
+
+```yaml
+conjugation:
+  enabled: true
+  attachments_file: tables/attachments.csv
+```
+
+The CSV is read as UTF-8 and may contain a UTF-8 byte-order mark. Empty cells
+are omitted so schema defaults still apply; entirely blank rows are skipped.
+`moiety.input_path` values are resolved relative to the CSV file, while the CSV
+path itself is resolved relative to the YAML file. Duplicate or unknown headers,
+extra cells, and list-valued headers are rejected. Lists and nested chemistry
+such as `mechanism.leaving_atoms` require inline `attachments` instead of CSV;
+the two attachment sources cannot be combined. Pydantic validates the
+materialized rows with the same schema used for `attachments`.
+
+Accepted CSV headers are:
+
+```text
+name
+enabled
+site.chain_id
+site.residue_name
+site.residue_number
+site.atom_name
+site.insertion_code
+site.atom_serial
+site.atom_index
+site.selector
+moiety.name
+moiety.force_field
+moiety.residue_name
+moiety.input_path
+moiety.smiles
+moiety.link_site.chain_id
+moiety.link_site.residue_name
+moiety.link_site.residue_number
+moiety.link_site.atom_name
+moiety.link_site.insertion_code
+moiety.link_site.atom_serial
+moiety.link_site.atom_index
+mechanism.name
+mechanism.reaction_smarts
+mechanism.site_atom
+mechanism.moiety_atom
+mechanism.product_residues.site
+mechanism.product_residues.moiety
+mechanism.bond.site_atom
+mechanism.bond.moiety_atom
+mechanism.bond.order
+mechanism.bond.target_bond_length_angstrom
+placement.strategy
+placement.target_bond_length_angstrom
+placement.clash_cutoff_angstrom
+placement.timeout_seconds
+```
+
+The parser explicitly rejects the list-valued headers `mechanism.atom_roles`,
+`mechanism.leaving_atoms.site`, and `mechanism.leaving_atoms.moiety` with a
+targeted error rather than treating their cells as ad hoc serialized lists.
 
 ## Attachment
 
@@ -115,6 +189,22 @@ For `nhs_lys_amide`, the mechanism resolves the lysine `NZ` atom when the site
 identifies a lysine residue. Include `residue_name` to make validation errors
 clearer.
 
+### Source selectors and canonical output identity
+
+Site selectors describe the unmodified source PDB that users inspect. PolyzyMD
+matches the original chain ID, residue name, residue number, insertion code, atom
+name, and optional exact atom serial/index before canonicalization. A selector
+such as chain `B`, residue 60 therefore continues to select source chain `B` even
+though the constructed protein is written on canonical chain `A`.
+
+Canonical protein residue numbers are continuous across source chains and
+protein molecules. This renumbering does not imply peptide connectivity.
+PolyzyMD preserves source segment boundaries with `TER` records and does not add
+a peptide bond between the last residue of one source segment and the first of
+the next. Explicit source `CONECT` bonds are retained when both atoms survive,
+including intentional cross-chain covalent links such as disulfides. A `TER`
+record marks a peptide boundary; it does not delete an explicit crosslink.
+
 ## Moiety
 
 A moiety is the group added to the protein. The active provider layer resolves
@@ -177,14 +267,15 @@ moiety:
 With `moiety.force_field: glycam06`, PolyzyMD attaches the glycan to Asn, uses
 attachment-scoped internal residue aliases for Pablo full modified-topology
 parsing, restores canonical GLYCAM names after Pablo succeeds, and maps the
-modified Asn/ASX residue to GLYCAM `NLN` during OpenMM system creation. Multiple
+modified Asn directly to GLYCAM `NLN` during product assembly. The product
+retains canonical `HD21` and removes `HD22`, matching the `NLN` template. Multiple
 glycan attachments such as Asn25 and Asn60 are supported by the same
 scoped-identity mechanism.
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | `name` | string | Moiety identifier. |
-| `force_field` | `glycam06`, OpenFF `.offxml`, or omitted | Optional per-moiety force-field owner. Use `glycam06` for strict GLYCAM/NLN routing. Omitted values inherit `force_field.small_molecule`; unknown labels fail without fallback. |
+| `force_field` | `glycam06` or OpenFF `.offxml` | Required for every enabled attachment. Use `glycam06` for strict GLYCAM/NLN routing or declare the OpenFF source for the generic route. Missing, blank, and unknown values fail closed. |
 | `residue_name` | string | Residue name to use for a generated single-residue moiety. |
 | `input_path` | path | Generic residue-resolved PDB-fragment source. The built-in executable profile is residue-resolved N-glycan input when `mechanism.name: n_glycosylation`; other mechanisms must opt in through their reaction template. |
 | `smiles` | string | SMILES for generated single-residue moieties. |
@@ -201,10 +292,10 @@ atom `C1`, and the source atom serial unless an explicit `moiety.link_site`
 selector is supplied. The workflow removes the validated hydroxyl O/H leaving
 atoms and links the glycan reducing-end `C1` to the Asn site atom.
 
-Migration note: older or minimal configs that omit `moiety.force_field` inherit
-`force_field.small_molecule` and use the generic OpenFF route. Strict GLYCAM does
-not silently fall back to OpenFF; opt in by setting `moiety.force_field:
-glycam06` on the glycan moiety.
+Migration note: enabled attachments must now declare `moiety.force_field`.
+Set `glycam06` for strict GLYCAM ownership or an explicit OpenFF `.offxml` source
+for the generic route. PolyzyMD does not infer ownership from
+`force_field.small_molecule` and never silently falls back between routes.
 
 ## Mechanism
 
@@ -227,11 +318,12 @@ mechanism:
 | `leaving_atoms.site` | list | Protein atoms removed during bond formation. |
 | `leaving_atoms.moiety` | list | Moiety atoms removed during bond formation. |
 
-The `nhs_lys_amide` mechanism uses built-in NHS-lysine defaults and is the
-validated vertical slice. Experimental non-NHS mechanisms use the same resolved
-plan and attachment-spec pipeline, but users should validate product chemistry,
-charges, and geometry carefully. Explicit custom PDB linkages must specify the
-atom-level fields required by the schema.
+The `nhs_lys_amide` mechanism uses built-in NHS-lysine defaults. Strict
+`n_glycosylation` with canonical GLYCAM PDB fragments and explicit
+`moiety.force_field: glycam06` is also a validated vertical slice. Other non-NHS
+mechanisms use the same resolved plan and attachment-spec pipeline but remain
+experimental. Explicit custom PDB linkages must specify the atom-level fields
+required by the schema.
 
 The public engine also accepts direct requests built from `protein_pdb_path` plus
 the same `attachments` entries. Raw molecule/topology keyword arguments are not
@@ -279,18 +371,41 @@ conjugation:
 
 ## Placement
 
+Configure the workflow-wide Packmol policy at `conjugation.placement`:
+
 ```yaml
-placement:
-  strategy: preserve_existing
-  target_bond_length_angstrom: 1.33
-  clash_cutoff_angstrom: 1.5
+conjugation:
+  placement:
+    timeout_seconds: 900
 ```
 
 | Field | Meaning |
 |-------|---------|
-| `strategy` | Placement strategy placeholder. |
-| `target_bond_length_angstrom` | Optional target bond length for placement workflows. |
-| `clash_cutoff_angstrom` | Steric clash cutoff for placement checks. |
+| `timeout_seconds` | Maximum wall time for each Packmol attempt. Defaults to 900 seconds; set to `null` to wait without a limit. |
+
+The current public workflow uses only the global `timeout_seconds`. The schema's
+`strategy`, `target_bond_length_angstrom`, and `clash_cutoff_angstrom` fields are
+reserved placeholders and do not alter config-driven placement. In particular,
+the severe-contact acceptance threshold is currently fixed at 2 A. Do not rely
+on an attachment-level timeout to override the global limit.
+
+Packmol exit code 173 and a timeout are candidate-producing outcomes, not
+successful placement by themselves. On timeout PolyzyMD terminates Packmol and
+kills it after a short grace period if needed. PolyzyMD continues only when the
+candidate has the exact expected atom count and order, finite coordinates, the
+post-snap linkage length, and the route's downstream structural checks. For
+coordinate-only PDB fragments, those checks also require a valid final `CONECT`
+graph and no severe true nonbonded heavy-atom contacts below 2 A. The contact
+check covers both protein--fragment and fragment--fragment pairs and excludes
+pairs separated by three or fewer bonds in the final graph. Execution and
+acceptance are recorded in `packmol_run_status.json`; inspect `timed_out`,
+`return_code`, `outcome`, `accepted_after_validation`, and `validation`.
+
+The 900-second limit applies to each Packmol process, not the whole build. The
+single-fragment coordinate-only path can retry up to 20 times, placing later
+status files under `packmol_modifier_placement_attempt_XX`; its total wait can
+therefore exceed 900 seconds. Multi-fragment input uses one joint Packmol attempt
+so fragment--fragment sterics are solved together.
 
 ## Product-State Charge Bridge
 
@@ -350,10 +465,10 @@ transfer.
 
 See {doc}`conjugation_support_matrix` for the current support matrix. In brief,
 the validated reliability milestone covers the opt-in config-driven and direct
-request NHS-lysine polymer vertical slice, including Pablo/OpenFF Interchange,
-ff14SB plus polymer templates, local pre-production NAGL patch charge bridge,
-local charge reconciliation, conjugate relaxation, final solvation, and
-`conjugate_validation_report.json`.
+request NHS-lysine polymer route and strict GLYCAM N-glycosylation for canonical
+GLYCAM-named CONECT PDB fragments. Their parameterization paths differ: NHS-Lys
+uses the product-state OpenFF charge bridge, while strict N-glycosylation uses
+native GLYCAM ownership and exact OpenMM/GROMACS sidecars.
 
 The validation report audits product bond graph evidence, link atom presence,
 leaving atom absence, valence sanity, charge evidence, parameter coverage,

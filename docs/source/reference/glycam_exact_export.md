@@ -13,7 +13,7 @@ conjugation:
         force_field: glycam06
     - name: lys63_polymer
       moiety:
-        # Omit force_field to inherit force_field.small_molecule.
+        force_field: openff-2.3.0.offxml
 ```
 
 Use canonical `moiety.force_field: glycam06` for GLYCAM glycans. Existing
@@ -26,13 +26,13 @@ Unknown labels fail loudly; PolyzyMD does not fall back from GLYCAM to OpenFF.
 | Domain | Owner | Notes |
 |--------|-------|-------|
 | Protein | Amber ff14SB | Loaded through OpenMM's Amber14 XML stack. |
-| Modified Asn | GLYCAM `NLN` | PolyzyMD maps each modified Asn/ASX residue to `NLN` in `residueTemplates`. |
+| Modified Asn | GLYCAM `NLN` | PolyzyMD emits the modified residue directly as `NLN`, retaining `HD21` and removing `HD22`. |
 | Glycan residues | GLYCAM_06j-1 | Input PDBs must use canonical GLYCAM names and complete `CONECT` records. |
 | Water | TIP3P | Native route currently accepts TIP3P water. |
 | Disconnected DMSO/free polymer/organics | OpenFF Sage through `SMIRNOFFTemplateGenerator` | Component must be disconnected from Amber/GLYCAM domains and have assigned partial charges. Disconnected multi-residue Sage polymers are represented as one OpenMM residue solely for template matching; original monomer segmentation remains audited. |
 
-The generic default route is Sage/Interchange for attachments that omit
-`moiety.force_field` and inherit `force_field.small_molecule`:
+The generic route is Sage/Interchange for attachments that explicitly declare
+an OpenFF `.offxml` owner:
 
 ```yaml
 force_field:
@@ -42,6 +42,7 @@ conjugation:
     - name: lys63_polymer
       moiety:
         name: polymer
+        force_field: openff-2.3.0.offxml
 ```
 
 The exact and mixed-overlay routes fail closed. They do not silently use OpenFF
@@ -50,9 +51,11 @@ overlay.
 
 ## Mixed overlay semantics
 
-When a system contains both GLYCAM-owned glycans and generic OpenFF-owned
-moieties, PolyzyMD builds a complete generic baseline and overlays only the
-GLYCAM-owned native terms. The merged system preserves baseline global
+When a system contains GLYCAM-owned glycans and disconnected generic
+OpenFF-owned components, PolyzyMD builds a complete generic baseline and
+overlays only the GLYCAM-owned native terms. A generic component covalently
+crossing into the Amber/GLYCAM product remains unsupported. The merged system
+preserves baseline global
 `NonbondedForce` settings, including method, cutoff, switching, dispersion
 correction, PME/Ewald settings, LJPME settings when available, force group,
 reciprocal-space force group, and force names. Reconstructed handled forces also
@@ -82,7 +85,8 @@ after Pablo succeeds.
 
 The restored topology carries metadata such as `canonical_residue_name`,
 `pablo_scoped_residue_name`, and `product_identity_source` for aliased residues.
-The native OpenMM handoff then maps each modified Asn residue to GLYCAM `NLN`.
+The native OpenMM handoff receives each modified site as GLYCAM `NLN`, with
+`HD21` retained and `HD22` absent.
 Multi-glycan systems such as Asn25 plus Asn60 use the same scoped identity model
 for each attachment.
 

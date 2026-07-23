@@ -7,10 +7,9 @@ PolyzyMD exact OpenMM/GROMACS paths.
 
 ```{important}
 This is an explicit per-moiety route. Mark each glycan moiety with
-`moiety.force_field: glycam06`. Moieties that omit `force_field` inherit the
-top-level `force_field.small_molecule` setting and use the generic OpenFF route.
-Unknown force-field labels fail loudly; PolyzyMD does not silently fall back from
-GLYCAM to OpenFF.
+`moiety.force_field: glycam06`. Every enabled attachment must explicitly declare
+`glycam06` or an OpenFF `.offxml` source. Missing and unknown force-field labels
+fail loudly; PolyzyMD does not silently fall back between GLYCAM and OpenFF.
 ```
 
 ```{warning}
@@ -25,10 +24,11 @@ users must configure deliberately and validate for their ensemble.
 ## Prerequisites
 
 - A cleaned protein PDB containing the target Asn residue or residues with
-  explicit hydrogens.
+  explicit hydrogens. Multi-chain proteins are accepted; keep the source chain
+  IDs that you use to identify sites in a molecular viewer.
 - One residue-resolved glycan PDB per attachment. The glycan must use canonical
   GLYCAM residue and atom names and must contain complete curated `CONECT`
-  records for the glycan graph.
+  records for the glycan graph. PolyzyMD does not infer missing bonds.
 - The reducing-end anomeric `C1` must have explicit hydroxyl O/H atoms, either
   as an ordinary residue-local hydroxyl or as the supported separate-residue
   `ROH` cap with `O1`/`HO1` atom names.
@@ -107,9 +107,10 @@ Disconnected precharged OpenFF components such as DMSO or ethanol, free polymer
 molecules, and other disconnected organics can coexist with GLYCAM glycans when
 they have complete provenance and assigned partial charges. Ions and water are
 also included in the final solvated system. Covalently attached OpenFF polymer on
-the same protein as a GLYCAM glycan is handled by the mixed overlay route, which
-audits ownership and fails closed on unknown baseline parameter forces that touch
-GLYCAM atoms.
+the same protein as a GLYCAM glycan is not supported because the
+Amber/GLYCAM--Sage boundary lacks audited bonded and exception ownership. The
+mixed overlay supports only generic components that remain disconnected from the
+Amber/GLYCAM product and fails closed when that separation cannot be proved.
 
 Disconnected multi-residue Sage polymers are represented internally as one
 OpenMM residue only for `SMIRNOFFTemplateGenerator` template matching. The
@@ -119,12 +120,19 @@ artifacts.
 ## 4. Configure one or more N-glycosylation attachments
 
 Add one enabled attachment under `conjugation.attachments` for each Asn site. Use
-the cleaned protein's Asn chain and residue number, set
+the unmodified source protein's Asn chain and residue number, set
 `moiety.force_field: glycam06`, and point `moiety.input_path` at the canonical
 GLYCAM-named CONECT PDB. The built-in N-glycosylation mechanism infers the
 canonical Asn `ND2`--glycan reducing-end `C1` linkage and validates the hydroxyl
 leaving atoms. Use explicit atom selectors only when you need to override that
 canonical inference.
+
+PolyzyMD later writes all protein atoms on canonical chain `A` with continuous
+residue numbering. Do not change a source chain `B` selector to chain `A` merely
+because the assembled PDB uses chain `A`. Source chain, residue number, insertion
+code, and atom identity are reconciled automatically. Source peptide boundaries
+remain separated by `TER`, while explicit cross-chain `CONECT` links are
+preserved.
 
 ```yaml
 conjugation:
@@ -164,7 +172,15 @@ The built-in mechanism forms an Asn `ND2`--glycan reducing-end `C1` bond. It
 removes one Asn `ND2` hydrogen and the validated glycan hydroxyl O/H leaving
 atoms. PolyzyMD uses attachment-scoped internal residue aliases while Pablo parses
 the full modified topology, then restores canonical glycan names and routes the
-modified Asn residue to the GLYCAM `NLN` template during OpenMM system creation.
+modified Asn directly to the GLYCAM `NLN` product residue. The assembled `NLN`
+retains `HD21` and does not contain `HD22`.
+
+For many file-based attachments, replace the inline list with
+`conjugation.attachments_file: tables/attachments.csv`. Each row can use dotted
+scalar columns such as `site.chain_id`, `site.residue_number`,
+`moiety.input_path`, and `mechanism.name`. CSV moiety paths are relative to the
+CSV file. See {doc}`../reference/protein_modification_config` for the complete
+CSV contract and a copyable example.
 
 ## 5. Use a tested YAML shape
 
@@ -289,8 +305,8 @@ openmm:
   precision: mixed
 ```
 
-The final solvated system may contain the attached glycans, attached OpenFF
-polymers, free OpenFF polymer chains, organic cosolvent, ions, and water. The
+The final solvated system may contain the attached glycans, free OpenFF polymer
+chains, organic cosolvent, ions, and water. The
 final periodic E2E acceptance test exercises this mixed component set.
 
 ## 6. Run the build
@@ -302,6 +318,17 @@ contains an `ExactExportBundle` rather than a public vanilla Interchange.
 ```bash
 pixi run -e build polyzymd build -c config.yaml
 ```
+
+Each Packmol attempt has a 900-second default timeout. Configure a different
+positive value with `conjugation.placement.timeout_seconds`, or use `null` for an
+intentional unbounded wait. A timeout or Packmol exit code 173 only means that a
+best candidate may exist. PolyzyMD accepts it only after validating exact atom
+count/order, finite coordinates, linkage length, final `CONECT`, and graph-aware
+protein--fragment and fragment--fragment clashes. Inspect
+`packmol_run_status.json`; `accepted_after_validation` must be `true`.
+The limit is per process: a single-fragment coordinate-only placement can retry
+up to 20 times, while multiple fragments are placed in one joint attempt. Use a
+shorter timeout when you need a bounded proof-of-concept build.
 
 The OpenMM execution path uses the authoritative native OpenMM `System`,
 `Topology`, and positions from that bundle. Production minimization should be
@@ -316,7 +343,8 @@ The important exact-route artifacts are:
 | Artifact | Typical path | What to check |
 |----------|--------------|---------------|
 | Solvated PDB | `.../solvated_conjugate.pdb` | Canonical glycan residue and atom names are restored after Pablo-only scoped aliasing. |
-| Native GLYCAM audit | `.../native_openmm_glycam_audit.json` | `route: native_openmm_glycam`, `residue_templates` maps each modified Asn/ASX residue to `NLN`, `glycam_template_matches` lists matched GLYCAM residues, and `sage_template_generator.proof_no_glycan_entered_sage` is `true`. |
+| Packmol status | `.../conjugate-construction/packmol_modifier_placement/packmol_run_status.json` | `accepted_after_validation` is `true`; single-fragment retries use sibling directories named `packmol_modifier_placement_attempt_XX`. |
+| Native GLYCAM audit | `.../native_openmm_glycam_audit.json` | `route: native_openmm_glycam`, `residue_templates` records each modified `NLN`, `glycam_template_matches` lists matched GLYCAM residues, and `sage_template_generator.proof_no_glycan_entered_sage` is `true`. |
 | Exact exception sidecar | `.../exact_openmm_exceptions.json` | Schema v2 sidecar with authoritative OpenMM atoms, bonds, nonbonded particles, exceptions, constraints, route invariants, and normalized GROMACS output identity/hashes. |
 | Workflow JSON | `.../conjugated_polymer_system_workflow.json` | `artifact_paths.native_openmm_glycam_audit` and `artifact_paths.exact_openmm_exceptions` point to the audit and sidecar. |
 
@@ -364,8 +392,8 @@ POLYZYMD_RUN_FINAL_E2E=1 pixi run -e build pytest tests/test_conjugation_final_e
 - The glycan input must be a canonical GLYCAM-named PDB with complete `CONECT`
   records. PolyzyMD rejects missing or detectably invalid explicit graphs and
   does not infer bonds from coordinates.
-- Strict GLYCAM never silently falls back to OpenFF. Omit `moiety.force_field`
-  only for moieties that should inherit `force_field.small_molecule`.
+- Strict GLYCAM never silently falls back to OpenFF. Every enabled attachment
+  must declare `glycam06` or its OpenFF `.offxml` owner explicitly.
 - Covalently attached Sage polymer on the same protein as a GLYCAM glycan is
   unsupported because cross-boundary bonded and exception provenance is not
   audited. Disconnected Sage components are supported when precharged and routed

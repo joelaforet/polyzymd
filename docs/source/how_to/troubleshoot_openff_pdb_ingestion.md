@@ -25,7 +25,9 @@ Use a small script or text inspection to answer these questions. Some checks are
 OpenFF chemistry checks; chain-ID checks are PolyzyMD input conventions that keep
 protein, substrate, polymer, and solvent roles unambiguous later in the build.
 
-- Do protein atom records use PolyzyMD chain `A`?
+- Are the source protein chain IDs stable and are attachment selectors written
+  against those source IDs? PolyzyMD maps constructed protein output to chain
+  `A`; users do not need to relabel a multi-chain source before selecting sites.
 - Are substrate, polymer, and solvent chains kept out of the enzyme PDB or placed
   on the expected chains `B`, `C`, and `D+` when relevant?
 - Are TER records present between disconnected protein fragments?
@@ -117,6 +119,14 @@ molecules are assigned chain `A`; substrate remains chain `B`, polymers chain
 residues continuously across retained enzyme molecules, so a homodimer with two
 source monomers numbered 1-99 becomes chain `A` residues 1-198.
 
+For a conjugation failure, compare the selector with the original chain,
+residue name and number, insertion code, and atom name. Do not rewrite a source
+chain `B` selector to chain `A` merely because the assembled PDB uses chain `A`.
+In the output, check that each original peptide-segment boundary has a `TER`
+record and that no new C--N peptide bond crosses it. Also confirm that intentional
+source `CONECT` bonds, including cross-chain disulfides, remain present. A `TER`
+boundary and an explicit cross-segment bond can coexist.
+
 ## Interpret OpenFF error dumps
 
 OpenFF PDB errors often include a residue-level description of atoms, bonds, and
@@ -163,12 +173,13 @@ Do not reuse reactant-state leaving names such as `HZ2`/`HZ3` as a default. The
 source protein may have used different hydrogen names, and those atoms should
 already be absent from the product PDB.
 
-## Residue-resolved glycan PDB fragments
+## Residue-resolved PDB fragments
 
-PolyzyMD's PDB-fragment moiety ingestion is strict about connectivity. A glycan
-fragment supplied with `moiety.input_path` must include complete `CONECT` records
-for the fragment graph. PolyzyMD does not infer, guess, or repair fragment bonds
-from coordinates.
+PolyzyMD's PDB-fragment moiety ingestion is strict about connectivity. Every
+fragment supplied with `moiety.input_path` must include complete, user-curated
+`CONECT` records for its graph. PolyzyMD does not infer, guess, or repair fragment
+bonds from coordinates. Add or correct the records in the input structure, then
+inspect them in a molecular viewer before rebuilding.
 
 After accepting the explicit graph, PolyzyMD may assign bond orders on that exact
 graph from parsed atoms, explicit hydrogens, formal charges, and `CONECT` pairs.
@@ -212,6 +223,33 @@ names with attachment-scoped Pablo aliases in an internal
 `assembled_crosslinked.pablo_scoped.pdb` file, but it restores canonical names
 before native OpenMM GLYCAM parameterization and records the alias mapping in
 workflow provenance.
+
+The modified Asn product should already be named `NLN` in the assembled product.
+Its amide nitrogen retains `HD21`; `HD22` is the removed protein leaving atom. If
+an output still contains `ASX`, or contains both `HD21` and `HD22` on modified
+Asn, it was produced by an older or inconsistent build.
+
+## Packmol timeout and exit 173
+
+The default placement timeout is 900 seconds per attempt. Set
+`conjugation.placement.timeout_seconds: null` only when you intentionally want an
+unbounded wait. A timeout terminates Packmol, while exit code 173 reports an
+imperfect best candidate. Neither outcome is accepted automatically.
+Single-fragment coordinate-only placement can make up to 20 sequential attempts,
+so the full default wait can be much longer than 900 seconds. Later attempts use
+directories named `packmol_modifier_placement_attempt_XX`. Multi-fragment
+placement instead makes one joint attempt.
+
+Inspect `packmol_run_status.json` in the placement directory. A usable candidate
+must have `accepted_after_validation: true`. The `validation` object records
+exact atom count/order, finite coordinates, the final linkage length, final
+`CONECT` graph validity, and severe true nonbonded heavy-atom contacts. Clash
+classification checks protein--fragment and fragment--fragment pairs and ignores
+pairs within three bonds in the final graph. If acceptance is false, fix the
+input geometry or shorten the active global timeout while diagnosing; the schema
+fields `strategy`, `target_bond_length_angstrom`, and `clash_cutoff_angstrom` do
+not currently change config-driven placement. Do not treat the existence of
+`packmol.pdb` as success.
 
 ## Disulfides
 

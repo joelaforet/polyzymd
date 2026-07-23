@@ -18,15 +18,18 @@ not only drawing a new bond. A reliable conjugation workflow must also account
 for atom identity, leaving atoms, product residue definitions, charge provenance,
 parameter coverage, and geometry.
 
-The current validated path is an opt-in, config-driven NHS-Lys polymer vertical
-slice. It starts from an unmodified protein, attaches an NHS-activated polymer to
+One validated path is an opt-in, config-driven NHS-Lys polymer vertical slice.
+It starts from an unmodified protein, attaches an NHS-activated polymer to
 lysine, ingests the product state through Pablo/OpenFF Interchange, combines
 ff14SB protein treatment with polymer templates, applies a local NAGL patch
 charge bridge near the linkage, reconciles local charge evidence, runs restrained
-OpenMM relaxation, and finishes with final solvation.
+OpenMM relaxation, and finishes with final solvation. A second validated slice
+uses canonical GLYCAM-named CONECT PDB fragments for strict
+N-glycosylation and native GLYCAM parameter ownership.
 
-The N-glycosylation path and multi-site attachment paths share some mechanism
-and validation infrastructure. Their support level differs by scope; see
+The strict GLYCAM and NHS-Lys paths share mechanism and validation
+infrastructure, while SMILES-only and custom mechanisms have narrower support;
+see
 {doc}`../reference/conjugation_support_matrix` for the current matrix.
 
 ## Decision

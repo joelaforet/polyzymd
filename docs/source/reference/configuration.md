@@ -48,6 +48,22 @@ See {ref}`build-scope-artifacts` for the exact files written by each scope.
 
 ---
 
+## Conjugation Configuration
+
+The optional `conjugation` block accepts either an ordered inline
+`attachments` list or `attachments_file`, never both. CSV rows use supported
+dotted scalar headers and are validated as ordinary attachment objects. Site
+selectors refer to identities in the unmodified source PDB, even when PolyzyMD
+canonicalizes all protein output to chain `A` with continuous residue numbers.
+
+Global `conjugation.placement.timeout_seconds` defaults to 900 seconds per
+Packmol attempt; `null` disables the timeout. A timeout or Packmol exit code 173
+can continue only after mandatory candidate validation. See
+{doc}`protein_modification_config` for the complete attachment CSV, source
+identity, `CONECT`/`TER`, placement, and modified-residue contracts.
+
+---
+
 ## Enzyme Configuration
 
 ```yaml
@@ -690,7 +706,7 @@ force_field:
 
 | Field | Values | Default | Notes |
 |-------|--------|---------|-------|
-| `conjugation.attachments[].moiety.force_field` | `glycam06`, OpenFF `.offxml`, or omitted | omitted | `glycam06` routes that moiety through strict GLYCAM ownership. Omitted values inherit `force_field.small_molecule` and use the generic OpenFF route. Unknown labels fail without fallback. |
+| `conjugation.attachments[].moiety.force_field` | `glycam06` or OpenFF `.offxml` | required for enabled attachments | `glycam06` routes that moiety through strict GLYCAM ownership. Declare an OpenFF source for the generic route. Missing, blank, and unknown values fail closed. |
 
 For strict GLYCAM N-glycosylation, mark each glycan moiety:
 
@@ -709,10 +725,10 @@ conjugation:
         name: n_glycosylation
 ```
 
-Migration note: existing moieties that omit `force_field` continue to inherit
-`force_field.small_molecule`. To migrate a canonical GLYCAM-named CONECT PDB
-N-glycan build to strict GLYCAM, set `moiety.force_field: glycam06` on the glycan
-moiety. Strict GLYCAM never silently falls back to OpenFF. See
+Migration note: enabled attachments must explicitly declare their owner. For a
+canonical GLYCAM-named CONECT PDB N-glycan, set
+`moiety.force_field: glycam06`; for a generic attachment, declare its OpenFF
+`.offxml` source. PolyzyMD never silently falls back between routes. See
 {doc}`glycam_exact_export` for exact OpenMM/GROMACS sidecar and audit semantics.
 
 ### Key Collision Warnings

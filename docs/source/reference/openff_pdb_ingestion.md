@@ -12,7 +12,7 @@ chemical graph can be matched to supported residue chemistry.
 | Requirement | Expected state | Notes |
 |---|---|---|
 | Hydrogens | Explicit | OpenFF protein PDB ingestion expects chemically complete hydrogens |
-| TER records | Present where fragments are disconnected | Mature cleaved proteins may have multiple fragments |
+| TER records | Present at peptide-segment boundaries | A boundary prevents a false peptide bond; an explicit cross-segment covalent link may still exist |
 | Missing residues | Curated intentionally | Header records such as `REMARK 465` require scientific review |
 | Disulfides | SG-SG connectivity clear; no SG-HG proton | Verify `SSBOND` and, when needed, `CONECT` records |
 | Direct validation | `Topology.from_pdb()` succeeds | Run this before relying on PolyzyMD build steps |
@@ -55,6 +55,15 @@ residues 1-99 is written as chain `A` residues 1-198. Older builds incorrectly
 used only `molecule(0)`, which made homodimer outputs look like single-monomer
 systems even though OpenFF had loaded multiple protein molecules.
 
+For conjugation, users select atoms with their original PDB identity: source
+chain, residue name and number, insertion code, atom name, and optional serial or
+index. PolyzyMD records that identity before mapping protein output to chain `A`.
+It writes `TER` at each source peptide-segment boundary and does not infer a
+peptide bond across that boundary. Explicit `CONECT` bonds whose atoms survive
+normalization are preserved, including covalent links between source chains.
+Continuous canonical numbering is therefore an output identity policy, not a
+claim that adjacent output residue numbers are peptide bonded.
+
 ## Source-protein hydrogen canonicalization
 
 Conjugation workflows that ingest a protein through Pablo should canonicalize
@@ -93,12 +102,15 @@ using attachment-scoped internal residue aliases. This avoids repeated-residue
 and branched-residue ambiguity while Pablo parses the full modified topology.
 After Pablo succeeds, PolyzyMD restores canonical GLYCAM residue names and atom
 names on the topology metadata before native OpenMM GLYCAM parameterization.
+The product-state protein residue is emitted directly as `NLN`; it retains
+`HD21` and does not contain `HD22`.
 
-## PDB-fragment glycan ingestion contract
+## PDB-fragment ingestion contract
 
-Residue-resolved glycan moieties supplied through `moiety.input_path` are treated
-as provider-neutral fragments before product-state Pablo/OpenFF ingestion. The
-fragment contract is intentionally strict:
+Residue-resolved moieties supplied through `moiety.input_path` are treated as
+provider-neutral fragments before a mechanism accepts them. The fragment
+contract is intentionally strict and applies to every PDB fragment, not only
+glycans:
 
 | Requirement | Expected state | Failure mode |
 |---|---|---|
@@ -110,6 +122,11 @@ fragment contract is intentionally strict:
 | Explicit H degree | Exactly one graph bond per hydrogen | Degree 0 or >1 fails explicitly |
 | Common valence | No obvious impossible upper valence | Overbonded H, O, C, N, S, or P fails |
 | Bond orders | Assigned only on the accepted graph from atoms, explicit H, charges, and `CONECT` pairs | Assignment that changes atom count, connectivity, radicals, or total formal charge fails |
+
+Users must provide and review the complete `CONECT` graph. PolyzyMD does not
+infer missing fragment bonds from coordinates, distance, residue templates, or
+the requested mechanism. This remains an input requirement even when a molecular
+viewer appears to draw plausible bonds.
 
 N-glycosylation motif detection is graph-first. The candidate anomeric carbon
 must be bonded to an O-H leaving group and to a retained ring oxygen connected

@@ -26,10 +26,11 @@ NHS-lysine polymer vertical slice:
 - restrained OpenMM relaxation evidence;
 - final solvation.
 
-The N-glycosylation path is wired for mechanism tests and exploratory workflow
-development, but it is not the same validated vertical slice as the NHS-Lys
-polymer workflow. See {doc}`../reference/conjugation_support_matrix` for the
-current support levels.
+Strict N-glycosylation is also a validated vertical slice when every glycan is a
+canonical GLYCAM-named PDB with complete user-curated `CONECT` records and each
+attachment sets `moiety.force_field: glycam06`. Generic PDB fragments are
+mechanism-gated and require the same complete explicit connectivity contract.
+See {doc}`../reference/conjugation_support_matrix` for the current support levels.
 
 ## Build the conjugated system
 
@@ -86,7 +87,10 @@ The report lives with the conjugate construction artifacts. In current
 config-driven builds, related evidence sidecars include files such as
 `product_state_charge_bridge.json`,
 `product_state_charge_bridge_local_reconciliation.json`, and
-`conjugate_relaxation.json` when relaxation ran.
+`conjugate_relaxation.json` when relaxation ran. Packmol placement directories
+also contain `packmol_run_status.json`. For timeout and exit-173 candidates,
+require `accepted_after_validation: true`; the existence of an output PDB is not
+sufficient.
 
 ## Read the top-level status
 
@@ -134,6 +138,19 @@ The report is organized into named audit sections. For each section, inspect
 | `linkage_geometry` | Linkage distances and severe nonbonded close contacts in the product coordinates. | `linkage_distances_angstrom`, `close_contact_count`. |
 | `relaxation_evidence` | `conjugate_relaxation.json` reports successful restrained OpenMM relaxation with finite energies, stable restrained protein atoms, and checked linkage distances. | `relaxation_diagnostics_json_path`. |
 
+For every coordinate-only PDB-fragment placement, also inspect the Packmol
+status validation. It verifies exact atom count/order, finite coordinates,
+post-snap bond lengths, the final `CONECT` graph, and severe heavy-atom contacts
+between protein and fragments and between different fragments. Pairs separated
+by three or fewer final-graph bonds are excluded from the nonbonded clash count.
+
+For multi-chain proteins, compare each configured site with the original source
+chain, residue number, insertion code, and atom name. Then confirm the product
+uses canonical protein chain `A`, continuous output numbering, and `TER` at each
+source peptide boundary without a false boundary-spanning peptide bond. Explicit
+cross-chain `CONECT` links should remain. For N-glycosylation, each modified site
+should be `NLN` with `HD21` present and `HD22` absent.
+
 For quick triage, print any non-passing sections:
 
 ```python
@@ -158,8 +175,9 @@ for section, payload in report.items():
 
 - Validation is necessary but not sufficient. It catches many construction
   failures, but it does not certify arbitrary chemistry or force-field accuracy.
-- Current validated reliability work centers on the NHS-Lys polymer path. Other
-  mechanisms may be wired or exploratory rather than production-ready.
+- Validated vertical slices include NHS-Lys polymer conjugation and the strict
+  GLYCAM N-glycosylation route described above. Other mechanisms may be wired or
+  exploratory rather than production-ready.
 - The exact Interchange/runtime handoff for CUDA 12.4 simulation-only
   environments is planned and implementation-dependent. Use only commands that
   appear in `polyzymd --help` or {doc}`../reference/cli_reference`.

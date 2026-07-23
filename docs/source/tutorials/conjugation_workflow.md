@@ -264,11 +264,11 @@ lysine `NZ`, so you can omit `site.atom_name` in the attachment. Add
 advanced explicit configuration.
 
 ```{note}
-`n_glycosylation` is wired for mechanism tests and exploratory workflow
-development. It is useful when developing a reducing-end glycan-like SMILES
-moiety path, but it is not peer support to the validated NHS-Lys polymer
-vertical slice. Check {doc}`../reference/conjugation_support_matrix` before
-treating exploratory mechanisms as supported workflows.
+The reducing-end glycan-like SMILES route remains exploratory. In contrast,
+`n_glycosylation` with canonical GLYCAM-named PDB fragments, complete `CONECT`
+records, and `moiety.force_field: glycam06` is a separate validated vertical
+slice. Follow {doc}`../how_to/glygen_glycan_conjugation` for that workflow and
+check {doc}`../reference/conjugation_support_matrix` for exact boundaries.
 ```
 
 ## Step 6: Read SMARTS as a Map of Roles
@@ -312,9 +312,10 @@ Read this as:
 4. atom map `4` is retained and can help orient or validate the local chemistry.
 
 The built-in NHS-Lys template uses the same idea: the linking atoms are the
-lysine nitrogen and NHS acyl carbon. Exploratory mechanism metadata, including
-the current N-glycosylation path, follows the same role vocabulary but does not
-automatically provide the same validated workflow support.
+lysine nitrogen and NHS acyl carbon. Custom or SMILES-only mechanism metadata
+follows the same role vocabulary but does not automatically provide validated
+workflow support. Strict PDB-fragment GLYCAM N-glycosylation has its own
+documented input and force-field contract.
 
 ## Step 7: Validate Custom SMARTS Conservatively
 
@@ -357,5 +358,6 @@ for first use:
 
 For working examples, see the notebooks in
 `src/polyzymd/builders/conjugation/poc/`, especially
-`public_api_conjugation_walkthrough.ipynb` for the NHS-Lys vertical slice. Treat
-the N-glycosylation notebook as exploratory development material.
+`public_api_conjugation_walkthrough.ipynb` for the NHS-Lys vertical slice. Use
+{doc}`../how_to/glygen_glycan_conjugation`, rather than an old planning notebook,
+for the strict GLYCAM route.

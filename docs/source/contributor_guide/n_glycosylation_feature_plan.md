@@ -207,7 +207,7 @@ The template owns:
 - detection of the glycan reducing-end/anomeric carbon from SMARTS
 - detection of the anomeric hydroxyl/leaving atoms
 - bond edits that replace reducing-end C-O with C-N to Asn `ND2`
-- product protein residue naming, `ASN -> ASX`
+- product protein residue naming, `ASN -> NLN`
 - product moiety residue naming from the user-provided `residue_name`
 
 ## SMILES and SDF handling
@@ -268,7 +268,7 @@ First implementation assumptions:
 
 - The protein target is an Asn side-chain amide nitrogen, normally atom `ND2`.
 - Product protein residue names always change. For N-glycosylation, rename the
-  modified protein residue from `ASN` to `ASX`.
+  modified protein residue from `ASN` directly to GLYCAM `NLN`.
 - The glycan residue name is user-provided and remains attached to the entire
   SMILES moiety.
 - The reaction creates a C-N bond between the reducing-end/anomeric carbon and
@@ -358,7 +358,7 @@ Conflict checks should include:
 
 - Generate the N-glycosidic C-N bond plan.
 - Remove one Asn `ND2` hydrogen and the glycan anomeric hydroxyl/leaving atoms.
-- Rename modified protein residues to `ASX`.
+- Rename modified protein residues to `NLN`.
 - Preserve the user-provided glycan residue name for the whole moiety.
 
 ### Phase 6 — multi-attachment assembly
@@ -393,7 +393,7 @@ Conflict checks should include:
   glycan.
 - Ambiguous or missing anomeric-center diagnostics.
 - Protein site validation for Asn `ND2`.
-- Product residue renaming from `ASN` to `ASX`.
+- Product residue renaming from `ASN` to `NLN`.
 - Bond/atom edit plans: new C-N bond, removed C-O/leaving atoms, removed Asn
   hydrogen.
 - Multi-attachment conflict detection.
@@ -415,7 +415,7 @@ Recommended scenarios:
    or fixture.
 2. Build one N-glycosylation on `5fyj-monomer.pdb`.
 3. Build multiple N-glycosylations on `5fyj-monomer.pdb`.
-4. Verify the product PDB has modified Asn residue names `ASX` and user-provided
+4. Verify the product PDB has modified Asn residue names `NLN` and user-provided
    glycan residue names.
 5. Verify product connectivity contains each expected C-N linkage.
 6. Smoke-test Pablo/OpenFF ingestion and final minimization in the pixi build
@@ -461,9 +461,9 @@ This plan page was validated with a clean docs build before commit.
   clearly rather than silently choosing a product.
 - Protonation: selecting which Asn `ND2` hydrogen to remove may depend on input
   naming and local preparation.
-- Residue naming: `ASX` must not collide with unrelated ambiguous Asn/Asp use in
+- Residue naming: `NLN` must not collide with unrelated residue use in
   downstream tooling.
-- Pablo residue definitions: product-state residue templates for `ASX` plus a
+- Pablo residue definitions: product-state residue templates for `NLN` plus a
   user-named glycan residue may require careful bond-externalization.
 - OpenFF Sage coverage: acceptable for a first implementation, but validation
   should record any problematic parameters or charge assignments.
@@ -482,7 +482,7 @@ The Ralph loop is complete when:
 - Users do not provide moiety atom indices.
 - The mechanism detects the reducing-end/anomeric carbon and leaving atoms from
   graph chemistry.
-- Modified protein residues are renamed `ASX`, and glycan residues use the
+- Modified protein residues are renamed `NLN`, and glycan residues use the
   user-provided residue code.
 - The product is parameterized with the accepted first-pass OpenFF Sage path.
 - One final minimization runs after all attachments.
