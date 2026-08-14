@@ -287,7 +287,7 @@ class SimulationRunner:
         if phase_completed(record_path) and state_path.exists():
             LOGGER.info("Loading completed minimization state from %s", state_path)
             integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
-            simulation = Simulation(self._topology, self._system, integrator, self._get_platform())
+            simulation = self._create_simulation(integrator)
             simulation.loadState(str(state_path))
             state = simulation.context.getState(getEnergy=True, getPositions=True)
             self._current_positions = state.getPositions()

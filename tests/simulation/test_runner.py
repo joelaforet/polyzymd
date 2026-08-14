@@ -5,11 +5,21 @@ OpenMM simulation setup (GPU, topology, system, etc.).
 """
 
 import gc
+import inspect
 import struct
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+
+def test_completed_minimization_uses_configured_platform_properties():
+    """A recovered minimization must use the shared platform-aware constructor."""
+    from polyzymd.simulation.runner import SimulationRunner
+
+    source = inspect.getsource(SimulationRunner.minimize)
+    assert "simulation = self._create_simulation(integrator)" in source
+    assert "self._get_platform())" not in source
 
 
 class TestThermostatTimescaleFriction:
