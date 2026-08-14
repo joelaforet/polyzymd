@@ -6,6 +6,17 @@ The project uses **pixi** for environment management. All simulation and
 analysis dependencies that are not available via pip are resolved from
 conda-forge through pixi environments.
 
+Pixi 0.72.2 or newer is required because the CUDA environments use named rich
+platforms with explicit driver and compute-capability virtual packages. The
+older 0.65.0 cluster installation cannot read this manifest; upgrade Pixi
+before installing or submitting OpenMM GPU jobs.
+
+OpenMM SLURM submission defaults to `--pixi-env auto`. The generated script
+queries the allocated GPU before environment activation, selects the highest
+compatible checked-in CUDA environment, validates explicit overrides, and
+creates an explicit CUDA Context. Never replace this behavior with platform
+fallback or a static node allowlist.
+
 **Always prefix commands with:**
 ```bash
 pixi run -e build <command>

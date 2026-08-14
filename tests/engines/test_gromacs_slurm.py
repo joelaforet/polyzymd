@@ -88,6 +88,59 @@ def test_script_contains_expected_slurm_and_restart_logic(monkeypatch) -> None:
     assert "if [ ! -f eq_02.gro ]; then" in script
     assert "trap 'handle_term' TERM" in script
     assert "Forwarding TERM to mdrun" in script
+
+
+def test_gromacs_script_does_not_use_openmm_cuda_routing(monkeypatch) -> None:
+    """GROMACS uses its site runtime and never enters the OpenMM router."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+
+    script = _generator().generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert "nvidia-smi" not in script
+    assert "resolve_platform" not in script
+    assert "getPlatformByName" not in script
+    assert "AUTO_PIXI_ENV" not in script
+    assert "module load gromacs/2024" in script
+
+
+@pytest.mark.parametrize("gpu", [False, True])
+def test_bridges2_cpu_and_gpu_scripts_are_self_restarting(monkeypatch, gpu) -> None:
+    """Bridges-2 scripts keep GROMACS restart behavior for CPU and GPU jobs."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+    config = SlurmConfig.from_preset("bridges2")
+    config.gpus = 1 if gpu else 0
+    generator = GromacsSlurmScriptGenerator(
+        slurm_config=config,
+        pixi_env="build",
+        gmx_binary="gmx",
+        module_load="module load gromacs/2024",
+    )
+
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert "#SBATCH --partition=GPU-shared" in script
+    assert ("#SBATCH --gpus=v100-32:1" in script) is gpu
+    assert "-cpi state.cpt" in script
+    assert "trap 'handle_term' TERM" in script
+    assert 'sbatch "$THIS_SCRIPT"' in script
     assert "TERM_RECEIVED=1" in script
     assert 'run_mdrun_stage "production"' in script
     assert "--mark-complete || true" in script

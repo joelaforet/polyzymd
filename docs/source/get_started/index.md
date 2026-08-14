@@ -41,11 +41,15 @@ not make setup, analysis, or development harder than necessary.
 |------|-------------|-----------------|
 | Set up projects, validate configs, prepare systems | `build` | `pixi run -e build polyzymd build -c config.yaml` |
 | Run OpenMM simulations on a CUDA 12.4 cluster | `sim-cuda-12-4` | `pixi run -e sim-cuda-12-4 polyzymd submit -c config.yaml --preset aa100` |
-| Run OpenMM simulations on a CUDA 12.6 cluster | `sim-cuda-12-6` | `pixi run -e sim-cuda-12-6 polyzymd submit -c config.yaml --preset bridges2` |
+| Run OpenMM simulations on a supported NVIDIA cluster | `build` at submission; `auto` in the job | `pixi run -e build polyzymd submit -c config.yaml --preset bridges2 --pixi-env auto` |
 | Compare trajectories and make analysis plots | `analysis` | `pixi run -e analysis polyzymd compare run rmsf -f comparison.yaml` |
 
 Use `pixi shell -e <env>` if you prefer activating an environment once instead
 of prefixing each command.
+
+The built-in OpenMM SLURM workflow supports checked-in NVIDIA CUDA runtimes.
+For CPU, AMD OpenCL, another cluster, or a new driver, see
+{doc}`../how_to/hardware_platforms`.
 
 ## Create Your First Project
 
