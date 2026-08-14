@@ -452,6 +452,9 @@ polyzymd run-segment -c CONFIG [OPTIONS]
 - If no segments exist: builds system, equilibrates, runs production segment 0
 - If segments exist but simulation incomplete: continues from last completed segment
 - If simulation is already complete: exits 0 immediately
+- Installs signal handlers before configuration loading or simulation setup
+- Skips minimization/equilibration only after an atomic completed phase record
+- Restarts an incomplete phase when no synchronized recovery record is valid
 
 ### Exit Codes
 
@@ -465,6 +468,8 @@ polyzymd run-segment -c CONFIG [OPTIONS]
 
 - This command is called by the generated SLURM scripts, not typically by users directly
 - Progress is tracked in `progress.json` in the working directory
+- Lifecycle state is tracked in per-phase `phase.json` files; orphan binary
+  checkpoints never prove phase completion
 
 ---
 

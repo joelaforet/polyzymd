@@ -249,7 +249,13 @@ class TestRampResumeIntegrity:
             samples=5,
         )
 
-        monkeypatch.setattr(signals, "is_interrupted", lambda: True)
+        # Deliver TERM after the first integration chunk, not during the new
+        # pre-setup interruption boundary where no synchronized state exists.
+        monkeypatch.setattr(
+            signals,
+            "is_interrupted",
+            lambda: runner.simulation is not None and runner.simulation.currentStep > 0,
+        )
         monkeypatch.setattr(signals, "get_interrupt_signal", lambda: 15)
         runner = DeterministicRunner(
             topology=topology,
@@ -478,6 +484,17 @@ def _write_eq_stage(
     if completed or interrupted:
         (stage_dir / f"{dir_name}_checkpoint.chk").write_bytes(b"\x00" * 16)
 
+    if completed and not interrupted:
+        from polyzymd.simulation.phase_state import write_phase_record
+
+        write_phase_record(
+            stage_dir / "phase.json",
+            phase=dir_name,
+            status="completed",
+            step=total_steps,
+            total_steps=total_steps,
+        )
+
     if interrupted:
         (stage_dir / "EQ_INTERRUPTED").write_text(
             f"stage_index={stage_index}\n"
@@ -562,6 +579,15 @@ class TestFindCompletedEqStages:
         runner = self._make_runner(tmp_path)
         completed = runner._find_completed_eq_stages(stages)
         assert completed == [0]
+
+    def test_orphan_checkpoint_is_not_completion(self, tmp_path):
+        """A hard-kill checkpoint without an atomic completion record is incomplete."""
+        stages = [self._make_stage("heating")]
+        stage_dir = tmp_path / "equilibration_0_heating"
+        stage_dir.mkdir()
+        (stage_dir / "equilibration_0_heating_checkpoint.chk").write_bytes(b"checkpoint")
+        runner = self._make_runner(tmp_path)
+        assert runner._find_completed_eq_stages(stages) == []
 
     def test_stops_at_first_gap(self, tmp_path):
         stages = [

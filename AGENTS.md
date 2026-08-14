@@ -110,6 +110,9 @@ implementation to private `_framework/` modules such as `compare.py`,
   `system.xml`, or segment State/topology files independently. Continuation prefers the predecessor topology; root PDB fallback is legacy-only and must pass count validation.
 - **Factory pattern:** `ClassName.from_config(config)` or `ClassName.from_yaml(path)`
 - **Lazy imports:** Heavy deps (OpenMM, MDAnalysis) imported inside functions/methods
+- **Preemption lifecycle:** Install handlers at `run-segment` entry; only atomic
+  `phase.json` records with `status: completed` may skip OpenMM phases. Keep
+  reporter intervals independent from bounded signal-check chunks.
 - **ABC + Strategy:** `ContactCriteria`, `MolecularSelector`, `MoleculeCharger`
 - **Plugin discovery:** `pkgutil`-based auto-discovery in `analyses/` — no registries
 - **Config:** Pydantic v2 `BaseModel` subclasses with `model_validator`

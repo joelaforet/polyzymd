@@ -194,11 +194,37 @@ mv "$RUNTIME_METADATA_TMP" "$WORKING_DIR/runtime_platform.json"
 # and forward them to the Python process running in the background.
 # =========================================================================
 CHILD_PID=""
+SUCCESSOR_RECEIPT="$WORKING_DIR/.successor-${SLURM_JOB_ID:-local}"
+JOB_COMPLETE=0
+resubmit_once() {
+    if [ "$JOB_COMPLETE" -eq 1 ]; then
+        return 0
+    fi
+    if [ -s "$SUCCESSOR_RECEIPT" ]; then
+        echo "Successor already submitted: $(cat "$SUCCESSOR_RECEIPT")"
+        return 0
+    fi
+    if [ -z "${SLURM_JOB_ID:-}" ]; then
+        echo "FATAL: cannot submit a dependent successor without SLURM_JOB_ID"
+        return 1
+    fi
+    local result
+    if ! result=$(sbatch --dependency="afterany:$SLURM_JOB_ID" "$THIS_SCRIPT"); then
+        echo "FATAL: dependent successor submission failed"
+        return 1
+    fi
+    printf '%s\n' "$result" > "$SUCCESSOR_RECEIPT.tmp"
+    mv "$SUCCESSOR_RECEIPT.tmp" "$SUCCESSOR_RECEIPT"
+    echo "Queued dependent successor: $result"
+}
 forward_signal() {
+    local submit_rc=0
+    resubmit_once || submit_rc=$?
     if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
         echo "Forwarding $1 to Python process (PID $CHILD_PID)"
         kill -"$1" "$CHILD_PID"
     fi
+    return "$submit_rc"
 }
 trap 'forward_signal USR1' USR1
 trap 'forward_signal TERM' TERM
@@ -246,6 +272,8 @@ PROGRESS_RC=$?
 set -e
 
 if [ $PROGRESS_RC -eq 0 ]; then
+    JOB_COMPLETE=1
+    rm -f "$SUCCESSOR_RECEIPT"
     echo "Simulation complete — no resubmission needed."
     exit 0
 fi
@@ -255,17 +283,12 @@ if [ $PROGRESS_RC -ne 1 ]; then
     exit $PROGRESS_RC
 fi
 
-# Work remains (exit code 1) — resubmit this same script
+# Work remains (exit code 1) — reuse a signal-created successor or submit now
 echo "Work remains — resubmitting job..."
-set +e
-sbatch "$THIS_SCRIPT"
-SUBMIT_RC=$?
-set -e
-
-if [ $SUBMIT_RC -eq 0 ]; then
-    echo "Resubmitted successfully."
+if resubmit_once; then
+    echo "Successor is queued."
 else
-    echo "WARNING: sbatch resubmission failed (exit code $SUBMIT_RC)"
+    echo "WARNING: sbatch resubmission failed"
     echo "You can manually resume with:"
     echo "  sbatch $THIS_SCRIPT"
     exit 1
