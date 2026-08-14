@@ -878,6 +878,7 @@ class SystemBuilder:
         config: "SimulationConfig",
         working_dir: Optional[Union[str, Path]] = None,
         polymer_seed: Optional[int] = None,
+        publish_topology: bool = True,
     ) -> Interchange:
         """Build the complete system from a configuration.
 
@@ -982,7 +983,8 @@ class SystemBuilder:
         self._solvated_topology = self._solvent_builder.solvated_topology
 
         # Save solvated PDB if working dir specified
-        if self._working_dir:
+        self._assign_pdb_identifiers()
+        if self._working_dir and publish_topology:
             self._working_dir.mkdir(parents=True, exist_ok=True)
             pdb_path = self._working_dir / "solvated_system.pdb"
             self.save_topology(pdb_path)

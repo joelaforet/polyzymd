@@ -338,3 +338,31 @@ scancel --signal=KILL <job_id>
 <!-- IMAGE OPPORTUNITY: Add a simple lifecycle diagram showing `submit ->
 run-segment -> check-progress -> resubmit`, plus a second annotated screenshot
 of a generated SLURM script header. -->
+# Build integrity and recovery
+
+For prebuilt OpenMM campaigns, wait for `polyzymd build` to finish before
+submitting simulation jobs. A successful build contains these three files in
+each replicate directory:
+
+- `solvated_system.pdb`
+- `system.xml`
+- `build_manifest.json`
+
+The manifest is the final commit marker. `--skip-build` verifies its
+configuration hash, artifact hashes, and particle count before OpenMM creates a
+simulation. A missing or malformed manifest means the build is incomplete.
+Older campaigns without a manifest remain recoverable only when the topology
+and System particle counts agree; PolyzyMD emits a warning and does not silently
+create a manifest.
+
+Build and simulation processes share `.polyzymd.lock` in the replicate
+directory. A second process exits instead of writing concurrently. PolyzyMD
+also refuses to rebuild a directory after progress, minimization,
+equilibration, or production artifacts exist. Use a new output directory for a
+new molecular system.
+
+Continuation loads `production_N_topology.pdb` from the predecessor production
+segment together with its System and State. The root `solvated_system.pdb` is a
+warned legacy fallback only. If a diagnostic names different particle counts,
+restore all artifacts from the same build; do not copy individual files until
+the counts happen to match.
