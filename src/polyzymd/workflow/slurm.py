@@ -639,6 +639,7 @@ class SlurmScriptGenerator:
                 "mail_line": self._mail_line(),
                 "account_line": self._account_line(),
                 "exclude_line": self._exclude_line(),
+                "configured_exclude": self._config.exclude or "",
                 "nodelist_line": self._nodelist_line(),
                 "constraint_line": self._constraint_line(),
                 "pixi_env": self._pixi_env,

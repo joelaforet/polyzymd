@@ -113,7 +113,9 @@ pixi shell -e sim-cuda-12-6
 polyzymd info
 ```
 
-Built-in presets include configurations for CU Boulder Alpine/Blanca and PSC Bridges2.
+Built-in presets include configurations for CU Boulder Alpine/Blanca and PSC Bridges-2.
+Presets configure scheduler resources. They do not prove that an allocated
+node has a compatible driver.
 For submission details and cluster-specific notes, see
 {doc}`../how_to/hpc_slurm`.
 
@@ -138,7 +140,7 @@ Use this mapping:
 
 | CUDA driver version | Environment | Example clusters |
 |---------------------|-------------|------------------|
-| 12.6 | `sim-cuda-12-6` | PSC Bridges2 |
+| 12.6 | `sim-cuda-12-6` | Compatible NVIDIA nodes |
 | 12.4 | `sim-cuda-12-4` | Compatible Blanca allocations |
 | 12.0 | `sim-cuda-12-0` | Older Blanca driver cohorts |
 
@@ -147,6 +149,9 @@ SLURM scripts query `nvidia-smi` before Pixi activation and reject missing,
 malformed, or unsupported GPU capabilities. An explicit `--pixi-env` override
 is checked against the allocated driver. CUDA Context failure is fatal;
 PolyzyMD uses CPU only when `openmm.platform: CPU` is explicitly configured.
+The standard OpenMM SLURM template is NVIDIA-only in version 1.3. CPU and AMD
+OpenCL use need a site-managed environment and batch wrapper. See
+{doc}`../how_to/hardware_platforms` for examples and the extension checklist.
 
 ## 4. Verify the Commands You Can Use
 

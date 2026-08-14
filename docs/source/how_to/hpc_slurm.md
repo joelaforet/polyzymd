@@ -136,30 +136,41 @@ pixi run -e sim-cuda-12-4 polyzymd recover -c config.yaml -r 1 --submit --preset
 
 ## Cluster-specific note for Bridges2
 
-Use the `bridges2` preset when running on PSC Bridges2:
+Use the `bridges2` preset to request PSC Bridges-2 scheduler resources. Let
+`auto` select the runtime from the driver on the allocated node:
 
 ```bash
-pixi run -e sim-cuda-12-6 polyzymd submit \
+pixi run -e build polyzymd submit \
     -c config.yaml \
     --preset bridges2 \
     --account abc123_gpu \
+    --pixi-env auto \
     --replicates 1-3
 ```
 
 Common Bridges2 differences:
 
-- it uses the `sim-cuda-12-6` environment
+- the preset configures SLURM resources; it does not guarantee CUDA compatibility
+- `auto` probes the selected GPU node before it activates a Pixi environment
 - you may need `--account` if you want to charge a specific allocation
 - GPU selection can be adjusted with `--gpu-type`
 
+Do not select a CUDA environment from the cluster name. Drivers and node images
+can change. See {doc}`hardware_platforms` for the current support limits, test
+procedure, and instructions for new hardware.
+
 ## Cluster-specific note for CU Boulder (Alpine and Blanca)
 
-OpenMM jobs should normally use `--pixi-env auto`. The generated script runs
+NVIDIA OpenMM jobs should normally use `--pixi-env auto`. The generated script runs
 `nvidia-smi` on the allocated node before activating Pixi, chooses the highest
 compatible checked-in CUDA 12.0, 12.4, or 12.6 environment, then creates a
 minimal explicit CUDA Context. Missing GPUs, unknown drivers, malformed probe
 output, incompatible overrides, and CUDA Context failures stop the job. There
 is no automatic CPU fallback.
+
+If routing fails before simulation starts, the job submits a successor to the
+same queue with `afterany`, excludes the failed node, and exits. A three-retry
+limit prevents an endless loop when the full partition is unsupported.
 
 The job atomically records the environment, OpenMM version, CUDA runtime,
 platform, precision, driver, device, and compute capability in
@@ -229,7 +240,7 @@ partition tables and troubleshooting.
 
 ## What the generated scripts do
 
-Each generated script follows the same loop:
+Each generated NVIDIA OpenMM script follows the same loop:
 
 1. detect GPU capability, select or validate the CUDA environment, activate it,
    and create an explicit CUDA Context
@@ -239,6 +250,10 @@ Each generated script follows the same loop:
 
 That is why long runs can continue automatically after wall-time expiry or a
 graceful interruption.
+
+Version 1.3 OpenMM SLURM scripts require an NVIDIA GPU. The Python simulation
+path can use explicit CPU and OpenCL platforms, but these platforms need a
+site-managed batch wrapper. See {doc}`hardware_platforms`.
 
 For GROMACS jobs the scripts additionally:
 
@@ -359,6 +374,7 @@ scancel --signal=KILL <job_id>
 - configuration fields: {doc}`../reference/configuration`
 - GROMACS HPC guide: {doc}`gromacs_export`
 - first-run setup: {doc}`../get_started/quickstart`
+- hardware portability and extension: {doc}`hardware_platforms`
 
 <!-- IMAGE OPPORTUNITY: Add a simple lifecycle diagram showing `submit ->
 run-segment -> check-progress -> resubmit`, plus a second annotated screenshot

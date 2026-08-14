@@ -72,6 +72,7 @@ Run on SLURM clusters — from individual jobs to daisy-chained workflows.
 :maxdepth: 1
 
 Run Simulations on SLURM Clusters <hpc_slurm>
+Run OpenMM on Other Hardware <hardware_platforms>
 Submit Analysis Jobs to SLURM <hpc_execution>
 ```
 

@@ -10,6 +10,9 @@ Covers:
 - Pixi environment activation in generated scripts
 """
 
+import os
+import subprocess
+
 import pytest
 
 import polyzymd.workflow.slurm as slurm_module
@@ -437,6 +440,12 @@ class TestGeneratedOpenMMScript:
         )
         assert "nvidia-smi --query-gpu=driver_version,compute_cap" in script
         assert 'openmm.Platform.getPlatformByName("CUDA")' in script
+        assert "resubmit_after_routing_failure" in script
+        assert '--dependency="afterany:$SLURM_JOB_ID"' in script
+        assert '--exclude="$excluded_node"' in script
+        assert "POLYZYMD_ROUTING_RETRY_COUNT=$next_count" in script
+        assert "POLYZYMD_ROUTING_FAILED_NODES=$failed_nodes" in script
+        assert "ROUTING_RETRY_LIMIT=3" in script
         assert "runtime_platform.json" in script
         assert "export INTERCHANGE_EXPERIMENTAL=1" in script
         assert 'CONFIG_PATH="/projects/user/run/config.yaml"' in script
@@ -449,6 +458,85 @@ class TestGeneratedOpenMMScript:
         assert "if [ $RC -ne 0 ] && [ $RC -ne 99 ]; then" in script
         assert 'polyzymd check-progress -c "$CONFIG_PATH" -r "$REPLICATE"' in script
         assert 'sbatch "$THIS_SCRIPT"' in script
+
+    def test_routing_retry_preserves_configured_exclusions(self, monkeypatch):
+        """A routing retry excludes the failed node and configured exclusions."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        config = SlurmConfig.from_preset("aa100")
+        config.exclude = "known-bad-node"
+        script = SlurmScriptGenerator(config, pixi_env="auto").generate_job_script(
+            config_path="/projects/user/run/config.yaml",
+            replicate=1,
+            working_dir="/scratch/user/run_1",
+        )
+
+        assert "CONFIGURED_EXCLUDE=known-bad-node" in script
+        assert 'excluded_node="$CONFIGURED_EXCLUDE,$excluded_node"' in script
+
+    def test_failed_probe_resubmits_and_exits(self, monkeypatch, tmp_path):
+        """A failed node probe queues one successor before this job exits."""
+        script = self._render_script(monkeypatch)
+        script_path = tmp_path / "job.sh"
+        script_path.write_text(script)
+
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "nvidia-smi").write_text("#!/bin/bash\nexit 1\n")
+        (bin_dir / "sbatch").write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$SBATCH_LOG"\n')
+        (bin_dir / "nvidia-smi").chmod(0o755)
+        (bin_dir / "sbatch").chmod(0o755)
+        sbatch_log = tmp_path / "sbatch.log"
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "PATH": f"{bin_dir}:{env['PATH']}",
+                "SBATCH_LOG": str(sbatch_log),
+                "SLURM_JOB_ID": "1234",
+                "SLURMD_NODENAME": "bad-gpu-2",
+                "SLURM_JOB_SCRIPT": str(script_path),
+                "POLYZYMD_ROUTING_RETRY_COUNT": "1",
+                "POLYZYMD_ROUTING_FAILED_NODES": "bad-gpu-1",
+            }
+        )
+
+        result = subprocess.run(["bash", str(script_path)], env=env, capture_output=True, text=True)
+
+        assert result.returncode == 0
+        submitted = sbatch_log.read_text()
+        assert "--dependency=afterany:1234" in submitted
+        assert "--exclude=bad-gpu-1,bad-gpu-2" in submitted
+        assert "POLYZYMD_ROUTING_RETRY_COUNT=2" in submitted
+        assert "POLYZYMD_ROUTING_FAILED_NODES=bad-gpu-1,bad-gpu-2" in submitted
+        assert "successor submitted; exiting current job" in result.stderr
+
+    def test_routing_retry_limit_stops_resubmission(self, monkeypatch, tmp_path):
+        """An unsupported partition cannot create an unlimited job chain."""
+        script_path = tmp_path / "job.sh"
+        script_path.write_text(self._render_script(monkeypatch))
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "nvidia-smi").write_text("#!/bin/bash\nexit 1\n")
+        (bin_dir / "nvidia-smi").chmod(0o755)
+        env = os.environ.copy()
+        env.update(
+            {
+                "PATH": f"{bin_dir}:{env['PATH']}",
+                "SLURM_JOB_ID": "1234",
+                "SLURMD_NODENAME": "bad-gpu-4",
+                "SLURM_JOB_SCRIPT": str(script_path),
+                "POLYZYMD_ROUTING_RETRY_COUNT": "3",
+            }
+        )
+
+        result = subprocess.run(["bash", str(script_path)], env=env, capture_output=True, text=True)
+
+        assert result.returncode == 1
+        assert "CUDA routing failed after 3 retries" in result.stderr
 
     def test_rendered_script_quotes_pixi_args_with_spaces(self, monkeypatch):
         """Pixi environment and manifest values render as single shell arguments."""
