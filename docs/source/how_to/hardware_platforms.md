@@ -32,10 +32,15 @@ still pass the NVIDIA driver probe and the explicit CUDA Context preflight.
 | CPU with the Python API | Supported when `openmm.platform` is `CPU` |
 | AMD GPU with the Python API | Possible through OpenMM `OpenCL` when the site supplies a working OpenCL runtime; not tested by PolyzyMD CI |
 | CPU or AMD GPU with generated OpenMM SLURM scripts | Not supported in version 1.3; the generated script requires `nvidia-smi` and performs a CUDA preflight |
+| GROMACS CPU or GPU with generated SLURM scripts | Supported through a site module or container; GROMACS does not use OpenMM platform routing |
 
 PolyzyMD never changes from CUDA or OpenCL to CPU after a Context failure. An
 unavailable requested platform is a fatal error. This rule prevents a large
 GPU job from running slowly on CPU without the user's knowledge.
+
+This OpenMM rule does not apply to the GROMACS backend. GROMACS uses its own
+site module or container and its own self-restarting SLURM template. See
+{doc}`gromacs_export` for portable CPU and GPU recipes.
 
 ## Use another NVIDIA SLURM cluster
 

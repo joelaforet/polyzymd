@@ -222,6 +222,12 @@ class TestResolveSubmissionPixiEnv:
 
         assert _resolve_submission_pixi_env("bridges2", "gromacs") == "build"
 
+    def test_gromacs_auto_maps_to_build(self) -> None:
+        """Shared auto selection must not create a nonexistent GROMACS environment."""
+        from polyzymd.cli.main import _resolve_submission_pixi_env
+
+        assert _resolve_submission_pixi_env("bridges2", "gromacs", "auto") == "build"
+
     def test_openmm_defaults_from_preset(self) -> None:
         """OpenMM should keep preset-specific CUDA environment defaults."""
         from polyzymd.cli.main import _resolve_submission_pixi_env

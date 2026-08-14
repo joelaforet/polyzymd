@@ -24,7 +24,7 @@ Add a minimal `gromacs:` block to your `config.yaml` and submit:
 ```yaml
 # config.yaml (add this block alongside your existing config)
 gromacs:
-  module_load: "module load gcc/11.2.0 gromacs/2024.2"
+  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
   ntmpi: 1
   ntomp: 8
 ```
@@ -73,7 +73,7 @@ gromacs:
   gmx_binary: "gmx"
   ntmpi: 1
   ntomp: 12
-  module_load: "module load gcc/11.2.0 gromacs/2024.2"
+  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
   mdrun_flags: "-nb gpu -pme gpu -bonded gpu -update gpu -pin on"
 ```
 
@@ -92,6 +92,127 @@ uses ahead-of-time compiled CUDA kernels, so a binary compiled for one GPU
 type may not run on another. OpenMM does not need this because it JIT-compiles
 kernels at launch.
 :::
+
+---
+
+## Use GROMACS on Different Clusters
+
+GROMACS does not use the OpenMM platform router. PolyzyMD does not inspect the
+CUDA driver for a GROMACS job. The site GROMACS module or container supplies
+the CPU, CUDA, or ROCm runtime.
+
+The shared `--pixi-env auto` option maps to `build` for GROMACS. The generated
+script activates `build` for the PolyzyMD commands. It then runs the configured
+`module_load`, `env_exports`, and `setup_commands` before it starts GROMACS.
+
+Use these settings to move a job to another SLURM cluster:
+
+| Requirement | PolyzyMD setting |
+|-------------|------------------|
+| Partition | `--partition` or `--preset` |
+| Account | `--account` |
+| QoS | `--qos` |
+| GPU type | `--gpu-type` |
+| Node feature | `--constraint` |
+| Site GROMACS installation | `gromacs.module_load` |
+| Container runtime | `gromacs.command_prefix` |
+| Site environment variables | `gromacs.env_exports` |
+| CPU allocation | `gromacs.ntmpi`, `gromacs.ntomp`, and `gromacs.memory` |
+| GPU allocation | `gromacs.gpu: true` and `gromacs.gpus` |
+
+An existing preset can supply the SLURM directive style. Override its account,
+partition, QoS, and GPU type for the target site. Use `aa100` for sites that
+accept `--gres=gpu`. Use `bridges2` for sites that accept `--gpus=<type>:<n>`.
+Always inspect a generated script before the first submission on a new site.
+
+```bash
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset aa100 \
+    --partition <site-partition> \
+    --account <site-account> \
+    --qos <site-qos> \
+    --generate-only
+```
+
+The CPU and GPU scripts use the same restart process:
+
+1. GROMACS writes a checkpoint during `mdrun`.
+2. The script passes `-cpi` and `-append` when it restarts production.
+3. The script forwards `SIGTERM` to `mdrun` so GROMACS can write a checkpoint.
+4. The script submits one successor when work remains.
+5. The successor uses the same resource request, module, and GROMACS flags.
+
+### Bridges-2 CPU job
+
+Use a CPU partition that is valid for your Bridges-2 allocation. The
+`gromacs.gpu` field must be false:
+
+```yaml
+gromacs:
+  gpu: false
+  gmx_binary: gmx_mpi
+  ntmpi: 4
+  ntomp: 4
+  memory: 16G
+  module_load: "module load <site-gromacs-module>"
+```
+
+```bash
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset bridges2 \
+    --partition <bridges2-cpu-partition> \
+    --account <allocation> \
+    --replicates 1-3
+```
+
+PolyzyMD omits the GPU directive when `gromacs.gpu` is false.
+
+### Bridges-2 GPU job
+
+Use the Bridges-2 GPU type that your allocation permits:
+
+```yaml
+gromacs:
+  gpu: true
+  gpus: 1
+  gmx_binary: gmx
+  ntmpi: 1
+  ntomp: 8
+  module_load: "module load <site-gromacs-module>"
+  mdrun_flags: "-nb gpu -pin on"
+```
+
+```bash
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset bridges2 \
+    --account <allocation> \
+    --gpu-type v100-32 \
+    --replicates 1-3
+```
+
+The site GROMACS build controls GPU compatibility. Test `gmx --version` and a
+short `gmx mdrun` in an allocation before a production campaign. Do not use the
+OpenMM `sim-cuda-12-*` environments to select a GROMACS runtime.
+
+### Blanca acceptance result
+
+The version 1.3 acceptance test used the `blanca-shirts` account and QoS on
+August 14, 2026. Both short jobs used GROMACS 2024.2 from the site module.
+
+| Mode | Node | Hardware | Result |
+|------|------|----------|--------|
+| CPU | `bgpu-shirts3` | 2 CPU threads | 20-step test completed |
+| GPU | `bgpu-shirts1` | NVIDIA A40 with driver 550.90.07 | 20-step GPU nonbonded test completed |
+
+The site module reported CUDA GPU support. These results verify the tested
+Blanca module and nodes only. Users must repeat the short test after a site
+module or driver update.
 
 ---
 

@@ -177,6 +177,8 @@ def _resolve_submission_pixi_env(preset: str, engine_name: str, pixi_env: str | 
     """
     from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV
 
+    if engine_name.lower() == "gromacs" and pixi_env == "auto":
+        return "build"
     if pixi_env:
         return pixi_env
     if engine_name.lower() == "gromacs":
@@ -1395,8 +1397,8 @@ def _print_gromacs_dry_run_details(
     default=None,
     type=click.Choice(["auto", "build", *SIM_PIXI_ENVS]),
     help=(
-        "Pixi environment for SLURM jobs. OpenMM defaults from --preset; GROMACS "
-        "defaults to build. Explicit CUDA envs are allowed for GPU GROMACS."
+        "Pixi environment for SLURM jobs. OpenMM uses capability-based auto routing. "
+        "GROMACS maps auto to build and uses the configured site module or container."
     ),
 )
 @click.option(
@@ -2826,8 +2828,8 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     default=None,
     type=click.Choice(["auto", "build", *SIM_PIXI_ENVS]),
     help=(
-        "Pixi environment for the recovery SLURM job. OpenMM defaults from --preset; "
-        "GROMACS defaults to build. Explicit CUDA envs are allowed for GPU GROMACS."
+        "Pixi environment for the recovery job. OpenMM uses capability-based auto routing. "
+        "GROMACS maps auto to build and uses the configured site module or container."
     ),
 )
 @click.option(
