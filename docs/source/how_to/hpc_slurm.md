@@ -11,7 +11,6 @@ manual dependency chains.
 ## Before you start
 
 - validate your config locally first
-- know which `pixi` CUDA environment matches your cluster
 - know which SLURM preset you want to use
 
 If you are still setting up the project itself, start with {doc}`../get_started/quickstart`.
@@ -32,7 +31,12 @@ From the repository root or a subdirectory under it:
 
 ```bash
 pixi run -e build polyzymd validate -c config.yaml
-pixi run -e sim-cuda-12-4 polyzymd submit -c config.yaml --preset aa100 --replicates 1 --generate-only
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --preset aa100 \
+    --pixi-env auto \
+    --replicates 1 \
+    --generate-only
 ```
 
 The `--generate-only` flag creates a script in `job_scripts/` without submitting it,
@@ -64,9 +68,10 @@ Use `testing` first when you are verifying a new system or workflow.
 Run a short job before launching many replicates:
 
 ```bash
-pixi run -e sim-cuda-12-4 polyzymd submit \
+pixi run -e build polyzymd submit \
     -c config.yaml \
     --preset testing \
+    --pixi-env auto \
     --time-limit 0:05:00 \
     --replicates 1
 ```
@@ -79,9 +84,10 @@ problems.
 Once the short test succeeds, submit production jobs:
 
 ```bash
-pixi run -e sim-cuda-12-4 polyzymd submit \
+pixi run -e build polyzymd submit \
     -c config.yaml \
     --preset aa100 \
+    --pixi-env auto \
     --replicates 1-5 \
     --email your.email@university.edu
 ```
@@ -90,16 +96,18 @@ Useful variants:
 
 ```bash
 # Override storage locations
-pixi run -e sim-cuda-12-4 polyzymd submit \
+pixi run -e build polyzymd submit \
     -c config.yaml \
     --preset aa100 \
+    --pixi-env auto \
     --projects-dir /projects/$USER/polyzymd \
     --scratch-dir /scratch/alpine/$USER/polyzymd_sims
 
 # Give a larger system more RAM
-pixi run -e sim-cuda-12-4 polyzymd submit \
+pixi run -e build polyzymd submit \
     -c config.yaml \
     --preset aa100 \
+    --pixi-env auto \
     --memory 8G
 ```
 
@@ -116,8 +124,8 @@ tail -f slurm_logs/*.out
 Use PolyzyMD for simulation progress:
 
 ```bash
-pixi run -e sim-cuda-12-4 polyzymd status -c config.yaml
-pixi run -e sim-cuda-12-4 polyzymd check-progress -c config.yaml -r 1
+pixi run -e build polyzymd status -c config.yaml
+pixi run -e build polyzymd check-progress -c config.yaml -r 1
 ```
 
 ## Recover a stalled replicate
@@ -125,16 +133,35 @@ pixi run -e sim-cuda-12-4 polyzymd check-progress -c config.yaml -r 1
 If a replicate stops progressing, inspect it first:
 
 ```bash
-pixi run -e sim-cuda-12-4 polyzymd recover -c config.yaml -r 1
+pixi run -e build polyzymd recover -c config.yaml -r 1
 ```
 
 If the report shows unfinished work, resubmit a recovery job:
 
 ```bash
-pixi run -e sim-cuda-12-4 polyzymd recover -c config.yaml -r 1 --submit --preset aa100
+pixi run -e build polyzymd recover \
+    -c config.yaml \
+    -r 1 \
+    --submit \
+    --preset aa100 \
+    --pixi-env auto
 ```
 
-## Cluster-specific note for Bridges2
+## Automatic OpenMM runtime selection
+
+Use `--pixi-env auto` for NVIDIA OpenMM jobs. After SLURM allocates a node,
+PolyzyMD checks the NVIDIA driver and selects the newest compatible checked-in
+CUDA environment. It creates a CUDA Context before the simulation starts.
+PolyzyMD does not fall back to CPU.
+
+If the node is not compatible, PolyzyMD submits a replacement job and excludes
+that node. It stops after three failed routing attempts.
+
+PolyzyMD records the selected runtime and prevents a replica from changing
+OpenMM versions during resubmission. For supported runtimes and instructions
+for new hardware, see {doc}`hardware_platforms`.
+
+## Bridges-2
 
 Use the `bridges2` preset to request PSC Bridges-2 scheduler resources. Let
 `auto` select the runtime from the driver on the allocated node:
@@ -148,69 +175,15 @@ pixi run -e build polyzymd submit \
     --replicates 1-3
 ```
 
-Common Bridges2 differences:
+Common Bridges-2 differences:
 
-- the preset configures SLURM resources; it does not guarantee CUDA compatibility
-- `auto` probes the selected GPU node before it activates a Pixi environment
 - you may need `--account` if you want to charge a specific allocation
 - GPU selection can be adjusted with `--gpu-type`
 
-Do not select a CUDA environment from the cluster name. Drivers and node images
-can change. See {doc}`hardware_platforms` for the current support limits, test
-procedure, and instructions for new hardware.
+The preset configures SLURM resources. The allocated node still controls which
+CUDA environment `auto` selects.
 
-## Cluster-specific note for CU Boulder (Alpine and Blanca)
-
-NVIDIA OpenMM jobs should normally use `--pixi-env auto`. The generated script runs
-`nvidia-smi` on the allocated node before activating Pixi, chooses the highest
-compatible checked-in CUDA 12.0, 12.4, or 12.6 environment, then creates a
-minimal explicit CUDA Context. A missing GPU, an unknown driver, malformed
-probe output, an incompatible override, or a CUDA Context failure prevents the
-simulation from starting. There is no automatic CPU fallback.
-
-If routing fails before simulation starts, the job submits a successor to the
-same queue with `afterany`, excludes the failed node, and exits. A three-retry
-limit prevents an endless loop when the full partition is unsupported.
-
-The job atomically records the environment, OpenMM version, CUDA runtime,
-platform, precision, driver, device, and compute capability in
-`runtime_platform.json`. Resubmission refuses to change environment, OpenMM
-version, platform, or precision within a replica.
-
-When temporarily using the old fixed `--pixi-env sim-cuda-12-4` workflow,
-exclude `bgpu-g4-u20,bgpu-g4-u24`. Auto routing does not rely on this node
-list. The CUDA 12.0 acceptance test below verifies auto-routing prerequisites
-on `bgpu-g4-u20`. The old fixed CUDA 12.4 environment remains incompatible
-with that node.
-
-### Blanca CUDA acceptance results
-
-The following results were measured on August 14, 2026. Each job installed its
-checked-in Pixi environment on the allocated node. Each job then created an
-explicit CUDA Context with mixed precision and ran the same 1,000-step,
-two-particle harmonic-bond benchmark.
-
-| Environment | Node | GPU | Driver | Maximum CUDA | Compute capability | OpenMM | Result |
-|-------------|------|-----|--------|--------------|--------------------|--------|--------|
-| `sim-cuda-12-0` | `bgpu-g4-u20` | NVIDIA L40 | 525.147.05 | 12.0 | 8.9 | 8.1.2 | CUDA Context and benchmark passed |
-| `sim-cuda-12-4` | `bgpu-shirts1` | NVIDIA A40 | 550.90.07 | 12.4 | 8.6 | 8.1.2 | CUDA Context and benchmark passed |
-
-SLURM jobs `27631524` and `27631525` completed with exit code 0. Both Contexts
-reported platform `CUDA`, precision `mixed`, device index `0`, and two System
-particles. No CPU fallback occurred.
-
-The comparison tolerance was `1e-6 kJ/mol` for potential and kinetic energy.
-The measured energy difference was `0.0 kJ/mol` at the start and end of the
-benchmark. The final position SHA-256 value was also identical in both
-environments:
-
-```text
-5a590d68e8806cb3e8c1dbcd732b3d131a3b8663335037b6323febedbe8bb818
-```
-
-These results verify the listed nodes, drivers, environments, and OpenMM
-version. Runtime capability detection remains the selection rule for other
-Blanca nodes.
+## CU Boulder Alpine and Blanca
 
 CU Boulder runs two SLURM clusters. Switch between them with environment
 modules before submitting:
@@ -230,30 +203,26 @@ Both clusters require `--partition`, `--account`, and `--qos` explicitly.
 Alpine example:
 
 ```bash
-pixi run -e sim-cuda-12-4 polyzymd submit \
+pixi run -e build polyzymd submit \
     -c config.yaml \
     --preset aa100 \
     --account ucb625_asc1 \
+    --pixi-env auto \
     --replicates 1-5
 ```
 
 Blanca example (partition, account, and QoS are typically the same value):
 
 ```bash
-pixi run -e sim-cuda-12-4 polyzymd submit \
+pixi run -e build polyzymd submit \
     -c config.yaml \
     --preset blanca-shirts \
+    --pixi-env auto \
     --replicates 1-5
 ```
 
-Blanca has 9+ different GPU types (P100, T4, V100, RTX 6000, A40, A100, L40,
-H100, RTX Pro 6000). If you are running GPU GROMACS on Blanca, use
-`--constraint` to pin your job to a compatible architecture — see
-[GROMACS engine](#gromacs-engine) below.
-
-The `blanca-shirts` preset uses `qos=preemptable`, which means jobs can be
-preempted by the node owner. GROMACS scripts handle this gracefully via
-SIGTERM trapping (see [Preemption resilience](#preemption-resilience)).
+If you run GROMACS on Blanca, use `--constraint` to request hardware that is
+compatible with the site GROMACS build. See {doc}`gromacs_export`.
 
 :::{tip}
 If you are also running analysis jobs via `polyzymd compare submit-all`, see
@@ -271,31 +240,20 @@ Each generated NVIDIA OpenMM script follows the same loop:
 3. call `polyzymd check-progress`
 4. resubmit itself if work remains
 
-That is why long runs can continue automatically after wall-time expiry or a
-graceful interruption.
+This loop lets a simulation continue across wall-time limits.
 
 Version 1.3 OpenMM SLURM scripts require an NVIDIA GPU. The Python simulation
 path can use explicit CPU and OpenCL platforms, but these platforms need a
 site-managed batch wrapper. See {doc}`hardware_platforms`.
 
-For GROMACS jobs the scripts additionally:
+GROMACS scripts also:
 
 - run EM, equilibration stages, and production with checkpoint restart
 - pass `-maxh` so GROMACS exits cleanly before the wall-time limit
 - trap SIGTERM and forward it to `gmx mdrun`, which flushes a checkpoint
 - self-resubmit until the full production duration completes
 
-## GROMACS engine
-
-:::{versionchanged} 1.3.0
-`polyzymd submit` now supports `--engine gromacs` for GROMACS SLURM
-submission with the same self-resubmitting workflow used by OpenMM.
-:::
-
-:::{seealso}
-For the complete GROMACS HPC guide including cluster recipes, flag glossary,
-config reference, and troubleshooting, see {doc}`gromacs_export`.
-:::
+## Submit GROMACS jobs
 
 ### CPU GROMACS
 
@@ -306,11 +264,6 @@ pixi run -e build polyzymd submit \
     --preset aa100 \
     --replicates 1-3
 ```
-
-:::{note}
-GROMACS CPU jobs use `pixi run -e build` (not `sim-cuda-12-4`) because the
-GROMACS binary comes from `module load`, not from the pixi environment.
-:::
 
 ### GPU GROMACS
 
@@ -323,48 +276,9 @@ pixi run -e build polyzymd submit \
     --replicates 1-3
 ```
 
-### GPU constraints (`--constraint`)
-
-GROMACS uses ahead-of-time compiled CUDA kernels. Unlike OpenMM, which
-JIT-compiles kernels at launch, a GROMACS binary compiled for one GPU
-architecture may not run on another. If your cluster has mixed GPU types,
-`--constraint` ensures your job lands on compatible hardware:
-
-```bash
---constraint "A40"              # single GPU type
---constraint "A40|A100"         # either type (OR)
---constraint "avx2&rh8"         # feature AND (CPU + OS flags)
-```
-
-This maps directly to the SLURM `#SBATCH --constraint` directive and works
-on any cluster — it is not specific to CU Boulder.
-
-(preemption-resilience)=
-### Preemption resilience
-
-GROMACS SLURM scripts trap `SIGTERM` (the signal SLURM sends before
-preempting a job). When the trap fires, the script:
-
-1. forwards the signal to `gmx mdrun`, which flushes a `.cpt` checkpoint
-2. waits for GROMACS to exit
-3. resubmits the job so production resumes from the checkpoint
-
-Combined with `--constraint`, this ensures resumed jobs land on compatible
-GPU hardware. This is especially important on clusters with preemptable QoS
-(e.g., Blanca `qos=preemptable`).
-
-### Module loading (`gromacs.module_load`)
-
-GROMACS on HPC clusters typically requires loading prerequisite modules
-(compiler, MPI) before the GROMACS module itself. Use the `gromacs.module_load`
-config field — it is inserted verbatim into the generated SLURM script:
-
-```yaml
-gromacs:
-  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
-```
-
-List prerequisites before the GROMACS module so dependencies resolve in order.
+GROMACS uses the site module or container from `config.yaml`. For CPU and GPU
+configuration, MPI settings, constraints, and recovery details, see
+{doc}`gromacs_export`.
 
 ## Common fixes
 
