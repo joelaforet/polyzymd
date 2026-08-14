@@ -37,11 +37,11 @@ BRIDGES2_GPU_TYPES: List[str] = ["v100-16", "v100-32", "l40s-48", "h100-80"]
 # Used by the CLI to pick the right environment automatically when
 # the user doesn't pass ``--pixi-env`` explicitly.
 PRESET_DEFAULT_PIXI_ENV: Dict[str, str] = {
-    "aa100": "sim-cuda-12-4",
-    "al40": "sim-cuda-12-4",
-    "blanca-shirts": "sim-cuda-12-4",
-    "bridges2": "sim-cuda-12-6",
-    "testing": "sim-cuda-12-4",
+    "aa100": "auto",
+    "al40": "auto",
+    "blanca-shirts": "auto",
+    "bridges2": "auto",
+    "testing": "auto",
 }
 
 # Pattern allowing alphanumerics, common path chars, and SLURM-safe punctuation

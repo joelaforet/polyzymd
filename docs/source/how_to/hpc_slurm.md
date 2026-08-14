@@ -154,6 +154,30 @@ Common Bridges2 differences:
 
 ## Cluster-specific note for CU Boulder (Alpine and Blanca)
 
+OpenMM jobs should normally use `--pixi-env auto`. The generated script runs
+`nvidia-smi` on the allocated node before activating Pixi, chooses the highest
+compatible checked-in CUDA 12.0, 12.4, or 12.6 environment, then creates a
+minimal explicit CUDA Context. Missing GPUs, unknown drivers, malformed probe
+output, incompatible overrides, and CUDA Context failures stop the job. There
+is no automatic CPU fallback.
+
+The job atomically records the environment, OpenMM version, CUDA runtime,
+platform, precision, driver, device, and compute capability in
+`runtime_platform.json`. Resubmission refuses to change environment, OpenMM
+version, platform, or precision within a replica.
+
+When temporarily using the old fixed `--pixi-env sim-cuda-12-4` workflow,
+exclude `bgpu-g4-u20,bgpu-g4-u24`. Auto routing does not rely on this node
+list and removes that workaround once those nodes report a supported runtime.
+
+The repository does not contain claimed Blanca probe results yet. Release
+acceptance still requires short allocations on representative CUDA 12.0 and
+12.4 nodes, successful explicit CUDA Context creation, a deterministic short
+benchmark, and the documented cross-environment trajectory/energy comparison.
+Record node, GPU, driver, maximum CUDA, compute capability, OpenMM Context
+result, and numerical tolerances from those real jobs; do not infer them from
+partition or node names.
+
 CU Boulder runs two SLURM clusters. Switch between them with environment
 modules before submitting:
 
@@ -207,7 +231,8 @@ partition tables and troubleshooting.
 
 Each generated script follows the same loop:
 
-1. activate the selected `pixi` environment
+1. detect GPU capability, select or validate the CUDA environment, activate it,
+   and create an explicit CUDA Context
 2. run `polyzymd run-segment`
 3. call `polyzymd check-progress`
 4. resubmit itself if work remains

@@ -13,14 +13,14 @@ do not need conda or mamba installed separately.
 
 ## Before You Start
 
-- Linux x86-64 for CUDA simulation environments
+- Linux x86-64 and Pixi 0.72.2 or newer for CUDA simulation environments
 - Git
 - a shell where you can install `pixi`
 
 ```{note}
 macOS is supported for non-CUDA setup, development, and trajectory analysis
 where the required dependencies solve. The CUDA simulation environments
-(`sim-cuda-12-4` and `sim-cuda-12-6`) are Linux-only and intended for GPU
+(`sim-cuda-12-0`, `sim-cuda-12-4`, and `sim-cuda-12-6`) are Linux-only and intended for GPU
 clusters.
 ```
 
@@ -78,8 +78,8 @@ build`, `pixi shell -e build`, and a successful `polyzymd info` output. -->
 PolyzyMD v1.3 uses a split environment workflow on clusters:
 
 - Use `build` on a login/build node to prepare and validate systems.
-- Use `sim-cuda-12-4` or `sim-cuda-12-6` on GPU nodes for OpenMM simulation
-  execution only.
+- Use `--pixi-env auto` for scheduled OpenMM simulation. It selects a
+  compatible `sim-cuda-12-*` runtime after inspecting the allocated GPU.
 - Use `analysis` after trajectories are produced to run comparisons and plots.
 
 This is different from the older `cuda-*` workflow where one CUDA environment
@@ -106,6 +106,8 @@ Then install the simulation runtime that matches your cluster:
 pixi install -e sim-cuda-12-6
 # or
 pixi install -e sim-cuda-12-4
+# or
+pixi install -e sim-cuda-12-0
 
 pixi shell -e sim-cuda-12-6
 polyzymd info
@@ -137,7 +139,14 @@ Use this mapping:
 | CUDA driver version | Environment | Example clusters |
 |---------------------|-------------|------------------|
 | 12.6 | `sim-cuda-12-6` | PSC Bridges2 |
-| 12.4 | `sim-cuda-12-4` | CU Boulder Blanca |
+| 12.4 | `sim-cuda-12-4` | Compatible Blanca allocations |
+| 12.0 | `sim-cuda-12-0` | Older Blanca driver cohorts |
+
+These rows describe runtime compatibility, not node-name routing. Generated
+SLURM scripts query `nvidia-smi` before Pixi activation and reject missing,
+malformed, or unsupported GPU capabilities. An explicit `--pixi-env` override
+is checked against the allocated driver. CUDA Context failure is fatal;
+PolyzyMD uses CPU only when `openmm.platform: CPU` is explicitly configured.
 
 ## 4. Verify the Commands You Can Use
 

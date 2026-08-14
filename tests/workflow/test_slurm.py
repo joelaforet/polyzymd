@@ -430,10 +430,14 @@ class TestGeneratedOpenMMScript:
         assert "#SBATCH --partition=aa100" in script
         assert "#SBATCH --job-name=r3_test" in script
         assert "#SBATCH --output=slurm_logs/r3_test.%j.out" in script
+        assert "REQUESTED_PIXI_ENV=sim-cuda-12-4" in script
         assert (
-            'eval "$(pixi shell-hook -e sim-cuda-12-4 '
+            'eval "$(pixi shell-hook -e "$PIXI_ENV" '
             '--manifest-path /projects/user/polyzymd/pixi.toml)"' in script
         )
+        assert "nvidia-smi --query-gpu=driver_version,compute_cap" in script
+        assert 'openmm.Platform.getPlatformByName("CUDA")' in script
+        assert "runtime_platform.json" in script
         assert "export INTERCHANGE_EXPERIMENTAL=1" in script
         assert 'CONFIG_PATH="/projects/user/run/config.yaml"' in script
         assert "REPLICATE=3" in script
@@ -466,21 +470,20 @@ class TestGeneratedOpenMMScript:
             output_file="slurm_logs/r3_test.%j.out",
         )
 
-        assert (
-            "pixi shell-hook -e 'sim-cuda-12-4 --manifest-path /tmp/evil' "
-            "--manifest-path '/projects/user/PolyzyMD Run/pixi.toml'"
-        ) in script
+        assert "REQUESTED_PIXI_ENV='sim-cuda-12-4 --manifest-path /tmp/evil'" in script
+        assert "--manifest-path '/projects/user/PolyzyMD Run/pixi.toml'" in script
 
     def test_rendered_script_preserves_setup_order(self, monkeypatch):
         """Pixi activation, strict mode, and OpenFF export keep their ordering."""
         script = self._render_script(monkeypatch)
 
+        probe_pos = script.index("nvidia-smi")
         pixi_pos = script.index("pixi shell-hook")
         strict_pos = script.index("set -e")
         export_pos = script.index("export INTERCHANGE_EXPERIMENTAL=1")
         run_pos = script.index("polyzymd run-segment")
 
-        assert pixi_pos < strict_pos < export_pos < run_pos
+        assert probe_pos < pixi_pos < strict_pos < export_pos < run_pos
 
 
 class TestScriptValueValidation:

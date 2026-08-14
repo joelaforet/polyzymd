@@ -170,7 +170,7 @@ def test_submit_openmm_warns_for_unrelated_environment(monkeypatch, tmp_path) ->
     assert result.exit_code == 0
     assert "Warning: polyzymd submit --engine openmm" not in result.stdout
     assert "Warning: polyzymd submit --engine openmm" in result.stderr
-    assert "sim-cuda" in result.stderr
+    assert "auto" in result.stderr
 
 
 def test_recover_submit_openmm_accepts_build_environment(monkeypatch, tmp_path) -> None:

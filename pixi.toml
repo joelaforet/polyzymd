@@ -7,7 +7,8 @@
 #   build           — system preparation, package development, docs, local checks
 #   analysis        — trajectory analysis, comparison, and plotting
 #   test            — local and CI test environment
-#   sim-cuda-12-4   — CUDA 12.4 simulation runtime, legacy OpenMM/NumPy stack
+#   sim-cuda-12-0   — CUDA 12.0 Blanca simulation runtime, OpenMM 8.1.2
+#   sim-cuda-12-4   — CUDA 12.4 Blanca simulation runtime, OpenMM 8.1.2
 #   sim-cuda-12-6   — CUDA 12.6 simulation runtime, current OpenMM stack
 #
 # WORKFLOW SPLIT
@@ -42,7 +43,15 @@ name        = "polyzymd"
 version     = "1.3.0"
 description = "MD simulations for enzyme-polymer systems"
 channels    = ["conda-forge"]
-platforms   = ["linux-64", "osx-64", "osx-arm64"]
+requires-pixi = ">=0.72.2"
+platforms = [
+  "linux-64",
+  "osx-64",
+  "osx-arm64",
+  { name = "blanca-cuda-12-0", platform = "linux-64", cuda = { driver = "12.0", arch = "8.0" } },
+  { name = "blanca-cuda-12-4", platform = "linux-64", cuda = { driver = "12.4", arch = "8.6" } },
+  { name = "cuda-12-6", platform = "linux-64", cuda = { driver = "12.6", arch = "8.0" } },
+]
 
 
 # =============================================================================
@@ -170,16 +179,24 @@ twine        = ">=5.0"
 # CUDA 12.6 simulation runtime — e.g. PSC Bridges2.
 # =============================================================================
 [feature.sim-cuda-12-6]
-platforms = ["linux-64"]
+platforms = ["cuda-12-6"]
 
-[feature.sim-cuda-12-6.target.linux-64.dependencies]
+[feature.sim-cuda-12-6.target.cuda-12-6.dependencies]
 numpy        = ">=2.0,<3"
 scipy        = ">=1.13"
 openmm       = ">=8.4,<8.5"
 cuda-version = "=12.6"
 
-[feature.sim-cuda-12-6.system-requirements]
-cuda = "12.6"
+# =============================================================================
+# FEATURE: sim-cuda-12-0
+# CUDA 12.0 simulation runtime for older Blanca driver cohorts.
+# =============================================================================
+[feature.sim-cuda-12-0]
+platforms = ["blanca-cuda-12-0"]
+
+[feature.sim-cuda-12-0.target.blanca-cuda-12-0.dependencies]
+openmm       = "=8.1.2"
+cuda-version = "=12.0"
 
 
 # =============================================================================
@@ -189,14 +206,11 @@ cuda = "12.6"
 # the current NumPy 2 analysis stack.
 # =============================================================================
 [feature.sim-cuda-12-4]
-platforms = ["linux-64"]
+platforms = ["blanca-cuda-12-4"]
 
-[feature.sim-cuda-12-4.target.linux-64.dependencies]
-openmm       = ">=8.1.2,<8.2"
+[feature.sim-cuda-12-4.target.blanca-cuda-12-4.dependencies]
+openmm       = "=8.1.2"
 cuda-version = "=12.4"
-
-[feature.sim-cuda-12-4.system-requirements]
-cuda = "12.4"
 
 
 # =============================================================================
@@ -209,6 +223,7 @@ build = { features = ["core", "numpy2", "builder", "analysis", "openmm-any", "de
 analysis = { features = ["core", "numpy2", "analysis"], no-default-feature = true, solve-group = "numpy2" }
 test = { features = ["core", "numpy2", "builder", "analysis", "openmm-any", "dev-tools"], no-default-feature = true, solve-group = "numpy2" }
 sim-cuda-12-4 = { features = ["core", "numpy1-sim", "sim-cuda-12-4"], no-default-feature = true, solve-group = "sim-cuda-12-4" }
+sim-cuda-12-0 = { features = ["core", "numpy1-sim", "sim-cuda-12-0"], no-default-feature = true, solve-group = "sim-cuda-12-0" }
 sim-cuda-12-6 = { features = ["core", "sim-cuda-12-6"], no-default-feature = true, solve-group = "sim-cuda-12-6" }
 
 
@@ -241,6 +256,13 @@ check-progress = { cmd = "polyzymd check-progress", description = "Check simulat
 # --- CUDA 12.4 simulation tasks (e.g. CU Boulder Blanca) ---
 [feature.sim-cuda-12-4.tasks]
 submit         = { cmd = "polyzymd submit", description = "Submit SLURM jobs (CUDA 12.4)" }
+run-segment    = { cmd = "polyzymd run-segment", description = "Run next simulation segment" }
+run-openmm     = { cmd = "polyzymd run --engine openmm", description = "Run local OpenMM simulation" }
+recover        = { cmd = "polyzymd recover", description = "Resume stalled simulation" }
+check-progress = { cmd = "polyzymd check-progress", description = "Check simulation progress" }
+
+[feature.sim-cuda-12-0.tasks]
+submit         = { cmd = "polyzymd submit", description = "Submit SLURM jobs (CUDA 12.0)" }
 run-segment    = { cmd = "polyzymd run-segment", description = "Run next simulation segment" }
 run-openmm     = { cmd = "polyzymd run --engine openmm", description = "Run local OpenMM simulation" }
 recover        = { cmd = "polyzymd recover", description = "Resume stalled simulation" }

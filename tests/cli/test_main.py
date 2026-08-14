@@ -226,7 +226,7 @@ class TestResolveSubmissionPixiEnv:
         """OpenMM should keep preset-specific CUDA environment defaults."""
         from polyzymd.cli.main import _resolve_submission_pixi_env
 
-        assert _resolve_submission_pixi_env("bridges2", "openmm") == "sim-cuda-12-6"
+        assert _resolve_submission_pixi_env("bridges2", "openmm") == "auto"
 
 
 class TestValidateCommandReferenceWarnings:

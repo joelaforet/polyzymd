@@ -355,7 +355,7 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--gpu-type` | - | No | - | GPU type for GRES (e.g., "a100", "a40", "mi100") |
 | `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
 | `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
-| `--pixi-env` | - | No | engine-specific | Pixi environment for SLURM jobs (`build`, `sim-cuda-12-4`, or `sim-cuda-12-6`); OpenMM defaults from preset, GROMACS defaults to `build` |
+| `--pixi-env` | - | No | engine-specific | Pixi environment for SLURM jobs (`auto`, `build`, or a checked-in `sim-cuda-12-*` environment); OpenMM defaults to capability-based `auto`, GROMACS defaults to `build` |
 | `--skip-build` | - | No | false | Skip system building (use pre-built system from `polyzymd build`) |
 | `--force` | - | No | false | Skip duplicate-job check |
 | `--openff-logs` | - | No | false | Enable verbose OpenFF logs in job scripts |
@@ -592,7 +592,7 @@ polyzymd recover -c CONFIG [OPTIONS]
 | `--qos` | - | No | - | Override SLURM QoS |
 | `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
 | `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
-| `--pixi-env` | - | No | engine-specific | Pixi environment for recovery job (`build`, `sim-cuda-12-4`, or `sim-cuda-12-6`); OpenMM defaults from preset, GROMACS defaults to `build` |
+| `--pixi-env` | - | No | engine-specific | Pixi environment for recovery job (`auto`, `build`, or a checked-in `sim-cuda-12-*` environment); OpenMM defaults to capability-based `auto`, GROMACS defaults to `build` |
 | `--force` | - | No | false | Skip duplicate-job check |
 
 ### Example

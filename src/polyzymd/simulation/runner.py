@@ -113,6 +113,8 @@ class SimulationRunner:
         positions: Any,
         working_dir: Union[str, Path],
         platform: str = "CUDA",
+        precision: str = "mixed",
+        device_index: str | None = None,
     ) -> None:
         """Initialize the SimulationRunner.
 
@@ -130,6 +132,8 @@ class SimulationRunner:
         self._positions = positions
         self._working_dir = Path(working_dir)
         self._platform_name = platform
+        self._platform_precision = precision
+        self._platform_device_index = device_index
 
         self._simulation: Optional[Simulation] = None
         self._current_positions = positions
@@ -167,26 +171,32 @@ class SimulationRunner:
         impose_unique_force_groups(self._system)
         LOGGER.debug("Assigned unique force groups")
 
-    def _get_platform(self) -> openmm.Platform:
-        """Get the compute platform.
+    def _get_platform(self) -> Any:
+        """Get the compute platform selection.
 
         Returns:
-            OpenMM Platform object.
+            Resolved platform and Context properties.
         """
         _ensure_openmm_loaded()
 
-        try:
-            platform = openmm.Platform.getPlatformByName(self._platform_name)
-            LOGGER.info(f"Using {self._platform_name} platform")
-        except openmm.OpenMMException as exc:
-            LOGGER.warning(
-                "Platform %s is not available (%s); falling back to CPU. "
-                "Install/configure the requested OpenMM platform or set platform='CPU'.",
-                self._platform_name,
-                exc,
-            )
-            platform = openmm.Platform.getPlatformByName("CPU")
-        return platform
+        from polyzymd.simulation.platform import resolve_platform
+
+        return resolve_platform(
+            self._platform_name,
+            precision=self._platform_precision,
+            device_index=self._platform_device_index,
+        )
+
+    def _create_simulation(self, integrator: openmm.Integrator) -> Simulation:
+        """Create a Simulation using the configured platform and properties."""
+        selection = self._get_platform()
+        return Simulation(
+            self._topology,
+            self._system,
+            integrator,
+            selection.platform,
+            selection.properties,
+        )
 
     def _create_integrator(
         self,
@@ -269,9 +279,7 @@ class SimulationRunner:
 
         # Create temporary simulation for minimization
         integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
-        platform = self._get_platform()
-
-        simulation = Simulation(self._topology, self._system, integrator, platform)
+        simulation = self._create_simulation(integrator)
         simulation.context.setPositions(self._current_positions)
 
         # Minimize
@@ -447,10 +455,8 @@ class SimulationRunner:
             friction=friction,
             timestep=timestep_fs,
         )
-        platform = self._get_platform()
-
         # Create simulation
-        self._simulation = Simulation(self._topology, self._system, integrator, platform)
+        self._simulation = self._create_simulation(integrator)
 
         # Set box vectors BEFORE positions - critical for NPT stage transitions
         # where box dimensions may have changed from previous stage
@@ -886,8 +892,7 @@ class SimulationRunner:
         # geometric state (positions, velocities, box vectors) — the next
         # run_equilibration_stage() call creates a proper LangevinMiddleIntegrator.
         integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
-        platform = self._get_platform()
-        temp_sim = Simulation(self._topology, self._system, integrator, platform)
+        temp_sim = self._create_simulation(integrator)
         temp_sim.loadCheckpoint(str(chk_path))
 
         state = temp_sim.context.getState(getPositions=True, getVelocities=True)
@@ -1180,9 +1185,7 @@ class SimulationRunner:
             friction=friction,
             timestep=timestep_fs,
         )
-        platform = self._get_platform()
-
-        self._simulation = Simulation(self._topology, self._system, integrator, platform)
+        self._simulation = self._create_simulation(integrator)
 
         # Set box vectors BEFORE positions - critical for correct periodic boundary handling
         if self._current_box_vectors is not None:

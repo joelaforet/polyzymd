@@ -34,7 +34,7 @@ logging.basicConfig(
 )
 LOGGER = logging.getLogger("polyzymd")
 BUILD_PIXI_ENVS = ("build",)
-SIM_PIXI_ENVS = ("sim-cuda-12-4", "sim-cuda-12-6")
+SIM_PIXI_ENVS = ("sim-cuda-12-0", "sim-cuda-12-4", "sim-cuda-12-6")
 KNOWN_SPLIT_PIXI_ENVS = (*BUILD_PIXI_ENVS, *SIM_PIXI_ENVS, "analysis", "test", "docs")
 
 
@@ -1385,7 +1385,7 @@ def _print_gromacs_dry_run_details(
 @click.option(
     "--pixi-env",
     default=None,
-    type=click.Choice(["build", "sim-cuda-12-4", "sim-cuda-12-6"]),
+    type=click.Choice(["auto", "build", *SIM_PIXI_ENVS]),
     help=(
         "Pixi environment for SLURM jobs. OpenMM defaults from --preset; GROMACS "
         "defaults to build. Explicit CUDA envs are allowed for GPU GROMACS."
@@ -1900,6 +1900,7 @@ def run_segment(
         else:
             # ---- CONTINUATION: load previous state, run next segment ----
             _run_continuation_segment(
+                sim_config=sim_config,
                 working_dir=working_dir,
                 segment_index=seg_idx,
                 duration_ns=duration_ns,
@@ -2027,6 +2028,9 @@ def _run_initial_segment(
         system=omm_system,
         positions=omm_positions,
         working_dir=working_dir,
+        platform=sim_config.openmm.platform,
+        precision=sim_config.openmm.precision,
+        device_index=sim_config.openmm.device_index,
     )
 
     # ------------------------------------------------------------------
@@ -2129,6 +2133,7 @@ def _run_initial_segment(
 
 
 def _run_continuation_segment(
+    sim_config: "SimulationConfig",
     working_dir: Path,
     segment_index: int,
     duration_ns: float,
@@ -2167,6 +2172,9 @@ def _run_continuation_segment(
     manager = ContinuationManager(
         working_dir=working_dir,
         segment_index=segment_index,
+        platform=sim_config.openmm.platform,
+        precision=sim_config.openmm.precision,
+        device_index=sim_config.openmm.device_index,
     )
     manager.load_previous_state()
 
@@ -2781,7 +2789,7 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 @click.option(
     "--pixi-env",
     default=None,
-    type=click.Choice(["build", "sim-cuda-12-4", "sim-cuda-12-6"]),
+    type=click.Choice(["auto", "build", *SIM_PIXI_ENVS]),
     help=(
         "Pixi environment for the recovery SLURM job. OpenMM defaults from --preset; "
         "GROMACS defaults to build. Explicit CUDA envs are allowed for GPU GROMACS."

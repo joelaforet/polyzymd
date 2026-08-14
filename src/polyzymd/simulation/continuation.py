@@ -119,6 +119,9 @@ class ContinuationManager:
         self,
         working_dir: Union[str, Path],
         segment_index: int,
+        platform: str = "CUDA",
+        precision: str = "mixed",
+        device_index: str | None = None,
     ) -> None:
         """Initialize the ContinuationManager.
 
@@ -133,6 +136,9 @@ class ContinuationManager:
         self._working_dir = Path(working_dir)
         self._segment_index = segment_index
         self._prev_segment = segment_index - 1
+        self._platform_name = platform
+        self._platform_precision = precision
+        self._platform_device_index = device_index
 
         # State
         self._system: Optional[openmm.System] = None
@@ -733,7 +739,20 @@ class ContinuationManager:
         # Create integrator and simulation
         integrator = self._create_integrator()
         _, _, _, Simulation, _ = _get_openmm_app_classes()
-        self._simulation = Simulation(self._topology, self._system, integrator)
+        from polyzymd.simulation.platform import resolve_platform
+
+        selection = resolve_platform(
+            self._platform_name,
+            precision=self._platform_precision,
+            device_index=self._platform_device_index,
+        )
+        self._simulation = Simulation(
+            self._topology,
+            self._system,
+            integrator,
+            selection.platform,
+            selection.properties,
+        )
 
         # Load state from previous segment
         paths = self._get_previous_paths()

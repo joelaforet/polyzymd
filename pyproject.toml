@@ -45,7 +45,9 @@ requires-python = ">=3.12"
 #   git clone <repo> && cd polyzymd
 #   pixi install -e build          # system preparation and package work
 #   pixi install -e analysis       # trajectory analysis and plotting
+#   pixi install -e sim-cuda-12-0  # CUDA 12.0 simulation runtime
 #   pixi install -e sim-cuda-12-4  # CUDA 12.4 simulation runtime
+#   # Scheduled OpenMM jobs normally use --pixi-env auto.
 # =============================================================================
 dependencies = [
     # Configuration and CLI (these install cleanly via pip)
