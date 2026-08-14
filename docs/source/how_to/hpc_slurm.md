@@ -164,9 +164,9 @@ procedure, and instructions for new hardware.
 NVIDIA OpenMM jobs should normally use `--pixi-env auto`. The generated script runs
 `nvidia-smi` on the allocated node before activating Pixi, chooses the highest
 compatible checked-in CUDA 12.0, 12.4, or 12.6 environment, then creates a
-minimal explicit CUDA Context. Missing GPUs, unknown drivers, malformed probe
-output, incompatible overrides, and CUDA Context failures stop the job. There
-is no automatic CPU fallback.
+minimal explicit CUDA Context. A missing GPU, an unknown driver, malformed
+probe output, an incompatible override, or a CUDA Context failure prevents the
+simulation from starting. There is no automatic CPU fallback.
 
 If routing fails before simulation starts, the job submits a successor to the
 same queue with `afterany`, excludes the failed node, and exits. A three-retry
@@ -179,15 +179,38 @@ version, platform, or precision within a replica.
 
 When temporarily using the old fixed `--pixi-env sim-cuda-12-4` workflow,
 exclude `bgpu-g4-u20,bgpu-g4-u24`. Auto routing does not rely on this node
-list and removes that workaround once those nodes report a supported runtime.
+list. The CUDA 12.0 acceptance test below verifies auto-routing prerequisites
+on `bgpu-g4-u20`. The old fixed CUDA 12.4 environment remains incompatible
+with that node.
 
-The repository does not contain claimed Blanca probe results yet. Release
-acceptance still requires short allocations on representative CUDA 12.0 and
-12.4 nodes, successful explicit CUDA Context creation, a deterministic short
-benchmark, and the documented cross-environment trajectory/energy comparison.
-Record node, GPU, driver, maximum CUDA, compute capability, OpenMM Context
-result, and numerical tolerances from those real jobs; do not infer them from
-partition or node names.
+### Blanca CUDA acceptance results
+
+The following results were measured on August 14, 2026. Each job installed its
+checked-in Pixi environment on the allocated node. Each job then created an
+explicit CUDA Context with mixed precision and ran the same 1,000-step,
+two-particle harmonic-bond benchmark.
+
+| Environment | Node | GPU | Driver | Maximum CUDA | Compute capability | OpenMM | Result |
+|-------------|------|-----|--------|--------------|--------------------|--------|--------|
+| `sim-cuda-12-0` | `bgpu-g4-u20` | NVIDIA L40 | 525.147.05 | 12.0 | 8.9 | 8.1.2 | CUDA Context and benchmark passed |
+| `sim-cuda-12-4` | `bgpu-shirts1` | NVIDIA A40 | 550.90.07 | 12.4 | 8.6 | 8.1.2 | CUDA Context and benchmark passed |
+
+SLURM jobs `27631524` and `27631525` completed with exit code 0. Both Contexts
+reported platform `CUDA`, precision `mixed`, device index `0`, and two System
+particles. No CPU fallback occurred.
+
+The comparison tolerance was `1e-6 kJ/mol` for potential and kinetic energy.
+The measured energy difference was `0.0 kJ/mol` at the start and end of the
+benchmark. The final position SHA-256 value was also identical in both
+environments:
+
+```text
+5a590d68e8806cb3e8c1dbcd732b3d131a3b8663335037b6323febedbe8bb818
+```
+
+These results verify the listed nodes, drivers, environments, and OpenMM
+version. Runtime capability detection remains the selection rule for other
+Blanca nodes.
 
 CU Boulder runs two SLURM clusters. Switch between them with environment
 modules before submitting:
