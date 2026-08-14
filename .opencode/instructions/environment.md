@@ -37,6 +37,15 @@ pixi shell -e build
 
 These must come from conda-forge via the pixi environment.
 
+## Prebuilt simulation artifacts
+
+`polyzymd build` publishes `solvated_system.pdb`, `system.xml`, and
+`build_manifest.json` as one integrity bundle. The manifest is written last and
+records configuration identity, particle count, hashes, OpenMM version, and
+canonical paths. Do not stage only part of this bundle between filesystems.
+Legacy directories without a manifest are recovery inputs only and are accepted
+only when all available particle counts agree.
+
 ## Environment Setup
 
 The environment specification is managed by `pixi.toml` at the repo root.

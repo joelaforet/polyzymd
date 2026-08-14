@@ -106,6 +106,8 @@ implementation to private `_framework/` modules such as `compare.py`,
   documented in `docs/source/how_to/troubleshoot_openff_pdb_ingestion.md` and
   `docs/source/reference/openff_pdb_ingestion.md` before the task is closed,
   unless the user explicitly defers the durable documentation update.
+- **OpenMM build identity:** A completed prebuild is committed by `build_manifest.json`. Never copy `solvated_system.pdb`,
+  `system.xml`, or segment State/topology files independently. Continuation prefers the predecessor topology; root PDB fallback is legacy-only and must pass count validation.
 - **Factory pattern:** `ClassName.from_config(config)` or `ClassName.from_yaml(path)`
 - **Lazy imports:** Heavy deps (OpenMM, MDAnalysis) imported inside functions/methods
 - **ABC + Strategy:** `ContactCriteria`, `MolecularSelector`, `MoleculeCharger`

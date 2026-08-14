@@ -152,6 +152,7 @@ class TestFindSolvatedPdb:
 
             mgr = ContinuationManager.__new__(ContinuationManager)
             mgr._working_dir = Path(working_dir)
+            mgr._prev_segment = 0
             return mgr
         except ImportError:
             pytest.skip("polyzymd.simulation.continuation not importable")
@@ -182,6 +183,18 @@ class TestFindSolvatedPdb:
 
         with pytest.raises(FileNotFoundError, match="Could not find solvated PDB file"):
             mgr._find_solvated_pdb()
+
+    def test_prefers_predecessor_topology_over_root_decoy(self, tmp_path):
+        """A segment-owned topology is bound to its System/State artifacts."""
+        root = tmp_path / "solvated_system.pdb"
+        root.write_text("decoy")
+        segment = tmp_path / "production_2" / "production_2_topology.pdb"
+        segment.parent.mkdir()
+        segment.write_text("matching")
+        mgr = self._make_manager(tmp_path)
+        mgr._prev_segment = 2
+
+        assert mgr._find_solvated_pdb() == segment
 
 
 class TestGetPreviousPaths:

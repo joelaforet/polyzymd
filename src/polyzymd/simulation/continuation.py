@@ -175,14 +175,26 @@ class ContinuationManager:
         FileNotFoundError
             If no suitable PDB file is found.
         """
-        allowed_paths = (
-            self._working_dir / "solvated_system.pdb",
+        segment_paths = (
+            self._working_dir
+            / f"production_{self._prev_segment}"
+            / f"production_{self._prev_segment}_topology.pdb",
             self._working_dir / "production_0" / "production_0_topology.pdb",
             self._working_dir / "production" / "production_topology.pdb",
         )
-        for pdb_path in allowed_paths:
+        for pdb_path in segment_paths:
             if pdb_path.exists():
                 return pdb_path
+
+        legacy_root = self._working_dir / "solvated_system.pdb"
+        if legacy_root.exists():
+            LOGGER.warning(
+                "No segment-owned topology exists for production_%s; using legacy root "
+                "topology %s after particle-count validation",
+                self._prev_segment,
+                legacy_root,
+            )
+            return legacy_root
 
         # Arbitrary recursive PDB discovery is disallowed to avoid selecting decoys or inputs
 
@@ -333,6 +345,20 @@ class ContinuationManager:
         pdb_path = self._find_solvated_pdb()
         LOGGER.info(f"Loading topology from {pdb_path}")
         self._topology = PDBFile(str(pdb_path)).topology
+
+        from polyzymd.simulation.artifact_integrity import validate_openmm_identity
+
+        state = None
+        if not use_checkpoint:
+            state = XmlSerializer.deserialize(paths["state"].read_text())
+        validate_openmm_identity(
+            self._topology,
+            self._system,
+            topology_path=pdb_path,
+            system_path=paths["system"],
+            state=state,
+            state_path=paths["state"] if state is not None else None,
+        )
 
         # Load parameters
         LOGGER.info(f"Loading parameters from {paths['params']}")
@@ -769,6 +795,12 @@ class ContinuationManager:
         # Create output directory
         output_dir = self._working_dir / f"production_{self._segment_index}"
         output_dir.mkdir(exist_ok=True)
+
+        topology_path = output_dir / f"production_{self._segment_index}_topology.pdb"
+        state = self._simulation.context.getState(getPositions=True)
+        _, _, PDBFile, _, _ = _get_openmm_app_classes()
+        with topology_path.open("w") as stream:
+            PDBFile.writeFile(self._topology, state.getPositions(), stream, keepIds=True)
 
         # Save system XML early so it exists on disk even if the segment is
         # hard-killed (SIGKILL / OOM).  This is required for checkpoint-based
