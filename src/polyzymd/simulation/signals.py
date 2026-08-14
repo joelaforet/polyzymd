@@ -76,6 +76,12 @@ def get_interrupt_signal() -> int:
     return _interrupt_signal
 
 
+def raise_if_interrupted(steps_completed: int = 0) -> None:
+    """Raise :class:`GracefulExit` at setup and lifecycle boundaries."""
+    if is_interrupted():
+        raise GracefulExit(get_interrupt_signal(), steps_completed)
+
+
 def reset() -> None:
     """Clear the interrupted flag (useful for tests)."""
     global _interrupt_signal

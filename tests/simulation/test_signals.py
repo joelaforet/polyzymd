@@ -22,6 +22,7 @@ from polyzymd.simulation.signals import (
     get_interrupt_signal,
     install_handlers,
     is_interrupted,
+    raise_if_interrupted,
     reset,
     save_interrupted_state,
     save_restart_checkpoint,
@@ -123,6 +124,16 @@ class TestInterruptFlag:
         assert get_interrupt_signal() == signal.SIGTERM
         reset()
         assert get_interrupt_signal() == signal.SIGUSR1
+
+    def test_raise_if_interrupted_preserves_boundary_step(self):
+        _handler(signal.SIGTERM, None)
+        try:
+            raise_if_interrupted(37)
+        except GracefulExit as exc:
+            assert exc.signal_number == signal.SIGTERM
+            assert exc.steps_completed == 37
+        else:
+            raise AssertionError("GracefulExit was not raised")
 
     def test_handler_does_not_use_logger(self):
         """Signal handler must not call LOGGER methods (async-signal-unsafe).

@@ -374,18 +374,13 @@ class TestJobTemplateExitCodeHandling:
         template = SlurmScriptGenerator.JOB_TEMPLATE
         assert "if [ $RC -ne 0 ] && [ $RC -ne 99 ]" in template
 
-    def test_sbatch_failure_path_disables_errexit(self):
-        """The sbatch failure warning path must remain reachable under set -e."""
+    def test_signal_resubmits_before_forwarding(self):
+        """TERM/USR1 must queue one dependent successor before child signaling."""
         template = SlurmScriptGenerator.JOB_TEMPLATE
-
-        resubmit_pos = template.index('echo "Work remains — resubmitting job..."')
-        set_plus_pos = template.index("set +e", resubmit_pos)
-        sbatch_pos = template.index('sbatch "$THIS_SCRIPT"', resubmit_pos)
-        submit_rc_pos = template.index("SUBMIT_RC=$?", sbatch_pos)
-        set_e_pos = template.index("set -e", submit_rc_pos)
-        warning_pos = template.index("WARNING: sbatch resubmission failed", set_e_pos)
-
-        assert set_plus_pos < sbatch_pos < submit_rc_pos < set_e_pos < warning_pos
+        handler = template[template.index("forward_signal()") : template.index("trap '")]
+        assert handler.index("resubmit_once") < handler.index('kill -"$1"')
+        assert 'sbatch --dependency="afterany:$SLURM_JOB_ID"' in template
+        assert 'if [ -s "$SUCCESSOR_RECEIPT" ]' in template
 
 
 class TestGeneratedOpenMMScript:
@@ -457,7 +452,7 @@ class TestGeneratedOpenMMScript:
         assert "exit 0" in script
         assert "if [ $RC -ne 0 ] && [ $RC -ne 99 ]; then" in script
         assert 'polyzymd check-progress -c "$CONFIG_PATH" -r "$REPLICATE"' in script
-        assert 'sbatch "$THIS_SCRIPT"' in script
+        assert 'sbatch --dependency="afterany:$SLURM_JOB_ID" "$THIS_SCRIPT"' in script
 
     def test_routing_retry_preserves_configured_exclusions(self, monkeypatch):
         """A routing retry excludes the failed node and configured exclusions."""

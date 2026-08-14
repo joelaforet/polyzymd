@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Union
@@ -275,6 +276,27 @@ class SimulationRunner:
         Returns:
             Final potential energy in kJ/mol.
         """
+        from polyzymd.simulation.phase_state import phase_completed, write_phase_record
+        from polyzymd.simulation.signals import GracefulExit, get_interrupt_signal, is_interrupted
+
+        phase_dir = self._working_dir / "minimization"
+        record_path = phase_dir / "phase.json"
+        state_path = phase_dir / "minimized_state.xml"
+        phase_dir.mkdir(exist_ok=True)
+
+        if phase_completed(record_path) and state_path.exists():
+            LOGGER.info("Loading completed minimization state from %s", state_path)
+            integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
+            simulation = self._create_simulation(integrator)
+            simulation.loadState(str(state_path))
+            state = simulation.context.getState(getEnergy=True, getPositions=True)
+            self._current_positions = state.getPositions()
+            self._current_box_vectors = state.getPeriodicBoxVectors()
+            return state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
+
+        write_phase_record(record_path, phase="minimization", status="started")
+        if is_interrupted():
+            raise GracefulExit(get_interrupt_signal())
         LOGGER.info("Running energy minimization")
 
         # Create temporary simulation for minimization
@@ -288,11 +310,26 @@ class SimulationRunner:
             maxIterations=max_iterations,
         )
 
+        if is_interrupted():
+            # OpenMM minimization is not resumable.  Leave only ``started`` so
+            # the dependent successor deterministically reruns this phase.
+            raise GracefulExit(get_interrupt_signal())
+
         # Get final state (including box vectors for proper handoff to equilibration)
         state = simulation.context.getState(getEnergy=True, getPositions=True)
         energy = state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
         self._current_positions = state.getPositions()
         self._current_box_vectors = state.getPeriodicBoxVectors()
+
+        temporary_state = state_path.with_name(f".{state_path.name}.tmp")
+        temporary_state.write_text(XmlSerializer.serialize(state))
+        os.replace(temporary_state, state_path)
+        write_phase_record(
+            record_path,
+            phase="minimization",
+            status="completed",
+            state_path=str(state_path.resolve()),
+        )
 
         LOGGER.info(f"Minimization complete: E = {energy:.2f} kJ/mol")
 
@@ -386,6 +423,9 @@ class SimulationRunner:
             Dictionary with stage results
         """
         from polyzymd.config.schema import Ensemble
+        from polyzymd.simulation.signals import raise_if_interrupted
+
+        raise_if_interrupted(resume_from_step)
         from polyzymd.core.position_restraints import (
             add_position_restraints_to_system,
             remove_position_restraints_from_system,
@@ -457,6 +497,7 @@ class SimulationRunner:
         )
         # Create simulation
         self._simulation = self._create_simulation(integrator)
+        raise_if_interrupted(resume_from_step)
 
         # Set box vectors BEFORE positions - critical for NPT stage transitions
         # where box dimensions may have changed from previous stage
@@ -547,7 +588,17 @@ class SimulationRunner:
         if self._simulation is None:
             raise RuntimeError("Equilibration simulation was not initialized")
 
-        # Helper: save EQ_INTERRUPTED marker for mid-stage resume
+        from polyzymd.simulation.phase_state import write_phase_record
+
+        phase_record_path = phase_dir / "phase.json"
+        write_phase_record(
+            phase_record_path,
+            phase=stage_name,
+            status="started",
+            total_steps=total_steps,
+        )
+
+        # Helper: save a synchronized recovery point for mid-stage resume
         def _save_eq_interrupted(steps_done: int, current_temp: float) -> None:
             self._simulation.saveCheckpoint(str(eq_chk_path))
             interrupted_state = self._simulation.context.getState(
@@ -576,6 +627,15 @@ class SimulationRunner:
                     ]
                 )
             marker_path.write_text("\n".join(marker_lines) + "\n")
+            write_phase_record(
+                phase_record_path,
+                phase=stage_name,
+                status="recovery",
+                step=steps_done,
+                total_steps=total_steps,
+                temperature=current_temp,
+                state_path=str(state_path.resolve()),
+            )
             LOGGER.info(
                 f"Saved synchronized equilibration state, checkpoint, and "
                 f"EQ_INTERRUPTED marker: stage {stage_index}, "
@@ -620,7 +680,8 @@ class SimulationRunner:
                     )
 
                 steps_to_update = temperature_update_steps - (steps_done % temperature_update_steps)
-                steps_this_chunk = min(steps_to_update, total_steps - steps_done)
+                # Preserve the ramp schedule while bounding interrupt latency.
+                steps_this_chunk = min(1000, steps_to_update, total_steps - steps_done)
                 self._simulation.step(steps_this_chunk)
                 steps_done += steps_this_chunk
                 current_temp = stage.temperature_at_step(steps_done, total_steps)
@@ -655,7 +716,7 @@ class SimulationRunner:
             else:
                 LOGGER.info(f"Running {total_steps} steps at {current_temp} K")
 
-            chunk_size = min(report_interval, steps_remaining)
+            chunk_size = min(1000, report_interval, steps_remaining)
             while steps_remaining > 0:
                 this_chunk = min(chunk_size, steps_remaining)
                 self._simulation.step(this_chunk)
@@ -690,6 +751,16 @@ class SimulationRunner:
         # Save checkpoint
         checkpoint_path = phase_dir / f"{stage_name}_checkpoint.chk"
         self._simulation.saveCheckpoint(str(checkpoint_path))
+
+        write_phase_record(
+            phase_record_path,
+            phase=stage_name,
+            status="completed",
+            step=total_steps,
+            total_steps=total_steps,
+            temperature=stage.get_final_temperature(),
+            state_path=str(state_xml_path.resolve()),
+        )
 
         # Remove EQ_INTERRUPTED marker if present (stage completed successfully)
         eq_interrupted_marker = phase_dir / "EQ_INTERRUPTED"
@@ -756,9 +827,9 @@ class SimulationRunner:
         for i, stage in enumerate(stages):
             stage_name = f"equilibration_{i}_{stage.name}"
             stage_dir = self._working_dir / stage_name
-            chk = stage_dir / f"{stage_name}_checkpoint.chk"
-            eq_marker = stage_dir / "EQ_INTERRUPTED"
-            if chk.exists() and not eq_marker.exists():
+            from polyzymd.simulation.phase_state import phase_completed
+
+            if phase_completed(stage_dir / "phase.json"):
                 completed.append(i)
             else:
                 break  # Stop at first gap — can't skip stages
@@ -1359,13 +1430,9 @@ class SimulationRunner:
         _last_checkpoint_write = _time.monotonic()
         _loop_start = _time.monotonic()
 
-        # Adaptive sub-chunk sizing: start with report_interval (the original
-        # chunk_size).  After the first checkpoint interval elapses, measure
-        # actual steps/second and adapt sub_chunk to target
-        # checkpoint_interval / 4 seconds (~15s worth of steps).  This
-        # ensures ~4 interrupt checks per checkpoint interval regardless of
-        # system size or hardware speed.
-        sub_chunk = min(report_interval, total_steps)
+        # Calibrate immediately with at most 1,000 steps, then keep every
+        # blocking OpenMM call near five seconds independent of reporter rate.
+        sub_chunk = min(1000, report_interval, total_steps)
         _adapted = False
 
         try:
@@ -1378,11 +1445,10 @@ class SimulationRunner:
                 _now = _time.monotonic()
 
                 # Adaptive sub-chunk calibration (once, after first interval)
-                if not _adapted and (_now - _loop_start) >= checkpoint_interval_s:
+                if not _adapted:
                     elapsed = _now - _loop_start
                     steps_per_sec = steps_done / elapsed if elapsed > 0 else 1.0
-                    # Target sub-chunk duration = checkpoint_interval / 4
-                    target_seconds = checkpoint_interval_s / 4.0
+                    target_seconds = 5.0
                     new_sub_chunk = max(10, int(steps_per_sec * target_seconds))
                     # Sub-chunk must be a divisor-friendly size relative to
                     # report_interval to avoid misaligned reporter writes.

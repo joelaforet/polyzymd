@@ -643,6 +643,7 @@ class TestRunInitialSegmentEquilibrationSkip:
         mock_pdb_class = MagicMock()
         mock_pdb_instance = MagicMock()
         mock_pdb_instance.topology = MagicMock()
+        mock_pdb_instance.topology.atoms.side_effect = lambda: iter([object()])
         mock_pdb_instance.positions = MagicMock()
         mock_pdb_class.return_value = mock_pdb_instance
 
@@ -715,6 +716,7 @@ class TestRunInitialSegmentEquilibrationSkip:
         mock_pdb_class = MagicMock()
         mock_pdb_instance = MagicMock()
         mock_pdb_instance.topology = MagicMock()
+        mock_pdb_instance.topology.atoms.side_effect = lambda: iter([object()])
         mock_pdb_instance.positions = MagicMock()
         mock_pdb_class.return_value = mock_pdb_instance
 

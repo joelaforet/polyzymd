@@ -1719,6 +1719,14 @@ def run_segment(
         1  - Error
         99 - Graceful interruption (wall-time signal, should resubmit)
     """
+    # Install before config loading, filesystem scans, building, or OpenMM setup.
+    # This closes the startup window in which Blanca preemption used to kill a
+    # job without giving the batch wrapper a graceful Python exit.
+    from polyzymd.simulation.signals import install_handlers, raise_if_interrupted
+
+    install_handlers()
+    raise_if_interrupted()
+
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.simulation.progress import (
         SegmentStatus,
@@ -1758,6 +1766,7 @@ def run_segment(
         working_dir = sim_config.get_working_directory(replicate)
 
     working_dir.mkdir(parents=True, exist_ok=True)
+    raise_if_interrupted()
 
     from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError, replicate_lock
     from polyzymd.simulation.signals import EXIT_CODE_CONCURRENT
@@ -1904,6 +1913,7 @@ def run_segment(
     )
 
     try:
+        raise_if_interrupted()
         if seg_idx == 0 and not progress.segments:
             # ---- FIRST RUN: build, equilibrate, run segment 0 ----
             _run_initial_segment(

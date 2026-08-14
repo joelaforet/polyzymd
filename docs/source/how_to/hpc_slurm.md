@@ -246,7 +246,25 @@ Version 1.3 OpenMM SLURM scripts require an NVIDIA GPU. The Python simulation
 path can use explicit CPU and OpenCL platforms, but these platforms need a
 site-managed batch wrapper. See {doc}`hardware_platforms`.
 
-GROMACS scripts also:
+For OpenMM jobs, `SIGTERM` or `SIGUSR1` immediately submits one successor with
+an `afterany` dependency on the current job, then forwards the signal to
+`run-segment`. A receipt in the replicate directory prevents duplicate traps
+and normal exit handling from submitting a second successor. If `sbatch`
+fails, the job exits with an error and prints the manual recovery command.
+
+OpenMM records each minimization and equilibration phase in an atomic
+`phase.json`. Only `status: completed` permits a successor to skip a phase.
+A checkpoint without that record is incomplete: PolyzyMD resumes from a
+synchronized portable state when one exists, or restarts the current phase
+from the preceding completed phase. Temperature ramps record the exact step
+and scheduled temperature. Minimization is restarted when interrupted because
+OpenMM minimization itself has no portable mid-minimization resume point.
+
+Every dynamics loop first calibrates with at most 1,000 steps and then targets
+five seconds per `Simulation.step()` call. Reporter frequency does not
+determine how quickly Python notices a preemption signal.
+
+For GROMACS jobs the scripts additionally:
 
 - run EM, equilibration stages, and production with checkpoint restart
 - pass `-maxh` so GROMACS exits cleanly before the wall-time limit

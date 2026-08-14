@@ -743,6 +743,9 @@ class ContinuationManager:
         dict
             Dictionary with segment results.
         """
+        from polyzymd.simulation.signals import raise_if_interrupted
+
+        raise_if_interrupted()
         if self._system is None or self._topology is None:
             raise RuntimeError("State not loaded. Call load_previous_state first.")
 
@@ -779,6 +782,7 @@ class ContinuationManager:
             selection.platform,
             selection.properties,
         )
+        raise_if_interrupted()
 
         # Load state from previous segment
         paths = self._get_previous_paths()
@@ -860,13 +864,9 @@ class ContinuationManager:
         _last_checkpoint_write = _time.monotonic()
         _loop_start = _time.monotonic()
 
-        # Adaptive sub-chunk sizing: start with seg_report_interval (the
-        # original chunk_size).  After the first checkpoint interval elapses,
-        # measure actual steps/second and adapt sub_chunk to target
-        # checkpoint_interval / 4 seconds (~15s worth of steps).  This
-        # ensures ~4 interrupt checks per checkpoint interval regardless of
-        # system size or hardware speed.
-        sub_chunk = min(seg_report_interval, total_steps)
+        # Calibrate immediately with at most 1,000 steps, then keep every
+        # blocking OpenMM call near five seconds independent of reporter rate.
+        sub_chunk = min(1000, seg_report_interval, total_steps)
         _adapted = False
 
         try:
@@ -879,11 +879,10 @@ class ContinuationManager:
                 _now = _time.monotonic()
 
                 # Adaptive sub-chunk calibration (once, after first interval)
-                if not _adapted and (_now - _loop_start) >= checkpoint_interval_s:
+                if not _adapted:
                     elapsed = _now - _loop_start
                     steps_per_sec = steps_done / elapsed if elapsed > 0 else 1.0
-                    # Target sub-chunk duration = checkpoint_interval / 4
-                    target_seconds = checkpoint_interval_s / 4.0
+                    target_seconds = 5.0
                     new_sub_chunk = max(10, int(steps_per_sec * target_seconds))
                     # Sub-chunk must be a divisor-friendly size relative to
                     # seg_report_interval to avoid misaligned reporter writes.
