@@ -602,11 +602,20 @@ def build(
         for rep in replicate_list:
             colored_echo(f"Building system for replicate {rep}...", phase="build")
             working_dir = sim_config.get_working_directory(rep)
+            from polyzymd.simulation.artifact_integrity import (
+                assert_rebuild_allowed,
+                replicate_lock,
+            )
+
+            build_lock = replicate_lock(working_dir)
+            build_lock.__enter__()
+            assert_rebuild_allowed(working_dir)
             builder = SystemBuilder.from_config(sim_config)
             interchange = builder.build_from_config(
                 config=sim_config,
                 working_dir=working_dir,
                 polymer_seed=rep,
+                publish_topology=bool(export_format),
             )
 
             # Branch based on export format
@@ -718,13 +727,11 @@ def build(
                             phase="build",
                         )
 
-                # Save OpenMM system to XML for --skip-build support
-                from openmm import XmlSerializer
+                from polyzymd.simulation.artifact_integrity import publish_build_bundle
 
-                system_xml_path = working_dir / "system.xml"
-                colored_echo(f"Saving OpenMM system to {system_xml_path}...", phase="build")
-                with open(system_xml_path, "w") as f:
-                    f.write(XmlSerializer.serialize(omm_system))
+                publish_build_bundle(
+                    working_dir, omm_topology, omm_system, omm_positions, sim_config
+                )
 
                 colored_echo("System built successfully!", phase="build")
                 colored_echo(f"Output directory: {working_dir}", phase="build")
@@ -739,6 +746,7 @@ def build(
                     "or 'polyzymd run-segment' to run a single segment locally.",
                     phase="build",
                 )
+            build_lock.__exit__(None, None, None)
 
     except PydanticValidationError as e:
         colored_echo("Configuration error:", err=True, level=logging.ERROR)
@@ -1749,6 +1757,16 @@ def run_segment(
 
     working_dir.mkdir(parents=True, exist_ok=True)
 
+    from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError, replicate_lock
+    from polyzymd.simulation.signals import EXIT_CODE_CONCURRENT
+
+    run_lock = replicate_lock(working_dir)
+    try:
+        run_lock.__enter__()
+    except ArtifactIntegrityError as exc:
+        colored_echo(str(exc), phase="simulation", level=logging.WARNING)
+        sys.exit(EXIT_CODE_CONCURRENT)
+
     # Calculate total steps and samples from config
     prod = sim_config.simulation_phases.production
     timestep_fs = prod.time_step
@@ -1984,6 +2002,7 @@ def _run_initial_segment(
             config=sim_config,
             working_dir=working_dir,
             polymer_seed=replicate,
+            publish_topology=False,
         )
 
         colored_echo("Extracting OpenMM components...", phase="build")
@@ -2003,6 +2022,10 @@ def _run_initial_segment(
             if restraint_defs:
                 apply_restraints(restraint_defs, omm_topology, omm_system)
                 colored_echo(f"Applied {len(restraint_defs)} restraint(s)", phase="build")
+
+        from polyzymd.simulation.artifact_integrity import publish_build_bundle
+
+        publish_build_bundle(working_dir, omm_topology, omm_system, omm_positions, sim_config)
     else:
         from openmm import XmlSerializer
         from openmm.app import PDBFile
@@ -2015,11 +2038,23 @@ def _run_initial_segment(
                 f"Pre-built system not found in {working_dir}. "
                 "Run 'polyzymd build' first or remove --skip-build."
             )
+        from polyzymd.simulation.artifact_integrity import (
+            validate_build_bundle,
+            validate_openmm_identity,
+        )
+
+        validate_build_bundle(working_dir, sim_config)
         pdb = PDBFile(str(pdb_path))
         omm_topology = pdb.topology
         omm_positions = pdb.positions
         with open(system_path, "r") as f:
             omm_system = XmlSerializer.deserialize(f.read())
+        validate_openmm_identity(
+            omm_topology,
+            omm_system,
+            topology_path=pdb_path,
+            system_path=system_path,
+        )
 
     # Create runner
     runner = SimulationRunner(
