@@ -435,6 +435,10 @@ class TestGeneratedOpenMMScript:
         )
         assert "nvidia-smi --query-gpu=driver_version,compute_cap" in script
         assert 'openmm.Platform.getPlatformByName("CUDA")' in script
+        assert "openmm.NonbondedForce()" in script
+        assert "state = context.getState(getEnergy=True)" in script
+        assert "integrator.step(1)" in script
+        assert 'if selected != "CUDA"' in script
         assert "resubmit_after_routing_failure" in script
         assert '--dependency="afterany:$SLURM_JOB_ID"' in script
         assert '--exclude="$excluded_node"' in script
@@ -442,10 +446,13 @@ class TestGeneratedOpenMMScript:
         assert "POLYZYMD_ROUTING_FAILED_NODES=$failed_nodes" in script
         assert "ROUTING_RETRY_LIMIT=3" in script
         assert "runtime_platform.json" in script
+        assert 'PIXI_ENV="$RECORDED_PIXI_ENV"' in script
+        assert "reusing recorded environment" in script
+        assert "differs from recorded" in script
         assert "export INTERCHANGE_EXPERIMENTAL=1" in script
-        assert 'CONFIG_PATH="/projects/user/run/config.yaml"' in script
+        assert "CONFIG_PATH=/projects/user/run/config.yaml" in script
         assert "REPLICATE=3" in script
-        assert 'WORKING_DIR="/scratch/user/run_3"' in script
+        assert "WORKING_DIR=/scratch/user/run_3" in script
         assert "polyzymd run-segment \\" in script
         assert '    --scratch-dir "$WORKING_DIR" &' in script
         assert "if [ $RC -eq 2 ]; then" in script
@@ -509,6 +516,36 @@ class TestGeneratedOpenMMScript:
         assert "POLYZYMD_ROUTING_FAILED_NODES=bad-gpu-1,bad-gpu-2" in submitted
         assert "successor submitted; exiting current job" in result.stderr
 
+    def test_incompatible_driver_excludes_node_before_pixi(self, monkeypatch, tmp_path):
+        """A node below the pinned runtime threshold should be replaced."""
+        script_path = tmp_path / "job.sh"
+        script_path.write_text(self._render_script(monkeypatch))
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "nvidia-smi").write_text("#!/bin/bash\necho '525.60.13, 8.0'\n")
+        (bin_dir / "sbatch").write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$SBATCH_LOG"\n')
+        (bin_dir / "pixi").write_text("#!/bin/bash\necho pixi-must-not-run >&2\nexit 70\n")
+        for command in ("nvidia-smi", "sbatch", "pixi"):
+            (bin_dir / command).chmod(0o755)
+        sbatch_log = tmp_path / "sbatch.log"
+        env = os.environ.copy()
+        env.update(
+            {
+                "PATH": f"{bin_dir}:{env['PATH']}",
+                "SBATCH_LOG": str(sbatch_log),
+                "SLURM_JOB_ID": "5678",
+                "SLURMD_NODENAME": "old-driver-node",
+                "SLURM_JOB_SCRIPT": str(script_path),
+            }
+        )
+
+        result = subprocess.run(["bash", str(script_path)], env=env, capture_output=True, text=True)
+
+        assert result.returncode == 0
+        assert "pixi-must-not-run" not in result.stderr
+        assert "sim-cuda-12-4 is incompatible with driver 525.60" in result.stderr
+        assert "--exclude=old-driver-node" in sbatch_log.read_text()
+
     def test_routing_retry_limit_stops_resubmission(self, monkeypatch, tmp_path):
         """An unsupported partition cannot create an unlimited job chain."""
         script_path = tmp_path / "job.sh"
@@ -561,12 +598,13 @@ class TestGeneratedOpenMMScript:
         script = self._render_script(monkeypatch)
 
         probe_pos = script.index("nvidia-smi")
+        metadata_pos = script.index('RUNTIME_METADATA="$WORKING_DIR/runtime_platform.json"')
         pixi_pos = script.index("pixi shell-hook")
         strict_pos = script.index("set -e")
         export_pos = script.index("export INTERCHANGE_EXPERIMENTAL=1")
         run_pos = script.index("polyzymd run-segment")
 
-        assert probe_pos < pixi_pos < strict_pos < export_pos < run_pos
+        assert metadata_pos < probe_pos < pixi_pos < strict_pos < export_pos < run_pos
 
 
 class TestScriptValueValidation:

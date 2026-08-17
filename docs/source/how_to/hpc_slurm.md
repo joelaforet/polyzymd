@@ -147,24 +147,33 @@ pixi run -e build polyzymd recover \
     --pixi-env auto
 ```
 
-## Automatic OpenMM runtime selection
+## OpenMM runtime policy
 
-Use `--pixi-env auto` for NVIDIA OpenMM jobs. After SLURM allocates a node,
-PolyzyMD checks the NVIDIA driver and selects the newest compatible checked-in
-CUDA environment. It creates a CUDA Context before the simulation starts.
-PolyzyMD does not fall back to CPU.
+Run `polyzymd submit` from the `build` environment. The `--pixi-env` option
+selects the environment that the Slurm job will use. It does not select the
+environment that runs the submit command.
+
+For a known site, `--pixi-env auto` resolves to the site policy when PolyzyMD
+generates the script. Blanca uses `sim-cuda-12-4`. Bridges-2 uses
+`sim-cuda-12-6`. A newer driver does not change this selection.
+
+On the allocated node, PolyzyMD checks the driver and activates the selected
+environment. It then creates an explicit CUDA Context, calculates an energy,
+and runs one integration step. This test detects an unusable CUDA runtime or
+PTX compiler before molecular setup. PolyzyMD does not fall back to CPU.
 
 If the node is not compatible, PolyzyMD submits a replacement job and excludes
 that node. It stops after three failed routing attempts.
 
-PolyzyMD records the selected runtime and prevents a replica from changing
-OpenMM versions during resubmission. For supported runtimes and instructions
-for new hardware, see {doc}`hardware_platforms`.
+PolyzyMD records the selected runtime. A replica cannot change its Pixi
+environment, OpenMM version, platform, or precision during resubmission. For
+supported runtimes and instructions for new hardware, see
+{doc}`hardware_platforms`.
 
 ## Bridges-2
 
-Use the `bridges2` preset to request PSC Bridges-2 scheduler resources. Let
-`auto` select the runtime from the driver on the allocated node:
+Use the `bridges2` preset to request PSC Bridges-2 scheduler resources. The
+preset resolves `auto` to the checked-in `sim-cuda-12-6` site environment:
 
 ```bash
 pixi run -e build polyzymd submit \
@@ -180,8 +189,8 @@ Common Bridges-2 differences:
 - you may need `--account` if you want to charge a specific allocation
 - GPU selection can be adjusted with `--gpu-type`
 
-The preset configures SLURM resources. The allocated node still controls which
-CUDA environment `auto` selects.
+The allocated node must be able to create a CUDA Context with this environment.
+It does not select a different environment.
 
 ## CU Boulder Alpine and Blanca
 
@@ -234,11 +243,12 @@ partition tables and troubleshooting.
 
 Each generated NVIDIA OpenMM script follows the same loop:
 
-1. detect GPU capability, select or validate the CUDA environment, activate it,
-   and create an explicit CUDA Context
-2. run `polyzymd run-segment`
-3. call `polyzymd check-progress`
-4. resubmit itself if work remains
+1. detect GPU capability and validate the environment selected at submission
+2. activate the environment, create an explicit CUDA Context, calculate an
+   energy, and run one integration step
+3. run `polyzymd run-segment`
+4. call `polyzymd check-progress`
+5. resubmit itself if work remains
 
 This loop lets a simulation continue across wall-time limits.
 

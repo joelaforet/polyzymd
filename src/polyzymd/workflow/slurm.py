@@ -39,8 +39,9 @@ BRIDGES2_GPU_TYPES: List[str] = ["v100-16", "v100-32", "l40s-48", "h100-80"]
 PRESET_DEFAULT_PIXI_ENV: Dict[str, str] = {
     "aa100": "auto",
     "al40": "auto",
-    "blanca-shirts": "auto",
-    "bridges2": "auto",
+    "blanca-shirts": "sim-cuda-12-4",
+    "blanca-chbe-rdi": "sim-cuda-12-4",
+    "bridges2": "sim-cuda-12-6",
     "testing": "auto",
 }
 

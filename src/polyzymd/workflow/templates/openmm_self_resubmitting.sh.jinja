@@ -73,6 +73,29 @@ resubmit_after_routing_failure() {
 
 # Select a compatible checked-in CUDA runtime before Pixi activation.
 REQUESTED_PIXI_ENV={{ pixi_env | shell_quote }}
+CONFIG_PATH={{ config_path | shell_quote }}
+REPLICATE={{ replicate }}
+WORKING_DIR={{ working_dir | shell_quote }}
+RUNTIME_METADATA="$WORKING_DIR/runtime_platform.json"
+PIXI_ENV="$REQUESTED_PIXI_ENV"
+if [ -f "$RUNTIME_METADATA" ]; then
+    RECORDED_PIXI_ENV="$(
+        sed -n 's/.*"pixi_environment"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+            "$RUNTIME_METADATA"
+    )"
+    if [[ ! "$RECORDED_PIXI_ENV" =~ ^sim-cuda-12-([046])$ ]]; then
+        echo "FATAL: runtime metadata has no valid pixi_environment: $RUNTIME_METADATA" >&2
+        exit 1
+    fi
+    if [ "$PIXI_ENV" = "auto" ]; then
+        PIXI_ENV="$RECORDED_PIXI_ENV"
+        echo "ROUTING: reusing recorded environment $PIXI_ENV"
+    elif [ "$PIXI_ENV" != "$RECORDED_PIXI_ENV" ]; then
+        echo "FATAL: requested environment $PIXI_ENV differs from recorded " \
+             "$RECORDED_PIXI_ENV in $RUNTIME_METADATA" >&2
+        exit 1
+    fi
+fi
 GPU_QUERY="$(nvidia-smi --query-gpu=driver_version,compute_cap --format=csv,noheader 2>/dev/null | head -n 1)" || {
     resubmit_after_routing_failure "no queryable NVIDIA GPU is allocated; refusing CPU fallback"
 }
@@ -83,18 +106,16 @@ DRIVER_MAJOR="${BASH_REMATCH[1]}"
 DRIVER_MINOR="${BASH_REMATCH[2]}"
 COMPUTE_CAP="${BASH_REMATCH[3]}.${BASH_REMATCH[4]}"
 DRIVER_CODE=$((10#$DRIVER_MAJOR * 100 + 10#$DRIVER_MINOR))
-if (( DRIVER_CODE >= 56028 )); then
-    AUTO_PIXI_ENV="sim-cuda-12-6"
-elif (( DRIVER_CODE >= 55054 )); then
-    AUTO_PIXI_ENV="sim-cuda-12-4"
-elif (( DRIVER_CODE >= 52560 )); then
-    AUTO_PIXI_ENV="sim-cuda-12-0"
-else
-    resubmit_after_routing_failure "unsupported NVIDIA driver $DRIVER_MAJOR.$DRIVER_MINOR"
-fi
-PIXI_ENV="$REQUESTED_PIXI_ENV"
 if [ "$PIXI_ENV" = "auto" ]; then
-    PIXI_ENV="$AUTO_PIXI_ENV"
+    if (( DRIVER_CODE >= 56028 )); then
+        PIXI_ENV="sim-cuda-12-6"
+    elif (( DRIVER_CODE >= 55054 )); then
+        PIXI_ENV="sim-cuda-12-4"
+    elif (( DRIVER_CODE >= 52560 )); then
+        PIXI_ENV="sim-cuda-12-0"
+    else
+        resubmit_after_routing_failure "unsupported NVIDIA driver $DRIVER_MAJOR.$DRIVER_MINOR"
+    fi
 elif [[ "$PIXI_ENV" =~ ^sim-cuda-12-([046])$ ]]; then
     case "$PIXI_ENV" in
         sim-cuda-12-6) REQUIRED_DRIVER=56028 ;;
@@ -119,26 +140,40 @@ set -e
 # Required for OpenFF Interchange.combine() functionality
 export INTERCHANGE_EXPERIMENTAL=1
 
-# Fail before molecular setup if explicit CUDA Context creation is impossible.
+# Fail before molecular setup if CUDA kernel creation or execution is impossible.
 if ! python - <<'PY'
 import openmm
 from openmm import unit
+
 system = openmm.System()
 system.addParticle(1.0)
+system.addParticle(1.0)
+force = openmm.NonbondedForce()
+force.addParticle(1.0, 0.3, 0.1)
+force.addParticle(-1.0, 0.3, 0.1)
+system.addForce(force)
 integrator = openmm.VerletIntegrator(1.0 * unit.femtosecond)
 platform = openmm.Platform.getPlatformByName("CUDA")
 context = openmm.Context(system, integrator, platform, {"Precision": "mixed"})
-print("CUDA preflight:", context.getPlatform().getName())
+context.setPositions([[0.0, 0.0, 0.0], [0.4, 0.0, 0.0]] * unit.nanometer)
+state = context.getState(getEnergy=True)
+integrator.step(1)
+selected = context.getPlatform().getName()
+if selected != "CUDA":
+    raise RuntimeError(f"CUDA preflight created an unexpected platform: {selected}")
+print(
+    "CUDA preflight:",
+    f"OpenMM {openmm.__version__}",
+    selected,
+    f"precision={platform.getPropertyValue(context, 'Precision')}",
+    f"device={platform.getPropertyValue(context, 'DeviceIndex')}",
+    f"energy={state.getPotentialEnergy()}",
+)
 del context, integrator
 PY
 then
-    resubmit_after_routing_failure "explicit CUDA Context preflight failed"
+    resubmit_after_routing_failure "CUDA Context creation or execution failed"
 fi
-
-# Configuration
-CONFIG_PATH="{{ config_path }}"
-REPLICATE={{ replicate }}
-WORKING_DIR="{{ working_dir }}"
 
 # Ensure working directory exists
 mkdir -p "$WORKING_DIR"

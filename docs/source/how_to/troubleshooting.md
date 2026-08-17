@@ -11,7 +11,8 @@ the command you are troubleshooting:
 | Task | Pixi environment |
 |------|------------------|
 | Project setup, PDB preparation, `polyzymd validate`, `polyzymd build` | `build` |
-| OpenMM GPU simulation, `polyzymd submit`, `polyzymd run-segment` | `sim-cuda-12-4` or `sim-cuda-12-6` |
+| OpenMM `polyzymd submit` or `recover --submit` | `build`; the Slurm job activates the site runtime |
+| Direct OpenMM `polyzymd run-segment` | `sim-cuda-12-4` or `sim-cuda-12-6` |
 | Trajectory comparison, plotting, `polyzymd compare ...` | `analysis` |
 
 Use `pixi shell -e <env>` to activate an environment, or prefix a command with

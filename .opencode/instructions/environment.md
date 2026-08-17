@@ -11,11 +11,12 @@ platforms with explicit driver and compute-capability virtual packages. The
 older 0.65.0 cluster installation cannot read this manifest; upgrade Pixi
 before installing or submitting OpenMM GPU jobs.
 
-OpenMM SLURM submission defaults to `--pixi-env auto`. The generated script
-queries the allocated GPU before environment activation, selects the highest
-compatible checked-in CUDA environment, validates explicit overrides, and
-creates an explicit CUDA Context. Never replace this behavior with platform
-fallback or a static node allowlist.
+Run OpenMM submission commands from `build`. The `--pixi-env` option selects
+the runtime inside the generated Slurm job. Known-site presets resolve `auto`
+to one fixed environment: Blanca uses `sim-cuda-12-4`, and Bridges-2 uses
+`sim-cuda-12-6`. The generated script validates the allocated GPU and executes
+a small explicit CUDA Context before molecular setup. Never add CPU fallback
+or change the environment because a node has a newer driver.
 
 **Always prefix commands with:**
 ```bash

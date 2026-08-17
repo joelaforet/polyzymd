@@ -18,9 +18,9 @@ These settings solve different problems:
 | Pixi environment | Supplies a compatible OpenMM and accelerator runtime | `pixi.toml` and `pixi.lock` |
 | OpenMM platform | Selects `CUDA`, `OpenCL`, or `CPU` when PolyzyMD creates a Context | `openmm.platform` in `config.yaml` |
 
-A preset does not prove that a runtime is compatible. For example, the
-`bridges2` preset supplies Bridges-2 SLURM directives. The allocated node must
-still pass the NVIDIA driver probe and the explicit CUDA Context preflight.
+A known-site preset selects one runtime for reproducibility. It does not prove
+that each node is compatible. The allocated node must still pass the NVIDIA
+driver probe and the explicit CUDA Context preflight.
 
 ## Current support limits
 
@@ -51,8 +51,8 @@ uses:
 nvidia-smi --query-gpu=driver_version,compute_cap --format=csv,noheader
 ```
 
-Then generate one test script. Use an existing preset and override its SLURM
-fields when possible:
+Select one validated environment for the campaign. Then generate one test
+script. Use an existing preset and override its Slurm fields when possible:
 
 ```bash
 pixi run -e build polyzymd submit \
@@ -61,7 +61,7 @@ pixi run -e build polyzymd submit \
     --partition <site-partition> \
     --account <site-account> \
     --qos <site-qos> \
-    --pixi-env auto \
+    --pixi-env <validated-sim-cuda-environment> \
     --replicates 1 \
     --generate-only
 ```
@@ -69,10 +69,10 @@ pixi run -e build polyzymd submit \
 Remove an option when the site does not use it. Inspect the generated `#SBATCH`
 lines before submission. Run a short test job before you start a campaign.
 
-The `auto` mode uses driver capability. It does not use a Blanca node list.
-It selects the newest compatible checked-in environment and then creates a
-small CUDA Context. It rejects an unknown driver and an incompatible explicit
-environment.
+For presets without a site policy, `auto` selects the newest compatible
+checked-in environment. Use an explicit environment after site validation so
+all replicas use the same OpenMM version. The node probe does not use a static
+node list.
 
 If a node fails the probe or the Context preflight, the job submits one
 successor to the same queue and excludes the failed node. It then exits. The
@@ -82,8 +82,8 @@ submission loop.
 
 ## Use Bridges-2
 
-The `bridges2` preset only configures the scheduler request. Select a GPU type
-that your allocation can use, and let `auto` inspect the allocated node:
+The `bridges2` preset configures the scheduler request and resolves `auto` to
+`sim-cuda-12-6`. Select a GPU type that your allocation can use:
 
 ```bash
 pixi run -e build polyzymd submit \
@@ -95,9 +95,8 @@ pixi run -e build polyzymd submit \
     --replicates 1
 ```
 
-Do not select `sim-cuda-12-6` only because the cluster is Bridges-2. Driver
-capability is authoritative. A cluster administrator can update a driver, and
-different GPU types can have different software images.
+The allocated node must pass the driver probe and CUDA execution test. A newer
+driver does not cause PolyzyMD to select another environment.
 
 ## Run with CPU through the API
 
@@ -176,7 +175,7 @@ Use this checklist when a site has a new NVIDIA driver or GPU cohort:
 4. Regenerate `pixi.lock` with Pixi 0.72.2 or newer. Install the environment on
    an allocated node.
 5. Add the validated driver threshold and environment name in
-   `src/polyzymd/workflow/cuda_routing.py` and in the OpenMM SLURM template.
+   `src/polyzymd/workflow/cuda_routing.py` and in the OpenMM Slurm template.
 6. Add routing tests in `tests/workflow/test_cuda_routing.py` and script tests
    in `tests/workflow/test_slurm.py`.
 7. Create an explicit CUDA Context on each hardware cohort. Then run a short,
@@ -187,9 +186,10 @@ Use this checklist when a site has a new NVIDIA driver or GPU cohort:
    name or a CUDA toolkit module.
 
 To add a reusable scheduler preset, edit `SlurmConfig.from_preset()` and
-`PRESET_DEFAULT_PIXI_ENV` in `src/polyzymd/workflow/slurm.py`. Add its CLI
-choice and tests. Use CLI overrides when the difference is only an account,
-partition, QoS, constraint, or node selection.
+`PRESET_DEFAULT_PIXI_ENV` in `src/polyzymd/workflow/slurm.py`. Assign the
+validated environment as the preset default. Add its CLI choice and tests. Use
+CLI overrides when the difference is only an account, partition, QoS,
+constraint, or node selection.
 
 ## Respond to a driver update
 
