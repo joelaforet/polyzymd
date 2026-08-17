@@ -32,8 +32,8 @@
 # ------------------------
 # - Install pixi:  curl -fsSL https://pixi.sh/install.sh | sh
 # - Clone the repo and cd into it
-# - Run: pixi install -e sim-cuda-12-4   (or whichever matches your cluster)
-# - Run: pixi shell -e sim-cuda-12-4
+# - Run: pixi install -e build -e sim-cuda-12-4
+# - Submit from build; the Slurm job activates the simulation environment
 #
 # Local setup and analysis should use `build` or `analysis`, not a sim-cuda env.
 # =============================================================================

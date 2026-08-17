@@ -177,13 +177,40 @@ def _resolve_submission_pixi_env(preset: str, engine_name: str, pixi_env: str | 
     """
     from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV
 
-    if engine_name.lower() == "gromacs" and pixi_env == "auto":
-        return "build"
-    if pixi_env:
-        return pixi_env
     if engine_name.lower() == "gromacs":
+        if pixi_env and pixi_env != "auto":
+            return pixi_env
         return "build"
+    if pixi_env and pixi_env != "auto":
+        return pixi_env
     return PRESET_DEFAULT_PIXI_ENV.get(preset, "sim-cuda-12-4")
+
+
+def _warn_for_site_pixi_override(
+    preset: str,
+    engine_name: str,
+    resolved_pixi_env: str,
+    explicit_pixi_env: str | None,
+) -> None:
+    """Warn when an explicit OpenMM environment differs from site policy."""
+    from polyzymd.workflow.slurm import PRESET_DEFAULT_PIXI_ENV
+
+    site_environment = PRESET_DEFAULT_PIXI_ENV.get(preset)
+    if (
+        engine_name.lower() != "openmm"
+        or explicit_pixi_env in (None, "auto")
+        or site_environment in (None, "auto")
+        or resolved_pixi_env == site_environment
+    ):
+        return
+
+    click.secho(
+        f"Warning: preset '{preset}' uses '{site_environment}' by policy, but the explicit "
+        f"override selects '{resolved_pixi_env}'. Keep one OpenMM environment for all "
+        "segments of a replica.",
+        fg="yellow",
+        err=True,
+    )
 
 
 def _warn_for_submission_pixi_env(
@@ -1456,6 +1483,7 @@ def submit(
     sim_config = SimulationConfig.from_yaml(config)
     engine_name = _resolve_engine_name(sim_config, override=engine)
     resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
+    _warn_for_site_pixi_override(preset, engine_name, resolved_pixi_env, pixi_env)
     _warn_for_submission_pixi_env(
         f"submit --engine {engine_name}", engine_name, resolved_pixi_env, pixi_env
     )
@@ -2970,6 +2998,7 @@ def recover(
     from polyzymd.workflow.slurm import SlurmConfig, SlurmScriptGenerator
 
     resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
+    _warn_for_site_pixi_override(preset, engine_name, resolved_pixi_env, pixi_env)
     _warn_for_submission_pixi_env(
         f"recover --submit --engine {engine_name}", engine_name, resolved_pixi_env, pixi_env
     )

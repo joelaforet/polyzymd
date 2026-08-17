@@ -78,8 +78,8 @@ build`, `pixi shell -e build`, and a successful `polyzymd info` output. -->
 PolyzyMD v1.3 uses a split environment workflow on clusters:
 
 - Use `build` on a login/build node to prepare and validate systems.
-- Use `--pixi-env auto` for scheduled OpenMM simulation. It selects a
-  compatible `sim-cuda-12-*` runtime after inspecting the allocated GPU.
+- Run `polyzymd submit` from `build`. For known sites, `--pixi-env auto`
+  selects the site's fixed `sim-cuda-12-*` runtime when it generates the job.
 - Use `analysis` after trajectories are produced to run comparisons and plots.
 
 This is different from the older `cuda-*` workflow where one CUDA environment
@@ -99,7 +99,7 @@ pixi run -e build polyzymd validate -c config.yaml
 pixi run -e build polyzymd build -c config.yaml
 ```
 
-Then install the simulation runtime that matches your cluster:
+Then install the simulation runtime assigned to your cluster:
 
 ```bash
 # Pick the environment that matches your cluster
@@ -109,13 +109,12 @@ pixi install -e sim-cuda-12-4
 # or
 pixi install -e sim-cuda-12-0
 
-pixi shell -e sim-cuda-12-6
-polyzymd info
+pixi run -e sim-cuda-12-6 polyzymd info
 ```
 
-Built-in presets include configurations for CU Boulder Alpine/Blanca and PSC Bridges-2.
-Presets configure scheduler resources. They do not prove that an allocated
-node has a compatible driver.
+Built-in presets include configurations for CU Boulder Alpine/Blanca and PSC
+Bridges-2. Known-site presets select a fixed runtime. The allocated node must
+still pass the driver probe and CUDA execution test.
 For submission details and cluster-specific notes, see
 {doc}`../how_to/hpc_slurm`.
 
@@ -128,7 +127,7 @@ pixi run -e analysis polyzymd compare run rmsf -f comparison.yaml
 pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
 ```
 
-### Choose the Right CUDA Environment
+### Choose the CUDA Environment
 
 On a GPU node, check the driver version:
 
@@ -136,19 +135,20 @@ On a GPU node, check the driver version:
 nvidia-smi | head -1
 ```
 
-Use this mapping:
+Use the environment assigned to the site:
 
-| CUDA driver version | Environment | Example clusters |
-|---------------------|-------------|------------------|
-| 12.6 | `sim-cuda-12-6` | Compatible NVIDIA nodes |
-| 12.4 | `sim-cuda-12-4` | Compatible Blanca allocations |
-| 12.0 | `sim-cuda-12-0` | Older Blanca driver cohorts |
+| Site policy | Environment |
+|-------------|-------------|
+| PSC Bridges-2 | `sim-cuda-12-6` |
+| CU Boulder Blanca | `sim-cuda-12-4` |
+| Validated older CUDA site | `sim-cuda-12-0` |
 
-These rows describe runtime compatibility, not node-name routing. Generated
-SLURM scripts query `nvidia-smi` before Pixi activation and reject missing,
-malformed, or unsupported GPU capabilities. An explicit `--pixi-env` override
-is checked against the allocated driver. CUDA Context failure is fatal;
-PolyzyMD uses CPU only when `openmm.platform: CPU` is explicitly configured.
+Generated Slurm scripts query `nvidia-smi` before Pixi activation and reject
+missing, malformed, or unsupported GPU capabilities. They then create a CUDA
+Context, calculate an energy, and run one integration step. An explicit
+`--pixi-env` override is checked against the allocated driver. CUDA failure is
+fatal; PolyzyMD uses CPU only when `openmm.platform: CPU` is explicitly
+configured.
 The standard OpenMM SLURM template is NVIDIA-only in version 1.3. CPU and AMD
 OpenCL use need a site-managed environment and batch wrapper. See
 {doc}`../how_to/hardware_platforms` for examples and the extension checklist.
@@ -164,7 +164,7 @@ In the `build` environment, these commands should work directly:
 | `polyzymd validate` | Yes | Config validation |
 | `polyzymd clean-pdb` | Yes | Convenience PDB cleanup, not biological-system selection |
 | `polyzymd info` | Yes | Version/dependency summary |
-| `polyzymd submit --engine openmm` | No | OpenMM submission targets a `sim-cuda-*` runtime |
+| `polyzymd submit --engine openmm` | Yes | The generated Slurm job activates the selected `sim-cuda-*` runtime |
 | `polyzymd submit --engine gromacs` | Yes | GROMACS submission can run from `build`; SLURM runs GROMACS in the external cluster environment |
 | `polyzymd run-segment` | No | OpenMM execution requires a `sim-cuda-*` runtime |
 

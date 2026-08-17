@@ -232,7 +232,55 @@ class TestResolveSubmissionPixiEnv:
         """OpenMM should keep preset-specific CUDA environment defaults."""
         from polyzymd.cli.main import _resolve_submission_pixi_env
 
-        assert _resolve_submission_pixi_env("bridges2", "openmm") == "auto"
+        assert _resolve_submission_pixi_env("blanca-shirts", "openmm") == "sim-cuda-12-4"
+        assert _resolve_submission_pixi_env("blanca-chbe-rdi", "openmm") == "sim-cuda-12-4"
+        assert _resolve_submission_pixi_env("bridges2", "openmm") == "sim-cuda-12-6"
+
+    def test_openmm_auto_resolves_from_site_policy(self) -> None:
+        """Explicit auto should use a known site's fixed environment."""
+        from polyzymd.cli.main import _resolve_submission_pixi_env
+
+        assert _resolve_submission_pixi_env("blanca-shirts", "openmm", "auto") == "sim-cuda-12-4"
+        assert _resolve_submission_pixi_env("bridges2", "openmm", "auto") == "sim-cuda-12-6"
+
+    def test_unpinned_site_retains_capability_auto(self) -> None:
+        """A site without validated policy should retain runtime detection."""
+        from polyzymd.cli.main import _resolve_submission_pixi_env
+
+        assert _resolve_submission_pixi_env("aa100", "openmm", "auto") == "auto"
+
+    def test_explicit_openmm_override_is_preserved(self) -> None:
+        """An expert override should not be replaced by site policy."""
+        from polyzymd.cli.main import _resolve_submission_pixi_env
+
+        assert (
+            _resolve_submission_pixi_env("blanca-shirts", "openmm", "sim-cuda-12-6")
+            == "sim-cuda-12-6"
+        )
+
+    def test_site_override_prints_reproducibility_warning(self, monkeypatch) -> None:
+        """An expert override should identify the preset environment policy."""
+        from polyzymd.cli.main import _warn_for_site_pixi_override
+
+        messages: list[str] = []
+        monkeypatch.setattr(click, "secho", lambda message, **_kwargs: messages.append(message))
+
+        _warn_for_site_pixi_override("blanca-shirts", "openmm", "sim-cuda-12-6", "sim-cuda-12-6")
+
+        assert messages
+        assert "sim-cuda-12-4" in messages[0]
+        assert "all segments of a replica" in messages[0]
+
+    def test_auto_does_not_print_override_warning(self, monkeypatch) -> None:
+        """Site auto resolution is normal and should not warn as an override."""
+        from polyzymd.cli.main import _warn_for_site_pixi_override
+
+        messages: list[str] = []
+        monkeypatch.setattr(click, "secho", lambda message, **_kwargs: messages.append(message))
+
+        _warn_for_site_pixi_override("blanca-shirts", "openmm", "sim-cuda-12-4", "auto")
+
+        assert messages == []
 
 
 class TestValidateCommandReferenceWarnings:

@@ -108,6 +108,10 @@ implementation to private `_framework/` modules such as `compare.py`,
   unless the user explicitly defers the durable documentation update.
 - **OpenMM build identity:** A completed prebuild is committed by `build_manifest.json`. Never copy `solvated_system.pdb`,
   `system.xml`, or segment State/topology files independently. Continuation prefers the predecessor topology; root PDB fallback is legacy-only and must pass count validation.
+- **OpenMM site runtime:** Run submission commands from `build`. Known-site
+  presets pin one simulation environment per campaign: Blanca uses
+  `sim-cuda-12-4`, and Bridges-2 uses `sim-cuda-12-6`. A node probe can reject
+  and exclude a node, but it must not upgrade the environment on a newer driver.
 - **Factory pattern:** `ClassName.from_config(config)` or `ClassName.from_yaml(path)`
 - **Lazy imports:** Heavy deps (OpenMM, MDAnalysis) imported inside functions/methods
 - **Preemption lifecycle:** Install handlers at `run-segment` entry; only atomic

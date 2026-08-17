@@ -29,6 +29,10 @@ def test_explicit_incompatible_override_is_rejected():
         select_cuda_environment((525, 60), "sim-cuda-12-4")
 
 
+def test_newer_driver_does_not_change_explicit_environment():
+    assert select_cuda_environment((590, 1), "sim-cuda-12-4") == "sim-cuda-12-4"
+
+
 def test_unknown_driver_and_override_are_rejected():
     with pytest.raises(ValueError, match="Unsupported"):
         select_cuda_environment((510, 1))
