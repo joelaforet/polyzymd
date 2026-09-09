@@ -164,6 +164,23 @@ polymers:
 | `reactions` | object | No | all "default" | ATRP reaction templates (dynamic mode) |
 | `charger` | string | No | "nagl" | Charge method for dynamic generation |
 | `max_retries` | int | No | 10 | Max attempts for ring-piercing avoidance |
+| `random_seed` | int | No | null | Seed for polymer sequence draws (default: the replicate number) |
+| `packing` | object | No | see below | PACKMOL placement settings |
+
+### Packing Options (`polymers.packing`)
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `padding` | float (nm) | No | 2.0 | Padding around the solute that defines the polymer packing box |
+| `tolerance` | float (Å) | No | 2.0 | PACKMOL minimum distance between any two atoms, including polymer to protein |
+| `movebadrandom` | bool | No | false | Pass PACKMOL's `movebadrandom`; helps dense or heterogeneous systems converge |
+| `box_vectors` | list[float] (nm) | No | null | Explicit `[Lx, Ly, Lz]` packing box; overrides `padding` |
+| `exclude_solute_bbox` | bool | No | false | Confine chains to a rectangular shell outside the solute bounding box (legacy). Off by default because the tolerance against the fixed solute already prevents overlap and the shell over-constrains long chains |
+| `nloop` | int | No | 200 | Maximum PACKMOL GENCAN loops per molecule type |
+
+PACKMOL is seeded with the replicate number for both polymer packing and
+solvation, so replicates start from independent coordinates. The seeds are
+recorded under `provenance` in `build_manifest.json`.
 
 ### Monomer Specification
 
@@ -559,6 +576,33 @@ simulation_phases:
 
 PolyzyMD requires staged equilibration. Use one or more entries in
 `equilibration_stages` even for minimal workflows.
+
+### Minimization (`simulation_phases.minimization`)
+
+Energy minimization runs before the first equilibration stage. It is a
+runtime-only setting: changing it does not alter the built system or its
+`build_manifest.json` hash.
+
+```yaml
+simulation_phases:
+  minimization:
+    freeze_solute: true      # hold protein + substrate fixed; only solvent/polymers relax
+    max_iterations: 1000     # 0 = run to convergence
+    tolerance: 10.0          # kJ/mol/nm
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `freeze_solute` | bool | true | Freeze every protein and substrate atom (the `solute` atom group) during minimization. The prepared structure enters equilibration with its coordinates unchanged; PolyzyMD verifies a zero solute displacement and records it in `minimization/phase.json` |
+| `max_iterations` | int | 1000 | Maximum minimizer iterations (0 = until convergence) |
+| `tolerance` | float | 10.0 | Energy tolerance in kJ/mol/nm |
+
+See {doc}`../explanation/simulation_safeguards` for why the solute is frozen.
+
+```{note}
+`production.report_interval` is deprecated and ignored. The trajectory frame
+interval is derived from `production.duration` and `production.samples`.
+```
 
 For a temperature ramp, omit `duration`. Set `temperature_increment` in K and
 `temperature_interval_steps` in MD steps. PolyzyMD computes how many updates are

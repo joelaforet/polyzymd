@@ -255,22 +255,48 @@ polymers:
 
 Polymers are placed in the simulation box using PACKMOL:
 
-1. Enzyme (+ substrate) placed at center
-2. Polymers placed around enzyme with minimum distance
-3. Water molecules fill remaining space
+1. Enzyme (+ substrate) placed at the center and held fixed
+2. Polymers placed anywhere in the packing box; PACKMOL keeps every polymer
+   atom at least `polymers.packing.tolerance` (default 2 Å) from the fixed
+   solute and from other chains
+3. Water molecules fill the remaining space (solvation box from
+   `solvent.box.padding`)
 4. Ions added to neutralize and reach target concentration
 
-### Box Padding
+PACKMOL is seeded with the replicate number, so each replicate gets an
+independent polymer arrangement and solvent configuration.
 
-The `solvent.box.padding` affects polymer placement:
+### Packing Box and Shell
+
+`polymers.packing.padding` (default 2.0 nm) sets how far the polymer packing box
+extends beyond the solute:
 
 ```yaml
-solvent:
-  box:
-    padding: 1.5    # nm - increase for more polymers
+polymers:
+  packing:
+    padding: 2.0          # nm around the solute for polymer placement
+    tolerance: 2.0        # Å minimum atom-atom distance
+    movebadrandom: true   # helps many unique chain types converge
 ```
 
-Larger padding = more space for polymers = larger system.
+Earlier versions also confined chains to a rectangular shell outside the
+solute's bounding box. That shell was often thinner than the chains themselves
+and made PACKMOL run to its loop limit without converging. It is now off by
+default; set `packing.exclude_solute_bbox: true` only if you need the legacy
+behaviour.
+
+### After Packing
+
+PACKMOL may exit with code 173 ("imperfect packing") for dense systems. PolyzyMD
+accepts the best solution, and energy minimization resolves the residual
+contacts. Two safeguards apply before any simulation starts:
+
+- The build aborts with `SolvationClashError` if more than a handful of packed
+  atoms overlap the solute, which indicates a coordinate-frame problem rather
+  than imperfect packing.
+- Minimization holds the protein and substrate fixed by default, so residual
+  polymer or water contacts are resolved by moving the polymer or water, never
+  the protein. See {doc}`../explanation/simulation_safeguards`.
 
 ---
 
@@ -285,11 +311,19 @@ Common causes:
 
 Solutions:
 ```yaml
+polymers:
+  packing:
+    padding: 2.5          # Larger polymer packing box
+    movebadrandom: true   # Better convergence for many chain types
+    nloop: 200            # Raise if PACKMOL stops at the loop limit
 solvent:
   box:
-    padding: 2.0          # Increase padding
-    tolerance: 2.5        # Increase tolerance (Angstrom)
+    padding: 2.0          # Larger solvation box
 ```
+
+If PACKMOL exits 173 (imperfect packing) the build still continues; the
+residual contacts are removed during minimization. A `SolvationClashError`
+means something else is wrong (see {doc}`troubleshooting`).
 
 ### "Force field assignment failed"
 

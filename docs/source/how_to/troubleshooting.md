@@ -186,6 +186,35 @@ PackmolError: PACKMOL did not converge
      count: 1    # Reduce from higher number
    ```
 
+4. For polymer packing specifically, raise `polymers.packing.nloop` or enable
+   `polymers.packing.movebadrandom`. Exit code 173 ("imperfect packing") is
+   not a failure: the build continues and minimization resolves the residual
+   contacts.
+
+### "SolvationClashError: N solvent atom(s) lie within 1.00 A of the solute"
+
+```
+SolvationClashError: 1182 solvent atom(s) lie within 1.00 A of the solute ...
+solute/solvent frame mismatch, see d96b1fcd
+```
+
+The assembled solute and the packed solvent or polymer coordinates are not in
+the same coordinate frame, so packed molecules sit inside the protein. This is
+a software or input problem, not a packing-quality problem: PACKMOL never
+places atoms this close to a fixed solute, and imperfect packing leaves at most
+a handful of such contacts (the assertion allows up to 20). Do not lower the
+limit or continue with the build.
+
+**Solutions:**
+
+1. Make sure you are running a PolyzyMD release that includes the
+   BRICK-centered solute fix (1.2.1 or later) and that the `build` environment
+   is up to date.
+2. Check that the input PDB coordinates are sensible (no atoms at the origin,
+   no duplicated models).
+3. Report the `packmol_input.txt` and `_PACKING_SOLUTE.pdb` from the build
+   directory together with the error message.
+
 ### "No atoms match selection"
 
 ```
@@ -388,6 +417,25 @@ ValueError: System state doesn't match checkpoint
 ```
 
 **Solution:** Don't modify the system between segments. If you need to change parameters, start fresh.
+
+### "TrajectoryLineageError: Trajectory segments do not form a single contiguous time line"
+
+The analysis loader refuses to concatenate production segments whose raw
+timestamps overlap, run backwards, or leave gaps, or whose frame intervals
+differ. This usually means two restart chains wrote into the same run
+directory (for example a duplicated SLURM resubmission) or a segment is
+missing.
+
+**Solutions:**
+
+1. Read the error: it names the offending segment pair with their first and
+   last times.
+2. Inspect `progress.json` (each segment records `polyzymd_version`,
+   `openmm_version`, `pixi_environment`, `started_at`) and the
+   `production_N/` directories to identify the branched chain.
+3. Move the branched segments out of the run directory (do not delete them),
+   then rerun the analysis. To inspect a bad chain anyway, call
+   `TrajectoryLoader.load_universe(replicate, verify_lineage=False)`.
 
 ---
 
