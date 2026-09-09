@@ -47,7 +47,7 @@ scratch or in the projects directory) grows to:
 ├── progress.json                      # Stage/segment records with runtime provenance
 ├── minimization/
 │   ├── minimized_state.xml
-│   └── phase.json                     # includes frozen_atoms, frozen_rmsd_angstrom
+│   └── phase.json                     # frozen_atoms, frozen_rmsd_angstrom, hydrogen_max_displacement_angstrom
 ├── equilibration_0_heating/           # Equilibration stage output
 │   └── ...
 ├── production_0/                      # First production segment
@@ -70,7 +70,7 @@ one or more trajectory segments.
 | `build_manifest.json` | SHA-256 of `solvated_system.pdb` and `system.xml`, the config hash, `openmm_version`, `polyzymd_version`, and `provenance` (see below). `polyzymd submit --skip-build` refuses bundles whose config hash no longer matches `config.yaml` |
 | `progress.json` | One record per equilibration stage and production segment with `polyzymd_version`, `openmm_version`, `pixi_environment` (null in files written by older versions) |
 | `production_N/production_N_parameters.json` | Simulation parameters plus a top-level `provenance` block (`polyzymd_version`, `openmm_version`, `pixi_environment`, `hostname`, `slurm_job_id`) |
-| `minimization/phase.json` | Phase status, state path, `frozen_atoms`, and `frozen_rmsd_angstrom` (0.0 when the solute was frozen) |
+| `minimization/phase.json` | Phase status, state path, `frozen_atoms` (the number of solute **heavy** atoms held fixed), `frozen_rmsd_angstrom` (0.0 when the solute was frozen), and `hydrogen_max_displacement_angstrom` (how far the furthest solute hydrogen moved onto its force-field constraint length; `null` for unfrozen minimization and for records written by older versions) |
 
 #### `build_manifest.json` provenance keys
 

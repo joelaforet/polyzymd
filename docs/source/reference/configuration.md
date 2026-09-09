@@ -627,14 +627,14 @@ runtime-only setting: changing it does not alter the built system or its
 ```yaml
 simulation_phases:
   minimization:
-    freeze_solute: true      # hold protein + substrate fixed; only solvent/polymers relax
+    freeze_solute: true      # hold protein + substrate heavy atoms fixed
     max_iterations: 1000     # 0 = run to convergence
     tolerance: 10.0          # kJ/mol/nm
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `freeze_solute` | bool | true | Freeze every protein and substrate atom (the `solute` atom group) during minimization. The prepared structure enters equilibration with its coordinates unchanged; PolyzyMD verifies a zero solute displacement and records it in `minimization/phase.json` |
+| `freeze_solute` | bool | true | Freeze every protein and substrate **heavy** atom (the `solute_heavy` atom group) during minimization; only solvent, polymers, and the solute hydrogens relax. The prepared heavy-atom structure enters equilibration with its coordinates unchanged; PolyzyMD verifies a zero heavy-atom displacement and records it, together with `hydrogen_max_displacement_angstrom`, in `minimization/phase.json`. Solute hydrogens stay mobile on purpose so the minimizer places them on the force field's X–H constraint lengths rather than keeping the input PDB's |
 | `max_iterations` | int | 1000 | Maximum minimizer iterations (0 = until convergence) |
 | `tolerance` | float | 10.0 | Energy tolerance in kJ/mol/nm |
 

@@ -44,6 +44,24 @@ LOGGER = logging.getLogger(__name__)
 # Phase types
 PhaseType = Literal["equilibration", "production"]
 
+# Force constant (kJ/mol/nm^2) of the harmonic bond that stands in for a constraint
+# between a frozen heavy atom and a mobile hydrogen while minimizing on the frozen
+# copy of the System.  OpenMM refuses constraints on massless particles, so the
+# surrogate is what pulls the hydrogen onto its constraint length; the value is of
+# the same order as a real X-H bond force constant, which leaves a residual well
+# below CONSTRAINT_TOLERANCE_ANGSTROM.
+CONSTRAINT_SURROGATE_FORCE_CONSTANT = 500000.0
+
+# Largest constraint violation (Angstrom) tolerated in the minimized state before
+# Context.applyConstraints is invoked to project the coordinates back onto the
+# constraint manifold.
+CONSTRAINT_TOLERANCE_ANGSTROM = 0.01
+
+# Heavy atoms must not move during frozen minimization.  applyConstraints, if it
+# has to run, redistributes a residual violation by inverse mass and so can nudge
+# a heavy partner by roughly 1/12 of it; this is the ceiling checked afterwards.
+FROZEN_HEAVY_DISPLACEMENT_TOLERANCE_ANGSTROM = 0.02
+
 
 def _ensure_openmm_loaded() -> None:
     """Load OpenMM symbols used by the simulation runner lazily.
@@ -266,33 +284,68 @@ class SimulationRunner:
 
     def _solute_atom_indices(self) -> List[int]:
         """Indices of every protein and substrate atom (see ``AtomGroupResolver``)."""
+        return self._resolve_atom_group("solute")
+
+    def _solute_heavy_atom_indices(self) -> List[int]:
+        """Indices of every non-hydrogen protein and substrate atom."""
+        return self._resolve_atom_group("solute_heavy")
+
+    def _resolve_atom_group(self, group_name: str) -> List[int]:
+        """Resolve a predefined atom group against this runner's topology."""
         from polyzymd.core.atom_groups import AtomGroupResolver, SystemComponentInfo
 
         component_info = SystemComponentInfo.from_topology(self._topology)
-        return AtomGroupResolver(self._topology, component_info).resolve("solute")
+        return AtomGroupResolver(self._topology, component_info).resolve(group_name)
 
     def _frozen_copy_of_system(self, frozen_indices: List[int]) -> openmm.System:
         """Return a copy of the System in which *frozen_indices* cannot move.
 
-        OpenMM's minimiser leaves massless particles exactly where they are, but
-        refuses constraints that involve a massless particle, so every constraint
-        touching a frozen atom is dropped from the copy.  Frozen atoms do not move,
-        so those constraints stay satisfied trivially.  The real System is untouched.
+        The frozen set is the solute *heavy* atoms; solute hydrogens stay mobile so
+        that the minimiser can pull them onto the force field's X-H constraint
+        lengths.  OpenMM's minimiser leaves massless particles exactly where they
+        are, but it refuses to build a Context for any constraint that involves a
+        massless particle ("A constraint cannot involve a massless particle"), so a
+        heavy--hydrogen constraint cannot simply be carried over into the copy.
+        Dropping it outright is also wrong: with ``constraints=HBonds`` the force
+        field emits no harmonic term for a constrained bond, so an unconstrained
+        hydrogen has nothing holding it to its parent atom.  Each frozen--mobile
+        constraint is therefore replaced by a stiff harmonic bond at the constraint
+        distance, which reproduces the constraint to within the minimiser's
+        tolerance; :meth:`minimize` then verifies the real System's constraints and
+        applies them exactly if any residual remains.  Constraints whose two
+        particles are both frozen are removed (they are satisfied trivially because
+        neither atom moves); there are normally none, since every solute constraint
+        involves a hydrogen.  The real System is untouched.
         """
         frozen_system = XmlSerializer.deserialize(XmlSerializer.serialize(self._system))
         frozen = set(frozen_indices)
         for index in frozen:
             frozen_system.setParticleMass(index, 0.0)
+
+        surrogate = openmm.HarmonicBondForce()
+        surrogate.setName("FrozenSoluteConstraintSurrogate")
         removed = 0
+        replaced = 0
         for constraint_index in range(frozen_system.getNumConstraints() - 1, -1, -1):
-            p1, p2, _ = frozen_system.getConstraintParameters(constraint_index)
-            if p1 in frozen or p2 in frozen:
+            p1, p2, distance = frozen_system.getConstraintParameters(constraint_index)
+            first_frozen = p1 in frozen
+            second_frozen = p2 in frozen
+            if first_frozen and second_frozen:
                 frozen_system.removeConstraint(constraint_index)
                 removed += 1
+            elif first_frozen or second_frozen:
+                frozen_system.removeConstraint(constraint_index)
+                surrogate.addBond(p1, p2, distance, CONSTRAINT_SURROGATE_FORCE_CONSTANT)
+                replaced += 1
+        if replaced:
+            frozen_system.addForce(surrogate)
         LOGGER.info(
-            "Frozen %d solute atoms for minimization (%d constraints dropped from the copy)",
+            "Frozen %d solute heavy atoms for minimization "
+            "(%d frozen-frozen constraints dropped, %d frozen-mobile constraints "
+            "replaced by harmonic surrogates in the copy)",
             len(frozen),
             removed,
+            replaced,
         )
         return frozen_system
 
@@ -307,6 +360,32 @@ class SimulationRunner:
         b = np.asarray(after.value_in_unit(omm_unit.angstrom))[indices]
         return float(np.sqrt(((a - b) ** 2).sum(axis=1)).max())
 
+    @staticmethod
+    def _max_constraint_violation_angstrom(system: "openmm.System", positions: Any) -> float:
+        """Largest |distance - constraint length| (Angstrom) over the System's constraints.
+
+        Equilibration starts by setting these positions on a constrained integrator;
+        a state whose constraints are violated can make CCMA diverge on the very
+        first step ("Particle coordinate is NaN"), so the value is checked and
+        logged before the minimized coordinates leave this method's caller.
+        """
+        import numpy as np
+
+        count = system.getNumConstraints()
+        if count == 0:
+            return 0.0
+        coordinates = np.asarray(positions.value_in_unit(omm_unit.angstrom))
+        first = np.empty(count, dtype=int)
+        second = np.empty(count, dtype=int)
+        lengths = np.empty(count, dtype=float)
+        for index in range(count):
+            p1, p2, distance = system.getConstraintParameters(index)
+            first[index] = p1
+            second[index] = p2
+            lengths[index] = distance.value_in_unit(omm_unit.angstrom)
+        actual = np.sqrt(((coordinates[first] - coordinates[second]) ** 2).sum(axis=1))
+        return float(np.abs(actual - lengths).max())
+
     def minimize(
         self,
         max_iterations: int = 1000,
@@ -319,16 +398,19 @@ class SimulationRunner:
         Args:
             max_iterations: Maximum iterations (0 = until convergence).
             tolerance: Energy tolerance in kJ/mol/nm.
-            freeze_solute: Hold every protein and substrate atom fixed so that
-                only solvent and polymers relax.  The prepared structure then
-                enters equilibration with its coordinates unchanged; the method
-                verifies this and raises if any solute atom moved.
+            freeze_solute: Hold every protein and substrate *heavy* atom fixed so
+                that only solvent, polymers, and the solute hydrogens relax.  The
+                prepared heavy-atom structure then enters equilibration with its
+                coordinates unchanged; the method verifies this and raises if any
+                frozen atom moved.  Solute hydrogens are deliberately left mobile
+                so the minimiser can place them on the force field's X-H
+                constraint lengths instead of keeping the input PDB's.
 
         Returns:
             Final potential energy in kJ/mol.
 
         Raises:
-            RuntimeError: If ``freeze_solute`` is set and a solute atom moved.
+            RuntimeError: If ``freeze_solute`` is set and a frozen heavy atom moved.
         """
         from polyzymd.simulation.phase_state import phase_completed, write_phase_record
         from polyzymd.simulation.signals import GracefulExit, get_interrupt_signal, is_interrupted
@@ -353,19 +435,26 @@ class SimulationRunner:
             raise GracefulExit(get_interrupt_signal())
         LOGGER.info("Running energy minimization")
 
-        frozen_indices: List[int] = self._solute_atom_indices() if freeze_solute else []
+        starting_positions = self._current_positions
+        frozen_indices: List[int] = []
+        hydrogen_indices: List[int] = []
+        if freeze_solute:
+            frozen_indices = self._solute_heavy_atom_indices()
+            hydrogen_indices = sorted(set(self._solute_atom_indices()) - set(frozen_indices))
         frozen_rmsd: float | None = None
+        hydrogen_displacement: float | None = None
         integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
         selection = self._get_platform()
 
         if frozen_indices:
-            # Minimise on a copy in which the solute is massless (hence fixed), then
-            # hand the relaxed solvent/polymer coordinates to the real System.
+            # Minimise on a copy in which the solute heavy atoms are massless (hence
+            # fixed), then hand the relaxed solvent/polymer/hydrogen coordinates to
+            # the real System.
             frozen_system = self._frozen_copy_of_system(frozen_indices)
             frozen_simulation = Simulation(
                 self._topology, frozen_system, integrator, selection.platform, selection.properties
             )
-            frozen_simulation.context.setPositions(self._current_positions)
+            frozen_simulation.context.setPositions(starting_positions)
             frozen_simulation.minimizeEnergy(
                 tolerance=tolerance * omm_unit.kilojoule_per_mole / omm_unit.nanometer,
                 maxIterations=max_iterations,
@@ -375,28 +464,74 @@ class SimulationRunner:
             ).getPositions()
             del frozen_simulation
             frozen_rmsd = self._max_displacement_angstrom(
-                self._current_positions, minimized_positions, frozen_indices
+                starting_positions, minimized_positions, frozen_indices
             )
             if frozen_rmsd > 1e-4:
                 raise RuntimeError(
-                    f"Frozen-solute minimization moved a solute atom by {frozen_rmsd:.4f} A; "
-                    "the prepared structure must enter equilibration unchanged."
+                    f"Frozen-solute minimization moved a solute heavy atom by "
+                    f"{frozen_rmsd:.4f} A; the prepared structure must enter "
+                    "equilibration unchanged."
                 )
+            hydrogen_displacement = self._max_displacement_angstrom(
+                starting_positions, minimized_positions, hydrogen_indices
+            )
             LOGGER.info(
-                "Solute held fixed during minimization (max displacement %.2e A over %d atoms)",
+                "Solute heavy atoms held fixed during minimization "
+                "(max displacement %.2e A over %d atoms); %d solute hydrogens relaxed "
+                "onto their constraint lengths (max displacement %.3f A)",
                 frozen_rmsd,
                 len(frozen_indices),
+                len(hydrogen_indices),
+                hydrogen_displacement,
             )
             integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
             simulation = self._create_simulation(integrator)
             simulation.context.setPositions(minimized_positions)
         else:
             simulation = self._create_simulation(integrator)
-            simulation.context.setPositions(self._current_positions)
+            simulation.context.setPositions(starting_positions)
             simulation.minimizeEnergy(
                 tolerance=tolerance * omm_unit.kilojoule_per_mole / omm_unit.nanometer,
                 maxIterations=max_iterations,
             )
+
+        # Equilibration starts by setting these coordinates on a constrained
+        # integrator, so the constraints of the *real* System must hold before the
+        # positions leave this method.
+        final_positions = simulation.context.getState(getPositions=True).getPositions()
+        violation = self._max_constraint_violation_angstrom(self._system, final_positions)
+        LOGGER.info(
+            "Max constraint violation in the minimized state: %.5f A over %d constraints",
+            violation,
+            self._system.getNumConstraints(),
+        )
+        if violation > CONSTRAINT_TOLERANCE_ANGSTROM:
+            LOGGER.warning(
+                "Minimized state violates a constraint by %.5f A (> %.3f A); "
+                "projecting the coordinates back onto the constraint manifold",
+                violation,
+                CONSTRAINT_TOLERANCE_ANGSTROM,
+            )
+            simulation.context.applyConstraints(1e-6)
+            final_positions = simulation.context.getState(getPositions=True).getPositions()
+            corrected = self._max_constraint_violation_angstrom(self._system, final_positions)
+            LOGGER.info("Constraint violation after applyConstraints: %.3e A", corrected)
+            if frozen_indices:
+                # applyConstraints splits the correction by inverse mass, so a frozen
+                # heavy atom can move by roughly 1/12 of the residual violation.
+                frozen_rmsd = self._max_displacement_angstrom(
+                    starting_positions, final_positions, frozen_indices
+                )
+                hydrogen_displacement = self._max_displacement_angstrom(
+                    starting_positions, final_positions, hydrogen_indices
+                )
+                if frozen_rmsd > FROZEN_HEAVY_DISPLACEMENT_TOLERANCE_ANGSTROM:
+                    raise RuntimeError(
+                        f"Enforcing the constraints after frozen-solute minimization moved "
+                        f"a solute heavy atom by {frozen_rmsd:.4f} A "
+                        f"(> {FROZEN_HEAVY_DISPLACEMENT_TOLERANCE_ANGSTROM} A); "
+                        "the prepared structure must enter equilibration unchanged."
+                    )
 
         if is_interrupted():
             # OpenMM minimization is not resumable.  Leave only ``started`` so
@@ -419,6 +554,7 @@ class SimulationRunner:
             state_path=str(state_path.resolve()),
             frozen_atoms=len(frozen_indices) if frozen_indices else None,
             frozen_rmsd_angstrom=frozen_rmsd,
+            hydrogen_max_displacement_angstrom=hydrogen_displacement,
         )
 
         LOGGER.info(f"Minimization complete: E = {energy:.2f} kJ/mol")
