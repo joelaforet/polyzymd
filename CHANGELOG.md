@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while Packmol reported success; the Paper-1 audit found 54 of 118 RML/CALB
   builds affected (823 waters within 2 Å of protein heavy atoms in one CALB
   control).  Such a build is now a hard failure before any PDB is written.
+  The failure threshold is `SOLVATION_CLASH_ATOM_LIMIT` (20) packed atoms below
+  half the tolerance: imperfect Packmol runs (exit 173) leave a handful of such
+  contacts that minimisation resolves and now only warn, whereas a frame mismatch
+  leaves hundreds to thousands.
 - **Trajectory segment lineage check.**  `TrajectoryLoader.load_universe()`
   verifies that daisy-chained segments share one frame interval and that each
   segment starts exactly one interval after its predecessor ends before
