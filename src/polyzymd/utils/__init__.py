@@ -23,6 +23,7 @@ from polyzymd.utils.charging import (
     get_charger,
 )
 from polyzymd.utils.forcegroups import impose_unique_force_groups
+from polyzymd.utils.packmol import PeriodicImageClashError, SolvationClashError
 from polyzymd.utils.replicates import parse_replicate_range, validate_replicate_range
 from polyzymd.utils.topology import get_largest_offmol, topology_from_sdf
 from polyzymd.utils.units import openff_to_openmm, openmm_to_openff
@@ -44,6 +45,9 @@ __all__ = [
     "get_topology_bbox_bounds",
     "pad_box_vectors_uniform",
     "get_box_volume",
+    # Packing / solvation safeguards
+    "SolvationClashError",
+    "PeriodicImageClashError",
     # Units
     "openff_to_openmm",
     "openmm_to_openff",

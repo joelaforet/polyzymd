@@ -231,6 +231,11 @@ class _MockBrickSize:
         return self._values
 
 
+def _mock_box_vectors(dims=(30.0, 40.0, 50.0)) -> _MockBrickSize:
+    """Quantity-like 3x3 box vectors matching the mocked brick size."""
+    return _MockBrickSize(np.diag(np.asarray(dims, dtype=float)))
+
+
 class TestSolvateAssemblyCoordinates:
     """Regression tests for centered-solute topology assembly."""
 
@@ -331,7 +336,7 @@ class TestSolvateAssemblyCoordinates:
             molecules=[object()],
             number_of_copies=[1],
             solute=original_solute,
-            box_vectors=MagicMock(),
+            box_vectors=_mock_box_vectors(),
             working_directory=tmp_path,
         )
 
@@ -388,7 +393,7 @@ class TestSolvateAssemblyCoordinates:
             molecules=[object()],
             number_of_copies=[1],
             solute=original_solute,
-            box_vectors=MagicMock(),
+            box_vectors=_mock_box_vectors(),
             working_directory=tmp_path,
         )
 
@@ -446,7 +451,7 @@ class TestSolvateAssemblyCoordinates:
                 molecules=[object()],
                 number_of_copies=[1],
                 solute=original_solute,
-                box_vectors=MagicMock(),
+                box_vectors=_mock_box_vectors(),
                 working_directory=tmp_path,
                 tolerance_angstrom=2.0,
             )
@@ -502,7 +507,7 @@ class TestSolvateAssemblyCoordinates:
                 molecules=[object()],
                 number_of_copies=[1],
                 solute=original_solute,
-                box_vectors=MagicMock(),
+                box_vectors=_mock_box_vectors(),
                 working_directory=tmp_path,
             )
 
@@ -595,7 +600,7 @@ class TestPackmolSeed:
             molecules=[object()],
             number_of_copies=[1],
             solute=original_solute,
-            box_vectors=MagicMock(),
+            box_vectors=_mock_box_vectors(),
             working_directory=tmp_path,
             seed=3,
         )
@@ -629,7 +634,7 @@ class TestPackmolSeed:
             molecules=[object()],
             number_of_copies=[1],
             solute=original_solute,
-            box_vectors=MagicMock(),
+            box_vectors=_mock_box_vectors(),
             working_directory=tmp_path,
             seed=5,
         )
@@ -700,7 +705,7 @@ class TestPolymerShellExclusion:
             molecules=[object()],
             number_of_copies=[1],
             solute=original_solute,
-            box_vectors=MagicMock(),
+            box_vectors=_mock_box_vectors(),
             working_directory=tmp_path,
             **kwargs,
         )
@@ -727,3 +732,276 @@ class TestPolymerShellExclusion:
         cfg = PolymerPackingConfig()
         assert cfg.exclude_solute_bbox is False
         assert cfg.nloop == 200
+
+
+# ---------------------------------------------------------------------------
+# Spherical confinement constraint
+# ---------------------------------------------------------------------------
+
+
+class TestInsideSphereConstraint:
+    """``inside sphere`` is rendered only when a sphere is supplied."""
+
+    SPHERE = np.array([10.0, 20.0, 30.0, 40.0])
+
+    def test_sphere_absent_by_default(self):
+        text = build_packmol_input(PDBS, COUNTS, BOX_3A, TOL)
+        assert "inside sphere" not in text
+
+    def test_sphere_rendered_when_requested(self):
+        text = build_packmol_input(PDBS, COUNTS, BOX_3A, TOL, inside_sphere_angstrom=self.SPHERE)
+        assert "  inside sphere 10.000000 20.000000 30.000000 40.000000" in text.splitlines()
+
+    def test_sphere_in_every_molecule_block(self):
+        text = build_packmol_input(PDBS, COUNTS, BOX_3A, TOL, inside_sphere_angstrom=self.SPHERE)
+        assert text.count("inside sphere") == len(PDBS)
+
+    def test_sphere_accompanies_inside_box(self):
+        """The sphere narrows the packing box; it does not replace it."""
+        text = build_packmol_input(PDBS, COUNTS, BOX_3A, TOL, inside_sphere_angstrom=self.SPHERE)
+        assert text.index("inside box") < text.index("inside sphere")
+
+    def test_sphere_absent_in_pbc_mode(self):
+        text = build_packmol_input(
+            PDBS, COUNTS, BOX_3A, TOL, use_pbc=True, inside_sphere_angstrom=self.SPHERE
+        )
+        assert "inside sphere" not in text
+
+    def test_sphere_requires_four_values(self):
+        with pytest.raises(ValueError, match=r"shape \(4,\)"):
+            build_packmol_input(
+                PDBS, COUNTS, BOX_3A, TOL, inside_sphere_angstrom=np.array([1.0, 2.0, 3.0])
+            )
+
+    def test_constraint_from_solute_topology(self):
+        """Radius = bounding-box circumradius + padding, centre = centre of geometry."""
+        from polyzymd.utils.packmol import solute_sphere_constraint
+
+        solute = _MockTopology(np.array([[0.0, 0.0, 0.0], [6.0, 8.0, 0.0], [3.0, 4.0, 0.0]]))
+        sphere = solute_sphere_constraint(solute, padding_angstrom=5.0)
+        np.testing.assert_allclose(sphere[:3], [3.0, 4.0, 0.0])
+        # bbox extent (6, 8, 0) -> diagonal 10 -> circumradius 5, plus 5 A padding
+        assert sphere[3] == pytest.approx(10.0)
+
+    def test_radius_is_independent_of_position(self):
+        """Two framings of the same solute must give the same radius."""
+        from polyzymd.utils.packmol import solute_sphere_constraint
+
+        coords = np.array([[0.0, 0.0, 0.0], [6.0, 8.0, 0.0], [3.0, 4.0, 0.0]])
+        here = solute_sphere_constraint(_MockTopology(coords), padding_angstrom=5.0)
+        there = solute_sphere_constraint(_MockTopology(coords + 137.0), padding_angstrom=5.0)
+        assert here[3] == pytest.approx(there[3])
+
+
+# ---------------------------------------------------------------------------
+# Periodic-image separation assertion
+# ---------------------------------------------------------------------------
+
+# A rhombic-dodecahedron cell in reduced form: c has x and y components equal
+# to half of a and b, which is where the pre-fix builds put polymers on top of
+# their own images.
+TRICLINIC_BOX = np.array(
+    [
+        [40.0, 0.0, 0.0],
+        [0.0, 40.0, 0.0],
+        [20.0, 20.0, 28.284271],
+    ]
+)
+
+
+class TestPeriodicImageSeparation:
+    """Atoms must not overlap their own periodic images."""
+
+    def test_clean_system_passes(self):
+        from polyzymd.utils import packmol
+
+        # Two atoms in the middle of the cell, far from every image.
+        topo = _MockTopology(np.array([[18.0, 18.0, 12.0], [22.0, 22.0, 16.0]]))
+        stats = packmol._assert_periodic_image_separation(
+            topo, TRICLINIC_BOX, tolerance_angstrom=2.0, label="test"
+        )
+        assert stats["n_atoms_below_tolerance"] == 0
+        assert stats["n_atoms_below_half_tolerance"] == 0
+
+    def test_image_pair_raises(self):
+        from polyzymd.utils import packmol
+
+        # Second atom sits one full ``a`` vector away, plus 0.1 A: its image
+        # across -a lands 0.1 A from the first atom.
+        first = np.array([5.0, 18.0, 12.0])
+        second = first + TRICLINIC_BOX[0] + np.array([0.1, 0.0, 0.0])
+        topo = _MockTopology(np.vstack([first, second]))
+
+        with pytest.raises(packmol.PeriodicImageClashError) as excinfo:
+            packmol._assert_periodic_image_separation(
+                topo, TRICLINIC_BOX, tolerance_angstrom=2.0, label="test system"
+            )
+
+        message = str(excinfo.value)
+        assert "2 atom(s) of the test system" in message
+        assert "0.100" in message
+        assert "(0, 1)" in message or "(1, 0)" in message
+
+    def test_image_pair_across_the_c_vector_raises(self):
+        """The z face of the brick is where the pre-fix builds overlapped."""
+        from polyzymd.utils import packmol
+
+        first = np.array([12.0, 14.0, 1.0])
+        second = first + TRICLINIC_BOX[2] + np.array([0.0, 0.0, 0.2])
+        topo = _MockTopology(np.vstack([first, second]))
+
+        with pytest.raises(packmol.PeriodicImageClashError, match="0.200"):
+            packmol._assert_periodic_image_separation(
+                topo, TRICLINIC_BOX, tolerance_angstrom=2.0, label="test"
+            )
+
+    def test_atom_is_not_counted_against_its_own_image(self):
+        """A lone atom is never in contact with itself, only with its images."""
+        from polyzymd.utils.packmol import periodic_image_statistics
+
+        stats = periodic_image_statistics(
+            np.array([[20.0, 20.0, 14.0]]), TRICLINIC_BOX, tolerance_angstrom=2.0
+        )
+        assert stats["n_atoms"] == 1
+        assert stats["n_atoms_below_tolerance"] == 0
+        assert stats["min_distance_angstrom"] == float("inf")
+
+    def test_self_image_contact_is_detected(self):
+        """An atom too close to its own image across a short cell must fail."""
+        from polyzymd.utils import packmol
+
+        tiny_box = np.array([[0.8, 0.0, 0.0], [0.0, 40.0, 0.0], [0.0, 0.0, 40.0]])
+        topo = _MockTopology(np.array([[0.4, 20.0, 20.0]]))
+        with pytest.raises(packmol.PeriodicImageClashError, match="0.800"):
+            packmol._assert_periodic_image_separation(
+                topo, tiny_box, tolerance_angstrom=2.0, label="test"
+            )
+
+    def test_marginal_contact_only_warns(self, caplog):
+        from polyzymd.utils import packmol
+
+        first = np.array([5.0, 18.0, 12.0])
+        second = first + TRICLINIC_BOX[0] + np.array([1.5, 0.0, 0.0])
+        topo = _MockTopology(np.vstack([first, second]))
+
+        with caplog.at_level("WARNING", logger="polyzymd.utils.packmol"):
+            stats = packmol._assert_periodic_image_separation(
+                topo, TRICLINIC_BOX, tolerance_angstrom=2.0, label="test"
+            )
+        assert stats["n_atoms_below_tolerance"] == 2
+        assert stats["n_atoms_below_half_tolerance"] == 0
+        assert any("periodic image" in record.message for record in caplog.records)
+
+    def test_accepts_quantity_box_vectors(self):
+        from polyzymd.utils import packmol
+
+        topo = _MockTopology(np.array([[18.0, 18.0, 12.0], [22.0, 22.0, 16.0]]))
+        stats = packmol._assert_periodic_image_separation(
+            topo, _MockBrickSize(TRICLINIC_BOX), tolerance_angstrom=2.0, label="test"
+        )
+        assert stats["n_atoms_below_tolerance"] == 0
+
+    def test_worst_pair_and_lattice_vector_are_reported(self):
+        from polyzymd.utils.packmol import periodic_image_statistics
+
+        first = np.array([5.0, 18.0, 12.0])
+        second = first + TRICLINIC_BOX[1] + np.array([0.0, 0.3, 0.0])
+        stats = periodic_image_statistics(
+            np.vstack([first, second]), TRICLINIC_BOX, tolerance_angstrom=2.0
+        )
+        assert stats["min_distance_angstrom"] == pytest.approx(0.3)
+        assert set(stats["worst_pair"]) == {0, 1}
+        assert stats["worst_lattice_vector"] in {(0, 1, 0), (0, -1, 0)}
+
+
+class TestPackPolymersFinalBox:
+    """Polymers are packed inside the supplied final brick, confined to a sphere."""
+
+    def _run(self, monkeypatch, tmp_path, **kwargs):
+        from polyzymd.utils import packmol
+
+        original_solute = _MockTopology(np.array([[0.0, 0.0, 0.0]]))
+        centered_solute = _MockTopology(np.array([[15.0, 20.0, 25.0], [17.0, 20.0, 25.0]]))
+        polymer_topology = _MockTopology(np.zeros((1, 3), dtype=float))
+        loaded_positions = np.array([[15.0, 20.0, 25.0], [17.0, 20.0, 25.0], [5.0, 8.0, 10.0]])
+        TestSolvateAssemblyCoordinates._install_fake_openff_modules(
+            monkeypatch,
+            centered_solute=centered_solute,
+            assembled_solvent=polymer_topology,
+            loaded_positions=loaded_positions,
+        )
+        run_packmol = MagicMock(return_value=tmp_path / "packmol.pdb")
+        monkeypatch.setattr(packmol, "run_packmol", run_packmol)
+        monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
+
+        packmol.pack_polymers(
+            molecules=[object()],
+            number_of_copies=[1],
+            solute=original_solute,
+            box_vectors=_mock_box_vectors(),
+            working_directory=tmp_path,
+            **kwargs,
+        )
+        return run_packmol.call_args.kwargs["input_text"]
+
+    def test_packing_box_is_the_supplied_brick(self, monkeypatch, tmp_path):
+        """The brick of the final cell (30, 40, 50), shrunk by the 2 A tolerance."""
+        text = self._run(monkeypatch, tmp_path)
+        assert "  inside box 0. 0. 0. 28.000000 38.000000 48.000000" in text.splitlines()
+
+    def test_sphere_constraint_is_added_by_default(self, monkeypatch, tmp_path):
+        text = self._run(monkeypatch, tmp_path, sphere_padding_angstrom=20.0)
+        # centred solute spans 2 A in x -> circumradius 1 A, plus 20 A padding
+        assert "  inside sphere 16.000000 20.000000 25.000000 21.000000" in text.splitlines()
+
+    def test_sphere_can_be_disabled(self, monkeypatch, tmp_path):
+        text = self._run(monkeypatch, tmp_path, confine_to_sphere=False)
+        assert "inside sphere" not in text
+        assert "inside box" in text
+
+
+class TestSolvateCenterSolute:
+    """``center_solute=False`` keeps an already brick-framed topology in place."""
+
+    def _run(self, monkeypatch, tmp_path, **kwargs):
+        from polyzymd.utils import packmol
+
+        original_solute = _MockTopology(np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]))
+        centered_solute = _MockTopology(np.array([[15.0, 20.0, 25.0], [16.0, 21.0, 26.0]]))
+        solvent_topology = _MockTopology(np.zeros((1, 3), dtype=float))
+        loaded_positions = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [25.0, 25.0, 25.0]])
+
+        mocks = TestSolvateAssemblyCoordinates._install_fake_openff_modules(
+            monkeypatch,
+            centered_solute=centered_solute,
+            assembled_solvent=solvent_topology,
+            loaded_positions=loaded_positions,
+        )
+        monkeypatch.setattr(
+            packmol, "run_packmol", MagicMock(return_value=tmp_path / "packmol.pdb")
+        )
+        monkeypatch.setattr(packmol, "_strip_conect_records", MagicMock(return_value=0))
+        monkeypatch.setattr(packmol, "_check_pbc_available", MagicMock(return_value=False))
+        monkeypatch.setattr(
+            packmol, "_check_ignore_conect_supported", MagicMock(return_value=False)
+        )
+        result = packmol.solvate_with_packmol(
+            molecules=[object()],
+            number_of_copies=[1],
+            solute=original_solute,
+            box_vectors=_mock_box_vectors(),
+            working_directory=tmp_path,
+            **kwargs,
+        )
+        return result, mocks, original_solute
+
+    def test_centring_is_skipped(self, monkeypatch, tmp_path):
+        result, mocks, original_solute = self._run(monkeypatch, tmp_path, center_solute=False)
+        mocks["center"].assert_not_called()
+        np.testing.assert_allclose(
+            result.positions[: original_solute.n_atoms], original_solute.positions
+        )
+
+    def test_centring_is_the_default(self, monkeypatch, tmp_path):
+        _, mocks, _ = self._run(monkeypatch, tmp_path)
+        mocks["center"].assert_called_once()
