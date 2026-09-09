@@ -40,6 +40,155 @@ _PACKMOL_MOLECULE_PREFIX = "_PACKING_MOLECULE"
 
 
 # ---------------------------------------------------------------------------
+# Post-assembly geometry assertion
+# ---------------------------------------------------------------------------
+
+
+class SolvationClashError(ValueError):
+    """Raised when packed solvent/polymer atoms overlap the fixed solute.
+
+    Packmol guarantees that every placed atom is at least ``tolerance`` away
+    from the fixed solute *in the Packmol frame*.  If the assembled topology
+    combines solute and solvent coordinates expressed in different frames
+    (the solute/solvent frame offset fixed in d96b1fcd), hundreds of solvent
+    molecules end up inside the solute while Packmol reports success.  This
+    error turns that silent defect into a hard build failure.
+    """
+
+
+def separation_statistics(
+    solute_xyz: "NDArray",
+    other_xyz: "NDArray",
+    *,
+    tolerance_angstrom: float,
+) -> dict[str, float | int]:
+    """Nearest-solute-atom distance statistics for a set of packed atoms.
+
+    Parameters
+    ----------
+    solute_xyz, other_xyz : NDArray
+        Coordinates in Angstrom, shape ``(N, 3)`` and ``(M, 3)``.  Direct
+        (non-periodic) distances are used: a frame mismatch shows up as
+        direct overlap, and direct distances never under-report a clash.
+    tolerance_angstrom : float
+        Packmol tolerance that was requested for the packing run.
+
+    Returns
+    -------
+    dict
+        ``n_other`` (M), ``n_below_tolerance``, ``n_below_half_tolerance``,
+        ``min_distance_angstrom`` (``inf`` when either set is empty).
+    """
+    import numpy as np
+    from scipy.spatial import cKDTree
+
+    solute_xyz = np.asarray(solute_xyz, dtype=float).reshape(-1, 3)
+    other_xyz = np.asarray(other_xyz, dtype=float).reshape(-1, 3)
+    stats: dict[str, float | int] = {
+        "n_other": int(other_xyz.shape[0]),
+        "n_below_tolerance": 0,
+        "n_below_half_tolerance": 0,
+        "min_distance_angstrom": float("inf"),
+    }
+    if solute_xyz.shape[0] == 0 or other_xyz.shape[0] == 0:
+        return stats
+
+    distances, _ = cKDTree(solute_xyz).query(other_xyz, k=1)
+    stats["n_below_tolerance"] = int(np.count_nonzero(distances < tolerance_angstrom))
+    stats["n_below_half_tolerance"] = int(np.count_nonzero(distances < 0.5 * tolerance_angstrom))
+    stats["min_distance_angstrom"] = float(distances.min())
+    return stats
+
+
+def _assert_solute_solvent_separation(
+    topology,
+    n_solute_atoms: int,
+    *,
+    tolerance_angstrom: float,
+    label: str = "solvent",
+) -> dict[str, float | int]:
+    """Fail loudly if packed atoms sit inside the solute after assembly.
+
+    The first *n_solute_atoms* atoms of *topology* are the fixed solute; the
+    remainder are the freshly packed molecules.  Any packed atom closer than
+    ``0.5 * tolerance_angstrom`` to a solute atom is treated as a genuine
+    clash (Packmol itself never places atoms closer than ``tolerance``; the
+    factor of two leaves headroom for PDB coordinate rounding).  Distances
+    between ``0.5 * tolerance`` and ``tolerance`` only emit a warning.
+
+    Parameters
+    ----------
+    topology : openff.toolkit.Topology
+        Assembled topology (solute first, packed molecules after).
+    n_solute_atoms : int
+        Number of leading solute atoms.  ``0`` disables the check.
+    tolerance_angstrom : float
+        Packmol tolerance used for the run.
+    label : str
+        Human-readable name for the packed species in messages.
+
+    Returns
+    -------
+    dict
+        The statistics from :func:`separation_statistics`.
+
+    Raises
+    ------
+    SolvationClashError
+        If any packed atom is closer than ``0.5 * tolerance_angstrom`` to the
+        solute.
+    """
+    import numpy as np
+
+    if n_solute_atoms <= 0:
+        return {
+            "n_other": 0,
+            "n_below_tolerance": 0,
+            "n_below_half_tolerance": 0,
+            "min_distance_angstrom": float("inf"),
+        }
+
+    positions = np.asarray(topology.get_positions().m_as("angstrom"), dtype=float)
+    stats = separation_statistics(
+        positions[:n_solute_atoms],
+        positions[n_solute_atoms:],
+        tolerance_angstrom=tolerance_angstrom,
+    )
+
+    if stats["n_below_half_tolerance"] > 0:
+        raise SolvationClashError(
+            f"{stats['n_below_half_tolerance']} {label} atom(s) lie within "
+            f"{0.5 * tolerance_angstrom:.2f} A of the solute "
+            f"({stats['n_below_tolerance']} within the {tolerance_angstrom:.2f} A Packmol "
+            f"tolerance; minimum separation {stats['min_distance_angstrom']:.3f} A; "
+            f"{stats['n_other']} {label} atoms checked). Packmol never places atoms this "
+            "close to a fixed solute, so the assembled solute and packed coordinates are "
+            "almost certainly expressed in different frames (solute/solvent frame mismatch, "
+            "see d96b1fcd). Refusing to continue the build."
+        )
+
+    if stats["n_below_tolerance"] > 0:
+        logger.warning(
+            "%d %s atom(s) lie between %.2f and %.2f A of the solute "
+            "(minimum %.3f A); Packmol tolerance was not fully honoured.",
+            stats["n_below_tolerance"],
+            label,
+            0.5 * tolerance_angstrom,
+            tolerance_angstrom,
+            stats["min_distance_angstrom"],
+        )
+    else:
+        logger.info(
+            "Solute/%s separation check passed: %d atoms, minimum %.3f A (tolerance %.2f A)",
+            label,
+            stats["n_other"],
+            stats["min_distance_angstrom"],
+            tolerance_angstrom,
+        )
+    return stats
+
+
+# ---------------------------------------------------------------------------
 # Input-file builder
 # ---------------------------------------------------------------------------
 
@@ -347,6 +496,12 @@ def pack_polymers(
     -------
     openff.toolkit.Topology
         Packed topology with solute + all polymer chains and box vectors set.
+
+    Raises
+    ------
+    SolvationClashError
+        If any polymer atom ends up closer than ``0.5 * tolerance_angstrom``
+        to the solute after assembly (solute/polymer frame mismatch).
     """
     import numpy as np
     from openff.packmol._packmol import (
@@ -505,6 +660,14 @@ def pack_polymers(
 
     packed_topology.box_vectors = box_vectors
 
+    if solute is not None:
+        _assert_solute_solvent_separation(
+            packed_topology,
+            centered_solute.n_atoms,
+            tolerance_angstrom=tolerance_angstrom,
+            label="polymer",
+        )
+
     if _temporary and not retain_working_files:
         shutil.rmtree(working_directory, ignore_errors=True)
 
@@ -567,6 +730,12 @@ def solvate_with_packmol(
     -------
     openff.toolkit.Topology
         Solvated topology with solute + solvent and box vectors set.
+
+    Raises
+    ------
+    SolvationClashError
+        If any solvent atom ends up closer than ``0.5 * tolerance_angstrom``
+        to the solute after assembly (solute/solvent frame mismatch).
     """
     import numpy as np
     from openff.packmol._packmol import (
@@ -660,6 +829,14 @@ def solvate_with_packmol(
         solvated_topology = solvent_topology
 
     solvated_topology.box_vectors = box_vectors
+
+    if solute is not None:
+        _assert_solute_solvent_separation(
+            solvated_topology,
+            centered_solute.n_atoms,
+            tolerance_angstrom=tolerance_angstrom,
+            label="solvent",
+        )
 
     if _temporary and not retain_working_files:
         shutil.rmtree(working_directory, ignore_errors=True)

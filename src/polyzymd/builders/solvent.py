@@ -205,6 +205,8 @@ class SolventBuilder:
         self._solvated_topology: Optional[Topology] = None
         self._box_vectors: Optional[NDArray] = None
         self._composition: Optional[SolventComposition] = None
+        self._n_solute_atoms: int = 0
+        self._packing_tolerance: float = 2.0
         self._solvation_counts: Optional[SolvationCounts] = None
 
     @property
@@ -425,6 +427,8 @@ class SolventBuilder:
 
         self._solvated_topology = solvated_top
         self._box_vectors = box_vecs
+        self._n_solute_atoms = int(topology.n_atoms)
+        self._packing_tolerance = float(tolerance)
 
         # Store solvation counts for PDB chain/residue assignment
         self._solvation_counts = SolvationCounts(
@@ -862,6 +866,7 @@ class SolventBuilder:
         Raises:
             RuntimeError: If no topology has been solvated.
             ValueError: If validation fails.
+            SolvationClashError: If any solvent atom overlaps the solute.
         """
         if self._solvated_topology is None:
             raise RuntimeError("No solvated topology. Call solvate() first.")
@@ -871,6 +876,19 @@ class SolventBuilder:
 
         if self._box_vectors is None:
             raise ValueError("No box vectors defined")
+
+        # Independent re-check of the solute/solvent separation on the stored
+        # topology.  solvate_with_packmol() already asserts this right after
+        # assembly; repeating it here guards against any later coordinate
+        # manipulation before the topology is written to disk.
+        from polyzymd.utils.packmol import _assert_solute_solvent_separation
+
+        _assert_solute_solvent_separation(
+            self._solvated_topology,
+            self._n_solute_atoms,
+            tolerance_angstrom=self._packing_tolerance,
+            label="solvent",
+        )
 
         LOGGER.info("Solvated topology validation passed")
         return True
