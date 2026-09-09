@@ -215,6 +215,35 @@ limit or continue with the build.
 3. Report the `packmol_input.txt` and `_PACKING_SOLUTE.pdb` from the build
    directory together with the error message.
 
+### "PeriodicImageClashError: N atom(s) ... lie within 1.00 A of a periodic image"
+
+```
+PeriodicImageClashError: 34 atom(s) of the packed solute + polymers lie within
+1.00 A of a periodic image (... minimum image separation 0.104 A between atoms
+(14363, 6312) across lattice vector (0, 0, 1) ...)
+```
+
+Molecules were packed outside the rectangular brick of the periodic cell, so
+they overlap themselves across the cell boundary. PACKMOL cannot see this: it
+runs without periodicity. Minimization cannot resolve a singular overlap
+either, and the run would die with NaN, so the build stops.
+
+**Solutions:**
+
+1. Rebuild with PolyzyMD 1.3.0-rc5 or later, which computes the periodic cell
+   before packing and packs the chains inside its brick. Bundles built by
+   earlier versions must be rebuilt, not patched.
+2. If you set `polymers.packing.box_vectors`, remove it: an explicit packing box
+   opts out of the deterministic cell and can be larger than the brick.
+3. If the message appears with `deterministic_box: true` in
+   `build_manifest.json`, check the logged clearance to the brick faces. A
+   solute that is long along `z` may not fit inside a rhombic-dodecahedron
+   brick at the configured padding (the `z` clearance is
+   `0.707 * padding - 0.146 * bbox_z`); raise `solvent.box.padding` or switch
+   to `solvent.box.shape: cube`.
+4. Contacts between half the tolerance and the full tolerance only produce a
+   warning; those are resolved by minimization and need no action.
+
 ### "No atoms match selection"
 
 ```

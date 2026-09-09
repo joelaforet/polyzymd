@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Polymers no longer overlap their own periodic images.**  Polymer chains used
+  to be packed into a rectangular box of `solute bbox + 2 * packing.padding`,
+  and the periodic cell was only derived afterwards from the packed topology.
+  The rhombic-dodecahedron brick is `sqrt(2)/2` (0.707) times shorter along `z`
+  than that padded extent, so chains protruded through the brick faces and
+  landed on top of themselves across the `c` lattice vector — invisible to
+  PACKMOL, which runs without periodicity.  The audited builds carried 11-169
+  atom pairs closer than 1.5 A to a periodic image, down to 0.10 A (CALB run5:
+  17 pairs below 2 A, 11 below 1.5 A, 2.1 % of polymer atoms outside the brick);
+  such an overlap is singular, minimisation cannot resolve it and the runs died
+  with NaN.  Chains are now packed inside the brick of the final cell, shrunk by
+  the PACKMOL tolerance, so every image pair is at least one tolerance apart.
+- **Periodic-image assertion at build time.**  New
+  `_assert_periodic_image_separation()` translates every atom by each of the 26
+  non-zero lattice vectors and raises `PeriodicImageClashError` when any atom
+  lies within half the PACKMOL tolerance of an image (count, minimum distance,
+  worst pair and lattice vector in the message); contacts between half the
+  tolerance and the tolerance only warn.  It runs after polymer packing and
+  after solvation.  `PeriodicImageClashError` and `SolvationClashError` are
+  exported from `polyzymd.utils`.
+- **Solvation no longer re-centres an already-framed topology.**
+  `solvate_with_packmol()` takes `center_solute` (default `True`); the system
+  builder passes `False` when the packed topology is already framed in the
+  brick.  Re-centring it by centre of geometry is a rigid translation that
+  pushed 0.02-0.38 % of polymer atoms back outside the brick.
 - **Build-time solute/solvent separation assertion.**  `solvate_with_packmol()`
   and `pack_polymers()` now raise `SolvationClashError` when any packed atom
   lies within half the Packmol tolerance of the fixed solute, and
@@ -32,6 +57,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The periodic box is computed first, from the protein and substrate alone.**
+  `SolventBuilder.compute_box_vectors()` derives the cell from the solute
+  bounding box plus `2 * (polymers.packing.padding + solvent.box.padding)`
+  before anything is packed, and both the polymer-packing and the solvation
+  stage use it.  The box used to be a function of where PACKMOL happened to put
+  the chains, so replicates of one condition differed: an RML replicate came out
+  with a 23 % smaller box, 18,865 waters instead of ~25,000 and 56/47 ions
+  instead of 72/63.  Replicates now share box, water count and ion count.
+  Builds without polymers keep the previous behaviour exactly (box computed from
+  the solute at solvation time), so existing control bundles remain valid.
+  Setting `polymers.packing.box_vectors` opts out of the deterministic cell and
+  is now actually honoured by `build_from_config()` (it was silently ignored).
+  The cell, brick and sphere radius are recorded under `provenance` in
+  `build_manifest.json` (`box_vectors_nm`, `brick_nm`, `deterministic_box`,
+  `polymer_sphere_radius_nm`).
+  **Polymer bundles built before this change must be rebuilt.**  The larger,
+  correctly-sized cell raises the water count by about 7 % for CALB and about
+  7-9 % for a normal RML replicate, and by up to 50 % for the under-filled
+  replicates that had shrunken boxes; controls are unchanged.
+- **Polymers are packed inside a sphere around the solute.**  `pack_polymers()`
+  adds a PACKMOL `inside sphere` constraint (centre = solute centre in the
+  brick, radius = half the solute bounding-box diagonal + `packing.padding`) on
+  top of the brick-sized `inside box`, so chains stay in a shell around the
+  protein instead of filling the brick corners (mean polymer-to-protein distance
+  19 A with the sphere, 23 A without).  New `polymers.packing.confine_to_sphere`
+  key (default `true`) turns it off.  `build_packmol_input()` gained the
+  matching `inside_sphere_angstrom` argument.  Note that these keys change the
+  build-manifest config hash of polymer configs.
 - **Polymer packing no longer confines chains to a bounding-box annulus.**
   `pack_polymers()` used to add a PACKMOL `outside box` constraint equal to the
   solute bounding box, forcing all chains into a rectangular shell that was often

@@ -171,16 +171,47 @@ polymers:
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `padding` | float (nm) | No | 2.0 | Padding around the solute that defines the polymer packing box |
+| `padding` | float (nm) | No | 2.0 | Room reserved for the polymer chains around the solute. Added to `solvent.box.padding` when the periodic cell is computed, and used as the padding of the confinement sphere |
 | `tolerance` | float (Å) | No | 2.0 | PACKMOL minimum distance between any two atoms, including polymer to protein |
 | `movebadrandom` | bool | No | false | Pass PACKMOL's `movebadrandom`; helps dense or heterogeneous systems converge |
-| `box_vectors` | list[float] (nm) | No | null | Explicit `[Lx, Ly, Lz]` packing box; overrides `padding` |
+| `confine_to_sphere` | bool | No | true | Confine chains to a sphere centred on the solute (radius = half the solute bounding-box diagonal + `padding`) while packing inside the final periodic brick. Set `false` to let chains fill the whole brick |
+| `box_vectors` | list[float] (nm) | No | null | Explicit `[Lx, Ly, Lz]` packing box. **Opts out of the deterministic cell**: the periodic box is then derived from the packed topology, as before, and differs between replicates |
 | `exclude_solute_bbox` | bool | No | false | Confine chains to a rectangular shell outside the solute bounding box (legacy). Off by default because the tolerance against the fixed solute already prevents overlap and the shell over-constrains long chains |
 | `nloop` | int | No | 200 | Maximum PACKMOL GENCAN loops per molecule type |
 
 PACKMOL is seeded with the replicate number for both polymer packing and
 solvation, so replicates start from independent coordinates. The seeds are
 recorded under `provenance` in `build_manifest.json`.
+
+#### Where the polymers are packed
+
+The periodic cell is computed **before** anything is packed, from the protein
+and substrate alone:
+
+```
+box vectors = shape_matrix @ diag(solute bbox + 2 * (polymers.packing.padding
+                                                     + solvent.box.padding))
+```
+
+Chains are then packed inside the rectangular *brick* of that cell (shrunk by
+`tolerance`, PACKMOL's own convention) plus the confinement sphere, and the
+solvent fills the same brick afterwards. Because the cell depends only on the
+enzyme and substrate, every replicate of a condition gets the same box volume,
+the same water count and the same ion counts. The cell, the brick and the
+sphere radius are recorded under `provenance` in `build_manifest.json`
+(`box_vectors_nm`, `brick_nm`, `polymer_sphere_radius_nm`), so replicates can
+be compared by diffing their manifests.
+
+```{note}
+A rhombic-dodecahedron brick is not the padded extent. Along `x` and `y` the
+brick equals `bbox + 2 * padding`, but along `z` it is `sqrt(2)/2` (0.707)
+times that, so the clearance between the solute and the `z` faces is
+`0.707 * padding - 0.146 * bbox_z`, not `padding`. That is the geometry of the
+cell, not a defect: the missing corners are supplied by the periodic images.
+The build logs the clearance to each brick face and warns when the solute does
+not fit inside the brick at all, in which case you should raise the padding or
+use `shape: cube`.
+```
 
 ### Monomer Specification
 
@@ -243,6 +274,16 @@ solvent:
 
 With `neutralize: true`, `nacl_concentration` targets the final neutralized
 Na+/Cl- ion concentration, not extra salt added after counter-ions.
+
+`box.padding` is the clearance between the **solute** and the box edge. When
+polymers are configured, `polymers.packing.padding` is added to it and the
+resulting cell is computed from the protein and substrate before any packing
+happens, so it is identical across replicates of a condition; the packed
+topology is not re-centred afterwards. Without polymers the box is computed
+from the solute at solvation time, exactly as before, so existing control
+bundles remain valid. The number of waters and ions follows from the box
+volume and `target_density`, so a deterministic box means deterministic
+solvent counts.
 
 ### Water Models
 

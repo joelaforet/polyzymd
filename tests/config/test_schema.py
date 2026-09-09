@@ -971,3 +971,65 @@ class TestMinimizationConfig:
         with_ = SimulationConfig(**with_block)
         assert config_hash(without) == config_hash(with_)
         assert "minimization" not in without.model_dump(mode="json")["simulation_phases"]
+
+
+class TestPolymerPackingSphereConfinement:
+    """``polymers.packing.confine_to_sphere`` and its effect on the build hash."""
+
+    @staticmethod
+    def _polymer_block():
+        return {
+            "enabled": True,
+            "type_prefix": "SBMA-EGMA",
+            "length": 5,
+            "count": 10,
+            "sdf_directory": "/tmp/test",
+            "monomers": [
+                {"label": "A", "probability": 1.0, "name": "SBMA", "smiles": "C=C"},
+            ],
+        }
+
+    def test_default_is_true(self):
+        from polyzymd.config.schema import PolymerPackingConfig
+
+        assert PolymerPackingConfig().confine_to_sphere is True
+
+    def test_can_be_disabled(self):
+        from polyzymd.config.schema import PolymerPackingConfig
+
+        assert PolymerPackingConfig(confine_to_sphere=False).confine_to_sphere is False
+
+    def test_changes_the_build_hash_of_polymer_configs(self, minimal_config_data):
+        """Polymer systems built before this change must be rebuilt."""
+        import copy
+
+        from polyzymd.simulation.artifact_integrity import config_hash
+
+        base = copy.deepcopy(minimal_config_data)
+        base["polymers"] = self._polymer_block()
+        default = SimulationConfig(**copy.deepcopy(base))
+
+        disabled = copy.deepcopy(base)
+        disabled["polymers"]["packing"] = {"confine_to_sphere": False}
+        assert config_hash(default) != config_hash(SimulationConfig(**disabled))
+
+    def test_leaves_control_configs_untouched(self, minimal_config_data):
+        """A config without a polymers block never sees the new key."""
+        import copy
+
+        control = SimulationConfig(**copy.deepcopy(minimal_config_data))
+        assert control.polymers is None
+        assert control.model_dump(mode="json")["polymers"] is None
+
+    def test_minimization_stays_out_of_the_hash(self, minimal_config_data):
+        """The runtime-only minimisation block must remain excluded."""
+        import copy
+
+        from polyzymd.simulation.artifact_integrity import config_hash
+
+        base = copy.deepcopy(minimal_config_data)
+        base["polymers"] = self._polymer_block()
+        without = SimulationConfig(**copy.deepcopy(base))
+        with_block = copy.deepcopy(base)
+        with_block["simulation_phases"]["minimization"] = {"freeze_solute": False}
+        assert config_hash(without) == config_hash(SimulationConfig(**with_block))

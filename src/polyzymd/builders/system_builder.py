@@ -293,7 +293,9 @@ class SystemBuilder:
         box_vectors_nm: Optional[List[float]] = None,
         seed: Optional[int] = None,
         exclude_solute_bbox: bool = False,
+        confine_to_sphere: bool = True,
         nloop: int = 200,
+        box_vectors: Optional[Any] = None,
     ) -> Topology:
         """Pack polymers around the combined solute topology.
 
@@ -315,7 +317,17 @@ class SystemBuilder:
                 ``None`` leaves Packmol on its fixed built-in default.
             exclude_solute_bbox: Confine chains to a shell outside the solute
                 bounding box (legacy). Default ``False``.
+            confine_to_sphere: Confine chains to a sphere around the solute
+                (radius = solute bounding-box circumradius + *padding*) while
+                packing inside the final periodic brick. Default ``True``.
             nloop: Maximum PACKMOL GENCAN loops per molecule type.
+            box_vectors: Final periodic box vectors (3x3 Quantity) of the
+                simulation cell.  When given, chains are packed inside the
+                rectangular brick of this cell so that no atom can overlap its
+                own periodic image, and *padding* is used only for the radius
+                of the confinement sphere.  ``None`` restores the legacy
+                behaviour of packing into a separate rectangular box of
+                solute bbox + 2 * *padding*.
 
         Returns:
             Topology with polymers packed.
@@ -335,9 +347,20 @@ class SystemBuilder:
 
         from polyzymd.utils import boxvectors
         from polyzymd.utils.packmol import pack_polymers as _pack_polymers
+        from polyzymd.utils.packmol import solute_sphere_constraint
 
-        # Calculate box vectors — explicit override or auto from bbox + padding
-        if box_vectors_nm is not None:
+        # Calculate box vectors — final cell, explicit override, or legacy
+        # bbox + padding.  The final cell is preferred: packing inside the
+        # brick of the box the system will actually be simulated in is what
+        # keeps the chains away from their own periodic images.
+        if box_vectors is not None:
+            box_vecs = box_vectors
+            LOGGER.info(
+                "Packing polymers inside the final periodic brick "
+                f"(box vectors {np.diagonal(np.asarray(box_vecs.m_as('nanometer'))).round(3)} nm "
+                "on the diagonal)"
+            )
+        elif box_vectors_nm is not None:
             LOGGER.info(
                 f"Using explicit box vectors: "
                 f"[{box_vectors_nm[0]:.2f}, {box_vectors_nm[1]:.2f}, "
@@ -356,6 +379,7 @@ class SystemBuilder:
         )
 
         # Pack polymers using our custom PACKMOL runner (supports movebadrandom)
+        solute_topology = self._combined_topology
         packed_top = _pack_polymers(
             molecules=self._polymer_molecules,
             number_of_copies=self._polymer_counts,
@@ -366,10 +390,15 @@ class SystemBuilder:
             nloop=nloop,
             seed=seed,
             exclude_solute_bbox=exclude_solute_bbox,
+            confine_to_sphere=confine_to_sphere,
+            sphere_padding_angstrom=padding * 10.0,
             working_directory=str(working_directory) if working_directory else None,
             retain_working_files=True,
         )
         self._build_provenance["polymer_packmol_seed"] = seed
+        if confine_to_sphere:
+            sphere = solute_sphere_constraint(solute_topology, padding_angstrom=padding * 10.0)
+            self._build_provenance["polymer_sphere_radius_nm"] = float(sphere[3]) / 10.0
 
         # Re-number chains
         self._renumber_chains(packed_top)
@@ -937,8 +966,34 @@ class SystemBuilder:
         # 3. Combine enzyme + substrate
         self.combine_solutes()
 
+        # 3b. Compute the periodic cell FIRST, from the protein + substrate
+        # alone.  The cell must not depend on where Packmol happens to put the
+        # polymer chains, otherwise replicates of one condition end up with
+        # different box volumes and therefore different water and ion counts.
+        # Polymers get their room by reserving polymers.packing.padding on top
+        # of solvent.box.padding.
+        polymers_enabled = bool(config.polymers and config.polymers.enabled)
+        deterministic_box = polymers_enabled and config.polymers.packing.box_vectors is None
+        box_vectors = None
+        if deterministic_box:
+            box_vectors = self._solvent_builder.compute_box_vectors_from_config(
+                self._combined_topology,
+                config.solvent,
+                extra_padding_nm=config.polymers.packing.padding,
+            )
+            LOGGER.info(
+                "Deterministic periodic cell from the protein + substrate bounding box "
+                f"+ 2 x ({config.polymers.packing.padding} + {config.solvent.box.padding}) nm: "
+                f"{box_vectors}"
+            )
+        elif polymers_enabled:
+            LOGGER.warning(
+                "polymers.packing.box_vectors is set: the periodic cell is derived from the "
+                "packed topology (legacy behaviour) and will differ between replicates."
+            )
+
         # 4. Build and pack polymers (if configured)
-        if config.polymers and config.polymers.enabled:
+        if polymers_enabled:
             LOGGER.info(f"Building polymers: {config.polymers.type_prefix}")
 
             characters = [m.label for m in config.polymers.monomers]
@@ -1003,18 +1058,26 @@ class SystemBuilder:
                 tolerance=packing.tolerance,
                 movebadrandom=packing.movebadrandom,
                 working_directory=self._working_dir,
+                box_vectors_nm=packing.box_vectors,
                 seed=polymer_seed,
                 exclude_solute_bbox=packing.exclude_solute_bbox,
+                confine_to_sphere=packing.confine_to_sphere,
                 nloop=packing.nloop,
+                box_vectors=box_vectors,
             )
 
-        # 5. Solvate
+        # 5. Solvate.  With a precomputed cell the packed topology is already
+        # framed in the brick, so the solvent builder must not re-centre it.
         LOGGER.info("Solvating system")
         self._solvent_builder.solvate_from_config(
-            self._combined_topology, config.solvent, seed=polymer_seed
+            self._combined_topology,
+            config.solvent,
+            seed=polymer_seed,
+            box_vectors=box_vectors,
         )
         self._solvated_topology = self._solvent_builder.solvated_topology
         self._build_provenance["solvent_packmol_seed"] = self._solvent_builder.packmol_seed
+        self._record_box_provenance(deterministic_box)
 
         # Save solvated PDB if working dir specified
         self._assign_pdb_identifiers()
@@ -1299,6 +1362,23 @@ class SystemBuilder:
                         atom.metadata["residue_number"] = residue_num + 1
 
         LOGGER.info("Fixed all 0-indexed residues")
+
+    def _record_box_provenance(self, deterministic_box: bool) -> None:
+        """Record the final cell in the build provenance.
+
+        ``box_vectors_nm`` and ``brick_nm`` let a user confirm that replicates
+        of one condition really do share a box (and therefore the same water
+        and ion counts) by diffing their ``build_manifest.json`` files.
+        """
+        import numpy as np
+
+        self._build_provenance["deterministic_box"] = bool(deterministic_box)
+        box_vecs = self._solvent_builder.box_vectors
+        if box_vecs is None:
+            return
+        arr = np.asarray(box_vecs.m_as("nanometer"), dtype=float)
+        self._build_provenance["box_vectors_nm"] = [[float(v) for v in row] for row in arr]
+        self._build_provenance["brick_nm"] = [float(v) for v in np.diagonal(arr)]
 
     @property
     def build_provenance(self) -> Dict[str, Any]:

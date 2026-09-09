@@ -198,8 +198,10 @@ class PolymerPackingConfig(BaseModel):
     around the protein-ligand complex.
 
     Attributes:
-        padding: Box padding around the solute in nanometers. Larger values
-            give polymers more room and can speed up PACKMOL convergence.
+        padding: Room reserved for the polymer chains around the solute, in
+            nanometers.  It is added to ``solvent.box.padding`` when the
+            periodic cell is computed (before packing, from the protein +
+            substrate alone) and is the padding of the confinement sphere.
         tolerance: Minimum molecular spacing for PACKMOL in Angstrom.
         movebadrandom: When ``True``, pass the ``movebadrandom`` keyword to
             PACKMOL.  This places badly-packed molecules at random positions
@@ -218,6 +220,11 @@ class PolymerPackingConfig(BaseModel):
             tolerance, confining chains to a rectangular shell (legacy
             behaviour).  Default ``False``: chains may pack anywhere in the
             box and the tolerance against the fixed solute prevents overlap.
+        confine_to_sphere: When ``True`` (default), chains are packed inside a
+            sphere centred on the solute with radius
+            ``0.5 * |solute bbox diagonal| + padding``, in addition to the
+            periodic brick.  Without it the chains spread into the corners of
+            the brick and drift away from the protein.
         nloop: Maximum PACKMOL GENCAN loops per molecule type (default 200).
 
     Example:
@@ -225,7 +232,9 @@ class PolymerPackingConfig(BaseModel):
         >>> PolymerPackingConfig(box_vectors=[8.0, 10.0, 12.0])
     """
 
-    padding: float = Field(2.0, gt=0.0, description="Box padding around solute (nm)")
+    padding: float = Field(
+        2.0, gt=0.0, description="Room reserved for polymer chains around the solute (nm)"
+    )
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
     exclude_solute_bbox: bool = Field(
         False,
@@ -233,6 +242,14 @@ class PolymerPackingConfig(BaseModel):
             "Confine polymers to a rectangular shell outside the solute bounding box "
             "(legacy behaviour). Off by default: the PACKMOL tolerance against the fixed "
             "solute already prevents overlap, and the shell over-constrains long chains."
+        ),
+    )
+    confine_to_sphere: bool = Field(
+        True,
+        description=(
+            "Confine polymer chains to a sphere around the solute (radius = solute "
+            "bounding-box circumradius + padding) while packing inside the final "
+            "periodic brick. Set false to let chains fill the whole brick."
         ),
     )
     nloop: int = Field(200, ge=1, description="Maximum PACKMOL GENCAN loops per molecule type")

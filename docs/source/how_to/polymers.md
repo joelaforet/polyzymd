@@ -255,28 +255,50 @@ polymers:
 
 Polymers are placed in the simulation box using PACKMOL:
 
-1. Enzyme (+ substrate) placed at the center and held fixed
-2. Polymers placed anywhere in the packing box; PACKMOL keeps every polymer
-   atom at least `polymers.packing.tolerance` (default 2 Å) from the fixed
-   solute and from other chains
-3. Water molecules fill the remaining space (solvation box from
-   `solvent.box.padding`)
-4. Ions added to neutralize and reach target concentration
+1. The periodic cell is computed first, from the enzyme + substrate bounding box
+   grown by `polymers.packing.padding + solvent.box.padding` on every side
+2. Enzyme (+ substrate) centered in the rectangular brick of that cell and held
+   fixed
+3. Polymers placed inside the same brick, and inside a sphere around the solute;
+   PACKMOL keeps every polymer atom at least `polymers.packing.tolerance`
+   (default 2 Å) from the fixed solute and from other chains
+4. Water molecules fill the remaining space in the same brick — the system is
+   *not* re-centred between packing and solvation
+5. Ions added to neutralize and reach target concentration
 
 PACKMOL is seeded with the replicate number, so each replicate gets an
-independent polymer arrangement and solvent configuration.
+independent polymer arrangement and solvent configuration — but every replicate
+of one condition gets the *same* box, water count and ion count, because the
+cell no longer depends on where the chains landed.
 
-### Packing Box and Shell
+### Packing Box and Sphere
 
-`polymers.packing.padding` (default 2.0 nm) sets how far the polymer packing box
-extends beyond the solute:
+`polymers.packing.padding` (default 2.0 nm) is the room reserved for the chains.
+It is added to `solvent.box.padding` when the cell is computed, and it is the
+padding of the confinement sphere (radius = half the solute bounding-box
+diagonal + `padding`):
 
 ```yaml
 polymers:
   packing:
-    padding: 2.0          # nm around the solute for polymer placement
-    tolerance: 2.0        # Å minimum atom-atom distance
-    movebadrandom: true   # helps many unique chain types converge
+    padding: 2.0            # nm of room reserved for the chains
+    tolerance: 2.0          # Å minimum atom-atom distance
+    movebadrandom: true     # helps many unique chain types converge
+    confine_to_sphere: true # keep chains in a shell around the solute
+```
+
+Packing inside the final brick is what keeps chains away from their own
+periodic images: two atoms that both lie inside the brick shrunk by `tolerance`
+are at least `tolerance` apart across every lattice vector. Set
+`confine_to_sphere: false` to let the chains fill the whole brick — they stay
+periodic-image safe, but they drift further from the protein (mean
+polymer-to-protein distance 23 Å instead of 19 Å in the SBMA-EGMA pentamer
+systems).
+
+```{warning}
+Setting `packing.box_vectors` opts out of the deterministic cell: chains are
+packed into that explicit box and the periodic cell is derived afterwards from
+the packed topology, which differs between replicates. Prefer `padding`.
 ```
 
 Earlier versions also confined chains to a rectangular shell outside the
@@ -294,6 +316,9 @@ contacts. Two safeguards apply before any simulation starts:
 - The build aborts with `SolvationClashError` if more than a handful of packed
   atoms overlap the solute, which indicates a coordinate-frame problem rather
   than imperfect packing.
+- The build aborts with `PeriodicImageClashError` if any atom lies within half
+  the tolerance of one of its own periodic images, checked after packing and
+  again after solvation over all 26 neighbouring cells.
 - Minimization holds the protein and substrate fixed by default, so residual
   polymer or water contacts are resolved by moving the polymer or water, never
   the protein. See {doc}`../explanation/simulation_safeguards`.
