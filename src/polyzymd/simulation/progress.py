@@ -88,6 +88,9 @@ class EquilibrationStageRecord(BaseModel):
         ISO-format timestamp when the stage started.
     finished_at : str | None
         ISO-format timestamp when the stage finished.
+    polyzymd_version, openmm_version, pixi_environment : str | None
+        Software provenance of the process that ran the stage. ``None`` for
+        records written by PolyzyMD versions that predate these fields.
     """
 
     index: int
@@ -97,6 +100,9 @@ class EquilibrationStageRecord(BaseModel):
     ensemble: str = "NVT"
     started_at: str = Field(default_factory=lambda: _now_iso())
     finished_at: str | None = None
+    polyzymd_version: str | None = None
+    openmm_version: str | None = None
+    pixi_environment: str | None = None
 
 
 class SegmentRecord(BaseModel):
@@ -120,6 +126,11 @@ class SegmentRecord(BaseModel):
         Current status of this segment.
     duration_ns : float
         Simulation time covered by this segment in nanoseconds.
+    polyzymd_version, openmm_version, pixi_environment : str | None
+        Software provenance of the process that ran the segment. ``None``
+        for records written by PolyzyMD versions that predate these fields.
+        A change between consecutive segments means the restart chain
+        switched environment (see the CUDA-driver routing history).
     """
 
     index: int
@@ -130,6 +141,9 @@ class SegmentRecord(BaseModel):
     finished_at: str | None = None
     status: SegmentStatus = SegmentStatus.RUNNING
     duration_ns: float = 0.0
+    polyzymd_version: str | None = None
+    openmm_version: str | None = None
+    pixi_environment: str | None = None
 
 
 class SimulationProgress(BaseModel):

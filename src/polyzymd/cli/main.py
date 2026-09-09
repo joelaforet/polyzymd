@@ -2179,7 +2179,10 @@ def _run_initial_segment(
     if progress is not None:
         eq_stages = []
         if eq_result.get("type") == "staged_equilibration":
+            from polyzymd.utils.version import record_provenance
+
             now_iso = datetime.now(timezone.utc).isoformat()
+            provenance = record_provenance()
             for stage_info in eq_result.get("stages", []):
                 eq_stages.append(
                     EquilibrationStageRecord(
@@ -2189,6 +2192,7 @@ def _run_initial_segment(
                         duration_ns=stage_info["duration_ns"],
                         ensemble=stage_info.get("ensemble", "NVT"),
                         finished_at=now_iso,
+                        **provenance,
                     )
                 )
         progress.equilibration_stages = eq_stages

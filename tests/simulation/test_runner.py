@@ -720,3 +720,90 @@ class TestFindInterruptedEqStage:
         assert info is not None
         assert info["is_temperature_ramping"] is True
         assert info["current_temperature"] == 200.0
+
+
+# ---------------------------------------------------------------------------
+# Provenance recorded per production segment
+# ---------------------------------------------------------------------------
+
+
+class TestSegmentProvenance:
+    """Each production segment must record the software that produced it."""
+
+    def test_parameters_json_and_progress_carry_provenance(self, tmp_path, monkeypatch):
+        import json
+
+        from openmm import NonbondedForce, System, Vec3, unit
+        from openmm.app import Element, Topology
+
+        from polyzymd.simulation.progress import (
+            SegmentStatus,
+            load_or_scan_progress,
+            load_progress,
+            save_progress,
+        )
+        from polyzymd.simulation.runner import SimulationRunner
+
+        monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "test-env")
+        monkeypatch.setenv("SLURM_JOB_ID", "42")
+
+        topology = Topology()
+        chain = topology.addChain("A")
+        residue = topology.addResidue("MOL", chain)
+        topology.addAtom("C", Element.getBySymbol("C"), residue)
+        system = System()
+        system.addParticle(12.0 * unit.dalton)
+        system.setDefaultPeriodicBoxVectors(
+            Vec3(2.0, 0.0, 0.0), Vec3(0.0, 2.0, 0.0), Vec3(0.0, 0.0, 2.0)
+        )
+        # The NPT barostat requires a periodic force on the system.
+        nonbonded = NonbondedForce()
+        nonbonded.setNonbondedMethod(NonbondedForce.CutoffPeriodic)
+        nonbonded.setCutoffDistance(0.9 * unit.nanometer)
+        nonbonded.addParticle(0.0, 0.3, 0.1)
+        system.addForce(nonbonded)
+        positions = [Vec3(0.0, 0.0, 0.0)] * unit.nanometer
+
+        # Ten 1 fs steps, two frames.
+        total_steps = 10
+        progress = load_or_scan_progress(
+            tmp_path, total_steps=total_steps, total_samples=2, timestep_fs=1.0
+        )
+        save_progress(tmp_path, progress)
+
+        runner = SimulationRunner(
+            topology=topology,
+            system=system,
+            positions=positions,
+            working_dir=tmp_path,
+            platform="Reference",
+        )
+        runner.run_production(
+            temperature=300.0,
+            duration_ns=total_steps * 1e-6,
+            num_samples=2,
+            timestep_fs=1.0,
+            segment_index=0,
+            report_interval=5,
+            checkpoint_interval_s=3600.0,
+        )
+
+        params = json.loads(
+            (tmp_path / "production_0" / "production_0_parameters.json").read_text()
+        )
+        prov = params["provenance"]
+        assert prov["pixi_environment"] == "test-env"
+        assert prov["slurm_job_id"] == "42"
+        assert prov["openmm_version"]
+        assert prov["polyzymd_version"]
+        assert prov["hostname"]
+        # Existing consumers keep reading the nested __values__ block.
+        assert params["__values__"]["thermo_params"]["__values__"]["temperature"]
+
+        loaded = load_progress(tmp_path)
+        assert loaded is not None
+        seg = loaded.segments[0]
+        assert seg.status == SegmentStatus.COMPLETED
+        assert seg.pixi_environment == "test-env"
+        assert seg.openmm_version == prov["openmm_version"]
+        assert seg.polyzymd_version == prov["polyzymd_version"]
