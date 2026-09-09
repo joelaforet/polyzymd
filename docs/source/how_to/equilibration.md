@@ -19,6 +19,27 @@ PolyzyMD now requires `simulation_phases.equilibration_stages`.
 
 Even if your protocol is minimal, represent it as one or more named stages.
 
+## What happens before stage 1: minimization
+
+Energy minimization always runs before the first equilibration stage. By
+default it holds every protein and substrate atom fixed and relaxes only water,
+ions, and polymers, so the structure you prepared enters heating exactly as
+built. Keep this default unless you have a specific reason to let the protein
+relax before restraints are applied:
+
+```yaml
+simulation_phases:
+  minimization:
+    freeze_solute: true    # default
+  equilibration_stages:
+    - name: "heating"
+      ...
+```
+
+The minimizer records the solute displacement (expected `0.0`) in
+`minimization/phase.json`. See {doc}`../explanation/simulation_safeguards` for
+the rationale.
+
 ## Simple three-stage example
 
 ```yaml
@@ -173,6 +194,10 @@ pixi run -e build polyzymd build -c config.yaml --dry-run
 Each stage writes its own trajectory, state-data CSV, topology PDB, and
 checkpoint files. The stage name becomes part of the output filename, which
 makes it easier to inspect temperature ramps or restraint-release steps later.
+
+`progress.json` records each completed stage together with the PolyzyMD
+version, OpenMM version, and pixi environment that ran it, so you can confirm
+after the fact that every stage of a restart chain ran under the same software.
 
 ## Troubleshooting
 

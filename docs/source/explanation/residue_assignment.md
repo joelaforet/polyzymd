@@ -73,6 +73,13 @@ plugins, and visualization workflows a shared vocabulary for referring to major
 system components without needing to infer component roles from atom names or
 force-field metadata.
 
+Protein residues in chain A are renumbered consecutively from 1 in the order
+they appear in the input structure (multimers continue the count across
+monomers). Input numbering is therefore not preserved: a crystal structure
+whose first modelled residue is number 5 has all of its residues shifted down
+by 4 in the built topology. Restraint selections and analysis residue lists
+must use the built numbering (see {doc}`../how_to/restraints`).
+
 For large systems, solvent and other remaining molecules may span multiple chain
 IDs because common topology formats place limits on residue numbering within a
 chain. In that case, the role is still the same: chains D and later represent

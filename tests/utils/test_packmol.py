@@ -670,3 +670,60 @@ class TestClashAtomLimit:
 
         # Defective March-2026 CALB control: 1182 solvent atoms below 1 A.
         assert packmol.SOLVATION_CLASH_ATOM_LIMIT < 1182 / 10
+
+
+class TestPolymerShellExclusion:
+    """The solute bounding-box annulus is opt-in."""
+
+    def _run(self, monkeypatch, tmp_path, **kwargs):
+        from polyzymd.utils import packmol
+
+        original_solute = _MockTopology(np.array([[0.0, 0.0, 0.0]]))
+        centered_solute = _MockTopology(np.array([[15.0, 20.0, 25.0]]))
+        polymer_topology = _MockTopology(np.zeros((1, 3), dtype=float))
+        loaded_positions = np.array([[15.0, 20.0, 25.0], [40.0, 40.0, 40.0]])
+        TestSolvateAssemblyCoordinates._install_fake_openff_modules(
+            monkeypatch,
+            centered_solute=centered_solute,
+            assembled_solvent=polymer_topology,
+            loaded_positions=loaded_positions,
+        )
+        boxvectors_mod = types.ModuleType("polyzymd.utils.boxvectors")
+        boxvectors_mod.get_topology_bbox_bounds = MagicMock(
+            return_value=(np.array([10.0, 10.0, 10.0]), np.array([20.0, 20.0, 20.0]))
+        )
+        monkeypatch.setitem(sys.modules, "polyzymd.utils.boxvectors", boxvectors_mod)
+        run_packmol = MagicMock(return_value=tmp_path / "packmol.pdb")
+        monkeypatch.setattr(packmol, "run_packmol", run_packmol)
+        monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
+        packmol.pack_polymers(
+            molecules=[object()],
+            number_of_copies=[1],
+            solute=original_solute,
+            box_vectors=MagicMock(),
+            working_directory=tmp_path,
+            **kwargs,
+        )
+        return run_packmol.call_args.kwargs["input_text"], boxvectors_mod.get_topology_bbox_bounds
+
+    def test_default_has_no_outside_box(self, monkeypatch, tmp_path):
+        text, bbox = self._run(monkeypatch, tmp_path)
+        assert "outside box" not in text
+        assert "inside box" in text
+        bbox.assert_not_called()
+
+    def test_opt_in_restores_annulus(self, monkeypatch, tmp_path):
+        text, bbox = self._run(monkeypatch, tmp_path, exclude_solute_bbox=True)
+        assert "outside box 8.000000 8.000000 8.000000 22.000000 22.000000 22.000000" in text
+        bbox.assert_called_once()
+
+    def test_nloop_is_rendered(self, monkeypatch, tmp_path):
+        text, _ = self._run(monkeypatch, tmp_path, nloop=50)
+        assert "nloop 50" in text.splitlines()
+
+    def test_packing_config_defaults(self):
+        from polyzymd.config.schema import PolymerPackingConfig
+
+        cfg = PolymerPackingConfig()
+        assert cfg.exclude_solute_bbox is False
+        assert cfg.nloop == 200

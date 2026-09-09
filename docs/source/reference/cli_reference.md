@@ -209,6 +209,13 @@ polyzymd build -c config.yaml -r 1 --format gromacs
 The build command creates:
 - `solvated_system.pdb` - Complete system with water and ions
 - `system.xml` - OpenMM serialized system with restraints
+- `build_manifest.json` - SHA-256 hashes of the two files above, the config
+  hash, OpenMM and PolyzyMD versions, and the PACKMOL seeds under `provenance`
+
+PACKMOL is seeded with the replicate number, so replicates start from
+independent coordinates. The build aborts with `SolvationClashError` if packed
+solvent or polymer atoms overlap the solute (see
+{doc}`../how_to/troubleshooting`).
 
 ### Output Files (GROMACS)
 

@@ -56,6 +56,15 @@ Always make protein selections chain-aware enough to avoid accidental matches.
 `protein and resid 77 and name OG` is safer than `resid 77 and name OG`.
 ```
 
+```{important}
+`resid` refers to the residue number in the **built** topology, not in your
+input PDB. PolyzyMD renumbers the protein consecutively from 1 (chain A), so
+if your PDB starts at residue 5, crystal-structure residue 144 becomes
+`resid 140`. Substrate (chain B) residues also restart at 1. Check
+`solvated_system.pdb` after `polyzymd build` and adjust selections and
+analysis definitions accordingly.
+```
+
 ## Step 4: find the right atom indices
 
 If the atom names in your input files are not enough, first build the system so
@@ -143,6 +152,8 @@ restraints:
 ### no atoms match the selection
 
 Check residue numbering, atom names, and chain identity in the built PDB.
+Remember that the protein is renumbered from 1: a PDB whose first residue is
+number 5 shifts every `resid` down by 4 relative to the crystal numbering.
 
 ### selection matches more than one atom
 

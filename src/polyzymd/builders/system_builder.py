@@ -292,6 +292,8 @@ class SystemBuilder:
         working_directory: Optional[Union[str, Path]] = None,
         box_vectors_nm: Optional[List[float]] = None,
         seed: Optional[int] = None,
+        exclude_solute_bbox: bool = False,
+        nloop: int = 200,
     ) -> Topology:
         """Pack polymers around the combined solute topology.
 
@@ -311,6 +313,9 @@ class SystemBuilder:
                 midpoint of this box.
             seed: Packmol random seed (typically the replicate index).
                 ``None`` leaves Packmol on its fixed built-in default.
+            exclude_solute_bbox: Confine chains to a shell outside the solute
+                bounding box (legacy). Default ``False``.
+            nloop: Maximum PACKMOL GENCAN loops per molecule type.
 
         Returns:
             Topology with polymers packed.
@@ -358,7 +363,9 @@ class SystemBuilder:
             box_vectors=box_vecs,
             tolerance_angstrom=tolerance,
             movebadrandom=movebadrandom,
+            nloop=nloop,
             seed=seed,
+            exclude_solute_bbox=exclude_solute_bbox,
             working_directory=str(working_directory) if working_directory else None,
             retain_working_files=True,
         )
@@ -997,6 +1004,8 @@ class SystemBuilder:
                 movebadrandom=packing.movebadrandom,
                 working_directory=self._working_dir,
                 seed=polymer_seed,
+                exclude_solute_bbox=packing.exclude_solute_bbox,
+                nloop=packing.nloop,
             )
 
         # 5. Solvate

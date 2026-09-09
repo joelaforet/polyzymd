@@ -69,6 +69,7 @@ If you are adding or reviewing an analysis plugin, read these pages first:
 Analysis system concepts <analysis_concepts>
 Architecture and design rationale <architecture>
 Residue assignment and chain conventions <residue_assignment>
+Why PolyzyMD guards the prepared structure <simulation_safeguards>
 Why PolyzyMD uses colored logging <colored_logging>
 ```
 

@@ -213,6 +213,12 @@ class PolymerPackingConfig(BaseModel):
             plus *padding*.  The protein is centered at the midpoint of
             the box.  Default is ``None`` (auto-compute from solute
             bounding box + padding).
+        exclude_solute_bbox: When ``True``, add a PACKMOL ``outside box``
+            constraint equal to the solute bounding box inflated by the
+            tolerance, confining chains to a rectangular shell (legacy
+            behaviour).  Default ``False``: chains may pack anywhere in the
+            box and the tolerance against the fixed solute prevents overlap.
+        nloop: Maximum PACKMOL GENCAN loops per molecule type (default 200).
 
     Example:
         >>> PolymerPackingConfig(padding=2.5, movebadrandom=True)
@@ -221,6 +227,15 @@ class PolymerPackingConfig(BaseModel):
 
     padding: float = Field(2.0, gt=0.0, description="Box padding around solute (nm)")
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
+    exclude_solute_bbox: bool = Field(
+        False,
+        description=(
+            "Confine polymers to a rectangular shell outside the solute bounding box "
+            "(legacy behaviour). Off by default: the PACKMOL tolerance against the fixed "
+            "solute already prevents overlap, and the shell over-constrains long chains."
+        ),
+    )
+    nloop: int = Field(200, ge=1, description="Maximum PACKMOL GENCAN loops per molecule type")
     movebadrandom: bool = Field(
         False,
         description=(

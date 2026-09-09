@@ -42,11 +42,18 @@ scratch or in the projects directory) grows to:
 ```
 {scratch_dir}/{naming_template}/       # One directory per replicate
 ├── solvated_system.pdb                # Topology (created by polyzymd build)
-├── equilibration_heating/             # Equilibration stage output
+├── system.xml                         # OpenMM System with restraints (polyzymd build)
+├── build_manifest.json                # Hashes, config hash, versions, PACKMOL seeds
+├── progress.json                      # Stage/segment records with runtime provenance
+├── minimization/
+│   ├── minimized_state.xml
+│   └── phase.json                     # includes frozen_atoms, frozen_rmsd_angstrom
+├── equilibration_0_heating/           # Equilibration stage output
 │   └── ...
 ├── production_0/                      # First production segment
 │   ├── production_0_trajectory.dcd    # Trajectory
-│   └── production_0_topology.pdb      # Topology snapshot
+│   ├── production_0_topology.pdb      # Topology snapshot
+│   └── production_0_parameters.json   # Parameters + "provenance" block
 ├── production_1/                      # Daisy-chain continuation segment
 │   ├── production_1_trajectory.dcd
 │   └── production_1_topology.pdb
@@ -55,6 +62,19 @@ scratch or in the projects directory) grows to:
 
 Each replicate gets its own complete directory containing a topology file and
 one or more trajectory segments.
+
+### Provenance files
+
+| File | Key contents |
+|------|--------------|
+| `build_manifest.json` | SHA-256 of `solvated_system.pdb` and `system.xml`, the config hash, `openmm_version`, `polyzymd_version`, and `provenance` (`packmol_seed`, `polymer_seed`, per-stage PACKMOL seeds). `polyzymd submit --skip-build` refuses bundles whose config hash no longer matches `config.yaml` |
+| `progress.json` | One record per equilibration stage and production segment with `polyzymd_version`, `openmm_version`, `pixi_environment` (null in files written by older versions) |
+| `production_N/production_N_parameters.json` | Simulation parameters plus a top-level `provenance` block (`polyzymd_version`, `openmm_version`, `pixi_environment`, `hostname`, `slurm_job_id`) |
+| `minimization/phase.json` | Phase status, state path, `frozen_atoms`, and `frozen_rmsd_angstrom` (0.0 when the solute was frozen) |
+
+When loading multi-segment trajectories, the analysis loader verifies that the
+segments form one contiguous, evenly spaced time line and raises
+`TrajectoryLineageError` otherwise (see {doc}`../how_to/troubleshooting`).
 
 ---
 
