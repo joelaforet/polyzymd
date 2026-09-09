@@ -2154,8 +2154,17 @@ def _run_initial_segment(
             return
 
     # Minimize
-    colored_echo("Running energy minimization...", phase="simulation")
-    runner.minimize()
+    minimization = sim_config.simulation_phases.minimization
+    colored_echo(
+        "Running energy minimization"
+        + (" (protein and substrate frozen)..." if minimization.freeze_solute else "..."),
+        phase="simulation",
+    )
+    runner.minimize(
+        max_iterations=minimization.max_iterations,
+        tolerance=minimization.tolerance,
+        freeze_solute=minimization.freeze_solute,
+    )
 
     # Equilibrate
     phases = sim_config.simulation_phases

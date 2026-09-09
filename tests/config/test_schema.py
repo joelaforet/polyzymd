@@ -932,3 +932,42 @@ class TestGromacsEngineConfigWarnings:
             SimulationConfig(**minimal_config_data)
 
         assert not any("override" in r.message for r in caplog.records)
+
+
+class TestMinimizationConfig:
+    """Runtime-only minimisation block: defaults on, never part of the build hash."""
+
+    def test_defaults_freeze_solute(self, minimal_config_data):
+        cfg = SimulationConfig(**minimal_config_data)
+        m = cfg.simulation_phases.minimization
+        assert m.freeze_solute is True
+        assert m.max_iterations == 1000
+        assert m.tolerance == pytest.approx(10.0)
+
+    def test_explicit_values_are_honoured(self, minimal_config_data):
+        minimal_config_data["simulation_phases"]["minimization"] = {
+            "freeze_solute": False,
+            "max_iterations": 0,
+            "tolerance": 1.0,
+        }
+        cfg = SimulationConfig(**minimal_config_data)
+        assert cfg.simulation_phases.minimization.freeze_solute is False
+        assert cfg.simulation_phases.minimization.max_iterations == 0
+
+    def test_rejects_unknown_keys(self, minimal_config_data):
+        minimal_config_data["simulation_phases"]["minimization"] = {"freeze_protein": True}
+        with pytest.raises(ValidationError):
+            SimulationConfig(**minimal_config_data)
+
+    def test_does_not_change_build_config_hash(self, minimal_config_data):
+        """Pre-built bundles must stay valid whether or not the block is present."""
+        import copy
+
+        from polyzymd.simulation.artifact_integrity import config_hash
+
+        without = SimulationConfig(**copy.deepcopy(minimal_config_data))
+        with_block = copy.deepcopy(minimal_config_data)
+        with_block["simulation_phases"]["minimization"] = {"freeze_solute": False}
+        with_ = SimulationConfig(**with_block)
+        assert config_hash(without) == config_hash(with_)
+        assert "minimization" not in without.model_dump(mode="json")["simulation_phases"]

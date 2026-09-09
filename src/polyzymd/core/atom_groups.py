@@ -35,6 +35,8 @@ PREDEFINED_GROUPS: FrozenSet[str] = frozenset(
         "ligand_heavy",
         # Polymer groups
         "polymer_heavy",
+        # Everything Packmol treated as the fixed solute (protein + substrate, all atoms)
+        "solute",
         # Solvent groups
         "solvent",
         "water_only",
@@ -300,6 +302,8 @@ class AtomGroupResolver:
             return self._get_ligand_heavy()
         elif group_name == "polymer_heavy":
             return self._get_polymer_heavy()
+        elif group_name == "solute":
+            return self._get_solute()
         elif group_name == "solvent":
             return self._get_solvent()
         elif group_name == "water_only":
@@ -384,6 +388,21 @@ class AtomGroupResolver:
 
         logger.debug(f"Resolved 'ligand_heavy': {len(heavy_atoms)} atoms")
         return heavy_atoms
+
+    def _get_solute(self) -> List[int]:
+        """Get every protein and substrate atom, hydrogens included.
+
+        This is the set of atoms that Packmol held fixed while packing polymers
+        and solvent, and the set frozen during energy minimisation so that the
+        prepared structure enters equilibration with its coordinates unchanged.
+        """
+        atoms: List[int] = []
+        if self._info.has_protein:
+            atoms.extend(self._get_chain_atoms(self._info.protein_chain_id))
+        if self._info.has_substrate:
+            atoms.extend(self._get_chain_atoms(self._info.substrate_chain_id))
+        logger.debug(f"Resolved 'solute': {len(atoms)} atoms")
+        return sorted(atoms)
 
     def _get_polymer_heavy(self) -> List[int]:
         """Get all non-hydrogen polymer atoms."""

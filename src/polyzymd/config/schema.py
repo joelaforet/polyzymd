@@ -1087,15 +1087,47 @@ class EquilibrationStageConfig(BaseModel):
         )
 
 
+class MinimizationConfig(BaseModel):
+    """Energy-minimisation settings.
+
+    Attributes:
+        freeze_solute: Hold every protein and substrate atom fixed during
+            minimisation so that only solvent and polymers relax. The prepared
+            structure therefore enters equilibration with its coordinates
+            unchanged (solute RMSD to the input structure is zero), and no
+            packing artefact can be "accommodated" by protein deformation.
+        max_iterations: Maximum minimiser iterations (0 = until convergence).
+        tolerance: Energy tolerance in kJ/mol/nm.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    freeze_solute: bool = Field(
+        True, description="Freeze protein and substrate atoms during minimisation"
+    )
+    max_iterations: int = Field(1000, ge=0, description="Maximum minimiser iterations")
+    tolerance: float = Field(10.0, gt=0, description="Energy tolerance in kJ/mol/nm")
+
+
 class SimulationPhasesConfig(BaseModel):
     """Configuration for all simulation phases.
 
     Attributes:
+        minimization: Energy-minimisation settings (runtime only, see below)
         equilibration_stages: Multi-stage equilibration protocol
         production: Production phase settings
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    # Runtime-only setting: excluded from model_dump() so that adding or changing it
+    # does not alter the build-manifest config hash and invalidate pre-built bundles
+    # (minimisation happens at run time, not at build time).
+    minimization: MinimizationConfig = Field(
+        default_factory=MinimizationConfig,
+        exclude=True,
+        description="Energy-minimisation settings (does not affect the built system)",
+    )
 
     equilibration_stages: list[EquilibrationStageConfig] | None = Field(
         None, description="Multi-stage equilibration protocol with position restraints"

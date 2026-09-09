@@ -264,19 +264,71 @@ class SimulationRunner:
             self._system.removeForce(i)
             LOGGER.debug("Removed barostat")
 
+    def _solute_atom_indices(self) -> List[int]:
+        """Indices of every protein and substrate atom (see ``AtomGroupResolver``)."""
+        from polyzymd.core.atom_groups import AtomGroupResolver, SystemComponentInfo
+
+        component_info = SystemComponentInfo.from_topology(self._topology)
+        return AtomGroupResolver(self._topology, component_info).resolve("solute")
+
+    def _frozen_copy_of_system(self, frozen_indices: List[int]) -> openmm.System:
+        """Return a copy of the System in which *frozen_indices* cannot move.
+
+        OpenMM's minimiser leaves massless particles exactly where they are, but
+        refuses constraints that involve a massless particle, so every constraint
+        touching a frozen atom is dropped from the copy.  Frozen atoms do not move,
+        so those constraints stay satisfied trivially.  The real System is untouched.
+        """
+        frozen_system = XmlSerializer.deserialize(XmlSerializer.serialize(self._system))
+        frozen = set(frozen_indices)
+        for index in frozen:
+            frozen_system.setParticleMass(index, 0.0)
+        removed = 0
+        for constraint_index in range(frozen_system.getNumConstraints() - 1, -1, -1):
+            p1, p2, _ = frozen_system.getConstraintParameters(constraint_index)
+            if p1 in frozen or p2 in frozen:
+                frozen_system.removeConstraint(constraint_index)
+                removed += 1
+        LOGGER.info(
+            "Frozen %d solute atoms for minimization (%d constraints dropped from the copy)",
+            len(frozen),
+            removed,
+        )
+        return frozen_system
+
+    @staticmethod
+    def _max_displacement_angstrom(before: Any, after: Any, indices: List[int]) -> float:
+        """Largest per-atom displacement (Angstrom) over *indices*."""
+        import numpy as np
+
+        if not indices:
+            return 0.0
+        a = np.asarray(before.value_in_unit(omm_unit.angstrom))[indices]
+        b = np.asarray(after.value_in_unit(omm_unit.angstrom))[indices]
+        return float(np.sqrt(((a - b) ** 2).sum(axis=1)).max())
+
     def minimize(
         self,
         max_iterations: int = 1000,
         tolerance: float = 10.0,
+        *,
+        freeze_solute: bool = True,
     ) -> float:
         """Run energy minimization.
 
         Args:
             max_iterations: Maximum iterations (0 = until convergence).
             tolerance: Energy tolerance in kJ/mol/nm.
+            freeze_solute: Hold every protein and substrate atom fixed so that
+                only solvent and polymers relax.  The prepared structure then
+                enters equilibration with its coordinates unchanged; the method
+                verifies this and raises if any solute atom moved.
 
         Returns:
             Final potential energy in kJ/mol.
+
+        Raises:
+            RuntimeError: If ``freeze_solute`` is set and a solute atom moved.
         """
         from polyzymd.simulation.phase_state import phase_completed, write_phase_record
         from polyzymd.simulation.signals import GracefulExit, get_interrupt_signal, is_interrupted
@@ -301,16 +353,50 @@ class SimulationRunner:
             raise GracefulExit(get_interrupt_signal())
         LOGGER.info("Running energy minimization")
 
-        # Create temporary simulation for minimization
+        frozen_indices: List[int] = self._solute_atom_indices() if freeze_solute else []
+        frozen_rmsd: float | None = None
         integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
-        simulation = self._create_simulation(integrator)
-        simulation.context.setPositions(self._current_positions)
+        selection = self._get_platform()
 
-        # Minimize
-        simulation.minimizeEnergy(
-            tolerance=tolerance * omm_unit.kilojoule_per_mole / omm_unit.nanometer,
-            maxIterations=max_iterations,
-        )
+        if frozen_indices:
+            # Minimise on a copy in which the solute is massless (hence fixed), then
+            # hand the relaxed solvent/polymer coordinates to the real System.
+            frozen_system = self._frozen_copy_of_system(frozen_indices)
+            frozen_simulation = Simulation(
+                self._topology, frozen_system, integrator, selection.platform, selection.properties
+            )
+            frozen_simulation.context.setPositions(self._current_positions)
+            frozen_simulation.minimizeEnergy(
+                tolerance=tolerance * omm_unit.kilojoule_per_mole / omm_unit.nanometer,
+                maxIterations=max_iterations,
+            )
+            minimized_positions = frozen_simulation.context.getState(
+                getPositions=True
+            ).getPositions()
+            del frozen_simulation
+            frozen_rmsd = self._max_displacement_angstrom(
+                self._current_positions, minimized_positions, frozen_indices
+            )
+            if frozen_rmsd > 1e-4:
+                raise RuntimeError(
+                    f"Frozen-solute minimization moved a solute atom by {frozen_rmsd:.4f} A; "
+                    "the prepared structure must enter equilibration unchanged."
+                )
+            LOGGER.info(
+                "Solute held fixed during minimization (max displacement %.2e A over %d atoms)",
+                frozen_rmsd,
+                len(frozen_indices),
+            )
+            integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
+            simulation = self._create_simulation(integrator)
+            simulation.context.setPositions(minimized_positions)
+        else:
+            simulation = self._create_simulation(integrator)
+            simulation.context.setPositions(self._current_positions)
+            simulation.minimizeEnergy(
+                tolerance=tolerance * omm_unit.kilojoule_per_mole / omm_unit.nanometer,
+                maxIterations=max_iterations,
+            )
 
         if is_interrupted():
             # OpenMM minimization is not resumable.  Leave only ``started`` so
@@ -331,6 +417,8 @@ class SimulationRunner:
             phase="minimization",
             status="completed",
             state_path=str(state_path.resolve()),
+            frozen_atoms=len(frozen_indices) if frozen_indices else None,
+            frozen_rmsd_angstrom=frozen_rmsd,
         )
 
         LOGGER.info(f"Minimization complete: E = {energy:.2f} kJ/mol")
