@@ -492,6 +492,7 @@ def pack_polymers(
     movebadrandom: bool = False,
     nloop: int | None = 200,
     seed: int | None = None,
+    exclude_solute_bbox: bool = False,
     working_directory: str | Path | None = None,
     retain_working_files: bool = True,
 ):
@@ -499,9 +500,13 @@ def pack_polymers(
 
     This is a drop-in replacement for the OpenFF ``pack_box()`` call in
     :meth:`~polyzymd.builders.system_builder.SystemBuilder.pack_polymers`.
-    It adds support for the ``movebadrandom`` Packmol keyword and packs
-    polymers in a rectangular shell around the protein (via ``outside box``
-    + ``inside box`` constraints).
+    It adds support for the ``movebadrandom`` Packmol keyword.  By default
+    the chains may go anywhere in the packing box: the fixed solute and the
+    Packmol tolerance alone keep them off the protein.  Setting
+    ``exclude_solute_bbox`` restores the older behaviour of confining the
+    chains to a rectangular shell (``outside box`` around the solute's
+    bounding box), which over-constrains long chains into a thin annulus
+    and makes Packmol converge slowly or not at all.
 
     Parameters
     ----------
@@ -523,6 +528,11 @@ def pack_polymers(
         values (200-500) improve convergence.  Default is ``200``.
     seed : int or None, optional
         Packmol random seed (see :func:`build_packmol_input`).
+    exclude_solute_bbox : bool, optional
+        Add an ``outside box`` constraint equal to the solute's bounding box
+        inflated by the tolerance, forcing the chains into a rectangular shell.
+        Default ``False`` (chains pack anywhere; the tolerance against the
+        fixed solute prevents overlap).
     working_directory : str, Path, or None, optional
         Directory for Packmol input/output files.  A temporary directory is
         created when ``None``.
@@ -580,70 +590,29 @@ def pack_polymers(
     # --- center solute in the brick ---
     centered_solute = _center_topology_at("BRICK", solute, box_vectors, brick_size)
 
-    # --- compute inner exclusion box (polymer shell constraint) ---
-    # Polymers must pack in a *shell* around the protein, not throughout
-    # the entire box volume.  We use Packmol's ``outside box`` constraint
-    # with a rectangular exclusion zone equal to the centered solute's
-    # bounding box inflated by the Packmol tolerance on each side.
-    #
-    # The shell thickness is controlled entirely by the caller's
-    # ``packing.padding`` parameter.  If the shell is too thin for the
-    # polymers being packed, a warning is logged with a recommended
-    # padding value.
-    from polyzymd.utils.boxvectors import get_topology_bbox_bounds
-
-    min_coords, max_coords = get_topology_bbox_bounds(centered_solute)
-    inner_exclusion_box = np.array(
-        [
-            min_coords[0] - tolerance_angstrom,
-            min_coords[1] - tolerance_angstrom,
-            min_coords[2] - tolerance_angstrom,
-            max_coords[0] + tolerance_angstrom,
-            max_coords[1] + tolerance_angstrom,
-            max_coords[2] + tolerance_angstrom,
-        ]
-    )
-
-    # Compute shell thicknesses for diagnostics.  The effective packing
-    # box (non-PBC) runs from 0 to ``box_size - tolerance``.
-    effective_box = box_size_angstrom - tolerance_angstrom
-    shell_lo = inner_exclusion_box[:3]  # distance from origin to exclusion face
-    shell_hi = effective_box - inner_exclusion_box[3:]  # exclusion face to box edge
-    min_shell = float(min(np.min(shell_lo), np.min(shell_hi)))
-
-    logger.info(
-        "Protein bbox (A): [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]",
-        *min_coords,
-        *max_coords,
-    )
-    logger.info(
-        "Exclusion box (A): [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]",
-        *inner_exclusion_box,
-    )
-    logger.info(
-        "Shell thickness lo (A): [%.1f, %.1f, %.1f]  hi: [%.1f, %.1f, %.1f]  min: %.1f",
-        *shell_lo,
-        *shell_hi,
-        min_shell,
-    )
-
-    # Warn if the shell is thinner than the largest polymer diameter.
-    max_diameter = max(_max_molecule_diameter_angstrom(mol) for mol in molecules)
-    if min_shell < max_diameter:
-        deficit_nm = (max_diameter - min_shell) / 10.0
-        logger.warning(
-            "Polymer shell thickness (%.1f A) is less than the largest "
-            "polymer diameter (%.1f A). Packing may fail or produce poor "
-            "results. Consider increasing packing.padding by at least "
-            "%.1f nm.",
-            min_shell,
-            max_diameter,
-            deficit_nm,
+    # --- optional inner exclusion box (polymer shell constraint) ---
+    # By default the chains may occupy the whole packing box; Packmol keeps
+    # every polymer atom at least ``tolerance`` from the fixed solute, which
+    # is all the geometry we need.  The legacy ``outside box`` shell equal to
+    # the solute's bounding box (inflated by the tolerance) over-constrains
+    # long chains into an annulus that is often thinner than the chains
+    # themselves, and Packmol then grinds to its loop limit without
+    # converging.
+    inner_exclusion_box = None
+    if exclude_solute_bbox:
+        inner_exclusion_box = _solute_bbox_exclusion(
+            centered_solute, box_size_angstrom, tolerance_angstrom, molecules
+        )
+    else:
+        logger.info(
+            "Polymers pack throughout the box (no solute bounding-box exclusion); "
+            "the %.1f A Packmol tolerance against the fixed solute prevents overlap.",
+            tolerance_angstrom,
         )
 
-    # Force PBC off for polymer packing — we need per-structure ``inside box``
-    # + ``outside box`` constraints to create the polymer shell.  PBC mode
-    # removes per-structure spatial constraints.  (Solvation can still use PBC
+    # Force PBC off for polymer packing so per-structure ``inside box`` (and
+    # the optional ``outside box``) constraints apply.  PBC mode removes
+    # per-structure spatial constraints.  (Solvation can still use PBC
     # since it doesn't need shell constraints.)
     _use_pbc = False
 
@@ -889,6 +858,65 @@ def solvate_with_packmol(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _solute_bbox_exclusion(
+    centered_solute,
+    box_size_angstrom: "NDArray",
+    tolerance_angstrom: float,
+    molecules: list,
+) -> "NDArray":
+    """Legacy rectangular shell: solute bounding box inflated by the tolerance.
+
+    Logs the resulting shell thickness and warns when it is thinner than the
+    largest polymer diameter, in which case Packmol is unlikely to converge.
+    """
+    import numpy as np
+
+    from polyzymd.utils.boxvectors import get_topology_bbox_bounds
+
+    min_coords, max_coords = get_topology_bbox_bounds(centered_solute)
+    inner_exclusion_box = np.array(
+        [
+            min_coords[0] - tolerance_angstrom,
+            min_coords[1] - tolerance_angstrom,
+            min_coords[2] - tolerance_angstrom,
+            max_coords[0] + tolerance_angstrom,
+            max_coords[1] + tolerance_angstrom,
+            max_coords[2] + tolerance_angstrom,
+        ]
+    )
+
+    # Effective packing box (non-PBC) runs from 0 to ``box_size - tolerance``.
+    effective_box = np.asarray(box_size_angstrom, dtype=float) - tolerance_angstrom
+    shell_lo = inner_exclusion_box[:3]
+    shell_hi = effective_box - inner_exclusion_box[3:]
+    min_shell = float(min(np.min(shell_lo), np.min(shell_hi)))
+
+    logger.info(
+        "Protein bbox (A): [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]", *min_coords, *max_coords
+    )
+    logger.info("Exclusion box (A): [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]", *inner_exclusion_box)
+    logger.info(
+        "Shell thickness lo (A): [%.1f, %.1f, %.1f]  hi: [%.1f, %.1f, %.1f]  min: %.1f",
+        *shell_lo,
+        *shell_hi,
+        min_shell,
+    )
+
+    max_diameter = max(_max_molecule_diameter_angstrom(mol) for mol in molecules)
+    if min_shell < max_diameter:
+        deficit_nm = (max_diameter - min_shell) / 10.0
+        logger.warning(
+            "Polymer shell thickness (%.1f A) is less than the largest "
+            "polymer diameter (%.1f A). Packing may fail or produce poor "
+            "results. Consider increasing packing.padding by at least "
+            "%.1f nm, or disable exclude_solute_bbox.",
+            min_shell,
+            max_diameter,
+            deficit_nm,
+        )
+    return inner_exclusion_box
 
 
 def _max_molecule_diameter_angstrom(mol) -> float:

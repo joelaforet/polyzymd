@@ -30,6 +30,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   produced overlapping, backwards-running segments that the loader silently
   concatenated.
 
+### Changed
+
+- **Polymer packing no longer confines chains to a bounding-box annulus.**
+  `pack_polymers()` used to add a PACKMOL `outside box` constraint equal to the
+  solute bounding box, forcing all chains into a rectangular shell that was often
+  thinner than the chains themselves (13 Å shell vs 22-32 Å pentamers in the
+  Paper-1 systems); PACKMOL then ran to its loop limit (6-12 min per replicate)
+  and exited 173.  Chains now pack anywhere in the box and the PACKMOL tolerance
+  against the fixed solute prevents overlap.  New `polymers.packing` keys:
+  `exclude_solute_bbox` (default `false`; `true` restores the shell) and `nloop`
+  (default 200).  Note: this changes the build-manifest config hash of polymer
+  configs, so polymer systems built earlier must be rebuilt before `submit`.
+
 ### Added
 
 - **Frozen-solute energy minimisation.**  `SimulationRunner.minimize()` now holds
