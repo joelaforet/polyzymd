@@ -22,6 +22,8 @@ class PhaseRecord(BaseModel):
     state_path: str | None = None
     system_fingerprint: str | None = None
     config_fingerprint: str | None = None
+    frozen_atoms: int | None = None
+    frozen_rmsd_angstrom: float | None = None
     updated_at: str
 
 

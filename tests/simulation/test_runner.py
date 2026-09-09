@@ -807,3 +807,98 @@ class TestSegmentProvenance:
         assert seg.pixi_environment == "test-env"
         assert seg.openmm_version == prov["openmm_version"]
         assert seg.polyzymd_version == prov["polyzymd_version"]
+
+
+# ---------------------------------------------------------------------------
+# Frozen-solute minimization
+# ---------------------------------------------------------------------------
+
+
+class TestFrozenSoluteMinimization:
+    """Minimization must leave protein/substrate coordinates exactly unchanged."""
+
+    @staticmethod
+    def _system(tmp_path):
+        from openmm import NonbondedForce, System, Vec3, unit
+        from openmm.app import Element, Topology
+
+        top = Topology()
+        protein = top.addChain("A")
+        res = top.addResidue("ALA", protein)
+        top.addAtom("CA", Element.getBySymbol("C"), res)
+        top.addAtom("HA", Element.getBySymbol("H"), res)
+        water = top.addChain("D")
+        res = top.addResidue("HOH", water)
+        top.addAtom("O", Element.getBySymbol("O"), res)
+
+        system = System()
+        nb = NonbondedForce()
+        nb.setNonbondedMethod(NonbondedForce.CutoffPeriodic)
+        nb.setCutoffDistance(0.9 * unit.nanometer)
+        for mass in (12.0, 1.0, 16.0):
+            system.addParticle(mass)
+            nb.addParticle(0.0, 0.3, 0.5)
+        nb.addException(0, 1, 0.0, 0.1, 0.0)  # bonded pair: no LJ between CA and HA
+        system.addForce(nb)
+        system.addConstraint(0, 1, 0.109)  # H-bond constraint on the solute
+        system.setDefaultPeriodicBoxVectors(
+            Vec3(3.0, 0.0, 0.0), Vec3(0.0, 3.0, 0.0), Vec3(0.0, 0.0, 3.0)
+        )
+        # Water oxygen placed 0.6 A from CA: a Packmol imperfect-packing residual.
+        positions = [Vec3(1.0, 1.0, 1.0), Vec3(1.109, 1.0, 1.0), Vec3(1.0, 1.06, 1.0)] * (
+            unit.nanometer
+        )
+        return top, system, positions
+
+    def test_solute_fixed_and_solvent_relaxes(self, tmp_path):
+        import json
+
+        import numpy as np
+        from openmm import unit
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        top, system, positions = self._system(tmp_path)
+        runner = SimulationRunner(
+            topology=top,
+            system=system,
+            positions=positions,
+            working_dir=tmp_path,
+            platform="Reference",
+        )
+        energy = runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=True)
+
+        before = np.asarray(positions.value_in_unit(unit.angstrom))
+        after = np.asarray(runner._current_positions.value_in_unit(unit.angstrom))
+        np.testing.assert_array_equal(after[:2], before[:2])  # solute exactly unchanged
+        assert np.linalg.norm(after[2] - before[2]) > 1.0  # water pushed away
+        assert np.linalg.norm(after[2] - after[0]) > 2.5
+        assert np.isfinite(energy)
+        # The real System keeps its constraints and masses.
+        assert system.getNumConstraints() == 1
+        assert system.getParticleMass(0).value_in_unit(unit.dalton) == 12.0
+
+        record = json.loads((tmp_path / "minimization" / "phase.json").read_text())
+        assert record["status"] == "completed"
+        assert record["frozen_atoms"] == 2
+        assert record["frozen_rmsd_angstrom"] == 0.0
+
+    def test_unfrozen_minimization_moves_solute(self, tmp_path):
+        import numpy as np
+        from openmm import unit
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        top, system, positions = self._system(tmp_path)
+        runner = SimulationRunner(
+            topology=top,
+            system=system,
+            positions=positions,
+            working_dir=tmp_path,
+            platform="Reference",
+        )
+        runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=False)
+        before = np.asarray(positions.value_in_unit(unit.angstrom))
+        after = np.asarray(runner._current_positions.value_in_unit(unit.angstrom))
+        # Without freezing, the overlap is shared between the protein and the water.
+        assert np.linalg.norm(after[0] - before[0]) > 0.1

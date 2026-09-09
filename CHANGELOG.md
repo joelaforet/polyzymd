@@ -28,6 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Frozen-solute energy minimisation.**  `SimulationRunner.minimize()` now holds
+  every protein and substrate atom fixed (new `solute` atom group) and relaxes only
+  solvent and polymers, so the prepared structure enters equilibration with its
+  coordinates unchanged; the runner verifies a zero solute displacement and records
+  it in `minimization/phase.json`.  Implemented by minimising on a copy of the
+  System with massless solute atoms and their constraints removed (OpenMM fixes
+  massless particles but forbids constraints on them); the real System is untouched.
+  Configurable via `simulation_phases.minimization` (`freeze_solute`, default
+  `true`; `max_iterations`; `tolerance`), a runtime-only block that is excluded
+  from the build-manifest config hash so existing bundles remain valid.
+  Motivation: waters packed inside the protein by the pre-d96b1fcd builds were
+  "accommodated" by protein inflation during minimisation before heating.
 - **Packmol seeding by replicate.**  `build_packmol_input()`,
   `solvate_with_packmol()`, `pack_polymers()`, `SolventBuilder.solvate()` and
   `SystemBuilder.pack_polymers()` accept `seed`; `build_from_config()` passes
