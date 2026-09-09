@@ -547,3 +547,89 @@ class TestSeparationStatistics:
         topo = _MockTopology(np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]))
         stats = _assert_solute_solvent_separation(topo, 0, tolerance_angstrom=2.0)
         assert stats["n_other"] == 0
+
+
+class TestPackmolSeed:
+    """Packmol ``seed`` keyword rendering and pass-through."""
+
+    def test_seed_absent_by_default(self):
+        from polyzymd.utils.packmol import build_packmol_input
+
+        text = build_packmol_input(["w.pdb"], [10], np.array([30.0, 30.0, 30.0]), 2.0)
+        assert "seed" not in text
+
+    def test_seed_rendered_when_given(self):
+        from polyzymd.utils.packmol import build_packmol_input
+
+        text = build_packmol_input(["w.pdb"], [10], np.array([30.0, 30.0, 30.0]), 2.0, seed=7)
+        lines = text.splitlines()
+        assert "seed 7" in lines
+        # Global keywords must precede the first structure block.
+        assert lines.index("seed 7") < lines.index("structure w.pdb")
+
+    def test_solvate_with_packmol_forwards_seed(self, monkeypatch, tmp_path):
+        from polyzymd.utils import packmol
+
+        original_solute = _MockTopology(np.array([[0.0, 0.0, 0.0]]))
+        centered_solute = _MockTopology(np.array([[15.0, 20.0, 25.0]]))
+        solvent_topology = _MockTopology(np.zeros((1, 3), dtype=float))
+        loaded_positions = np.array([[15.0, 20.0, 25.0], [30.0, 30.0, 30.0]])
+
+        TestSolvateAssemblyCoordinates._install_fake_openff_modules(
+            monkeypatch,
+            centered_solute=centered_solute,
+            assembled_solvent=solvent_topology,
+            loaded_positions=loaded_positions,
+        )
+        run_packmol = MagicMock(return_value=tmp_path / "packmol.pdb")
+        monkeypatch.setattr(packmol, "run_packmol", run_packmol)
+        monkeypatch.setattr(packmol, "_strip_conect_records", MagicMock(return_value=0))
+        monkeypatch.setattr(packmol, "_check_pbc_available", MagicMock(return_value=False))
+        monkeypatch.setattr(
+            packmol, "_check_ignore_conect_supported", MagicMock(return_value=False)
+        )
+
+        packmol.solvate_with_packmol(
+            molecules=[object()],
+            number_of_copies=[1],
+            solute=original_solute,
+            box_vectors=MagicMock(),
+            working_directory=tmp_path,
+            seed=3,
+        )
+
+        assert "seed 3" in run_packmol.call_args.kwargs["input_text"].splitlines()
+
+    def test_pack_polymers_forwards_seed(self, monkeypatch, tmp_path):
+        from polyzymd.utils import packmol
+
+        original_solute = _MockTopology(np.array([[0.0, 0.0, 0.0]]))
+        centered_solute = _MockTopology(np.array([[15.0, 20.0, 25.0]]))
+        polymer_topology = _MockTopology(np.zeros((1, 3), dtype=float))
+        loaded_positions = np.array([[15.0, 20.0, 25.0], [40.0, 40.0, 40.0]])
+
+        TestSolvateAssemblyCoordinates._install_fake_openff_modules(
+            monkeypatch,
+            centered_solute=centered_solute,
+            assembled_solvent=polymer_topology,
+            loaded_positions=loaded_positions,
+        )
+        boxvectors_mod = types.ModuleType("polyzymd.utils.boxvectors")
+        boxvectors_mod.get_topology_bbox_bounds = MagicMock(
+            return_value=(np.array([10.0, 10.0, 10.0]), np.array([20.0, 20.0, 20.0]))
+        )
+        monkeypatch.setitem(sys.modules, "polyzymd.utils.boxvectors", boxvectors_mod)
+        run_packmol = MagicMock(return_value=tmp_path / "packmol.pdb")
+        monkeypatch.setattr(packmol, "run_packmol", run_packmol)
+        monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
+
+        packmol.pack_polymers(
+            molecules=[object()],
+            number_of_copies=[1],
+            solute=original_solute,
+            box_vectors=MagicMock(),
+            working_directory=tmp_path,
+            seed=5,
+        )
+
+        assert "seed 5" in run_packmol.call_args.kwargs["input_text"].splitlines()

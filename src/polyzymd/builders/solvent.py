@@ -207,6 +207,7 @@ class SolventBuilder:
         self._composition: Optional[SolventComposition] = None
         self._n_solute_atoms: int = 0
         self._packing_tolerance: float = 2.0
+        self._packmol_seed: Optional[int] = None
         self._solvation_counts: Optional[SolvationCounts] = None
 
     @property
@@ -237,6 +238,7 @@ class SolventBuilder:
         box_shape: BoxShapeType = "rhombic_dodecahedron",
         target_density: float = 1.0,
         tolerance: float = 2.0,
+        seed: Optional[int] = None,
     ) -> Topology:
         """Solvate a topology with water, ions, and optional co-solvents.
 
@@ -247,6 +249,9 @@ class SolventBuilder:
             box_shape: Box geometry.
             target_density: Target density in g/mL.
             tolerance: Minimum molecular spacing for PACKMOL in Angstrom.
+            seed: Packmol random seed. ``None`` leaves Packmol on its fixed
+                built-in default (identical coordinates for identical
+                inputs); pass the replicate index for independent replicates.
 
         Returns:
             Solvated OpenFF Topology.
@@ -420,6 +425,7 @@ class SolventBuilder:
             solute=topology,
             box_vectors=box_vecs,
             tolerance_angstrom=tolerance,
+            seed=seed,
         )
 
         # Set residue names
@@ -429,6 +435,7 @@ class SolventBuilder:
         self._box_vectors = box_vecs
         self._n_solute_atoms = int(topology.n_atoms)
         self._packing_tolerance = float(tolerance)
+        self._packmol_seed = seed
 
         # Store solvation counts for PDB chain/residue assignment
         self._solvation_counts = SolvationCounts(
@@ -449,12 +456,14 @@ class SolventBuilder:
         self,
         topology: Topology,
         config: "SolventConfig",
+        seed: Optional[int] = None,
     ) -> Topology:
         """Solvate using configuration object.
 
         Args:
             topology: OpenFF Topology to solvate.
             config: SolventConfig with solvent settings.
+            seed: Packmol random seed (typically the replicate index).
 
         Returns:
             Solvated OpenFF Topology.
@@ -488,6 +497,7 @@ class SolventBuilder:
             box_shape=config.box.shape.value,
             target_density=config.box.target_density,
             tolerance=config.box.tolerance,
+            seed=seed,
         )
 
     @staticmethod
@@ -856,6 +866,11 @@ class SolventBuilder:
                 residue_name = smiles_to_residue[mol_smiles]
                 for atom in mol.atoms:
                     atom.metadata["residue_name"] = residue_name
+
+    @property
+    def packmol_seed(self) -> Optional[int]:
+        """Packmol seed used for the most recent solvation (``None`` if unseeded)."""
+        return self._packmol_seed
 
     def validate(self) -> bool:
         """Validate the solvated topology.

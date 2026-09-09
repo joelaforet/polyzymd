@@ -204,6 +204,7 @@ def build_packmol_input(
     ignore_conect: bool = False,
     inner_exclusion_box_angstrom: "NDArray | None" = None,
     nloop: int | None = None,
+    seed: int | None = None,
 ) -> str:
     """Build the text content of a Packmol input file.
 
@@ -249,6 +250,12 @@ def build_packmol_input(
         Packmol's default is 50; for dense shell-packing with many
         molecules, higher values (200–500) improve convergence.
         Default is ``None`` (use Packmol's built-in default).
+    seed : int or None, optional
+        Seed for Packmol's random number generator (``seed`` keyword).
+        ``None`` omits the keyword, so Packmol uses its fixed built-in
+        default and every run with identical inputs produces identical
+        coordinates.  Pass the replicate index to obtain independent
+        starting configurations per replicate.
 
     Returns
     -------
@@ -291,6 +298,10 @@ def build_packmol_input(
 
     if nloop is not None:
         lines.append(f"nloop {nloop}")
+        lines.append("")
+
+    if seed is not None:
+        lines.append(f"seed {int(seed)}")
         lines.append("")
 
     if use_pbc:
@@ -457,6 +468,7 @@ def pack_polymers(
     tolerance_angstrom: float = 2.0,
     movebadrandom: bool = False,
     nloop: int | None = 200,
+    seed: int | None = None,
     working_directory: str | Path | None = None,
     retain_working_files: bool = True,
 ):
@@ -486,6 +498,8 @@ def pack_polymers(
         Maximum GENCAN optimisation loops per molecule type.  Packmol's
         default is 50; for dense shell-packing with many molecules, higher
         values (200-500) improve convergence.  Default is ``200``.
+    seed : int or None, optional
+        Packmol random seed (see :func:`build_packmol_input`).
     working_directory : str, Path, or None, optional
         Directory for Packmol input/output files.  A temporary directory is
         created when ``None``.
@@ -629,6 +643,7 @@ def pack_polymers(
             movebadrandom=movebadrandom,
             inner_exclusion_box_angstrom=inner_exclusion_box,
             nloop=nloop,
+            seed=seed,
         )
 
         output_path = run_packmol(
@@ -687,6 +702,7 @@ def solvate_with_packmol(
     *,
     tolerance_angstrom: float = 2.0,
     movebadrandom: bool = False,
+    seed: int | None = None,
     working_directory: str | Path | None = None,
     retain_working_files: bool = True,
 ):
@@ -720,6 +736,8 @@ def solvate_with_packmol(
         Packmol tolerance in Angstrom (default 2.0).
     movebadrandom : bool, optional
         Pass the ``movebadrandom`` keyword to Packmol (default ``False``).
+    seed : int or None, optional
+        Packmol random seed (see :func:`build_packmol_input`).
     working_directory : str, Path, or None, optional
         Directory for Packmol input/output files.  A temporary directory is
         created when ``None``.
@@ -797,6 +815,7 @@ def solvate_with_packmol(
             use_pbc=_use_pbc,
             movebadrandom=movebadrandom,
             ignore_conect=_ignore_conect,
+            seed=seed,
         )
 
         output_path = run_packmol(

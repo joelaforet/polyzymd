@@ -759,7 +759,12 @@ def build(
                 from polyzymd.simulation.artifact_integrity import publish_build_bundle
 
                 publish_build_bundle(
-                    working_dir, omm_topology, omm_system, omm_positions, sim_config
+                    working_dir,
+                    omm_topology,
+                    omm_system,
+                    omm_positions,
+                    sim_config,
+                    provenance=builder.build_provenance,
                 )
 
                 colored_echo("System built successfully!", phase="build")

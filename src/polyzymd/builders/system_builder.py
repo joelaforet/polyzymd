@@ -76,6 +76,7 @@ class SystemBuilder:
         self._solvated_topology: Optional[Topology] = None
         self._interchange: Optional[Interchange] = None
         self._working_dir: Optional[Path] = None
+        self._build_provenance: Dict[str, Any] = {}
 
         # Molecule count tracking for PDB chain/residue assignment
         # These are set during build and used by _assign_pdb_identifiers()
@@ -290,6 +291,7 @@ class SystemBuilder:
         movebadrandom: bool = False,
         working_directory: Optional[Union[str, Path]] = None,
         box_vectors_nm: Optional[List[float]] = None,
+        seed: Optional[int] = None,
     ) -> Topology:
         """Pack polymers around the combined solute topology.
 
@@ -307,6 +309,8 @@ class SystemBuilder:
                 in nanometers.  When provided, overrides the auto-computed
                 bounding box + *padding*.  The protein is centered at the
                 midpoint of this box.
+            seed: Packmol random seed (typically the replicate index).
+                ``None`` leaves Packmol on its fixed built-in default.
 
         Returns:
             Topology with polymers packed.
@@ -354,9 +358,11 @@ class SystemBuilder:
             box_vectors=box_vecs,
             tolerance_angstrom=tolerance,
             movebadrandom=movebadrandom,
+            seed=seed,
             working_directory=str(working_directory) if working_directory else None,
             retain_working_files=True,
         )
+        self._build_provenance["polymer_packmol_seed"] = seed
 
         # Re-number chains
         self._renumber_chains(packed_top)
@@ -888,12 +894,27 @@ class SystemBuilder:
             config: SimulationConfig with all settings.
             working_dir: Working directory for output files.
             polymer_seed: Random seed for polymer generation. This is used as a
-                fallback if config.polymers.random_seed is not set.
+                fallback if config.polymers.random_seed is not set. Callers pass
+                the replicate index. The same value seeds Packmol for polymer
+                packing and solvation so that replicates start from independent
+                coordinates (Packmol is otherwise deterministic for identical
+                inputs).
 
         Returns:
             OpenFF Interchange ready for simulation.
         """
         self._working_dir = Path(working_dir) if working_dir else None
+        self._build_provenance = {
+            "polymer_seed": polymer_seed,
+            "packmol_seed": polymer_seed,
+        }
+        if polymer_seed is None:
+            LOGGER.warning(
+                "No replicate seed supplied: Packmol will use its fixed default seed and "
+                "replicates will share identical starting coordinates."
+            )
+        else:
+            LOGGER.info(f"Packmol seed (from replicate): {polymer_seed}")
 
         # 1. Build enzyme
         LOGGER.info(f"Building enzyme: {config.enzyme.name}")
@@ -975,12 +996,16 @@ class SystemBuilder:
                 tolerance=packing.tolerance,
                 movebadrandom=packing.movebadrandom,
                 working_directory=self._working_dir,
+                seed=polymer_seed,
             )
 
         # 5. Solvate
         LOGGER.info("Solvating system")
-        self._solvent_builder.solvate_from_config(self._combined_topology, config.solvent)
+        self._solvent_builder.solvate_from_config(
+            self._combined_topology, config.solvent, seed=polymer_seed
+        )
         self._solvated_topology = self._solvent_builder.solvated_topology
+        self._build_provenance["solvent_packmol_seed"] = self._solvent_builder.packmol_seed
 
         # Save solvated PDB if working dir specified
         self._assign_pdb_identifiers()
@@ -1265,6 +1290,15 @@ class SystemBuilder:
                         atom.metadata["residue_number"] = residue_num + 1
 
         LOGGER.info("Fixed all 0-indexed residues")
+
+    @property
+    def build_provenance(self) -> Dict[str, Any]:
+        """Seeds and settings that determine the build's starting coordinates.
+
+        Populated by :meth:`build_from_config`; recorded in ``build_manifest.json``
+        by :func:`polyzymd.simulation.artifact_integrity.publish_build_bundle`.
+        """
+        return dict(self._build_provenance)
 
     def get_component_info(self) -> "SystemComponentInfo":
         """Get system component information for atom group resolution.

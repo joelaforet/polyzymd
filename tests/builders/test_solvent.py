@@ -128,3 +128,29 @@ def test_charge_to_integer_rejects_true_fractional_charge() -> None:
     """Integer charge conversion should reject fractional net charge."""
     with pytest.raises(ValueError, match="must be an integer"):
         SolventBuilder._charge_to_integer(-15.25)
+
+
+def test_config_translation_forwards_packmol_seed(monkeypatch) -> None:
+    """solvate_from_config should forward the Packmol seed to solvate()."""
+    captured = {}
+
+    def fake_solvate(self, *, topology, composition, **kwargs):
+        captured["kwargs"] = kwargs
+        return topology
+
+    monkeypatch.setattr(SolventBuilder, "solvate", fake_solvate)
+    SolventBuilder().solvate_from_config(object(), SolventConfig(), seed=4)
+    assert captured["kwargs"]["seed"] == 4
+
+
+def test_solvate_default_seed_is_none(monkeypatch) -> None:
+    """Without a seed, solvate_from_config must not invent one."""
+    captured = {}
+
+    def fake_solvate(self, *, topology, composition, **kwargs):
+        captured["kwargs"] = kwargs
+        return topology
+
+    monkeypatch.setattr(SolventBuilder, "solvate", fake_solvate)
+    SolventBuilder().solvate_from_config(object(), SolventConfig())
+    assert captured["kwargs"]["seed"] is None
