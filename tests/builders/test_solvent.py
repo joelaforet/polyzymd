@@ -154,3 +154,185 @@ def test_solvate_default_seed_is_none(monkeypatch) -> None:
     monkeypatch.setattr(SolventBuilder, "solvate", fake_solvate)
     SolventBuilder().solvate_from_config(object(), SolventConfig())
     assert captured["kwargs"]["seed"] is None
+
+
+# ---------------------------------------------------------------------------
+# Deterministic periodic cell
+# ---------------------------------------------------------------------------
+
+
+class _FakeConformer:
+    """Minimal stand-in for an OpenFF conformer quantity."""
+
+    def __init__(self, coords):
+        import numpy as np
+
+        self._coords = np.asarray(coords, dtype=float)
+
+    def m_as(self, _unit):
+        return self._coords
+
+
+class _FakeMolecule:
+    """Molecule exposing a single conformer, as get_topology_bbox expects."""
+
+    def __init__(self, coords):
+        self.conformers = [_FakeConformer(coords)]
+        self.n_conformers = 1
+
+
+class _FakeTopology:
+    """Topology exposing an iterable of molecules."""
+
+    def __init__(self, *molecules):
+        self.molecules = list(molecules)
+
+
+def _solute_molecule():
+    """A solute spanning 10 x 20 x 30 Angstrom."""
+    return _FakeMolecule([[0.0, 0.0, 0.0], [10.0, 20.0, 30.0]])
+
+
+def _legacy_box_vectors(topology, padding_nm):
+    """The box the pre-fix code computed: bbox + 2*padding, shaped."""
+    import openff.packmol as packmol
+    from openff.units import Quantity
+
+    from polyzymd.utils import boxvectors
+
+    bbox = boxvectors.get_topology_bbox(topology)
+    padded = boxvectors.pad_box_vectors_uniform(bbox, Quantity(padding_nm, "nanometer"))
+    return packmol.RHOMBIC_DODECAHEDRON @ padded
+
+
+def test_compute_box_vectors_matches_legacy_for_a_solute_only_build() -> None:
+    """Control bundles must keep the box they have today (no extra padding)."""
+    import numpy as np
+
+    topology = _FakeTopology(_solute_molecule())
+    computed = SolventBuilder().compute_box_vectors(topology, padding=1.2)
+    legacy = _legacy_box_vectors(topology, 1.2)
+
+    np.testing.assert_allclose(
+        computed.m_as("nanometer"), legacy.m_as("nanometer"), rtol=0, atol=1e-12
+    )
+
+
+def test_compute_box_vectors_reserves_room_for_polymers() -> None:
+    """With polymers the cell grows by 2 * packing padding in every direction."""
+    import numpy as np
+
+    topology = _FakeTopology(_solute_molecule())
+    without = SolventBuilder().compute_box_vectors(topology, padding=1.2)
+    with_polymers = SolventBuilder().compute_box_vectors(topology, padding=1.2, extra_padding=2.0)
+    grown = _legacy_box_vectors(topology, 1.2 + 2.0)
+
+    np.testing.assert_allclose(
+        with_polymers.m_as("nanometer"), grown.m_as("nanometer"), rtol=0, atol=1e-12
+    )
+    assert np.linalg.det(with_polymers.m_as("nanometer")) > np.linalg.det(without.m_as("nanometer"))
+
+
+def test_compute_box_vectors_is_independent_of_polymer_positions() -> None:
+    """Two replicates whose chains landed elsewhere must share one box."""
+    import numpy as np
+
+    solute = _solute_molecule()
+    replicate_a = _FakeTopology(solute, _FakeMolecule([[40.0, 40.0, 40.0]]))
+    replicate_b = _FakeTopology(solute, _FakeMolecule([[-60.0, 90.0, 15.0]]))
+
+    builder = SolventBuilder()
+    box_a = builder.compute_box_vectors(_FakeTopology(solute), padding=1.2, extra_padding=2.0)
+    box_b = builder.compute_box_vectors(_FakeTopology(solute), padding=1.2, extra_padding=2.0)
+    np.testing.assert_array_equal(box_a.m_as("nanometer"), box_b.m_as("nanometer"))
+
+    # ...whereas deriving the box from the packed topology does not.
+    packed_a = builder.compute_box_vectors(replicate_a, padding=1.2)
+    packed_b = builder.compute_box_vectors(replicate_b, padding=1.2)
+    assert not np.allclose(packed_a.m_as("nanometer"), packed_b.m_as("nanometer"))
+
+
+def test_compute_box_vectors_from_config_uses_config_padding() -> None:
+    """The config wrapper must forward padding, shape and the extra padding."""
+    import numpy as np
+
+    topology = _FakeTopology(_solute_molecule())
+    config = SolventConfig()
+    computed = SolventBuilder().compute_box_vectors_from_config(
+        topology, config, extra_padding_nm=2.0
+    )
+    expected = SolventBuilder().compute_box_vectors(
+        topology,
+        padding=config.box.padding,
+        box_shape=config.box.shape.value,
+        extra_padding=2.0,
+    )
+    np.testing.assert_array_equal(computed.m_as("nanometer"), expected.m_as("nanometer"))
+
+
+def _real_solute_topology():
+    """A real one-molecule OpenFF topology with coordinates (methane)."""
+    from openff.toolkit import Molecule, Topology
+
+    molecule = Molecule.from_smiles("C")
+    molecule.generate_conformers(n_conformers=1)
+    return Topology.from_molecules([molecule])
+
+
+def test_solvate_with_precomputed_box_skips_centring(monkeypatch) -> None:
+    """A topology already framed in the brick must not be moved again."""
+    import numpy as np
+
+    import polyzymd.utils.packmol as packmol_utils
+
+    captured = {}
+
+    def fake_solvate_with_packmol(**kwargs):
+        captured.update(kwargs)
+        return kwargs["solute"]
+
+    def fail_if_centred(self, topology, box_vecs):
+        raise AssertionError("an already-framed topology must not be re-centred")
+
+    monkeypatch.setattr(packmol_utils, "solvate_with_packmol", fake_solvate_with_packmol)
+    monkeypatch.setattr(SolventBuilder, "_center_topology_in_box", fail_if_centred)
+
+    topology = _real_solute_topology()
+    box = SolventBuilder().compute_box_vectors(topology, padding=1.2, extra_padding=2.0)
+
+    SolventBuilder().solvate(topology=topology, box_vectors=box)
+
+    assert captured["center_solute"] is False
+    np.testing.assert_array_equal(captured["box_vectors"].m_as("nanometer"), box.m_as("nanometer"))
+
+
+def test_solvate_without_box_centres_and_derives_the_box(monkeypatch) -> None:
+    """Solute-only builds keep the legacy compute-centre-solvate behaviour."""
+    import numpy as np
+
+    import polyzymd.utils.packmol as packmol_utils
+
+    captured = {}
+    centred = []
+
+    def fake_solvate_with_packmol(**kwargs):
+        captured.update(kwargs)
+        return kwargs["solute"]
+
+    monkeypatch.setattr(packmol_utils, "solvate_with_packmol", fake_solvate_with_packmol)
+    monkeypatch.setattr(
+        SolventBuilder,
+        "_center_topology_in_box",
+        lambda self, topology, box_vecs: centred.append(box_vecs),
+    )
+
+    topology = _real_solute_topology()
+    expected = SolventBuilder().compute_box_vectors(topology, padding=1.2)
+
+    SolventBuilder().solvate(topology=topology, padding=1.2)
+
+    assert captured["center_solute"] is True
+    assert len(centred) == 1
+    np.testing.assert_allclose(
+        captured["box_vectors"].m_as("nanometer"), expected.m_as("nanometer")
+    )

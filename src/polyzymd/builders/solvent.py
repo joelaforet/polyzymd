@@ -230,6 +230,108 @@ class SolventBuilder:
         """
         return self._solvation_counts
 
+    def compute_box_vectors(
+        self,
+        topology: Topology,
+        *,
+        padding: float = 1.2,
+        box_shape: BoxShapeType = "rhombic_dodecahedron",
+        extra_padding: float = 0.0,
+    ) -> "Quantity":
+        """Compute the periodic box vectors for a topology.
+
+        This is the single definition of the simulation cell: the topology's
+        axis-aligned bounding box, grown by ``2 * (padding + extra_padding)``
+        in every direction, transformed by the box-shape matrix.  It is a pure
+        function of the topology's coordinates, so calling it *before* polymers
+        are packed makes the cell deterministic — every replicate of a
+        condition gets the same box, and therefore the same water and ion
+        counts.
+
+        Parameters
+        ----------
+        topology : openff.toolkit.Topology
+            Topology whose bounding box sets the box size.  For a deterministic
+            build this is the protein + substrate only, never the packed
+            polymers.
+        padding : float
+            Solute-to-box-edge padding in nm (``solvent.box.padding``).
+        box_shape : str
+            Box geometry (``cube``, ``rhombic_dodecahedron``,
+            ``truncated_octahedron``).
+        extra_padding : float
+            Additional padding in nm reserved for molecules that will be packed
+            later (``polymers.packing.padding``).  ``0.0`` for a build without
+            polymers, which reproduces the legacy box exactly.
+
+        Returns
+        -------
+        openff.units.Quantity
+            3x3 row-major box vectors.
+        """
+        from openff.units import Quantity
+
+        from polyzymd.utils import boxvectors
+
+        box_shape_matrix = self._get_box_shape_matrix(box_shape)
+        total_padding = float(padding) + float(extra_padding)
+        padding_qty = Quantity(total_padding, "nanometer")
+
+        min_box_vecs = boxvectors.get_topology_bbox(topology)
+        box_vecs = boxvectors.pad_box_vectors_uniform(min_box_vecs, padding_qty)
+        box_vecs = box_shape_matrix @ box_vecs
+
+        self._warn_on_thin_brick(min_box_vecs, box_vecs)
+        return box_vecs
+
+    def compute_box_vectors_from_config(
+        self,
+        topology: Topology,
+        config: "SolventConfig",
+        extra_padding_nm: float = 0.0,
+    ) -> "Quantity":
+        """Compute the periodic box vectors from a :class:`SolventConfig`.
+
+        Thin wrapper over :meth:`compute_box_vectors` used by
+        :class:`~polyzymd.builders.system_builder.SystemBuilder` so that the
+        polymer-packing stage and the solvation stage share one box.
+        """
+        return self.compute_box_vectors(
+            topology,
+            padding=config.box.padding,
+            box_shape=config.box.shape.value,
+            extra_padding=extra_padding_nm,
+        )
+
+    @staticmethod
+    def _warn_on_thin_brick(bbox_vectors: "Quantity", box_vecs: "Quantity") -> None:
+        """Log the clearance between the solute bounding box and the brick faces.
+
+        The rectangular brick of a rhombic dodecahedron is shorter along ``z``
+        than the padded extent (``c_z = sqrt(2)/2 * L_z``), so the clearance
+        along ``z`` is not the requested padding.  A negative clearance means
+        the solute itself pokes through a brick face, which guarantees
+        periodic-image contacts.
+        """
+        bbox = np.diagonal(np.asarray(bbox_vectors.m_as("nanometer"), dtype=float))
+        brick = np.diagonal(np.asarray(box_vecs.m_as("nanometer"), dtype=float))
+        clearance = (brick - bbox) / 2.0
+        LOGGER.info(
+            "Brick %.2f x %.2f x %.2f nm; solute bbox %.2f x %.2f x %.2f nm; "
+            "clearance to the brick faces %.2f / %.2f / %.2f nm",
+            *brick,
+            *bbox,
+            *clearance,
+        )
+        if np.any(clearance < 0.0):
+            LOGGER.warning(
+                "The solute bounding box does not fit inside the periodic brick "
+                "(clearance %.2f / %.2f / %.2f nm). The rhombic-dodecahedron brick is "
+                "sqrt(2)/2 times shorter along z than the padded extent; increase the "
+                "padding or use a cubic box.",
+                *clearance,
+            )
+
     def solvate(
         self,
         topology: Topology,
@@ -239,19 +341,26 @@ class SolventBuilder:
         target_density: float = 1.0,
         tolerance: float = 2.0,
         seed: Optional[int] = None,
+        box_vectors: Optional["Quantity"] = None,
     ) -> Topology:
         """Solvate a topology with water, ions, and optional co-solvents.
 
         Args:
             topology: OpenFF Topology to solvate.
             composition: Solvent composition specification.
-            padding: Distance from solute to box edge in nm.
-            box_shape: Box geometry.
+            padding: Distance from solute to box edge in nm.  Ignored when
+                *box_vectors* is given.
+            box_shape: Box geometry.  Ignored when *box_vectors* is given.
             target_density: Target density in g/mL.
             tolerance: Minimum molecular spacing for PACKMOL in Angstrom.
             seed: Packmol random seed. ``None`` leaves Packmol on its fixed
                 built-in default (identical coordinates for identical
                 inputs); pass the replicate index for independent replicates.
+            box_vectors: Precomputed periodic box vectors.  When given, the box
+                is *not* derived from this topology and the topology is *not*
+                re-centred: it is assumed to be already framed in the brick of
+                this cell (the output of polymer packing is).  This is what
+                makes the cell identical across replicates of one condition.
 
         Returns:
             Solvated OpenFF Topology.
@@ -273,21 +382,19 @@ class SolventBuilder:
             f"padding={padding} nm, shape={box_shape}"
         )
 
-        # Get box shape matrix
-        box_shape_matrix = self._get_box_shape_matrix(box_shape)
+        # Use the precomputed cell when the caller has one (the deterministic
+        # box computed before polymer packing); otherwise derive it here from
+        # this topology, which is the behaviour for solute-only builds.
+        center_solute = box_vectors is None
+        if box_vectors is None:
+            box_vecs = self.compute_box_vectors(topology, padding=padding, box_shape=box_shape)
+            LOGGER.info(f"Computed box vectors: {box_vecs}")
 
-        # Calculate box vectors from solute bounding box + padding
-        padding_qty = Quantity(padding, "nanometer")
-        min_box_vecs = boxvectors.get_topology_bbox(topology)
-        box_vecs = boxvectors.pad_box_vectors_uniform(min_box_vecs, padding_qty)
-
-        # Apply box shape transformation
-        box_vecs = box_shape_matrix @ box_vecs
-
-        LOGGER.info(f"Computed box vectors: {box_vecs}")
-
-        # Center topology in box
-        self._center_topology_in_box(topology, box_vecs)
+            # Center topology in box
+            self._center_topology_in_box(topology, box_vecs)
+        else:
+            box_vecs = box_vectors
+            LOGGER.info(f"Using precomputed box vectors: {box_vecs}")
 
         # Calculate box volume and target masses
         box_vol = boxvectors.get_box_volume(box_vecs, units_as_openmm=False)
@@ -426,6 +533,7 @@ class SolventBuilder:
             box_vectors=box_vecs,
             tolerance_angstrom=tolerance,
             seed=seed,
+            center_solute=center_solute,
         )
 
         # Set residue names
@@ -457,6 +565,7 @@ class SolventBuilder:
         topology: Topology,
         config: "SolventConfig",
         seed: Optional[int] = None,
+        box_vectors: Optional["Quantity"] = None,
     ) -> Topology:
         """Solvate using configuration object.
 
@@ -464,6 +573,8 @@ class SolventBuilder:
             topology: OpenFF Topology to solvate.
             config: SolventConfig with solvent settings.
             seed: Packmol random seed (typically the replicate index).
+            box_vectors: Precomputed periodic box vectors (see
+                :meth:`solvate`).  ``None`` derives the box from *topology*.
 
         Returns:
             Solvated OpenFF Topology.
@@ -498,6 +609,7 @@ class SolventBuilder:
             target_density=config.box.target_density,
             tolerance=config.box.tolerance,
             seed=seed,
+            box_vectors=box_vectors,
         )
 
     @staticmethod
