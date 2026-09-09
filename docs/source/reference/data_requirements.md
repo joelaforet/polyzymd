@@ -67,10 +67,27 @@ one or more trajectory segments.
 
 | File | Key contents |
 |------|--------------|
-| `build_manifest.json` | SHA-256 of `solvated_system.pdb` and `system.xml`, the config hash, `openmm_version`, `polyzymd_version`, and `provenance` (`packmol_seed`, `polymer_seed`, per-stage PACKMOL seeds). `polyzymd submit --skip-build` refuses bundles whose config hash no longer matches `config.yaml` |
+| `build_manifest.json` | SHA-256 of `solvated_system.pdb` and `system.xml`, the config hash, `openmm_version`, `polyzymd_version`, and `provenance` (see below). `polyzymd submit --skip-build` refuses bundles whose config hash no longer matches `config.yaml` |
 | `progress.json` | One record per equilibration stage and production segment with `polyzymd_version`, `openmm_version`, `pixi_environment` (null in files written by older versions) |
 | `production_N/production_N_parameters.json` | Simulation parameters plus a top-level `provenance` block (`polyzymd_version`, `openmm_version`, `pixi_environment`, `hostname`, `slurm_job_id`) |
 | `minimization/phase.json` | Phase status, state path, `frozen_atoms`, and `frozen_rmsd_angstrom` (0.0 when the solute was frozen) |
+
+#### `build_manifest.json` provenance keys
+
+| Key | Meaning |
+|-----|---------|
+| `polymer_seed`, `packmol_seed` | Replicate seed used for polymer generation and PACKMOL |
+| `polymer_packmol_seed` | Seed passed to the polymer-packing PACKMOL run |
+| `solvent_packmol_seed` | Seed passed to the solvation PACKMOL run |
+| `box_vectors_nm` | The periodic cell as a 3x3 row-major matrix in nm |
+| `brick_nm` | Diagonal of the cell — the rectangular brick that PACKMOL fills, in nm |
+| `deterministic_box` | `true` when the cell was computed from the protein + substrate before packing (the default for polymer builds); `false` for solute-only builds and when `polymers.packing.box_vectors` is set |
+| `polymer_sphere_radius_nm` | Radius of the confinement sphere used for the chains (absent when `confine_to_sphere: false`) |
+
+Replicates of one condition must agree on `box_vectors_nm`, `brick_nm` and
+`polymer_sphere_radius_nm`, and therefore on their water and ion counts; they
+differ only in the seeds. Diffing two manifests is the quickest way to confirm
+that.
 
 When loading multi-segment trajectories, the analysis loader verifies that the
 segments form one contiguous, evenly spaced time line and raises
