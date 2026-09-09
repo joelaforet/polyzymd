@@ -55,10 +55,18 @@ def publish_build_bundle(
     system: Any,
     positions: Any,
     config: Any,
+    provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Atomically publish a complete PDB/System bundle, committing manifest last."""
+    """Atomically publish a complete PDB/System bundle, committing manifest last.
+
+    ``provenance`` (optional) is recorded verbatim under the manifest's
+    ``"provenance"`` key alongside the PolyzyMD version; builders use it for
+    the Packmol/polymer seeds that determine the starting coordinates.
+    """
     from openmm import XmlSerializer, version
     from openmm.app import PDBFile
+
+    from polyzymd.utils.version import get_polyzymd_version
 
     working_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".build-bundle-", dir=working_dir) as staging_text:
@@ -75,6 +83,8 @@ def publish_build_bundle(
             "config_hash": config_hash(config),
             "particle_count": int(system.getNumParticles()),
             "openmm_version": version.full_version,
+            "polyzymd_version": get_polyzymd_version(),
+            "provenance": dict(provenance or {}),
             "artifacts": {
                 name: {
                     "path": str((working_dir / name).resolve()),

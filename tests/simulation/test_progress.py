@@ -1949,3 +1949,60 @@ class TestHardKillRetryInPlace:
         info = get_next_segment_info(progress, total_steps=10000000, total_samples=250)
         assert info is not None
         assert info["segment_index"] == 1
+
+
+class TestRecordProvenanceFields:
+    """Provenance fields on segment and equilibration records."""
+
+    def test_defaults_are_none(self):
+        seg = SegmentRecord(index=0)
+        assert seg.polyzymd_version is None
+        assert seg.openmm_version is None
+        assert seg.pixi_environment is None
+        eq = EquilibrationStageRecord(index=0)
+        assert eq.polyzymd_version is None
+
+    def test_round_trip(self, tmp_path):
+        seg = SegmentRecord(
+            index=0,
+            polyzymd_version="1.3.0",
+            openmm_version="8.1.2",
+            pixi_environment="sim-cuda-12-4",
+        )
+        eq = EquilibrationStageRecord(
+            index=0, name="heating", polyzymd_version="1.3.0", openmm_version="8.1.2"
+        )
+        p = _make_progress(segments=[seg])
+        p.equilibration_stages = [eq]
+        save_progress(tmp_path, p)
+        loaded = load_progress(tmp_path)
+        assert loaded is not None
+        assert loaded.segments[0].pixi_environment == "sim-cuda-12-4"
+        assert loaded.segments[0].openmm_version == "8.1.2"
+        assert loaded.equilibration_stages[0].polyzymd_version == "1.3.0"
+
+    def test_legacy_progress_without_provenance_loads(self, tmp_path):
+        legacy = {
+            "config_path": "/tmp/config.yaml",
+            "total_steps_requested": 100,
+            "total_samples_requested": 10,
+            "timestep_fs": 2.0,
+            "equilibration_stages": [{"index": 0, "name": "heating", "status": "completed"}],
+            "segments": [
+                {
+                    "index": 0,
+                    "steps_completed": 100,
+                    "steps_requested": 100,
+                    "samples_written": 10,
+                    "status": "completed",
+                    "duration_ns": 0.0002,
+                }
+            ],
+            "status": "completed",
+            "replicate": 1,
+        }
+        (tmp_path / "progress.json").write_text(json.dumps(legacy))
+        loaded = load_progress(tmp_path)
+        assert loaded is not None
+        assert loaded.segments[0].polyzymd_version is None
+        assert loaded.equilibration_stages[0].openmm_version is None

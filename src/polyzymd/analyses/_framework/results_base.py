@@ -1,22 +1,12 @@
-"""Version helpers for analysis artifact metadata."""
+"""Version helpers for analysis artifact metadata.
+
+The implementation lives in :mod:`polyzymd.utils.version` so that build and
+simulation provenance records can share it; this module re-exports it for
+backwards compatibility.
+"""
 
 from __future__ import annotations
 
-from importlib.metadata import PackageNotFoundError
+from polyzymd.utils.version import get_polyzymd_version
 
-
-def get_polyzymd_version() -> str:
-    """Return the installed PolyzyMD version.
-
-    Returns
-    -------
-    str
-        Installed package version, or ``"unknown"`` when package metadata is
-        unavailable in an editable or source-tree execution context.
-    """
-    try:
-        from importlib.metadata import version
-
-        return version("polyzymd")
-    except (ImportError, PackageNotFoundError):
-        return "unknown"
+__all__ = ["get_polyzymd_version"]

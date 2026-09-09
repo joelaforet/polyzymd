@@ -14,6 +14,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Union
 
+from polyzymd.utils.version import record_provenance, runtime_provenance
+
 if TYPE_CHECKING:
     import openmm
     from openmm import XmlSerializer
@@ -1334,6 +1336,7 @@ class SimulationRunner:
         # Save parameters JSON (needed for continuation across segments)
         params_dict = {
             "__class__": "SimulationParameters",
+            "provenance": runtime_provenance(),
             "__values__": {
                 "thermo_params": {
                     "__class__": "ThermoParameters",
@@ -1633,6 +1636,7 @@ class SimulationRunner:
             steps_requested=total_steps,
             samples_written=0,
             status=SegmentStatus.RUNNING,
+            **record_provenance(),
         )
 
         _update_or_append_segment(progress, record)
@@ -1733,6 +1737,7 @@ class SimulationRunner:
             samples_written=num_samples,
             status=SegmentStatus.COMPLETED,
             duration_ns=duration_ns,
+            **record_provenance(),
         )
         record.finished_at = _now_iso()
 
@@ -1798,6 +1803,7 @@ class SimulationRunner:
             samples_written=0,  # Interrupted — samples may be partial
             status=SegmentStatus.INTERRUPTED,
             duration_ns=actual_duration_ns,
+            **record_provenance(),
         )
 
         _update_or_append_segment(progress, record)

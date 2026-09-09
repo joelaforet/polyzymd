@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from polyzymd.simulation.artifact_integrity import (
+    MANIFEST_NAME,
     ArtifactIntegrityError,
     publish_build_bundle,
     replicate_lock,
@@ -136,3 +137,26 @@ def test_replicate_lock_blocks_concurrent_process(tmp_path):
         process.join(5)
     assert process.exitcode == 0
     assert queue.get(timeout=1) == "blocked"
+
+
+def test_manifest_records_provenance_and_versions(tmp_path):
+    topology, system, positions = _tiny_openmm_bundle()
+    manifest = publish_build_bundle(
+        tmp_path,
+        topology,
+        system,
+        positions,
+        _Config(),
+        provenance={"packmol_seed": 3, "polymer_seed": 3},
+    )
+    assert manifest["provenance"] == {"packmol_seed": 3, "polymer_seed": 3}
+    assert isinstance(manifest["polyzymd_version"], str)
+    assert manifest["openmm_version"]
+    on_disk = json.loads((tmp_path / MANIFEST_NAME).read_text())
+    assert on_disk["provenance"]["packmol_seed"] == 3
+
+
+def test_manifest_provenance_defaults_to_empty(tmp_path):
+    topology, system, positions = _tiny_openmm_bundle()
+    manifest = publish_build_bundle(tmp_path, topology, system, positions, _Config())
+    assert manifest["provenance"] == {}

@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Build-time solute/solvent separation assertion.**  `solvate_with_packmol()`
+  and `pack_polymers()` now raise `SolvationClashError` when any packed atom
+  lies within half the Packmol tolerance of the fixed solute, and
+  `SolventBuilder.validate()` repeats the check on the stored topology.  Every
+  build before d96b1fcd combined a brick-centred solvent with a
+  triclinic-centred solute, so hundreds of waters started inside the protein
+  while Packmol reported success; the Paper-1 audit found 54 of 118 RML/CALB
+  builds affected (823 waters within 2 Å of protein heavy atoms in one CALB
+  control).  Such a build is now a hard failure before any PDB is written.
+- **Trajectory segment lineage check.**  `TrajectoryLoader.load_universe()`
+  verifies that daisy-chained segments share one frame interval and that each
+  segment starts exactly one interval after its predecessor ends before
+  concatenating them, raising `TrajectoryLineageError` otherwise
+  (`verify_lineage=False` opts out).  A duplicated SLURM resubmission had
+  produced overlapping, backwards-running segments that the loader silently
+  concatenated.
+
+### Added
+
+- **Packmol seeding by replicate.**  `build_packmol_input()`,
+  `solvate_with_packmol()`, `pack_polymers()`, `SolventBuilder.solvate()` and
+  `SystemBuilder.pack_polymers()` accept `seed`; `build_from_config()` passes
+  the replicate index to both packing stages so replicates start from
+  independent coordinates (Packmol is deterministic for identical inputs).
+  The seeds are recorded under `provenance` in `build_manifest.json`, which
+  also gains `polyzymd_version`.
+- **Per-segment runtime provenance.**  `SegmentRecord` and
+  `EquilibrationStageRecord` carry optional `polyzymd_version`,
+  `openmm_version` and `pixi_environment` fields (older `progress.json` files
+  still load), and `production_N_parameters.json` gains a `provenance` block
+  with those values plus hostname and SLURM job id.  New helpers
+  `polyzymd.utils.version.runtime_provenance()` / `record_provenance()`;
+  `get_polyzymd_version()` moved there and is re-exported from
+  `analyses/_framework/results_base.py`.
+
 ## [1.3.0] - 2026-04-09 — Analysis Plugin System & OCP Compliance
 
 Large-scale refactoring of the analysis and comparison subsystems to achieve
