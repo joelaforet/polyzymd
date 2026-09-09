@@ -557,6 +557,164 @@ def _trajectory_time(trajectory: Any) -> float | None:
     return _finite_numeric_time(getattr(trajectory, "time", None))
 
 
+class TrajectoryLineageError(ValueError):
+    """Raised when daisy-chained trajectory segments do not form one time line.
+
+    Consecutive production segments written by a healthy restart chain start
+    exactly one frame interval after the previous segment ends.  Overlapping,
+    backwards-jumping or gapped segments mean two chains wrote into the same
+    run directory (for example a duplicated SLURM resubmission) or a segment is
+    missing; concatenating them silently would corrupt every time-dependent
+    analysis.
+    """
+
+
+@dataclass
+class _SegmentTiming:
+    """Raw timing metadata of one trajectory segment."""
+
+    path: Path
+    n_frames: int
+    first_time: float | None
+    last_time: float | None
+    dt: float | None
+
+
+def _probe_segment_timing(universe: Any, trajectory_file: Path) -> _SegmentTiming:
+    """Read the first/last raw times and frame interval of one segment.
+
+    Parameters
+    ----------
+    universe : MDAnalysis.Universe
+        Universe built from the run's topology; the segment is loaded into it
+        with ``load_new`` so the topology is parsed only once.
+    trajectory_file : Path
+        Trajectory segment to probe.
+    """
+
+    universe.load_new(str(trajectory_file))
+    trajectory = universe.trajectory
+    n_frames = int(len(trajectory))
+    if n_frames == 0:
+        return _SegmentTiming(trajectory_file, 0, None, None, None)
+
+    trajectory[0]
+    first_time = _trajectory_time(trajectory)
+    dt: float | None = None
+    if n_frames > 1:
+        trajectory[1]
+        second_time = _trajectory_time(trajectory)
+        if first_time is not None and second_time is not None:
+            dt = second_time - first_time
+    if dt is None:
+        dt = _finite_numeric_time(getattr(trajectory, "dt", None))
+    trajectory[n_frames - 1]
+    last_time = _trajectory_time(trajectory)
+    trajectory[0]
+    return _SegmentTiming(trajectory_file, n_frames, first_time, last_time, dt)
+
+
+def _assert_contiguous_segments(
+    topology_file: Path,
+    trajectory_files: Sequence[Path],
+    *,
+    relative_tolerance: float = 1e-3,
+) -> list[_SegmentTiming]:
+    """Require daisy-chained segments to form one monotonic, evenly spaced time line.
+
+    Each segment's raw first and last times and frame interval are read from
+    the files themselves.  Every segment must use the same frame interval, and
+    segment *k* must start exactly one interval after segment *k-1* ends.
+
+    Parameters
+    ----------
+    topology_file : Path
+        Topology used to open the segments.
+    trajectory_files : Sequence[Path]
+        Segments in chain order.
+    relative_tolerance : float, optional
+        Allowed deviation as a fraction of the frame interval (DCD headers
+        store the interval as float32, so exact comparison is not possible).
+
+    Returns
+    -------
+    list[_SegmentTiming]
+        Timing metadata per segment, in order.
+
+    Raises
+    ------
+    TrajectoryLineageError
+        If frame intervals differ between segments, or any segment does not
+        start one interval after its predecessor ends.
+    """
+
+    if len(trajectory_files) < 2:
+        return []
+
+    _require_mdanalysis("segment lineage validation")
+    import MDAnalysis as mda
+
+    universe = mda.Universe(str(topology_file))
+    timings = [_probe_segment_timing(universe, Path(f)) for f in trajectory_files]
+
+    if any(t.first_time is None or t.last_time is None for t in timings):
+        LOGGER.warning(
+            "Trajectory segments under %s expose no raw time metadata; skipping the "
+            "segment lineage check.",
+            Path(trajectory_files[0]).parent.parent,
+        )
+        return timings
+
+    reference_dt = next((t.dt for t in timings if t.dt is not None and t.dt > 0), None)
+    if reference_dt is None:
+        LOGGER.warning(
+            "Could not determine a frame interval for segments under %s; skipping the "
+            "segment lineage check.",
+            Path(trajectory_files[0]).parent.parent,
+        )
+        return timings
+    tolerance = relative_tolerance * reference_dt
+
+    problems: list[str] = []
+    for timing in timings:
+        if timing.dt is not None and abs(timing.dt - reference_dt) > tolerance:
+            problems.append(
+                f"{timing.path}: frame interval {timing.dt:.6g} differs from "
+                f"{reference_dt:.6g} used by the first segment"
+            )
+    for previous, current in zip(timings, timings[1:]):
+        assert previous.last_time is not None and current.first_time is not None
+        gap = current.first_time - previous.last_time
+        if abs(gap - reference_dt) > tolerance:
+            if gap <= 0:
+                kind = "overlaps or runs backwards relative to"
+            else:
+                kind = f"leaves a gap of {gap - reference_dt:.6g} after"
+            problems.append(
+                f"{current.path} (starts at t={current.first_time:.6g}) {kind} "
+                f"{previous.path} (ends at t={previous.last_time:.6g}); expected a step of "
+                f"{reference_dt:.6g}"
+            )
+
+    if problems:
+        raise TrajectoryLineageError(
+            "Trajectory segments do not form a single contiguous time line; refusing to "
+            "concatenate them. This usually means two restart chains wrote into the same "
+            "run directory (duplicate SLURM resubmission) or a segment is missing. "
+            "Inspect progress.json and the production_N directories, quarantine the "
+            "branched segments, then retry.\n  - " + "\n  - ".join(problems)
+        )
+
+    LOGGER.debug(
+        "Segment lineage check passed for %d segments (dt=%.6g, t=%.6g..%.6g)",
+        len(timings),
+        reference_dt,
+        timings[0].first_time,
+        timings[-1].last_time,
+    )
+    return timings
+
+
 class _TimestampPreservingTrajectory:
     """Proxy that exposes raw MDAnalysis timestep timestamps.
 
@@ -978,6 +1136,8 @@ class TrajectoryLoader:
         self,
         replicate: int,
         cache: bool = True,
+        *,
+        verify_lineage: bool = True,
     ) -> "Universe":
         """Load MDAnalysis Universe for a replicate.
 
@@ -987,11 +1147,21 @@ class TrajectoryLoader:
             Replicate number (1-indexed)
         cache : bool, optional
             If True (default), cache the Universe for reuse
+        verify_lineage : bool, optional
+            If True (default), require multi-segment trajectories to form a
+            single monotonic, evenly spaced time line before concatenating
+            them (see :class:`TrajectoryLineageError`).
 
         Returns
         -------
         Universe
             MDAnalysis Universe with trajectory loaded
+
+        Raises
+        ------
+        TrajectoryLineageError
+            If ``verify_lineage`` is set and the segments overlap, run
+            backwards, or leave gaps.
 
         Notes
         -----
@@ -1014,7 +1184,10 @@ class TrajectoryLoader:
                 str(info.trajectory_files[0]),
             )
         else:
-            # Multiple segments - use ChainReader
+            # Multiple segments - use ChainReader, but only after checking
+            # that the segments actually chain (no branched/duplicate chains).
+            if verify_lineage:
+                _assert_contiguous_segments(info.topology_file, info.trajectory_files)
             u = mda.Universe(
                 str(info.topology_file),
                 [str(f) for f in info.trajectory_files],

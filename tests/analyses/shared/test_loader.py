@@ -21,7 +21,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from polyzymd.analyses.shared.loader import TrajectoryLoader, enrich_universe_elements
+from polyzymd.analyses.shared.loader import (
+    TrajectoryInfo,
+    TrajectoryLineageError,
+    TrajectoryLoader,
+    _assert_contiguous_segments,
+    enrich_universe_elements,
+)
 
 TEST_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
@@ -1061,3 +1067,106 @@ class TestTrajectoryInfoValidation:
         )
         with pytest.raises(FileNotFoundError, match="Topology not found"):
             info.validate()
+
+
+# ---------------------------------------------------------------------------
+# Segment lineage check
+# ---------------------------------------------------------------------------
+
+
+def _write_dcd_segment(path: Path, *, istart: int, n_frames: int, dt: float = 1.0) -> None:
+    """Write a tiny 3-atom DCD with frame interval ``dt`` starting at ``istart * dt``."""
+    import numpy as np
+
+    mda = pytest.importorskip("MDAnalysis")
+    u = mda.Universe.empty(3, trajectory=True)
+    with mda.Writer(str(path), n_atoms=3, dt=dt, istart=istart, nsavc=1) as writer:
+        for frame in range(n_frames):
+            u.atoms.positions = np.full((3, 3), float(frame))
+            writer.write(u.atoms)
+
+
+def _write_topology(path: Path) -> None:
+    mda = pytest.importorskip("MDAnalysis")
+    import numpy as np
+
+    u = mda.Universe.empty(3, trajectory=True)
+    u.add_TopologyAttr("names", ["C1", "C2", "C3"])
+    u.add_TopologyAttr("resnames", ["MOL"])
+    u.atoms.positions = np.zeros((3, 3))
+    u.atoms.write(str(path))
+
+
+class TestSegmentLineage:
+    """Multi-segment loads must refuse overlapping or gapped segments."""
+
+    def test_contiguous_segments_pass(self, tmp_path):
+        top = tmp_path / "top.pdb"
+        _write_topology(top)
+        a, b = tmp_path / "a.dcd", tmp_path / "b.dcd"
+        _write_dcd_segment(a, istart=0, n_frames=5)
+        _write_dcd_segment(b, istart=5, n_frames=5)
+
+        timings = _assert_contiguous_segments(top, [a, b])
+        assert [t.n_frames for t in timings] == [5, 5]
+        assert timings[1].first_time == pytest.approx(5.0, rel=1e-6)
+
+    def test_overlapping_segments_raise(self, tmp_path):
+        top = tmp_path / "top.pdb"
+        _write_topology(top)
+        a, b = tmp_path / "a.dcd", tmp_path / "b.dcd"
+        _write_dcd_segment(a, istart=0, n_frames=5)
+        _write_dcd_segment(b, istart=3, n_frames=5)  # 3..7 overlaps 0..4
+
+        with pytest.raises(TrajectoryLineageError, match="overlaps or runs backwards") as excinfo:
+            _assert_contiguous_segments(top, [a, b])
+        assert str(b) in str(excinfo.value)
+        assert str(a) in str(excinfo.value)
+
+    def test_gapped_segments_raise(self, tmp_path):
+        top = tmp_path / "top.pdb"
+        _write_topology(top)
+        a, b = tmp_path / "a.dcd", tmp_path / "b.dcd"
+        _write_dcd_segment(a, istart=0, n_frames=5)
+        _write_dcd_segment(b, istart=8, n_frames=5)  # gap of 3 frames
+
+        with pytest.raises(TrajectoryLineageError, match="leaves a gap"):
+            _assert_contiguous_segments(top, [a, b])
+
+    def test_frame_interval_mismatch_raises(self, tmp_path):
+        top = tmp_path / "top.pdb"
+        _write_topology(top)
+        a, b = tmp_path / "a.dcd", tmp_path / "b.dcd"
+        _write_dcd_segment(a, istart=0, n_frames=5, dt=1.0)
+        _write_dcd_segment(b, istart=3, n_frames=5, dt=2.0)  # starts at t=6, dt=2
+
+        with pytest.raises(TrajectoryLineageError, match="frame interval"):
+            _assert_contiguous_segments(top, [a, b])
+
+    def test_single_segment_is_not_checked(self, tmp_path):
+        assert _assert_contiguous_segments(tmp_path / "top.pdb", [tmp_path / "a.dcd"]) == []
+
+    def test_load_universe_refuses_branched_chain(self, tmp_path, monkeypatch):
+        top = tmp_path / "solvated_system.pdb"
+        _write_topology(top)
+        a, b = tmp_path / "production_0.dcd", tmp_path / "production_1.dcd"
+        _write_dcd_segment(a, istart=0, n_frames=5)
+        _write_dcd_segment(b, istart=2, n_frames=5)
+
+        config = _make_openmm_config(tmp_path)
+        loader = TrajectoryLoader(config)
+        info = TrajectoryInfo(
+            topology_file=top,
+            trajectory_files=[a, b],
+            n_segments=2,
+            working_directory=tmp_path,
+            replicate=1,
+        )
+        monkeypatch.setattr(loader, "get_trajectory_info", lambda replicate: info)
+
+        with pytest.raises(TrajectoryLineageError):
+            loader.load_universe(1)
+
+        # Opt-out still concatenates (for forensic inspection of bad chains).
+        u = loader.load_universe(1, cache=False, verify_lineage=False)
+        assert len(u.trajectory) == 10
