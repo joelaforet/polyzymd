@@ -43,6 +43,17 @@ _PACKMOL_MOLECULE_PREFIX = "_PACKING_MOLECULE"
 # Post-assembly geometry assertion
 # ---------------------------------------------------------------------------
 
+#: Number of packed atoms closer than ``0.5 * tolerance`` to the solute above which
+#: the assembled system is treated as a frame mismatch rather than imperfect packing.
+#:
+#: Packmol exit code 173 ("imperfect packing") legitimately leaves a handful of
+#: residual contacts (observed: 1 atom at 0.6 A and 3-5 atoms below the tolerance in
+#: dense 30-chain polymer shells); energy minimisation resolves those.  A solute/solvent
+#: frame mismatch (d96b1fcd) instead puts hundreds to thousands of solvent atoms inside
+#: the solute (observed: 1182 atoms below 1 A in a defective CALB control build).  The
+#: limit sits two orders of magnitude from both observations.
+SOLVATION_CLASH_ATOM_LIMIT = 20
+
 
 class SolvationClashError(ValueError):
     """Raised when packed solvent/polymer atoms overlap the fixed solute.
@@ -110,11 +121,13 @@ def _assert_solute_solvent_separation(
     """Fail loudly if packed atoms sit inside the solute after assembly.
 
     The first *n_solute_atoms* atoms of *topology* are the fixed solute; the
-    remainder are the freshly packed molecules.  Any packed atom closer than
-    ``0.5 * tolerance_angstrom`` to a solute atom is treated as a genuine
-    clash (Packmol itself never places atoms closer than ``tolerance``; the
-    factor of two leaves headroom for PDB coordinate rounding).  Distances
-    between ``0.5 * tolerance`` and ``tolerance`` only emit a warning.
+    remainder are the freshly packed molecules.  Packed atoms closer than
+    ``0.5 * tolerance_angstrom`` to a solute atom count as clashes.  More than
+    :data:`SOLVATION_CLASH_ATOM_LIMIT` clashing atoms means the solute and the
+    packed coordinates are expressed in different frames and the build is
+    aborted; a handful of clashes is the residue of an imperfect Packmol run
+    (exit code 173) that minimisation resolves, and only produces a warning,
+    as do distances between ``0.5 * tolerance`` and ``tolerance``.
 
     Parameters
     ----------
@@ -135,8 +148,8 @@ def _assert_solute_solvent_separation(
     Raises
     ------
     SolvationClashError
-        If any packed atom is closer than ``0.5 * tolerance_angstrom`` to the
-        solute.
+        If more than :data:`SOLVATION_CLASH_ATOM_LIMIT` packed atoms are closer
+        than ``0.5 * tolerance_angstrom`` to the solute.
     """
     import numpy as np
 
@@ -155,19 +168,29 @@ def _assert_solute_solvent_separation(
         tolerance_angstrom=tolerance_angstrom,
     )
 
-    if stats["n_below_half_tolerance"] > 0:
+    if stats["n_below_half_tolerance"] > SOLVATION_CLASH_ATOM_LIMIT:
         raise SolvationClashError(
             f"{stats['n_below_half_tolerance']} {label} atom(s) lie within "
             f"{0.5 * tolerance_angstrom:.2f} A of the solute "
             f"({stats['n_below_tolerance']} within the {tolerance_angstrom:.2f} A Packmol "
             f"tolerance; minimum separation {stats['min_distance_angstrom']:.3f} A; "
-            f"{stats['n_other']} {label} atoms checked). Packmol never places atoms this "
-            "close to a fixed solute, so the assembled solute and packed coordinates are "
-            "almost certainly expressed in different frames (solute/solvent frame mismatch, "
-            "see d96b1fcd). Refusing to continue the build."
+            f"{stats['n_other']} {label} atoms checked; limit {SOLVATION_CLASH_ATOM_LIMIT}). "
+            "Imperfect Packmol runs leave at most a handful of such contacts, so the "
+            "assembled solute and packed coordinates are almost certainly expressed in "
+            "different frames (solute/solvent frame mismatch, see d96b1fcd). Refusing to "
+            "continue the build."
         )
 
-    if stats["n_below_tolerance"] > 0:
+    if stats["n_below_half_tolerance"] > 0:
+        logger.warning(
+            "%d %s atom(s) lie within %.2f A of the solute (minimum %.3f A); this is the "
+            "residue of an imperfect Packmol run and will be resolved by minimisation.",
+            stats["n_below_half_tolerance"],
+            label,
+            0.5 * tolerance_angstrom,
+            stats["min_distance_angstrom"],
+        )
+    elif stats["n_below_tolerance"] > 0:
         logger.warning(
             "%d %s atom(s) lie between %.2f and %.2f A of the solute "
             "(minimum %.3f A); Packmol tolerance was not fully honoured.",

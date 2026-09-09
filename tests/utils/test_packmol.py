@@ -440,6 +440,7 @@ class TestSolvateAssemblyCoordinates:
             packmol, "_check_ignore_conect_supported", MagicMock(return_value=False)
         )
 
+        monkeypatch.setattr(packmol, "SOLVATION_CLASH_ATOM_LIMIT", 0)
         with pytest.raises(packmol.SolvationClashError) as excinfo:
             packmol.solvate_with_packmol(
                 molecules=[object()],
@@ -495,6 +496,7 @@ class TestSolvateAssemblyCoordinates:
         )
         monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
 
+        monkeypatch.setattr(packmol, "SOLVATION_CLASH_ATOM_LIMIT", 0)
         with pytest.raises(packmol.SolvationClashError, match="1 polymer atom"):
             packmol.pack_polymers(
                 molecules=[object()],
@@ -633,3 +635,38 @@ class TestPackmolSeed:
         )
 
         assert "seed 5" in run_packmol.call_args.kwargs["input_text"].splitlines()
+
+
+class TestClashAtomLimit:
+    """A few imperfect-packing contacts warn; a frame mismatch raises."""
+
+    @staticmethod
+    def _topology(n_clashing: int, n_clean: int = 50) -> _MockTopology:
+        solute = np.array([[0.0, 0.0, 0.0]])
+        clashing = np.tile([[0.6, 0.0, 0.0]], (n_clashing, 1))
+        clean = np.column_stack(
+            [np.linspace(10.0, 60.0, n_clean), np.zeros(n_clean), np.zeros(n_clean)]
+        )
+        return _MockTopology(np.vstack([solute, clashing, clean]))
+
+    def test_residual_contacts_only_warn(self, caplog):
+        from polyzymd.utils import packmol
+
+        topo = self._topology(packmol.SOLVATION_CLASH_ATOM_LIMIT)
+        with caplog.at_level("WARNING", logger="polyzymd.utils.packmol"):
+            stats = packmol._assert_solute_solvent_separation(topo, 1, tolerance_angstrom=2.0)
+        assert stats["n_below_half_tolerance"] == packmol.SOLVATION_CLASH_ATOM_LIMIT
+        assert any("imperfect Packmol run" in rec.message for rec in caplog.records)
+
+    def test_many_contacts_raise(self):
+        from polyzymd.utils import packmol
+
+        topo = self._topology(packmol.SOLVATION_CLASH_ATOM_LIMIT + 1)
+        with pytest.raises(packmol.SolvationClashError, match="frame mismatch"):
+            packmol._assert_solute_solvent_separation(topo, 1, tolerance_angstrom=2.0)
+
+    def test_limit_is_far_below_defective_builds(self):
+        from polyzymd.utils import packmol
+
+        # Defective March-2026 CALB control: 1182 solvent atoms below 1 A.
+        assert packmol.SOLVATION_CLASH_ATOM_LIMIT < 1182 / 10
