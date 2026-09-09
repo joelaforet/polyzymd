@@ -22,10 +22,13 @@ Even if your protocol is minimal, represent it as one or more named stages.
 ## What happens before stage 1: minimization
 
 Energy minimization always runs before the first equilibration stage. By
-default it holds every protein and substrate atom fixed and relaxes only water,
-ions, and polymers, so the structure you prepared enters heating exactly as
-built. Keep this default unless you have a specific reason to let the protein
-relax before restraints are applied:
+default it holds every protein and substrate **heavy** atom fixed and relaxes
+water, ions, polymers, and the solute hydrogens, so the heavy-atom structure
+you prepared enters heating exactly as built. The hydrogens are left mobile on
+purpose: with `constraints=HBonds` their bond lengths are set by the force
+field, and freezing them would carry the input PDB's X–H lengths into a
+constrained integrator that cannot satisfy them. Keep this default unless you
+have a specific reason to let the protein relax before restraints are applied:
 
 ```yaml
 simulation_phases:
@@ -36,9 +39,13 @@ simulation_phases:
       ...
 ```
 
-The minimizer records the solute displacement (expected `0.0`) in
-`minimization/phase.json`. See {doc}`../explanation/simulation_safeguards` for
-the rationale.
+The minimizer records the frozen heavy-atom displacement (expected `0.0`) and
+the largest solute-hydrogen displacement
+(`hydrogen_max_displacement_angstrom`, non-zero whenever the input hydrogens
+were off their force-field bond lengths) in `minimization/phase.json`. It also
+verifies that the minimized state satisfies every constraint of the real System
+before heating starts. See {doc}`../explanation/simulation_safeguards` for the
+rationale.
 
 ## Simple three-stage example
 
@@ -114,6 +121,8 @@ Available groups include:
 - `protein_calpha`
 - `ligand_heavy`
 - `polymer_heavy`
+- `solute` (protein + substrate, hydrogens included), `solute_heavy` (the same
+  without hydrogens: the set frozen during minimization)
 - `solvent`, `water_only`, `ions_only`, `cosolvents_only`
 
 ### Free equilibration stage

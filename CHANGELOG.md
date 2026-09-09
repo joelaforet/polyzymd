@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Frozen-solute minimization now freezes the solute heavy atoms only, so the
+  hydrogens satisfy their constraints.**  Since the frozen-minimization feature
+  landed, `SimulationRunner.minimize()` made *every* protein and substrate atom
+  massless, hydrogens included, and dropped every constraint touching a frozen
+  atom (OpenMM forbids constraints on massless particles).  With
+  `constraints=HBonds` the force field emits no harmonic term for an X-H bond,
+  so the solute hydrogens simply kept the input PDB's bond lengths, which are
+  not the force field's.  In the minimized states of the 2026-09 rebuild all
+  1994 RML protein X-H constraints were violated (mean 0.113 A, max 0.234 A, 950
+  of them by more than 0.1 A) while polymer and water constraints were exact
+  (0.000 A).  Heating then set those positions on a constrained integrator,
+  assigned 60 K velocities and stepped with ~2000 violated constraints; CCMA
+  occasionally diverged on the first step and OpenMM raised
+  "Particle coordinate is NaN" within seconds, so protein-identical replicates
+  failed or survived on the luck of the velocity seed (RML 0:100 r1 ran while r2
+  and r5 died; the RML control lost r1 and kept r2-r5).  The frozen set is now
+  the new `solute_heavy` atom group (`protein_heavy` union `ligand_heavy`);
+  solute hydrogens stay mobile and each frozen-heavy/mobile-hydrogen constraint
+  is carried into the minimization copy as a stiff harmonic surrogate bond at
+  the constraint length, because OpenMM rejects a constraint with any massless
+  participant.  Heavy-atom coordinates remain bit-identical.  After
+  minimization the runner measures the largest constraint violation of the real
+  System, logs it, and projects the coordinates with
+  `Context.applyConstraints(1e-6)` if it exceeds 0.01 A.
+  `minimization/phase.json` now also records
+  `hydrogen_max_displacement_angstrom`, and `frozen_atoms` counts heavy atoms.
 - **Polymers no longer overlap their own periodic images.**  Polymer chains used
   to be packed into a rectangular box of `solute bbox + 2 * packing.padding`,
   and the periodic cell was only derived afterwards from the packed topology.

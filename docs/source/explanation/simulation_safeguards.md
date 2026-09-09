@@ -117,14 +117,71 @@ structure enters equilibration exactly as built, restraints are applied, and
 the configured heating and free-equilibration stages take it from there.
 
 Mechanically, `SimulationRunner.minimize()` runs the minimizer on a temporary
-copy of the OpenMM System in which every protein and substrate atom (the
-`solute` atom group, hydrogens included) has zero mass. OpenMM never moves a
-massless particle, but it also refuses constraints that involve one, so the
-copy drops the constraints touching frozen atoms (they remain trivially
-satisfied). Solvent and polymers relax against the fixed solute; the relaxed
-coordinates are copied back into the real System, whose masses and constraints
-are untouched. The runner checks that the solute displacement is zero and
-records it in `minimization/phase.json`.
+copy of the OpenMM System in which every protein and substrate **heavy** atom
+(the `solute_heavy` atom group) has zero mass. OpenMM never moves a massless
+particle, so those coordinates come back bit-identical. Solvent and polymers
+relax against the fixed solute; the relaxed coordinates are copied back into
+the real System, whose masses and constraints are untouched. The runner checks
+that the heavy-atom displacement is zero and records it in
+`minimization/phase.json`.
+
+### Why the hydrogens stay mobile
+
+Freezing the *whole* solute, hydrogens included, looks like the stricter choice
+and is in fact a bug — one this section previously described as the design.
+With `constraints=HBonds` the force field emits no harmonic bond term for an
+X–H bond; it emits a constraint, and the bond length is whatever that constraint
+says. A massless hydrogen keeps the length it had in the input PDB, and those
+lengths come from whatever built the structure (a crystallographic hydrogen
+placement, PDBFixer, a previous force field) rather than from the force field
+about to be simulated. Nothing in a frozen minimization corrects them, because
+OpenMM refuses to build a Context for a constraint that involves a massless
+particle, so every X–H constraint was simply dropped from the copy.
+
+The result was measurable. In the 2026-09 rebuild, all 1994 protein X–H
+constraints of the RML systems were violated in the minimized state — mean
+0.113 Å, maximum 0.234 Å, 950 of them by more than 0.1 Å — while the polymer
+and water constraints, whose atoms were mobile, were exact to 0.000 Å.
+Equilibration then sets those positions on a constrained integrator, assigns
+velocities at 60 K, and steps: CCMA has to remove ~2000 violations at once and
+occasionally diverges on the very first step, which OpenMM reports as
+`Particle coordinate is NaN`. Whether a replicate survived was a matter of the
+velocity seed — protein-identical replicates of the same condition failed and
+succeeded at random (RML 0:100 replicate 1 ran, replicates 2 and 5 died; the
+RML control lost replicate 1 and kept the other four).
+
+Freezing only the heavy atoms fixes this at the source. The hydrogens are the
+only solute atoms whose geometry the force field, not the crystal structure,
+determines; letting the minimizer place them costs nothing scientifically and
+is what the pre-`freeze_solute` behaviour did. Since OpenMM will not accept a
+constraint on a massless particle in *any* position — verified empirically:
+constructing such a Context raises `A constraint cannot involve a massless
+particle` — the copy replaces each frozen-heavy-atom/mobile-hydrogen constraint
+with a stiff harmonic bond at the constraint distance
+(5 × 10⁵ kJ mol⁻¹ nm⁻²). Dropping the constraint outright is not an option: it
+would leave the hydrogen with no bonded term at all and the minimizer would
+scatter it. Constraints whose two particles are both frozen are removed, since
+neither atom moves; in a real system there are none, because every X–H
+constraint has a hydrogen on one end.
+
+### The final check: the constraints of the real System
+
+Because the surrogate bond is an approximation to the constraint, the runner
+does not assume the result. After minimization — frozen or not — it measures
+the largest `|distance − constraint length|` over every constraint of the real
+System and logs it. If that exceeds 0.01 Å it calls
+`Context.applyConstraints(1e-6)` to project the coordinates back onto the
+constraint manifold and logs the residual. `applyConstraints` distributes a
+correction by inverse mass, so a heavy partner can move by roughly 1/12 of it;
+the heavy-atom displacement is therefore re-checked afterwards against a 0.02 Å
+ceiling instead of the 1e-4 Å ceiling that applies to the minimization itself.
+In practice the surrogate leaves a residual well below 0.01 Å, the projection
+never runs, and the heavy atoms are bit-identical.
+
+The maximum distance a solute hydrogen travelled is logged and recorded in
+`minimization/phase.json` as `hydrogen_max_displacement_angstrom`. A large value
+there is not an error — it is the measure of how far the input hydrogens were
+from the force field's own bond lengths.
 
 Set `simulation_phases.minimization.freeze_solute: false` to recover the old
 behaviour. The setting is runtime-only and does not change the build manifest

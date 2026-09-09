@@ -37,6 +37,8 @@ PREDEFINED_GROUPS: FrozenSet[str] = frozenset(
         "polymer_heavy",
         # Everything Packmol treated as the fixed solute (protein + substrate, all atoms)
         "solute",
+        # The solute without its hydrogens: the set frozen during minimization
+        "solute_heavy",
         # Solvent groups
         "solvent",
         "water_only",
@@ -304,6 +306,8 @@ class AtomGroupResolver:
             return self._get_polymer_heavy()
         elif group_name == "solute":
             return self._get_solute()
+        elif group_name == "solute_heavy":
+            return self._get_solute_heavy()
         elif group_name == "solvent":
             return self._get_solvent()
         elif group_name == "water_only":
@@ -402,6 +406,24 @@ class AtomGroupResolver:
         if self._info.has_substrate:
             atoms.extend(self._get_chain_atoms(self._info.substrate_chain_id))
         logger.debug(f"Resolved 'solute': {len(atoms)} atoms")
+        return sorted(atoms)
+
+    def _get_solute_heavy(self) -> List[int]:
+        """Get every non-hydrogen protein and substrate atom.
+
+        This is ``protein_heavy`` union ``ligand_heavy``: the set held fixed
+        during energy minimisation.  Solute hydrogens are deliberately excluded
+        so that the minimiser can pull them onto the force field's X-H
+        constraint lengths; freezing them as well leaves the input PDB's bond
+        lengths in place and hands equilibration a state whose constraints are
+        violated (see ``SimulationRunner.minimize``).
+        """
+        atoms: List[int] = []
+        if self._info.has_protein:
+            atoms.extend(self._get_protein_heavy())
+        if self._info.has_substrate:
+            atoms.extend(self._get_ligand_heavy())
+        logger.debug(f"Resolved 'solute_heavy': {len(atoms)} atoms")
         return sorted(atoms)
 
     def _get_polymer_heavy(self) -> List[int]:

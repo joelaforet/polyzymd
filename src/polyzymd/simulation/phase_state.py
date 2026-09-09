@@ -24,6 +24,7 @@ class PhaseRecord(BaseModel):
     config_fingerprint: str | None = None
     frozen_atoms: int | None = None
     frozen_rmsd_angstrom: float | None = None
+    hydrogen_max_displacement_angstrom: float | None = None
     updated_at: str
 
 

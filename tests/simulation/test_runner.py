@@ -815,10 +815,19 @@ class TestSegmentProvenance:
 
 
 class TestFrozenSoluteMinimization:
-    """Minimization must leave protein/substrate coordinates exactly unchanged."""
+    """Minimization must leave solute heavy-atom coordinates exactly unchanged."""
+
+    #: Constraint length (nm) of the solute C-H bond in the toy system below.
+    CONSTRAINT_NM = 0.109
 
     @staticmethod
-    def _system(tmp_path):
+    def _system(tmp_path, hydrogen_offset_nm: float = 0.0):
+        """Toy system: a solute C-H pair plus one clashing water oxygen.
+
+        ``hydrogen_offset_nm`` stretches the input C-H distance away from the
+        constraint length, the way a PDB whose hydrogens were built with a
+        different geometry than the force field's does.
+        """
         from openmm import NonbondedForce, System, Vec3, unit
         from openmm.app import Element, Topology
 
@@ -840,63 +849,138 @@ class TestFrozenSoluteMinimization:
             nb.addParticle(0.0, 0.3, 0.5)
         nb.addException(0, 1, 0.0, 0.1, 0.0)  # bonded pair: no LJ between CA and HA
         system.addForce(nb)
-        system.addConstraint(0, 1, 0.109)  # H-bond constraint on the solute
+        system.addConstraint(0, 1, TestFrozenSoluteMinimization.CONSTRAINT_NM)
         system.setDefaultPeriodicBoxVectors(
             Vec3(3.0, 0.0, 0.0), Vec3(0.0, 3.0, 0.0), Vec3(0.0, 0.0, 3.0)
         )
         # Water oxygen placed 0.6 A from CA: a Packmol imperfect-packing residual.
-        positions = [Vec3(1.0, 1.0, 1.0), Vec3(1.109, 1.0, 1.0), Vec3(1.0, 1.06, 1.0)] * (
+        hydrogen_x = 1.0 + TestFrozenSoluteMinimization.CONSTRAINT_NM + hydrogen_offset_nm
+        positions = [Vec3(1.0, 1.0, 1.0), Vec3(hydrogen_x, 1.0, 1.0), Vec3(1.0, 1.06, 1.0)] * (
             unit.nanometer
         )
         return top, system, positions
 
-    def test_solute_fixed_and_solvent_relaxes(self, tmp_path):
-        import json
-
-        import numpy as np
-        from openmm import unit
-
+    @staticmethod
+    def _runner(tmp_path, top, system, positions):
         from polyzymd.simulation.runner import SimulationRunner
 
-        top, system, positions = self._system(tmp_path)
-        runner = SimulationRunner(
+        return SimulationRunner(
             topology=top,
             system=system,
             positions=positions,
             working_dir=tmp_path,
             platform="Reference",
         )
+
+    def test_solute_heavy_atoms_fixed_and_solvent_relaxes(self, tmp_path):
+        import json
+
+        import numpy as np
+        from openmm import unit
+
+        top, system, positions = self._system(tmp_path)
+        runner = self._runner(tmp_path, top, system, positions)
         energy = runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=True)
 
         before = np.asarray(positions.value_in_unit(unit.angstrom))
         after = np.asarray(runner._current_positions.value_in_unit(unit.angstrom))
-        np.testing.assert_array_equal(after[:2], before[:2])  # solute exactly unchanged
+        np.testing.assert_array_equal(after[0], before[0])  # heavy solute exactly unchanged
         assert np.linalg.norm(after[2] - before[2]) > 1.0  # water pushed away
         assert np.linalg.norm(after[2] - after[0]) > 2.5
         assert np.isfinite(energy)
         # The real System keeps its constraints and masses.
         assert system.getNumConstraints() == 1
         assert system.getParticleMass(0).value_in_unit(unit.dalton) == 12.0
+        assert system.getParticleMass(1).value_in_unit(unit.dalton) == 1.0
 
         record = json.loads((tmp_path / "minimization" / "phase.json").read_text())
         assert record["status"] == "completed"
-        assert record["frozen_atoms"] == 2
+        # Only the heavy solute atom is frozen; the hydrogen stays mobile.
+        assert record["frozen_atoms"] == 1
         assert record["frozen_rmsd_angstrom"] == 0.0
+        assert record["hydrogen_max_displacement_angstrom"] is not None
+
+    def test_misplaced_hydrogen_is_pulled_onto_its_constraint_length(self, tmp_path):
+        """A hydrogen 0.2 A off its constraint length is fixed by minimization."""
+        import json
+
+        import numpy as np
+        from openmm import unit
+
+        top, system, positions = self._system(tmp_path, hydrogen_offset_nm=0.02)
+        runner = self._runner(tmp_path, top, system, positions)
+        runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=True)
+
+        before = np.asarray(positions.value_in_unit(unit.angstrom))
+        after = np.asarray(runner._current_positions.value_in_unit(unit.angstrom))
+        np.testing.assert_array_equal(after[0], before[0])  # heavy atom still exact
+        length = np.linalg.norm(after[1] - after[0])
+        assert abs(length - self.CONSTRAINT_NM * 10.0) < 1e-3  # H snapped onto the constraint
+        assert np.linalg.norm(after[1] - before[1]) > 0.1  # and it really had to move
+
+        record = json.loads((tmp_path / "minimization" / "phase.json").read_text())
+        assert record["frozen_atoms"] == 1
+        assert record["frozen_rmsd_angstrom"] == 0.0
+        assert record["hydrogen_max_displacement_angstrom"] > 0.1
+
+    def test_constraints_are_satisfied_after_frozen_minimization(self, tmp_path):
+        """The state handed to equilibration must satisfy every real constraint."""
+        from openmm import unit
+
+        from polyzymd.simulation.runner import SimulationRunner
+
+        top, system, positions = self._system(tmp_path, hydrogen_offset_nm=0.02)
+        # The input state is badly out of tolerance: that is what used to reach
+        # heating and make CCMA diverge on the first step.
+        assert SimulationRunner._max_constraint_violation_angstrom(system, positions) > 0.19
+
+        runner = self._runner(tmp_path, top, system, positions)
+        runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=True)
+
+        violation = SimulationRunner._max_constraint_violation_angstrom(
+            system, runner._current_positions
+        )
+        assert violation < 1e-3
+        # Sanity: the helper measures in Angstrom against the System's own lengths.
+        assert system.getConstraintParameters(0)[2].value_in_unit(unit.nanometer) == (
+            self.CONSTRAINT_NM
+        )
+
+    def test_frozen_copy_keeps_heavy_hydrogen_constraints_as_surrogate_bonds(self, tmp_path):
+        """The copy replaces frozen-mobile constraints instead of dropping them."""
+        import openmm
+
+        top, system, positions = self._system(tmp_path)
+        runner = self._runner(tmp_path, top, system, positions)
+        frozen_system = runner._frozen_copy_of_system([0])
+
+        # OpenMM refuses a constraint that involves a massless particle, so the
+        # constraint is gone from the copy...
+        assert frozen_system.getNumConstraints() == 0
+        # ...but a stiff harmonic surrogate keeps the hydrogen on its bond length.
+        surrogates = [
+            frozen_system.getForce(i)
+            for i in range(frozen_system.getNumForces())
+            if isinstance(frozen_system.getForce(i), openmm.HarmonicBondForce)
+        ]
+        assert len(surrogates) == 1
+        assert surrogates[0].getNumBonds() == 1
+        p1, p2, length, k = surrogates[0].getBondParameters(0)
+        assert {p1, p2} == {0, 1}
+        assert length.value_in_unit(openmm.unit.nanometer) == self.CONSTRAINT_NM
+        assert k.value_in_unit(
+            openmm.unit.kilojoule_per_mole / openmm.unit.nanometer**2
+        ) == pytest.approx(500000.0)
+        # Only the heavy atom is massless.
+        assert frozen_system.getParticleMass(0).value_in_unit(openmm.unit.dalton) == 0.0
+        assert frozen_system.getParticleMass(1).value_in_unit(openmm.unit.dalton) == 1.0
 
     def test_unfrozen_minimization_moves_solute(self, tmp_path):
         import numpy as np
         from openmm import unit
 
-        from polyzymd.simulation.runner import SimulationRunner
-
         top, system, positions = self._system(tmp_path)
-        runner = SimulationRunner(
-            topology=top,
-            system=system,
-            positions=positions,
-            working_dir=tmp_path,
-            platform="Reference",
-        )
+        runner = self._runner(tmp_path, top, system, positions)
         runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=False)
         before = np.asarray(positions.value_in_unit(unit.angstrom))
         after = np.asarray(runner._current_positions.value_in_unit(unit.angstrom))
