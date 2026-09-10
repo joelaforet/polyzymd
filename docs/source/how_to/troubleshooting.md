@@ -403,6 +403,63 @@ manually:
    eval "$(pixi shell-hook -e sim-cuda-12-4 --manifest-path /path/to/polyzymd/pixi.toml)"
    ```
 
+### "A cancelled job comes straight back"
+
+```
+scancel 1234567
+# ...seconds later
+squeue -u $USER   # the same replicate is queued again
+```
+
+`scancel` sends `SIGTERM`. `run-segment` treats that as a graceful
+interruption and exits 99, which the job wrapper reads as "interrupted, work
+remains" — so it queues a successor, and each attempt creates another
+`production_N` directory.
+
+**Solution:** stop the chain rather than the job:
+
+```bash
+polyzymd cancel -c config.yaml -r 1-3          # marker + scancel
+polyzymd cancel -c config.yaml -r 1-3 --resume # allow it to run again
+```
+
+Chains submitted before this feature existed keep their old script and do
+not check the marker; stop those with
+`scancel --batch --signal=KILL <job_id>`.
+
+### "FATAL: CUDA routing failed after 3 retries"
+
+The chain drew three consecutive nodes whose driver is too old for the pinned
+`sim-cuda-*` environment, or that could not reproduce the recorded runtime.
+The message names every node it tried.
+
+**Solutions:**
+
+1. Resubmit excluding all of them at once — the message gives you the list:
+   ```bash
+   polyzymd submit -c config.yaml -r 1 --preset blanca-shirts \
+       --exclude bgpu-g4-u20,bgpu-g4-u24,bgpu-g4-u30
+   ```
+2. If the same nodes keep appearing, add them to the preset's exclusion list
+   so no chain draws them.
+
+A node that runs a segment successfully resets the budget, so this message
+means three failures in a row, not three failures over the life of the run.
+
+### "Segment N was hard-killed ... Moved to production_N.hardkilled-..."
+
+A segment was killed without a grace period (SIGKILL, OOM, node failure), so
+it left no `INTERRUPTED` marker and no `restart_state.xml` — only a stale
+checkpoint at an unknown position. PolyzyMD cannot tell how much of that
+segment is trustworthy, so it renames the directory out of the way and re-runs
+segment `N` from the last good state.
+
+**What to do:** nothing is required; the run continues. The retired directory
+still holds the frames that were written, so inspect or salvage it if you
+need to, and delete it when you no longer do. If you see many of these,
+lower the wall-time or raise the preemption grace period so segments end
+gracefully.
+
 ### "Permission denied on scratch"
 
 ```
@@ -438,6 +495,32 @@ FileNotFoundError: checkpoint.chk not found
    ```
 
 2. Verify working directory path is correct
+
+### "Could not reload ... OpenMM checkpoints are not portable"
+
+```
+RuntimeError: Could not reload .../production_3_checkpoint.chk: OpenMM
+checkpoints are not portable and this process differs from the one that
+wrote it (pixi_environment 'sim-cuda-12-4' -> 'sim-cuda-12-0')
+```
+
+Binary `.chk` checkpoints only reload under the OpenMM build that wrote them.
+The chain was rerouted to a different environment between segments, and the
+hard-killed previous segment left no portable state XML to recover from.
+
+**Solutions:**
+
+1. Prefer the recorded environment: the chain's `runtime_platform.json` names
+   the `pixi_environment` and `openmm_version` it is pinned to. Submit with
+   that `--pixi-env` (or `auto`, which reuses the recorded value).
+2. If the environment genuinely has to change, retire the unrecoverable
+   segment directory (rename it, do not delete it) so the segment is re-run
+   from the last portable state.
+
+PolyzyMD always prefers a portable serialized state
+(`production_N_state.xml`, `interrupted_state.xml`, `restart_state.xml`) over
+a checkpoint, and logs which one it chose, so this error only appears when a
+checkpoint was the only surviving option.
 
 ### "State mismatch"
 

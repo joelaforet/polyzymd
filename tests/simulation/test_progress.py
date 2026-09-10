@@ -12,6 +12,7 @@ Covers:
 """
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -78,6 +79,7 @@ def _write_completed_segment_on_disk(
     seg_idx: int,
     duration_ns: float = 10.0,
     num_samples: int = 125,
+    provenance: dict | None = None,
 ) -> None:
     """Write minimal files simulating a completed production segment."""
     seg_dir = working_dir / f"production_{seg_idx}"
@@ -103,6 +105,8 @@ def _write_completed_segment_on_disk(
             "thermo_params": {"__values__": {}},
         }
     }
+    if provenance is not None:
+        params["provenance"] = provenance
     (seg_dir / f"production_{seg_idx}_parameters.json").write_text(json.dumps(params))
 
 
@@ -388,37 +392,57 @@ class TestProgressIO:
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert len(tmp_files) == 0
 
-    def test_save_calls_fsync_before_rename(self):
-        """save_progress must flush and fsync before os.replace (B8).
+    def test_save_delegates_to_atomic_write(self):
+        """save_progress must publish through ``_atomic_write`` (B8).
 
-        Without fsync, a power failure after rename could leave a truncated
-        progress.json because the kernel hadn't flushed the page cache.
+        A fixed ``progress.json.tmp`` can be clobbered by a second writer, so
+        the durable-publication logic lives in one helper: a unique temporary
+        file, flushed and fsynced, then renamed into place.
         """
         import inspect
 
+        from polyzymd.simulation import artifact_integrity
+
         source = inspect.getsource(save_progress)
-        lines = source.split("\n")
+        assert "_atomic_write" in source, "save_progress must use _atomic_write"
+        assert ".json.tmp" not in source, "save_progress must not use a fixed temporary name"
 
-        flush_idx = None
-        fsync_idx = None
-        replace_idx = None
-
+        helper = inspect.getsource(artifact_integrity._atomic_write)
+        lines = helper.split("\n")
+        flush_idx = fsync_idx = replace_idx = None
         for i, line in enumerate(lines):
             stripped = line.strip()
-            if "f.flush()" in stripped:
+            if ".flush()" in stripped:
                 flush_idx = i
             if "os.fsync(" in stripped:
                 fsync_idx = i
             if "os.replace(" in stripped:
                 replace_idx = i
 
-        assert flush_idx is not None, "f.flush() not found in save_progress"
-        assert fsync_idx is not None, "os.fsync() not found in save_progress"
-        assert replace_idx is not None, "os.replace() not found in save_progress"
+        assert flush_idx is not None, "flush() not found in _atomic_write"
+        assert fsync_idx is not None, "os.fsync() not found in _atomic_write"
+        assert replace_idx is not None, "os.replace() not found in _atomic_write"
         message = (
             f"Expected order: flush ({flush_idx}) < fsync ({fsync_idx}) < replace ({replace_idx})"
         )
         assert flush_idx < fsync_idx < replace_idx, message
+
+    def test_save_uses_a_unique_temporary_name(self, tmp_path, monkeypatch):
+        """Concurrent writers must not share one temporary file name."""
+        seen = []
+        real_replace = os.replace
+
+        def _record(src, dst):
+            seen.append(Path(src).name)
+            real_replace(src, dst)
+
+        monkeypatch.setattr(os, "replace", _record)
+        save_progress(tmp_path, _make_progress())
+        save_progress(tmp_path, _make_progress())
+
+        assert len(seen) == 2
+        assert seen[0] != seen[1], f"temporary name reused: {seen}"
+        assert list(tmp_path.glob("*.tmp")) == []
 
 
 # ---------------------------------------------------------------------------
@@ -907,6 +931,99 @@ class TestScanEquilibrationStages:
 # ---------------------------------------------------------------------------
 # scan_filesystem — equilibration stages integration
 # ---------------------------------------------------------------------------
+
+
+class TestScanFilesystemProvenance:
+    """Segment provenance survives a progress.json rebuilt from the filesystem.
+
+    A cancelled-and-resubmitted chain reconciles ``progress.json`` from a
+    filesystem scan.  Before this, the ``polyzymd_version`` /
+    ``openmm_version`` / ``pixi_environment`` fields added in #90 came back
+    ``null`` even though ``production_N_parameters.json`` still had them.
+    """
+
+    PROVENANCE = {
+        "polyzymd_version": "1.3.0rc5",
+        "openmm_version": "8.1.2",
+        "pixi_environment": "sim-cuda-12-4",
+        "hostname": "bgpu-g4-u21",
+        "slurm_job_id": "12345",
+    }
+
+    def test_scan_recovers_provenance_from_parameters_json(self, tmp_path):
+        _write_completed_segment_on_disk(tmp_path, 0, provenance=self.PROVENANCE)
+        progress = scan_filesystem(tmp_path, timestep_fs=2.0)
+        record = progress.segments[0]
+        assert record.polyzymd_version == "1.3.0rc5"
+        assert record.openmm_version == "8.1.2"
+        assert record.pixi_environment == "sim-cuda-12-4"
+
+    def test_scan_without_provenance_block_leaves_fields_none(self, tmp_path):
+        _write_completed_segment_on_disk(tmp_path, 0)
+        record = scan_filesystem(tmp_path, timestep_fs=2.0).segments[0]
+        assert record.polyzymd_version is None
+        assert record.openmm_version is None
+        assert record.pixi_environment is None
+
+    def test_scan_ignores_a_malformed_provenance_block(self, tmp_path):
+        _write_completed_segment_on_disk(tmp_path, 0, provenance={"openmm_version": None})
+        record = scan_filesystem(tmp_path, timestep_fs=2.0).segments[0]
+        assert record.openmm_version is None
+
+    def test_interrupted_segment_keeps_provenance(self, tmp_path):
+        _write_completed_segment_on_disk(tmp_path, 0, provenance=self.PROVENANCE)
+        (tmp_path / "production_0" / "production_0_state.xml").unlink()
+        (tmp_path / "production_0" / "INTERRUPTED").write_text(
+            "segment_index=0\nsteps_completed=1000\nsteps_requested=5000\n"
+        )
+        record = scan_filesystem(tmp_path, timestep_fs=2.0).segments[0]
+        assert record.status == SegmentStatus.INTERRUPTED
+        assert record.pixi_environment == "sim-cuda-12-4"
+
+    def test_validate_progress_restores_null_provenance(self, tmp_path):
+        """A progress file whose records lost provenance is repaired in place."""
+        _write_completed_segment_on_disk(tmp_path, 0, provenance=self.PROVENANCE)
+        stale = SimulationProgress(
+            total_steps_requested=10_000_000,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=5_000_000,
+                    steps_requested=5_000_000,
+                    status=SegmentStatus.COMPLETED,
+                )
+            ],
+        )
+        assert stale.segments[0].openmm_version is None
+
+        repaired = validate_progress(tmp_path, stale, timestep_fs=2.0)
+
+        assert repaired.segments[0].openmm_version == "8.1.2"
+        assert repaired.segments[0].pixi_environment == "sim-cuda-12-4"
+        assert repaired.segments[0].polyzymd_version == "1.3.0rc5"
+
+    def test_validate_progress_prefers_the_recorded_provenance(self, tmp_path):
+        """The progress file wins when both sources know the environment."""
+        _write_completed_segment_on_disk(tmp_path, 0, provenance=self.PROVENANCE)
+        recorded = SimulationProgress(
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    status=SegmentStatus.COMPLETED,
+                    pixi_environment="sim-cuda-12-0",
+                    openmm_version="8.1.1",
+                )
+            ],
+        )
+
+        repaired = validate_progress(tmp_path, recorded, timestep_fs=2.0)
+
+        assert repaired.segments[0].pixi_environment == "sim-cuda-12-0"
+        assert repaired.segments[0].openmm_version == "8.1.1"
+        # Missing values still come from the parameters JSON.
+        assert repaired.segments[0].polyzymd_version == "1.3.0rc5"
 
 
 class TestScanFilesystemEquilibration:

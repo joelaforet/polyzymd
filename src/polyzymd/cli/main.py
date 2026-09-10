@@ -1788,15 +1788,6 @@ def run_segment(
     raise_if_interrupted()
 
     from polyzymd.config.schema import SimulationConfig
-    from polyzymd.simulation.progress import (
-        SegmentStatus,
-        SimulationProgress,
-        SimulationStatus,
-        _derive_overall_status,
-        get_next_segment_info,
-        load_or_scan_progress,
-        save_progress,
-    )
 
     colored_echo(f"Loading configuration from: {config}", phase="simulation")
 
@@ -1837,6 +1828,57 @@ def run_segment(
     except ArtifactIntegrityError as exc:
         colored_echo(str(exc), phase="simulation", level=logging.WARNING)
         sys.exit(EXIT_CODE_CONCURRENT)
+
+    # The lock must be released on every exit path, including sys.exit() and
+    # unhandled exceptions: a leaked flock makes every later job in the chain
+    # exit with EXIT_CODE_CONCURRENT and silently stops the run.
+    try:
+        _run_segment_locked(
+            config=config,
+            sim_config=sim_config,
+            working_dir=working_dir,
+            replicate=replicate,
+            skip_build=skip_build,
+        )
+    finally:
+        run_lock.__exit__(None, None, None)
+
+
+def _run_segment_locked(
+    config: str,
+    sim_config: "SimulationConfig",
+    working_dir: Path,
+    replicate: int,
+    skip_build: bool,
+) -> None:
+    """Run the next production segment while the replicate lock is held.
+
+    Split out of :func:`run_segment` so the lock is acquired and released by
+    exactly one ``try``/``finally`` around this call.
+
+    Parameters
+    ----------
+    config : str
+        Path to the YAML configuration file (recorded in ``progress.json``).
+    sim_config : SimulationConfig
+        Validated configuration.
+    working_dir : Path
+        Replicate working directory.
+    replicate : int
+        Replicate number (1-based).
+    skip_build : bool
+        Whether to reuse a pre-built system for the initial segment.
+    """
+    from polyzymd.simulation.progress import (
+        SegmentStatus,
+        SimulationProgress,
+        SimulationStatus,
+        _derive_overall_status,
+        get_next_segment_info,
+        load_or_scan_progress,
+        save_progress,
+    )
+    from polyzymd.simulation.signals import raise_if_interrupted
 
     # Calculate total steps and samples from config
     prod = sim_config.simulation_phases.production
@@ -1929,30 +1971,51 @@ def run_segment(
     # estimates steps from the CSV file rather than an authoritative
     # INTERRUPTED marker.
     #
-    # Fix: clean up the hard-killed segment's directory and remove it
-    # from progress so that ``get_next_segment_info()`` assigns the
-    # *same* segment index.  The segment will be retried from the
-    # previous good state (the last segment with a proper completion
-    # or graceful interruption).
+    # Fix: retire the hard-killed segment's directory and remove it from
+    # progress so that ``get_next_segment_info()`` assigns the *same*
+    # segment index.  The segment will be retried from the previous good
+    # state (the last segment with a proper completion or graceful
+    # interruption).
+    #
+    # Two safeguards, both added after data was lost on Blanca:
+    #   * a segment that left a ``restart_state.xml`` behind IS
+    #     recoverable — the continuation manager resumes from that
+    #     portable state — so the guard does not apply at all;
+    #   * the directory is renamed, never deleted.  Everything under
+    #     ``production_N`` (the DCD frames, the state-data CSV, the
+    #     checkpoint) is GPU-hours that cannot be recreated, and a
+    #     heuristic ("stale checkpoint, no marker") is not a good enough
+    #     reason to call ``shutil.rmtree`` on it.
     if progress.segments:
         last_seg = max(progress.segments, key=lambda s: s.index)
         if last_seg.status == SegmentStatus.INTERRUPTED:
             last_seg_dir = working_dir / f"production_{last_seg.index}"
             interrupted_marker = last_seg_dir / "INTERRUPTED"
+            restart_state = last_seg_dir / "restart_state.xml"
             if last_seg_dir.exists() and not interrupted_marker.exists():
-                colored_echo(
-                    f"Segment {last_seg.index} was hard-killed (no INTERRUPTED "
-                    f"marker — only stale checkpoint found). Cleaning up "
-                    f"directory to retry from previous good state.",
-                    phase="simulation",
-                    level=logging.WARNING,
-                )
-                shutil.rmtree(last_seg_dir)
-                progress.segments = [s for s in progress.segments if s.index != last_seg.index]
-                progress.status = _derive_overall_status(
-                    progress.segments, is_complete=progress.is_complete
-                )
-                save_progress(working_dir, progress)
+                if restart_state.exists():
+                    colored_echo(
+                        f"Segment {last_seg.index} has no INTERRUPTED marker but "
+                        f"left {restart_state.name} — it is recoverable, keeping "
+                        f"the directory and continuing from that state.",
+                        phase="simulation",
+                        level=logging.WARNING,
+                    )
+                else:
+                    retired = _retire_hardkilled_segment(last_seg_dir)
+                    colored_echo(
+                        f"Segment {last_seg.index} was hard-killed (no INTERRUPTED "
+                        f"marker, no restart_state.xml — only a stale checkpoint). "
+                        f"Moved to {retired.name} and retrying from the previous "
+                        f"good state; delete it once you no longer need the data.",
+                        phase="simulation",
+                        level=logging.WARNING,
+                    )
+                    progress.segments = [s for s in progress.segments if s.index != last_seg.index]
+                    progress.status = _derive_overall_status(
+                        progress.segments, is_complete=progress.is_complete
+                    )
+                    save_progress(working_dir, progress)
 
     # Determine what to run next
     seg_info = get_next_segment_info(progress, total_steps, total_samples)
@@ -2020,6 +2083,35 @@ def run_segment(
 
             traceback.print_exc()
         sys.exit(1)
+
+
+def _retire_hardkilled_segment(segment_dir: Path) -> Path:
+    """Rename a hard-killed segment directory out of the way.
+
+    The scanner only recognises ``production_N``, so the renamed directory
+    no longer participates in progress reconciliation while its trajectory
+    data stays on disk for inspection or salvage.
+
+    Parameters
+    ----------
+    segment_dir : Path
+        The ``production_N`` directory to retire.
+
+    Returns
+    -------
+    Path
+        The new path, ``production_N.hardkilled-<ISO timestamp>``.
+    """
+    from datetime import datetime, timezone
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = segment_dir.with_name(f"{segment_dir.name}.hardkilled-{stamp}")
+    suffix = 1
+    while target.exists():
+        target = segment_dir.with_name(f"{segment_dir.name}.hardkilled-{stamp}-{suffix}")
+        suffix += 1
+    segment_dir.rename(target)
+    return target
 
 
 def _run_initial_segment(
@@ -2406,6 +2498,239 @@ def check_progress(
             phase="progress",
         )
         sys.exit(1)
+
+
+# =============================================================================
+# Cancel Command
+# =============================================================================
+
+STOP_FILENAME = "STOP"
+
+
+def stop_file_path(working_dir: Path) -> Path:
+    """Return the STOP-file path for a replicate working directory.
+
+    While this file exists the self-resubmitting job wrapper refuses to
+    submit a successor and a queued successor exits without starting a
+    segment, which is what makes a chain stoppable at all: a plain
+    ``scancel`` only sends SIGTERM, and the wrapper reads the resulting
+    exit code 99 as "interrupted, work remains" and resubmits.
+
+    Parameters
+    ----------
+    working_dir : Path
+        Replicate working (scratch) directory.
+
+    Returns
+    -------
+    Path
+        ``<working_dir>/STOP``.
+    """
+    return Path(working_dir) / STOP_FILENAME
+
+
+def write_stop_file(working_dir: Path, config_path: str, replicate: int) -> Path:
+    """Write a human-readable STOP file into a replicate working directory.
+
+    Parameters
+    ----------
+    working_dir : Path
+        Replicate working (scratch) directory.
+    config_path : str
+        Configuration file the chain was submitted with.
+    replicate : int
+        Replicate number.
+
+    Returns
+    -------
+    Path
+        The STOP file that was written.
+    """
+    import getpass
+    import socket
+    from datetime import datetime, timezone
+
+    try:
+        user = getpass.getuser()
+    except (OSError, KeyError):  # pragma: no cover - unusual environments
+        user = "unknown"
+    try:
+        host = socket.gethostname()
+    except OSError:  # pragma: no cover - unusual environments
+        host = "unknown"
+
+    working_dir = Path(working_dir)
+    working_dir.mkdir(parents=True, exist_ok=True)
+    target = stop_file_path(working_dir)
+    target.write_text(
+        "PolyzyMD STOP marker — this simulation chain will not resubmit itself.\n"
+        f"written_by:   {user}@{host}\n"
+        f"written_at:   {datetime.now(timezone.utc).isoformat()}\n"
+        f"command:      polyzymd cancel\n"
+        f"config:       {config_path}\n"
+        f"replicate:    {replicate}\n"
+        "\n"
+        "The job wrapper checks for this file before submitting any successor\n"
+        "and at the start of every job.  To restart the chain, remove this file\n"
+        "(or run `polyzymd cancel --resume` with the same options) and submit\n"
+        "again with `polyzymd submit`.\n"
+    )
+    return target
+
+
+@cli.command()
+@click.option(
+    "-c",
+    "--config",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to YAML configuration file",
+)
+@click.option(
+    "-r",
+    "--replicates",
+    default="1",
+    help="Replicate range (e.g., '1-5', '1,3,5')",
+)
+@click.option(
+    "--scratch-dir",
+    default=None,
+    type=click.Path(),
+    help="Scratch directory override (must match the one used at submission)",
+)
+@click.option(
+    "--resume",
+    is_flag=True,
+    help="Remove the STOP marker instead of writing it, so the chain can be resubmitted",
+)
+@click.option(
+    "--stop-only",
+    is_flag=True,
+    help="Write the STOP marker but do not cancel queued or running jobs",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Report what would be stopped without writing files or cancelling jobs",
+)
+def cancel(
+    config: str,
+    replicates: str,
+    scratch_dir: str | None,
+    resume: bool,
+    stop_only: bool,
+    dry_run: bool,
+) -> None:
+    """Stop self-resubmitting simulation chains (and let them be restarted).
+
+    \b
+    ``scancel`` alone cannot stop a chain: it sends SIGTERM, ``run-segment``
+    exits 99, and the wrapper reads that as "interrupted, work remains" and
+    queues a successor within seconds.  This command writes a STOP marker
+    into each replicate's working directory first — the wrapper refuses to
+    submit a successor while it exists — and then cancels the matching
+    queued and running jobs by name.
+
+    \b
+    Examples:
+      polyzymd cancel -c config.yaml -r 1-3
+      polyzymd cancel -c config.yaml -r 1-3 --resume
+    """
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.workflow.daisy_chain import (
+        cancel_slurm_jobs,
+        check_existing_slurm_jobs,
+        create_job_name,
+    )
+
+    try:
+        sim_config = SimulationConfig.from_yaml(config)
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as exc:
+        colored_echo(f"Failed to load config: {exc}", err=True, level=logging.ERROR)
+        sys.exit(1)
+
+    replicate_numbers = _resolve_replicates_option(replicates)
+    config_path = str(Path(config).resolve())
+
+    for replicate in replicate_numbers:
+        if scratch_dir:
+            working_dir = Path(scratch_dir)
+        else:
+            working_dir = Path(sim_config.get_working_directory(replicate))
+        marker = stop_file_path(working_dir)
+        job_name = create_job_name(sim_config, replicate)
+
+        if resume:
+            if dry_run:
+                colored_echo(
+                    f"[dry-run] replicate {replicate}: would remove {marker}",
+                    phase="simulation",
+                )
+                continue
+            if marker.exists():
+                marker.unlink()
+                colored_echo(
+                    f"Replicate {replicate}: removed {marker} — resubmit with "
+                    f"`polyzymd submit -c {config} -r {replicate}`",
+                    phase="simulation",
+                )
+            else:
+                colored_echo(
+                    f"Replicate {replicate}: no STOP marker at {marker} — nothing to resume",
+                    phase="simulation",
+                    level=logging.WARNING,
+                )
+            continue
+
+        job_ids = [] if stop_only else check_existing_slurm_jobs(job_name)
+
+        if dry_run:
+            queued = ", ".join(job_ids) if job_ids else "none"
+            colored_echo(
+                f"[dry-run] replicate {replicate}: would write {marker} "
+                f"and cancel job(s) {queued} (name '{job_name}')",
+                phase="simulation",
+            )
+            continue
+
+        # The marker is written *before* cancelling, so a successor that is
+        # queued while scancel runs still sees it and exits without work.
+        write_stop_file(working_dir, config_path, replicate)
+        colored_echo(f"Replicate {replicate}: wrote {marker}", phase="simulation")
+
+        if stop_only:
+            colored_echo(
+                f"Replicate {replicate}: leaving job(s) named '{job_name}' running; "
+                f"the chain will stop after the current segment",
+                phase="simulation",
+            )
+            continue
+
+        cancelled = cancel_slurm_jobs(job_ids)
+        if cancelled:
+            colored_echo(
+                f"Replicate {replicate}: cancelled job(s) {', '.join(cancelled)}",
+                phase="simulation",
+            )
+        elif job_ids:
+            colored_echo(
+                f"Replicate {replicate}: could not cancel job(s) {', '.join(job_ids)} — "
+                f"cancel them manually; the STOP marker already prevents resubmission",
+                phase="simulation",
+                level=logging.WARNING,
+            )
+        else:
+            colored_echo(
+                f"Replicate {replicate}: no queued or running job named '{job_name}'",
+                phase="simulation",
+            )
+
+    if not resume and not dry_run:
+        colored_echo(
+            "Chains stopped. Restart them with `polyzymd cancel --resume` "
+            "followed by `polyzymd submit`.",
+            phase="simulation",
+        )
 
 
 # =============================================================================

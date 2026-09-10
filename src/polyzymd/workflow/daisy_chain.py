@@ -99,6 +99,52 @@ def check_existing_slurm_jobs(job_name: str) -> List[str]:
     return job_ids
 
 
+def cancel_slurm_jobs(job_ids: List[str]) -> List[str]:
+    """Cancel SLURM jobs by ID, best effort.
+
+    Mirrors :func:`check_existing_slurm_jobs`: outside a SLURM environment
+    (CI, a workstation) the absence of ``scancel`` is logged and reported as
+    "nothing cancelled" rather than raised, so that the STOP-file half of
+    ``polyzymd cancel`` still works.
+
+    Parameters
+    ----------
+    job_ids : list of str
+        SLURM job IDs to cancel.
+
+    Returns
+    -------
+    list of str
+        The job IDs that ``scancel`` accepted.
+    """
+    if not job_ids:
+        return []
+    try:
+        result = subprocess.run(
+            ["scancel", *job_ids],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        LOGGER.warning(
+            "scancel not found — no SLURM jobs were cancelled "
+            "(this is expected outside of SLURM environments)"
+        )
+        return []
+    except subprocess.TimeoutExpired:
+        LOGGER.warning("scancel timed out — jobs may still be queued")
+        return []
+    except OSError as exc:
+        LOGGER.warning(f"scancel failed ({exc}) — jobs may still be queued")
+        return []
+
+    if result.returncode != 0:
+        LOGGER.warning(f"scancel returned exit code {result.returncode}: {result.stderr.strip()}")
+        return []
+    return list(job_ids)
+
+
 def _sanitize_slurm_job_name(job_name: object, replicate: int) -> str:
     """Sanitize a job name for SLURM and log-file use.
 

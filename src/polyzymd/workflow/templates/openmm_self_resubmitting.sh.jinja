@@ -30,6 +30,32 @@ ROUTING_FAILED_NODES="${POLYZYMD_ROUTING_FAILED_NODES:-}"
 ROUTING_RETRY_LIMIT=3
 CONFIGURED_EXCLUDE={{ configured_exclude | shell_quote }}
 
+# Union of comma-separated node lists, first-seen order, duplicates dropped.
+merge_node_list() {
+    printf '%s,' "$@" | tr ',' '\n' \
+        | awk 'NF && !seen[$0]++ {printf "%s%s", sep, $0; sep=","} END {printf "\n"}'
+}
+
+# A chain stops when the run directory holds a STOP file (written by
+# `polyzymd cancel`) or when POLYZYMD_STOP_CHAIN=1 is exported into the job.
+# Checked before every successor submission so a cancelled chain stays
+# cancelled instead of resurrecting itself within seconds of `scancel`.
+stop_requested() {
+    if [ "${POLYZYMD_STOP_CHAIN:-0}" = "1" ]; then
+        echo "STOP: POLYZYMD_STOP_CHAIN=1 — not submitting a successor"
+        return 0
+    fi
+    if [ -n "${STOP_FILE:-}" ] && [ -f "$STOP_FILE" ]; then
+        echo "STOP: $STOP_FILE exists — not submitting a successor"
+        echo "STOP: ---- $STOP_FILE ----"
+        sed -n '1,20p' "$STOP_FILE" || true
+        echo "STOP: -------------------------------"
+        echo "STOP: remove the file (or run 'polyzymd cancel --resume') to restart the chain"
+        return 0
+    fi
+    return 1
+}
+
 resubmit_after_routing_failure() {
     local reason="$1"
     echo "ROUTING: $reason" >&2
@@ -38,25 +64,31 @@ resubmit_after_routing_failure() {
         echo "FATAL: invalid routing retry count: $ROUTING_RETRY_COUNT" >&2
         exit 1
     fi
-    if (( ROUTING_RETRY_COUNT >= ROUTING_RETRY_LIMIT )); then
-        echo "FATAL: CUDA routing failed after $ROUTING_RETRY_LIMIT retries" >&2
-        exit 1
-    fi
     if [ -z "${SLURM_JOB_ID:-}" ] || [ -z "${SLURMD_NODENAME:-}" ]; then
         echo "FATAL: cannot resubmit outside an allocated SLURM node" >&2
         exit 1
     fi
 
+    # Every node this chain has been routed away from, including this one.
+    local failed_nodes
+    failed_nodes="$(merge_node_list "$ROUTING_FAILED_NODES" "$SLURMD_NODENAME")"
+
+    if (( ROUTING_RETRY_COUNT >= ROUTING_RETRY_LIMIT )); then
+        echo "FATAL: CUDA routing failed after $ROUTING_RETRY_LIMIT retries;" \
+             "incompatible nodes: $failed_nodes" >&2
+        echo "FATAL: resubmit manually with --exclude=$failed_nodes once a" \
+             "compatible node is available" >&2
+        exit 1
+    fi
+    if stop_requested; then
+        echo "ROUTING: stop requested — not rerouting; exiting cleanly" >&2
+        exit 0
+    fi
+
     local next_count=$((ROUTING_RETRY_COUNT + 1))
-    local failed_nodes="$SLURMD_NODENAME"
-    if [ -n "$ROUTING_FAILED_NODES" ]; then
-        failed_nodes="$ROUTING_FAILED_NODES,$failed_nodes"
-    fi
-    local excluded_node="$failed_nodes"
-    if [ -n "$CONFIGURED_EXCLUDE" ]; then
-        excluded_node="$CONFIGURED_EXCLUDE,$excluded_node"
-    fi
-    echo "ROUTING: resubmitting to the same queue without $SLURMD_NODENAME " \
+    local excluded_node
+    excluded_node="$(merge_node_list "$CONFIGURED_EXCLUDE" "$failed_nodes")"
+    echo "ROUTING: resubmitting to the same queue without $failed_nodes " \
          "(attempt $next_count/$ROUTING_RETRY_LIMIT)" >&2
     if sbatch \
         --dependency="afterany:$SLURM_JOB_ID" \
@@ -76,7 +108,16 @@ REQUESTED_PIXI_ENV={{ pixi_env | shell_quote }}
 CONFIG_PATH={{ config_path | shell_quote }}
 REPLICATE={{ replicate }}
 WORKING_DIR={{ working_dir | shell_quote }}
+STOP_FILE="${POLYZYMD_STOP_FILE:-$WORKING_DIR/STOP}"
 RUNTIME_METADATA="$WORKING_DIR/runtime_platform.json"
+
+# A successor that was already queued when the chain was cancelled must not
+# start a new segment.  Bail out before the GPU probe so no production_N
+# directory is created.
+if stop_requested; then
+    echo "STOP: not starting a segment for replicate $REPLICATE"
+    exit 0
+fi
 PIXI_ENV="$REQUESTED_PIXI_ENV"
 if [ -f "$RUNTIME_METADATA" ]; then
     RECORDED_PIXI_ENV="$(
@@ -192,6 +233,7 @@ echo "=================================================="
 
 RUNTIME_METADATA_TMP="$WORKING_DIR/.runtime_platform.json.$$"
 export PIXI_ENV DRIVER_MAJOR DRIVER_MINOR COMPUTE_CAP
+set +e
 python - "$WORKING_DIR/runtime_platform.json" "$RUNTIME_METADATA_TMP" <<'PY'
 import json
 import os
@@ -215,12 +257,29 @@ if published.exists():
     immutable = ("pixi_environment", "openmm_version", "platform", "precision")
     changed = [key for key in immutable if previous.get(key) != metadata[key]]
     if changed:
-        raise SystemExit(
-            "FATAL: runtime changed across replica resubmission: "
-            + ", ".join(f"{key}={previous.get(key)!r}->{metadata[key]!r}" for key in changed)
+        # Exit code 3 is the wrapper's "this node cannot honour the recorded
+        # runtime" signal: the wrapper reroutes to another node instead of
+        # killing the chain (a bare SystemExit under `set -e` left no
+        # successor queued and silently ended the run).
+        print(
+            "runtime changed across replica resubmission: "
+            + ", ".join(f"{key}={previous.get(key)!r}->{metadata[key]!r}" for key in changed),
+            file=sys.stderr,
         )
+        raise SystemExit(3)
 temporary.write_text(json.dumps(metadata, sort_keys=True) + "\n")
 PY
+RUNTIME_METADATA_RC=$?
+set -e
+if [ "$RUNTIME_METADATA_RC" -eq 3 ]; then
+    rm -f "$RUNTIME_METADATA_TMP"
+    resubmit_after_routing_failure \
+        "${SLURMD_NODENAME:-this node} cannot reproduce the recorded run runtime"
+elif [ "$RUNTIME_METADATA_RC" -ne 0 ]; then
+    rm -f "$RUNTIME_METADATA_TMP"
+    echo "FATAL: could not record runtime metadata (exit $RUNTIME_METADATA_RC)" >&2
+    exit "$RUNTIME_METADATA_RC"
+fi
 mv "$RUNTIME_METADATA_TMP" "$WORKING_DIR/runtime_platform.json"
 
 # =========================================================================
@@ -231,8 +290,13 @@ mv "$RUNTIME_METADATA_TMP" "$WORKING_DIR/runtime_platform.json"
 CHILD_PID=""
 SUCCESSOR_RECEIPT="$WORKING_DIR/.successor-${SLURM_JOB_ID:-local}"
 JOB_COMPLETE=0
+STOP_HONOURED=0
 resubmit_once() {
     if [ "$JOB_COMPLETE" -eq 1 ]; then
+        return 0
+    fi
+    if stop_requested; then
+        STOP_HONOURED=1
         return 0
     fi
     if [ -s "$SUCCESSOR_RECEIPT" ]; then
@@ -243,8 +307,14 @@ resubmit_once() {
         echo "FATAL: cannot submit a dependent successor without SLURM_JOB_ID"
         return 1
     fi
+    # This node successfully reached `run-segment`, so the routing budget is
+    # spent state from an unhealthy node and must not be inherited: reset the
+    # counter and clear the accumulated exclusions for the successor.
     local result
-    if ! result=$(sbatch --dependency="afterany:$SLURM_JOB_ID" "$THIS_SCRIPT"); then
+    if ! result=$(sbatch \
+        --dependency="afterany:$SLURM_JOB_ID" \
+        --export="ALL,POLYZYMD_ROUTING_RETRY_COUNT=0,POLYZYMD_ROUTING_FAILED_NODES=" \
+        "$THIS_SCRIPT"); then
         echo "FATAL: dependent successor submission failed"
         return 1
     fi
@@ -321,6 +391,10 @@ fi
 # Work remains (exit code 1) — reuse a signal-created successor or submit now
 echo "Work remains — resubmitting job..."
 if resubmit_once; then
+    if [ "$STOP_HONOURED" -eq 1 ]; then
+        echo "Chain stopped by request — no successor queued."
+        exit 0
+    fi
     echo "Successor is queued."
 else
     echo "WARNING: sbatch resubmission failed"

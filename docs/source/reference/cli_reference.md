@@ -437,6 +437,71 @@ what work remains. See {doc}`../how_to/hpc_slurm` for details.
 
 ---
 
+## polyzymd cancel
+
+Stop self-resubmitting simulation chains, and hand them back when you want
+to continue.
+
+```bash
+polyzymd cancel -c CONFIG [OPTIONS]
+```
+
+`scancel` on its own does not stop a chain. SLURM sends `SIGTERM`,
+`run-segment` exits 99, and the job wrapper reads that as "interrupted, work
+remains" and queues a successor within seconds. `polyzymd cancel` writes a
+`STOP` marker into each replicate working directory first — the wrapper
+refuses to submit a successor while it exists, and a successor that is
+already queued exits before starting a segment — and then cancels the
+matching queued and running jobs by job name.
+
+### Options
+
+| Option | Short | Required | Default | Description |
+|--------|-------|----------|---------|-------------|
+| `--config` | `-c` | Yes | - | Path to YAML configuration file |
+| `--replicates` | `-r` | No | `1` | Replicate range (e.g. `1-5`, `1,3,5`) |
+| `--scratch-dir` | - | No | from config | Scratch directory override; must match submission |
+| `--resume` | - | No | false | Remove the `STOP` marker instead of writing it |
+| `--stop-only` | - | No | false | Write the marker but leave running jobs alone |
+| `--dry-run` | - | No | false | Report what would happen; write and cancel nothing |
+
+### Example
+
+```bash
+# Stop three replicates now
+polyzymd cancel -c config.yaml -r 1-3
+
+# Let the current segment finish, then stop
+polyzymd cancel -c config.yaml -r 1-3 --stop-only
+
+# Allow the chains to run again, then resubmit
+polyzymd cancel -c config.yaml -r 1-3 --resume
+polyzymd submit -c config.yaml -r 1-3 --preset blanca-shirts
+```
+
+### The STOP marker
+
+`<working_dir>/STOP` is a plain-text file that records who wrote it, on which
+host, when, the config path and the replicate, and how to undo it. Deleting
+the file by hand is equivalent to `--resume`.
+
+The job wrapper also honours `POLYZYMD_STOP_CHAIN=1` in the job environment
+and `POLYZYMD_STOP_FILE=<path>` to relocate the marker.
+
+### Notes
+
+- The marker is written before `scancel` runs, so a successor queued during
+  cancellation still sees it.
+- `--resume` only removes the marker; it does not resubmit. Use
+  `polyzymd submit` afterwards.
+- Outside a SLURM environment (no `scancel`) the marker is still written and
+  the missing scheduler is reported as a warning.
+- Already-running chains keep the job script that was rendered at submission
+  time. A chain submitted before this feature existed does not check the
+  marker; stop those with `scancel --batch --signal=KILL <job_id>`.
+
+---
+
 ## polyzymd run-segment
 
 Unified entry point for SLURM jobs. Determines what work remains by loading

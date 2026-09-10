@@ -147,6 +147,49 @@ pixi run -e build polyzymd recover \
     --pixi-env auto
 ```
 
+(hpc-slurm-stop-a-chain)=
+## Stop a chain
+
+A self-resubmitting chain survives `scancel`. SLURM sends `SIGTERM`,
+`run-segment` exits 99, and the wrapper reads that as "interrupted, work
+remains" and queues a successor within seconds — each attempt also creating a
+new `production_N` directory. Stop the chain instead of the job:
+
+```bash
+pixi run -e build polyzymd cancel -c config.yaml -r 1-3
+```
+
+This writes a `STOP` marker into each replicate working directory and then
+cancels the queued and running jobs for those replicates. The marker is what
+makes the stop stick: the wrapper checks for it before submitting any
+successor and at the start of every job, so a successor that was already
+queued exits without starting a segment.
+
+To let the current segment finish and stop after it, keep the running job:
+
+```bash
+pixi run -e build polyzymd cancel -c config.yaml -r 1-3 --stop-only
+```
+
+To start again, remove the marker and resubmit:
+
+```bash
+pixi run -e build polyzymd cancel -c config.yaml -r 1-3 --resume
+pixi run -e build polyzymd submit -c config.yaml -r 1-3 --preset blanca-shirts
+```
+
+The marker is a readable text file (`<working_dir>/STOP`) naming who stopped
+the chain, when, and how to undo it; deleting it by hand is equivalent to
+`--resume`. The job environment variables `POLYZYMD_STOP_CHAIN=1` and
+`POLYZYMD_STOP_FILE=<path>` are honoured as well.
+
+:::{note}
+A chain keeps the script that was rendered when it was submitted. Chains
+submitted before this release do not check the marker; stop those the old
+way, with `scancel --batch --signal=KILL <job_id>`, and use `polyzymd cancel`
+for everything you submit from now on.
+:::
+
 ## OpenMM runtime policy
 
 Run `polyzymd submit` from the `build` environment. The `--pixi-env` option
@@ -289,12 +332,14 @@ partition tables and troubleshooting.
 
 Each generated NVIDIA OpenMM script follows the same loop:
 
-1. detect GPU capability and validate the environment selected at submission
-2. activate the environment, create an explicit CUDA Context, calculate an
+1. exit immediately if a `STOP` marker is present (see
+   [Stop a chain](#hpc-slurm-stop-a-chain))
+2. detect GPU capability and validate the environment selected at submission
+3. activate the environment, create an explicit CUDA Context, calculate an
    energy, and run one integration step
-3. run `polyzymd run-segment`
-4. call `polyzymd check-progress`
-5. resubmit itself if work remains
+4. run `polyzymd run-segment`
+5. call `polyzymd check-progress`
+6. resubmit itself if work remains and no `STOP` marker has appeared
 
 This loop lets a simulation continue across wall-time limits.
 
@@ -307,6 +352,12 @@ an `afterany` dependency on the current job, then forwards the signal to
 `run-segment`. A receipt in the replicate directory prevents duplicate traps
 and normal exit handling from submitting a second successor. If `sbatch`
 fails, the job exits with an error and prints the manual recovery command.
+
+Routing state travels with the chain. A rerouted successor inherits
+`POLYZYMD_ROUTING_RETRY_COUNT` and `POLYZYMD_ROUTING_FAILED_NODES`, whose
+union with the preset exclusions becomes its `--exclude`; a successor queued
+after a segment that actually ran is exported a reset counter and an empty
+node list.
 
 OpenMM records each minimization and equilibration phase in an atomic
 `phase.json`. Only `status: completed` permits a successor to skip a phase.
@@ -373,11 +424,8 @@ you move the config, regenerate the scripts and resubmit.
 (hpc-slurm-stop-permanently)=
 ### need to stop a job permanently
 
-Because standard cancellation can trigger graceful restart behavior, use:
-
-```bash
-scancel --signal=KILL <job_id>
-```
+See [Stop a chain](#hpc-slurm-stop-a-chain). Plain `scancel` is not enough:
+the chain resubmits itself within seconds.
 
 ## Related reference pages
 

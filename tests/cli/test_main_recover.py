@@ -1636,3 +1636,201 @@ class TestStatusDeferBinary:
         assert result.exit_code == 0, result.output
         _, kwargs = mock_create_engine.call_args
         assert kwargs.get("defer_binary") is True
+
+
+# ---------------------------------------------------------------------------
+# Hard-killed segment recovery and replicate-lock lifetime
+# ---------------------------------------------------------------------------
+
+
+def _write_hard_killed_segment(working_dir: Path, seg_idx: int = 0) -> Path:
+    """Write a segment that looks hard-killed: stale checkpoint, no marker."""
+    import os
+    import time
+
+    seg_dir = working_dir / f"production_{seg_idx}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    chk = seg_dir / f"production_{seg_idx}_checkpoint.chk"
+    chk.write_bytes(b"\x00" * 16)
+    (seg_dir / f"production_{seg_idx}_system.xml").write_text("<System/>")
+    (seg_dir / f"production_{seg_idx}_state_data.csv").write_text(
+        '#"Step","Time (ps)"\n0,0.0\n80000,160.0\n'
+    )
+    (seg_dir / f"production_{seg_idx}_trajectory.dcd").write_bytes(b"frames")
+    stale = time.time() - 1200
+    os.utime(chk, (stale, stale))
+    return seg_dir
+
+
+class TestRetireHardkilledSegment:
+    """A hard-killed segment directory is renamed, never deleted.
+
+    ``production_N`` holds GPU-hours of trajectory that cannot be recreated,
+    and the "stale checkpoint, no INTERRUPTED marker" rule is a heuristic.
+    """
+
+    def test_directory_is_renamed_with_an_iso_timestamp(self, tmp_path):
+        from polyzymd.cli.main import _retire_hardkilled_segment
+
+        seg_dir = _write_hard_killed_segment(tmp_path)
+        retired = _retire_hardkilled_segment(seg_dir)
+
+        assert not seg_dir.exists()
+        assert retired.exists()
+        assert retired.name.startswith("production_0.hardkilled-")
+        stamp = retired.name.split("hardkilled-")[1]
+        assert stamp.endswith("Z") and len(stamp) == 16, stamp
+
+    def test_trajectory_data_survives(self, tmp_path):
+        from polyzymd.cli.main import _retire_hardkilled_segment
+
+        seg_dir = _write_hard_killed_segment(tmp_path)
+        retired = _retire_hardkilled_segment(seg_dir)
+
+        assert (retired / "production_0_trajectory.dcd").read_bytes() == b"frames"
+        assert (retired / "production_0_checkpoint.chk").exists()
+
+    def test_second_retirement_does_not_clobber_the_first(self, tmp_path):
+        from polyzymd.cli.main import _retire_hardkilled_segment
+
+        first = _retire_hardkilled_segment(_write_hard_killed_segment(tmp_path))
+        second = _retire_hardkilled_segment(_write_hard_killed_segment(tmp_path))
+
+        assert first.exists()
+        assert second.exists()
+        assert first != second
+
+    def test_retired_directory_is_invisible_to_the_scanner(self, tmp_path):
+        from polyzymd.cli.main import _retire_hardkilled_segment
+        from polyzymd.simulation.progress import scan_filesystem
+
+        _retire_hardkilled_segment(_write_hard_killed_segment(tmp_path))
+
+        assert scan_filesystem(tmp_path).segments == []
+
+
+class TestRunSegmentHardKillGuard:
+    """run-segment retires an unrecoverable segment but keeps a recoverable one."""
+
+    @staticmethod
+    def _invoke(tmp_path, working_dir):
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("engine: openmm\n")
+
+        sim_config = MagicMock()
+        sim_config.engine = "openmm"
+        prod = sim_config.simulation_phases.production
+        prod.duration = 10.0
+        prod.time_step = 2.0
+        prod.samples = 250
+        prod.checkpoint_interval = 600.0
+        sim_config.get_working_directory.return_value = working_dir
+
+        runner = CliRunner()
+        with (
+            patch("polyzymd.config.schema.SimulationConfig.from_yaml", return_value=sim_config),
+            patch("polyzymd.cli.main.warn_if_wrong_pixi_env"),
+            patch("polyzymd.cli.main._run_initial_segment") as initial,
+            patch("polyzymd.cli.main._run_continuation_segment") as continuation,
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "run-segment",
+                    "-c",
+                    str(config_path),
+                    "-r",
+                    "1",
+                    "--scratch-dir",
+                    str(working_dir),
+                ],
+            )
+        return result, initial, continuation
+
+    def test_unrecoverable_segment_is_renamed_not_deleted(self, tmp_path):
+        working_dir = tmp_path / "run_1"
+        _write_hard_killed_segment(working_dir)
+
+        result, initial, _ = self._invoke(tmp_path, working_dir)
+
+        assert result.exit_code == 0, result.output
+        assert not (working_dir / "production_0").exists()
+        retired = list(working_dir.glob("production_0.hardkilled-*"))
+        assert len(retired) == 1
+        assert (retired[0] / "production_0_trajectory.dcd").exists()
+        assert initial.called
+
+    def test_segment_with_restart_state_is_kept(self, tmp_path):
+        """restart_state.xml means the segment is recoverable — do not touch it."""
+        working_dir = tmp_path / "run_1"
+        seg_dir = _write_hard_killed_segment(working_dir)
+        (seg_dir / "restart_state.xml").write_text("<State/>")
+
+        result, initial, continuation = self._invoke(tmp_path, working_dir)
+
+        assert result.exit_code == 0, result.output
+        assert seg_dir.exists()
+        assert list(working_dir.glob("production_0.hardkilled-*")) == []
+        assert continuation.called
+        assert not initial.called
+
+
+class TestRunSegmentLockRelease:
+    """The replicate lock is released however run-segment ends."""
+
+    @staticmethod
+    def _invoke(tmp_path, working_dir, side_effect):
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("engine: openmm\n")
+        sim_config = MagicMock()
+        sim_config.engine = "openmm"
+
+        runner = CliRunner()
+        with (
+            patch("polyzymd.config.schema.SimulationConfig.from_yaml", return_value=sim_config),
+            patch("polyzymd.cli.main.warn_if_wrong_pixi_env"),
+            patch("polyzymd.cli.main._run_segment_locked", side_effect=side_effect),
+        ):
+            return runner.invoke(
+                cli,
+                [
+                    "run-segment",
+                    "-c",
+                    str(config_path),
+                    "-r",
+                    "1",
+                    "--scratch-dir",
+                    str(working_dir),
+                ],
+            )
+
+    @staticmethod
+    def _lock_is_free(working_dir: Path) -> bool:
+        from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError, replicate_lock
+
+        try:
+            with replicate_lock(working_dir):
+                return True
+        except ArtifactIntegrityError:
+            return False
+
+    def test_lock_released_after_a_failed_segment(self, tmp_path):
+        working_dir = tmp_path / "run_1"
+        result = self._invoke(tmp_path, working_dir, RuntimeError("boom"))
+
+        assert result.exit_code != 0
+        assert self._lock_is_free(working_dir)
+
+    def test_lock_released_after_a_graceful_interruption(self, tmp_path):
+        working_dir = tmp_path / "run_1"
+        result = self._invoke(tmp_path, working_dir, SystemExit(99))
+
+        assert result.exit_code == 99
+        assert self._lock_is_free(working_dir)
+
+    def test_lock_released_after_a_successful_segment(self, tmp_path):
+        working_dir = tmp_path / "run_1"
+        result = self._invoke(tmp_path, working_dir, None)
+
+        assert result.exit_code == 0, result.output
+        assert self._lock_is_free(working_dir)

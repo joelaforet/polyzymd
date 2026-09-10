@@ -146,6 +146,10 @@ class ContinuationManager:
         self._simulation: Optional[Simulation] = None
         self._param_dict: Optional[Dict[str, Any]] = None
         self._use_checkpoint_recovery: bool = False
+        # Description of a runtime change between the previous segment and
+        # this process, or None when the runtime is unchanged.  Set by
+        # :meth:`_get_previous_paths`; used to explain checkpoint failures.
+        self._runtime_change: str | None = None
 
     @property
     def working_dir(self) -> Path:
@@ -200,6 +204,79 @@ class ContinuationManager:
 
         raise FileNotFoundError(f"Could not find solvated PDB file in {self._working_dir}")
 
+    def _previous_runtime_change(self) -> str | None:
+        """Describe how this process differs from the one that ran the segment.
+
+        Binary OpenMM ``.chk`` checkpoints are not portable: they are only
+        guaranteed to reload under the same OpenMM build on the same
+        platform.  Since #90 each segment's
+        ``production_N_parameters.json`` records the ``openmm_version`` and
+        ``pixi_environment`` of the process that wrote it, so a restart chain
+        that was rerouted to a different CUDA environment can be detected
+        before a checkpoint is trusted.
+
+        Returns
+        -------
+        str or None
+            Human-readable description of the change, ``"unknown"``-flavoured
+            when the previous provenance was never recorded, or ``None`` when
+            the runtime is demonstrably unchanged.
+        """
+        from polyzymd.utils.version import runtime_provenance
+
+        params_path = (
+            self._working_dir
+            / f"production_{self._prev_segment}"
+            / f"production_{self._prev_segment}_parameters.json"
+        )
+        previous: Dict[str, Any] = {}
+        if params_path.is_file():
+            try:
+                with open(params_path, "r") as handle:
+                    block = json.load(handle).get("provenance")
+                if isinstance(block, dict):
+                    previous = block
+            except (OSError, ValueError) as exc:
+                LOGGER.warning(f"Could not read provenance from {params_path}: {exc}")
+
+        current = runtime_provenance()
+        differences = []
+        for key in ("openmm_version", "pixi_environment"):
+            recorded = previous.get(key)
+            running = current.get(key)
+            if recorded is None:
+                differences.append(f"{key} of the previous segment is unrecorded")
+            elif recorded != running:
+                differences.append(f"{key} {recorded!r} -> {running!r}")
+        if not differences:
+            return None
+        return "; ".join(differences)
+
+    def _find_portable_state(self) -> tuple[Path, Path] | None:
+        """Return the best (state XML, system XML) pair for the previous segment.
+
+        Portable serialized ``State`` XML reloads under any OpenMM build, so
+        it is always preferred over a binary checkpoint.
+
+        Returns
+        -------
+        tuple of Path or None
+            ``(state_xml, system_xml)``, or ``None`` when the previous
+            segment left no portable state behind.
+        """
+        prev_dir = self._working_dir / f"production_{self._prev_segment}"
+        default_system = prev_dir / f"production_{self._prev_segment}_system.xml"
+        candidates = (
+            (prev_dir / f"production_{self._prev_segment}_state.xml", default_system),
+            (prev_dir / "interrupted_state.xml", prev_dir / "interrupted_system.xml"),
+            (prev_dir / "restart_state.xml", prev_dir / "restart_system.xml"),
+        )
+        for state, system in candidates:
+            if not state.exists():
+                continue
+            return state, (system if system.exists() else default_system)
+        return None
+
     def _get_previous_paths(self) -> Dict[str, Path]:
         """Get paths to files from the previous segment.
 
@@ -208,7 +285,8 @@ class ContinuationManager:
         dict
             Dictionary with paths to state, system, and parameter files.
 
-            Recovery priority (portable state XML preferred over binary .chk):
+            Recovery priority (portable state XML preferred over binary .chk,
+            see :meth:`_find_portable_state`):
 
             1. **Normal completion** — ``production_N_state.xml`` and
                ``production_N_system.xml`` exist.
@@ -225,6 +303,11 @@ class ContinuationManager:
             5. **Hard kill/OOM/node failure** — periodic ``checkpoint.chk``
                from CheckpointReporter exists but no XML state files.
                Falls back to ``loadCheckpoint()`` (non-portable).
+
+            Cases 4 and 5 additionally compare the previous segment's
+            recorded ``openmm_version`` / ``pixi_environment`` (see #90) with
+            this process and log the mismatch, because a checkpoint written
+            by another OpenMM build is not reloadable.
         """
         prev_dir = self._working_dir / f"production_{self._prev_segment}"
 
@@ -233,38 +316,22 @@ class ContinuationManager:
         checkpoint_path = prev_dir / f"production_{self._prev_segment}_checkpoint.chk"
         params_path = prev_dir / f"production_{self._prev_segment}_parameters.json"
 
-        # Portable state XMLs from interruption handlers
-        interrupted_state = prev_dir / "interrupted_state.xml"
         interrupted_system = prev_dir / "interrupted_system.xml"
-        restart_state = prev_dir / "restart_state.xml"
-        restart_system = prev_dir / "restart_system.xml"
         interrupted_chk = prev_dir / "interrupted_checkpoint.chk"
 
         use_checkpoint = False
+        self._runtime_change = None
 
-        if state_path.exists():
-            # Case 1: Normal completion — state.xml exists
-            pass
-
-        elif interrupted_state.exists():
-            # Case 2: Graceful interruption — portable interrupted_state.xml
-            LOGGER.info(
-                f"Previous segment {self._prev_segment} was interrupted — "
-                f"recovering from interrupted_state.xml (portable)"
-            )
-            state_path = interrupted_state
-            if interrupted_system.exists():
-                system_path = interrupted_system
-
-        elif restart_state.exists():
-            # Case 3: Interrupted between checkpoints — wall-time restart
-            LOGGER.info(
-                f"Previous segment {self._prev_segment} was interrupted — "
-                f"recovering from restart_state.xml (portable wall-time checkpoint)"
-            )
-            state_path = restart_state
-            if restart_system.exists():
-                system_path = restart_system
+        # Cases 1-3: any portable serialized State reloads under any OpenMM
+        # build, so it always wins over a binary checkpoint.
+        portable = self._find_portable_state()
+        if portable is not None:
+            state_path, system_path = portable
+            if state_path.name != f"production_{self._prev_segment}_state.xml":
+                LOGGER.info(
+                    f"Previous segment {self._prev_segment} was interrupted — "
+                    f"recovering from {state_path.name} (portable)"
+                )
 
         elif interrupted_chk.exists() and interrupted_system.exists():
             # Case 4: Emergency recovery when only binary .chk survived
@@ -293,6 +360,28 @@ class ContinuationManager:
                 f"({checkpoint_path}) but no system.xml ({system_path}) — "
                 f"cannot recover.  The segment must be re-run from scratch."
             )
+
+        # A binary checkpoint is only reloadable under the OpenMM build and
+        # environment that wrote it, so record whether this process is that
+        # one.  A restart chain that was rerouted to another CUDA environment
+        # (see the routing history in #89) or rebuilt against another OpenMM
+        # would otherwise fail here with an opaque OpenMM error, or worse,
+        # load silently misinterpreted binary state.
+        if use_checkpoint:
+            self._runtime_change = self._previous_runtime_change()
+            if self._runtime_change is None:
+                LOGGER.info(
+                    f"Previous segment {self._prev_segment} ran under this same "
+                    f"runtime — its binary checkpoint is safe to reload"
+                )
+            else:
+                LOGGER.warning(
+                    f"Previous segment {self._prev_segment} ran under a different "
+                    f"runtime ({self._runtime_change}) and left no portable state "
+                    f"XML — falling back to the non-portable checkpoint "
+                    f"{checkpoint_path.name}; a load failure here means the segment "
+                    f"must be re-run under the recorded environment"
+                )
 
         return {
             "state": state_path,
@@ -790,7 +879,18 @@ class ContinuationManager:
             # Cases 4/5: Only binary checkpoint available (non-portable).
             chk_path = paths["checkpoint"]
             LOGGER.info(f"Recovering from interrupted segment via checkpoint: {chk_path}")
-            self._simulation.loadCheckpoint(str(chk_path))
+            try:
+                self._simulation.loadCheckpoint(str(chk_path))
+            except Exception as exc:  # OpenMM raises bare Exception subclasses
+                if self._runtime_change is None:
+                    raise
+                raise RuntimeError(
+                    f"Could not reload {chk_path}: OpenMM checkpoints are not "
+                    f"portable and this process differs from the one that wrote "
+                    f"it ({self._runtime_change}).  Re-run segment "
+                    f"{self._prev_segment} under the recorded environment, or "
+                    f"delete the segment directory to restart it."
+                ) from exc
         else:
             # Cases 1/2/3: Portable state XML (normal, interrupted, or restart).
             LOGGER.info(f"Loading state from {paths['state']}")

@@ -444,7 +444,7 @@ class TestJobTemplateExitCodeHandling:
         template = SlurmScriptGenerator.JOB_TEMPLATE
         handler = template[template.index("forward_signal()") : template.index("trap '")]
         assert handler.index("resubmit_once") < handler.index('kill -"$1"')
-        assert 'sbatch --dependency="afterany:$SLURM_JOB_ID"' in template
+        assert '--dependency="afterany:$SLURM_JOB_ID"' in template
         assert 'if [ -s "$SUCCESSOR_RECEIPT" ]' in template
 
 
@@ -524,7 +524,11 @@ class TestGeneratedOpenMMScript:
         assert "exit 0" in script
         assert "if [ $RC -ne 0 ] && [ $RC -ne 99 ]; then" in script
         assert 'polyzymd check-progress -c "$CONFIG_PATH" -r "$REPLICATE"' in script
-        assert 'sbatch --dependency="afterany:$SLURM_JOB_ID" "$THIS_SCRIPT"' in script
+        assert '--export="ALL,POLYZYMD_ROUTING_RETRY_COUNT=0,POLYZYMD_ROUTING_FAILED_NODES="' in (
+            script
+        )
+        assert 'STOP_FILE="${POLYZYMD_STOP_FILE:-$WORKING_DIR/STOP}"' in script
+        assert "stop_requested" in script
 
     def test_routing_retry_preserves_configured_exclusions(self, monkeypatch):
         """A routing retry excludes the failed node and configured exclusions."""
@@ -542,7 +546,7 @@ class TestGeneratedOpenMMScript:
         )
 
         assert "CONFIGURED_EXCLUDE=known-bad-node" in script
-        assert 'excluded_node="$CONFIGURED_EXCLUDE,$excluded_node"' in script
+        assert 'excluded_node="$(merge_node_list "$CONFIGURED_EXCLUDE" "$failed_nodes")"' in script
 
     def test_failed_probe_resubmits_and_exits(self, monkeypatch, tmp_path):
         """A failed node probe queues one successor before this job exits."""
@@ -634,6 +638,248 @@ class TestGeneratedOpenMMScript:
 
         assert result.returncode == 1
         assert "CUDA routing failed after 3 retries" in result.stderr
+
+    @staticmethod
+    def _fake_cluster_bin(tmp_path, *, driver="560.35.03", compute="8.0"):
+        """Create a bin/ directory with fake cluster commands on PATH.
+
+        Parameters
+        ----------
+        tmp_path : pathlib.Path
+            Test scratch directory.
+        driver : str
+            Driver version reported by the fake ``nvidia-smi``.
+        compute : str
+            Compute capability reported by the fake ``nvidia-smi``.
+
+        Returns
+        -------
+        pathlib.Path
+            The populated ``bin`` directory.
+        """
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir(exist_ok=True)
+        (bin_dir / "nvidia-smi").write_text(f"#!/bin/bash\necho '{driver}, {compute}'\n")
+        (bin_dir / "sbatch").write_text(
+            '#!/bin/bash\nprintf "%s\\n" "$@" >> "$SBATCH_LOG"\necho "Submitted batch job 42"\n'
+        )
+        # `pixi shell-hook` must emit shell code; emitting nothing keeps the
+        # surrounding environment intact for the rest of the script.
+        (bin_dir / "pixi").write_text("#!/bin/bash\nexit 0\n")
+        # Two heredoc scripts are piped to python: the CUDA preflight (no
+        # positional arguments) and the runtime-metadata writer (published +
+        # temporary path).  FAKE_METADATA_RC only affects the latter.
+        (bin_dir / "python").write_text(
+            "#!/bin/bash\n"
+            "cat > /dev/null\n"
+            'if [ -n "$3" ]; then\n'
+            '  if [ -n "${FAKE_METADATA_RC:-}" ]; then exit "$FAKE_METADATA_RC"; fi\n'
+            '  printf \'{"pixi_environment": "sim-cuda-12-4"}\\n\' > "$3"\n'
+            "fi\n"
+            'exit "${FAKE_PYTHON_RC:-0}"\n'
+        )
+        (bin_dir / "polyzymd").write_text(
+            "#!/bin/bash\n"
+            'if [ "$1" = "check-progress" ]; then exit "${FAKE_PROGRESS_RC:-1}"; fi\n'
+            'exit "${FAKE_SEGMENT_RC:-0}"\n'
+        )
+        for command in ("nvidia-smi", "sbatch", "pixi", "python", "polyzymd"):
+            (bin_dir / command).chmod(0o755)
+        return bin_dir
+
+    @classmethod
+    def _run_script(cls, script_path, bin_dir, tmp_path, **env_overrides):
+        """Execute a rendered script with fake cluster commands on PATH.
+
+        Returns
+        -------
+        tuple
+            ``(CompletedProcess, sbatch_log_text)``.
+        """
+        sbatch_log = tmp_path / "sbatch.log"
+        env = os.environ.copy()
+        env.update(
+            {
+                "PATH": f"{bin_dir}:{env['PATH']}",
+                "SBATCH_LOG": str(sbatch_log),
+                "SLURM_JOB_ID": "1000",
+                "SLURMD_NODENAME": "gpu-node-a",
+                "SLURM_JOB_SCRIPT": str(script_path),
+            }
+        )
+        env.update({key: str(value) for key, value in env_overrides.items()})
+        result = subprocess.run(["bash", str(script_path)], env=env, capture_output=True, text=True)
+        log = sbatch_log.read_text() if sbatch_log.exists() else ""
+        return result, log
+
+    @classmethod
+    def _render_to(cls, monkeypatch, tmp_path, working_dir):
+        """Render a script whose WORKING_DIR points at *working_dir*."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        generator = SlurmScriptGenerator(SlurmConfig.from_preset("aa100"), pixi_env="sim-cuda-12-4")
+        script = generator.generate_job_script(
+            config_path="/projects/user/run/config.yaml",
+            replicate=3,
+            working_dir=str(working_dir),
+            job_name="r3_test",
+            output_file="slurm_logs/r3_test.%j.out",
+        )
+        script_path = tmp_path / "job.sh"
+        script_path.write_text(script)
+        return script_path
+
+    def test_runtime_mismatch_reroutes_instead_of_dying(self, monkeypatch, tmp_path):
+        """A runtime-provenance mismatch must reroute, not kill the chain.
+
+        The immutability guard used to raise under ``set -e`` before any trap
+        was installed, so the chain died with no successor queued.
+        """
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        (working_dir / "runtime_platform.json").write_text('{"pixi_environment": "sim-cuda-12-4"}')
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path)
+
+        result, log = self._run_script(
+            script_path,
+            bin_dir,
+            tmp_path,
+            FAKE_METADATA_RC="3",
+            SLURMD_NODENAME="mismatch-node",
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "cannot reproduce the recorded run runtime" in result.stderr
+        assert "--exclude=mismatch-node" in log
+        assert "POLYZYMD_ROUTING_RETRY_COUNT=1" in log
+
+    def test_successful_segment_resets_routing_state(self, monkeypatch, tmp_path):
+        """A successor queued after a good segment starts with a fresh budget."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path)
+
+        result, log = self._run_script(
+            script_path,
+            bin_dir,
+            tmp_path,
+            POLYZYMD_ROUTING_RETRY_COUNT="2",
+            POLYZYMD_ROUTING_FAILED_NODES="bad-1,bad-2",
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "POLYZYMD_ROUTING_RETRY_COUNT=0" in log
+        assert "POLYZYMD_ROUTING_FAILED_NODES=" in log
+        assert "POLYZYMD_ROUTING_FAILED_NODES=bad-1" not in log
+
+    def test_consecutive_routing_failures_accumulate_nodes(self, monkeypatch, tmp_path):
+        """Two routing failures in a row exclude both offending nodes."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path, driver="525.147")
+
+        first, first_log = self._run_script(
+            script_path, bin_dir, tmp_path, SLURMD_NODENAME="bgpu-g4-u20"
+        )
+        assert first.returncode == 0
+        assert "--exclude=bgpu-g4-u20" in first_log
+
+        second, second_log = self._run_script(
+            script_path,
+            bin_dir,
+            tmp_path,
+            SLURMD_NODENAME="bgpu-g4-u24",
+            POLYZYMD_ROUTING_RETRY_COUNT="1",
+            POLYZYMD_ROUTING_FAILED_NODES="bgpu-g4-u20",
+        )
+        assert second.returncode == 0
+        assert "--exclude=bgpu-g4-u20,bgpu-g4-u24" in second_log
+        assert "POLYZYMD_ROUTING_FAILED_NODES=bgpu-g4-u20,bgpu-g4-u24" in second_log
+
+    def test_repeated_failure_on_same_node_is_not_duplicated(self, monkeypatch, tmp_path):
+        """The excluded-node list is a set, not an append-only log."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path, driver="525.147")
+
+        result, log = self._run_script(
+            script_path,
+            bin_dir,
+            tmp_path,
+            SLURMD_NODENAME="bgpu-g4-u20",
+            POLYZYMD_ROUTING_RETRY_COUNT="1",
+            POLYZYMD_ROUTING_FAILED_NODES="bgpu-g4-u20",
+        )
+
+        assert result.returncode == 0
+        assert "--exclude=bgpu-g4-u20\n" in log
+
+    def test_routing_limit_message_names_every_excluded_node(self, monkeypatch, tmp_path):
+        """The terminal routing message lists every node the chain tried."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path, driver="525.147")
+
+        result, _ = self._run_script(
+            script_path,
+            bin_dir,
+            tmp_path,
+            SLURMD_NODENAME="bgpu-g4-u30",
+            POLYZYMD_ROUTING_RETRY_COUNT="3",
+            POLYZYMD_ROUTING_FAILED_NODES="bgpu-g4-u20,bgpu-g4-u24",
+        )
+
+        assert result.returncode == 1
+        assert "bgpu-g4-u20,bgpu-g4-u24,bgpu-g4-u30" in result.stderr
+
+    def test_stop_file_prevents_successor_submission(self, monkeypatch, tmp_path):
+        """A STOP file in the run directory halts the chain before sbatch."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        (working_dir / "STOP").write_text("stopped by tester at 2026-09-09T00:00:00+00:00\n")
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path)
+
+        result, log = self._run_script(script_path, bin_dir, tmp_path)
+
+        assert result.returncode == 0, result.stderr
+        assert log == ""
+        assert "STOP" in result.stdout
+        assert "stopped by tester" in result.stdout
+
+    def test_stop_env_override_prevents_successor_submission(self, monkeypatch, tmp_path):
+        """POLYZYMD_STOP_CHAIN=1 stops a chain without touching the filesystem."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path)
+
+        result, log = self._run_script(script_path, bin_dir, tmp_path, POLYZYMD_STOP_CHAIN="1")
+
+        assert result.returncode == 0, result.stderr
+        assert log == ""
+        assert "POLYZYMD_STOP_CHAIN=1" in result.stdout
+
+    def test_stop_file_prevents_routing_resubmission(self, monkeypatch, tmp_path):
+        """A stopped chain does not reroute to another node either."""
+        working_dir = tmp_path / "run_3"
+        working_dir.mkdir()
+        (working_dir / "STOP").write_text("stopped\n")
+        script_path = self._render_to(monkeypatch, tmp_path, working_dir)
+        bin_dir = self._fake_cluster_bin(tmp_path, driver="525.147")
+
+        result, log = self._run_script(script_path, bin_dir, tmp_path)
+
+        assert result.returncode == 0
+        assert log == ""
 
     def test_rendered_script_quotes_pixi_args_with_spaces(self, monkeypatch):
         """Pixi environment and manifest values render as single shell arguments."""

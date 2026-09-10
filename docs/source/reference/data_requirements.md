@@ -57,18 +57,34 @@ scratch or in the projects directory) grows to:
 ├── production_1/                      # Daisy-chain continuation segment
 │   ├── production_1_trajectory.dcd
 │   └── production_1_topology.pdb
+├── production_2.hardkilled-20260909T181530Z/   # Retired unrecoverable segment
+├── runtime_platform.json              # Pinned pixi env, OpenMM build, driver
+├── STOP                               # Present only while the chain is stopped
 └── ...                                # Additional segments if daisy-chained
 ```
 
 Each replicate gets its own complete directory containing a topology file and
 one or more trajectory segments.
 
+### Control and marker files
+
+| File | Written by | Meaning |
+|------|------------|---------|
+| `STOP` | `polyzymd cancel` | While present, the job wrapper submits no successor and a queued successor exits before starting a segment. Plain text: who stopped the chain, on which host, when, with which config and replicate, and how to undo it. Remove it (or run `polyzymd cancel --resume`) to allow resubmission |
+| `runtime_platform.json` | first job of the chain | The runtime the chain is pinned to: `pixi_environment`, `openmm_version`, `platform`, `precision`, plus the observed driver and compute capability. A node that cannot reproduce the first four is rerouted, not run |
+| `.successor-<job_id>` | job wrapper | Receipt proving a successor was already queued for that job, so a signal trap and normal exit cannot queue two |
+| `.polyzymd.lock` | `run-segment` | Per-replicate `flock`; a second job on the same replicate exits with code 2 instead of running concurrently |
+| `production_N.hardkilled-<ISO timestamp>` | `run-segment` | A segment that was hard-killed (no `INTERRUPTED` marker, no `restart_state.xml`, only a stale checkpoint) and could not be resumed. It is renamed out of the way, never deleted, so its frames survive; segment `N` is then re-run from the previous good state. Delete these once you no longer need the data |
+
+A segment that *does* leave `restart_state.xml` behind is recoverable and is
+never retired: the next job resumes from that portable state.
+
 ### Provenance files
 
 | File | Key contents |
 |------|--------------|
 | `build_manifest.json` | SHA-256 of `solvated_system.pdb` and `system.xml`, the config hash, `openmm_version`, `polyzymd_version`, and `provenance` (see below). `polyzymd submit --skip-build` refuses bundles whose config hash no longer matches `config.yaml` |
-| `progress.json` | One record per equilibration stage and production segment with `polyzymd_version`, `openmm_version`, `pixi_environment` (null in files written by older versions) |
+| `progress.json` | One record per equilibration stage and production segment with `polyzymd_version`, `openmm_version`, `pixi_environment` (null in files written by older versions). Rebuilt from a filesystem scan after a chain is cancelled and resubmitted; the segment provenance is then recovered from each `production_N_parameters.json` rather than lost. Published atomically (unique temporary file, fsync, rename) so a second writer cannot corrupt it |
 | `production_N/production_N_parameters.json` | Simulation parameters plus a top-level `provenance` block (`polyzymd_version`, `openmm_version`, `pixi_environment`, `hostname`, `slurm_job_id`) |
 | `minimization/phase.json` | Phase status, state path, `frozen_atoms` (the number of solute **heavy** atoms held fixed), `frozen_rmsd_angstrom` (0.0 when the solute was frozen), and `hydrogen_max_displacement_angstrom` (how far the furthest solute hydrogen moved onto its force-field constraint length; `null` for unfrozen minimization and for records written by older versions) |
 

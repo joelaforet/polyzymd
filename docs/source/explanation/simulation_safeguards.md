@@ -198,6 +198,59 @@ segment *k−1* ends and all segments share the interval. Every segment record
 also carries the PolyzyMD version, OpenMM version, and pixi environment that
 produced it, so a chain that silently switched software can be identified.
 
+## Safeguard 5: a restart chain must be recoverable and stoppable
+
+A production run on a preemptable QoS is not one job. It is a chain of jobs,
+each of which runs one segment and submits its own successor, and the chain
+only produces science if every link can be re-established after an
+interruption — and can be broken deliberately when a human decides the run is
+wrong. Four properties are guarded.
+
+**A chain must not run out of nodes.** Site-pinned CUDA routing sends a job to
+a node, and a node whose driver is too old for the pinned environment cannot
+run it. The job then resubmits itself excluding that node. The exclusion is
+only useful if it survives: the accumulated node list travels with the chain
+and is unioned into the successor's `--exclude`, so consecutive bad draws
+narrow the search instead of repeating it. The retry budget is per unhealthy
+stretch, not per run: reaching `run-segment` proves the node works, so the
+next job starts with a fresh budget and no exclusions. When the budget really
+is exhausted the job names every node it tried, which is exactly the argument
+a human needs to resubmit by hand.
+
+**A runtime that cannot be reproduced is a routing problem, not a fatal
+error.** A replica is pinned to one pixi environment, OpenMM build, platform
+and precision, because mixing them within a trajectory is not defensible.
+Detecting a mismatch used to end the chain: the guard raised before any
+successor had been queued. The mismatch is a property of the *node*, so it is
+now treated the way an incompatible driver is — the job reroutes.
+
+**Recovery must prefer portable state.** OpenMM `.chk` checkpoints are binary
+and are only guaranteed to reload under the build that wrote them, while a
+serialized `State` XML reloads anywhere. Continuation therefore takes the
+best available state XML first and reaches a checkpoint only when nothing
+portable survived. In that case the previous segment's recorded
+`openmm_version` and `pixi_environment` are compared with the running process
+and the decision is logged, so a checkpoint reloaded across a rebuilt
+environment is either caught or, at minimum, on the record.
+
+**Nothing partial is deleted, and nothing is deleted on a heuristic.** A
+segment that was hard-killed is recognised only by a stale checkpoint and a
+missing marker — a guess, not a fact. Acting on that guess by deleting the
+directory destroyed GPU-hours of frames. The directory is now renamed to
+`production_N.hardkilled-<timestamp>`, which removes it from progress
+accounting while keeping every byte, and the guess is not made at all when a
+`restart_state.xml` shows the segment is recoverable.
+
+**Stopping must be possible without a trick.** `scancel` sends `SIGTERM`,
+which is exactly the signal that means "wall-time is up, save and continue"
+to a chain designed to survive preemption — so cancelling a job resubmitted
+it. Distinguishing "the scheduler interrupted you" from "a human wants you to
+stop" cannot be done from the signal alone, so the intent is recorded out of
+band: `polyzymd cancel` writes a `STOP` marker into the run directory, and the
+wrapper checks for it before submitting any successor. The marker is a plain
+text file that says who wrote it and when, because a control file that stops
+a month-long run should be readable by the next person who finds it.
+
 ## Related pages
 
 - Configuration keys: {doc}`../reference/configuration`
