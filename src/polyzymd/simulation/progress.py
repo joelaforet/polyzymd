@@ -8,8 +8,9 @@ the total requested simulation time has not been reached.
 
 The progress file (``progress.json``) is the primary source of truth, with
 filesystem scanning (``production_N/`` directories) used for validation on
-startup. Writes are atomic (write to ``.tmp``, then rename) to prevent
-corruption if the process is killed mid-write.
+startup. Writes go through :func:`~polyzymd.simulation.artifact_integrity.
+_atomic_write` (unique temporary file, fsync, rename) so that neither a kill
+mid-write nor a second concurrent writer can corrupt the file.
 """
 
 from __future__ import annotations
@@ -334,19 +335,20 @@ def save_progress(working_dir: str | Path, progress: SimulationProgress) -> Path
     Path
         Path to the saved progress file.
     """
+    from polyzymd.simulation.artifact_integrity import _atomic_write
+
     working_dir = Path(working_dir)
     working_dir.mkdir(parents=True, exist_ok=True)
 
     progress.last_updated = _now_iso()
     target = _progress_path(working_dir)
-    tmp = target.with_suffix(".json.tmp")
 
-    with open(tmp, "w") as f:
-        json.dump(progress.model_dump(mode="json"), f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-
-    os.replace(str(tmp), str(target))
+    # A fixed temporary file name is shared state: two writers (the
+    # simulation loop's periodic update and a concurrent CLI command) could
+    # interleave their writes into it and rename a half-written file over the
+    # progress file.  ``_atomic_write`` uses a unique temporary name, fsyncs
+    # it, and renames it into place.
+    _atomic_write(target, (json.dumps(progress.model_dump(mode="json"), indent=2) + "\n").encode())
     LOGGER.debug(f"Saved progress to {target}")
     return target
 
@@ -546,6 +548,46 @@ def scan_filesystem(
     return progress
 
 
+def _read_segment_provenance(params_json: Path) -> Dict[str, str | None]:
+    """Read the ``provenance`` block from a segment's parameters JSON.
+
+    ``production_N_parameters.json`` records ``polyzymd_version``,
+    ``openmm_version`` and ``pixi_environment`` for the process that ran the
+    segment.  A ``progress.json`` rebuilt from a filesystem scan must recover
+    those fields from there, otherwise a chain that was cancelled and
+    resubmitted loses the provenance of every segment it already ran.
+
+    Parameters
+    ----------
+    params_json : Path
+        Path to ``production_N_parameters.json``.
+
+    Returns
+    -------
+    dict
+        Keyword arguments for :class:`SegmentRecord`; empty when the file is
+        missing, unreadable, or predates the provenance block.
+    """
+    if not params_json.is_file():
+        return {}
+    try:
+        with open(params_json, "r") as handle:
+            params = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        LOGGER.warning(f"Could not read provenance from {params_json}: {exc}")
+        return {}
+
+    provenance = params.get("provenance")
+    if not isinstance(provenance, dict):
+        return {}
+    recovered = {
+        key: provenance.get(key)
+        for key in ("polyzymd_version", "openmm_version", "pixi_environment")
+        if provenance.get(key) is not None
+    }
+    return recovered
+
+
 def _scan_segment_dir(
     seg_idx: int,
     seg_dir: Path,
@@ -570,6 +612,10 @@ def _scan_segment_dir(
     interrupted_marker = seg_dir / "INTERRUPTED"
     state_xml = seg_dir / f"production_{seg_idx}_state.xml"
     params_json = seg_dir / f"production_{seg_idx}_parameters.json"
+
+    # Software provenance survives in the parameters JSON even when
+    # progress.json is rebuilt from scratch (see #90).
+    provenance = _read_segment_provenance(params_json)
 
     # Determine status
     if interrupted_marker.exists():
@@ -605,6 +651,7 @@ def _scan_segment_dir(
             samples_written=0,  # Unknown for interrupted segments
             status=status,
             duration_ns=duration_ns,
+            **provenance,
         )
     elif state_xml.exists():
         # Completed segment — read parameters to get step count
@@ -640,6 +687,7 @@ def _scan_segment_dir(
             status=status,
             duration_ns=duration_ns,
             finished_at=_now_iso(),  # Approximate
+            **provenance,
         )
     else:
         # No state.xml and no INTERRUPTED marker — check for checkpoint
@@ -684,6 +732,7 @@ def _scan_segment_dir(
                     samples_written=0,
                     status=SegmentStatus.RUNNING,
                     duration_ns=duration_ns,
+                    **provenance,
                 )
             else:
                 LOGGER.warning(
@@ -702,6 +751,7 @@ def _scan_segment_dir(
                     samples_written=0,
                     status=SegmentStatus.INTERRUPTED,
                     duration_ns=duration_ns,
+                    **provenance,
                 )
         else:
             # Truly failed: no recoverable files at all
@@ -714,6 +764,7 @@ def _scan_segment_dir(
                 steps_completed=0,
                 steps_requested=0,
                 status=SegmentStatus.FAILED,
+                **provenance,
             )
 
 
@@ -960,6 +1011,12 @@ def validate_progress(
                 finished_at=file_rec.finished_at or fs_rec.finished_at,
                 status=fs_rec.status,
                 duration_ns=max(fs_rec.duration_ns, file_rec.duration_ns),
+                # Provenance is never invented by reconciliation: keep what
+                # the progress file recorded, and otherwise take what the
+                # parameters JSON on disk still knows.
+                polyzymd_version=file_rec.polyzymd_version or fs_rec.polyzymd_version,
+                openmm_version=file_rec.openmm_version or fs_rec.openmm_version,
+                pixi_environment=file_rec.pixi_environment or fs_rec.pixi_environment,
             )
             reconciled.append(merged)
         elif fs_rec is not None:
