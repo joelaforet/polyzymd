@@ -1209,6 +1209,7 @@ def _print_gromacs_dry_run_details(
     gpu_type: str | None,
     constraint: str | None,
     nodelist: str | None,
+    exclude: str | None = None,
     partition: str | None = None,
     qos: str | None = None,
     email: str = "",
@@ -1235,6 +1236,8 @@ def _print_gromacs_dry_run_details(
         CLI constraint override.
     nodelist : str or None
         CLI nodelist override.
+    exclude : str or None, optional
+        CLI excluded-node override (replaces the preset value).
     partition : str or None, optional
         CLI partition override.
     qos : str or None, optional
@@ -1268,6 +1271,8 @@ def _print_gromacs_dry_run_details(
         base_slurm.constraint = constraint
     if nodelist:
         base_slurm.nodelist = nodelist
+    if exclude is not None:
+        base_slurm.exclude = exclude or None
 
     effective = engine_impl._resolve_slurm_config(base_slurm)
     effective_flags = engine_impl._resolve_mdrun_flags(effective)
@@ -1286,6 +1291,8 @@ def _print_gromacs_dry_run_details(
         colored_echo(f"    Constraint:     {effective.constraint}", phase=phase)
     if effective.nodelist:
         colored_echo(f"    Nodelist:       {effective.nodelist}", phase=phase)
+    if effective.exclude:
+        colored_echo(f"    Exclude:        {effective.exclude}", phase=phase)
     if effective.qos:
         colored_echo(f"    QoS:            {effective.qos}", phase=phase)
     colored_echo(phase=phase)
@@ -1414,6 +1421,16 @@ def _print_gromacs_dry_run_details(
     help="SLURM --nodelist override (e.g., 'node01' or 'node[01-04]').",
 )
 @click.option(
+    "--exclude",
+    "exclude_nodes",
+    default=None,
+    help=(
+        "SLURM --exclude override (e.g., 'bgpu-g4-u20,bgpu-g4-u24'). "
+        "Replaces the preset's excluded-node list; pass an empty string to "
+        "exclude nothing. Omit to keep the preset default."
+    ),
+)
+@click.option(
     "--openff-logs",
     "submit_openff_logs",
     is_flag=True,
@@ -1462,6 +1479,7 @@ def submit(
     gpu_type: str | None,
     constraint: str | None,
     nodelist: str | None,
+    exclude_nodes: str | None,
     submit_openff_logs: bool,
     skip_build: bool,
     pixi_env: str | None,
@@ -1514,6 +1532,11 @@ def submit(
         colored_echo(f"GPU type override: {gpu_type}", phase="workflow")
     if constraint:
         colored_echo(f"Constraint: {constraint}", phase="workflow")
+    if exclude_nodes is not None:
+        colored_echo(
+            f"Excluded nodes override: {exclude_nodes or '(none)'}",
+            phase="workflow",
+        )
     if skip_build:
         colored_echo("Skip-build mode: using pre-built systems", phase="workflow")
 
@@ -1553,6 +1576,7 @@ def submit(
                 gpu_type=gpu_type,
                 constraint=constraint,
                 nodelist=nodelist,
+                exclude=exclude_nodes,
                 partition=partition,
                 qos=qos,
                 email=email,
@@ -1612,6 +1636,8 @@ def submit(
                 slurm_config.constraint = constraint
             if nodelist:
                 slurm_config.nodelist = nodelist
+            if exclude_nodes is not None:
+                slurm_config.exclude = exclude_nodes or None
 
             working_dir = sim_config.get_working_directory(rep) / "gromacs"
             job_name = create_job_name(sim_config, rep)
@@ -1682,6 +1708,7 @@ def submit(
             gpu_type=gpu_type,
             constraint=constraint,
             nodelist=nodelist,
+            exclude=exclude_nodes,
             openff_logs=submit_openff_logs,
             skip_build=skip_build,
         )

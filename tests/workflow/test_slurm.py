@@ -61,7 +61,7 @@ class TestPresetLoading:
         assert cfg.partition == "blanca,blanca-shirts"
         assert cfg.qos == "preemptable"
         assert cfg.account == "blanca-shirts"
-        assert cfg.exclude == "bgpu-bortz1"
+        assert cfg.exclude == "bgpu-bortz1,bgpu-g4-u20,bgpu-g4-u24"
 
     def test_testing_preset(self):
         cfg = SlurmConfig.from_preset("testing")
@@ -95,6 +95,71 @@ class TestPresetLoading:
         msg = str(exc_info.value)
         for name in ("aa100", "al40", "blanca-shirts", "bridges2", "testing"):
             assert name in msg, f"Missing preset {name!r} from error message"
+
+
+# ---------------------------------------------------------------------------
+# Blanca excluded-node list (old NVIDIA drivers)
+# ---------------------------------------------------------------------------
+
+
+# bgpu-g4-u20 and bgpu-g4-u24 run driver 525.147, which is too old for the
+# pinned sim-cuda-12-4 builds; bgpu-bortz1 is a pre-existing exclusion.
+_EXPECTED_BLANCA_EXCLUDES = ("bgpu-bortz1", "bgpu-g4-u20", "bgpu-g4-u24")
+
+
+class TestBlancaExcludedNodes:
+    """Both shirts presets exclude the old-driver Blanca GPU nodes."""
+
+    @pytest.mark.parametrize("preset", ["blanca-shirts", "blanca-chbe-rdi"])
+    def test_preset_excludes_all_known_bad_nodes(self, preset):
+        cfg = SlurmConfig.from_preset(preset)
+        assert cfg.exclude is not None
+        listed = cfg.exclude.split(",")
+        assert listed == list(_EXPECTED_BLANCA_EXCLUDES)
+
+    @pytest.mark.parametrize("preset", ["blanca-shirts", "blanca-chbe-rdi"])
+    def test_rendered_script_has_single_exclude_line(self, preset, monkeypatch):
+        """Exactly one #SBATCH --exclude= line, listing all three nodes."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        script = SlurmScriptGenerator(
+            SlurmConfig.from_preset(preset), pixi_env="sim-cuda-12-4"
+        ).generate_job_script(
+            config_path="/projects/user/run/config.yaml",
+            replicate=1,
+            working_dir="/scratch/user/run_1",
+        )
+        exclude_lines = [
+            line for line in script.splitlines() if line.startswith("#SBATCH --exclude=")
+        ]
+        assert exclude_lines == ["#SBATCH --exclude=bgpu-bortz1,bgpu-g4-u20,bgpu-g4-u24"]
+
+    def test_explicit_override_replaces_preset_value(self):
+        """An explicit exclude replaces the preset list rather than appending."""
+        cfg = SlurmConfig.from_preset("blanca-shirts")
+        cfg.exclude = "some-other-node"
+        gen = _make_generator(cfg)
+        assert gen._exclude_line() == "#SBATCH --exclude=some-other-node"
+        assert "bgpu-bortz1" not in gen._exclude_line()
+
+    def test_preset_without_exclude_renders_no_directive(self, monkeypatch):
+        """bridges2 has no excluded nodes, so no --exclude line is emitted."""
+        monkeypatch.setattr(
+            slurm_module,
+            "_discover_manifest_path",
+            lambda: "/projects/user/polyzymd/pixi.toml",
+        )
+        script = SlurmScriptGenerator(
+            SlurmConfig.from_preset("bridges2"), pixi_env="sim-cuda-12-6"
+        ).generate_job_script(
+            config_path="/projects/user/run/config.yaml",
+            replicate=1,
+            working_dir="/scratch/user/run_1",
+        )
+        assert "#SBATCH --exclude=" not in script
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +326,7 @@ class TestConditionalDirectives:
     def test_exclude_line_present(self):
         cfg = SlurmConfig.from_preset("blanca-shirts")
         gen = _make_generator(cfg)
-        assert gen._exclude_line() == "#SBATCH --exclude=bgpu-bortz1"
+        assert gen._exclude_line() == "#SBATCH --exclude=bgpu-bortz1,bgpu-g4-u20,bgpu-g4-u24"
 
     def test_exclude_line_absent(self):
         cfg = SlurmConfig.from_preset("aa100")

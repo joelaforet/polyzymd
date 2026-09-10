@@ -51,6 +51,11 @@ _SAFE_SCRIPT_VALUE = _re.compile(r"^[A-Za-z0-9._/,:\-@%=+ ]+$")
 _SAFE_CONSTRAINT_VALUE = _re.compile(r"^[A-Za-z0-9._\-|&]+$")
 _SAFE_NODELIST_VALUE = _re.compile(r"^[A-Za-z0-9._,\-\[\]]+$")
 _SAFE_GPU_TYPE_VALUE = _re.compile(r"^[A-Za-z0-9._\-]+$")
+# Blanca GPU nodes excluded by the shirts presets (comma-separated, SLURM
+# ``--exclude`` syntax).  See the comment on the presets in
+# ``SlurmConfig.from_preset`` for why each node is listed.
+_BLANCA_EXCLUDED_NODES = "bgpu-bortz1,bgpu-g4-u20,bgpu-g4-u24"
+
 _WORKFLOW_TEMPLATE_PACKAGE = "polyzymd.workflow"
 _OPENMM_SELF_RESUBMITTING_TEMPLATE = "openmm_self_resubmitting.sh.jinja"
 
@@ -332,19 +337,28 @@ class SlurmConfig:
                 "account": "ucb625_asc1",
                 "time_limit": "23:59:59",
             },
+            # Blanca GPU nodes excluded from both shirts presets.  Each entry
+            # costs throughput, so record why it is here and when it may go:
+            #   bgpu-bortz1  — pre-existing exclusion (unreliable node).
+            #   bgpu-g4-u20  — NVIDIA driver 525.147, too old for the pinned
+            #   bgpu-g4-u24    sim-cuda-12-4 builds (CUDA >= 12.4 needs driver
+            #                  >= 550).  Jobs landing here log
+            #                  "ROUTING: sim-cuda-12-4 is incompatible with
+            #                  driver 525.147" and burn a routing retry.  Drop
+            #                  these two once CURC upgrades their drivers.
             "blanca-shirts": {
                 "partition": "blanca,blanca-shirts",
                 "qos": "preemptable",
                 "account": "blanca-shirts",
                 "time_limit": "23:59:59",
-                "exclude": "bgpu-bortz1",
+                "exclude": _BLANCA_EXCLUDED_NODES,
             },
             "blanca-chbe-rdi": {
                 "partition": "blanca,blanca-chbe-rdi",
                 "qos": "preemptable",
                 "account": "blanca-chbe-rdi",
                 "time_limit": "23:59:59",
-                "exclude": "bgpu-bortz1",
+                "exclude": _BLANCA_EXCLUDED_NODES,
             },
             "bridges2": {
                 "partition": "GPU-shared",

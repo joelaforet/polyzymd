@@ -76,6 +76,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `provenance` block, and reconciliation prefers the value already in the
   progress file and falls back to the parameters JSON.
 
+- **The `blanca-shirts` and `blanca-chbe-rdi` presets now exclude the
+  old-driver Blanca GPU nodes `bgpu-g4-u20` and `bgpu-g4-u24`** (alongside the
+  pre-existing `bgpu-bortz1`).  Both run NVIDIA driver 525.147, which is too
+  old for the pinned `sim-cuda-12-4` environment (CUDA 12.4 requires driver
+  >= 550).  A job that landed there logged
+  `ROUTING: sim-cuda-12-4 is incompatible with driver 525.147`, excluded that
+  one node and resubmitted; because the excluded-node list does not accumulate
+  across resubmissions, a chain that drew these two nodes on consecutive
+  attempts exhausted the three-attempt routing budget and died with
+  `FATAL: CUDA routing failed after 3 retries` (one RML control replicate out
+  of 57 in the 2026-09 campaign).  Only newly rendered job scripts pick up the
+  new list; chains already running keep their current exclusions until their
+  next submit.
 - **Frozen-solute minimization now freezes the solute heavy atoms only, so the
   hydrogens satisfy their constraints.**  Since the frozen-minimization feature
   landed, `SimulationRunner.minimize()` made *every* protein and substrate atom
@@ -191,6 +204,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`polyzymd submit --exclude <nodelist>`** overrides the preset's SLURM
+  `--exclude` value (replacing it, not appending), so a node can be re-tested
+  without editing the preset.  Omitting the flag keeps the preset default; pass
+  an empty string to exclude nothing.
 - **Frozen-solute energy minimisation.**  `SimulationRunner.minimize()` now holds
   every protein and substrate atom fixed (new `solute` atom group) and relaxes only
   solvent and polymers, so the prepared structure enters equilibration with its
