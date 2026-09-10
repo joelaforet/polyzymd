@@ -2474,6 +2474,239 @@ def check_progress(
 
 
 # =============================================================================
+# Cancel Command
+# =============================================================================
+
+STOP_FILENAME = "STOP"
+
+
+def stop_file_path(working_dir: Path) -> Path:
+    """Return the STOP-file path for a replicate working directory.
+
+    While this file exists the self-resubmitting job wrapper refuses to
+    submit a successor and a queued successor exits without starting a
+    segment, which is what makes a chain stoppable at all: a plain
+    ``scancel`` only sends SIGTERM, and the wrapper reads the resulting
+    exit code 99 as "interrupted, work remains" and resubmits.
+
+    Parameters
+    ----------
+    working_dir : Path
+        Replicate working (scratch) directory.
+
+    Returns
+    -------
+    Path
+        ``<working_dir>/STOP``.
+    """
+    return Path(working_dir) / STOP_FILENAME
+
+
+def write_stop_file(working_dir: Path, config_path: str, replicate: int) -> Path:
+    """Write a human-readable STOP file into a replicate working directory.
+
+    Parameters
+    ----------
+    working_dir : Path
+        Replicate working (scratch) directory.
+    config_path : str
+        Configuration file the chain was submitted with.
+    replicate : int
+        Replicate number.
+
+    Returns
+    -------
+    Path
+        The STOP file that was written.
+    """
+    import getpass
+    import socket
+    from datetime import datetime, timezone
+
+    try:
+        user = getpass.getuser()
+    except (OSError, KeyError):  # pragma: no cover - unusual environments
+        user = "unknown"
+    try:
+        host = socket.gethostname()
+    except OSError:  # pragma: no cover - unusual environments
+        host = "unknown"
+
+    working_dir = Path(working_dir)
+    working_dir.mkdir(parents=True, exist_ok=True)
+    target = stop_file_path(working_dir)
+    target.write_text(
+        "PolyzyMD STOP marker — this simulation chain will not resubmit itself.\n"
+        f"written_by:   {user}@{host}\n"
+        f"written_at:   {datetime.now(timezone.utc).isoformat()}\n"
+        f"command:      polyzymd cancel\n"
+        f"config:       {config_path}\n"
+        f"replicate:    {replicate}\n"
+        "\n"
+        "The job wrapper checks for this file before submitting any successor\n"
+        "and at the start of every job.  To restart the chain, remove this file\n"
+        "(or run `polyzymd cancel --resume` with the same options) and submit\n"
+        "again with `polyzymd submit`.\n"
+    )
+    return target
+
+
+@cli.command()
+@click.option(
+    "-c",
+    "--config",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to YAML configuration file",
+)
+@click.option(
+    "-r",
+    "--replicates",
+    default="1",
+    help="Replicate range (e.g., '1-5', '1,3,5')",
+)
+@click.option(
+    "--scratch-dir",
+    default=None,
+    type=click.Path(),
+    help="Scratch directory override (must match the one used at submission)",
+)
+@click.option(
+    "--resume",
+    is_flag=True,
+    help="Remove the STOP marker instead of writing it, so the chain can be resubmitted",
+)
+@click.option(
+    "--stop-only",
+    is_flag=True,
+    help="Write the STOP marker but do not cancel queued or running jobs",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Report what would be stopped without writing files or cancelling jobs",
+)
+def cancel(
+    config: str,
+    replicates: str,
+    scratch_dir: str | None,
+    resume: bool,
+    stop_only: bool,
+    dry_run: bool,
+) -> None:
+    """Stop self-resubmitting simulation chains (and let them be restarted).
+
+    \b
+    ``scancel`` alone cannot stop a chain: it sends SIGTERM, ``run-segment``
+    exits 99, and the wrapper reads that as "interrupted, work remains" and
+    queues a successor within seconds.  This command writes a STOP marker
+    into each replicate's working directory first — the wrapper refuses to
+    submit a successor while it exists — and then cancels the matching
+    queued and running jobs by name.
+
+    \b
+    Examples:
+      polyzymd cancel -c config.yaml -r 1-3
+      polyzymd cancel -c config.yaml -r 1-3 --resume
+    """
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.workflow.daisy_chain import (
+        cancel_slurm_jobs,
+        check_existing_slurm_jobs,
+        create_job_name,
+    )
+
+    try:
+        sim_config = SimulationConfig.from_yaml(config)
+    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as exc:
+        colored_echo(f"Failed to load config: {exc}", err=True, level=logging.ERROR)
+        sys.exit(1)
+
+    replicate_numbers = _resolve_replicates_option(replicates)
+    config_path = str(Path(config).resolve())
+
+    for replicate in replicate_numbers:
+        if scratch_dir:
+            working_dir = Path(scratch_dir)
+        else:
+            working_dir = Path(sim_config.get_working_directory(replicate))
+        marker = stop_file_path(working_dir)
+        job_name = create_job_name(sim_config, replicate)
+
+        if resume:
+            if dry_run:
+                colored_echo(
+                    f"[dry-run] replicate {replicate}: would remove {marker}",
+                    phase="simulation",
+                )
+                continue
+            if marker.exists():
+                marker.unlink()
+                colored_echo(
+                    f"Replicate {replicate}: removed {marker} — resubmit with "
+                    f"`polyzymd submit -c {config} -r {replicate}`",
+                    phase="simulation",
+                )
+            else:
+                colored_echo(
+                    f"Replicate {replicate}: no STOP marker at {marker} — nothing to resume",
+                    phase="simulation",
+                    level=logging.WARNING,
+                )
+            continue
+
+        job_ids = [] if stop_only else check_existing_slurm_jobs(job_name)
+
+        if dry_run:
+            queued = ", ".join(job_ids) if job_ids else "none"
+            colored_echo(
+                f"[dry-run] replicate {replicate}: would write {marker} "
+                f"and cancel job(s) {queued} (name '{job_name}')",
+                phase="simulation",
+            )
+            continue
+
+        # The marker is written *before* cancelling, so a successor that is
+        # queued while scancel runs still sees it and exits without work.
+        write_stop_file(working_dir, config_path, replicate)
+        colored_echo(f"Replicate {replicate}: wrote {marker}", phase="simulation")
+
+        if stop_only:
+            colored_echo(
+                f"Replicate {replicate}: leaving job(s) named '{job_name}' running; "
+                f"the chain will stop after the current segment",
+                phase="simulation",
+            )
+            continue
+
+        cancelled = cancel_slurm_jobs(job_ids)
+        if cancelled:
+            colored_echo(
+                f"Replicate {replicate}: cancelled job(s) {', '.join(cancelled)}",
+                phase="simulation",
+            )
+        elif job_ids:
+            colored_echo(
+                f"Replicate {replicate}: could not cancel job(s) {', '.join(job_ids)} — "
+                f"cancel them manually; the STOP marker already prevents resubmission",
+                phase="simulation",
+                level=logging.WARNING,
+            )
+        else:
+            colored_echo(
+                f"Replicate {replicate}: no queued or running job named '{job_name}'",
+                phase="simulation",
+            )
+
+    if not resume and not dry_run:
+        colored_echo(
+            "Chains stopped. Restart them with `polyzymd cancel --resume` "
+            "followed by `polyzymd submit`.",
+            phase="simulation",
+        )
+
+
+# =============================================================================
 # Status Command
 # =============================================================================
 
