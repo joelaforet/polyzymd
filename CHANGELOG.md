@@ -7,7 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`polyzymd cancel` stops a self-resubmitting chain, and `--resume` hands it
+  back.**  `scancel` alone could not stop a chain: SLURM sends `SIGTERM`,
+  `run-segment` exits 99, and the job wrapper reads that as "interrupted, work
+  remains" and queues a successor within seconds, each attempt also creating a
+  new `production_N` directory.  The only reliable stop was
+  `scancel --batch --signal=KILL`.  `polyzymd cancel -c config.yaml -r 1-3`
+  now writes a plain-text `STOP` marker into each replicate working directory
+  (who stopped the chain, on which host, when, with which config, and how to
+  undo it) and then cancels the matching queued and running jobs by name.  The
+  job wrapper checks for the marker before submitting any successor and at the
+  start of every job, and also honours `POLYZYMD_STOP_CHAIN=1` and
+  `POLYZYMD_STOP_FILE`.  `--stop-only` leaves the running job alone so the
+  chain stops after the current segment, `--dry-run` reports without acting,
+  and `--resume` removes the marker.
+
 ### Fixed
+
+- **Routing exclusions accumulate and the retry budget resets.**  A job that
+  landed on a GPU node whose driver is too old for the pinned pixi environment
+  resubmitted itself excluding that node, but the retry counter was never
+  cleared after a segment ran and the accumulated exclusions were dropped, so
+  a chain that drew bad nodes on non-consecutive attempts died with
+  `FATAL: CUDA routing failed after 3 retries` (observed 2026-09-09 on an RML
+  control chain: bgpu-g4-u20 and bgpu-g4-u24, driver 525.147).  The failed-node
+  list is now a de-duplicated union carried into `--exclude` on every routing
+  resubmit, the terminal message names every node tried, and a successor
+  queued after a segment that reached `run-segment` starts with a reset
+  counter and an empty exclusion list.
+- **A runtime-provenance mismatch reroutes instead of killing the chain.**  The
+  wrapper's runtime-immutability guard raised under `set -e` before
+  `run-segment` and before any trap was installed, so no successor was queued
+  and the chain ended silently.  It now exits with code 3 and is routed
+  through the existing routing-failure path, excluding the offending node.
+- **A checkpoint written by another OpenMM build is no longer trusted
+  silently.**  Recovery-source selection in `ContinuationManager` is
+  portable-first by construction (`production_N_state.xml`, then
+  `interrupted_state.xml`, then `restart_state.xml`, each with its matching
+  system XML), and the binary `.chk` cases are reached only when no portable
+  state survived.  In that case the previous segment's recorded
+  `openmm_version` and `pixi_environment` are compared with the running
+  process, the decision is logged either way, and a `loadCheckpoint()` failure
+  under a changed runtime is re-raised as an actionable error.
+- **A hard-killed segment directory is renamed, not deleted.**  The hard-kill
+  guard called `shutil.rmtree()` on a partially written `production_N`
+  directory whenever the last segment was interrupted with no `INTERRUPTED`
+  marker — a heuristic, and one that destroyed frames that cost GPU-hours.
+  The guard is now skipped entirely when `restart_state.xml` shows the segment
+  is recoverable, and otherwise renames the directory to
+  `production_N.hardkilled-<ISO timestamp>`, which the progress scanner
+  ignores.
+- **`progress.json` is published atomically.**  It was written through a fixed
+  `progress.json.tmp`, which two concurrent writers could interleave into and
+  rename half-written over the progress file.  It now goes through
+  `artifact_integrity._atomic_write` (unique temporary file, fsync, rename).
+- **The replicate run lock is always released.**  `run-segment` acquired the
+  lock with `__enter__()` and never exited the context manager, so the
+  `flock` leaked on every exit path.  The command body moved into
+  `_run_segment_locked()`, called inside a `try`/`finally`.
+- **Segment provenance survives a progress rebuild.**  After a chain was
+  cancelled and resubmitted, `progress.json` was reconciled from a filesystem
+  scan and every segment's `polyzymd_version`, `openmm_version` and
+  `pixi_environment` came back `null` even though
+  `production_N/production_N_parameters.json` still carried them (observed
+  2026-09-09 on all nine control runs).  The scanner now reads the
+  `provenance` block, and reconciliation prefers the value already in the
+  progress file and falls back to the parameters JSON.
 
 - **Frozen-solute minimization now freezes the solute heavy atoms only, so the
   hydrogens satisfy their constraints.**  Since the frozen-minimization feature

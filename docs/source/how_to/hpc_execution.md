@@ -480,6 +480,10 @@ preemption:
 2. Use `--reconcile` with `polyzymd compare status` to sync stale status files.
 3. Target a non-preemptible partition or QoS if available.
 
+Analysis workers are single jobs and stop when you `scancel` them. Simulation
+runs are self-resubmitting chains and do not: stop those with
+`polyzymd cancel` (see {ref}`hpc-slurm-stop-a-chain`).
+
 ### Why `afterany` instead of `afterok`?
 
 The DAG uses `--dependency=afterany:...` rather than `afterok`. This means
