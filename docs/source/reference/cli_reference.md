@@ -362,6 +362,7 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--gpu-type` | - | No | - | GPU type for GRES (e.g., "a100", "a40", "mi100") |
 | `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
 | `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
+| `--exclude` | - | No | from preset | SLURM `--exclude` override (e.g., "bgpu-g4-u20,bgpu-g4-u24"). Replaces the preset list; pass `""` to exclude nothing |
 | `--pixi-env` | - | No | engine-specific | Runtime for generated Slurm jobs; OpenMM `auto` uses a fixed environment for known-site presets, and GROMACS uses `build` |
 | `--skip-build` | - | No | false | Skip system building (use pre-built system from `polyzymd build`) |
 | `--force` | - | No | false | Skip duplicate-job check |

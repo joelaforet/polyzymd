@@ -1005,6 +1005,7 @@ class TestSubmitEngineAware:
             constraint=None,
             qos=None,
             nodelist=None,
+            exclude=None,
         )
         mock_engine._resolve_mdrun_flags = lambda _effective: "-pin on"
         mock_create_engine.return_value = mock_engine
@@ -1061,6 +1062,7 @@ class TestSubmitEngineAware:
             constraint="A40",
             qos="normal",
             nodelist=None,
+            exclude=None,
         )
         mock_engine._resolve_mdrun_flags = lambda _effective: "-update gpu -bonded gpu"
         mock_create_engine.return_value = mock_engine
@@ -1130,6 +1132,7 @@ class TestSubmitEngineAware:
             constraint=base.constraint,
             qos=base.qos,
             nodelist=base.nodelist,
+            exclude=base.exclude,
         )
         mock_engine._resolve_mdrun_flags = lambda _effective: "-pin on"
         mock_create_engine.return_value = mock_engine
@@ -1605,6 +1608,65 @@ class TestSubmitConstraintOption:
         assert request.slurm_config.qos == "normal"
         assert request.slurm_config.email == "user@example.com"
 
+    def test_submit_help_shows_exclude(self) -> None:
+        """'polyzymd submit --help' should show the --exclude option."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["submit", "--help"])
+        assert result.exit_code == 0
+        assert "--exclude" in result.output
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_exclude_passed_to_submit_daisy_chain(
+        self,
+        mock_submit,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """submit --exclude should reach the OpenMM submission path."""
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "openmm"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "submit",
+                "-c",
+                str(config_path),
+                "--exclude",
+                "bgpu-g4-u20,bgpu-g4-u24",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mock_submit.assert_called_once()
+        assert mock_submit.call_args.kwargs["exclude"] == "bgpu-g4-u20,bgpu-g4-u24"
+
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_exclude_defaults_to_none_so_preset_wins(
+        self,
+        mock_submit,
+        mock_from_yaml,
+        tmp_path: Path,
+    ) -> None:
+        """Without --exclude the preset's excluded-node list is left alone."""
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "openmm"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["submit", "-c", str(config_path)])
+
+        assert result.exit_code == 0
+        assert mock_submit.call_args.kwargs["exclude"] is None
+
     @patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
     @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
@@ -1692,6 +1754,7 @@ class TestSubmitConstraintOption:
             constraint=base.constraint,
             qos=base.qos,
             nodelist=base.nodelist,
+            exclude=base.exclude,
         )
         mock_engine._resolve_mdrun_flags = lambda _effective: "-pin on"
         mock_create_engine.return_value = mock_engine

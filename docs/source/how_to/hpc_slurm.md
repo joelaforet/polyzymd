@@ -163,12 +163,58 @@ and runs one integration step. This test detects an unusable CUDA runtime or
 PTX compiler before molecular setup. PolyzyMD does not fall back to CPU.
 
 If the node is not compatible, PolyzyMD submits a replacement job and excludes
-that node. It stops after three failed routing attempts.
+that node. It stops after three failed routing attempts. Nodes that are known
+in advance to be incompatible are excluded up front by the preset, so they
+never consume a routing attempt — see
+[Excluded Blanca GPU nodes](#excluded-blanca-gpu-nodes).
 
 PolyzyMD records the selected runtime. A replica cannot change its Pixi
 environment, OpenMM version, platform, or precision during resubmission. For
 supported runtimes and instructions for new hardware, see
 {doc}`hardware_platforms`.
+
+(excluded-blanca-gpu-nodes)=
+## Excluded Blanca GPU nodes
+
+The `blanca-shirts` and `blanca-chbe-rdi` presets ship with a SLURM
+`--exclude` list so that jobs never land on GPU nodes that are known to be
+unusable:
+
+| Node | Why it is excluded |
+|------|--------------------|
+| `bgpu-bortz1` | Unreliable node; pre-existing exclusion |
+| `bgpu-g4-u20` | NVIDIA driver 525.147, too old for the pinned `sim-cuda-12-4` builds (CUDA 12.4 needs driver >= 550) |
+| `bgpu-g4-u24` | Same old driver as `bgpu-g4-u20` |
+
+Without these entries, a job that landed on `bgpu-g4-u20` or `bgpu-g4-u24`
+logged `ROUTING: sim-cuda-12-4 is incompatible with driver 525.147`, spent one
+of its three routing attempts, and resubmitted. A chain that drew both nodes
+on consecutive attempts exhausted the budget and died with
+`FATAL: CUDA routing failed after 3 retries`.
+
+Only newly rendered job scripts pick up the list. A chain that is already
+running keeps the exclusions baked into its current script until its next
+submission.
+
+Override the list with `--exclude` when you need a different set — for
+example, to re-test a node after CURC upgrades its driver:
+
+```bash
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --preset blanca-shirts \
+    --exclude bgpu-bortz1 \
+    --replicates 1
+```
+
+`--exclude` **replaces** the preset value rather than appending to it. Pass an
+empty string (`--exclude ""`) to exclude nothing. Omit the flag to keep the
+preset default.
+
+:::{versionadded} 1.3.0
+`polyzymd submit --exclude` and the `bgpu-g4-u20` / `bgpu-g4-u24` preset
+exclusions.
+:::
 
 ## Bridges-2
 
