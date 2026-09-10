@@ -363,6 +363,137 @@ class TestGetPreviousPaths:
 
 
 # ---------------------------------------------------------------------------
+# Checkpoint portability across runtimes (openmm_version / pixi_environment)
+# ---------------------------------------------------------------------------
+
+
+def _set_segment_provenance(working_dir: Path, seg_idx: int, **provenance) -> None:
+    """Attach a #90-style provenance block to a segment's parameters JSON."""
+    params_path = working_dir / f"production_{seg_idx}" / f"production_{seg_idx}_parameters.json"
+    params = json.loads(params_path.read_text())
+    params["provenance"] = provenance
+    params_path.write_text(json.dumps(params))
+
+
+class TestCheckpointRuntimePortability:
+    """A binary .chk is only trusted when this process wrote-compatible.
+
+    OpenMM checkpoints are not portable across builds.  A preemptable chain
+    that is rerouted to a different CUDA environment must not silently
+    reinterpret one.
+    """
+
+    def _make_manager(self, working_dir, prev_segment):
+        from polyzymd.simulation.continuation import ContinuationManager
+
+        mgr = ContinuationManager.__new__(ContinuationManager)
+        mgr._working_dir = Path(working_dir)
+        mgr._prev_segment = prev_segment
+        mgr._runtime_change = None
+        return mgr
+
+    @staticmethod
+    def _pin_runtime(monkeypatch, openmm_version="8.1.2", pixi_environment="sim-cuda-12-4"):
+        import polyzymd.utils.version as version_module
+
+        monkeypatch.setattr(
+            version_module,
+            "runtime_provenance",
+            lambda: {
+                "polyzymd_version": "1.3.0rc5",
+                "openmm_version": openmm_version,
+                "pixi_environment": pixi_environment,
+                "hostname": "test-node",
+                "slurm_job_id": None,
+            },
+        )
+
+    def test_matching_runtime_keeps_the_checkpoint(self, tmp_path, monkeypatch, caplog):
+        _write_hard_killed_segment(tmp_path, 0)
+        _set_segment_provenance(
+            tmp_path, 0, openmm_version="8.1.2", pixi_environment="sim-cuda-12-4"
+        )
+        self._pin_runtime(monkeypatch)
+        mgr = self._make_manager(tmp_path, 0)
+
+        with caplog.at_level("INFO"):
+            paths = mgr._get_previous_paths()
+
+        assert paths["use_checkpoint"] is True
+        assert mgr._runtime_change is None
+        assert "safe to reload" in caplog.text
+
+    def test_changed_environment_is_reported(self, tmp_path, monkeypatch, caplog):
+        _write_hard_killed_segment(tmp_path, 0)
+        _set_segment_provenance(
+            tmp_path, 0, openmm_version="8.1.2", pixi_environment="sim-cuda-12-0"
+        )
+        self._pin_runtime(monkeypatch)
+        mgr = self._make_manager(tmp_path, 0)
+
+        with caplog.at_level("WARNING"):
+            mgr._get_previous_paths()
+
+        assert mgr._runtime_change is not None
+        assert "sim-cuda-12-0" in mgr._runtime_change
+        assert "sim-cuda-12-4" in mgr._runtime_change
+        assert "non-portable checkpoint" in caplog.text
+
+    def test_unrecorded_provenance_counts_as_a_change(self, tmp_path, monkeypatch):
+        """Segments written before #90 carry no provenance — do not assume."""
+        _write_hard_killed_segment(tmp_path, 0)
+        self._pin_runtime(monkeypatch)
+        mgr = self._make_manager(tmp_path, 0)
+
+        mgr._get_previous_paths()
+
+        assert mgr._runtime_change is not None
+        assert "unrecorded" in mgr._runtime_change
+
+    def test_portable_state_wins_over_a_checkpoint_from_another_runtime(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        """restart_state.xml is used even though a .chk is also present."""
+        _write_hard_killed_segment(tmp_path, 0)
+        seg_dir = tmp_path / "production_0"
+        (seg_dir / "restart_state.xml").write_text("<State/>")
+        _set_segment_provenance(
+            tmp_path, 0, openmm_version="8.0.0", pixi_environment="sim-cuda-12-0"
+        )
+        self._pin_runtime(monkeypatch)
+        mgr = self._make_manager(tmp_path, 0)
+
+        paths = mgr._get_previous_paths()
+
+        assert paths["use_checkpoint"] is False
+        assert paths["state"].name == "restart_state.xml"
+        # No system XML of its own — fall back to the segment's system.xml.
+        assert paths["system"].name == "production_0_system.xml"
+        assert mgr._runtime_change is None
+
+    def test_find_portable_state_prefers_completed_then_interrupted(self, tmp_path):
+        _write_hard_killed_segment(tmp_path, 0)
+        seg_dir = tmp_path / "production_0"
+        (seg_dir / "restart_state.xml").write_text("<State/>")
+        (seg_dir / "interrupted_state.xml").write_text("<State/>")
+        (seg_dir / "interrupted_system.xml").write_text("<System/>")
+        mgr = self._make_manager(tmp_path, 0)
+
+        state, system = mgr._find_portable_state()
+        assert state.name == "interrupted_state.xml"
+        assert system.name == "interrupted_system.xml"
+
+        (seg_dir / "production_0_state.xml").write_text("<State/>")
+        state, system = mgr._find_portable_state()
+        assert state.name == "production_0_state.xml"
+        assert system.name == "production_0_system.xml"
+
+    def test_find_portable_state_returns_none_for_a_hard_kill(self, tmp_path):
+        _write_hard_killed_segment(tmp_path, 0)
+        assert self._make_manager(tmp_path, 0)._find_portable_state() is None
+
+
+# ---------------------------------------------------------------------------
 # File validation in load_previous_state
 # ---------------------------------------------------------------------------
 
