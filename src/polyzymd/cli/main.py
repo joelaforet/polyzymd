@@ -1761,15 +1761,6 @@ def run_segment(
     raise_if_interrupted()
 
     from polyzymd.config.schema import SimulationConfig
-    from polyzymd.simulation.progress import (
-        SegmentStatus,
-        SimulationProgress,
-        SimulationStatus,
-        _derive_overall_status,
-        get_next_segment_info,
-        load_or_scan_progress,
-        save_progress,
-    )
 
     colored_echo(f"Loading configuration from: {config}", phase="simulation")
 
@@ -1810,6 +1801,57 @@ def run_segment(
     except ArtifactIntegrityError as exc:
         colored_echo(str(exc), phase="simulation", level=logging.WARNING)
         sys.exit(EXIT_CODE_CONCURRENT)
+
+    # The lock must be released on every exit path, including sys.exit() and
+    # unhandled exceptions: a leaked flock makes every later job in the chain
+    # exit with EXIT_CODE_CONCURRENT and silently stops the run.
+    try:
+        _run_segment_locked(
+            config=config,
+            sim_config=sim_config,
+            working_dir=working_dir,
+            replicate=replicate,
+            skip_build=skip_build,
+        )
+    finally:
+        run_lock.__exit__(None, None, None)
+
+
+def _run_segment_locked(
+    config: str,
+    sim_config: "SimulationConfig",
+    working_dir: Path,
+    replicate: int,
+    skip_build: bool,
+) -> None:
+    """Run the next production segment while the replicate lock is held.
+
+    Split out of :func:`run_segment` so the lock is acquired and released by
+    exactly one ``try``/``finally`` around this call.
+
+    Parameters
+    ----------
+    config : str
+        Path to the YAML configuration file (recorded in ``progress.json``).
+    sim_config : SimulationConfig
+        Validated configuration.
+    working_dir : Path
+        Replicate working directory.
+    replicate : int
+        Replicate number (1-based).
+    skip_build : bool
+        Whether to reuse a pre-built system for the initial segment.
+    """
+    from polyzymd.simulation.progress import (
+        SegmentStatus,
+        SimulationProgress,
+        SimulationStatus,
+        _derive_overall_status,
+        get_next_segment_info,
+        load_or_scan_progress,
+        save_progress,
+    )
+    from polyzymd.simulation.signals import raise_if_interrupted
 
     # Calculate total steps and samples from config
     prod = sim_config.simulation_phases.production
@@ -1902,30 +1944,51 @@ def run_segment(
     # estimates steps from the CSV file rather than an authoritative
     # INTERRUPTED marker.
     #
-    # Fix: clean up the hard-killed segment's directory and remove it
-    # from progress so that ``get_next_segment_info()`` assigns the
-    # *same* segment index.  The segment will be retried from the
-    # previous good state (the last segment with a proper completion
-    # or graceful interruption).
+    # Fix: retire the hard-killed segment's directory and remove it from
+    # progress so that ``get_next_segment_info()`` assigns the *same*
+    # segment index.  The segment will be retried from the previous good
+    # state (the last segment with a proper completion or graceful
+    # interruption).
+    #
+    # Two safeguards, both added after data was lost on Blanca:
+    #   * a segment that left a ``restart_state.xml`` behind IS
+    #     recoverable — the continuation manager resumes from that
+    #     portable state — so the guard does not apply at all;
+    #   * the directory is renamed, never deleted.  Everything under
+    #     ``production_N`` (the DCD frames, the state-data CSV, the
+    #     checkpoint) is GPU-hours that cannot be recreated, and a
+    #     heuristic ("stale checkpoint, no marker") is not a good enough
+    #     reason to call ``shutil.rmtree`` on it.
     if progress.segments:
         last_seg = max(progress.segments, key=lambda s: s.index)
         if last_seg.status == SegmentStatus.INTERRUPTED:
             last_seg_dir = working_dir / f"production_{last_seg.index}"
             interrupted_marker = last_seg_dir / "INTERRUPTED"
+            restart_state = last_seg_dir / "restart_state.xml"
             if last_seg_dir.exists() and not interrupted_marker.exists():
-                colored_echo(
-                    f"Segment {last_seg.index} was hard-killed (no INTERRUPTED "
-                    f"marker — only stale checkpoint found). Cleaning up "
-                    f"directory to retry from previous good state.",
-                    phase="simulation",
-                    level=logging.WARNING,
-                )
-                shutil.rmtree(last_seg_dir)
-                progress.segments = [s for s in progress.segments if s.index != last_seg.index]
-                progress.status = _derive_overall_status(
-                    progress.segments, is_complete=progress.is_complete
-                )
-                save_progress(working_dir, progress)
+                if restart_state.exists():
+                    colored_echo(
+                        f"Segment {last_seg.index} has no INTERRUPTED marker but "
+                        f"left {restart_state.name} — it is recoverable, keeping "
+                        f"the directory and continuing from that state.",
+                        phase="simulation",
+                        level=logging.WARNING,
+                    )
+                else:
+                    retired = _retire_hardkilled_segment(last_seg_dir)
+                    colored_echo(
+                        f"Segment {last_seg.index} was hard-killed (no INTERRUPTED "
+                        f"marker, no restart_state.xml — only a stale checkpoint). "
+                        f"Moved to {retired.name} and retrying from the previous "
+                        f"good state; delete it once you no longer need the data.",
+                        phase="simulation",
+                        level=logging.WARNING,
+                    )
+                    progress.segments = [s for s in progress.segments if s.index != last_seg.index]
+                    progress.status = _derive_overall_status(
+                        progress.segments, is_complete=progress.is_complete
+                    )
+                    save_progress(working_dir, progress)
 
     # Determine what to run next
     seg_info = get_next_segment_info(progress, total_steps, total_samples)
@@ -1993,6 +2056,35 @@ def run_segment(
 
             traceback.print_exc()
         sys.exit(1)
+
+
+def _retire_hardkilled_segment(segment_dir: Path) -> Path:
+    """Rename a hard-killed segment directory out of the way.
+
+    The scanner only recognises ``production_N``, so the renamed directory
+    no longer participates in progress reconciliation while its trajectory
+    data stays on disk for inspection or salvage.
+
+    Parameters
+    ----------
+    segment_dir : Path
+        The ``production_N`` directory to retire.
+
+    Returns
+    -------
+    Path
+        The new path, ``production_N.hardkilled-<ISO timestamp>``.
+    """
+    from datetime import datetime, timezone
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = segment_dir.with_name(f"{segment_dir.name}.hardkilled-{stamp}")
+    suffix = 1
+    while target.exists():
+        target = segment_dir.with_name(f"{segment_dir.name}.hardkilled-{stamp}-{suffix}")
+        suffix += 1
+    segment_dir.rename(target)
+    return target
 
 
 def _run_initial_segment(
