@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`polyzymd status --format agent|json`.**  `status` accepts repeated `-c`
+  and `--all DIR`, makes one `squeue` call, and prints one line per replicate
+  with a fixed verdict (`COMPLETED`, `RUNNING`, `QUEUED`, `DEAD`,
+  `NOT_STARTED`, `NOT_FOUND`), the live job, ns/day, an ETA, and for dead
+  chains the last `FATAL` line of the newest SLURM log plus a resubmit
+  command.  The default table output is unchanged.
+
 - **`polyzymd cancel` stops a self-resubmitting chain, and `--resume` hands it
   back.**  `scancel` alone could not stop a chain: SLURM sends `SIGTERM`,
   `run-segment` exits 99, and the job wrapper reads that as "interrupted, work
@@ -25,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `--resume` removes the marker.
 
 ### Fixed
+
+- **Recovery skips truncated state or system XML.**  A hard kill could leave
+  `interrupted_system.xml` at zero bytes; recovery paired it with the intact
+  `interrupted_state.xml` and the next segment died in OpenMM with
+  `Invalid input string`.  Candidates must now be non-empty and end with their
+  closing root tag; a truncated system falls back to `production_N_system.xml`
+  and a truncated state is skipped for the next candidate.
 
 - **Routing exclusions accumulate and the retry budget resets.**  A job that
   landed on a GPU node whose driver is too old for the pinned pixi environment

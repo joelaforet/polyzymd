@@ -128,6 +128,10 @@ pixi run -e build polyzymd status -c config.yaml
 pixi run -e build polyzymd check-progress -c config.yaml -r 1
 ```
 
+To see SLURM state, throughput, ETA, and the reason a chain died in one
+report across many configs, use `polyzymd status --format agent`; see
+{doc}`monitor_simulations`.
+
 ## Recover a stalled replicate
 
 If a replicate stops progressing, inspect it first:
