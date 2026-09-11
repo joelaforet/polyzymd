@@ -184,9 +184,7 @@ def _rg_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]
 def _sasa_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]:
     from polyzymd.analyses.sasa import SASAAnalysis, SASARunSettings, SASASettings
 
-    settings = SASASettings(
-        runs=[SASARunSettings(label="protein", target_selection="chainid A")]
-    )
+    settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
 
     def artifact(label: str, values: tuple[float, ...]) -> ConditionArtifact:
         return ConditionArtifact(
@@ -379,13 +377,9 @@ def _pairwise_p_values(plugin: str, result: Any) -> list[tuple[float, float | No
     pairs: list[tuple[float, float | None]] = []
     if plugin == "distances":
         for comparison in result.pairwise_comparisons:
-            pairs.append(
-                (comparison.distance_p_value, comparison.distance_p_value_adjusted)
-            )
+            pairs.append((comparison.distance_p_value, comparison.distance_p_value_adjusted))
             if comparison.fraction_p_value is not None:
-                pairs.append(
-                    (comparison.fraction_p_value, comparison.fraction_p_value_adjusted)
-                )
+                pairs.append((comparison.fraction_p_value, comparison.fraction_p_value_adjusted))
     elif plugin == "contacts":
         for comparison in result.pairwise_comparisons:
             for aggregate in comparison.aggregate_comparisons:
