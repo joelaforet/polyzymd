@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
@@ -96,6 +97,32 @@ def quantity_from_dict(qdict: Dict[str, Any]) -> Quantity:
         return value * unit_mapping[unit_str]
     else:
         return value * getattr(u, unit_str)
+
+
+def _xml_looks_complete(path: Path, root_tag: str) -> bool:
+    """Cheaply check that an OpenMM XML file was fully written.
+
+    A hard kill (preemption, OOM) can leave ``interrupted_system.xml`` or
+    ``interrupted_state.xml`` at zero bytes or cut off mid-element. OpenMM
+    then fails with the unhelpful ``Invalid input string`` and the chain dies
+    although an intact ``restart_*`` pair or the segment's own
+    ``production_N_system.xml`` sits next to it. Rather than parse several MB
+    of XML we require a non-empty file whose tail contains the closing root
+    tag.
+    """
+    try:
+        size = path.stat().st_size
+        if size == 0:
+            return False
+        with path.open("rb") as fh:
+            fh.seek(max(0, size - 256))
+            tail = fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    if f"</{root_tag}>" in tail:
+        return True
+    # A self-closing root (``<State/>``) is also complete.
+    return re.search(rf"<{root_tag}\b[^>]*/>", tail) is not None
 
 
 class ContinuationManager:
@@ -274,7 +301,22 @@ class ContinuationManager:
         for state, system in candidates:
             if not state.exists():
                 continue
-            return state, (system if system.exists() else default_system)
+            if not _xml_looks_complete(state, "State"):
+                LOGGER.warning(
+                    f"Skipping {state.name}: file is empty or truncated "
+                    f"(interrupted mid-write); trying the next portable state"
+                )
+                continue
+            if system.exists() and _xml_looks_complete(system, "System"):
+                return state, system
+            if system.exists():
+                LOGGER.warning(
+                    f"{system.name} is empty or truncated (interrupted mid-write); "
+                    f"pairing {state.name} with {default_system.name} instead"
+                )
+            if _xml_looks_complete(default_system, "System"):
+                return state, default_system
+            LOGGER.warning(f"No intact system XML for {state.name}; trying the next portable state")
         return None
 
     def _get_previous_paths(self) -> Dict[str, Path]:

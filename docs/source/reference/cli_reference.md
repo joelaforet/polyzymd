@@ -605,9 +605,63 @@ polyzymd status -c config.yaml
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `-c, --config PATH` | Yes | Path to YAML configuration file |
+| `-c, --config PATH` | One of `-c`/`--all` | Path to a YAML configuration file. Repeatable with `--format agent` or `json`. |
+| `--all DIR` | One of `-c`/`--all` | Search `DIR` (up to 3 levels deep, hidden directories skipped) for `config.yaml` files. Repeatable. |
+| `--format table\|agent\|json` | No | `table` (default) prints progress bars for one config. `agent` prints one compact line per replicate with SLURM state, throughput and ETA. `json` emits the same data as JSON. |
+| `--no-slurm` | No | Skip the `squeue` query. Verdicts then rely on `progress.json` alone and cannot separate dead chains from running ones. |
+| `--preset NAME` | No | Preset name to print in the resubmit hint for dead chains (`agent` format). |
 
-### Output Format
+### Agent format
+
+`--format agent` is designed for scripts and LLM agents: it answers "is
+anything still driving this replicate?" and "when will it finish?" in as few
+characters as possible. It makes **one** `squeue -u $USER` call regardless of
+how many configs and replicates it covers, joins that with each replicate's
+`progress.json`, and for chains with no live job reads the newest SLURM log
+for the line that explains the death.
+
+```bash
+polyzymd status --format agent --all /projects/me/sims --preset blanca-shirts
+```
+
+```
+# polyzymd status  2026-09-11 16:28 UTC  2 system(s)  8 replicate(s): 5 running, 1 queued, 1 dead, 1 not_started
+
+## CALB_ResorufinButyrate_none_1000ns_343K  (CALB/noPoly_CALB_water_343K/config.yaml)
+run1   361.6/1000ns   36%  RUNNING      job 28248421 R 5:27 bgpu-shirts3  176ns/d  eta 3.6d
+run4   354.2/1000ns   35%  QUEUED       job 28248423 PD ((Priority))  eta ?
+run5   708.2/1000ns   71%  RUNNING      job 28248388 R 39:13 bgpu-shirts2  324ns/d  eta 22h
+
+## RML_ResorufinButyrate_none_1000ns_333K  (RML/noPoly_RML_water_333K/config.yaml)
+run3   393.4/1000ns   39%  DEAD         no job  last: FATAL: CUDA routing failed after 3 retries [RML_..._run3.28235208.out]
+run4     0.0/1000ns    0%  NOT_STARTED  no job  last: Validation error: 354 polymer atom(s) lie within 1.00 A of the solute [build_r4_28214393.out]
+
+# dead chains — resume from checkpoint with:
+polyzymd submit -c RML/noPoly_RML_water_333K/config.yaml -r 3 --preset blanca-shirts
+```
+
+Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
+
+| Verdict | Meaning |
+|---------|---------|
+| `COMPLETED` | `progress.json` reports all production steps done |
+| `RUNNING` | A SLURM job with this replicate's job name is in state `R` (or completing/configuring) |
+| `QUEUED` | A matching job exists but is pending; the reason is shown in parentheses |
+| `DEAD` | Work remains and no matching job is queued or running. Nothing will restart it. The `last:` field is the most informative error line near the end of the newest SLURM log, with the log filename in brackets. |
+| `NOT_STARTED` | Directory exists but production never began (typically a failed build; the build log is consulted). |
+| `NOT_FOUND` | Expected replicate directory is missing from scratch |
+
+Throughput (`ns/d`) is measured from the newest segment with a known wall
+window (a finished or interrupted segment), falling back to the live segment
+timed from its start to now. Windows under 10 minutes or 1000 steps are
+ignored. The ETA is remaining nanoseconds divided by that rate and is only
+printed for `RUNNING` and `QUEUED` replicates.
+
+If `squeue` is unavailable the header carries a warning and every non-complete
+replicate falls back to `progress.json` alone; treat `DEAD` as unreliable in
+that case.
+
+### Table format
 
 ```
   polyzymd status — fnIII_apo_OEGMA-SBMA_A50_B50_100ns_310K

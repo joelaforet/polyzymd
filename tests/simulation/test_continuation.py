@@ -232,6 +232,31 @@ class TestGetPreviousPaths:
         assert "interrupted_state.xml" in str(paths["state"])
         assert "interrupted_system.xml" in str(paths["system"])
 
+    def test_truncated_interrupted_system_falls_back_to_segment_system(self, tmp_path):
+        """A 0-byte interrupted_system.xml (hard kill mid-write) must not be handed to OpenMM."""
+        _write_interrupted_segment(tmp_path, 0)
+        seg_dir = tmp_path / "production_0"
+        (seg_dir / "interrupted_system.xml").write_bytes(b"")
+        (seg_dir / "production_0_system.xml").write_text("<System/>")
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is False
+        assert "interrupted_state.xml" in str(paths["state"])
+        assert "production_0_system.xml" in str(paths["system"])
+
+    def test_truncated_interrupted_state_skipped_for_restart_pair(self, tmp_path):
+        """A truncated interrupted_state.xml is skipped in favour of an intact restart pair."""
+        _write_interrupted_segment(tmp_path, 0)
+        seg_dir = tmp_path / "production_0"
+        (seg_dir / "interrupted_state.xml").write_text("<State><Positions><Position x=")
+        (seg_dir / "restart_state.xml").write_text("<State/>")
+        (seg_dir / "restart_system.xml").write_text("<System/>")
+        mgr = self._make_manager(tmp_path, 0)
+        paths = mgr._get_previous_paths()
+        assert paths["use_checkpoint"] is False
+        assert "restart_state.xml" in str(paths["state"])
+        assert "restart_system.xml" in str(paths["system"])
+
     def test_graceful_interrupt_legacy_chk_only(self, tmp_path):
         """Gracefully interrupted with only .chk (no state.xml) → checkpoint recovery."""
         seg_dir = tmp_path / "production_0"

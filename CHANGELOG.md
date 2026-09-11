@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`polyzymd status --format agent|json` joins progress, SLURM and logs in one
+  call.**  The progress-bar view could not tell a preempted-and-requeued chain
+  from a dead one, and gave no throughput or ETA, so answering "has anything
+  died, and how long is left?" meant one `status` per config plus `squeue`,
+  `sacct` and log tails by hand.  `status` now accepts repeated `-c` and
+  `--all DIR` (finds `config.yaml` files three levels deep), makes a single
+  `squeue -u $USER` call, and with `--format agent` prints one line per
+  replicate: ns done, percent, a fixed verdict (`COMPLETED`, `RUNNING`,
+  `QUEUED`, `DEAD`, `NOT_STARTED`, `NOT_FOUND`), the live job id/state/node,
+  ns/day from segment timestamps, an ETA, and for dead chains the last `FATAL`
+  (or `CONCURRENT`, `Segment N failed`, `Validation error`) line of the newest
+  SLURM log plus a ready-to-run `polyzymd submit` command.  `--format json`
+  emits the same data.  `--no-slurm` skips the query and `--preset` fills the
+  resubmit hint.  The default `table` output is unchanged.
+
 - **`polyzymd cancel` stops a self-resubmitting chain, and `--resume` hands it
   back.**  `scancel` alone could not stop a chain: SLURM sends `SIGTERM`,
   `run-segment` exits 99, and the job wrapper reads that as "interrupted, work
@@ -25,6 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `--resume` removes the marker.
 
 ### Fixed
+
+- **Recovery no longer hands OpenMM a truncated state or system XML.**  A hard
+  kill during the signal handler can leave `interrupted_system.xml` (or
+  `interrupted_state.xml`) at zero bytes.  `ContinuationManager` then paired
+  the intact `interrupted_state.xml` with the empty system file and the next
+  segment died with `Invalid input string`, ending the chain although an
+  intact `restart_*` pair and `production_N_system.xml` sat next to it
+  (observed 2026-09-11 on an RML control replicate).  Portable-state selection
+  now requires each file to be non-empty and end with its closing root tag;
+  a truncated system falls back to the segment's own system XML, a truncated
+  state is skipped for the next candidate, and each decision is logged.
 
 - **Routing exclusions accumulate and the retry budget resets.**  A job that
   landed on a GPU node whose driver is too old for the pinned pixi environment

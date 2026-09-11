@@ -2855,7 +2855,7 @@ def _status_report(
                     config_path=config_path,
                     scratch_directory="",
                     replicates=[],
-                    error=f"failed to load config: {e}",
+                    error="failed to load config: " + str(e).splitlines()[0][:200],
                 )
             )
             continue
