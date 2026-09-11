@@ -1,4 +1,34 @@
-"""MDAnalysis-native hydrogen-bond jobs and artifact helpers."""
+"""MDAnalysis-native hydrogen-bond jobs and artifact helpers.
+
+``HydrogenBondAnalysis`` counts a donor-hydrogen-acceptor triplet whenever the
+donor-acceptor distance and the D-H...A angle pass their cutoffs, so the donor
+and acceptor selections decide what counts as a hydrogen bond. PolyzyMD passes
+the group union intersected with the configured electronegative elements, which
+keeps C-H donors and carbon acceptors out of the count.
+
+References
+----------
+Arunan, E., Desiraju, G. R., Klein, R. A., Sadlej, J., Scheiner, S., Alkorta,
+    I., Clary, D. C., Crabtree, R. H., Dannenberg, J. J., Hobza, P.,
+    Kjaergaard, H. G., Legon, A. C., Mennucci, B., & Nesbitt, D. J. (2011).
+    Definition of the hydrogen bond (IUPAC Recommendations 2011). Pure and
+    Applied Chemistry, 83(8), 1637-1641. doi:10.1351/PAC-REC-10-01-02
+Smith, P., Ziolek, R. M., Gazzarrini, E., Owen, D. M., & Lorenz, C. D. (2019).
+    On the interaction of hyaluronic acid with synovial fluid lipid membranes.
+    Physical Chemistry Chemical Physics, 21(19), 9845-9857.
+    doi:10.1039/C9CP01532A
+Jeffrey, G. A., & Saenger, W. (1991). Hydrogen Bonding in Biological
+    Structures. Springer-Verlag, Berlin.
+Michaud-Agrawal, N., Denning, E. J., Woolf, T. B., & Beckstein, O. (2011).
+    MDAnalysis: a toolkit for the analysis of molecular dynamics simulations.
+    Journal of Computational Chemistry, 32(10), 2319-2327.
+    doi:10.1002/jcc.21787
+Gowers, R. J., Linke, M., Barnoud, J., Reddy, T. J. E., Melo, M. N., Seyler,
+    S. L., Domanski, J., Dotson, D. L., Buchoux, S., Kenney, I. M., &
+    Beckstein, O. (2016). MDAnalysis: a Python package for the rapid analysis
+    of molecular dynamics simulations. Proceedings of the 15th Python in
+    Science Conference, 98-105. doi:10.25080/Majora-629e541a-00e
+"""
 
 from __future__ import annotations
 
@@ -15,6 +45,7 @@ from numpy.typing import NDArray
 
 from polyzymd.analyses._framework.cache_identity import compute_config_hash
 from polyzymd.analyses._framework.results_base import get_polyzymd_version
+from polyzymd.analyses.exceptions import SelectionError
 from polyzymd.analyses.hydrogen_bonds._models import (
     CompositionEntry,
     DirectedResiduePairResult,
@@ -62,6 +93,9 @@ class HydrogenBondMDAPlan:
     """Selection and summary state prepared for one hydrogen-bond replicate."""
 
     selection_string: str
+    donors_selection_string: str
+    acceptors_selection_string: str
+    donor_acceptor_elements: tuple[str, ...]
     hydrogens_selection_string: str
     hydrogens_selection_source: str
     frame_indices: list[int]
@@ -158,9 +192,9 @@ class HydrogenBondMDAAnalysis:
 
         hbonds = HydrogenBondAnalysis(
             universe=self.universe,
-            donors_sel=self.plan.selection_string,
+            donors_sel=self.plan.donors_selection_string,
             hydrogens_sel=self.plan.hydrogens_selection_string,
-            acceptors_sel=self.plan.selection_string,
+            acceptors_sel=self.plan.acceptors_selection_string,
             d_a_cutoff=self.settings.distance_cutoff,
             d_h_a_angle_cutoff=self.settings.angle_cutoff,
             update_selections=self.settings.update_selections,
@@ -205,6 +239,7 @@ def build_hydrogen_bond_jobs(ctx: MDAReplicateJobContext) -> list[MDAAnalysisJob
             "angle_cutoff": settings.angle_cutoff,
             "update_selections": settings.update_selections,
             "allow_empty_groups": settings.allow_empty_groups,
+            "donor_acceptor_elements": list(settings.donor_acceptor_elements),
             "hydrogens_selection": settings.hydrogens_selection,
             "dynamic_selection_policy": dynamic_selection_policy_payload(settings),
         },
@@ -302,6 +337,12 @@ class HydrogenBondArtifactCollector:
                         analysis.universe, "_polyzymd_element_enrichment", None
                     ),
                 },
+                "donor_acceptor_selection_policy": {
+                    "donors_selection": analysis.plan.donors_selection_string,
+                    "acceptors_selection": analysis.plan.acceptors_selection_string,
+                    "hydrogens_selection": analysis.plan.hydrogens_selection_string,
+                    "elements": list(analysis.plan.donor_acceptor_elements),
+                },
             },
             metadata={
                 "result_kind": "hydrogen_bonds_mda_replicate",
@@ -312,6 +353,8 @@ class HydrogenBondArtifactCollector:
                 "equilibration_time": eq_value,
                 "equilibration_unit": eq_unit,
                 "selection_string": analysis.plan.selection_string,
+                "donors_selection_string": analysis.plan.donors_selection_string,
+                "acceptors_selection_string": analysis.plan.acceptors_selection_string,
                 "hydrogens_selection_string": analysis.plan.hydrogens_selection_string,
                 "hydrogens_selection_source": analysis.plan.hydrogens_selection_source,
                 "timestep_ps": analysis.plan.timestep_ps,
@@ -440,6 +483,9 @@ def aggregate_hydrogen_bond_artifacts(
             "hydrogens_selection_policy": ordered_artifacts[0].provenance.get(
                 "hydrogens_selection_policy"
             ),
+            "donor_acceptor_selection_policy": ordered_artifacts[0].provenance.get(
+                "donor_acceptor_selection_policy"
+            ),
         },
         metadata={
             "result_kind": "hydrogen_bonds_mda_condition",
@@ -449,6 +495,10 @@ def aggregate_hydrogen_bond_artifacts(
             "equilibration_time": condition_model.equilibration_time,
             "equilibration_unit": condition_model.equilibration_unit,
             "selection_string": condition_model.selection_string,
+            "donors_selection_string": ordered_artifacts[0].metadata.get("donors_selection_string"),
+            "acceptors_selection_string": ordered_artifacts[0].metadata.get(
+                "acceptors_selection_string"
+            ),
             "hydrogens_selection_string": ordered_artifacts[0].metadata.get(
                 "hydrogens_selection_string"
             ),
@@ -825,10 +875,10 @@ def _prepare_hydrogen_bond_plan(
             warnings.append(message)
         atom_group = universe.select_atoms(selection_str, updating=settings.update_selections)
         if len(atom_group) == 0 and not settings.allow_empty_groups:
-            raise ValueError(
-                f"Group '{group_name}' selection '{selection_str}' matched no atoms in "
-                "the universe. Fix the selection or set allow_empty_groups: true to "
-                "warn and skip."
+            raise SelectionError(
+                f"hydrogen_bonds group '{group_name}' selection '{selection_str}' matched "
+                "no atoms in the universe. Fix the selection or set "
+                "allow_empty_groups: true to warn and skip the affected summaries."
             )
         resolved_groups[group_name] = atom_group
 
@@ -850,6 +900,8 @@ def _prepare_hydrogen_bond_plan(
             summary_results_by_name[summary_spec.name] = summary_result
 
     union_sel = _build_union_selection(active_summary_specs, settings, resolved_groups)
+    donors_selection_string = ""
+    acceptors_selection_string = ""
     hydrogens_selection_string = ""
     hydrogens_selection_source = "none"
     if not union_sel:
@@ -862,6 +914,12 @@ def _prepare_hydrogen_bond_plan(
                 _build_zero_summary(summary_spec, n_frames=n_frames),
             )
     else:
+        donors_selection_string = _build_donor_acceptor_selection(
+            universe=universe,
+            settings=settings,
+            group_union_selection=union_sel,
+        )
+        acceptors_selection_string = donors_selection_string
         (
             hydrogens_selection_string,
             hydrogens_selection_source,
@@ -877,6 +935,9 @@ def _prepare_hydrogen_bond_plan(
 
     return HydrogenBondMDAPlan(
         selection_string=union_sel,
+        donors_selection_string=donors_selection_string,
+        acceptors_selection_string=acceptors_selection_string,
+        donor_acceptor_elements=tuple(settings.donor_acceptor_elements),
         hydrogens_selection_string=hydrogens_selection_string,
         hydrogens_selection_source=hydrogens_selection_source,
         frame_indices=frame_indices,
@@ -951,6 +1012,58 @@ def _resolve_hydrogens_selection(
         f"{enrichment_text}"
     )
     return f"({group_union_selection}) and (name H* or name [123]H*)", "name_fallback", warning
+
+
+def _build_donor_acceptor_selection(
+    *,
+    universe: Any,
+    settings: HydrogenBondSettings,
+    group_union_selection: str,
+) -> str:
+    """Build the donor and acceptor selection used by MDAnalysis H-bond detection.
+
+    MDAnalysis treats every atom of ``donors_sel`` that sits within the
+    donor-hydrogen cutoff of a selected hydrogen as a donor, and every atom of
+    ``acceptors_sel`` as an acceptor. Passing the raw group union therefore
+    admits C-H donors and carbon acceptors, so the union is intersected with the
+    configured electronegative elements.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe or compatible test double.
+    settings : HydrogenBondSettings
+        User-facing hydrogen-bond settings.
+    group_union_selection : str
+        Union of all active summary groups.
+
+    Returns
+    -------
+    str
+        Selection string restricted to ``settings.donor_acceptor_elements``.
+
+    Raises
+    ------
+    SelectionError
+        Raised when the universe carries no usable element metadata, because
+        widening the selection back to every atom would silently reintroduce
+        carbon donors and acceptors.
+    """
+
+    if not _universe_has_element_metadata(universe):
+        enrichment = getattr(universe, "_polyzymd_element_enrichment", None)
+        enrichment_text = f" Element enrichment metadata: {enrichment}." if enrichment else ""
+        raise SelectionError(
+            "hydrogen_bonds could not read element metadata, so donors and acceptors "
+            "cannot be restricted to "
+            f"{' '.join(settings.donor_acceptor_elements)}. Load a topology that carries "
+            "elements (for example a PDB written by PolyzyMD) instead of one that only "
+            "carries atom names."
+            f"{enrichment_text}"
+        )
+
+    elements = " ".join(settings.donor_acceptor_elements)
+    return f"({group_union_selection}) and element {elements}"
 
 
 def _warn_on_group_overlap(resolved_groups: dict[str, Any]) -> None:
@@ -1278,6 +1391,8 @@ def _write_event_sidecar(
             "shape": [int(dim) for dim in events.shape],
             "n_events": int(events.shape[0]),
             "selection_string": plan.selection_string,
+            "donors_selection_string": plan.donors_selection_string,
+            "acceptors_selection_string": plan.acceptors_selection_string,
             "hydrogens_selection_string": plan.hydrogens_selection_string,
             "hydrogens_selection_source": plan.hydrogens_selection_source,
             "distance_cutoff": settings.distance_cutoff,

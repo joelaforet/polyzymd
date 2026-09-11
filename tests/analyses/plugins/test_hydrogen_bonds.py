@@ -26,6 +26,7 @@ from polyzymd.analyses.base import (
     ReplicateContext,
     SlurmResourceHint,
 )
+from polyzymd.analyses.exceptions import SelectionError
 from polyzymd.analyses.hydrogen_bonds import (
     HydrogenBondCompositionSettings,
     HydrogenBondsAnalysis,
@@ -79,13 +80,24 @@ class _MockAtomCollection:
     """Minimal atom collection with optional element metadata."""
 
     def __init__(
-        self, atoms_by_index: dict[int, _MockAtom], elements: list[str] | None = None
+        self,
+        atoms_by_index: dict[int, _MockAtom],
+        elements: list[str] | None = None,
+        *,
+        with_elements: bool = True,
     ) -> None:
-        """Store atoms and optional element topology metadata."""
+        """Store atoms and optional element topology metadata.
+
+        Element metadata is present by default because hydrogen-bond detection
+        needs it to restrict donors and acceptors. Pass ``with_elements=False``
+        to model a topology that carries no elements.
+        """
 
         self._atoms_by_index = atoms_by_index
         if elements is not None:
             self.elements = elements
+        elif with_elements:
+            self.elements = ["C"] * len(atoms_by_index)
 
     def __getitem__(self, item: int) -> _MockAtom:
         """Return one atom by topology index."""
@@ -260,7 +272,8 @@ def test_settings_defaults() -> None:
     assert len(settings.summaries) == 1
     assert settings.summaries[0].name == "protein_polymer"
     assert settings.summaries[0].between == ("protein", "polymer")
-    assert settings.allow_empty_groups is True
+    assert settings.allow_empty_groups is False
+    assert settings.donor_acceptor_elements == ("N", "O")
     assert settings.hydrogens_selection is None
 
 
@@ -516,18 +529,17 @@ def test_mda_analysis_uses_element_h_when_elements_available() -> None:
     assert analysis.plan is not None
     assert analysis.plan.hydrogens_selection_source == "element"
     assert instances[0].kwargs["hydrogens_sel"] == "((chainid A) or (chainid C)) and (element H)"
+    assert instances[0].kwargs["donors_sel"] == "((chainid A) or (chainid C)) and element N O"
+    assert instances[0].kwargs["acceptors_sel"] == instances[0].kwargs["donors_sel"]
 
 
-def test_mda_analysis_uses_name_fallback_without_elements() -> None:
-    """Missing element metadata should fall back to explicit hydrogen names."""
-
-    instances: list[MockHydrogenBondAnalysis] = []
+def test_mda_analysis_requires_element_metadata() -> None:
+    """Missing element metadata should raise instead of widening the selection."""
 
     class MockHydrogenBondAnalysis:
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
             self.results = types.SimpleNamespace(hbonds=np.empty((0, 6), dtype=float))
-            instances.append(self)
 
         def run(self, start: int, stop: int | None, step: int, verbose: bool) -> None:
             del start, stop, step, verbose
@@ -538,7 +550,8 @@ def test_mda_analysis_uses_name_fallback_without_elements() -> None:
         {
             0: _MockAtom(0, "A", 10, "SER", 0),
             1: _MockAtom(1, "C", 100, "OEG", 1),
-        }
+        },
+        with_elements=False,
     )
     universe._polyzymd_element_enrichment = {"applied": False, "reason": "test"}
     universe.select_atoms.side_effect = lambda selection, updating: {
@@ -554,14 +567,8 @@ def test_mda_analysis_uses_name_fallback_without_elements() -> None:
     )
 
     with patch.dict(sys.modules, _make_mdanalysis_module(MockHydrogenBondAnalysis)):
-        analysis.run(start=0, stop=3, step=1)
-
-    assert analysis.plan is not None
-    assert analysis.plan.hydrogens_selection_source == "name_fallback"
-    assert instances[0].kwargs["hydrogens_sel"] == (
-        "((chainid A) or (chainid C)) and (name H* or name [123]H*)"
-    )
-    assert any("hydrogens_selection" in warning for warning in analysis.plan.warnings)
+        with pytest.raises(SelectionError, match="could not read element metadata"):
+            analysis.run(start=0, stop=3, step=1)
 
 
 def test_mda_analysis_wraps_user_hydrogens_selection() -> None:
@@ -931,15 +938,28 @@ def test_compute_stage_basic(tmp_path: Path) -> None:
     assert len(instances) == 1
     assert instances[0].kwargs["d_a_cutoff"] == pytest.approx(settings.distance_cutoff)
     assert instances[0].kwargs["d_h_a_angle_cutoff"] == pytest.approx(settings.angle_cutoff)
-    assert instances[0].kwargs["hydrogens_sel"] == (
-        "((chainid A) or (chainid C)) and (name H* or name [123]H*)"
-    )
-    assert artifact.metadata["hydrogens_selection_source"] == "name_fallback"
+    assert instances[0].kwargs["hydrogens_sel"] == "((chainid A) or (chainid C)) and (element H)"
+    assert artifact.metadata["hydrogens_selection_source"] == "element"
     assert artifact.metadata["hydrogens_selection_string"] == (
-        "((chainid A) or (chainid C)) and (name H* or name [123]H*)"
+        "((chainid A) or (chainid C)) and (element H)"
     )
-    assert artifact.provenance["hydrogens_selection_policy"]["source"] == "name_fallback"
-    assert any("hydrogens_selection" in warning for warning in artifact.warnings)
+    assert artifact.metadata["donors_selection_string"] == (
+        "((chainid A) or (chainid C)) and element N O"
+    )
+    assert (
+        artifact.metadata["acceptors_selection_string"]
+        == artifact.metadata["donors_selection_string"]
+    )
+    assert artifact.provenance["hydrogens_selection_policy"]["source"] == "element"
+    donor_acceptor_policy = artifact.provenance["donor_acceptor_selection_policy"]
+    assert donor_acceptor_policy["elements"] == ["N", "O"]
+    assert donor_acceptor_policy["donors_selection"] == (
+        "((chainid A) or (chainid C)) and element N O"
+    )
+    assert donor_acceptor_policy["acceptors_selection"] == donor_acceptor_policy["donors_selection"]
+    assert donor_acceptor_policy["hydrogens_selection"] == (
+        "((chainid A) or (chainid C)) and (element H)"
+    )
     assert instances[0].run_args is not None
     assert instances[0].run_args["start"] == 0
 
@@ -1036,7 +1056,7 @@ def test_compute_stage_empty_selection(tmp_path: Path, caplog: pytest.LogCapture
         replicates=(1,),
         sim_config=MagicMock(),
     )
-    settings = HydrogenBondSettings()
+    settings = HydrogenBondSettings(allow_empty_groups=True)
     ctx = ReplicateContext(
         condition=condition,
         replicate=1,
@@ -1109,6 +1129,7 @@ def test_compute_stage_skips_only_empty_summary_and_keeps_other_summaries(
             HydrogenBondSummarySettings(name="protein_polymer", between=("protein", "polymer")),
             HydrogenBondSummarySettings(name="protein_internal", within="protein"),
         ],
+        allow_empty_groups=True,
     )
     ctx = ReplicateContext(
         condition=condition,
@@ -1180,7 +1201,7 @@ def test_compute_stage_empty_group_raises_by_default(tmp_path: Path) -> None:
         output_dir=tmp_path / "run_1",
         equilibration="0ns",
         recompute=True,
-        settings=HydrogenBondSettings(allow_empty_groups=False),
+        settings=HydrogenBondSettings(),
     )
 
     analysis = HydrogenBondsAnalysis()
