@@ -81,7 +81,7 @@ Example diagnostic output may look like this:
 
 ```text
 Correlation time: 15394 ps (15.4 ns)
-Statistical inefficiency: 3078.8
+Statistical inefficiency: 308.9
 Independent samples: 6.5 (from 2000 frames)
 ```
 
