@@ -100,7 +100,11 @@ against `None`. A hook that returns a type outside the contract raises
 The simple path implements `extract_metrics()` and lets `stats.py` run the
 t-tests, the ANOVA, the Benjamini-Hochberg correction and the ranking. The
 custom path overrides `compare()` and returns its own saveable model. rmsf,
-catalytic_triad and secondary_structure take the simple path. rmsd, rg, sasa,
+catalytic_triad and secondary_structure take the simple path. rmsf and
+secondary_structure do define `compare()`, but only as a type guard that raises
+`TypeError` when an aggregated result is not a `ConditionArtifact` before
+delegating to `super().compare(ctx)`. That is still the simple path. Do not copy
+it as a template for a custom comparison. rmsd, rg, sasa,
 distances, contacts and hydrogen_bonds take the custom path.
 
 ## Results and plotting

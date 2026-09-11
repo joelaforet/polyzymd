@@ -56,7 +56,7 @@ or removing toctree entries. This is documented in
 **Symptom:** Various incomplete features and inconsistencies in the analysis
 module.
 
-**Details:** See `analysis-module.md` for the full roadmap. Key items:
+**Details:** See `docs/planning/analyses_refactor.md` for the full roadmap. Key items:
 - Standardize analyzer inheritance
 - Unify result formats
 - Add comprehensive tests

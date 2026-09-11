@@ -9,26 +9,36 @@ set -uo pipefail
 
 payload=$(cat)
 
-# Pull tool_input.command out of the hook payload. Fall back to a raw substring
-# match when no Python is on PATH, which over-blocks rather than under-blocks.
+block() {
+    echo "commit gate: $1" >&2
+    echo "Fix it and commit again. Run the livecoms-check skill if the failure is scientific." >&2
+    exit 2
+}
+
+# Pull tool_input.command out of the hook payload. A payload we cannot parse is
+# treated as a commit, so a malformed or unexpected payload blocks rather than
+# waves the commit through. The no-Python path does the same by matching against
+# the raw payload text.
 command_text=""
 if python_bin=$(command -v python3 || command -v python); then
-    command_text=$("$python_bin" -c '
+    if ! command_text=$("$python_bin" -c '
 import json, sys
-try:
-    payload = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
+payload = json.load(sys.stdin)
 print(payload.get("tool_input", {}).get("command", ""))
-' <<<"$payload")
+' <<<"$payload" 2>/dev/null); then
+        block "could not parse the hook payload, so the commit is not allowed through unchecked."
+    fi
 else
     command_text="$payload"
 fi
 
-case "$command_text" in
-    *"git commit"*) ;;
-    *) exit 0 ;;
-esac
+# Match git commit in the forms that actually reach the shell, including
+# `git -C <path> commit` and `git --no-pager commit`, at the start of the
+# command or after a shell separator.
+git_commit_re='(^|[;&|]\s*)git(\s+-[A-Za-z-]+(\s+[^[:space:]]+)?)*\s+commit\b'
+if ! grep -Eq "$git_commit_re" <<<"$command_text"; then
+    exit 0
+fi
 
 repo_root="${CLAUDE_PROJECT_DIR:-}"
 if [[ -z "$repo_root" ]]; then
@@ -50,12 +60,6 @@ fi
 
 build_bin="$pixi_root/.pixi/envs/build/bin"
 test_python="$pixi_root/.pixi/envs/test/bin/python"
-
-block() {
-    echo "commit gate: $1" >&2
-    echo "Fix it and commit again. Run the livecoms-check skill if the failure is scientific." >&2
-    exit 2
-}
 
 for tool in "$build_bin/ruff" "$build_bin/black"; do
     [[ -x "$tool" ]] || block "cannot find $tool. Check that the build environment is installed."

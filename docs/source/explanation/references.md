@@ -25,7 +25,9 @@ packages that provide them are cited as methods rather than as dependencies.
 - Smith, P., Ziolek, R. M., Gazzarrini, E., Owen, D. M., and Lorenz, C. D.
   (2019). On the interaction of hyaluronic acid with synovial fluid lipid
   membranes. Physical Chemistry Chemical Physics 21:9845-9857.
-  doi:10.1039/C9CP01532A
+  doi:10.1039/C9CP01532A (we do not build on this paper. MDAnalysis asks that
+  users of its HydrogenBondAnalysis cite it, and the hydrogen bonds plugin uses
+  that class.)
 - McGibbon, R. T., Beauchamp, K. A., Harrigan, M. P., Klein, C., Swails, J. M.,
   Hernandez, C. X., Schwantes, C. R., Wang, L.-P., Lane, T. J., and
   Pande, V. S. (2015). MDTraj: a modern open library for the analysis of
@@ -66,7 +68,7 @@ decide what counts as a hydrogen bond, a helix or an exposed atom.
   Applied Chemistry 83:1637-1641. doi:10.1351/PAC-REC-10-01-02
 - Kuzmanic, A. and Zagrovic, B. (2010). Determination of ensemble-average
   pairwise root mean-square deviation from experimental B-factors. Biophysical
-  Journal 98:861-871. doi:10.1016/j.bpj.2009.11.011
+  Journal 98:861-871. doi:10.1016/j.bpj.2009.11.011 (not implemented)
 
 ## Sampling and uncertainty
 
@@ -128,7 +130,7 @@ which is what these tests and corrections are built for.
   2nd edition. Lawrence Erlbaum Associates, Hillsdale.
 - Hedges, L. V. (1981). Distribution theory for Glass's estimator of effect
   size and related estimators. Journal of Educational Statistics 6:107-128.
-  doi:10.3102/10769986006002107
+  doi:10.3102/10769986006002107 (small-sample correction, not implemented)
 - Scott, D. W. (1992). Multivariate density estimation: theory, practice, and
   visualization. Wiley, New York. doi:10.1002/9780470316849
 

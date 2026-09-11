@@ -22,7 +22,7 @@ one item rather than the plan.
 
 ## Phase 0, correctness (v1.3.0)
 
-- [x] Make the repository legible to a fresh session. Add `CLAUDE.md` importing
+- [ ] Make the repository legible to a fresh session. Add `CLAUDE.md` importing
       `AGENTS.md`, rewrite `.opencode/instructions/analysis-module.md` from the
       real module tree, add this checklist, add the `livecoms-check` skill, add
       the commit gate hook, and add `CITATION.cff` and the references page.

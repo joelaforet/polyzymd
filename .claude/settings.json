@@ -6,7 +6,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/commit-gate.sh"
+            "if": "Bash(git *)",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/commit-gate.sh",
+            "statusMessage": "Checking ruff, black and the scientific tests before the commit",
+            "timeout": 180
           }
         ]
       }
