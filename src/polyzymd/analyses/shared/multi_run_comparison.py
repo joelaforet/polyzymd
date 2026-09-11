@@ -7,7 +7,7 @@ compare multiple named runs (RMSD, Rg, SASA).
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 
@@ -153,10 +153,87 @@ def apply_fdr_correction(
     """
     from polyzymd.analyses.shared.inferential_statistics import apply_family_correction
 
+    anova_items = _coerce_result_sequence(anova_by_run)
+    if set_corrected is None:
+        _validate_default_setter_targets(pairwise_results, "pairwise_results")
+    _validate_anova_targets(anova_items)
+
     apply_family_correction(
         pairwise_results,
         fdr_alpha=fdr_alpha,
         get_p_value=get_p_value,
         set_corrected=set_corrected,
-        anova_results=anova_by_run,
+        anova_results=anova_items,
     )
+
+
+def _validate_default_setter_targets(results: Sequence[Any], label: str) -> None:
+    """Check that the default setter can write to every result object.
+
+    Parameters
+    ----------
+    results : Sequence[Any]
+        Result objects the default setter will mutate.
+    label : str
+        Name of the container, used in the error message.
+
+    Raises
+    ------
+    TypeError
+        Raised when a result lacks a writable ``significant`` or
+        ``p_value_adjusted`` attribute.
+    """
+    for idx, result in enumerate(results):
+        result_type = type(result).__name__
+        for attribute in ("significant", "p_value_adjusted"):
+            if not hasattr(result, attribute):
+                raise TypeError(
+                    "apply_fdr_correction() default setter requires results with a "
+                    f"{attribute!r} attribute. {label}[{idx}] has type {result_type}. "
+                    "Provide set_corrected=... for custom result objects."
+                )
+            try:
+                setattr(result, attribute, getattr(result, attribute))
+            except (AttributeError, TypeError) as exc:
+                raise TypeError(
+                    "apply_fdr_correction() default setter requires a mutable "
+                    f"{attribute!r} attribute. {label}[{idx}] has type {result_type}. "
+                    "Provide set_corrected=... for custom result objects."
+                ) from exc
+
+
+def _validate_anova_targets(results: Sequence[Any]) -> None:
+    """Check that omnibus ANOVA results can record the policy's verdict.
+
+    Parameters
+    ----------
+    results : Sequence[Any]
+        ANOVA result objects.
+
+    Raises
+    ------
+    TypeError
+        Raised when an ANOVA result lacks a writable ``significant`` or
+        ``p_value_adjusted`` attribute.
+    """
+    _validate_default_setter_targets(results, "anova_by_run")
+
+
+def _coerce_result_sequence(results: Mapping[Any, Any] | Sequence[Any] | None) -> list[Any]:
+    """Normalize mapping or sequence result containers to a list.
+
+    Parameters
+    ----------
+    results : Mapping[Any, Any] | Sequence[Any] | None
+        Container of result objects.
+
+    Returns
+    -------
+    list[Any]
+        The contained results, in order.
+    """
+    if results is None:
+        return []
+    if isinstance(results, Mapping):
+        return list(results.values())
+    return list(results)

@@ -46,8 +46,9 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -638,13 +639,58 @@ def percent_change(control_mean: float, treatment_mean: float) -> float:
     return (treatment_mean - control_mean) / control_mean * 100
 
 
+class OmnibusTest(Protocol):
+    """What an omnibus ANOVA result exposes to the correction policy.
+
+    Attributes
+    ----------
+    p_value : float or None
+        Raw p-value of the omnibus test.
+    significant : bool
+        Set by the policy from the raw p-value against alpha.
+    """
+
+    p_value: float | None
+    significant: bool
+
+
+class PairwiseTest(OmnibusTest, Protocol):
+    """What a pairwise test exposes to the default correction callbacks.
+
+    Attributes
+    ----------
+    p_value_adjusted : float or None
+        Benjamini-Hochberg value written by the policy.
+    """
+
+    p_value_adjusted: float | None
+
+
+class PValueReader(Protocol):
+    """Reads the raw p-value out of one test object.
+
+    Returning ``None`` keeps the test in the family's ordering but marks it
+    as carrying no p-value, so it is never declared significant.
+    """
+
+    def __call__(self, test: object, /) -> float | None:
+        """Return the raw p-value of *test*, or ``None``."""
+
+
+class CorrectionWriter(Protocol):
+    """Writes a Benjamini-Hochberg outcome back onto one test object."""
+
+    def __call__(self, test: object, bh_result: BHResult, /) -> None:
+        """Record *bh_result* on *test*."""
+
+
 def apply_family_correction(
-    pairwise_tests: Sequence[Any],
+    pairwise_tests: Sequence[object],
     *,
     fdr_alpha: float = 0.05,
-    get_p_value: Callable[[Any], float | None] | None = None,
-    set_corrected: Callable[[Any, BHResult], None] | None = None,
-    anova_results: Sequence[Any] | Mapping[Any, Any] | None = None,
+    get_p_value: PValueReader | None = None,
+    set_corrected: CorrectionWriter | None = None,
+    anova_results: Sequence[OmnibusTest] | Mapping[object, OmnibusTest] | None = None,
 ) -> None:
     """Correct one analysis run's pairwise tests as a single family.
 
@@ -660,19 +706,21 @@ def apply_family_correction(
 
     Parameters
     ----------
-    pairwise_tests : Sequence[Any]
-        Objects carrying one pairwise test each. Mutated in place.
+    pairwise_tests : Sequence[object]
+        Objects carrying one pairwise test each. Mutated in place. With the
+        default callbacks each object must satisfy :class:`PairwiseTest`;
+        with custom callbacks the objects can be anything those callbacks
+        understand, such as ``(result, field_prefix)`` tuples.
     fdr_alpha : float, optional
         False discovery rate for the pairwise family, and the plain alpha
         used for the omnibus ANOVA, by default 0.05.
-    get_p_value : Callable[[Any], float | None] or None, optional
+    get_p_value : PValueReader or None, optional
         Reads the raw p-value from one test. Defaults to ``.p_value``,
         or ``None`` when the object has ``testable`` set to false.
-    set_corrected : Callable[[Any, BHResult], None] or None, optional
+    set_corrected : CorrectionWriter or None, optional
         Writes the correction back. Defaults to setting
-        ``.p_value_adjusted`` (when the attribute exists) and
-        ``.significant``.
-    anova_results : Sequence[Any] or Mapping[Any, Any] or None, optional
+        ``.p_value_adjusted`` and ``.significant``.
+    anova_results : Sequence[OmnibusTest] or Mapping[object, OmnibusTest] or None, optional
         Omnibus ANOVA results to mark, by default ``None``.
 
     References
@@ -682,15 +730,14 @@ def apply_family_correction(
     of the Royal Statistical Society B*, 57(1), 289-300.
     """
 
-    def _default_get_p_value(result: Any) -> float | None:
-        if not getattr(result, "testable", True):
+    def _default_get_p_value(test: object, /) -> float | None:
+        if not getattr(test, "testable", True):
             return None
-        return getattr(result, "p_value", None)
+        return getattr(test, "p_value", None)
 
-    def _default_set_corrected(result: Any, bh_result: BHResult) -> None:
-        if hasattr(result, "p_value_adjusted"):
-            result.p_value_adjusted = bh_result.adjusted_p_value
-        result.significant = bh_result.significant
+    def _default_set_corrected(test: object, bh_result: BHResult, /) -> None:
+        test.p_value_adjusted = bh_result.adjusted_p_value  # type: ignore[attr-defined]
+        test.significant = bh_result.significant  # type: ignore[attr-defined]
 
     p_getter = get_p_value or _default_get_p_value
     corrected_setter = set_corrected or _default_set_corrected
@@ -712,9 +759,8 @@ def apply_family_correction(
         else list(anova_results or [])
     )
     for anova in anova_items:
-        if hasattr(anova, "p_value_adjusted"):
-            anova.p_value_adjusted = None
-        raw_p = getattr(anova, "p_value", None)
+        anova.p_value_adjusted = None  # type: ignore[attr-defined]
+        raw_p = anova.p_value
         testable = getattr(anova, "testable", True)
         anova.significant = bool(
             testable and raw_p is not None and not math.isnan(raw_p) and raw_p <= fdr_alpha
@@ -722,7 +768,7 @@ def apply_family_correction(
 
 
 def enforce_direction_significance(
-    results: Sequence[Any],
+    results: Sequence[object],
     fields: Sequence[tuple[str, str]] = (("direction", "significant"),),
 ) -> None:
     """Replace direction labels on results that are not significant.
@@ -733,7 +779,7 @@ def enforce_direction_significance(
 
     Parameters
     ----------
-    results : Sequence[Any]
+    results : Sequence[object]
         Result objects to relabel in place.
     fields : Sequence[tuple[str, str]], optional
         ``(direction_attribute, significance_attribute)`` pairs to check,

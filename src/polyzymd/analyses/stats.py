@@ -913,6 +913,39 @@ def _payload_direction_label(higher_is_better: bool | None) -> str:
     return ""
 
 
+def _control_contrast(
+    result: ComparisonResult,
+    metric_key: str,
+    control_label: str,
+    other_label: str,
+) -> PairwiseResult | None:
+    """Find the pairwise test behind a control-versus-best summary line.
+
+    Parameters
+    ----------
+    result : ComparisonResult
+        Comparison result being formatted.
+    metric_key : str
+        Metric the summary line is about.
+    control_label : str
+        Control condition label.
+    other_label : str
+        The other condition in the contrast.
+
+    Returns
+    -------
+    PairwiseResult | None
+        The matching pairwise result, or ``None`` when the pair was not
+        tested.
+    """
+    for comparison in result.pairwise_comparisons:
+        if comparison.metric != metric_key:
+            continue
+        if {comparison.condition_a, comparison.condition_b} == {control_label, other_label}:
+            return comparison
+    return None
+
+
 def _format_scalar_text(
     result: ComparisonResult,
     title: str,
@@ -1098,9 +1131,15 @@ def _format_scalar_text(
             ctrl = _get_cond(result.control_label)
             ctrl_val = _get_mean(ctrl)
             pct = percent_change(ctrl_val, top_val)
+            contrast = _control_contrast(result, metric_key, result.control_label, top_label)
             if not math.isnan(pct):
                 direction = interpret_direction(pct, ("lower", "unchanged", "higher"))
-                if direction == "unchanged":
+                if contrast is not None and not contrast.significant:
+                    lines.append(
+                        "  -> no significant change relative to control "
+                        f"({result.control_label})"
+                    )
+                elif direction == "unchanged":
                     lines.append(f"  -> unchanged relative to control ({result.control_label})")
                 else:
                     magnitude = format_pct(pct).lstrip("+-")
@@ -1296,9 +1335,12 @@ def _format_scalar_markdown(
             ctrl = _get_cond(result.control_label)
             ctrl_val = _get_mean(ctrl)
             pct = percent_change(ctrl_val, top_val)
+            contrast = _control_contrast(result, metric_key, result.control_label, top_label)
             if not math.isnan(pct):
                 direction = interpret_direction(pct, ("lower", "unchanged", "higher"))
-                if direction == "unchanged":
+                if contrast is not None and not contrast.significant:
+                    lines.append("2. no significant change relative to control")
+                elif direction == "unchanged":
                     lines.append("2. unchanged relative to control")
                 else:
                     magnitude = format_pct(pct).lstrip("+-")

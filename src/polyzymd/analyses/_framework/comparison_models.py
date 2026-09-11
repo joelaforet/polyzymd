@@ -76,11 +76,17 @@ class PairwiseResult(BaseModel):
 
 
 class ANOVAResult(BaseModel):
-    """One-way ANOVA result for one metric."""
+    """One-way ANOVA result for one metric.
+
+    The ANOVA is an omnibus test outside the pairwise Benjamini-Hochberg
+    family, so ``p_value_adjusted`` is always ``None`` and ``significant``
+    compares the raw ``p_value`` with alpha.
+    """
 
     metric: str = "default"
     f_statistic: float
     p_value: float
+    p_value_adjusted: float | None = None
     significant: bool
     testable: bool = True
     note: str | None = None

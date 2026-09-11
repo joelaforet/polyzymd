@@ -694,7 +694,7 @@ class SASAAnalysis(Analysis):
                         independent_ttest=independent_ttest,
                         cohens_d=cohens_d,
                         percent_change=percent_change,
-                        ttest_method=getattr(ctx, "ttest_method", "student"),
+                        ttest_method=ctx.ttest_method,
                     )
                     if candidate is not None:
                         pairwise.append(candidate)

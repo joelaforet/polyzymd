@@ -829,7 +829,7 @@ class RgAnalysis(Analysis):
                             condition_b=condition_b,
                             run_a=available[condition_a].get_run(run_label),
                             run_b=available[condition_b].get_run(run_label),
-                            ttest_method=getattr(ctx, "ttest_method", "student"),
+                            ttest_method=ctx.ttest_method,
                         )
                     )
 
@@ -1009,7 +1009,6 @@ class RgAnalysis(Analysis):
                 run_label=run_label,
                 condition_a=condition_a,
                 condition_b=condition_b,
-                effect_interpretation="not_testable",
                 direction=direction,
                 significant=False,
                 percent_change=pct_change,

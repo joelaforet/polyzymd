@@ -67,7 +67,8 @@ four conditions against a control therefore corrects 6 tests together, not
 3 and 3.
 
 The family never spans separate `polyzymd compare run` invocations, and it
-never includes the ANOVA.
+never includes the ANOVA. For why the boundary is drawn there, see
+{doc}`../explanation/analysis_statistics_best_practices`.
 
 #### Effect size
 
@@ -77,10 +78,8 @@ never includes the ANOVA.
 | `hedges_g` | `cohens_d` multiplied by the Hedges (1981) correction `J = 1 - 3 / (4 * (n1 + n2) - 9)`. With three replicates per condition, `J` is about 0.80. |
 | `effect_size_interpretation` | The Cohen (1988) adjective, or `null` when `n1 + n2 < 10`. |
 
-Quote `hedges_g` at the replicate counts molecular dynamics produces. Cohen's
-d is biased upward at small `n`, and its standard error is of order one, so
-the adjective is withheld below ten combined replicates rather than reporting
-noise as "large".
+For why the adjective is withheld and which number to quote, see
+{doc}`../explanation/analysis_statistics_best_practices`.
 
 ```{note}
 When a `control` label is set in `comparison.yaml`, only control-vs-treatment pairs are tested. Otherwise, all unique pairs are tested.
@@ -111,7 +110,7 @@ p-value with `fdr_alpha`. This rule is the same in every plugin.
 |-------|------|-------------|
 | `f_statistic` | float | F-statistic from the one-way ANOVA. |
 | `p_value` | float | Raw p-value for the omnibus test. Never adjusted. |
-| `p_value_adjusted` | null | Always `null`. The ANOVA is outside the correction family. |
+| `p_value_adjusted` | null | Always `null`. The ANOVA is outside the correction family. The distances plugin spells this `distance_p_value_adjusted` and `fraction_p_value_adjusted`. |
 | `significant` | bool | Whether the raw `p_value <= fdr_alpha`. |
 
 ANOVA does **not** determine which pairs differ -- that is the role of post-hoc tests. ANOVA is skipped when fewer than 3 conditions are present, and returns `NaN` statistics if any group has fewer than 2 observations.

@@ -218,25 +218,32 @@ class DistancePairANOVA(BaseModel):
     distance_f_statistic : float
         F-statistic for mean distance.
     distance_p_value : float
-        P-value for distance ANOVA.
+        Raw p-value for the distance ANOVA.
+    distance_p_value_adjusted : None
+        Always ``None``. The ANOVA is an omnibus test outside the pairwise
+        Benjamini-Hochberg family, so it is never adjusted.
     distance_significant : bool
-        Whether p < 0.05.
+        Whether the raw p-value is at or below ``fdr_alpha``.
     fraction_f_statistic : float, optional
         F-statistic for fraction below threshold.
     fraction_p_value : float, optional
-        P-value for fraction ANOVA.
+        Raw p-value for the fraction ANOVA.
+    fraction_p_value_adjusted : None
+        Always ``None``, for the same reason.
     fraction_significant : bool, optional
-        Whether fraction p < 0.05.
+        Whether the raw fraction p-value is at or below ``fdr_alpha``.
     """
 
     pair_label: str
     distance_f_statistic: float
     distance_p_value: float
+    distance_p_value_adjusted: float | None = None
     distance_significant: bool
     distance_testable: bool = True
     distance_note: str | None = None
     fraction_f_statistic: float | None = None
     fraction_p_value: float | None = None
+    fraction_p_value_adjusted: float | None = None
     fraction_significant: bool | None = None
     fraction_testable: bool | None = None
     fraction_note: str | None = None

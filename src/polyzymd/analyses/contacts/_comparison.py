@@ -114,7 +114,7 @@ def compare(ctx: ComparisonContext) -> Any:
             summaries,
             condition_data,
             effective_control,
-            ttest_method=getattr(ctx, "ttest_method", "student"),
+            ttest_method=ctx.ttest_method,
         )
 
     anova_results: list[ContactsANOVASummary] = []

@@ -649,7 +649,7 @@ class DistancesAnalysis(Analysis):
                             summary.label,
                             control_pair,
                             treatment_pair,
-                            ttest_method=getattr(ctx, "ttest_method", "student"),
+                            ttest_method=ctx.ttest_method,
                         )
                         comparisons.append(comp)
                 else:
@@ -663,7 +663,7 @@ class DistancesAnalysis(Analysis):
                                 summary_b.label,
                                 pair_a,
                                 pair_b,
-                                ttest_method=getattr(ctx, "ttest_method", "student"),
+                                ttest_method=ctx.ttest_method,
                             )
                             comparisons.append(comp)
 
@@ -866,6 +866,7 @@ class DistancesAnalysis(Analysis):
 
         for anova in anova_by_pair or []:
             for prefix in ("distance", "fraction"):
+                setattr(anova, f"{prefix}_p_value_adjusted", None)
                 testable = getattr(anova, f"{prefix}_testable", None)
                 if testable is None:
                     continue
