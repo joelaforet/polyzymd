@@ -90,18 +90,40 @@ hydrogen). The angle is measured at the hydrogen: D–H···A.
 :::{admonition} Topology and hydrogen caveats
 :class: important
 
-The plugin passes your configured group union to MDAnalysis as the donor and
-acceptor selection. Your topology must contain explicit hydrogen atoms; systems
-without hydrogens or with coarse-grained beads will undercount or return no
-H-bonds.
+Your topology must contain explicit hydrogen atoms; systems without hydrogens
+or with coarse-grained beads will undercount or return no H-bonds.
+
+PolyzyMD passes your configured group union intersected with the electronegative
+elements in `donor_acceptor_elements` to MDAnalysis as both the donor and the
+acceptor selection, so the effective selection is
+`(<group union>) and element N O` by default. Donors and acceptors are therefore
+nitrogen and oxygen only.
 
 PolyzyMD prefers `(<group union>) and (element H)` for hydrogen selection. For
 GRO-like topologies with missing MDAnalysis `elements`, PolyzyMD tries to infer
 elements safely from atom types or atom names. If elements remain unavailable,
-`hydrogen_bonds` falls back to the conservative name pattern
-`(<group union>) and (name H* or name [123]H*)`. Use `hydrogens_selection` only
-for unusual explicit-hydrogen names.
+`hydrogen_bonds` raises `SelectionError` rather than counting every atom as a
+donor and an acceptor. Use `hydrogens_selection` only for unusual
+explicit-hydrogen names.
 :::
+
+### Donor and acceptor elements
+
+```yaml
+plugins:
+  hydrogen_bonds:
+    donor_acceptor_elements: ["N", "O", "S"]
+```
+
+The default is `["N", "O"]`. Carbon is excluded because a C-H donor or a carbon
+acceptor is not a hydrogen bond under the IUPAC definition, and including carbon
+inflates counts by an amount that depends on polymer chemistry. Add `"S"` when
+you want cysteine and methionine sulfur to donate and accept, which is the usual
+extension for enzymes with reactive thiols. Hydrogen cannot appear in this list;
+hydrogens are selected separately through `hydrogens_selection`.
+
+Changing this setting changes the settings fingerprint, so cached results are
+recomputed on the next run.
 
 ### Groups
 
@@ -186,7 +208,8 @@ overlap, the plugin raises an error by default. Set
 |-------|------|---------|-------------|
 | `update_selections` | bool | `true` | Re-evaluate simple atom-group selections each frame. Coordinate-dependent group selections such as `around`, `sphzone`, and `cyzone` are not supported when this is `true`; use static groups or separate preprocessed groups instead. |
 | `top_n_pairs` | int | `15` | Number of top residue pairs to report per summary |
-| `allow_empty_groups` | bool | `true` | If `true` (default), warn and skip summaries when a referenced group selection matches no atoms. Set `false` for strict validation (raise `ValueError`). |
+| `allow_empty_groups` | bool | `false` | If `false` (default), a group selection that matches no atoms raises `SelectionError` naming the group and the selection. Set `true` to warn and skip the affected summaries instead. |
+| `donor_acceptor_elements` | list of string | `["N", "O"]` | Elements allowed to act as donors and acceptors. Add `"S"` to include sulfur. |
 | `allow_overlapping_composition` | bool | `false` | If `false`, overlapping composition partitions raise an error. Set `true` to allow overlap with warnings. |
 | `hydrogens_selection` | string or null | `null` | Advanced explicit-hydrogen selection override for unusual atom names. The default uses element metadata, with GRO-safe inference/name fallback when needed. |
 | `timestep_ps` | float or null | `null` | Manual frame spacing in ps for time-axis plots. If null, read from trajectory metadata. |

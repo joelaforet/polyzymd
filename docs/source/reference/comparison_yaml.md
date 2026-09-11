@@ -295,7 +295,8 @@ Each entry in `runs`:
 | `angle_cutoff` | float | `150` | H-bond angle cutoff in degrees |
 | `update_selections` | bool | `true` | Update atom selections every frame |
 | `top_n_pairs` | int | `15` | Number of top residue pairs to report |
-| `allow_empty_groups` | bool | `true` | Allow empty group selections: `true` = warn and skip summaries when a group matches no atoms; `false` = raise error |
+| `allow_empty_groups` | bool | `false` | Empty group selections: `false` = raise `SelectionError` naming the group and selection; `true` = warn and skip the summaries that use the group |
+| `donor_acceptor_elements` | list of string | `["N", "O"]` | Elements allowed to act as donors and acceptors; add `"S"` for sulfur |
 | `allow_overlapping_composition` | bool | `false` | Whether overlapping composition partitions are allowed |
 | `composition` | mapping | `null` | Composition analysis settings |
 | `hydrogens_selection` | string | `null` | Advanced explicit-hydrogen selection override for unusual atom names |
