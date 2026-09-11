@@ -121,6 +121,8 @@ class UniverseProvenance:
     config_engine: str | None
     engine_override: str | None = None
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    excluded_segments: tuple[int, ...] = field(default_factory=tuple)
+    segment_status: tuple[tuple[int, str], ...] = field(default_factory=tuple)
 
     def as_dict(self) -> dict[str, Any]:
         """Serialize provenance to JSON-compatible primitive values.
@@ -140,6 +142,8 @@ class UniverseProvenance:
             "config_engine": self.config_engine,
             "engine_override": self.engine_override,
             "warnings": list(self.warnings),
+            "excluded_segments": list(self.excluded_segments),
+            "segment_status": {str(index): status for index, status in self.segment_status},
         }
 
 
@@ -149,6 +153,7 @@ class UniverseProvider:
 
     config: SimulationConfig
     engine_override: str | None = None
+    require_complete: bool = True
     loader: _TrajectoryLoaderLike | None = None
     loader_factory: LoaderFactory | None = None
     _provenance_cache: dict[int, UniverseProvenance] = field(default_factory=dict, init=False)
@@ -194,7 +199,7 @@ class UniverseProvider:
             Loaded MDAnalysis universe from the underlying trajectory loader.
         """
         self.provenance_for(replicate, refresh=not cache)
-        return self._get_loader().load_universe(replicate, cache=cache)
+        return self._get_loader().load_universe(replicate, cache=cache, **self._segment_kwargs())
 
     def provenance_for(self, replicate: int, *, refresh: bool = False) -> UniverseProvenance:
         """Return provenance for a replicate, computing it when needed.
@@ -215,7 +220,7 @@ class UniverseProvider:
             return self._provenance_cache[replicate]
 
         loader = self._get_loader()
-        info = loader.get_trajectory_info(replicate)
+        info = loader.get_trajectory_info(replicate, **self._segment_kwargs())
         provenance = self._build_provenance(info=info, loader=loader)
         self._provenance_cache[replicate] = provenance
         return provenance
@@ -234,6 +239,20 @@ class UniverseProvider:
             Cached provenance when available, otherwise ``None``.
         """
         return self._provenance_cache.get(replicate)
+
+    def _segment_kwargs(self) -> dict[str, Any]:
+        """Return the segment-completeness keyword to forward to the loader.
+
+        The keyword is forwarded only when it differs from the loader default,
+        so loaders that predate the option keep working.
+
+        Returns
+        -------
+        dict[str, Any]
+            Either an empty mapping or ``{"require_complete": False}``.
+        """
+
+        return {} if self.require_complete else {"require_complete": False}
 
     def _get_loader(self) -> _TrajectoryLoaderLike:
         """Return the lazily instantiated trajectory loader.
@@ -312,6 +331,8 @@ class UniverseProvider:
             config_engine=self._config_engine(),
             engine_override=self.engine_override,
             warnings=tuple(warnings),
+            excluded_segments=tuple(getattr(info, "excluded_segments", ()) or ()),
+            segment_status=tuple(sorted((getattr(info, "segment_status", None) or {}).items())),
         )
 
     def _config_engine(self) -> str | None:

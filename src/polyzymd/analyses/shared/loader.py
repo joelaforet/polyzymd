@@ -619,6 +619,7 @@ def _assert_contiguous_segments(
     trajectory_files: Sequence[Path],
     *,
     relative_tolerance: float = 1e-3,
+    excluded_segments: Sequence[int] = (),
 ) -> list[_SegmentTiming]:
     """Require daisy-chained segments to form one monotonic, evenly spaced time line.
 
@@ -635,6 +636,10 @@ def _assert_contiguous_segments(
     relative_tolerance : float, optional
         Allowed deviation as a fraction of the frame interval (DCD headers
         store the interval as float32, so exact comparison is not possible).
+    excluded_segments : sequence of int, optional
+        Segment indices the engine left out because they are not complete.
+        They are named in the error, since leaving out a segment that other
+        segments continue from is itself a reason the time line has a gap.
 
     Returns
     -------
@@ -697,12 +702,25 @@ def _assert_contiguous_segments(
             )
 
     if problems:
+        if excluded_segments:
+            cause = (
+                f"Production segment(s) {list(excluded_segments)} were left out of this "
+                "chain because progress.json records them as still running or failed, so "
+                "the gap below is where they would have been. Wait for the run to finish, "
+                "or pass require_complete=False to read them as they stand. If that does "
+                "not explain the gap, two restart chains may have written into the same "
+                "run directory (duplicate SLURM resubmission), or a segment is missing."
+            )
+        else:
+            cause = (
+                "This usually means two restart chains wrote into the same run directory "
+                "(duplicate SLURM resubmission) or a segment is missing."
+            )
         raise TrajectoryLineageError(
             "Trajectory segments do not form a single contiguous time line; refusing to "
-            "concatenate them. This usually means two restart chains wrote into the same "
-            "run directory (duplicate SLURM resubmission) or a segment is missing. "
-            "Inspect progress.json and the production_N directories, quarantine the "
-            "branched segments, then retry.\n  - " + "\n  - ".join(problems)
+            f"concatenate them. {cause} Inspect progress.json and the production_N "
+            "directories, quarantine the branched segments, then retry.\n  - "
+            + "\n  - ".join(problems)
         )
 
     LOGGER.debug(
@@ -806,6 +824,48 @@ def _wrap_timestamp_preserving_trajectory(trajectory: Any) -> Any:
     return _TimestampPreservingTrajectory(trajectory)
 
 
+def _segment_completeness_warning(layout: "TrajectoryLayout") -> str | None:
+    """Describe production segments the engine left out or flagged.
+
+    Parameters
+    ----------
+    layout : TrajectoryLayout
+        Engine-resolved layout for one replicate.
+
+    Returns
+    -------
+    str or None
+        Warning text naming the affected segment indices, or ``None`` when
+        every discovered segment is complete.
+    """
+
+    excluded = list(getattr(layout, "excluded_segments", []))
+    if excluded:
+        status = dict(getattr(layout, "segment_status", {}) or {})
+        highest_kept = max(
+            (index for index in status if index not in excluded),
+            default=-1,
+        )
+        if any(index < highest_kept for index in excluded):
+            consequence = (
+                "they sit between segments that were kept, so the concatenated time line "
+                "has a gap where they were and the lineage check will refuse it"
+            )
+        else:
+            consequence = "the analysis window ends before them"
+        return (
+            f"Excluded production segment(s) {excluded} from this replicate because the "
+            f"engine records them as still running or failed; {consequence}."
+        )
+    incomplete = list(getattr(layout, "incomplete_segments", []))
+    if incomplete:
+        return (
+            f"Reading production segment(s) {incomplete} that the engine records as still "
+            "running or failed; the last frames may be mid-write."
+        )
+    return None
+
+
 @dataclass
 class TrajectoryInfo:
     """Information about discovered trajectory files.
@@ -828,6 +888,10 @@ class TrajectoryInfo:
         Engine-reported trajectory format, when available.
     warnings : list[str]
         Discovery warnings that should be preserved in downstream provenance.
+    excluded_segments : list[int]
+        Segment indices the engine left out because they are not complete.
+    segment_status : dict[int, str]
+        Status the engine recorded for each production segment index.
     """
 
     topology_file: Path
@@ -838,6 +902,8 @@ class TrajectoryInfo:
     topology_format: str | None = None
     trajectory_format: str | None = None
     warnings: list[str] = field(default_factory=list)
+    excluded_segments: list[int] = field(default_factory=list)
+    segment_status: dict[int, str] = field(default_factory=dict)
 
     @property
     def n_trajectory_files(self) -> int:
@@ -915,7 +981,7 @@ class TrajectoryLoader:
         self.config = config
         self._engine_override = engine_override
         self._engine: SimulationEngine | None = None
-        self._universe_cache: dict[int, "Universe"] = {}
+        self._universe_cache: dict[tuple[int, bool], "Universe"] = {}
 
     # ------------------------------------------------------------------
     # Engine delegation helpers
@@ -942,6 +1008,8 @@ class TrajectoryLoader:
         self,
         working_dir: Path,
         replicate: int | None = None,
+        *,
+        require_complete: bool = True,
     ) -> "TrajectoryLayout":
         """Resolve trajectory layout via the engine.
 
@@ -953,6 +1021,9 @@ class TrajectoryLoader:
             Replicate index.  When ``None`` (e.g. from
             ``find_topology(working_dir)``), the replicate is inferred
             from the directory name (``run_<N>``) with a fallback to 1.
+        require_complete : bool, optional
+            Leave out production segments the engine records as still running
+            or failed, by default True.
 
         Returns
         -------
@@ -972,7 +1043,15 @@ class TrajectoryLoader:
         except (AttributeError, TypeError):
             engine_dir = working_dir
         try:
-            layout = engine.resolve_trajectory_layout(engine_dir, replicate)
+            # The keyword is passed only when it differs from the engine
+            # default so that engine doubles with the older two-argument
+            # signature keep working.
+            if require_complete:
+                layout = engine.resolve_trajectory_layout(engine_dir, replicate)
+            else:
+                layout = engine.resolve_trajectory_layout(
+                    engine_dir, replicate, require_complete=False
+                )
         except FileNotFoundError:
             raise
         except (TypeError, ValueError, ValidationError) as exc:
@@ -1060,13 +1139,22 @@ class TrajectoryLoader:
     # Public API
     # ------------------------------------------------------------------
 
-    def get_trajectory_info(self, replicate: int) -> TrajectoryInfo:
+    def get_trajectory_info(
+        self,
+        replicate: int,
+        *,
+        require_complete: bool = True,
+    ) -> TrajectoryInfo:
         """Get trajectory file information for a replicate.
 
         Parameters
         ----------
         replicate : int
             Replicate number (1-indexed)
+        require_complete : bool, optional
+            Leave out production segments the engine records as still running
+            or failed, by default True. A segment that is still being written
+            would otherwise load as a short trajectory.
 
         Returns
         -------
@@ -1097,7 +1185,9 @@ class TrajectoryLoader:
             )
 
         # Delegate file discovery to the simulation engine
-        layout = self._resolve_layout(working_dir, replicate=replicate)
+        layout = self._resolve_layout(
+            working_dir, replicate=replicate, require_complete=require_complete
+        )
 
         if layout.topology_path is None:
             raise FileNotFoundError(f"No topology file found in {working_dir}")
@@ -1120,6 +1210,10 @@ class TrajectoryLoader:
         gro_warning = self._gro_topology_warning(layout)
         if gro_warning is not None:
             warnings.append(gro_warning)
+        segment_warning = _segment_completeness_warning(layout)
+        if segment_warning is not None:
+            warnings.append(segment_warning)
+            LOGGER.warning(segment_warning)
 
         return TrajectoryInfo(
             topology_file=layout.topology_path,
@@ -1130,6 +1224,8 @@ class TrajectoryLoader:
             topology_format=layout.topology_format,
             trajectory_format=layout.trajectory_format,
             warnings=warnings,
+            excluded_segments=list(layout.excluded_segments),
+            segment_status=dict(layout.segment_status),
         )
 
     def load_universe(
@@ -1138,6 +1234,7 @@ class TrajectoryLoader:
         cache: bool = True,
         *,
         verify_lineage: bool = True,
+        require_complete: bool = True,
     ) -> "Universe":
         """Load MDAnalysis Universe for a replicate.
 
@@ -1151,6 +1248,10 @@ class TrajectoryLoader:
             If True (default), require multi-segment trajectories to form a
             single monotonic, evenly spaced time line before concatenating
             them (see :class:`TrajectoryLineageError`).
+        require_complete : bool, optional
+            If True (default), leave out production segments the engine records
+            as still running or failed. Set it to False to read a campaign that
+            is still in flight, knowing the last segment ends mid-write.
 
         Returns
         -------
@@ -1171,10 +1272,16 @@ class TrajectoryLoader:
         _require_mdanalysis()
         import MDAnalysis as mda
 
-        if cache and replicate in self._universe_cache:
-            return self._universe_cache[replicate]
+        cache_key = (replicate, require_complete)
+        if cache and cache_key in self._universe_cache:
+            return self._universe_cache[cache_key]
 
-        info = self.get_trajectory_info(replicate)
+        # Pass the keyword only when it differs from the default so that
+        # patched or older ``get_trajectory_info`` implementations keep working.
+        if require_complete:
+            info = self.get_trajectory_info(replicate)
+        else:
+            info = self.get_trajectory_info(replicate, require_complete=False)
         info.validate()
 
         # Load universe - MDAnalysis handles multiple trajectory files
@@ -1187,7 +1294,11 @@ class TrajectoryLoader:
             # Multiple segments - use ChainReader, but only after checking
             # that the segments actually chain (no branched/duplicate chains).
             if verify_lineage:
-                _assert_contiguous_segments(info.topology_file, info.trajectory_files)
+                _assert_contiguous_segments(
+                    info.topology_file,
+                    info.trajectory_files,
+                    excluded_segments=tuple(info.excluded_segments),
+                )
             u = mda.Universe(
                 str(info.topology_file),
                 [str(f) for f in info.trajectory_files],
@@ -1196,7 +1307,7 @@ class TrajectoryLoader:
         u.trajectory = _wrap_timestamp_preserving_trajectory(u.trajectory)
 
         if cache:
-            self._universe_cache[replicate] = u
+            self._universe_cache[cache_key] = u
 
         return u
 

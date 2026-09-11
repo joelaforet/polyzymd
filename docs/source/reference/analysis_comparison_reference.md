@@ -177,6 +177,45 @@ comparison/sasa/result.json
 comparison/hydrogen_bonds/result.json
 ```
 
+## Incomplete production segments
+
+The OpenMM engine reads the status recorded for each production segment in
+`progress.json` and leaves out any segment marked `running` or `failed`, since
+its DCD is still being appended to or stopped at an arbitrary step. The
+excluded indices appear in `excluded_segments` on the trajectory layout, in
+`TrajectoryInfo`, and in the `provenance.universe_policy.provenance` block of
+every artifact, next to `segment_status`. A warning names them.
+
+`TrajectoryLoader.load_universe`, `TrajectoryLoader.get_trajectory_info`, and
+`UniverseProvider` take `require_complete`, which defaults to `True`. Set it to
+`False` to read a campaign that is still running; the segments are then
+included and listed in `incomplete_segments` on the layout instead.
+
+What this does and does not guarantee:
+
+- Segments marked `interrupted` are kept, because the continuation chain
+  resumes from an interrupted segment's saved state and its frames belong to
+  the time line. An interrupted segment is written with `samples_written = 0`
+  and the comment that samples may be partial
+  (`simulation/continuation.py:828`), so its frame count is not recorded
+  anywhere. Treat the last interrupted segment of a chain as partial.
+- Excluding a segment that other segments continue from leaves a hole in the
+  concatenated time line. The lineage check catches it and names the excluded
+  segments as a possible cause, but the fix is to wait for the run or to pass
+  `require_complete=False`, not to quarantine anything.
+- The contiguity check reads only the first and last time of each segment plus
+  its frame interval. It proves that segment boundaries line up. It does not
+  detect a dropped or duplicated frame inside a segment.
+- Recorded input paths are absolute. A run directory copied or moved to another
+  path does not match its recorded identity, so analyses recompute rather than
+  reuse, and commands that only read caches raise instead.
+
+The GROMACS engine records no per-file status, because its layout is a single
+production XTC rather than a chain of segments. It accepts `require_complete`
+for interface parity and ignores it, and its `segment_status` and
+`excluded_segments` are always empty. Check the job state yourself before
+analyzing a live GROMACS run.
+
 ## Plotting Smoke Test
 
 For a final smoke test after comparisons finish:
