@@ -9,6 +9,7 @@ distances are overlaid or grouped together.
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
@@ -27,24 +28,50 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
-# Matplotlib/seaborn are lazy-imported inside functions to avoid
-# import-time overhead. Sentinels defined here for availability checks.
-HAS_SEABORN: bool
-try:
-    import seaborn as _sns_probe  # noqa: F401 — probe only
-
-    HAS_SEABORN = True
-    del _sns_probe
-except ImportError:
-    HAS_SEABORN = False
-
 logger = logging.getLogger(__name__)
 
 
+def __getattr__(name: str) -> bool:
+    """Resolve the module-level seaborn availability flag on first use.
+
+    Importing seaborn costs about one second and pulls in ``scipy.stats`` and
+    ``matplotlib.pyplot``, so plugin discovery must not trigger it. The flag is
+    answered from the import system instead, which does not execute seaborn.
+
+    Parameters
+    ----------
+    name : str
+        Attribute being looked up.
+
+    Returns
+    -------
+    bool
+        Whether seaborn is installed, for ``HAS_SEABORN``.
+
+    Raises
+    ------
+    AttributeError
+        If any other attribute is requested.
+    """
+    if name == "HAS_SEABORN":
+        return importlib.util.find_spec("seaborn") is not None
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 def _require_seaborn() -> None:
-    """Raise ImportError if seaborn is not available."""
-    if not HAS_SEABORN:
-        raise ImportError("seaborn is required for KDE plots.\nInstall with: pip install seaborn")
+    """Import seaborn, raising an actionable ImportError when it is missing.
+
+    Raises
+    ------
+    ImportError
+        If seaborn is not installed.
+    """
+    try:
+        import seaborn  # noqa: F401
+    except ImportError as exc:
+        raise ImportError(
+            "seaborn is required for KDE plots.\nInstall with: pip install seaborn"
+        ) from exc
 
 
 def _get_color_palette(n_colors: int, palette: str = "tab10") -> list:
