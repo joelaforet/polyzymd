@@ -37,7 +37,10 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 AUTOCORRELATION_FRAME_THRESHOLD = 100
 MEAN_RMSF_METRIC = "mean_rmsf"
-RMSF_PROFILE_VERSION = "1"
+# Bumped to "2" when RMSF stopped being computed from autocorrelation-subsampled
+# frames. Profiles written under version 1 used a fraction of the window and are
+# not comparable to profiles written under version 2.
+RMSF_PROFILE_VERSION = "2"
 RMSF_METRIC_METADATA = {
     "label": "Mean RMSF",
     "unit": "A",
@@ -45,7 +48,7 @@ RMSF_METRIC_METADATA = {
     "direction_labels": ("stabilizing", "unchanged", "destabilizing"),
     "statistical_policy": {
         "metric_classification": "variance_based",
-        "frame_strategy": "subsample_by_autocorrelation_when_estimated",
+        "frame_strategy": "all_production_frames",
         "uncertainty_level": "biological_replicate_sem",
     },
 }
@@ -64,7 +67,7 @@ def build_rmsf_jobs(ctx: MDAReplicateJobContext, settings: RMSFSettings) -> list
     Returns
     -------
     list of MDAAnalysisJob
-        Single RMSF profile job with explicit independent-frame selection.
+        Single RMSF profile job covering every frame in the production window.
     """
 
     job_input = prepare_rmsf_profile_input(
@@ -480,7 +483,7 @@ def prepare_rmsf_profile_input(
     condition_label: str,
     replicate: int,
 ) -> RMSFProfileInput:
-    """Validate selections, align the trajectory, and choose RMSF frames.
+    """Validate selections, align the trajectory, and collect RMSF frames.
 
     Parameters
     ----------
@@ -1136,7 +1139,16 @@ def _autocorrelation_metadata(
     stop: int,
     explicit_frame_selection: bool = False,
 ) -> dict[str, Any]:
-    """Return independent-frame metadata for variance-based RMSF."""
+    """Return correlation diagnostics for the RMSF production window.
+
+    Every frame in the window is used to compute RMSF. The correlation time
+    and the effective sample count are recorded so a reader can judge how
+    much independent information the profile rests on, but they do not
+    select frames. Thinning a variance estimator to N/g points does not
+    remove the finite-sample bias of the fluctuation, it only raises the
+    variance of the profile, so the uncertainty on RMSF comes from the SEM
+    across replicates instead.
+    """
 
     metadata: dict[str, Any] = {
         "autocorrelation_analyzed": False,
@@ -1151,33 +1163,18 @@ def _autocorrelation_metadata(
     }
     if explicit_frame_selection:
         metadata["warning"] = (
-            "RMSF autocorrelation subsampling is skipped for explicit frame selections; "
+            "RMSF correlation diagnostics are skipped for explicit frame selections; "
             "the provided frames are preserved exactly."
         )
         return metadata
     if frames.size <= AUTOCORRELATION_FRAME_THRESHOLD:
         return metadata
 
-    from polyzymd.analyses.shared.autocorrelation import (
-        compute_acf,
-        estimate_correlation_time,
-        get_independent_indices,
-    )
+    from polyzymd.analyses.shared.autocorrelation import compute_acf, estimate_correlation_time
 
     rmsd_values = compute_rmsd_timeseries(atoms, start_frame=start, stop_frame=stop, step=step)
     acf_result = compute_acf(rmsd_values, timestep=timestep_ps * step, timestep_unit="ps")
     tau_result = estimate_correlation_time(acf_result, n_frames=int(frames.size))
-    independent_frames = get_independent_indices(
-        n_frames=stop,
-        correlation_time=tau_result.tau,
-        timestep=timestep_ps,
-        start_frame=start,
-    )
-    independent_frames = independent_frames[independent_frames < stop]
-    if step > 1:
-        independent_frames = independent_frames[np.isin(independent_frames, frames)]
-    if independent_frames.size == 0:
-        independent_frames = frames
 
     metadata.update(
         {
@@ -1187,7 +1184,6 @@ def _autocorrelation_metadata(
             "n_independent_frames": tau_result.n_independent,
             "statistical_inefficiency": tau_result.statistical_inefficiency,
             "warning": tau_result.warning,
-            "selected_frames": independent_frames.astype(np.int64).tolist(),
         }
     )
     return metadata

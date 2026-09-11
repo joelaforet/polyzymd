@@ -60,30 +60,35 @@ MD trajectories contain correlated frames. Correlation affects how quickly RMSF
 estimates converge and how much uncertainty should be assigned to them. It is
 not enough to count every saved frame as an independent observation.
 
-PolyzyMD's current RMSF strategy is conservative: it estimates a correlation
-time and subsamples approximately independent frames before computing RMSF. This
-reduces the risk of treating dense, correlated trajectory output as more
-informative than it is. It also means short trajectories with long correlation
-times may produce only a small number of effective samples.
+PolyzyMD computes RMSF from every frame in the production window and reports
+the correlation time beside it as a diagnostic. Earlier releases thinned the
+window to approximately independent frames first. That was withdrawn because
+thinning does not help a variance estimator. The finite-sample bias of a
+fluctuation computed from N correlated frames with inefficiency g is about the
+same as the bias of one computed from N/g independent frames, so discarding
+frames leaves the bias where it was and raises the variance of the profile.
+Fluctuation observables need more data, not less.
 
 Conceptually, PolyzyMD:
 
 1. aligns the trajectory to the chosen reference;
-2. estimates correlation from a trajectory-level timeseries;
-3. selects frames spaced far enough apart to be treated as approximately
-   independent for the current RMSF calculation;
-4. computes RMSF from that reduced frame set.
+2. computes RMSF from every frame in the production window;
+3. estimates correlation from a trajectory-level timeseries and records the
+   correlation time and effective sample count as diagnostics;
+4. puts the uncertainty on RMSF on the standard error across replicates.
 
 Example diagnostic output may look like this:
 
 ```text
 Correlation time: 15394 ps (15.4 ns)
-Statistical inefficiency: 308.9
-Independent samples: 6 (from 2000 frames)
+Statistical inefficiency: 3078.8
+Independent samples: 6.5 (from 2000 frames)
 ```
 
-This does not mean the trajectory is invalid. It means the RMSF estimate has
-less independent information than the raw frame count suggests.
+This does not mean the trajectory is invalid, and it does not mean 1994 frames
+were thrown away. All 2000 frames went into the profile. It means the RMSF
+estimate has less independent information than the raw frame count suggests,
+and that the replicate SEM is the number to quote.
 
 ## Interpreting reliability warnings
 
@@ -91,7 +96,7 @@ PolyzyMD warns when the effective number of independent samples is small, for
 example:
 
 ```text
-WARNING: Low statistical reliability: only 6 independent samples
+WARNING: Low statistical reliability: only 6.5 independent samples
 (recommended >= 10). Correlation time τ = 15394 ps is comparable to
 or longer than the trajectory sampling window. Consider:
 (1) extending simulation time,
