@@ -67,7 +67,7 @@ class RgRunPayload:
     sem_rg: float | None
     correlation_time: float | None
     correlation_time_unit: str | None
-    n_independent_frames: int | None
+    n_independent_frames: float | None
     statistical_inefficiency: float | None
     autocorrelation_warning: str | None
     fragment_rg_values: NDArray[np.float64] | None = None
@@ -793,7 +793,7 @@ def _payload_from_analysis(
     sem_rg: float | None = None
     correlation_time: float | None = None
     correlation_time_unit: str | None = None
-    n_independent_frames: int | None = None
+    n_independent_frames: float | None = None
     statistical_inefficiency: float | None = None
     autocorrelation_warning: str | None = None
     if len(rg_values) >= 20:

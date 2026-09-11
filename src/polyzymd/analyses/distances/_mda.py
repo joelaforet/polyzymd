@@ -52,7 +52,7 @@ class DistancePairPayload:
     sem_distance: float | None
     correlation_time: float | None
     correlation_time_unit: str | None
-    n_independent_frames: int | None
+    n_independent_frames: float | None
     statistical_inefficiency: float | None
     autocorrelation_warning: str | None
     threshold: float | None
@@ -425,7 +425,7 @@ def _summarize_distance_series(
     sem_distance: float | None = None
     correlation_time: float | None = None
     correlation_time_unit: str | None = None
-    n_independent_frames: int | None = None
+    n_independent_frames: float | None = None
     statistical_inefficiency: float | None = None
     autocorrelation_warning: str | None = None
     if len(distances) >= 20:

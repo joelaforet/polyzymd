@@ -505,7 +505,7 @@ def _collect_run(
     sem_rmsd: float | None = None
     correlation_time: float | None = None
     correlation_time_unit: str | None = None
-    n_independent_frames: int | None = None
+    n_independent_frames: float | None = None
     statistical_inefficiency: float | None = None
     autocorrelation_warning: str | None = None
     if len(rmsd_values) >= 20:

@@ -605,7 +605,7 @@ def _simultaneous_contact_statistics(
             "n_independent": None,
             "warning": str(exc),
         }
-    n_independent = int(tau_result.n_independent)
+    n_independent = float(tau_result.n_independent)
     sem = (
         float(np.sqrt(fraction * (1.0 - fraction) / float(n_independent)))
         if n_independent > 0

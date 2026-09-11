@@ -876,7 +876,7 @@ def _summarize_raw_sasa(
     sem_sasa: float | None = None
     correlation_time: float | None = None
     correlation_time_unit: str | None = None
-    n_independent_frames: int | None = None
+    n_independent_frames: float | None = None
     statistical_inefficiency: float | None = None
     autocorrelation_warning: str | None = None
     effective_timestep_ps = _effective_timestep_ps(raw_timestep_ps, frame_stride)
