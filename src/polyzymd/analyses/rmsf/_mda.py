@@ -18,6 +18,7 @@ from polyzymd.analyses.mda import (
     ArtifactStore,
     ConditionArtifact,
     FrameSelection,
+    MDAAggregationError,
     MDAAnalysisJob,
     MDACollectorContext,
     MDAJobResult,
@@ -927,6 +928,20 @@ def _validate_and_order_artifacts(
                 f"{artifact.metadata.get('settings_fingerprint')}, expected {settings_fingerprint}. "
                 "Recompute the condition or clear stale caches."
             )
+        stored_profile_version = artifact.metadata.get("rmsf_profile_version")
+        if stored_profile_version != RMSF_PROFILE_VERSION:
+            described = (
+                "no RMSF profile version"
+                if stored_profile_version is None
+                else f"RMSF profile version {stored_profile_version!r}"
+            )
+            raise MDAAggregationError(
+                f"RMSF replicate {artifact.replicate} records {described}, expected "
+                f"{RMSF_PROFILE_VERSION!r}. Version 1 profiles were computed from "
+                "autocorrelation-subsampled frames and cannot be averaged with version 2 "
+                "profiles computed from the whole production window. Recompute the condition "
+                "or clear stale caches before aggregating."
+            )
         if artifact.metadata.get("selection_string") != settings.selection:
             raise ValueError(f"RMSF replicate {artifact.replicate} selection mismatch")
         _validate_reference_file_identity(artifact, settings)
@@ -1170,11 +1185,17 @@ def _autocorrelation_metadata(
     if frames.size <= AUTOCORRELATION_FRAME_THRESHOLD:
         return metadata
 
-    from polyzymd.analyses.shared.autocorrelation import compute_acf, estimate_correlation_time
+    from polyzymd.analyses.shared.autocorrelation import estimate_correlation_time
 
+    # Pass the series rather than a precomputed ACF: the ACF path truncates the
+    # sum at max_lag = N // 4, the raw-series path sums every available lag.
     rmsd_values = compute_rmsd_timeseries(atoms, start_frame=start, stop_frame=stop, step=step)
-    acf_result = compute_acf(rmsd_values, timestep=timestep_ps * step, timestep_unit="ps")
-    tau_result = estimate_correlation_time(acf_result, n_frames=int(frames.size))
+    tau_result = estimate_correlation_time(
+        rmsd_values,
+        timestep=timestep_ps * step,
+        timestep_unit="ps",
+        n_frames=int(frames.size),
+    )
 
     metadata.update(
         {

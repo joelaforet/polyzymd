@@ -13,6 +13,7 @@ from polyzymd.analyses.mda.aggregation import (
     ReplicateMetricPolicy,
     aggregate_replicate_artifacts,
     aggregate_replicate_artifacts_from_disk,
+    validate_autocorrelation_estimator_version,
 )
 from polyzymd.analyses.mda.artifacts import (
     MDA_ARTIFACT_SCHEMA_VERSION,
@@ -69,6 +70,7 @@ __all__ = [
     "ExplicitReplicateMetricPolicy",
     "MDAAggregationContext",
     "MDAAggregationError",
+    "validate_autocorrelation_estimator_version",
     "ReplicateMetricPolicy",
     "aggregate_replicate_artifacts",
     "aggregate_replicate_artifacts_from_disk",

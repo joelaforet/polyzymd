@@ -30,8 +30,10 @@ from polyzymd.analyses.mda import (
     ReplicateArtifact,
     build_pair_distance_analysis,
     pair_distance_version,
+    validate_autocorrelation_estimator_version,
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
+from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 from polyzymd.analyses.shared.loader import parse_time_string
 
 if TYPE_CHECKING:
@@ -208,6 +210,7 @@ class TriadArtifactCollector:
             },
             metadata={
                 "result_kind": "catalytic_triad_mda_replicate",
+                "autocorrelation_estimator_version": AUTOCORRELATION_ESTIMATOR_VERSION,
                 "settings_fingerprint": ctx.settings_fingerprint,
                 "config_hash": config_hash,
                 "polyzymd_version": get_polyzymd_version(),
@@ -365,6 +368,7 @@ def _validate_and_order_artifacts(
                 f"fingerprint {artifact.metadata.get('settings_fingerprint')}, expected "
                 f"{settings_fingerprint}. Recompute the condition or clear stale caches."
             )
+        validate_autocorrelation_estimator_version(artifact, analysis_label="Catalytic-triad")
         _validate_pair_payloads(artifact, settings)
         store = ArtifactStore(analysis_dir / f"run_{artifact.replicate}")
         store.validate_sidecar(_triad_distance_sidecar(artifact))

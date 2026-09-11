@@ -24,6 +24,7 @@ from polyzymd.analyses.mda import (
     MDAJobResult,
     MDAUniversePolicy,
     ReplicateArtifact,
+    validate_autocorrelation_estimator_version,
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
 from polyzymd.analyses.sasa._artifacts import (
@@ -32,6 +33,7 @@ from polyzymd.analyses.sasa._artifacts import (
     resolve_selection_indices,
     validate_target_subset,
 )
+from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.statistics import compute_sem
 
@@ -408,6 +410,7 @@ class SASAArtifactCollector:
             },
             metadata={
                 "result_kind": "sasa_mda_replicate",
+                "autocorrelation_estimator_version": AUTOCORRELATION_ESTIMATOR_VERSION,
                 "settings_fingerprint": ctx.settings_fingerprint,
                 "config_hash": config_hash,
                 "polyzymd_version": get_polyzymd_version(),
@@ -1050,6 +1053,7 @@ def _validate_and_order_artifacts(
                 f"{artifact.replicate}: expected {settings_fingerprint!r}, got "
                 f"{stored_fingerprint!r}. Recompute stale caches."
             )
+        validate_autocorrelation_estimator_version(artifact, analysis_label="SASA")
         observed = [
             str(entry.get("run_label")) for entry in artifact.payload.get("run_results", [])
         ]

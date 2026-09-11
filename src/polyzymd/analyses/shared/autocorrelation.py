@@ -6,7 +6,6 @@ independent samples. This module provides tools to:
 1. Compute the autocorrelation function (ACF) of an observable
 2. Estimate the correlation time (τ) from the ACF
 3. Compute statistical inefficiency (g) for proper uncertainty quantification
-4. Select independent frames based on τ for proper statistics
 
 Key Concepts
 ------------
@@ -33,7 +32,7 @@ with the sum truncated at the first non-positive C(t) beyond a short minimum
 lag, and the integrated correlation time follows from it as
 τ = (g - 1)/2 * Δt. Earlier releases also offered a first-zero-crossing
 estimator and an exponential fit. Both were withdrawn because neither
-estimates the integrated correlation time: on an AR(1) series with φ = 0.9
+estimates the integrated correlation time. On an AR(1) series with φ = 0.9
 the first-zero method overestimated g by a factor of five and the
 exponential fit by up to two.
 
@@ -84,7 +83,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from enum import Enum
 from typing import Literal
 
 import numpy as np
@@ -100,13 +98,16 @@ MIN_RECOMMENDED_N_INDEPENDENT = 10
 # value near lag zero cannot truncate the sum. Same default as pymbar.
 DEFAULT_MINTIME = 3
 
+# Identifies which correlation estimator produced a stored number. Version "1"
+# was the trapezoid integration that counted lag zero twice and floored tau at
+# one timestep; version "2" is the pymbar-style sum below. Plugins stamp this on
+# every replicate artifact whose sem_* field divides by an effective sample
+# count, and refuse to aggregate artifacts that disagree, because the two
+# versions give sem values that differ by a factor of about the square root of
+# three for a fast observable. Bump it whenever the estimator changes a number.
+AUTOCORRELATION_ESTIMATOR_VERSION = "2"
+
 _WITHDRAWN_METHODS = ("first_zero", "exponential_fit")
-
-
-class CorrelationTimeMethod(str, Enum):
-    """Method for estimating correlation time from ACF."""
-
-    INTEGRATION = "integration"
 
 
 @dataclass
@@ -390,68 +391,6 @@ def estimate_correlation_time(
         statistical_inefficiency=g,
         warning=warning,
     )
-
-
-def get_independent_indices(
-    n_frames: int,
-    correlation_time: float,
-    timestep: float = 1.0,
-    start_frame: int = 0,
-) -> NDArray[np.int64]:
-    """Get frame indices for independent samples.
-
-    Selects frames separated by at least 2*τ (correlation time) to
-    ensure approximate independence for statistical analysis.
-
-    Parameters
-    ----------
-    n_frames : int
-        Total number of frames in trajectory
-    correlation_time : float
-        Correlation time τ (in same units as timestep)
-    timestep : float, optional
-        Time between frames. Default is 1.0.
-    start_frame : int, optional
-        First frame to consider (after equilibration). Default is 0.
-        Note: Frame indices are 0-indexed internally, but user-facing
-        documentation uses 1-indexed (PyMOL convention).
-
-    Returns
-    -------
-    NDArray[np.int64]
-        Array of frame indices (0-indexed) that are approximately independent
-
-    Examples
-    --------
-    >>> # Get independent frames for RMSF calculation
-    >>> tau_result = estimate_correlation_time(rmsd, timestep=10.0)
-    >>> indices = get_independent_indices(
-    ...     n_frames=10000,
-    ...     correlation_time=tau_result.tau,
-    ...     timestep=10.0,
-    ...     start_frame=1000,  # Skip first 1000 frames for equilibration
-    ... )
-    >>> print(f"Using {len(indices)} independent frames")
-
-    Notes
-    -----
-    Frame indices returned are 0-indexed (for direct use with MDAnalysis).
-    When displaying to users, add 1 for PyMOL convention.
-
-    The spacing is set to 2*τ/timestep, which gives frames with
-    negligible correlation (ACF < 0.05 for exponential decay).
-    """
-    if n_frames <= start_frame:
-        raise ValueError(f"start_frame ({start_frame}) >= n_frames ({n_frames})")
-
-    # Convert correlation time to frame spacing
-    # Use 2*τ for good independence (ACF ≈ exp(-2) ≈ 0.14)
-    frame_spacing = max(1, int(np.ceil(2.0 * correlation_time / timestep)))
-
-    # Generate indices
-    indices = np.arange(start_frame, n_frames, frame_spacing, dtype=np.int64)
-
-    return indices
 
 
 def _statistical_inefficiency_from_acf(
