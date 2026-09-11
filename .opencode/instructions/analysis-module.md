@@ -1,269 +1,122 @@
-# Analysis Module Rules
+# Analysis module rules
 
-## Overview
+## The real tree
 
-The analysis system lives in the `analyses/` package:
+Verified against `src/polyzymd/analyses/` on 2026-09-11. Every file named here
+exists. If you add or delete a module, update this list in the same commit.
 
 ```
 src/polyzymd/analyses/
-├── base.py                 # Public facade: Analysis, contexts, result models
-├── _framework/             # Internal lifecycle, I/O, context, and comparison helpers
-├── discovery.py            # pkgutil-based auto-discovery
-├── orchestrator.py         # Framework engine: compute → aggregate → compare → plot
-├── stats.py                # default_scalar_comparison(), format_scalar_comparison()
-├── shared/                 # Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
-├── rmsf/                   # RMSF plugin sub-package
-│   ├── __init__.py         #   RMSFAnalysis plugin class
-│   ├── _plotters.py        #   Plotting functions (extracted from __init__.py)
-│   ├── _results.py         #   Result models
-│   └── _comparison_results.py  # Comparison result model
-├── distances/              # Distances plugin sub-package
-│   ├── __init__.py         #   DistancesAnalysis + DistanceCalculator
-│   └── _plotters.py        #   Plotting functions
-├── catalytic_triad/        # Catalytic triad plugin sub-package (default-compare lifecycle)
-│   ├── __init__.py         #   CatalyticTriadAnalysis plugin class
-│   ├── _plotters.py        #   Plotting functions (KDE panels, threshold bars)
-│   └── _results.py         #   Result models
-├── secondary_structure/    # Secondary structure plugin sub-package
-│   ├── __init__.py         #   SecondaryStructureAnalysis plugin class
-│   └── _plotters.py        #   Plotting functions
-├── contacts/               # Contacts plugin sub-package
-│   ├── __init__.py         #   Public ContactsAnalysis facade
-│   ├── _cache.py           #   Internal cache helpers
-│   ├── _lifecycle.py       #   Internal lifecycle helpers
-│   ├── _filters.py         #   Internal condition filtering
-│   ├── _comparison.py      #   Internal custom comparison implementation
-│   ├── _plotting.py        #   Internal plot lifecycle orchestration
-│   ├── _plotters.py        #   Internal plotting functions
-│   ├── _results.py         #   Internal result models
-│   ├── _comparison_results.py  # Internal comparison result model
-│   ├── _aggregator.py      #   Internal aggregation logic
-│   ├── _formatters.py      #   Internal CLI formatting
-│   ├── _identity.py        #   Internal settings fingerprints
-│   ├── _mda.py             #   Internal MDAnalysis job helpers
-│   └── _paths.py           #   Internal result path helpers
+├── base.py              # Public import surface for plugin authors
+├── discovery.py         # pkgutil auto-discovery of plugins
+├── orchestrator.py      # Engine: compute, aggregate, compare, plot
+├── stats.py             # default_scalar_comparison, format_scalar_comparison
+├── exceptions.py        # Typed analysis errors
+├── _framework/          # aggregate_validation, cache_identity, compare,
+│                        # comparison_models, contexts, contract, io,
+│                        # lifecycle, results_base
+├── mda/                 # aggregation, artifacts, base, comparison,
+│                        # frame_selection, job, lifecycle, pair_distance,
+│                        # plugin, store, universe
+├── shared/              # aa_classification, alignment, autocorrelation,
+│                        # centroid, convergence, diagnostics,
+│                        # inferential_statistics, loader, multi_run_comparison,
+│                        # multi_run_formatting, paths, plotting, selections,
+│                        # statistics, window, groupings/, selectors/
+├── catalytic_triad/     # __init__, _mda, _plot_settings, _plotters
+├── contacts/            # __init__, _aggregator, _comparison,
+│                        # _comparison_results, _events, _filters, _formatters,
+│                        # _identity, _lifecycle, _mda, _plot_settings, _plotters
+├── distances/           # __init__, _comparison_results, _formatters, _mda,
+│                        # _plot_settings, _plotters
+├── hydrogen_bonds/      # __init__, _mda, _models, _plotters
+├── rg/                  # __init__, _comparison_results, _formatters, _mda,
+│                        # _plot_settings, _plotters
+├── rmsd/                # __init__, _comparison_results, _formatters, _mda,
+│                        # _plot_settings, _plotters
+├── rmsf/                # __init__, _mda, _plot_settings, _plotters
+├── sasa/                # __init__, _artifacts, _comparison_results,
+│                        # _formatters, _mda, _plot_settings, _plotters
+└── secondary_structure/ # __init__, _mda, _plot_settings, _plotters
 ```
 
-`polyzymd.analyses.base` is the supported public import surface. It re-exports
-`Analysis`, lifecycle contexts, metric descriptors, and comparison models from
-private framework modules. Contributors should import from
-`polyzymd.analyses.base` and should not import private `_framework/` modules directly.
+There is no `_results.py`, `_cache.py`, `_paths.py` or `_plotting.py` in any
+plugin package. Result models live in `_models.py` (hydrogen bonds), in
+`_comparison_results.py`, or in the plugin `__init__.py`. Cache and path
+handling belong to the framework artifact layer, not to plugins.
 
-Plugins may be simple single-file modules or packages. Established and advanced
-plugins usually extract plotting into `_plotters.py` and MDAnalysis helpers into
-`_mda.py`, while the scaffold may generate a compact single-file plugin.
-Contacts is larger, so `ContactsAnalysis` stays public in `contacts/__init__.py`
-while artifact, filtering, comparison, plotting, result, and MDAnalysis helpers
-live in private `contacts/_*.py` modules. These modules are implementation
-details, not contributor API. Public contributor plugins use the MDAnalysis job
-lifecycle: `MDAAnalysisJob` plus collectors producing `ReplicateArtifact`.
+## Loading trajectories
 
-### How to Add a New Analysis
+`polyzymd.analyses.shared.loader.TrajectoryLoader` is the canonical universe
+loader. It resolves topology and trajectory files for a replicate, checks
+segment lineage, and builds the MDAnalysis universe.
 
-1. Run `polyzymd new-analysis <name>` to scaffold a plugin and tests, OR
-   create a module/package under `src/polyzymd/analyses/` manually
-2. Define a `Settings` class (Pydantic v2 `BaseModel`)
-3. Subclass `Analysis` and choose the lifecycle mode for your plugin
-4. When `has_compute_stage=True`, implement `build_mda_jobs()` and, when
-   needed, `build_mda_collector()` for the MDAnalysis job path. Advanced
-   packages should put `AnalysisBase`-compatible helpers in `_mda.py`.
-5. If the plugin is compare-only, set `has_compute_stage=False`
-6. Implement `aggregate()` only when `has_aggregate_stage=True`
-7. Done — framework discovers it via `pkgutil` (no registries, no imports)
+`polyzymd.analyses.mda.universe.UniverseProvider` wraps `TrajectoryLoader`. It
+takes a `SimulationConfig`, instantiates the loader lazily, and adds input
+provenance (`UniverseProvenance`) to each load. Plugins and framework code use
+`UniverseProvider`. Nothing else should build a `Universe` directly, and no
+plugin should construct file paths by hand.
 
-### Required Class Variables
+## Public import surface
 
-```python
-class MyAnalysis(Analysis):
-    name: ClassVar[str] = "my_analysis"       # Used in CLI and config
-    Settings: ClassVar[type] = MySettings      # Or as inner class
-```
+Import from `polyzymd.analyses.base`. It re-exports `Analysis`, the four
+lifecycle contexts, `MetricValue`, the comparison models, `PluginContractError`
+and `SlurmResourceHint`. Do not import `_framework/` modules from a plugin.
 
-### Lifecycle Hooks
+## Adding a plugin
 
-Required hooks depend on the plugin mode:
+1. Run `polyzymd new-analysis <name>` to scaffold the package and its tests, or
+   write the package by hand under `src/polyzymd/analyses/`.
+2. Define a `Settings` class as a Pydantic v2 `BaseModel`.
+3. Subclass `Analysis` and set `name` and `Settings` as `ClassVar`s.
+4. With `has_compute_stage=True`, implement `build_mda_jobs()` and, when the
+   plugin needs one, `build_mda_collector()`. Put `AnalysisBase` subclasses in
+   `_mda.py`.
+5. Set `has_compute_stage=False` for a compare-only plugin. Setting
+   `has_aggregate_stage=True` with `has_compute_stage=False` raises
+   `PluginContractError`.
+6. Implement `aggregate()` only when `has_aggregate_stage=True`.
+7. Discovery is automatic through `pkgutil`. There is no registry to edit.
 
-| Hook | When Used | Signature / Notes |
-|------|-----------|-------------------|
-| `build_mda_jobs()` + `build_mda_collector()` | Public compute-stage plugins with `has_compute_stage=True` | MDAnalysis owns per-trajectory iteration; collectors map completed jobs to `ReplicateArtifact`; PolyzyMD owns `ArtifactStore`, `ConditionArtifact`, `ComparisonArtifact`, statistics, and plotting |
-| `aggregate()` | Only when `has_aggregate_stage=True` | `(ctx: AggregateContext, results: Sequence[Any]) -> Any` |
+## Lifecycle hooks and contexts
 
-Compare-only or no-compute plugins set `has_compute_stage=False` and skip the
-MDAnalysis job compute path.
+| Hook | When | Context | Returns |
+|------|------|---------|---------|
+| `build_mda_jobs()` plus `build_mda_collector()` | `has_compute_stage=True` | `ReplicateContext` | `ReplicateArtifact` through the collector |
+| `aggregate()` | `has_aggregate_stage=True` | `AggregateContext` | Pydantic model or dict |
+| `compare()` | Once per analysis | `ComparisonContext` | Pydantic model, or `None` |
+| `plot()` | Once per analysis | `PlotContext` | `list[Path]` |
+| `extract_metrics()` | Default compare path | `ComparisonContext` | `dict[str, MetricValue]` |
+| `filter_conditions()` | Optional | conditions | filtered conditions |
+| `format()` | Optional | comparison result | CLI text |
 
-### Optional Overrides
+Contexts carry what a plugin needs. Never load a config inside a plugin.
+`PlotContext.plot_settings` is always a valid `PlotSettings`, so do not guard
+against `None`. A hook that returns a type outside the contract raises
+`PluginContractError`.
 
-| Method | Default Behavior | Override When |
-|--------|-----------------|---------------|
-| `extract_metrics()` | Returns `{}` | Using default `compare()` — return `dict[str, MetricValue]` for automatic t-tests/ANOVA |
-| `compare()` | Calls `extract_metrics()` + `default_scalar_comparison()` | Multi-metric or entry-table comparisons (e.g. contacts, distances) |
-| `filter_conditions()` | Keeps all conditions | Excluding conditions (e.g. no-polymer for contacts) |
-| `plot()` | Returns `[]` (no plots) | Custom matplotlib visualizations |
-| `format()` | JSON dump or legacy formatter | Custom CLI output formatting |
+## Two comparison paths
 
-### Extracting Plotting to `_plotters.py`
+The simple path implements `extract_metrics()` and lets `stats.py` run the
+t-tests, the ANOVA, the Benjamini-Hochberg correction and the ranking. The
+custom path overrides `compare()` and returns its own saveable model. rmsf,
+catalytic_triad and secondary_structure take the simple path. rmsd, rg, sasa,
+distances, contacts and hydrogen_bonds take the custom path.
 
-Established plugins separate plotting functions into a `_plotters.py` module
-within the plugin package. This keeps `__init__.py` focused on the lifecycle
-methods for the chosen plugin mode while plotting functions live in a dedicated
-file.
+## Results and plotting
 
-**Current state** (all 5 established plugins have `_plotters.py`):
-- `rmsf/_plotters.py` — 8 plotting functions
-- `secondary_structure/_plotters.py` — 7 plotting functions + 3 constants
-- `distances/_plotters.py` — 10 plotting functions
-- `contacts/_plotters.py` — 18 functions (8 data loaders + 10 plotters)
-- `catalytic_triad/_plotters.py` — 7 functions (KDE panels, threshold bars, 2D KDE)
+Persist replicate, condition and comparison artifacts through `ArtifactStore`.
+Large arrays and event tables go in validated sidecars that the artifact
+payload refers to. Do not invent a plugin-specific cache filename scheme.
 
-**Pattern:** The plugin's `plot()` method calls functions from `_plotters.py`:
+`plot()` reads cached artifacts and sidecars. It must not reload a trajectory
+or rerun an analysis.
 
-```python
-# In __init__.py
-from ._plotters import plot_comparison_bars, plot_per_residue
+## Statistical contract
 
-def plot(self, ctx: PlotContext) -> list[Path]:
-    data, labels = self._build_plot_data(ctx)
-    paths = []
-    paths.append(plot_comparison_bars(data, labels, ctx.output_dir, ctx.plot_settings))
-    paths.append(plot_per_residue(data, labels, ctx.output_dir, ctx.plot_settings))
-    return [p for p in paths if p is not None]
-```
-
-**New plugins** should start with plotting inline in `plot()` and extract to
-`_plotters.py` when the module exceeds ~500 lines or has 3+ plot functions.
-
-### Two Comparison Paths
-
-**Simple path** (rmsf, catalytic_triad, secondary_structure):
-- Implement `extract_metrics()` to return `dict[str, MetricValue]`
-- Set `AggregatedResultClass` if using Pydantic models (dict plugins work
-  automatically via `json.loads()`)
-- Framework handles loading, t-tests, ANOVA, ranking, and formatting automatically
-
-**Custom path** (contacts, distances):
-- Override `compare()` entirely — return your own Pydantic model with `.save()`
-- The returned model must be saveable/loadable
-
-### Context Objects
-
-Plugins receive framework-provided context objects — never load configs yourself:
-
-| Context | Passed To | Key Attributes |
-|---------|-----------|----------------|
-| `ReplicateContext` | lower-level lifecycle context access | `.sim_config`, `.settings`, `.output_dir`, `.replicate`, `.recompute`, `.result_path` |
-| `AggregateContext` | `aggregate()` | `.condition`, `.replicates`, `.output_dir`, `.settings`, `.result_path` |
-| `ComparisonContext` | `compare()` | `.conditions`, `.analysis_dirs`, `.results_dir`, `.effective_control`, `.settings` |
-| `PlotContext` | `plot()` | `.conditions`, `.analysis_dirs`, `.output_dir`, `.settings`, `.plot_settings` |
-
-### Result Saving
-
-Trajectory-native plugins should persist canonical replicate, condition, and
-comparison artifacts through `ArtifactStore`. Do not add plugin-specific cache
-filename schemes; place large arrays or event tables in validated sidecars and
-refer to them from artifact payload/provenance.
-
-### Return Types: Pydantic Models vs Dicts
-
-Lifecycle hooks must return a Pydantic `BaseModel` instance, a canonical
-artifact, or a plain `dict` (`aggregate()` when used). `compare()` may also
-return `None` when no comparison result is produced. Invalid return types are
-enforced as plugin contract failures and raise `PluginContractError`.
-
-### Result Deserialization
-
-The default `compare()` path calls `_load_aggregated_result()` →
-`_deserialize_result()` to load aggregated results from disk. The base
-implementation handles both paths automatically:
-
-- If `AggregatedResultClass` is set: uses `.load(path)` or `.model_validate_json()`
-- Otherwise: uses `json.loads()` for plain-dict results
-
-You only need to override `_deserialize_result()` for non-standard
-deserialization (e.g. NPZ sidecars, custom migrations).
-
-### PlotContext.plot_settings Guarantee
-
-The orchestrator guarantees that `PlotContext.plot_settings` is always a valid
-`PlotSettings` instance — never `None`. Plugins should NOT guard against `None`:
-
-```python
-# CORRECT — trust the guarantee
-def plot(self, ctx: PlotContext) -> list[Path]:
-    theme = get_theme(ctx.plot_settings)
-
-# WRONG — unnecessary guard (removed from all plugins)
-def plot(self, ctx: PlotContext) -> list[Path]:
-    if ctx.plot_settings is None:
-        ...
-```
-
-### Loading Results in `plot()`
-
-Plots must read cached artifacts and sidecars only; they must not reload
-trajectories or rerun analyses. Use framework helpers to collect per-condition
-artifact paths, then load `ConditionArtifact` data through the artifact layer:
-
-```python
-data, labels = self._build_plot_data(ctx)
-for label in labels:
-    if label not in data or label == "__meta__":
-        continue
-    agg_dir = data[label]["aggregated_dir"]
-    summary = self._load_aggregated_result(agg_dir)
-    if summary is not None:
-        # ... plot data ...
-```
-
-## MetricType System (Autocorrelation Handling)
-
-This section is a planned future enhancement and is not implemented in the
-current codebase.
-
-Based on LiveCoMS best practices (Grossfield et al., 2018), metrics may be
-classified by how they should handle autocorrelated MD data.
-
-Planned (not yet implemented):
-
-| MetricType | Frame Strategy | Uncertainty Strategy | Examples |
-|------------|---------------|---------------------|----------|
-| **MEAN_BASED** | Use ALL frames | Correct SEM with N_eff = N/g | Contact fraction, triad proximity |
-| **VARIANCE_BASED** | Subsample by 2τ | Standard formula on independent samples | RMSF, fluctuation metrics |
-
-## Key Classes
-
-- **`Analysis`** — Plugin ABC (in `analyses/base.py`)
-- **`ParallelContactAnalyzer`** — Polymer-protein contacts (in `contacts/`)
-- **`DistanceCalculator`** — Inter-group distance tracking (in `distances/__init__.py`)
-- **`MolecularSelector`** — Strategy for atom group selection
-- **`ContactCriteria`** — Strategy for contact definitions
-- **`MetricType`** — Planned autocorrelation handling strategy (future)
-
-### Caching
-
-Analysis results are cached to avoid recomputation. The cache uses file hashes
-to detect changes. **Known issue:** the hash mismatch warning currently prints
-66+ times instead of once (see known-issues.md).
-
-## Existing Plugins
-
-| Plugin | Default compare? | Primary metric |
-|--------|-----------------|----------------|
-| `rmsf` | Yes | `mean_rmsf` (lower = more stable) |
-| `catalytic_triad` | Yes | `mean_triad_proximity` (lower = closer) |
-| `secondary_structure` | Yes | `helix_fraction` (higher = more structured) |
-| `rmsd` | No (custom) | Per-run mean RMSD (lower = more stable) |
-| `rg` | No (custom) | Per-run mean Rg (lower = more compact) |
-| `sasa` | No (custom) | Solvent-accessible surface area metrics |
-| `distances` | No (custom) | Multiple distance metrics |
-| `contacts` | No (custom) | Coverage + contact fraction |
-| `hydrogen_bonds` | No (custom) | H-bond occupancy + lifetime |
-
-## Issue #20 — Remaining TODOs
-
-GitHub Issue #20 tracks the analysis module roadmap. The plugin system
-(Phases 1-5) is complete. Remaining items:
-
-1. Fix cache hash mismatch warning (prints 66x)
-2. Resolve contact criteria cutoff disagreement (4.0A vs 4.5A)
-3. ~~Migrate legacy formatters into plugin `format()` methods~~ (DONE — Phase 7)
-4. Add test templates for new contributor plugins
+The replicate is the sampling unit for every cross-condition test and every
+condition-level uncertainty. Equilibration is one global value applied
+uniformly, and no diagnostic is allowed to select data. Every metric carries a
+unit and a stated uncertainty. Invoke the `livecoms-check` skill in
+`.claude/skills/` before committing analysis code, and follow
+`docs/planning/analyses_refactor.md` for the order of the outstanding work.
