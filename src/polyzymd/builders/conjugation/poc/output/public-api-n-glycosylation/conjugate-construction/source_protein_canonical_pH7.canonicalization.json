@@ -1,0 +1,13 @@
+{
+  "input_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/5fyj-monomer-protein-only.pdb",
+  "output_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/conjugate-construction/source_protein_canonical_pH7.pdb",
+  "ph": 7.0,
+  "force_field_name": "amber14/protein.ff14SB.xml",
+  "atom_count": 9931,
+  "hydrogen_count": 4940,
+  "diagnostics": [
+    "Source protein hydrogens were removed and regenerated with OpenMM Modeller",
+    "Hydrogen canonicalization pH: 7",
+    "OpenMM hydrogen force field: amber14/protein.ff14SB.xml"
+  ]
+}

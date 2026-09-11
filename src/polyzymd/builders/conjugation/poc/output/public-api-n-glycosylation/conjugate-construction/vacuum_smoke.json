@@ -1,0 +1,19 @@
+{
+  "success": true,
+  "output_dir": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/conjugate-construction",
+  "smoke_json_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/conjugate-construction/vacuum_smoke.json",
+  "minimized_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/conjugate-construction/assembled_minimized.pdb",
+  "equilibrated_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/conjugate-construction/assembled_equilibrated.pdb",
+  "platform_name": "CPU",
+  "restrained_atom_count": 4991,
+  "energy_before_min_kj_mol": 1373952303950.7573,
+  "energy_after_min_kj_mol": 59214.61990979166,
+  "energy_before_nvt_kj_mol": 54257.82195833438,
+  "energy_after_nvt_kj_mol": 55332.576357689715,
+  "nvt_steps": 10,
+  "diagnostics": [
+    "Restrained vacuum OpenMM smoke completed with finite state values",
+    "Maximum minimized coordinate span was 11.293 nm",
+    "Maximum equilibrated coordinate span was 11.293 nm"
+  ]
+}

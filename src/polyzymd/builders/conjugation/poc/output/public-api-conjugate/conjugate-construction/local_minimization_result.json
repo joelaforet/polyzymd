@@ -1,0 +1,44 @@
+{
+  "success": true,
+  "input_pdb": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/assembled_crosslinked.pdb",
+  "output_dir": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction",
+  "result_json_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/local_minimization_result.json",
+  "relaxed_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-conjugate/conjugate-construction/seeded_random_10mer_crosslinked_relaxed.pdb",
+  "before_geometry": {
+    "nz_c047_distance_angstrom": 1.3299936090072015,
+    "c047_o020_distance_angstrom": 1.2251057097246754,
+    "nz_o020_distance_angstrom": 0.6216132237975647,
+    "nz_c047_o020_angle_degrees": 27.77276904509076,
+    "reciprocal_nz_c047_conect": true,
+    "nz_o020_conect_present": false,
+    "passes": false,
+    "failures": [
+      "NZ-O020 distance 0.622 A below hard 1.8 A minimum",
+      "NZ-C047-O020 angle 27.77 deg outside 105-135 deg"
+    ]
+  },
+  "after_geometry": {
+    "nz_c047_distance_angstrom": 1.4864053955768588,
+    "c047_o020_distance_angstrom": 1.224649337565656,
+    "nz_o020_distance_angstrom": 2.199946590260772,
+    "nz_c047_o020_angle_degrees": 108.09227824366019,
+    "reciprocal_nz_c047_conect": true,
+    "nz_o020_conect_present": false,
+    "passes": true,
+    "failures": []
+  },
+  "platform_name": "CPU",
+  "mobile_atom_count": 93,
+  "restrained_atom_count": 2714,
+  "energy_before_min_kj_mol": 2590636520.7433095,
+  "energy_after_min_kj_mol": 14329.76924539134,
+  "max_restrained_protein_displacement_angstrom": 0.020841652075266306,
+  "mean_restrained_protein_displacement_angstrom": 0.004063093927104002,
+  "blocker": null,
+  "blocker_traceback": null,
+  "diagnostics": [
+    "OpenMM/OpenFF/Pablo local minimization completed without RDKit/UFF fallback",
+    "Maximum restrained protein displacement was 0.0208 A",
+    "Relaxed geometry passed local amide validation"
+  ]
+}

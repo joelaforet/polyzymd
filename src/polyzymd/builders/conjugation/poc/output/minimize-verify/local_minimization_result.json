@@ -1,0 +1,36 @@
+{
+  "success": false,
+  "input_pdb": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/minimize-verify/seeded_random_10mer_crosslinked.pdb",
+  "output_dir": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/minimize-verify",
+  "result_json_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/minimize-verify/local_minimization_result.json",
+  "relaxed_pdb_path": null,
+  "before_geometry": {
+    "nz_c047_distance_angstrom": 1.3295427785520861,
+    "c047_o020_distance_angstrom": 1.2261639368371589,
+    "nz_o020_distance_angstrom": 0.9922247729219424,
+    "nz_c047_o020_angle_degrees": 45.466606481367464,
+    "reciprocal_nz_c047_conect": true,
+    "nz_o020_conect_present": false,
+    "passes": false,
+    "failures": [
+      "NZ-O020 distance 0.992 A below hard 1.8 A minimum",
+      "NZ-C047-O020 angle 45.47 deg outside 105-135 deg"
+    ]
+  },
+  "after_geometry": null,
+  "platform_name": null,
+  "mobile_atom_count": 0,
+  "restrained_atom_count": 0,
+  "energy_before_min_kj_mol": null,
+  "energy_after_min_kj_mol": null,
+  "max_restrained_protein_displacement_angstrom": null,
+  "mean_restrained_protein_displacement_angstrom": null,
+  "blocker": "OpenMM/OpenFF/Pablo local minimization could not be completed. OpenMMException: Error loading CUDA module: CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222)",
+  "blocker_traceback": "Traceback (most recent call last):\n  File \"/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/local_minimization.py\", line 287, in run_post_crosslink_local_minimization\n    simulation = openmm_app.Simulation(topology, system, integrator, platform)\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/joelaforet/Shirts-Lab-Linux/polyzymd/.pixi/envs/build/lib/python3.12/site-packages/openmm/app/simulation.py\", line 103, in __init__\n    self.context = mm.Context(self.system, self.integrator, platform)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/joelaforet/Shirts-Lab-Linux/polyzymd/.pixi/envs/build/lib/python3.12/site-packages/openmm/openmm.py\", line 6051, in __init__\n    _openmm.Context_swiginit(self, _openmm.new_Context(*args))\n                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^\nopenmm.OpenMMException: Error loading CUDA module: CUDA_ERROR_UNSUPPORTED_PTX_VERSION (222)\n",
+  "diagnostics": [
+    "No RDKit/UFF fallback was attempted; minimization requires the OpenMM/OpenFF/Pablo route.",
+    "The input PDB metadata and CONECT records were preserved; only geometry was measured.",
+    "Product-state Pablo crosslinks use empty leaving atom groups only when no custom product library is supplied.",
+    "Pablo crosslink policy enabled: True"
+  ]
+}

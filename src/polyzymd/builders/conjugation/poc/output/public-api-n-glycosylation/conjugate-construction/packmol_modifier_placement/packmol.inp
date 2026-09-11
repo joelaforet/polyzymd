@@ -1,0 +1,20 @@
+tolerance 2.000000
+filetype pdb
+output packmol_output.pdb
+
+movebadrandom
+
+nloop 500
+
+structure /home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/conjugate-construction/packmol_modifier_placement/protein_fixed_sterics.pdb
+  number 1
+  fixed 0. 0. 0. 0. 0. 0.
+end structure
+
+structure /home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/conjugate-construction/placement_01/packmol_modifier_placement/modifier_retained.pdb
+  number 1
+  inside box 0. 0. 0. 131.927617 107.891000 150.875000
+  atoms 14
+  inside sphere 58.631617 35.399000 32.989000 5.0
+  end atoms
+end structure

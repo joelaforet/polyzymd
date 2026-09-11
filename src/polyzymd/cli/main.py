@@ -2742,21 +2742,149 @@ def cancel(
 @click.option(
     "-c",
     "--config",
-    required=True,
+    "configs",
+    multiple=True,
     type=click.Path(exists=True),
-    help="Path to YAML configuration file",
+    help="Path to a YAML configuration file (repeatable)",
 )
-def status(config: str) -> None:
-    """Show progress overview for all replicates.
+@click.option(
+    "--all",
+    "all_roots",
+    multiple=True,
+    type=click.Path(exists=True),
+    help="Directory to search (3 levels deep) for config.yaml files (repeatable)",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "agent", "json"]),
+    default="table",
+    show_default=True,
+    help="table: progress bars (one config). agent: one compact line per replicate with "
+    "SLURM state, throughput, ETA and the last error of dead chains. json: same data.",
+)
+@click.option(
+    "--no-slurm",
+    is_flag=True,
+    help="Skip the squeue query (verdicts then rely on progress.json only)",
+)
+@click.option(
+    "--preset",
+    "preset_hint",
+    default=None,
+    help="Preset name to print in the resubmit hint for dead chains (agent format)",
+)
+def status(
+    configs: tuple[str, ...],
+    all_roots: tuple[str, ...],
+    output_format: str,
+    no_slurm: bool,
+    preset_hint: str | None,
+) -> None:
+    """Show progress and job state for all replicates.
 
-    Auto-detects replicate directories and displays a compact progress
-    summary with colored bars, completion percentage, ns progress, and
-    simulation status for each replicate.
+    The default ``table`` format prints a colored progress bar per replicate
+    for a single config. The ``agent`` format is built for scripted or LLM
+    consumers: it accepts many configs, makes one ``squeue`` call, and prints
+    one line per replicate with a fixed verdict vocabulary (COMPLETED,
+    RUNNING, QUEUED, DEAD, NOT_STARTED, NOT_FOUND), the live SLURM job,
+    throughput in ns/day, an ETA, and for DEAD chains the last FATAL line of
+    the newest SLURM log plus a ready-to-run ``polyzymd submit`` command.
 
     \b
-    Example:
+    Examples:
         polyzymd status -c config.yaml
+        polyzymd status --format agent -c a/config.yaml -c b/config.yaml
+        polyzymd status --format agent --all /projects/me/sims --preset blanca-shirts
     """
+    config_paths = list(configs)
+    if all_roots:
+        from polyzymd.cli.status_report import discover_config_files
+
+        config_paths.extend(str(p) for p in discover_config_files(all_roots))
+    # de-duplicate, preserving order
+    seen: set[str] = set()
+    config_paths = [p for p in config_paths if not (p in seen or seen.add(p))]
+    if not config_paths:
+        raise click.UsageError("Provide at least one -c/--config or --all directory.")
+
+    if output_format != "table":
+        _status_report(config_paths, output_format, no_slurm=no_slurm, preset_hint=preset_hint)
+        return
+    if len(config_paths) > 1:
+        raise click.UsageError(
+            "--format table shows one config at a time; use --format agent or json for several."
+        )
+    _status_table(config_paths[0])
+
+
+def _status_report(
+    config_paths: list[str], output_format: str, *, no_slurm: bool, preset_hint: str | None
+) -> None:
+    """Multi-config, SLURM-aware status (``--format agent|json``)."""
+    from datetime import datetime, timezone
+
+    from polyzymd.cli.status_report import (
+        SystemReport,
+        build_system_report,
+        jobs_by_name,
+        query_user_jobs,
+        render_agent,
+        render_json,
+    )
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.engines import create_engine
+    from polyzymd.simulation.progress import save_progress
+
+    warn_if_wrong_pixi_env("status", "build", accepted=KNOWN_SPLIT_PIXI_ENVS)
+    logging.getLogger("polyzymd.simulation.progress").setLevel(logging.ERROR)
+
+    now = datetime.now(timezone.utc)
+    jobs = None if no_slurm else query_user_jobs()
+    slurm_available = jobs is not None
+    jobs_index = jobs_by_name(jobs) if jobs is not None else None
+
+    reports: list[SystemReport] = []
+    for config_path in config_paths:
+        try:
+            sim_config = SimulationConfig.from_yaml(config_path)
+        except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
+            reports.append(
+                SystemReport(
+                    name=Path(config_path).parent.name,
+                    config_path=config_path,
+                    scratch_directory="",
+                    replicates=[],
+                    error=f"failed to load config: {e}",
+                )
+            )
+            continue
+        engine_name = _resolve_engine_name(sim_config, override=None)
+        engine_inst = create_engine(sim_config, override=engine_name, defer_binary=True)
+        reports.append(
+            build_system_report(
+                sim_config,
+                config_path,
+                engine_inst=engine_inst,
+                jobs_index=jobs_index,
+                now=now,
+                save_progress_fn=save_progress,
+            )
+        )
+
+    if output_format == "json":
+        click.echo(render_json(reports, now=now, slurm_available=slurm_available), nl=False)
+    else:
+        click.echo(
+            render_agent(
+                reports, now=now, slurm_available=slurm_available, preset_hint=preset_hint
+            ),
+            nl=False,
+        )
+
+
+def _status_table(config: str) -> None:
+    """Single-config progress-bar view (``--format table``, the default)."""
     from polyzymd.cli.colors import render_progress_bar
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.engines import create_engine

@@ -1,0 +1,20 @@
+tolerance 2.000000
+filetype pdb
+output packmol_output.pdb
+
+movebadrandom
+
+nloop 500
+
+structure /home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/minimize-verify/packmol_modifier_placement/protein_fixed_sterics.pdb
+  number 1
+  fixed 0. 0. 0. 0. 0. 0.
+end structure
+
+structure /home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/minimize-verify/packmol_modifier_placement/modifier_retained.pdb
+  number 1
+  inside box 0. 0. 0. 76.379000 78.468000 78.815000
+  atoms 163
+  inside sphere 37.028000 40.180000 32.494000 5.0
+  end atoms
+end structure

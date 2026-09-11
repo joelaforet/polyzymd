@@ -1,0 +1,44 @@
+{
+  "success": true,
+  "input_pdb": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/minimize-cpu-verify/seeded_random_10mer_crosslinked.pdb",
+  "output_dir": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/minimize-cpu-verify",
+  "result_json_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/minimize-cpu-verify/local_minimization_result.json",
+  "relaxed_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/minimize-cpu-verify/seeded_random_10mer_crosslinked_relaxed.pdb",
+  "before_geometry": {
+    "nz_c047_distance_angstrom": 1.3302439625873141,
+    "c047_o020_distance_angstrom": 1.2257556852815332,
+    "nz_o020_distance_angstrom": 0.9786051297637867,
+    "nz_c047_o020_angle_degrees": 44.79074738325146,
+    "reciprocal_nz_c047_conect": true,
+    "nz_o020_conect_present": false,
+    "passes": false,
+    "failures": [
+      "NZ-O020 distance 0.979 A below hard 1.8 A minimum",
+      "NZ-C047-O020 angle 44.79 deg outside 105-135 deg"
+    ]
+  },
+  "after_geometry": {
+    "nz_c047_distance_angstrom": 1.4952621843676774,
+    "c047_o020_distance_angstrom": 1.213394000314819,
+    "nz_o020_distance_angstrom": 2.2551722772329383,
+    "nz_c047_o020_angle_degrees": 112.3126530288789,
+    "reciprocal_nz_c047_conect": true,
+    "nz_o020_conect_present": false,
+    "passes": true,
+    "failures": []
+  },
+  "platform_name": "CPU",
+  "mobile_atom_count": 93,
+  "restrained_atom_count": 2714,
+  "energy_before_min_kj_mol": 654698376.76621,
+  "energy_after_min_kj_mol": 16144.196105013738,
+  "max_restrained_protein_displacement_angstrom": 0.024923279936904165,
+  "mean_restrained_protein_displacement_angstrom": 0.004095595456500561,
+  "blocker": null,
+  "blocker_traceback": null,
+  "diagnostics": [
+    "OpenMM/OpenFF/Pablo local minimization completed without fallback",
+    "Maximum restrained protein displacement was 0.0249 A",
+    "Relaxed geometry passed local amide validation"
+  ]
+}

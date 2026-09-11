@@ -1,0 +1,51 @@
+{
+  "success": false,
+  "input_pdb": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/conjugate-construction/assembled_crosslinked.pdb",
+  "output_dir": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/conjugate-construction",
+  "result_json_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/conjugate-construction/local_minimization_result.json",
+  "relaxed_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/conjugate-construction/seeded_random_10mer_crosslinked_relaxed.pdb",
+  "before_geometry": {
+    "nz_c047_distance_angstrom": 1.4497944681919566,
+    "c047_o020_distance_angstrom": 1.4275955309540558,
+    "nz_o020_distance_angstrom": 1.486783440854786,
+    "nz_c047_o020_angle_degrees": 62.218331174321825,
+    "reciprocal_nz_c047_conect": true,
+    "nz_o020_conect_present": false,
+    "passes": false,
+    "failures": [
+      "C047-O020 distance 1.428 A outside 1.15-1.35 A",
+      "NZ-O020 distance 1.487 A below hard 1.8 A minimum",
+      "NZ-C047-O020 angle 62.22 deg outside 105-135 deg"
+    ]
+  },
+  "after_geometry": {
+    "nz_c047_distance_angstrom": 29.69901245832932,
+    "c047_o020_distance_angstrom": 1.0938706504884421,
+    "nz_o020_distance_angstrom": 28.71645113867659,
+    "nz_c047_o020_angle_degrees": 25.604323566546412,
+    "reciprocal_nz_c047_conect": true,
+    "nz_o020_conect_present": false,
+    "passes": false,
+    "failures": [
+      "NZ-C047 distance 29.699 A outside 1.25-1.65 A",
+      "C047-O020 distance 1.094 A outside 1.15-1.35 A",
+      "NZ-C047-O020 angle 25.60 deg outside 105-135 deg"
+    ]
+  },
+  "platform_name": "CPU",
+  "mobile_atom_count": 30,
+  "restrained_atom_count": 9928,
+  "energy_before_min_kj_mol": 666871769.3274837,
+  "energy_after_min_kj_mol": 115618.59668778864,
+  "max_restrained_protein_displacement_angstrom": 0.7938908312318447,
+  "mean_restrained_protein_displacement_angstrom": 0.005595944450474454,
+  "blocker": null,
+  "blocker_traceback": null,
+  "diagnostics": [
+    "OpenMM/OpenFF/Pablo local minimization completed without RDKit/UFF fallback",
+    "Maximum restrained protein displacement was 0.7939 A",
+    "NZ-C047 distance 29.699 A outside 1.25-1.65 A",
+    "C047-O020 distance 1.094 A outside 1.15-1.35 A",
+    "NZ-C047-O020 angle 25.60 deg outside 105-135 deg"
+  ]
+}

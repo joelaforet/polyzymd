@@ -1,0 +1,8 @@
+HEADER 
+TITLE     Built with Packmol                                             
+REMARK   Packmol generated pdb file 
+REMARK   Home-Page: http://m3g.iqm.unicamp.br/packmol
+REMARK
+HETATM    1 C1   UNK A   1      10.000  10.000  10.000  1.00  0.00           C  
+HETATM    2 C1   UNK A   1       9.782   9.106   5.053  1.00  0.00           C  
+END

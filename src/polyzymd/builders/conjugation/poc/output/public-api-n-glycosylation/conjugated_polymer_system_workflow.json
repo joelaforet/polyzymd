@@ -1,0 +1,204 @@
+{
+  "output_dir": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation",
+  "crosslinked_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/conjugate-construction/assembled_crosslinked.pdb",
+  "relaxed_conjugate_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/conjugate-construction/assembled_equilibrated.pdb",
+  "solvated_pdb_path": "/home/joelaforet/Shirts-Lab-Linux/polyzymd/src/polyzymd/builders/conjugation/poc/output/public-api-n-glycosylation/solvated_conjugate_free_polymers.pdb",
+  "attachments": [
+    "chainF-glycan-asn625"
+  ],
+  "resolved_plans": [
+    {
+      "contract": {
+        "protein_endpoint": {
+          "participant": "protein",
+          "selector": {
+            "chain_id": "B",
+            "residue_name": "ASN",
+            "residue_number": 625,
+            "atom_name": "ND2",
+            "insertion_code": "",
+            "atom_serial": null,
+            "atom_index": null
+          },
+          "product_residue_name": "ASX",
+          "leaving_atom_selectors": [
+            {
+              "chain_id": "B",
+              "residue_name": "ASN",
+              "residue_number": 625,
+              "atom_name": "HD21",
+              "insertion_code": "",
+              "atom_serial": 1753,
+              "atom_index": 1752
+            }
+          ],
+          "leaving_atom_names": []
+        },
+        "modifier_endpoint": {
+          "participant": "modifier",
+          "selector": {
+            "chain_id": "C",
+            "residue_name": "NAG",
+            "residue_number": 1,
+            "atom_name": "C014",
+            "insertion_code": "",
+            "atom_serial": 14,
+            "atom_index": 13
+          },
+          "product_residue_name": "NAG",
+          "leaving_atom_selectors": [
+            {
+              "chain_id": "C",
+              "residue_name": "NAG",
+              "residue_number": 1,
+              "atom_name": "O015",
+              "insertion_code": "",
+              "atom_serial": 15,
+              "atom_index": 14
+            },
+            {
+              "chain_id": "C",
+              "residue_name": "NAG",
+              "residue_number": 1,
+              "atom_name": "H030",
+              "insertion_code": "",
+              "atom_serial": 30,
+              "atom_index": 29
+            }
+          ],
+          "leaving_atom_names": []
+        },
+        "bond": {
+          "protein_atom_selector": null,
+          "modifier_atom_selector": null,
+          "protein_atom_name": "ND2",
+          "modifier_atom_name": "C014",
+          "bond_order": 1,
+          "target_bond_length_angstrom": 1.45
+        },
+        "mechanism_name": "n_glycosylation"
+      },
+      "protein_link_atom": {
+        "serial": 1752,
+        "atom_index": 1751,
+        "atom_name": "ND2",
+        "residue_name": "ASN",
+        "chain_id": "B",
+        "residue_number": 625,
+        "insertion_code": "",
+        "x": 43.97,
+        "y": 9.049,
+        "z": -32.308,
+        "occupancy": 1.0,
+        "temp_factor": 0.0,
+        "element": "N",
+        "charge": "",
+        "alt_loc": "",
+        "record_name": "ATOM"
+      },
+      "modifier_link_atom": {
+        "serial": 14,
+        "atom_index": 13,
+        "atom_name": "C014",
+        "residue_name": "NAG",
+        "chain_id": "C",
+        "residue_number": 1,
+        "insertion_code": "",
+        "x": -0.1326359475581442,
+        "y": -1.3981483338672496,
+        "z": 0.06564449216559398,
+        "occupancy": 1.0,
+        "temp_factor": 0.0,
+        "element": "C",
+        "charge": "",
+        "alt_loc": "",
+        "record_name": "HETATM"
+      },
+      "protein_leaving_atoms": [
+        {
+          "serial": 1753,
+          "atom_index": 1752,
+          "atom_name": "HD21",
+          "residue_name": "ASN",
+          "chain_id": "B",
+          "residue_number": 625,
+          "insertion_code": "",
+          "x": 44.897,
+          "y": 9.373,
+          "z": -32.554,
+          "occupancy": 1.0,
+          "temp_factor": 0.0,
+          "element": "H",
+          "charge": "",
+          "alt_loc": "",
+          "record_name": "ATOM"
+        }
+      ],
+      "modifier_leaving_atoms": [
+        {
+          "serial": 15,
+          "atom_index": 14,
+          "atom_name": "O015",
+          "residue_name": "NAG",
+          "chain_id": "C",
+          "residue_number": 1,
+          "insertion_code": "",
+          "x": 0.2239426305568888,
+          "y": -2.5356605363010076,
+          "z": -0.6940483901564173,
+          "occupancy": 1.0,
+          "temp_factor": 0.0,
+          "element": "O",
+          "charge": "",
+          "alt_loc": "",
+          "record_name": "HETATM"
+        },
+        {
+          "serial": 30,
+          "atom_index": 29,
+          "atom_name": "H030",
+          "residue_name": "NAG",
+          "chain_id": "C",
+          "residue_number": 1,
+          "insertion_code": "",
+          "x": -0.32576661578204,
+          "y": -3.26043879519104,
+          "z": -0.3611688469769743,
+          "occupancy": 1.0,
+          "temp_factor": 0.0,
+          "element": "H",
+          "charge": "",
+          "alt_loc": "",
+          "record_name": "HETATM"
+        }
+      ],
+      "protein_product_residue_name": "ASX",
+      "modifier_product_residue_name": "NAG",
+      "pablo_crosslink_requirement": {
+        "residues": [
+          "ASX",
+          "NAG"
+        ],
+        "linking_atoms": [
+          "ND2",
+          "C014"
+        ],
+        "leaving_atoms": [
+          [
+            "HD21"
+          ],
+          [
+            "O015",
+            "H030"
+          ]
+        ],
+        "bond_order": 1
+      },
+      "target_bond_length_angstrom": 1.45
+    }
+  ],
+  "diagnostics": [
+    "Conjugate construction completed (1 attachment site)",
+    "Product-state local minimization was requested for mechanism 'n_glycosylation', but the NHS-Lys local selector machinery does not support this chemistry; using one combined restrained vacuum smoke/minimization for the assembled product."
+  ]
+}
