@@ -46,7 +46,7 @@ Replicate and condition artifacts record the selections that were used.
 | `provenance` | `donor_acceptor_selection_policy.acceptors_selection` | Effective `acceptors_sel` string |
 | `provenance` | `donor_acceptor_selection_policy.hydrogens_selection` | Effective `hydrogens_sel` string |
 | `provenance` | `donor_acceptor_selection_policy.elements` | Elements the donor and acceptor selections were restricted to |
-| `provenance` | `hydrogens_selection_policy.source` | `element`, `user`, or `name_fallback` |
+| `provenance` | `hydrogens_selection_policy.source` | `element` or `user` |
 | `metadata` | `donors_selection_string`, `acceptors_selection_string`, `hydrogens_selection_string` | The same strings, also written to the NPZ event sidecar |
 
 `donor_acceptor_elements` is part of the settings fingerprint, so changing it

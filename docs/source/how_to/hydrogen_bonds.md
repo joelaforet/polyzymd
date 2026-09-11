@@ -103,8 +103,12 @@ PolyzyMD prefers `(<group union>) and (element H)` for hydrogen selection. For
 GRO-like topologies with missing MDAnalysis `elements`, PolyzyMD tries to infer
 elements safely from atom types or atom names. If elements remain unavailable,
 `hydrogen_bonds` raises `SelectionError` rather than counting every atom as a
-donor and an acceptor. Use `hydrogens_selection` only for unusual
+donor and an acceptor, and it raises the same error when the donor and acceptor
+selection matches no atoms. Use `hydrogens_selection` only for unusual
 explicit-hydrogen names.
+
+Element spellings come from the topology, so a topology that writes `CL` is
+matched even though the canonical symbol is `Cl`.
 :::
 
 ### Donor and acceptor elements
@@ -211,7 +215,7 @@ overlap, the plugin raises an error by default. Set
 | `allow_empty_groups` | bool | `false` | If `false` (default), a group selection that matches no atoms raises `SelectionError` naming the group and the selection. Set `true` to warn and skip the affected summaries instead. |
 | `donor_acceptor_elements` | list of string | `["N", "O"]` | Elements allowed to act as donors and acceptors. Add `"S"` to include sulfur. |
 | `allow_overlapping_composition` | bool | `false` | If `false`, overlapping composition partitions raise an error. Set `true` to allow overlap with warnings. |
-| `hydrogens_selection` | string or null | `null` | Advanced explicit-hydrogen selection override for unusual atom names. The default uses element metadata, with GRO-safe inference/name fallback when needed. |
+| `hydrogens_selection` | string or null | `null` | Advanced explicit-hydrogen selection override for unusual atom names. The default uses element metadata, with GRO-safe element inference when needed. |
 | `timestep_ps` | float or null | `null` | Manual frame spacing in ps for time-axis plots. If null, read from trajectory metadata. |
 
 If you want composition partitions to mirror group selections, define them

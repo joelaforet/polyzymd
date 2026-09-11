@@ -317,11 +317,15 @@ Each summary entry in `summaries` has:
 For mapping-form input, keys are treated as `name` values.
 
 Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` and requires explicit
-hydrogens. PolyzyMD prefers `(<group union>) and (element H)`. For GRO-like
-topologies without MDAnalysis `elements`, PolyzyMD tries safe element inference
-from atom types or atom names; if elements remain unavailable, the plugin falls
-back to `(<group union>) and (name H* or name [123]H*)`. Set
-`hydrogens_selection` only for unusual explicit-hydrogen naming schemes.
+hydrogens and element metadata. Donors and acceptors are
+`(<group union>) and element <donor_acceptor_elements>` and hydrogens are
+`(<group union>) and (element H)`. For GRO-like topologies without MDAnalysis
+`elements`, PolyzyMD tries safe element inference from atom types or atom names;
+if elements remain unavailable the plugin raises `SelectionError` instead of
+counting every atom as a donor and an acceptor. Element spellings are taken from
+the topology, so a topology that writes `CL` is matched even though the
+canonical symbol is `Cl`. Set `hydrogens_selection` only for unusual
+explicit-hydrogen naming schemes.
 
 `composition` sub-fields:
 

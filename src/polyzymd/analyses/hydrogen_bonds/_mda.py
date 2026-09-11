@@ -4,30 +4,8 @@
 donor-acceptor distance and the D-H...A angle pass their cutoffs, so the donor
 and acceptor selections decide what counts as a hydrogen bond. PolyzyMD passes
 the group union intersected with the configured electronegative elements, which
-keeps C-H donors and carbon acceptors out of the count.
-
-References
-----------
-Arunan, E., Desiraju, G. R., Klein, R. A., Sadlej, J., Scheiner, S., Alkorta,
-    I., Clary, D. C., Crabtree, R. H., Dannenberg, J. J., Hobza, P.,
-    Kjaergaard, H. G., Legon, A. C., Mennucci, B., & Nesbitt, D. J. (2011).
-    Definition of the hydrogen bond (IUPAC Recommendations 2011). Pure and
-    Applied Chemistry, 83(8), 1637-1641. doi:10.1351/PAC-REC-10-01-02
-Smith, P., Ziolek, R. M., Gazzarrini, E., Owen, D. M., & Lorenz, C. D. (2019).
-    On the interaction of hyaluronic acid with synovial fluid lipid membranes.
-    Physical Chemistry Chemical Physics, 21(19), 9845-9857.
-    doi:10.1039/C9CP01532A
-Jeffrey, G. A., & Saenger, W. (1991). Hydrogen Bonding in Biological
-    Structures. Springer-Verlag, Berlin.
-Michaud-Agrawal, N., Denning, E. J., Woolf, T. B., & Beckstein, O. (2011).
-    MDAnalysis: a toolkit for the analysis of molecular dynamics simulations.
-    Journal of Computational Chemistry, 32(10), 2319-2327.
-    doi:10.1002/jcc.21787
-Gowers, R. J., Linke, M., Barnoud, J., Reddy, T. J. E., Melo, M. N., Seyler,
-    S. L., Domanski, J., Dotson, D. L., Buchoux, S., Kenney, I. M., &
-    Beckstein, O. (2016). MDAnalysis: a Python package for the rapid analysis
-    of molecular dynamics simulations. Proceedings of the 15th Python in
-    Science Conference, 98-105. doi:10.25080/Majora-629e541a-00e
+keeps C-H donors and carbon acceptors out of the count. See
+:mod:`polyzymd.analyses.hydrogen_bonds` for the references behind that choice.
 """
 
 from __future__ import annotations
@@ -64,7 +42,7 @@ from polyzymd.analyses.mda import (
     ReplicateArtifact,
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
-from polyzymd.analyses.shared.loader import parse_time_string
+from polyzymd.analyses.shared.loader import _canonical_element_symbol, parse_time_string
 
 if TYPE_CHECKING:
     from polyzymd.analyses.hydrogen_bonds import (
@@ -914,24 +892,47 @@ def _prepare_hydrogen_bond_plan(
                 _build_zero_summary(summary_spec, n_frames=n_frames),
             )
     else:
-        donors_selection_string = _build_donor_acceptor_selection(
+        donors_selection_string, element_warning = _build_donor_acceptor_selection(
             universe=universe,
             settings=settings,
             group_union_selection=union_sel,
         )
         acceptors_selection_string = donors_selection_string
-        (
-            hydrogens_selection_string,
-            hydrogens_selection_source,
-            hydrogens_selection_warning,
-        ) = _resolve_hydrogens_selection(
-            universe=universe,
-            settings=settings,
-            group_union_selection=union_sel,
-        )
-        if hydrogens_selection_warning is not None:
-            LOGGER.warning(hydrogens_selection_warning)
-            warnings.append(hydrogens_selection_warning)
+        if element_warning is not None:
+            LOGGER.warning(element_warning)
+            warnings.append(element_warning)
+
+        # Donors and acceptors share one selection, so one emptiness check covers both.
+        n_donor_atoms = len(universe.select_atoms(donors_selection_string, updating=False))
+        if n_donor_atoms == 0:
+            message = (
+                f"hydrogen_bonds donor and acceptor selection '{donors_selection_string}' "
+                "matched no atoms in the universe. Widen the groups, or set "
+                "hydrogen_bonds.donor_acceptor_elements to elements the selected groups "
+                "contain, or set allow_empty_groups: true to warn and skip the summaries."
+            )
+            if not settings.allow_empty_groups:
+                raise SelectionError(message)
+            LOGGER.warning(message)
+            warnings.append(message)
+            union_sel = ""
+            donors_selection_string = ""
+            acceptors_selection_string = ""
+            active_summary_specs = []
+            for summary_spec in settings.summaries:
+                summary_results_by_name.setdefault(
+                    summary_spec.name,
+                    _build_zero_summary(summary_spec, n_frames=n_frames),
+                )
+        else:
+            (
+                hydrogens_selection_string,
+                hydrogens_selection_source,
+            ) = _resolve_hydrogens_selection(
+                universe=universe,
+                settings=settings,
+                group_union_selection=union_sel,
+            )
 
     return HydrogenBondMDAPlan(
         selection_string=union_sel,
@@ -971,7 +972,9 @@ def _universe_has_element_metadata(universe: Any) -> bool:
         n_atoms = len(universe.atoms)
     except (AttributeError, TypeError):
         return False
-    return len(elements) == n_atoms
+    if len(elements) != n_atoms:
+        return False
+    return all(str(element).strip() for element in elements)
 
 
 def _resolve_hydrogens_selection(
@@ -979,7 +982,7 @@ def _resolve_hydrogens_selection(
     universe: Any,
     settings: HydrogenBondSettings,
     group_union_selection: str,
-) -> tuple[str, str, str | None]:
+) -> tuple[str, str]:
     """Resolve the hydrogen selection used by MDAnalysis H-bond detection.
 
     Parameters
@@ -993,25 +996,82 @@ def _resolve_hydrogens_selection(
 
     Returns
     -------
-    tuple[str, str, str or None]
-        Selection string, source label, and optional warning.
+    tuple[str, str]
+        Selection string and source label.
+
+    Raises
+    ------
+    SelectionError
+        Raised when no hydrogen selection override is given and the universe
+        carries no element metadata.
     """
 
     if settings.hydrogens_selection is not None:
-        return f"({group_union_selection}) and ({settings.hydrogens_selection})", "user", None
+        return f"({group_union_selection}) and ({settings.hydrogens_selection})", "user"
 
-    if _universe_has_element_metadata(universe):
-        return f"({group_union_selection}) and (element H)", "element", None
+    if not _universe_has_element_metadata(universe):
+        raise SelectionError(_missing_element_metadata_message(universe, settings))
+    return f"({group_union_selection}) and (element H)", "element"
+
+
+def _missing_element_metadata_message(universe: Any, settings: HydrogenBondSettings) -> str:
+    """Build the error text used when a universe carries no element metadata."""
 
     enrichment = getattr(universe, "_polyzymd_element_enrichment", None)
     enrichment_text = f" Element enrichment metadata: {enrichment}." if enrichment else ""
-    warning = (
-        "hydrogen_bonds could not read element metadata; falling back to hydrogen atom-name "
-        "patterns 'name H* or name [123]H*'. Explicit hydrogens are required. For unusual "
-        "hydrogen naming, set hydrogen_bonds.hydrogens_selection."
+    return (
+        "hydrogen_bonds could not read element metadata, so donors and acceptors cannot "
+        f"be restricted to {' '.join(settings.donor_acceptor_elements)}. Load a topology "
+        "that carries elements (for example a PDB written by PolyzyMD) instead of one "
+        "that only carries atom names."
         f"{enrichment_text}"
     )
-    return f"({group_union_selection}) and (name H* or name [123]H*)", "name_fallback", warning
+
+
+def _resolve_element_spellings(
+    universe: Any,
+    elements: Sequence[str],
+) -> tuple[list[str], list[str]]:
+    """Map canonical element symbols onto the spellings a universe uses.
+
+    MDAnalysis matches ``element`` selections literally, so a topology that
+    writes ``CL`` is not matched by ``element Cl``. The configured canonical
+    symbols are therefore resolved against the element strings the universe
+    actually carries.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe or compatible test double.
+    elements : Sequence[str]
+        Canonical element symbols from the settings.
+
+    Returns
+    -------
+    tuple[list[str], list[str]]
+        Spellings found in the universe, and the canonical symbols the universe
+        does not carry.
+    """
+
+    spellings_by_symbol: dict[str, list[str]] = {}
+    for raw_element in universe.atoms.elements:
+        token = str(raw_element).strip()
+        canonical = _canonical_element_symbol(token)
+        if canonical is None:
+            continue
+        found = spellings_by_symbol.setdefault(canonical, [])
+        if token not in found:
+            found.append(token)
+
+    spellings: list[str] = []
+    missing: list[str] = []
+    for symbol in elements:
+        found = spellings_by_symbol.get(symbol)
+        if not found:
+            missing.append(symbol)
+            continue
+        spellings.extend(found)
+    return spellings, missing
 
 
 def _build_donor_acceptor_selection(
@@ -1019,7 +1079,7 @@ def _build_donor_acceptor_selection(
     universe: Any,
     settings: HydrogenBondSettings,
     group_union_selection: str,
-) -> str:
+) -> tuple[str, str | None]:
     """Build the donor and acceptor selection used by MDAnalysis H-bond detection.
 
     MDAnalysis treats every atom of ``donors_sel`` that sits within the
@@ -1039,31 +1099,39 @@ def _build_donor_acceptor_selection(
 
     Returns
     -------
-    str
-        Selection string restricted to ``settings.donor_acceptor_elements``.
+    tuple[str, str or None]
+        Selection string restricted to ``settings.donor_acceptor_elements``,
+        and a warning naming the configured elements the universe does not
+        carry.
 
     Raises
     ------
     SelectionError
         Raised when the universe carries no usable element metadata, because
         widening the selection back to every atom would silently reintroduce
-        carbon donors and acceptors.
+        carbon donors and acceptors. Also raised when the universe carries none
+        of the configured elements.
     """
 
     if not _universe_has_element_metadata(universe):
-        enrichment = getattr(universe, "_polyzymd_element_enrichment", None)
-        enrichment_text = f" Element enrichment metadata: {enrichment}." if enrichment else ""
+        raise SelectionError(_missing_element_metadata_message(universe, settings))
+
+    spellings, missing = _resolve_element_spellings(universe, settings.donor_acceptor_elements)
+    if not spellings:
         raise SelectionError(
-            "hydrogen_bonds could not read element metadata, so donors and acceptors "
-            "cannot be restricted to "
-            f"{' '.join(settings.donor_acceptor_elements)}. Load a topology that carries "
-            "elements (for example a PDB written by PolyzyMD) instead of one that only "
-            "carries atom names."
-            f"{enrichment_text}"
+            "hydrogen_bonds found none of the configured donor and acceptor elements "
+            f"{' '.join(settings.donor_acceptor_elements)} in the universe. Set "
+            "hydrogen_bonds.donor_acceptor_elements to elements the topology contains."
         )
 
-    elements = " ".join(settings.donor_acceptor_elements)
-    return f"({group_union_selection}) and element {elements}"
+    warning = None
+    if missing:
+        warning = (
+            "hydrogen_bonds: the universe carries no "
+            f"{' '.join(missing)} atoms, so those donor and acceptor elements contribute "
+            "nothing to this analysis."
+        )
+    return f"({group_union_selection}) and element {' '.join(spellings)}", warning
 
 
 def _warn_on_group_overlap(resolved_groups: dict[str, Any]) -> None:

@@ -79,7 +79,7 @@ from polyzymd.analyses.mda import (
     ConditionArtifact,
     ReplicateArtifact,
 )
-from polyzymd.analyses.shared.loader import TrajectoryLoader
+from polyzymd.analyses.shared.loader import TrajectoryLoader, _canonical_element_symbol
 from polyzymd.analyses.shared.statistics import compute_sem
 
 if TYPE_CHECKING:
@@ -503,13 +503,15 @@ class HydrogenBondSettings(BaseModel):
         Returns
         -------
         tuple[str, ...]
-            Capitalized symbols with duplicates removed, in the given order.
+            Canonical element symbols with duplicates removed, in the given
+            order. The spelling used against a topology is resolved later from
+            the element strings the topology actually carries.
 
         Raises
         ------
         ValueError
-            Raised when the tuple is empty, when a symbol is not alphabetic,
-            or when hydrogen is listed.
+            Raised when the tuple is empty, when a symbol is not a known
+            element, or when hydrogen is listed.
         """
 
         if not value:
@@ -517,18 +519,18 @@ class HydrogenBondSettings(BaseModel):
 
         normalized: list[str] = []
         for symbol in value:
-            cleaned = symbol.strip().capitalize()
-            if not cleaned.isalpha() or len(cleaned) > 2:
+            canonical = _canonical_element_symbol(symbol)
+            if canonical is None:
                 raise ValueError(
-                    f"donor_acceptor_elements entry {symbol!r} is not an element symbol"
+                    f"donor_acceptor_elements entry {symbol!r} is not a known element symbol"
                 )
-            if cleaned == "H":
+            if canonical == "H":
                 raise ValueError(
                     "donor_acceptor_elements must not contain 'H'; hydrogens are selected "
                     "separately through hydrogens_selection"
                 )
-            if cleaned not in normalized:
-                normalized.append(cleaned)
+            if canonical not in normalized:
+                normalized.append(canonical)
         return tuple(normalized)
 
     @field_validator("hydrogens_selection")

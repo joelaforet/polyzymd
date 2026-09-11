@@ -97,7 +97,8 @@ class _MockAtomCollection:
         if elements is not None:
             self.elements = elements
         elif with_elements:
-            self.elements = ["C"] * len(atoms_by_index)
+            cycle = ("N", "O")
+            self.elements = [cycle[index % 2] for index in range(len(atoms_by_index))]
 
     def __getitem__(self, item: int) -> _MockAtom:
         """Return one atom by topology index."""
@@ -124,6 +125,25 @@ class _MockAtomGroup:
     def __and__(self, other: "_MockAtomGroup") -> "_MockAtomGroup":
         overlap = sorted(set(self.indices.tolist()) & set(other.indices.tolist()))
         return _MockAtomGroup(overlap)
+
+
+def _mock_selection_lookup(mapping: dict[str, _MockAtomGroup]):
+    """Return a ``select_atoms`` side effect backed by a selection mapping.
+
+    Selections the mapping does not name, such as the element-restricted donor
+    and acceptor selection, resolve to the union of the mapped groups.
+    """
+
+    def _select(selection: str, updating: bool | None = None) -> _MockAtomGroup:
+        del updating
+        if selection in mapping:
+            return mapping[selection]
+        union: set[int] = set()
+        for group in mapping.values():
+            union.update(group.indices.tolist())
+        return _MockAtomGroup(sorted(union))
+
+    return _select
 
 
 class _MockUniverseProvider:
@@ -288,6 +308,30 @@ def test_settings_custom() -> None:
     )
     assert set(settings.groups) == {"enzyme", "ligand", "polymer"}
     assert [summary.name for summary in settings.summaries] == ["enzyme_polymer", "ligand_internal"]
+
+
+def test_donor_acceptor_elements_are_canonicalized() -> None:
+    """Element symbols are canonicalized and de-duplicated."""
+
+    settings = HydrogenBondSettings(donor_acceptor_elements=("n", "O", "cl", "CL"))
+    assert settings.donor_acceptor_elements == ("N", "O", "Cl")
+
+
+def test_donor_acceptor_elements_reject_non_elements() -> None:
+    """Tokens that are not element symbols fail validation."""
+
+    with pytest.raises(ValidationError, match="not a known element symbol"):
+        HydrogenBondSettings(donor_acceptor_elements=("Xx",))
+
+    with pytest.raises(ValidationError, match="not a known element symbol"):
+        HydrogenBondSettings(donor_acceptor_elements=("Nn",))
+
+
+def test_donor_acceptor_elements_reject_hydrogen() -> None:
+    """Hydrogen is selected separately and is not a donor or acceptor element."""
+
+    with pytest.raises(ValidationError, match="must not contain 'H'"):
+        HydrogenBondSettings(donor_acceptor_elements=("N", "H"))
 
 
 def test_empty_hydrogens_selection_is_rejected() -> None:
@@ -470,7 +514,7 @@ def test_mda_analysis_records_effective_timestep_metadata() -> None:
         "chainid A": _MockAtomGroup([0]),
         "chainid C": _MockAtomGroup([1]),
     }
-    universe.select_atoms.side_effect = lambda selection, updating: selections[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(selections)
     analysis = HydrogenBondMDAAnalysis(
         universe=universe,
         settings=HydrogenBondSettings(),
@@ -509,12 +553,14 @@ def test_mda_analysis_uses_element_h_when_elements_available() -> None:
             0: _MockAtom(0, "A", 10, "SER", 0),
             1: _MockAtom(1, "C", 100, "OEG", 1),
         },
-        elements=["C", "O"],
+        elements=["N", "O"],
     )
-    universe.select_atoms.side_effect = lambda selection, updating: {
-        "chainid A": _MockAtomGroup([0]),
-        "chainid C": _MockAtomGroup([1]),
-    }[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(
+        {
+            "chainid A": _MockAtomGroup([0]),
+            "chainid C": _MockAtomGroup([1]),
+        }
+    )
     analysis = HydrogenBondMDAAnalysis(
         universe=universe,
         settings=HydrogenBondSettings(),
@@ -554,10 +600,12 @@ def test_mda_analysis_requires_element_metadata() -> None:
         with_elements=False,
     )
     universe._polyzymd_element_enrichment = {"applied": False, "reason": "test"}
-    universe.select_atoms.side_effect = lambda selection, updating: {
-        "chainid A": _MockAtomGroup([0]),
-        "chainid C": _MockAtomGroup([1]),
-    }[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(
+        {
+            "chainid A": _MockAtomGroup([0]),
+            "chainid C": _MockAtomGroup([1]),
+        }
+    )
     analysis = HydrogenBondMDAAnalysis(
         universe=universe,
         settings=HydrogenBondSettings(),
@@ -593,10 +641,12 @@ def test_mda_analysis_wraps_user_hydrogens_selection() -> None:
             1: _MockAtom(1, "C", 100, "OEG", 1),
         }
     )
-    universe.select_atoms.side_effect = lambda selection, updating: {
-        "chainid A": _MockAtomGroup([0]),
-        "chainid C": _MockAtomGroup([1]),
-    }[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(
+        {
+            "chainid A": _MockAtomGroup([0]),
+            "chainid C": _MockAtomGroup([1]),
+        }
+    )
     analysis = HydrogenBondMDAAnalysis(
         universe=universe,
         settings=HydrogenBondSettings(hydrogens_selection="name HW*"),
@@ -884,7 +934,7 @@ def test_compute_stage_basic(tmp_path: Path) -> None:
         "chainid A": _MockAtomGroup([0]),
         "chainid C": _MockAtomGroup([1]),
     }
-    universe.select_atoms.side_effect = lambda selection, updating: selections[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(selections)
 
     condition = Condition(
         label="test",
@@ -983,10 +1033,12 @@ def test_compute_stage_warns_once_for_default_groups_and_summaries(
     universe = MagicMock()
     universe.trajectory = [object(), object(), object()]
     universe.atoms = _MockAtomCollection(atoms)
-    universe.select_atoms.side_effect = lambda selection, updating: {
-        "chainid A": _MockAtomGroup([0]),
-        "chainid C": _MockAtomGroup([1]),
-    }[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(
+        {
+            "chainid A": _MockAtomGroup([0]),
+            "chainid C": _MockAtomGroup([1]),
+        }
+    )
 
     condition = Condition(
         label="test",
@@ -1115,7 +1167,7 @@ def test_compute_stage_skips_only_empty_summary_and_keeps_other_summaries(
         "chainid A": _MockAtomGroup([0, 1]),
         "chainid C": _MockAtomGroup([]),
     }
-    universe.select_atoms.side_effect = lambda selection, updating: selections[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(selections)
 
     condition = Condition(
         label="No Polymer (Control)",
@@ -1312,7 +1364,7 @@ def test_equilibration_leaves_one_frame_warns(
         "chainid A": _MockAtomGroup([0]),
         "chainid C": _MockAtomGroup([1]),
     }
-    universe.select_atoms.side_effect = lambda selection, updating: selections[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(selections)
 
     condition = Condition(
         label="test",
@@ -1565,9 +1617,11 @@ def test_dynamic_selection_policy_recorded_in_artifact(tmp_path: Path) -> None:
     universe = MagicMock()
     universe.trajectory = [object(), object()]
     universe.atoms = _MockAtomCollection(atoms)
-    universe.select_atoms.side_effect = lambda selection, updating: {
-        "around 5.0 chainid A": _MockAtomGroup([0]),
-    }[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(
+        {
+            "around 5.0 chainid A": _MockAtomGroup([0]),
+        }
+    )
     condition = Condition(
         label="test",
         config_path=Path("/tmp/config.yaml"),
@@ -1629,15 +1683,13 @@ def test_dynamic_composition_warning_recorded_in_artifact(tmp_path: Path) -> Non
     universe.trajectory = [object(), object()]
     universe.atoms = _MockAtomCollection(atoms)
 
-    def select_atoms(selection: str, updating: bool | None = None) -> _MockAtomGroup:
-        del updating
-        return {
+    universe.select_atoms.side_effect = _mock_selection_lookup(
+        {
             "chainid A": _MockAtomGroup([0]),
             "chainid C": _MockAtomGroup([1]),
             "around 5.0 chainid A": _MockAtomGroup([0]),
-        }[selection]
-
-    universe.select_atoms.side_effect = select_atoms
+        }
+    )
     condition = Condition(
         label="test",
         config_path=Path("/tmp/config.yaml"),
@@ -1864,7 +1916,7 @@ def test_composition_not_configured(tmp_path: Path) -> None:
         "chainid A": _MockAtomGroup([0]),
         "chainid C": _MockAtomGroup([1]),
     }
-    universe.select_atoms.side_effect = lambda selection, updating: selections[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(selections)
 
     condition = Condition(
         label="test",
@@ -3520,10 +3572,12 @@ def test_compute_no_hbonds_found(tmp_path: Path) -> None:
     universe = MagicMock()
     universe.trajectory = [object(), object(), object(), object()]
     universe.atoms = _MockAtomCollection(atoms)
-    universe.select_atoms.side_effect = lambda selection, updating: {
-        "chainid A": _MockAtomGroup([0]),
-        "chainid C": _MockAtomGroup([1]),
-    }[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(
+        {
+            "chainid A": _MockAtomGroup([0]),
+            "chainid C": _MockAtomGroup([1]),
+        }
+    )
 
     condition = Condition(
         label="test",
@@ -3587,10 +3641,12 @@ def test_compute_between_mode_classification(tmp_path: Path) -> None:
     universe = MagicMock()
     universe.trajectory = [object(), object(), object()]
     universe.atoms = _MockAtomCollection(atoms)
-    universe.select_atoms.side_effect = lambda selection, updating: {
-        "chainid A": _MockAtomGroup([0, 2]),
-        "chainid C": _MockAtomGroup([1]),
-    }[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(
+        {
+            "chainid A": _MockAtomGroup([0, 2]),
+            "chainid C": _MockAtomGroup([1]),
+        }
+    )
 
     condition = Condition(
         label="test",
@@ -3655,10 +3711,12 @@ def test_compute_within_mode_classification(tmp_path: Path) -> None:
     universe = MagicMock()
     universe.trajectory = [object(), object(), object()]
     universe.atoms = _MockAtomCollection(atoms)
-    universe.select_atoms.side_effect = lambda selection, updating: {
-        "chainid A": _MockAtomGroup([0, 1]),
-        "chainid C": _MockAtomGroup([2, 3]),
-    }[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(
+        {
+            "chainid A": _MockAtomGroup([0, 1]),
+            "chainid C": _MockAtomGroup([2, 3]),
+        }
+    )
 
     settings = HydrogenBondSettings(
         groups={"protein": "chainid A", "polymer": "chainid C"},
@@ -3719,11 +3777,13 @@ def test_compute_multiple_summaries(tmp_path: Path) -> None:
     universe = MagicMock()
     universe.trajectory = [object(), object(), object()]
     universe.atoms = _MockAtomCollection(atoms)
-    universe.select_atoms.side_effect = lambda selection, updating: {
-        "chainid A": _MockAtomGroup([0]),
-        "chainid C": _MockAtomGroup([1]),
-        "chainid A or chainid C": _MockAtomGroup([0, 1]),
-    }[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(
+        {
+            "chainid A": _MockAtomGroup([0]),
+            "chainid C": _MockAtomGroup([1]),
+            "chainid A or chainid C": _MockAtomGroup([0, 1]),
+        }
+    )
 
     settings = HydrogenBondSettings(
         groups={
@@ -4713,10 +4773,12 @@ def test_replicate_does_not_truncate_pairs_before_aggregation(tmp_path: Path) ->
     universe = MagicMock()
     universe.trajectory = [object(), object()]
     universe.atoms = _MockAtomCollection(atoms)
-    universe.select_atoms.side_effect = lambda selection, updating: {
-        "chainid A": _MockAtomGroup([0, 2]),
-        "chainid C": _MockAtomGroup([1, 3]),
-    }[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(
+        {
+            "chainid A": _MockAtomGroup([0, 2]),
+            "chainid C": _MockAtomGroup([1, 3]),
+        }
+    )
 
     condition = Condition(
         label="test",
@@ -4779,10 +4841,12 @@ def test_full_lifecycle_mocked(tmp_path: Path) -> None:
         ],
         dtype=float,
     )
-    universe_1.select_atoms.side_effect = lambda selection, updating: {
-        "chainid A": _MockAtomGroup([0]),
-        "chainid C": _MockAtomGroup([1]),
-    }[selection]
+    universe_1.select_atoms.side_effect = _mock_selection_lookup(
+        {
+            "chainid A": _MockAtomGroup([0]),
+            "chainid C": _MockAtomGroup([1]),
+        }
+    )
 
     universe_2 = MagicMock()
     universe_2.trajectory = [object(), object(), object(), object()]
@@ -4795,10 +4859,12 @@ def test_full_lifecycle_mocked(tmp_path: Path) -> None:
         ],
         dtype=float,
     )
-    universe_2.select_atoms.side_effect = lambda selection, updating: {
-        "chainid A": _MockAtomGroup([0]),
-        "chainid C": _MockAtomGroup([1]),
-    }[selection]
+    universe_2.select_atoms.side_effect = _mock_selection_lookup(
+        {
+            "chainid A": _MockAtomGroup([0]),
+            "chainid C": _MockAtomGroup([1]),
+        }
+    )
 
     analysis = HydrogenBondsAnalysis()
     condition = Condition(
@@ -4911,12 +4977,12 @@ def test_compute_stage_hydrogens_sel_explicit(tmp_path: Path) -> None:
     }
     universe = MagicMock()
     universe.trajectory = [object(), object(), object()]
-    universe.atoms = _MockAtomCollection(atoms, elements=["C", "O"])
+    universe.atoms = _MockAtomCollection(atoms, elements=["N", "O"])
     selections = {
         "chainid A": _MockAtomGroup([0]),
         "chainid C": _MockAtomGroup([1]),
     }
-    universe.select_atoms.side_effect = lambda selection, updating: selections[selection]
+    universe.select_atoms.side_effect = _mock_selection_lookup(selections)
 
     condition = Condition(
         label="test",

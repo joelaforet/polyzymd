@@ -147,11 +147,13 @@ not supported.
 Exactly one of `between` or `within` must be set for each summary.
 
 Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` and requires explicit
-hydrogens. PolyzyMD prefers `(<group union>) and (element H)` and infers missing
-elements for GRO-like topologies when atom types or atom names are conservative
-enough. If elements remain unavailable, the plugin falls back to
-`(<group union>) and (name H* or name [123]H*)`. Set `hydrogens_selection` only
-for unusual explicit-hydrogen naming schemes.
+hydrogens and element metadata. Donors and acceptors are
+`(<group union>) and element <donor_acceptor_elements>` and hydrogens are
+`(<group union>) and (element H)`. PolyzyMD infers missing elements for GRO-like
+topologies when atom types or atom names are conservative enough. If elements
+remain unavailable, or if the donor and acceptor selection matches no atoms, the
+plugin raises `SelectionError` unless `allow_empty_groups` is true. Set
+`hydrogens_selection` only for unusual explicit-hydrogen naming schemes.
 
 `HydrogenBondCompositionSettings`:
 

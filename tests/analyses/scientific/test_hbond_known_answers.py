@@ -2,9 +2,11 @@
 
 The reference system holds three isolated donor-hydrogen-acceptor triads that
 share the same geometry (donor-acceptor distance 2.9 A, D-H...A angle 170
-degrees). Only the N-H...O triad is a hydrogen bond under the IUPAC definition;
-the C-H...O and N-H...C triads are contacts that carry no electronegative
-partner on one side.
+degrees), plus a fourth triad whose C-H carbon carries a bonded nitrogen. Only
+the N-H...O triad is a hydrogen bond under the IUPAC definition; the C-H...O and
+N-H...C triads are contacts that carry no electronegative partner on one side,
+and the fourth triad checks that the nitrogen next to a C-H is not paired with
+that hydrogen.
 
 References
 ----------
@@ -83,7 +85,12 @@ def _build_triad_universe() -> "mda.Universe":
         ("N", "O"),
         ("C", "O"),
         ("N", "C"),
+        ("C", "O"),
     )
+    # The fourth triad carries a nitrogen bonded to its donor carbon, placed away
+    # from the hydrogen so the 1.2 A donor-hydrogen pairing cannot claim it.
+    neighbor_triad_index = 3
+    neighbor_offset = np.array([-1.47, 0.0, 0.0])
     elements: list[str] = []
     names: list[str] = []
     chain_ids: list[str] = []
@@ -100,6 +107,21 @@ def _build_triad_universe() -> "mda.Universe":
         chain_ids.extend(["A", "A", "C"])
         atom_resindex.extend([2 * triad_index, 2 * triad_index, 2 * triad_index + 1])
         bonds.append((base, base + 1))
+
+    neighbor_index = len(elements)
+    elements.append("N")
+    names.append("NX")
+    chain_ids.append("A")
+    atom_resindex.append(2 * neighbor_triad_index)
+    bonds.append((neighbor_triad_index * 3, neighbor_index))
+    frame_positions = np.vstack(
+        [
+            frame_positions,
+            (np.array([neighbor_triad_index * TRIAD_SPACING, 0.0, 0.0]) + neighbor_offset).astype(
+                np.float32
+            ),
+        ]
+    )
 
     n_residues = len(triads) * 2
     universe = mda.Universe.empty(
@@ -206,3 +228,92 @@ def test_missing_elements_raise_instead_of_widening_the_selection() -> None:
 
     with pytest.raises(SelectionError, match="could not read element metadata"):
         analysis.run(start=0, stop=N_FRAMES, step=1)
+
+
+def test_donor_acceptor_selection_without_matching_atoms_raises() -> None:
+    """Configuring an element the system does not carry is an error, not a zero."""
+
+    universe = _build_triad_universe()
+    analysis = HydrogenBondMDAAnalysis(
+        universe=universe,
+        settings=HydrogenBondSettings(donor_acceptor_elements=("S",)),
+        condition_label="known_answer",
+        replicate=1,
+        raw_timestep_ps=1.0,
+    )
+
+    with pytest.raises(SelectionError, match="none of the configured donor and acceptor"):
+        analysis.run(start=0, stop=N_FRAMES, step=1)
+
+
+def test_donor_acceptor_selection_empty_within_groups_raises() -> None:
+    """An element present elsewhere but absent from the groups is also an error."""
+
+    universe = _build_triad_universe()
+    analysis = HydrogenBondMDAAnalysis(
+        universe=universe,
+        settings=HydrogenBondSettings(
+            groups={"protein": "resname ACC", "polymer": "resname ACC"},
+            donor_acceptor_elements=("N",),
+        ),
+        condition_label="known_answer",
+        replicate=1,
+        raw_timestep_ps=1.0,
+    )
+
+    with pytest.raises(SelectionError, match="matched no atoms"):
+        analysis.run(start=0, stop=N_FRAMES, step=1)
+
+
+def test_donor_acceptor_selection_empty_is_skippable() -> None:
+    """The permissive setting turns the empty selection into zero summaries."""
+
+    universe = _build_triad_universe()
+    analysis = HydrogenBondMDAAnalysis(
+        universe=universe,
+        settings=HydrogenBondSettings(
+            groups={"protein": "resname ACC", "polymer": "resname ACC"},
+            donor_acceptor_elements=("N",),
+            allow_empty_groups=True,
+        ),
+        condition_label="known_answer",
+        replicate=1,
+        raw_timestep_ps=1.0,
+    )
+    analysis.run(start=0, stop=N_FRAMES, step=1)
+
+    assert analysis.plan is not None
+    assert analysis.results.hbonds.shape[0] == 0
+    assert any("matched no atoms" in warning for warning in analysis.plan.warnings)
+
+
+def test_uppercase_element_spelling_is_matched() -> None:
+    """A topology spelling chlorine as CL is matched despite the canonical Cl."""
+
+    universe = mda.Universe.empty(
+        n_atoms=3,
+        n_residues=2,
+        atom_resindex=np.array([0, 0, 1]),
+        trajectory=True,
+    )
+    universe.add_TopologyAttr("elements", ["N", "H", "CL"])
+    universe.add_TopologyAttr("names", ["ND", "HD", "CLA"])
+    universe.add_TopologyAttr("resnames", ["DON", "ACC"])
+    universe.add_TopologyAttr("resids", np.array([1, 2]))
+    universe.add_TopologyAttr("chainIDs", ["A", "A", "C"])
+    universe.add_bonds([(0, 1)])
+    positions = _triad_positions(np.zeros(3)).astype(np.float32)
+    universe.load_new(np.repeat(positions[np.newaxis, :, :], N_FRAMES, axis=0), order="fac")
+
+    analysis = HydrogenBondMDAAnalysis(
+        universe=universe,
+        settings=HydrogenBondSettings(donor_acceptor_elements=("N", "Cl")),
+        condition_label="known_answer",
+        replicate=1,
+        raw_timestep_ps=1.0,
+    )
+    analysis.run(start=0, stop=N_FRAMES, step=1)
+
+    assert analysis.plan is not None
+    assert analysis.plan.donors_selection_string.endswith("element N CL")
+    assert analysis.results.hbonds.shape[0] == N_FRAMES
