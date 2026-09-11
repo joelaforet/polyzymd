@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use PolyzyMD in work you publish, please cite it as below."
+title: "PolyzyMD: a toolkit for enzyme-polymer conjugate molecular dynamics"
+abstract: >-
+  PolyzyMD builds, runs and analyses molecular dynamics simulations of
+  enzyme-polymer conjugates. Its analysis module treats the replicate as the
+  sampling unit and follows the LiveCoMS best practices for quantifying
+  sampling quality and uncertainty.
+type: software
+version: 1.3.0
+license: MIT
+repository-code: "https://github.com/joelaforet/polyzymd"
+url: "https://github.com/joelaforet/polyzymd"
+authors:
+  - family-names: "LaForet"
+    given-names: "Joseph R."
+    name-suffix: "Jr."
+    email: "jola3134@colorado.edu"
+    affiliation: "Shirts group, Department of Chemical and Biological Engineering, University of Colorado Boulder"
+keywords:
+  - molecular dynamics
+  - enzyme-polymer conjugates
+  - trajectory analysis
+  - uncertainty quantification
+  - OpenMM
+  - MDAnalysis
