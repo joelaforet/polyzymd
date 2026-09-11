@@ -121,9 +121,9 @@ class DirectedPairAggregate(BaseModel):
     donor: ResidueRef
     acceptor: ResidueRef
     mean_occupancy: float
-    sem_occupancy: float
+    sem_occupancy: float | None
     mean_events_per_frame: float
-    sem_events_per_frame: float
+    sem_events_per_frame: float | None
     per_replicate_occupancy: list[float]
 
 
@@ -133,9 +133,9 @@ class UndirectedPairAggregate(BaseModel):
     residue_a: ResidueRef
     residue_b: ResidueRef
     mean_occupancy: float
-    sem_occupancy: float
+    sem_occupancy: float | None
     mean_events_per_frame: float
-    sem_events_per_frame: float
+    sem_events_per_frame: float | None
     per_replicate_occupancy: list[float]
 
 
@@ -149,12 +149,12 @@ class HydrogenBondAggregatedSummary(BaseModel):
     group_names: list[str]
     n_replicates: int
     mean_hbonds_per_frame: float
-    sem_hbonds_per_frame: float
+    sem_hbonds_per_frame: float | None
     per_replicate_mean_hbonds: list[float]
     mean_unique_pairs_per_frame: float = 0.0
-    sem_unique_pairs_per_frame: float = 0.0
+    sem_unique_pairs_per_frame: float | None = None
     mean_fraction_with_any: float
-    sem_fraction_with_any: float
+    sem_fraction_with_any: float | None
     per_replicate_fraction_with_any: list[float]
     directed_pairs: list[DirectedPairAggregate] = Field(default_factory=list)
     undirected_pairs: list[UndirectedPairAggregate] = Field(default_factory=list)
@@ -166,10 +166,10 @@ class AggregatedCompositionEntry(BaseModel):
     donor_partition: str
     acceptor_partition: str
     mean_hbonds_per_frame: float
-    sem_hbonds_per_frame: float
+    sem_hbonds_per_frame: float | None
     per_replicate_hbonds: list[float]
     mean_fraction_of_total: float
-    sem_fraction_of_total: float
+    sem_fraction_of_total: float | None
     per_replicate_fraction: list[float]
 
 

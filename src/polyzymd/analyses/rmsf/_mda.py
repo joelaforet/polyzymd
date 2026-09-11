@@ -28,7 +28,7 @@ from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_pa
 from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
 from polyzymd.analyses.shared.diagnostics import get_selection_diagnostics
 from polyzymd.analyses.shared.loader import parse_time_string
-from polyzymd.analyses.shared.statistics import compute_sem
+from polyzymd.analyses.shared.statistics import compute_sem, metric_summary_payload
 
 if TYPE_CHECKING:
     from polyzymd.analyses.mda import ArtifactSidecarRef, MDAReplicateJobContext
@@ -289,9 +289,11 @@ def aggregate_rmsf_artifacts(
 
     matrix = np.vstack(profiles)
     mean_rmsf_per_residue = np.mean(matrix, axis=0)
-    sem_rmsf_per_residue = np.zeros(matrix.shape[1], dtype=np.float64)
     if matrix.shape[0] > 1:
         sem_rmsf_per_residue = np.std(matrix, axis=0, ddof=1) / np.sqrt(matrix.shape[0])
+    else:
+        # One replicate gives no per-residue spread; null, not a row of zeros.
+        sem_rmsf_per_residue = None
 
     per_replicate_means = [float(np.mean(profile)) for profile in profiles]
     overall_stats = compute_sem(per_replicate_means)
@@ -299,12 +301,13 @@ def aggregate_rmsf_artifacts(
     residue_ids = [int(value) for value in first_profile.get("residue_ids", [])]
     residue_names = [str(value) for value in first_profile.get("residue_names", [])]
     mean_values = mean_rmsf_per_residue.tolist()
-    sem_values = sem_rmsf_per_residue.tolist()
-    metric = _metric_summary(
+    sem_values = (
+        [None] * matrix.shape[1] if sem_rmsf_per_residue is None else sem_rmsf_per_residue.tolist()
+    )
+    metric = metric_summary_payload(
         MEAN_RMSF_METRIC,
         per_replicate_means,
-        overall_stats.mean,
-        overall_stats.sem,
+        unit=str(RMSF_METRIC_METADATA["unit"]),
     )
     metric.update(RMSF_METRIC_METADATA)
     replicate_metrics = {
@@ -341,7 +344,7 @@ def aggregate_rmsf_artifacts(
     if reference_ss is not None:
         payload["reference_secondary_structure"] = reference_ss
     warnings = _unique_warnings([*_combined_warnings(ordered_artifacts), *reference_ss_warnings])
-    artifact = ConditionArtifact(
+    artifact = ConditionArtifact.build(
         analysis_name="rmsf",
         condition_label=condition_label,
         replicates=[int(rep) for rep in replicates],
@@ -1378,20 +1381,6 @@ def _profile_statistics(rmsf_values: NDArray[np.float64]) -> dict[str, float]:
         "std_rmsf": float(np.std(rmsf_values, ddof=0)),
         "min_rmsf": float(np.min(rmsf_values)),
         "max_rmsf": float(np.max(rmsf_values)),
-    }
-
-
-def _metric_summary(name: str, values: Sequence[float], mean: float, sem: float) -> dict[str, Any]:
-    """Return an artifact metric summary."""
-
-    array = np.asarray(values, dtype=np.float64)
-    return {
-        "name": name,
-        "values": [float(value) for value in values],
-        "mean": float(mean),
-        "sem": float(sem),
-        "std": float(np.std(array, ddof=1)) if array.size > 1 else 0.0,
-        "n": int(array.size),
     }
 
 

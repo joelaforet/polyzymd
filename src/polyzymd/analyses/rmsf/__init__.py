@@ -26,6 +26,7 @@ from polyzymd.analyses.mda import (
 )
 from polyzymd.analyses.rmsf._mda import (
     MEAN_RMSF_METRIC,
+    RMSF_METRIC_METADATA,
     RMSFArtifactCollector,
     aggregate_rmsf_artifacts,
     build_rmsf_jobs,
@@ -205,11 +206,10 @@ class RMSFAnalysis(Analysis):
             )
         payload = summary.payload
         return {
-            MEAN_RMSF_METRIC: MetricValue(
-                name=MEAN_RMSF_METRIC,
-                mean=float(payload["overall_mean_rmsf"]),
-                sem=float(payload["overall_sem_rmsf"]),
-                replicate_values=[float(value) for value in payload["per_replicate_mean_rmsf"]],
+            MEAN_RMSF_METRIC: MetricValue.from_replicate_values(
+                MEAN_RMSF_METRIC,
+                [float(value) for value in payload["per_replicate_mean_rmsf"]],
+                unit=str(RMSF_METRIC_METADATA["unit"]),
                 higher_is_better=False,
                 direction_labels=("stabilizing", "unchanged", "destabilizing"),
             )

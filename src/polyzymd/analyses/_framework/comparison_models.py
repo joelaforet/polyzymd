@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -25,14 +26,57 @@ class SlurmResourceHint(BaseModel):
 
 @dataclass(frozen=True)
 class MetricValue:
-    """A scalar metric extracted from one aggregated condition result."""
+    """A scalar metric extracted from one aggregated condition result.
+
+    The replicate is the sampling unit. ``unit`` names the physical unit of
+    ``mean`` (``"A"``, ``"A^2"``, ``"%"``, ``"ns"``) and is ``None`` only for a
+    dimensionless metric. The standard error, both limits and ``ci_method`` are
+    ``None`` when a single replicate makes them inestimable.
+    """
 
     name: str
     mean: float
-    sem: float
+    sem: float | None
     replicate_values: list[float]
+    unit: str | None = None
+    ci95_low: float | None = None
+    ci95_high: float | None = None
+    ci_method: str | None = None
     higher_is_better: bool | None = True
     direction_labels: tuple[str, str, str] = ("decreased", "unchanged", "increased")
+
+    @classmethod
+    def from_replicate_values(
+        cls,
+        name: str,
+        replicate_values: Sequence[float],
+        *,
+        unit: str | None = None,
+        higher_is_better: bool | None = True,
+        direction_labels: tuple[str, str, str] = ("decreased", "unchanged", "increased"),
+        scale: float = 1.0,
+    ) -> "MetricValue":
+        """Build a metric from replicate values, deriving SEM and interval.
+
+        ``scale`` multiplies every value before the statistics are computed, for
+        a unit change such as fraction to percent.
+        """
+        from polyzymd.analyses.shared.statistics import mean_sem_ci
+
+        scaled = [float(value) * float(scale) for value in replicate_values]
+        stats = mean_sem_ci(scaled)
+        return cls(
+            name=name,
+            mean=stats.mean,
+            sem=stats.sem,
+            replicate_values=scaled,
+            unit=unit,
+            ci95_low=stats.ci_low,
+            ci95_high=stats.ci_high,
+            ci_method=stats.ci_method,
+            higher_is_better=higher_is_better,
+            direction_labels=direction_labels,
+        )
 
 
 class ConditionSummary(BaseModel):
@@ -87,6 +131,7 @@ class ComparisonResult(BaseModel):
     fdr_alpha: float | None = None
     ttest_method: str = "student"
     posthoc_method: str = "ttest_bh"
+    uncertainty: dict[str, object] | None = None
     conditions: list[ConditionSummary] = Field(default_factory=list)
     pairwise_comparisons: list[PairwiseResult] = Field(default_factory=list)
     anova: list[ANOVAResult] | None = None
@@ -147,8 +192,8 @@ class BaseConditionSummary(BaseModel, ABC):
 
     @property
     @abstractmethod
-    def primary_metric_sem(self) -> float:
-        """Return the SEM of the primary metric."""
+    def primary_metric_sem(self) -> float | None:
+        """Return the SEM of the primary metric, or ``None`` for one replicate."""
 
 
 TConditionSummary = TypeVar("TConditionSummary", bound=BaseConditionSummary)

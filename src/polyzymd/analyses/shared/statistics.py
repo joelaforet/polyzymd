@@ -1,23 +1,24 @@
 """Statistical functions for replicate aggregation.
 
-This module provides statistical utilities for combining results across
-multiple simulation replicates with proper error propagation.
+The replicate is the sampling unit. Every uncertainty here is computed across
+replicates, never across frames. The standard uncertainty is the standard error
+of the mean, ``s / sqrt(n)`` with the sample standard deviation, and the
+reported interval is the two-sided Student t interval
+``mean +/- t(1 - alpha/2, n - 1) * SEM``. At n = 3 that coverage factor is
+4.303, so a plus-or-minus-one-SEM band covers far less than 95 percent and must
+not be read as one. A single replicate supports neither, so those fields are
+``None`` rather than ``0.0``.
 
-Key design decisions:
-- All uncertainties are reported as Standard Error of the Mean (SEM)
-- SEM = std / sqrt(N) where N is the number of independent samples
-- Hierarchical aggregation preserves proper statistics at each level
-
-Functions
----------
-compute_sem
-    Standard error of the mean for a 1D array
-aggregate_per_residue_stats
-    Combine per-residue values across replicates
-aggregate_region_stats
-    Combine region-averaged values across replicates
-weighted_mean_with_sem
-    Weighted average with proper error propagation
+References
+----------
+.. [1] Grossfield, A.; Patrone, P. N.; Roe, D. R.; Schultz, A. J.;
+       Siderius, D. W.; Zuckerman, D. M. Best Practices for Quantification of
+       Uncertainty and Sampling Quality in Molecular Simulations.
+       Living J. Comput. Mol. Sci. 2018, 1 (1), 5067.
+       https://doi.org/10.33011/livecoms.1.1.5067
+.. [2] Joint Committee for Guides in Metrology. Evaluation of Measurement
+       Data: Guide to the Expression of Uncertainty in Measurement,
+       JCGM 100:2008; BIPM: Sevres, 2008.
 """
 
 from __future__ import annotations
@@ -27,35 +28,191 @@ from typing import Sequence
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+from scipy.stats import t as student_t
+
+from polyzymd.analyses.exceptions import StatisticsError
+
+UNCERTAINTY_KIND_REPLICATE_SEM = "sem_across_replicates"
+"""Name of the only uncertainty this module estimates."""
+
+CI_METHOD_STUDENT_T = "student_t"
+"""Name of the interval method reported alongside every confidence interval."""
+
+DEFAULT_COVERAGE = 0.95
+"""Coverage probability of the reported confidence interval."""
+
+
+def student_t_coverage_factor(n: int, coverage: float = DEFAULT_COVERAGE) -> float | None:
+    """Return the Student t coverage factor for *n* replicates.
+
+    The factor is ``k = t(1 - alpha / 2, n - 1)``, which is 4.303 at n = 3 and
+    2.776 at n = 5 for 95 percent coverage. Returns ``None`` when ``n < 2``, and
+    raises ``StatisticsError`` when ``coverage`` is outside ``(0, 1)``.
+    """
+    if not 0.0 < coverage < 1.0:
+        raise StatisticsError(f"coverage must be in (0, 1), got {coverage!r}")
+    if n < 2:
+        return None
+
+    return float(student_t.ppf(0.5 + coverage / 2.0, n - 1))
+
+
+def uncertainty_block(
+    n: int | None,
+    coverage: float = DEFAULT_COVERAGE,
+    kind: str = UNCERTAINTY_KIND_REPLICATE_SEM,
+) -> dict:
+    """Return the serializable description of a reported uncertainty.
+
+    Every aggregated artifact carries this block, with ``kind``, ``n``,
+    ``coverage`` and ``method`` keys, so a reader never has to guess what an
+    error bar or a ``sem`` field means. ``n`` is ``None`` when no replicate
+    count is known.
+    """
+    return {
+        "kind": kind,
+        "n": None if n is None else int(n),
+        "coverage": float(coverage),
+        "method": CI_METHOD_STUDENT_T,
+    }
+
+
+@dataclass(frozen=True)
+class MeanSemCI:
+    """Mean, standard uncertainty and Student t confidence interval.
+
+    Every field except ``mean`` and ``n`` is ``None`` for a single replicate,
+    where no spread exists.
+    """
+
+    mean: float
+    sem: float | None
+    n: int
+    ci_low: float | None
+    ci_high: float | None
+    ci_method: str | None
+    coverage: float | None
+
+    def to_dict(self) -> dict:
+        """Convert to a dictionary for JSON serialization."""
+        return {
+            "mean": float(self.mean),
+            "sem": None if self.sem is None else float(self.sem),
+            "n": int(self.n),
+            "ci95_low": None if self.ci_low is None else float(self.ci_low),
+            "ci95_high": None if self.ci_high is None else float(self.ci_high),
+            "ci_method": self.ci_method,
+            "coverage": None if self.coverage is None else float(self.coverage),
+        }
+
+
+def mean_sem_ci(values: ArrayLike, coverage: float = DEFAULT_COVERAGE) -> MeanSemCI:
+    """Compute the mean, SEM and Student t confidence interval of *values*.
+
+    This is the one interval estimator in the analyses package. Everything that
+    reports a condition-level uncertainty goes through it so that the coverage
+    factor, the degrees of freedom and the single-replicate rule are the same
+    everywhere. Raises ``StatisticsError`` on an empty sample.
+
+    Examples
+    --------
+    >>> result = mean_sem_ci([2.0, 2.2, 2.4])
+    >>> round(result.ci_high - result.mean, 4)
+    0.4968
+    """
+    array = np.asarray(values, dtype=np.float64).ravel()
+    n = int(array.size)
+    if n == 0:
+        raise StatisticsError("Cannot compute statistics on empty array")
+
+    mean = float(np.mean(array))
+    factor = student_t_coverage_factor(n, coverage)
+    if factor is None:
+        return MeanSemCI(
+            mean=mean,
+            sem=None,
+            n=n,
+            ci_low=None,
+            ci_high=None,
+            ci_method=None,
+            coverage=None,
+        )
+
+    sem = float(np.std(array, ddof=1) / np.sqrt(float(n)))
+    half_width = factor * sem
+    return MeanSemCI(
+        mean=mean,
+        sem=sem,
+        n=n,
+        ci_low=mean - half_width,
+        ci_high=mean + half_width,
+        ci_method=CI_METHOD_STUDENT_T,
+        coverage=float(coverage),
+    )
+
+
+def metric_summary_payload(
+    name: str,
+    values: Sequence[float],
+    *,
+    unit: str | None = None,
+    coverage: float = DEFAULT_COVERAGE,
+) -> dict:
+    """Build the serialized metric summary for one condition-level metric.
+
+    Every plugin writes its aggregated metrics in this shape, which matches
+    ``polyzymd.analyses.mda.aggregation.AggregatedMetric``. Deriving the mean,
+    the standard error, the spread and the interval from ``values`` in one place
+    keeps the stored statistics consistent with the replicate values that the
+    comparison layer recomputes them from. The spread, the standard error and
+    both limits are ``None`` for a single replicate.
+    """
+    numeric = [float(value) for value in values]
+    stats = mean_sem_ci(numeric, coverage=coverage)
+    std = None if stats.sem is None else stats.sem * np.sqrt(float(stats.n))
+    return {
+        "name": name,
+        "values": numeric,
+        "mean": stats.mean,
+        "sem": stats.sem,
+        "std": None if std is None else float(std),
+        "n": stats.n,
+        "unit": unit,
+        "ci95_low": stats.ci_low,
+        "ci95_high": stats.ci_high,
+        "ci_method": stats.ci_method,
+    }
 
 
 @dataclass
 class StatResult:
-    """Container for mean +/- SEM results.
+    """Container for a mean with its standard uncertainty and interval.
 
-    Attributes
-    ----------
-    mean : float
-        The mean value
-    sem : float
-        Standard error of the mean
-    n_samples : int
-        Number of samples used in computation
+    The standard error, both confidence limits and the method are ``None`` when
+    a single replicate makes them inestimable.
     """
 
     mean: float
-    sem: float
+    sem: float | None
     n_samples: int
+    ci95_low: float | None = None
+    ci95_high: float | None = None
+    ci_method: str | None = None
 
     def __repr__(self) -> str:
+        if self.sem is None:
+            return f"{self.mean:.4f} (n={self.n_samples}, SEM not estimable)"
         return f"{self.mean:.4f} ± {self.sem:.4f} (n={self.n_samples})"
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
             "mean": float(self.mean),
-            "sem": float(self.sem),
+            "sem": None if self.sem is None else float(self.sem),
             "n_samples": self.n_samples,
+            "ci95_low": None if self.ci95_low is None else float(self.ci95_low),
+            "ci95_high": None if self.ci95_high is None else float(self.ci95_high),
+            "ci_method": self.ci_method,
         }
 
 
@@ -94,22 +251,10 @@ class PerResidueStats:
 
 
 def compute_sem(values: ArrayLike, ddof: int = 1) -> StatResult:
-    """Compute mean and standard error of the mean.
+    """Compute the mean, SEM and 95 percent confidence interval.
 
-    SEM = std / sqrt(N) where N is the number of samples.
-
-    Parameters
-    ----------
-    values : array_like
-        1D array of values (e.g., one value per replicate)
-    ddof : int, optional
-        Delta degrees of freedom for std calculation. Default is 1
-        (Bessel's correction for sample std).
-
-    Returns
-    -------
-    StatResult
-        Container with mean, sem, and n_samples
+    A thin wrapper over :func:`mean_sem_ci`. ``ddof`` other than 1 is rejected
+    because a confidence interval needs the sample standard deviation.
 
     Examples
     --------
@@ -118,26 +263,21 @@ def compute_sem(values: ArrayLike, ddof: int = 1) -> StatResult:
     >>> print(f"RMSF = {result.mean:.2f} +/- {result.sem:.2f} A")
     RMSF = 2.60 +/- 0.07 A
 
-    Notes
-    -----
-    For a single value, SEM is undefined (returns 0.0).
     """
-    arr = np.asarray(values, dtype=np.float64)
-    n = len(arr)
+    if ddof != 1:
+        raise StatisticsError(
+            f"compute_sem requires the sample standard deviation (ddof=1); got ddof={ddof!r}"
+        )
 
-    if n == 0:
-        raise ValueError("Cannot compute statistics on empty array")
-
-    mean = float(np.mean(arr))
-
-    if n == 1:
-        # Single sample: SEM is undefined, return 0
-        return StatResult(mean=mean, sem=0.0, n_samples=1)
-
-    std = float(np.std(arr, ddof=ddof))
-    sem = std / np.sqrt(n)
-
-    return StatResult(mean=mean, sem=sem, n_samples=n)
+    result = mean_sem_ci(values)
+    return StatResult(
+        mean=result.mean,
+        sem=result.sem,
+        n_samples=result.n,
+        ci95_low=result.ci_low,
+        ci95_high=result.ci_high,
+        ci_method=result.ci_method,
+    )
 
 
 def aggregate_per_residue_stats(

@@ -296,16 +296,13 @@ class CatalyticTriadAnalysis(Analysis):
         if not isinstance(payload, dict):
             payload = summary
         return {
-            SIMULTANEOUS_CONTACT_METRIC: MetricValue(
-                name=SIMULTANEOUS_CONTACT_METRIC,
-                mean=float(_payload_get(payload, "overall_simultaneous_contact")) * 100.0,
-                sem=float(_payload_get(payload, "sem_simultaneous_contact")) * 100.0,
-                replicate_values=[
-                    float(value) * 100.0
-                    for value in _payload_get(payload, "per_replicate_simultaneous")
-                ],
+            SIMULTANEOUS_CONTACT_METRIC: MetricValue.from_replicate_values(
+                SIMULTANEOUS_CONTACT_METRIC,
+                [float(value) for value in _payload_get(payload, "per_replicate_simultaneous")],
+                unit="%",
                 higher_is_better=bool(SIMULTANEOUS_CONTACT_METADATA["higher_is_better"]),
                 direction_labels=tuple(SIMULTANEOUS_CONTACT_METADATA["direction_labels"]),
+                scale=100.0,
             )
         }
 

@@ -33,6 +33,7 @@ from polyzymd.analyses.mda import (
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
 from polyzymd.analyses.shared.loader import parse_time_string
+from polyzymd.analyses.shared.statistics import metric_summary_payload
 
 if TYPE_CHECKING:
     from polyzymd.analyses.catalytic_triad import CatalyticTriadSettings
@@ -275,11 +276,9 @@ def aggregate_triad_artifacts(
     metrics, replicate_metrics = _condition_metrics(
         replicates=replicates,
         per_replicate_simultaneous=per_replicate_simultaneous,
-        mean=sim_stats.mean,
-        sem=sim_stats.sem,
     )
     first_metadata = ordered_artifacts[0].metadata
-    artifact = ConditionArtifact(
+    artifact = ConditionArtifact.build(
         analysis_name="catalytic_triad",
         condition_label=condition_label,
         replicates=[int(rep) for rep in replicates],
@@ -290,7 +289,7 @@ def aggregate_triad_artifacts(
             "pair_results": pair_results,
             "threshold": float(settings.threshold),
             "overall_simultaneous_contact": float(sim_stats.mean),
-            "sem_simultaneous_contact": float(sim_stats.sem),
+            "sem_simultaneous_contact": sim_stats.sem,
             "per_replicate_simultaneous": per_replicate_simultaneous,
             "metrics": metrics,
             "replicate_metrics": replicate_metrics,
@@ -415,17 +414,14 @@ def _condition_metrics(
     *,
     replicates: Sequence[int],
     per_replicate_simultaneous: Sequence[float],
-    mean: float,
-    sem: float,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, float]]]:
     """Build percent-scaled condition metrics from canonical aggregate values."""
 
     values = [float(value) * 100.0 for value in per_replicate_simultaneous]
-    metric = _metric_summary(
+    metric = metric_summary_payload(
         SIMULTANEOUS_CONTACT_METRIC,
         values,
-        mean * 100.0,
-        sem * 100.0,
+        unit=str(SIMULTANEOUS_CONTACT_METADATA["unit"]),
     )
     metric.update(SIMULTANEOUS_CONTACT_METADATA)
     replicate_metrics = {
@@ -462,7 +458,7 @@ def _aggregate_pair_payloads(
             "selection1": source_pair.get("selection1"),
             "selection2": source_pair.get("selection2"),
             "overall_mean": float(mean_stats.mean),
-            "overall_sem": float(mean_stats.sem),
+            "overall_sem": mean_stats.sem,
             "overall_median": float(median_stats.mean),
             "per_replicate_means": mean_values,
             "per_replicate_stds": std_values,
@@ -471,27 +467,11 @@ def _aggregate_pair_payloads(
             "overall_fraction_below": (
                 float(fraction_stats.mean) if fraction_stats is not None else None
             ),
-            "sem_fraction_below": (
-                float(fraction_stats.sem) if fraction_stats is not None else None
-            ),
+            "sem_fraction_below": (fraction_stats.sem if fraction_stats is not None else None),
             "per_replicate_fractions_below": finite_fractions or None,
         }
         aggregated.append(result)
     return aggregated
-
-
-def _metric_summary(name: str, values: Sequence[float], mean: float, sem: float) -> dict[str, Any]:
-    """Return an artifact metric summary."""
-
-    array = np.asarray(values, dtype=np.float64)
-    return {
-        "name": name,
-        "values": [float(value) for value in values],
-        "mean": float(mean),
-        "sem": float(sem),
-        "std": float(np.std(array, ddof=1)) if array.size > 1 else 0.0,
-        "n": int(array.size),
-    }
 
 
 def _write_replicate_sidecar(

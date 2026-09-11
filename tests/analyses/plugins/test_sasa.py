@@ -1212,7 +1212,10 @@ def test_sasa_formatter_singleton_sem_rendered_as_not_available() -> None:
 
     assert "n/a" in text_output
     assert "SEM: n/a (single replicate; not estimable)" in text_output
-    assert "| control | 100.00 | n/a | 1 |" in markdown_output
+    assert (
+        "| control | 100.00 | n/a (single replicate) | n/a (single replicate) | 1 |"
+        in markdown_output
+    )
 
 
 def test_comparison_result_models() -> None:

@@ -39,6 +39,7 @@ from polyzymd.analyses.mda import (
 from polyzymd.analyses.mda.aggregation import AggregatedMetric, MDAAggregationError
 from polyzymd.analyses.mda.store import ArtifactStoreError
 from polyzymd.analyses.shared.statistics import compute_sem as _compute_sem_stat
+from polyzymd.analyses.shared.statistics import metric_summary_payload
 
 CONTACT_PROFILE_SIDECAR = "sidecars/contact_profiles.npz"
 CONTACTS_AGGREGATION_POLICY_VERSION = "contacts-condition-aggregation-v1"
@@ -52,7 +53,7 @@ _FRAME_TIME_ABS_TOL_PS = 1e-5
 _FRAME_TIME_REL_TOL = 1e-7
 
 
-def _compute_sem(values: Sequence[float]) -> tuple[float, float]:
+def _compute_sem(values: Sequence[float]) -> tuple[float, float | None]:
     """Compute mean and standard error of the mean.
 
     This private wrapper normalizes the shared statistics result to the tuple
@@ -66,10 +67,13 @@ def _compute_sem(values: Sequence[float]) -> tuple[float, float]:
     Returns
     -------
     mean : float
-    sem : float
+        Mean across replicates.
+    sem : float or None
+        Standard error across replicates, ``None`` when a single replicate
+        makes it inestimable.
     """
     if not values:
-        return 0.0, 0.0
+        return 0.0, None
 
     result = _compute_sem_stat(values)
     return result.mean, result.sem
@@ -126,10 +130,10 @@ def aggregate_contact_artifacts(
         compute_residence_times=compute_residence_times,
     )
     metrics = {
-        "coverage": _aggregated_metric("coverage", coverage_values).model_dump(),
-        "mean_contact_fraction": _aggregated_metric(
-            "mean_contact_fraction", contact_values
-        ).model_dump(),
+        "coverage": metric_summary_payload("coverage", coverage_values, unit="fraction"),
+        "mean_contact_fraction": metric_summary_payload(
+            "mean_contact_fraction", contact_values, unit="fraction"
+        ),
     }
     metric_metadata = {
         "coverage": {
@@ -148,7 +152,7 @@ def aggregate_contact_artifacts(
     replicate_metrics = {
         str(item.artifact.replicate): dict(item.artifact.payload["metrics"]) for item in loaded
     }
-    artifact = ConditionArtifact(
+    artifact = ConditionArtifact.build(
         analysis_name="contacts",
         condition_label=ctx.condition.label,
         replicates=replicate_ids,
@@ -1420,8 +1424,11 @@ def _write_profile_sidecar(
         for type_index, polymer_type in enumerate(polymer_types):
             for residue_index, row in enumerate(residue_rows):
                 rt_summary = row.get("residence_time_by_polymer_type", {}).get(polymer_type, {})
-                rt_mean[type_index, residue_index] = float(rt_summary.get("mean_ns", 0.0))
-                rt_sem[type_index, residue_index] = float(rt_summary.get("sem_ns", 0.0))
+                rt_mean[type_index, residue_index] = float(rt_summary.get("mean_ns") or 0.0)
+                rt_sem_value = rt_summary.get("sem_ns")
+                rt_sem[type_index, residue_index] = (
+                    np.nan if rt_sem_value is None else float(rt_sem_value)
+                )
                 rt_counts[type_index, residue_index] = int(rt_summary.get("n_events", 0))
         arrays.update(
             residence_time_mean_ns=rt_mean,
@@ -1437,17 +1444,6 @@ def _write_profile_sidecar(
             "compute_residence_times": compute_residence_times,
         },
         **arrays,
-    )
-
-
-def _aggregated_metric(name: str, values: Sequence[float]) -> AggregatedMetric:
-    """Build an MDA aggregated metric from replicate values."""
-
-    metric_values = [float(value) for value in values]
-    mean, sem = _compute_sem(metric_values)
-    std = float(np.std(metric_values, ddof=1)) if len(metric_values) > 1 else 0.0
-    return AggregatedMetric(
-        name=name, values=metric_values, mean=mean, sem=sem, std=std, n=len(values)
     )
 
 

@@ -17,6 +17,7 @@ from polyzymd.analyses.distances._comparison_results import DistanceComparisonRe
 from polyzymd.analyses.shared.inferential_statistics import percent_change
 from polyzymd.analyses.shared.multi_run_formatting import (
     SINGLE_REPLICATE_SEM_NOTE,
+    format_interval_from_sem,
     format_sem_phrase,
     format_sem_value,
     is_sem_estimable,
@@ -81,13 +82,16 @@ def format_distances_console_table(
         # Table header
         if threshold is not None:
             header = (
-                f"{'Rank':<5} {'Condition':<25} {'Mean Dist':<12} {'SEM':<10} "
-                f"{'% Below':<10} {'N':<4}"
+                f"{'Rank':<5} {'Condition':<25} {'Mean Dist':<12} {'95% CI':<26} "
+                f"{'SEM':<10} {'% Below':<10} {'N':<4}"
             )
         else:
-            header = f"{'Rank':<5} {'Condition':<25} {'Mean Dist':<12} {'SEM':<10} {'N':<4}"
+            header = (
+                f"{'Rank':<5} {'Condition':<25} {'Mean Dist':<12} {'95% CI':<26} "
+                f"{'SEM':<10} {'N':<4}"
+            )
         lines.append(header)
-        lines.append("-" * 80)
+        lines.append("-" * 100)
 
         # Show conditions ranked by this pair's distance
         for rank, label in enumerate(ranking, 1):
@@ -96,16 +100,22 @@ def format_distances_console_table(
             marker = "*" if label == result.control_label else " "
             dist_str = f"{pair_data.mean_distance:.2f} A"
             sem_str = format_sem_value(pair_data.sem_distance, cond.n_replicates, precision=3)
+            ci_str = format_interval_from_sem(
+                pair_data.mean_distance,
+                pair_data.sem_distance,
+                cond.n_replicates,
+                precision=3,
+            )
 
             if threshold is not None and pair_data.fraction_below_threshold is not None:
                 frac_pct = pair_data.fraction_below_threshold * 100
                 lines.append(
-                    f"{rank:<5} {label:<25} {dist_str:<12} {sem_str:<10} "
+                    f"{rank:<5} {label:<25} {dist_str:<12} {ci_str:<26} {sem_str:<10} "
                     f"{frac_pct:>6.1f}%   {cond.n_replicates:<4}{marker}"
                 )
             else:
                 lines.append(
-                    f"{rank:<5} {label:<25} {dist_str:<12} {sem_str:<10} "
+                    f"{rank:<5} {label:<25} {dist_str:<12} {ci_str:<26} {sem_str:<10} "
                     f"{cond.n_replicates:<4}{marker}"
                 )
 
@@ -373,29 +383,34 @@ def format_distances_markdown(
         ranking = result.get_ranking(pair_label)
 
         if threshold is not None:
-            lines.append("| Rank | Condition | Mean Distance | SEM | % Below | N |")
-            lines.append("|------|-----------|---------------|-----|---------|---|")
+            lines.append("| Rank | Condition | Mean Distance | 95% CI | SEM | % Below | N |")
+            lines.append("|------|-----------|---------------|--------|-----|---------|---|")
         else:
-            lines.append("| Rank | Condition | Mean Distance | SEM | N |")
-            lines.append("|------|-----------|---------------|-----|---|")
+            lines.append("| Rank | Condition | Mean Distance | 95% CI | SEM | N |")
+            lines.append("|------|-----------|---------------|--------|-----|---|")
 
         for rank, label in enumerate(ranking, 1):
             cond = result.get_condition(label)
             pair_data = cond.get_pair(pair_label)
             marker = " (control)" if label == result.control_label else ""
 
+            sem_str = format_sem_value(pair_data.sem_distance, cond.n_replicates, precision=3)
+            ci_str = format_interval_from_sem(
+                pair_data.mean_distance,
+                pair_data.sem_distance,
+                cond.n_replicates,
+                precision=3,
+            )
             if threshold is not None and pair_data.fraction_below_threshold is not None:
                 frac_pct = pair_data.fraction_below_threshold * 100
-                sem_str = format_sem_value(pair_data.sem_distance, cond.n_replicates, precision=3)
                 lines.append(
                     f"| {rank} | **{label}**{marker} | {pair_data.mean_distance:.2f} A | "
-                    f"{sem_str} | {frac_pct:.1f}% | {cond.n_replicates} |"
+                    f"{ci_str} | {sem_str} | {frac_pct:.1f}% | {cond.n_replicates} |"
                 )
             else:
-                sem_str = format_sem_value(pair_data.sem_distance, cond.n_replicates, precision=3)
                 lines.append(
                     f"| {rank} | **{label}**{marker} | {pair_data.mean_distance:.2f} A | "
-                    f"{sem_str} | {cond.n_replicates} |"
+                    f"{ci_str} | {sem_str} | {cond.n_replicates} |"
                 )
 
         if any(not is_sem_estimable(result.get_condition(label).n_replicates) for label in ranking):

@@ -7,6 +7,7 @@ import logging
 from polyzymd.analyses.sasa._comparison_results import SASAComparisonResult
 from polyzymd.analyses.shared.multi_run_formatting import (
     SINGLE_REPLICATE_SEM_NOTE,
+    format_interval_from_sem,
     format_sem_value,
     is_sem_estimable,
 )
@@ -32,8 +33,10 @@ def _format_sasa_table(result: SASAComparisonResult) -> str:
         lines.append("")
         lines.append(f"SASA Comparison: {run_label}")
         lines.append("=" * 45)
-        lines.append(f"{'Condition':<18} {'Mean SASA (A^2)':<16} {'SEM':<8} {'Rank':<4}")
-        lines.append("-" * 52)
+        lines.append(
+            f"{'Condition':<18} {'Mean SASA (A^2)':<16} {'95% CI':<26} {'SEM':<8} {'Rank':<4}"
+        )
+        lines.append("-" * 78)
 
         ranking = result.get_ranking(run_label)
         for rank, condition_label in enumerate(ranking, 1):
@@ -41,8 +44,12 @@ def _format_sasa_table(result: SASAComparisonResult) -> str:
             run_summary = condition.get_run(run_label)
             n_replicates = condition.n_replicates or len(run_summary.per_replicate_means)
             sem_str = format_sem_value(run_summary.sem_sasa, n_replicates, precision=2)
+            ci_str = format_interval_from_sem(
+                run_summary.mean_sasa, run_summary.sem_sasa, n_replicates, precision=2
+            )
             lines.append(
-                f"{condition.label:<18} {run_summary.mean_sasa:<16.2f} {sem_str:<8} {rank:<4}"
+                f"{condition.label:<18} {run_summary.mean_sasa:<16.2f} "
+                f"{ci_str:<26} {sem_str:<8} {rank:<4}"
             )
         if any(
             not is_sem_estimable(
@@ -73,16 +80,20 @@ def _format_sasa_markdown(result: SASAComparisonResult) -> str:
     for run_label in result.run_labels:
         lines.append(f"## SASA Comparison: {run_label}")
         lines.append("")
-        lines.append("| Condition | Mean SASA (A^2) | SEM | Rank |")
-        lines.append("|-----------|------------------|-----|------|")
+        lines.append("| Condition | Mean SASA (A^2) | 95% CI | SEM | Rank |")
+        lines.append("|-----------|------------------|--------|-----|------|")
         ranking = result.get_ranking(run_label)
         for rank, condition_label in enumerate(ranking, 1):
             condition = result.get_condition(condition_label)
             run_summary = condition.get_run(run_label)
             n_replicates = condition.n_replicates or len(run_summary.per_replicate_means)
             sem_str = format_sem_value(run_summary.sem_sasa, n_replicates, precision=2)
+            ci_str = format_interval_from_sem(
+                run_summary.mean_sasa, run_summary.sem_sasa, n_replicates, precision=2
+            )
             lines.append(
-                f"| {condition.label} | {run_summary.mean_sasa:.2f} | {sem_str} | {rank} |"
+                f"| {condition.label} | {run_summary.mean_sasa:.2f} | "
+                f"{ci_str} | {sem_str} | {rank} |"
             )
         if any(
             not is_sem_estimable(

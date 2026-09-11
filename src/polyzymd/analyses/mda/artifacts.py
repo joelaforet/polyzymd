@@ -419,7 +419,12 @@ class ReplicateArtifact(ArtifactEnvelope):
 
 
 class ConditionArtifact(ArtifactEnvelope):
-    """Aggregated artifact produced for one simulation condition."""
+    """Aggregated artifact produced for one simulation condition.
+
+    The payload carries an ``uncertainty`` block naming the estimator, the
+    replicate count, the coverage and the interval method, so a reader of the
+    JSON never has to infer what a ``sem`` field means.
+    """
 
     artifact_type: Literal["condition"] = "condition"
 
@@ -427,6 +432,49 @@ class ConditionArtifact(ArtifactEnvelope):
     replicates: list[int] = Field(default_factory=list)
     source_replicates: list[dict[str, Any]] = Field(default_factory=list)
     skipped_replicates: list[dict[str, Any]] = Field(default_factory=list)
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        analysis_name: str,
+        condition_label: str,
+        replicates: Sequence[int] | None = None,
+        payload: Mapping[str, Any] | None = None,
+        **fields: Any,
+    ) -> "ConditionArtifact":
+        """Build a condition artifact, recording what its uncertainties are.
+
+        Plugins construct their aggregates through this factory so that every
+        condition payload carries an ``uncertainty`` block, with n taken from
+        the replicate list or, failing that, ``payload["n_replicates"]``, and
+        ``None`` when neither states a count.
+        Loading an artifact from disk goes through plain validation instead and
+        leaves the stored payload exactly as written, so one produced by an
+        older version is read back unchanged rather than restamped.
+        """
+
+        from polyzymd.analyses.shared.statistics import uncertainty_block
+
+        replicate_ids = [int(replicate) for replicate in replicates or []]
+        payload_dict: dict[str, Any] = dict(payload or {})
+        if not isinstance(payload_dict.get("uncertainty"), Mapping):
+            n: int | None = len(replicate_ids) or None
+            if n is None:
+                stored = payload_dict.get("n_replicates")
+                n = (
+                    int(stored)
+                    if isinstance(stored, int) and not isinstance(stored, bool)
+                    else None
+                )
+            payload_dict["uncertainty"] = uncertainty_block(n)
+        return cls(
+            analysis_name=analysis_name,
+            condition_label=condition_label,
+            replicates=replicate_ids,
+            payload=payload_dict,
+            **fields,
+        )
 
 
 class ComparisonArtifact(ArtifactEnvelope):

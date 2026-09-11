@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -538,7 +539,11 @@ class TestTriadAggregationAndComparison:
     def test_extract_metrics_preserves_percent_scaling(
         self, triad_analysis: CatalyticTriadAnalysis
     ) -> None:
-        """Non-canonical metric extraction should still report percentages."""
+        """Non-canonical metric extraction should still report percentages.
+
+        The mean, SEM and interval come from the replicate values, which are
+        the sampling unit, so a stale stored SEM cannot leak into a comparison.
+        """
 
         summary = MagicMock(
             overall_simultaneous_contact=0.72,
@@ -550,9 +555,12 @@ class TestTriadAggregationAndComparison:
 
         metric = metrics[SIMULTANEOUS_CONTACT_METRIC]
         assert isinstance(metric, MetricValue)
-        assert metric.mean == 72.0
-        assert metric.sem == 4.0
+        assert metric.mean == pytest.approx(72.0)
+        assert metric.sem == pytest.approx(2.0 / math.sqrt(3.0))
         assert metric.replicate_values == [70.0, 72.0, 74.0]
+        assert metric.unit == "%"
+        assert metric.ci_method == "student_t"
+        assert metric.ci95_low == pytest.approx(72.0 - 4.302652729749462 * metric.sem)
 
     def test_deserialize_rejects_noncanonical_json(
         self, triad_analysis: CatalyticTriadAnalysis, tmp_path: Path

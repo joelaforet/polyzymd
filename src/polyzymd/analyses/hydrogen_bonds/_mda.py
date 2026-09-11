@@ -34,6 +34,7 @@ from polyzymd.analyses.mda import (
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
 from polyzymd.analyses.shared.loader import parse_time_string
+from polyzymd.analyses.shared.statistics import metric_summary_payload
 
 if TYPE_CHECKING:
     from polyzymd.analyses.hydrogen_bonds import (
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
     from polyzymd.analyses.mda import ArtifactSidecarRef, MDAReplicateJobContext
 
 LOGGER = logging.getLogger(__name__)
+HBOND_UNIT = "hydrogen bonds per frame"
 COORDINATE_DEPENDENT_SELECTION_KEYWORDS = frozenset(
     {"around", "point", "prop", "cyzone", "sphzone", "isolayer"}
 )
@@ -421,7 +423,7 @@ def aggregate_hydrogen_bond_artifacts(
     )
     metrics, replicate_metrics = _condition_metrics(condition_model)
     source_result_files = _source_result_files(output_dir, replicates)
-    return ConditionArtifact(
+    return ConditionArtifact.build(
         analysis_name="hydrogen_bonds",
         condition_label=condition_label,
         replicates=[int(rep) for rep in replicates],
@@ -1311,18 +1313,7 @@ def _condition_metrics(
     for summary in result.summaries:
         metric_name = f"mean_hbonds_{summary.name}"
         values = [float(value) for value in summary.per_replicate_mean_hbonds]
-        metrics[metric_name] = {
-            "name": metric_name,
-            "values": values,
-            "mean": float(summary.mean_hbonds_per_frame),
-            "sem": float(summary.sem_hbonds_per_frame),
-            "std": (
-                float(np.std(np.asarray(values, dtype=np.float64), ddof=1))
-                if len(values) > 1
-                else 0.0
-            ),
-            "n": len(values),
-        }
+        metrics[metric_name] = metric_summary_payload(metric_name, values, unit=HBOND_UNIT)
         for replicate, value in zip(result.replicates, values):
             replicate_metrics[str(replicate)][metric_name] = value
     return metrics, replicate_metrics

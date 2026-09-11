@@ -2335,9 +2335,10 @@ def test_aggregate_single_replicate(tmp_path: Path) -> None:
     summary = aggregated.summaries[0]
 
     assert summary.mean_hbonds_per_frame == pytest.approx(3.5)
-    assert summary.sem_hbonds_per_frame == pytest.approx(0.0)
+    # One replicate gives no estimable uncertainty, so the SEM is null, not zero.
+    assert summary.sem_hbonds_per_frame is None
     assert summary.mean_fraction_with_any == pytest.approx(0.9)
-    assert summary.sem_fraction_with_any == pytest.approx(0.0)
+    assert summary.sem_fraction_with_any is None
 
 
 def test_aggregate_empty_results(tmp_path: Path) -> None:
@@ -2544,7 +2545,10 @@ def test_extract_metrics_basic() -> None:
     assert set(metrics) == {"mean_hbonds_protein_polymer"}
     metric = metrics["mean_hbonds_protein_polymer"]
     assert metric.mean == pytest.approx(3.0)
-    assert metric.sem == pytest.approx(0.3)
+    # SEM comes from the replicate values, which are the sampling unit.
+    assert metric.sem == pytest.approx(0.2)
+    assert metric.unit == "hydrogen bonds per frame"
+    assert metric.ci_method == "student_t"
     assert metric.replicate_values == pytest.approx([2.8, 3.2])
     assert metric.higher_is_better is None
     assert metric.direction_labels == ("fewer H-bonds", "similar", "more H-bonds")
@@ -2602,7 +2606,7 @@ def test_extract_metrics_canonical_artifact_dict_input(tmp_path: Path) -> None:
 
     metric = metrics["mean_hbonds_protein_polymer"]
     assert metric.mean == pytest.approx(2.0)
-    assert metric.sem == pytest.approx(0.25)
+    assert metric.sem == pytest.approx(0.2)
     assert metric.replicate_values == pytest.approx([1.8, 2.2])
 
 

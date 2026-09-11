@@ -36,3 +36,12 @@ class PlotError(AnalysisError):
 
 class DependencyError(AnalysisError):
     """Raised when declared analysis dependencies are invalid or missing."""
+
+
+class StatisticsError(AnalysisError, ValueError):
+    """Raised when a statistical estimator is given an input it cannot use.
+
+    An invalid sample or an unsupported option is a typed failure, not a
+    silently degraded zero. It also subclasses ``ValueError`` so that callers
+    written before the typed error existed keep working.
+    """
