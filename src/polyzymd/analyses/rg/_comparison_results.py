@@ -148,7 +148,8 @@ class RgRunPairwiseComparison(BaseModel):
     p_value: float | None = None
     p_value_adjusted: float | None = None
     cohens_d: float | None = None
-    effect_interpretation: str
+    hedges_g: float | None = None
+    effect_interpretation: str | None = None
     direction: str
     significant: bool
     percent_change: float

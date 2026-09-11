@@ -179,7 +179,7 @@ def format_distances_console_table(
 
                 lines.append(
                     f"{comparison_name:<30} {pct_str:<10} {p_str:<12} "
-                    f"{d_str:<10} {comp.distance_effect_interpretation:<12} "
+                    f"{d_str:<10} {comp.distance_effect_interpretation or 'n/a':<12} "
                     f"{comp.distance_direction:<10}"
                 )
 
@@ -213,7 +213,7 @@ def format_distances_console_table(
 
                     lines.append(
                         f"{comparison_name:<30} {pct_str:<10} {p_str:<12} "
-                        f"{d_str:<10} {comp.fraction_effect_interpretation:<12} "
+                        f"{d_str:<10} {comp.fraction_effect_interpretation or 'n/a':<12} "
                         f"{comp.fraction_direction:<12}"
                     )
 
@@ -435,7 +435,8 @@ def format_distances_markdown(
                 lines.append(
                     f"| {comparison_name} | {format_pct(comp.distance_percent_change)} | "
                     f"{p_value} | {d_value} | "
-                    f"{comp.distance_effect_interpretation} | {comp.distance_direction} | {sig} |"
+                    f"{comp.distance_effect_interpretation or 'n/a'} | "
+                    f"{comp.distance_direction} | {sig} |"
                 )
 
             lines.append("")
@@ -464,7 +465,7 @@ def format_distances_markdown(
                     lines.append(
                         f"| {comparison_name} | {format_pct(comp.fraction_percent_change)} | "
                         f"{p_value} | {d_value} | "
-                        f"{comp.fraction_effect_interpretation} | {comp.fraction_direction} | "
+                        f"{comp.fraction_effect_interpretation or 'n/a'} | {comp.fraction_direction} | "
                         f"{sig} |"
                     )
 

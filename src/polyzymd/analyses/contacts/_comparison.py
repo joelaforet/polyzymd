@@ -110,7 +110,12 @@ def compare(ctx: ComparisonContext) -> Any:
 
     comparisons: list[ContactsPairwiseComparison] = []
     if len(summaries) >= 2:
-        comparisons = compute_contacts_pairwise(summaries, condition_data, effective_control)
+        comparisons = compute_contacts_pairwise(
+            summaries,
+            condition_data,
+            effective_control,
+            ttest_method=getattr(ctx, "ttest_method", "student"),
+        )
 
     anova_results: list[ContactsANOVASummary] = []
     if len(summaries) >= 3:
@@ -495,6 +500,7 @@ def compute_contacts_pairwise(
     summaries: list[Any],
     condition_data: list[tuple[Condition, dict[str, Any]]],
     effective_control: str | None,
+    ttest_method: str = "student",
 ) -> list[Any]:
     """Compute pairwise statistical comparisons for contacts.
 
@@ -506,6 +512,9 @@ def compute_contacts_pairwise(
         Raw condition data with per-replicate values.
     effective_control : str or None
         Control condition label.
+    ttest_method : str, optional
+        Variance assumption for the t-test, ``"student"`` or ``"welch"``,
+        by default ``"student"``.
 
     Returns
     -------
@@ -532,6 +541,7 @@ def compute_contacts_pairwise(
                 summary.label,
                 summary,
                 data,
+                ttest_method=ttest_method,
             )
             comparisons.append(comp)
     else:
@@ -545,6 +555,7 @@ def compute_contacts_pairwise(
                     label_b,
                     label_to_summary[label_b],
                     label_to_data[label_b],
+                    ttest_method=ttest_method,
                 )
                 comparisons.append(comp)
 
@@ -588,6 +599,7 @@ def compare_contacts_pair(
     label_b: str,
     summary_b: Any,
     data_b: dict[str, Any],
+    ttest_method: str = "student",
 ) -> Any:
     """Compare two conditions for coverage and contact fraction.
 
@@ -599,6 +611,9 @@ def compare_contacts_pair(
         Condition summaries.
     data_a, data_b : dict[str, Any]
         Raw data with per-replicate values.
+    ttest_method : str, optional
+        Variance assumption for the t-test, ``"student"`` or ``"welch"``,
+        by default ``"student"``.
 
     Returns
     -------
@@ -622,7 +637,7 @@ def compare_contacts_pair(
     coverage_a = data_a["coverage_per_replicate"]
     coverage_b = data_b["coverage_per_replicate"]
     coverage_testable = len(coverage_a) >= 2 and len(coverage_b) >= 2
-    ttest = independent_ttest(coverage_a, coverage_b)
+    ttest = independent_ttest(coverage_a, coverage_b, method=ttest_method)
     effect = cohens_d(coverage_a, coverage_b)
     pct = percent_change(summary_a.coverage_mean, summary_b.coverage_mean)
     direction = interpret_direction(
@@ -643,6 +658,7 @@ def compare_contacts_pair(
             t_statistic=ttest.t_statistic,
             p_value=ttest.p_value,
             cohens_d=effect.cohens_d,
+            hedges_g=effect.hedges_g,
             effect_size_interpretation=effect.interpretation,
             significant=ttest.significant if coverage_testable else False,
             percent_change=pct,
@@ -655,7 +671,7 @@ def compare_contacts_pair(
     contact_a = data_a["contact_fraction_per_replicate"]
     contact_b = data_b["contact_fraction_per_replicate"]
     contact_testable = len(contact_a) >= 2 and len(contact_b) >= 2
-    ttest = independent_ttest(contact_a, contact_b)
+    ttest = independent_ttest(contact_a, contact_b, method=ttest_method)
     effect = cohens_d(contact_a, contact_b)
     pct = percent_change(summary_a.mean_contact_fraction, summary_b.mean_contact_fraction)
     direction = interpret_direction(
@@ -676,6 +692,7 @@ def compare_contacts_pair(
             t_statistic=ttest.t_statistic,
             p_value=ttest.p_value,
             cohens_d=effect.cohens_d,
+            hedges_g=effect.hedges_g,
             effect_size_interpretation=effect.interpretation,
             significant=ttest.significant if contact_testable else False,
             percent_change=pct,
@@ -745,70 +762,48 @@ def compute_contacts_anova(condition_data: list[tuple[Condition, dict[str, Any]]
 def apply_fdr_correction(
     comparisons: list[Any], anova_results: list[Any], fdr_alpha: float
 ) -> None:
-    """Apply Benjamini-Hochberg FDR correction to comparison p-values.
+    """Correct every contacts pairwise test as one family.
+
+    The family holds the coverage test and the contact-fraction test of
+    every condition pair. ANOVA results are omnibus tests: they are
+    reported uncorrected, their ``p_value_adjusted`` stays ``None``, and
+    they gate nothing.
 
     Parameters
     ----------
     comparisons : list[Any]
-        Pairwise comparison results.
+        Pairwise comparison results, mutated in place.
     anova_results : list[Any]
-        ANOVA summaries.
+        Omnibus ANOVA summaries, mutated in place.
     fdr_alpha : float
-        False discovery rate alpha.
+        False discovery rate for the pairwise family and plain alpha for
+        the omnibus ANOVA.
     """
 
-    from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
+    from polyzymd.analyses.shared.inferential_statistics import (
+        apply_family_correction,
+        enforce_direction_significance,
+    )
 
     all_pairwise_agg = []
     for comp in comparisons:
         all_pairwise_agg.extend(comp.aggregate_comparisons)
 
+    apply_family_correction(
+        all_pairwise_agg,
+        fdr_alpha=fdr_alpha,
+        anova_results=anova_results,
+    )
+    enforce_direction_significance(all_pairwise_agg)
+
     if all_pairwise_agg:
-        logger.debug(
-            "Starting BH correction for contacts pairwise family: size=%d, alpha=%.4f",
-            len(all_pairwise_agg),
-            fdr_alpha,
-        )
-        raw_p = [agg.p_value if agg.testable else None for agg in all_pairwise_agg]
-        bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
-        changed_significance = 0
-        for agg, bh in zip(all_pairwise_agg, bh_results, strict=False):
-            if agg.significant != bh.significant:
-                changed_significance += 1
-            agg.p_value_adjusted = bh.adjusted_p_value
-            agg.significant = bh.significant if agg.testable else False
         n_significant = sum(1 for agg in all_pairwise_agg if agg.significant)
         logger.info(
-            "Applied BH correction to %d contacts pairwise tests at α=%.3f: "
-            "%d remain significant, %d changed significance",
+            "Applied BH correction to %d contacts pairwise tests at alpha=%.3f: "
+            "%d remain significant",
             len(all_pairwise_agg),
             fdr_alpha,
             n_significant,
-            changed_significance,
-        )
-
-    if anova_results:
-        logger.debug(
-            "Starting BH correction for contacts ANOVA family: size=%d, alpha=%.4f",
-            len(anova_results),
-            fdr_alpha,
-        )
-        raw_p = [a.p_value if a.testable else None for a in anova_results]
-        bh_results = benjamini_hochberg(raw_p, alpha=fdr_alpha)
-        changed_significance = 0
-        for anova, bh in zip(anova_results, bh_results, strict=False):
-            if anova.significant != bh.significant:
-                changed_significance += 1
-            anova.p_value_adjusted = bh.adjusted_p_value
-            anova.significant = bh.significant if anova.testable else False
-        n_significant = sum(1 for anova in anova_results if anova.significant)
-        logger.info(
-            "Applied BH correction to %d contacts ANOVA tests at α=%.3f: "
-            "%d remain significant, %d changed significance",
-            len(anova_results),
-            fdr_alpha,
-            n_significant,
-            changed_significance,
         )
 
 

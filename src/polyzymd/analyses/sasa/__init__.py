@@ -33,8 +33,11 @@ from polyzymd.analyses.sasa._mda import (
     load_condition_artifact,
 )
 from polyzymd.analyses.sasa._plot_settings import SASAPlotSettings
+from polyzymd.analyses.shared.inferential_statistics import (
+    apply_family_correction,
+    enforce_direction_significance,
+)
 from polyzymd.analyses.shared.multi_run_comparison import (
-    apply_fdr_correction,
     build_condition_pairs,
     filter_summaries_with_run,
 )
@@ -691,6 +694,7 @@ class SASAAnalysis(Analysis):
                         independent_ttest=independent_ttest,
                         cohens_d=cohens_d,
                         percent_change=percent_change,
+                        ttest_method=getattr(ctx, "ttest_method", "student"),
                     )
                     if candidate is not None:
                         pairwise.append(candidate)
@@ -727,7 +731,8 @@ class SASAAnalysis(Analysis):
             anova_by_run = None
 
         fdr_alpha = getattr(ctx, "fdr_alpha", 0.05)
-        self._apply_fdr_correction(pairwise, anova_by_run, fdr_alpha)
+        apply_family_correction(pairwise, fdr_alpha=fdr_alpha, anova_results=anova_by_run)
+        enforce_direction_significance(pairwise)
 
         return SASAComparisonResult(
             metric="mean_sasa",
@@ -817,8 +822,29 @@ class SASAAnalysis(Analysis):
         independent_ttest: Any,
         cohens_d: Any,
         percent_change: Any,
+        ttest_method: str = "student",
     ) -> Any:
-        """Compare one SASA run between two conditions."""
+        """Compare one SASA run between two conditions.
+
+        Parameters
+        ----------
+        run_label : str
+            Label of the run being compared.
+        condition_a, condition_b : str
+            Condition labels.
+        run_a, run_b : Any
+            Run summaries for each condition.
+        independent_ttest, cohens_d, percent_change : Any
+            Statistical helpers injected by the caller.
+        ttest_method : str, optional
+            Variance assumption for the t-test, ``"student"`` or
+            ``"welch"``, by default ``"student"``.
+
+        Returns
+        -------
+        SASARunPairwiseComparison
+            Pairwise statistics for this run.
+        """
         from polyzymd.analyses.sasa._comparison_results import SASARunPairwiseComparison
         from polyzymd.analyses.stats import interpret_direction
 
@@ -826,7 +852,7 @@ class SASAAnalysis(Analysis):
         values_b = [value for value in run_b.per_replicate_means if SASAAnalysis._is_finite(value)]
         testable = len(values_a) >= 2 and len(values_b) >= 2
 
-        t_result = independent_ttest(values_a, values_b)
+        t_result = independent_ttest(values_a, values_b, method=ttest_method)
         d_result = cohens_d(values_a, values_b)
         pct_change = percent_change(run_a.mean_sasa, run_b.mean_sasa)
         direction = interpret_direction(
@@ -842,6 +868,7 @@ class SASAAnalysis(Analysis):
             t_statistic=t_result.t_statistic if testable else None,
             p_value=t_result.p_value if testable else None,
             cohens_d=d_result.cohens_d if testable else None,
+            hedges_g=d_result.hedges_g if testable else None,
             effect_interpretation=d_result.interpretation,
             direction=direction,
             significant=t_result.significant if testable else False,
@@ -849,28 +876,6 @@ class SASAAnalysis(Analysis):
             testable=testable,
             note=None if testable else NOT_TESTABLE_SINGLETON_NOTE,
         )
-
-    @staticmethod
-    def _apply_fdr_correction(
-        pairwise: list[Any],
-        anova_by_run: list[Any] | None,
-        fdr_alpha: float,
-    ) -> None:
-        """Apply Benjamini-Hochberg FDR correction to pairwise and ANOVA p-values.
-
-        Treats all pairwise comparisons as one family and ANOVA tests as
-        a separate family.
-
-        Parameters
-        ----------
-        pairwise : list
-            Pairwise comparison results (mutated in place).
-        anova_by_run : list or None
-            ANOVA results (mutated in place).
-        fdr_alpha : float
-            FDR significance threshold.
-        """
-        apply_fdr_correction(pairwise, anova_by_run, fdr_alpha)
 
     @staticmethod
     def _has_run_summary(summary: Any, run_label: str) -> bool:

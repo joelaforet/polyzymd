@@ -14,6 +14,12 @@ These are **utility functions**, not methods on a base class.  Complex
 analyses override ``compare()`` entirely and call whichever functions they
 need.
 
+Multiple comparisons follow one policy for the whole package, defined in
+:func:`polyzymd.analyses.shared.inferential_statistics.apply_family_correction`.
+One analysis run is one Benjamini-Hochberg family holding every pairwise
+test across every metric. The one-way ANOVA is reported uncorrected as an
+omnibus test and gates nothing.
+
 See Also
 --------
 polyzymd.analyses.shared.inferential_statistics : Lower-level statistical
@@ -73,6 +79,15 @@ def interpret_direction(
     -------
     str
         One of the three direction labels.
+
+    Notes
+    -----
+    The label this returns is provisional. Significance is only known
+    after the run's pairwise family has been corrected, so callers pass
+    their results through
+    :func:`polyzymd.analyses.shared.inferential_statistics.enforce_direction_significance`
+    afterwards, which rewrites the label to "no significant change" where
+    the test did not reach the threshold.
     """
     if math.isnan(pct_change):
         return direction_labels[1]
@@ -197,6 +212,7 @@ def pairwise_comparisons(
                     p_value_adjusted=None,
                     posthoc_method=posthoc_method,
                     cohens_d=effect.cohens_d,
+                    hedges_g=effect.hedges_g,
                     effect_size_interpretation=effect.interpretation,
                     direction=direction,
                     significant=ttest.significant if testable else False,
@@ -250,6 +266,7 @@ def pairwise_comparisons(
                     p_value_adjusted=p_value if testable else None,
                     posthoc_method=posthoc_method,
                     cohens_d=effect.cohens_d,
+                    hedges_g=effect.hedges_g,
                     effect_size_interpretation=effect.interpretation,
                     direction=direction,
                     significant=p_value <= fdr_alpha if testable else False,
@@ -506,21 +523,20 @@ def default_scalar_comparison(
         # Ranking always works when at least 1 condition exists
         all_rankings[metric_name] = rank_conditions(per_cond)
 
-    # Apply BH correction across ALL pairwise results (full family)
-    if all_pairwise and posthoc_method == "ttest_bh":
-        from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
+    # One family per run: every pairwise test across every metric.  Tukey HSD
+    # already controls the family-wise rate, so it is not corrected again.
+    from polyzymd.analyses.shared.inferential_statistics import (
+        apply_family_correction,
+        enforce_direction_significance,
+    )
 
-        raw_p_values = [r.p_value if r.testable else None for r in all_pairwise]
-        bh_results = benjamini_hochberg(raw_p_values, alpha=fdr_alpha)
-        for result, bh in zip(all_pairwise, bh_results, strict=False):
-            result.p_value_adjusted = bh.adjusted_p_value
-            if not result.testable:
-                result.significant = False
-                continue
-            p_for_significance = (
-                bh.adjusted_p_value if bh.adjusted_p_value is not None else result.p_value
-            )
-            result.significant = p_for_significance <= fdr_alpha
+    if posthoc_method == "ttest_bh":
+        apply_family_correction(
+            all_pairwise,
+            fdr_alpha=fdr_alpha,
+            anova_results=all_anova,
+        )
+    enforce_direction_significance(all_pairwise)
 
     # Build condition summaries
     condition_summaries: list[ConditionSummary] = []
@@ -998,6 +1014,7 @@ def _format_scalar_text(
             sig_marker = "*" if comp.significant else ""
             pct_str = format_pct(comp.percent_change)
             d_str = f"{comp.cohens_d:.2f}" if comp.testable else "n/a"
+            effect_str = comp.effect_size_interpretation or "n/a"
             if comp.posthoc_method == "ttest_bh":
                 p_str = f"{comp.p_value:.4f}{sig_marker}" if comp.testable else "not testable"
                 p_adj = comp.p_value_adjusted
@@ -1010,18 +1027,17 @@ def _format_scalar_text(
                 if has_adjusted:
                     lines.append(
                         f"{name:<30} {pct_str:<10} {t_str:<10} {p_str:<12} {p_adj_str:<12} "
-                        f"{d_str:<10} {comp.effect_size_interpretation:<12}"
+                        f"{d_str:<10} {effect_str:<12}"
                     )
                 else:
                     lines.append(
                         f"{name:<30} {pct_str:<10} {t_str:<10} {p_str:<12} "
-                        f"{d_str:<10} {comp.effect_size_interpretation:<12}"
+                        f"{d_str:<10} {effect_str:<12}"
                     )
             elif comp.posthoc_method == "tukey_hsd":
                 p_str = f"{comp.p_value:.4f}{sig_marker}" if comp.testable else "not testable"
                 lines.append(
-                    f"{name:<30} {pct_str:<10} {p_str:<12} "
-                    f"{d_str:<10} {comp.effect_size_interpretation:<12}"
+                    f"{name:<30} {pct_str:<10} {p_str:<12} " f"{d_str:<10} {effect_str:<12}"
                 )
             else:
                 raise ValueError(f"Unknown posthoc method {comp.posthoc_method!r}")
@@ -1196,6 +1212,7 @@ def _format_scalar_markdown(
             name = f"{comp.condition_b} vs {comp.condition_a}"
             sig = "Yes" if comp.significant else "No"
             d_str = f"{comp.cohens_d:.2f}" if comp.testable else "n/a"
+            effect_str = comp.effect_size_interpretation or "n/a"
             if comp.posthoc_method == "ttest_bh":
                 p_adj = "n/a" if comp.p_value_adjusted is None else f"{comp.p_value_adjusted:.4f}"
                 p_value = f"{comp.p_value:.4f}" if comp.testable else "not testable"
@@ -1208,20 +1225,20 @@ def _format_scalar_markdown(
                     lines.append(
                         f"| {name} | {format_pct(comp.percent_change)} | "
                         f"{t_str} | {p_value} | {p_adj} | {d_str} | "
-                        f"{comp.effect_size_interpretation} | {sig} |"
+                        f"{effect_str} | {sig} |"
                     )
                 else:
                     lines.append(
                         f"| {name} | {format_pct(comp.percent_change)} | "
                         f"{t_str} | {p_value} | {d_str} | "
-                        f"{comp.effect_size_interpretation} | {sig} |"
+                        f"{effect_str} | {sig} |"
                     )
             elif comp.posthoc_method == "tukey_hsd":
                 p_value = f"{comp.p_value:.4f}" if comp.testable else "not testable"
                 lines.append(
                     f"| {name} | {format_pct(comp.percent_change)} | "
                     f"{p_value} | {d_str} | "
-                    f"{comp.effect_size_interpretation} | {sig} |"
+                    f"{effect_str} | {sig} |"
                 )
             else:
                 raise ValueError(f"Unknown posthoc method {comp.posthoc_method!r}")

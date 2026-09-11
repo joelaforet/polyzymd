@@ -30,8 +30,11 @@ from polyzymd.analyses.rg._mda import (
     build_rg_jobs,
 )
 from polyzymd.analyses.rg._plot_settings import RgPlotSettings
+from polyzymd.analyses.shared.inferential_statistics import (
+    apply_family_correction,
+    enforce_direction_significance,
+)
 from polyzymd.analyses.shared.multi_run_comparison import (
-    apply_fdr_correction,
     build_condition_pairs,
     filter_summaries_with_run,
 )
@@ -826,6 +829,7 @@ class RgAnalysis(Analysis):
                             condition_b=condition_b,
                             run_a=available[condition_a].get_run(run_label),
                             run_b=available[condition_b].get_run(run_label),
+                            ttest_method=getattr(ctx, "ttest_method", "student"),
                         )
                     )
 
@@ -858,7 +862,12 @@ class RgAnalysis(Analysis):
             anova_by_run = None
 
         fdr_alpha = getattr(ctx, "fdr_alpha", 0.05)
-        self._apply_fdr_correction(pairwise_comparisons, anova_by_run, fdr_alpha)
+        apply_family_correction(
+            pairwise_comparisons,
+            fdr_alpha=fdr_alpha,
+            anova_results=anova_by_run,
+        )
+        enforce_direction_significance(pairwise_comparisons)
 
         return RgComparisonResult(
             metric="mean_rg",
@@ -952,6 +961,7 @@ class RgAnalysis(Analysis):
         condition_b: str,
         run_a: Any,
         run_b: Any,
+        ttest_method: str = "student",
     ) -> Any:
         """Compare a single Rg run between two conditions.
 
@@ -967,6 +977,9 @@ class RgAnalysis(Analysis):
             Condition A run summary object.
         run_b : Any
             Condition B run summary object.
+        ttest_method : str, optional
+            Variance assumption for the t-test, ``"student"`` or
+            ``"welch"``, by default ``"student"``.
 
         Returns
         -------
@@ -1004,7 +1017,7 @@ class RgAnalysis(Analysis):
                 note="Insufficient replicates (n < 2) for inferential statistics",
             )
 
-        t_result = independent_ttest(run_a_values, run_b_values)
+        t_result = independent_ttest(run_a_values, run_b_values, method=ttest_method)
         d_result = cohens_d(run_a_values, run_b_values)
 
         return RgRunPairwiseComparison(
@@ -1014,44 +1027,11 @@ class RgAnalysis(Analysis):
             t_statistic=t_result.t_statistic,
             p_value=t_result.p_value,
             cohens_d=d_result.cohens_d,
+            hedges_g=d_result.hedges_g,
             effect_interpretation=d_result.interpretation,
             direction=direction,
             significant=t_result.significant,
             percent_change=pct_change,
-        )
-
-    @staticmethod
-    def _apply_fdr_correction(
-        pairwise: list[Any],
-        anova_by_run: list[Any] | None,
-        fdr_alpha: float,
-    ) -> None:
-        """Apply Benjamini-Hochberg FDR correction to pairwise and ANOVA p-values.
-
-        Treats all pairwise comparisons as one family and ANOVA tests as
-        a separate family.
-
-        Parameters
-        ----------
-        pairwise : list
-            Pairwise comparison results (mutated in place).
-        anova_by_run : list or None
-            ANOVA results (mutated in place).
-        fdr_alpha : float
-            FDR significance threshold.
-        """
-
-        def _set_corrected(result: Any, bh_result: Any) -> None:
-            if hasattr(result, "p_value_adjusted"):
-                result.p_value_adjusted = bh_result.adjusted_p_value
-            result.significant = bh_result.significant
-
-        apply_fdr_correction(
-            pairwise,
-            anova_by_run,
-            fdr_alpha,
-            get_p_value=lambda result: result.p_value if result.testable else None,
-            set_corrected=lambda result, bh: _set_corrected(result, bh),
         )
 
     @staticmethod

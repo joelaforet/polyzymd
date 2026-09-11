@@ -79,7 +79,8 @@ class AggregateComparisonResult(BaseModel):
     p_value: float
     p_value_adjusted: float | None = None
     cohens_d: float
-    effect_size_interpretation: str
+    hedges_g: float | None = None
+    effect_size_interpretation: str | None = None
     significant: bool
     meets_effect_size_threshold: bool = True
     percent_change: float
