@@ -26,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Recovery skips truncated state or system XML.**  A hard kill could leave
+  `interrupted_system.xml` at zero bytes; recovery paired it with the intact
+  `interrupted_state.xml` and the next segment died in OpenMM with
+  `Invalid input string`.  Candidates must now be non-empty and end with their
+  closing root tag; a truncated system falls back to `production_N_system.xml`
+  and a truncated state is skipped for the next candidate.
+
 - **Routing exclusions accumulate and the retry budget resets.**  A job that
   landed on a GPU node whose driver is too old for the pinned pixi environment
   resubmitted itself excluding that node, but the retry counter was never
