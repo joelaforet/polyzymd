@@ -3925,7 +3925,11 @@ def _make_aggregated_result_with_pair(
 
 
 def test_plot_top_pairs_uses_sem_occupancy_for_xerr(tmp_path: Path) -> None:
-    """Top-pairs plot should pass aggregate SEM values as horizontal xerr."""
+    """Top-pairs bars should scale the aggregate SEM to the 95 percent interval.
+
+    Each bar spans ``t(0.975, n - 1) * SEM`` so the drawn range is the interval
+    the footnote claims. With two replicates the coverage factor is 12.706.
+    """
     pytest.importorskip("matplotlib")
     import matplotlib.axes
 
@@ -3962,8 +3966,9 @@ def test_plot_top_pairs_uses_sem_occupancy_for_xerr(tmp_path: Path) -> None:
 
     assert path is not None
     assert len(captured_kwargs) == 2
-    assert captured_kwargs[0]["xerr"] == pytest.approx([cond_a_sem])
-    assert captured_kwargs[1]["xerr"] == pytest.approx([cond_b_sem])
+    coverage_factor = 12.706204736432095
+    assert captured_kwargs[0]["xerr"] == pytest.approx([cond_a_sem * coverage_factor])
+    assert captured_kwargs[1]["xerr"] == pytest.approx([cond_b_sem * coverage_factor])
     assert all(kwargs["capsize"] == PlotSettings().theme.bar_capsize for kwargs in captured_kwargs)
 
 

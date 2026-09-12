@@ -17,9 +17,15 @@ import numpy as np
 
 from polyzymd.analyses.shared.loader import _require_matplotlib
 from polyzymd.analyses.shared.plotting import (
+    annotate_uncertainty,
+    error_bar_half_widths,
     get_condition_colors,
+    get_output_path,
     has_replicate_uncertainty,
     order_condition_labels,
+    plugin_plot_settings,
+    resolve_error_bar,
+    save_figure,
     scatter_replicate_values,
 )
 
@@ -461,6 +467,8 @@ def plot_triad_threshold_bars(
     dpi: int = 300,
     plot_settings: Any | None = None,
     control_label: str | None = None,
+    error_bar: str = "ci95",
+    equilibration: str | None = None,
 ) -> "Figure":
     """Create grouped bar chart of threshold fractions across conditions.
 
@@ -592,10 +600,10 @@ def plot_triad_threshold_bars(
             bar_positions,
             data[cond_idx],
             width,
-            yerr=(
-                errors[cond_idx]
-                if any(has_replicate_uncertainty(values) for values in replicate_values[cond_idx])
-                else None
+            yerr=error_bar_half_widths(
+                errors[cond_idx],
+                replicate_values[cond_idx],
+                error_bar=error_bar,
             ),
             label=label,
             color=color,
@@ -629,6 +637,16 @@ def plot_triad_threshold_bars(
     ax.set_title(title, fontsize=13, fontweight="bold")
 
     plt.tight_layout()
+    annotate_uncertainty(
+        fig,
+        plot_settings,
+        "catalytic_triad",
+        n_replicates=min(
+            (len(values) for cond in replicate_values for values in cond if values),
+            default=0,
+        ),
+        equilibration=equilibration,
+    )
 
     if save_path:
         save_path = Path(save_path)
@@ -873,8 +891,6 @@ def plot_triad_kde_panel_from_data(
     list[Path]
         Paths to generated plot files.
     """
-    from polyzymd.analyses.shared.plotting import get_output_path, save_figure
-
     if not plot_settings.catalytic_triad.generate_kde_panel:
         return []
 
@@ -918,6 +934,7 @@ def plot_triad_threshold_bars_from_data(
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
+    equilibration: str | None = None,
 ) -> list[Path]:
     """Generate grouped bar chart of triad contact fractions.
 
@@ -940,8 +957,6 @@ def plot_triad_threshold_bars_from_data(
     list[Path]
         Paths to generated plot files.
     """
-    from polyzymd.analyses.shared.plotting import get_output_path, save_figure
-
     if not plot_settings.catalytic_triad.generate_bars:
         return []
 
@@ -984,6 +999,10 @@ def plot_triad_threshold_bars_from_data(
         dpi=plot_settings.dpi,
         plot_settings=plot_settings,
         control_label=control_label,
+        error_bar=resolve_error_bar(
+            plugin_plot_settings(plot_settings, "catalytic_triad"), plot_settings
+        ),
+        equilibration=equilibration,
     )
 
     return [save_figure(fig, output_path, plot_settings)]

@@ -15,12 +15,17 @@ import numpy as np
 
 from polyzymd.analyses.mda import ConditionArtifact
 from polyzymd.analyses.shared.plotting import (
+    annotate_uncertainty,
     apply_axis_style,
     apply_legend,
+    band_half_widths,
+    error_bar_half_widths,
     get_condition_colors,
     get_output_path,
     get_palette_colors,
     order_condition_labels,
+    plugin_plot_settings,
+    resolve_error_bar,
     save_figure,
     scatter_replicate_values,
     scatter_stacked_segment_replicates,
@@ -78,6 +83,7 @@ def plot_summary_comparison(
     output_dir: Path,
     plot_settings: Any,
     control_label: str | None = None,
+    equilibration: str | None = None,
 ) -> Path | None:
     """Plot faceted grouped bars by summary with independent y-axis scales."""
     import matplotlib
@@ -105,6 +111,7 @@ def plot_summary_comparison(
     x = np.arange(len(labels), dtype=float)
     colors = get_condition_colors(labels, plot_settings, control_label=control_label)
 
+    n_replicates_seen = 0
     height_per_summary = 3.5
     fig, axes = plt.subplots(
         n_summaries,
@@ -129,7 +136,17 @@ def plot_summary_comparison(
                 list(_get_attr(summary, "per_replicate_mean_hbonds", [])) if summary else []
             )
 
-        yerr = suppress_singleton_errors(sems, replicate_values)
+        yerr = error_bar_half_widths(
+            sems,
+            replicate_values,
+            error_bar=resolve_error_bar(
+                plugin_plot_settings(plot_settings, "hydrogen_bonds"), plot_settings
+            ),
+        )
+        n_replicates_seen = max(
+            n_replicates_seen,
+            min((len(values) for values in replicate_values if values), default=0),
+        )
         ax.bar(
             x,
             means,
@@ -161,6 +178,14 @@ def plot_summary_comparison(
     fig.suptitle("Hydrogen-bond summary comparison", y=0.995)
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.98))
 
+    annotate_uncertainty(
+        fig,
+        plot_settings,
+        "hydrogen_bonds",
+        n_replicates=n_replicates_seen,
+        equilibration=equilibration,
+    )
+
     output_path = get_output_path(output_dir, "hbond_summary_comparison", plot_settings)
     return save_figure(fig, output_path, plot_settings)
 
@@ -173,8 +198,9 @@ def plot_timeseries(
     output_dir: Path,
     plot_settings: Any,
     control_label: str | None = None,
+    equilibration: str | None = None,
 ) -> Path | None:
-    """Plot per-frame mean timeseries with ±1 SD band across replicates."""
+    """Plot the per-frame mean with the chosen interval across replicates."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -185,6 +211,7 @@ def plot_timeseries(
     fig, ax = plt.subplots(figsize=(9.0, 4.8))
 
     plotted_any = False
+    n_replicates_seen = 0
     for idx, label in enumerate(labels):
         result = results.get(label)
         traces = replicate_data.get(label, {}).get(summary_name, [])
@@ -215,16 +242,22 @@ def plot_timeseries(
         stacked = np.vstack(trimmed)
         mean_trace = np.mean(stacked, axis=0)
         ax.plot(time_ns, mean_trace, color=colors[idx], linewidth=2.2, label=label)
-        if stacked.shape[0] > 1:
-            std_trace = np.std(stacked, axis=0)
+        band_half_width = band_half_widths(
+            stacked,
+            error_bar=resolve_error_bar(
+                plugin_plot_settings(plot_settings, "hydrogen_bonds"), plot_settings
+            ),
+        )
+        if band_half_width is not None:
             ax.fill_between(
                 time_ns,
-                mean_trace - std_trace,
-                mean_trace + std_trace,
+                mean_trace - band_half_width,
+                mean_trace + band_half_width,
                 color=colors[idx],
                 alpha=0.2,
                 linewidth=0,
             )
+            n_replicates_seen = max(n_replicates_seen, int(stacked.shape[0]))
         plotted_any = True
 
     if not plotted_any:
@@ -239,6 +272,14 @@ def plot_timeseries(
         ylabel="H-bonds/frame",
     )
     apply_legend(ax, plot_settings)
+
+    annotate_uncertainty(
+        fig,
+        plot_settings,
+        "hydrogen_bonds",
+        n_replicates=n_replicates_seen,
+        equilibration=equilibration,
+    )
 
     output_path = get_output_path(
         output_dir,
@@ -303,6 +344,7 @@ def plot_top_pairs(
     bar_height = 0.8 / max(n_conditions, 1)
     colors = get_condition_colors(labels, plot_settings, control_label=control_label)
 
+    n_replicates_seen = 0
     fig, ax = plt.subplots(figsize=(10.0, max(4.0, 0.55 * len(top_labels) + 1.5)))
     for idx, label in enumerate(labels):
         summary = _find_summary(results[label], summary_name) if label in results else None
@@ -334,7 +376,17 @@ def plot_top_pairs(
         replicate_values = [
             replicate_values_by_pair.get(pair_label, []) for pair_label in top_labels
         ]
-        xerr = suppress_singleton_errors(sems, replicate_values)
+        xerr = error_bar_half_widths(
+            sems,
+            replicate_values,
+            error_bar=resolve_error_bar(
+                plugin_plot_settings(plot_settings, "hydrogen_bonds"), plot_settings
+            ),
+        )
+        n_replicates_seen = max(
+            n_replicates_seen,
+            min((len(values) for values in replicate_values if values), default=0),
+        )
         offset = (idx - n_conditions / 2 + 0.5) * bar_height
         bar_positions = y + offset
         bar_kwargs = {
@@ -367,6 +419,8 @@ def plot_top_pairs(
         xlabel="Mean occupancy",
     )
     apply_legend(ax, plot_settings)
+
+    annotate_uncertainty(fig, plot_settings, "hydrogen_bonds", n_replicates=n_replicates_seen)
 
     output_path = get_output_path(
         output_dir, f"hbond_top_pairs_{_safe_name(summary_name)}", plot_settings

@@ -773,13 +773,17 @@ class DistancesAnalysis(Analysis):
             logger.warning(f"Distance KDE plot failed: {exc}")
 
         try:
-            result = _plot_distance_threshold_bars(plot_data, labels, ctx.output_dir, plot_settings)
+            result = _plot_distance_threshold_bars(
+                plot_data, labels, ctx.output_dir, plot_settings, ctx.equilibration
+            )
             plots.extend(result)
         except (ValueError, RuntimeError, OSError) as exc:
             logger.warning(f"Distance threshold bars plot failed: {exc}")
 
         try:
-            result = _plot_distance_state_bars(plot_data, labels, ctx.output_dir, plot_settings)
+            result = _plot_distance_state_bars(
+                plot_data, labels, ctx.output_dir, plot_settings, ctx.equilibration
+            )
             plots.extend(result)
         except (ValueError, RuntimeError, OSError) as exc:
             logger.warning(f"Distance state bars plot failed: {exc}")

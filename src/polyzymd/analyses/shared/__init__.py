@@ -67,9 +67,12 @@ from polyzymd.analyses.shared.loader import (
     time_to_frame,
 )
 from polyzymd.analyses.shared.plotting import (
+    add_uncertainty_footnote,
     annotate_cells,
     apply_axis_style,
     apply_legend,
+    band_half_widths,
+    error_bar_half_widths,
     get_condition_color_map,
     get_condition_colors,
     get_output_path,
@@ -77,6 +80,8 @@ from polyzymd.analyses.shared.plotting import (
     get_theme,
     grouped_bars,
     order_condition_labels,
+    plugin_plot_settings,
+    resolve_error_bar,
     save_figure,
     symmetric_clim,
 )
@@ -150,6 +155,11 @@ __all__ = [
     "order_condition_labels",
     "get_condition_colors",
     "get_condition_color_map",
+    "add_uncertainty_footnote",
+    "band_half_widths",
+    "error_bar_half_widths",
+    "plugin_plot_settings",
+    "resolve_error_bar",
     "get_output_path",
     "save_figure",
     "grouped_bars",
