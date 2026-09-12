@@ -21,7 +21,6 @@ _PLOTTER_MODULES = tuple(
     for name in (
         "rmsd",
         "rmsf",
-        "rg",
         "sasa",
         "contacts",
         "distances",

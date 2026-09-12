@@ -106,6 +106,11 @@ class Observable(BaseModel):
     higher_is_better : bool or None, optional
         Direction that counts as an improvement, used by formatters. ``None``
         when the quantity has no preferred direction.
+    metadata : dict, optional
+        JSON-compatible facts about how the value was measured, for example the
+        periodic boundary policy or whether the topology carried bonds. The
+        framework copies it onto the replicate estimate and writes it into the
+        replicate artifact. It takes no part in the statistics.
     """
 
     name: str = Field(min_length=1)
@@ -114,6 +119,7 @@ class Observable(BaseModel):
     unit: str | None = None
     index: list[float] | None = None
     higher_is_better: bool | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(frozen=True)
 
@@ -158,6 +164,7 @@ class ObservableEstimate(BaseModel):
     profile: list[float] | None = None
     index: list[float] | None = None
     higher_is_better: bool | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     n_frames: int
     statistical_inefficiency: float | None = None
     n_eff: float | None = None
@@ -308,6 +315,7 @@ def reduce_observable(observable: Observable | ObservableEstimate) -> Observable
         "kind": observable.kind,
         "unit": observable.unit,
         "higher_is_better": observable.higher_is_better,
+        "metadata": dict(observable.metadata),
         "n_frames": int(values.size),
     }
     if observable.kind == "profile":
