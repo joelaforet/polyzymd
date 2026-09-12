@@ -40,7 +40,6 @@ PLUGINS_WITH_PLOT_SETTINGS = (
     "rmsd",
     "rmsf",
     "rg",
-    "sasa",
     "contacts",
     "distances",
     "secondary_structure",

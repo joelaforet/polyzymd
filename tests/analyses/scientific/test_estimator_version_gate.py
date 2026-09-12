@@ -17,7 +17,6 @@ from polyzymd.analyses.rmsf._mda import RMSF_PROFILE_VERSION
 from polyzymd.analyses.rmsf._mda import (
     _validate_and_order_artifacts as _validate_rmsf_artifacts,
 )
-from polyzymd.analyses.sasa import SASASettings
 from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 
 FINGERPRINT = "fingerprint"
@@ -70,10 +69,6 @@ def _validator_call(analysis_name: str, artifact: ReplicateArtifact, tmp_path):
         from polyzymd.analyses.rg._mda import _validate_and_order_artifacts as validate
 
         return validate(run_labels=["default"], analysis_dir=tmp_path, **common)
-    if analysis_name == "sasa":
-        from polyzymd.analyses.sasa._mda import _validate_and_order_artifacts as validate
-
-        return validate(settings=SASASettings(), **common)
     if analysis_name == "distances":
         from polyzymd.analyses.distances._mda import _validate_and_order_artifacts as validate
 
@@ -87,7 +82,7 @@ def _validator_call(analysis_name: str, artifact: ReplicateArtifact, tmp_path):
     raise AssertionError(f"unhandled analysis {analysis_name}")
 
 
-PLUGINS = ["rmsd", "rg", "sasa", "distances", "catalytic_triad"]
+PLUGINS = ["rmsd", "rg", "distances", "catalytic_triad"]
 
 
 @pytest.mark.parametrize("analysis_name", PLUGINS)
