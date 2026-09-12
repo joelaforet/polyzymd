@@ -549,5 +549,5 @@ class TestDiscoveryImportCost:
         )
         result = json.loads(completed.stdout.strip().splitlines()[-1])
 
-        assert result["names"], "discovery found no plugins"
+        assert len(result["names"]) == 9, result["names"]
         assert result["heavy"] == []

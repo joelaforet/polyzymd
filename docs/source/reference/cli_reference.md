@@ -874,6 +874,7 @@ List the available analysis names with `polyzymd compare run --list`.
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
 | `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default: the comparison default, `10ns`. |
 | `--label TEXT` | No | Condition label, one per `-c` in the same order. Default: the name of the directory holding the config. |
+| `--run LABEL` | No | Run or pair label to report when the analysis measures one metric on several selections, for example `Protein` or `Polymer Oligomers` for rg. Default: the first one the plugin lists; the rest appear in `all_runs`. |
 | `--set KEY=VALUE` | No | Plugin setting. Repeatable. The value is read as YAML, so `--set n_bins=50` gives an integer; a dotted key nests. |
 | `--format agent\|json\|table` | No | `agent` (default) prints at most 25 lines, `json` prints the full `ProtocolReport`, `table` prints an aligned summary. |
 | `-o, --output PATH` | No | Also write the rendered output to this file. |
@@ -903,9 +904,9 @@ Line shapes:
 
 | Line | Fields |
 |---|---|
-| header | `# polyzymd analyze <analysis>  metric <key>  unit <unit or none>  eq <window>  conditions <count>  replicates <n,n,...>  protocol <analysis>/<protocol_version>` |
+| header | `# polyzymd analyze <analysis>  metric <key>  unit <unit or none>[  run <label>]  eq <window>  conditions <count>  replicates <n,n,...>  protocol <analysis>/<protocol_version>` |
 | condition | `<label>  n <count>  mean <value>  sem <value>  ci95 <low> to <high>  values <per-replicate values>` |
-| comparison | `<a> vs <b>  delta <signed>  ci95 <low> to <high>  p <value>  p_adj <value>  test <name>  correction <name>  d <value>  significant\|not_significant\|not_testable` |
+| comparison | `<a> vs <b>  delta <signed>  ci95 <low> to <high>  p <value>  p_adj <value>  test <name>  correction <name>  d <value>  significant\|not_significant\|no_test\|not_testable` |
 | warning | `warning: <text>` |
 | verdict | `verdict: <sentence>` |
 
@@ -920,6 +921,8 @@ The verdict vocabulary is fixed so a caller can branch on it:
 | `larger` | The second condition differs from the control after correction and the difference is positive |
 | `smaller` | The second condition differs from the control after correction and the difference is negative |
 | `no significant difference` | The test ran and the adjusted p value did not clear alpha |
+| `no test recorded` | The plugin stored no multiplicity-corrected p value, so the comparison describes a difference without deciding it |
+| `changed` | The difference is significant but the two means are equal at the stored precision |
 | `not testable` | A condition has fewer than two replicates, so the test is undefined |
 
 `--format json` prints the full report. Every field is documented in
@@ -948,6 +951,9 @@ polyzymd analyze sasa -c A/config.yaml -c B/config.yaml \
 
 # An existing comparison project
 polyzymd analyze rmsf -f comparison.yaml
+
+# Report the polymer selection instead of the protein
+polyzymd analyze rg -c A/config.yaml -c B/config.yaml --run "Polymer Oligomers"
 ```
 
 ### Notes

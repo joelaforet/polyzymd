@@ -12,8 +12,10 @@ reads back exactly what `model_dump_json()` wrote.
 | `analysis` | `str` | Canonical analysis name, for example `rg`. |
 | `protocol_version` | `str` | The plugin's `Analysis.protocol_version`. With `analysis` it identifies the code that defined the metric. Every plugin starts at `"1"` and bumps it when the meaning, unit or estimator of a reported metric changes. |
 | `metric` | `str` | Primary metric key: the first key the plugin's `extract_metrics()` returns. |
-| `unit` | `str \| None` | Unit of `metric`, for example `A` or `%`. `None` marks a dimensionless metric. |
+| `unit` | `str \| None` | Unit of `metric`, for example `A` or `%`. `None` marks a dimensionless metric, and also a plugin that declares no unit. |
+| `run` | `str \| None` | Selected run or pair label, for a plugin that measures the same metric on several selections (rg on `Protein` and `Polymer Oligomers`, sasa on four contexts, distances on each atom pair). `None` when the plugin reports one run. |
 | `all_metrics` | `list[str]` | Every metric key the plugin reported, `metric` first. Only `metric` is summarised in `conditions` and `pairwise`. |
+| `all_runs` | `list[str]` | Every run or pair label the plugin reported, `run` first. Empty when the plugin reports one run. Select another with `--run LABEL`. |
 | `equilibration` | `str` | Equilibration window discarded from the start of every replicate, for example `10ns`. Applied uniformly to every replicate of every condition. |
 | `frames_per_replicate` | `dict[str, int \| None]` | Frames each replicate of a condition contributed, keyed by condition label, from the condition artifact's frame-selection provenance. `None` for a plugin that records no frame selection. |
 | `conditions` | `list[ConditionReport]` | One entry per condition, in the order the configs were given. |
@@ -36,8 +38,8 @@ count is stated on the last line.
 | `mean` | `float` | Mean of the primary metric across replicates. |
 | `sem` | `float \| None` | Standard error of that mean across replicates, `s / sqrt(n)` with `ddof = 1`. `None` for one replicate, where it does not exist. |
 | `ci95` | `tuple[float, float] \| None` | Limits of the 95 percent Student t interval on the mean. `None` for one replicate. |
-| `ci_method` | `str \| None` | Interval method, `student_t` when an interval exists. |
-| `replicate_values` | `list[float]` | The per-replicate values behind the mean, in replicate order. |
+| `ci_method` | `str \| None` | `student_t` when the interval came from `replicate_values`; `student_t_from_sem` when the plugin stored only a mean and a standard error and the interval was rebuilt as `mean` plus or minus `t(0.975, n - 1)` times `sem`. `None` when no interval exists. |
+| `replicate_values` | `list[float]` | The per-replicate values behind the mean, in replicate order. Empty for a plugin that stores only summary statistics, such as contacts. |
 
 ## PairwiseReport
 
@@ -46,9 +48,9 @@ count is stated on the last line.
 | `a` | `str` | Control condition label. |
 | `b` | `str` | Compared condition label. |
 | `delta` | `float` | `mean(b) - mean(a)`, in the metric's unit. |
-| `delta_ci95` | `tuple[float, float] \| None` | 95 percent Student t interval on `delta`, uncorrected for multiplicity. Pooled variance with `n_a + n_b - 2` degrees of freedom for `student_t`, separate variances with Welch-Satterthwaite degrees of freedom for `welch_t`. `None` when a condition has fewer than two replicates. |
+| `delta_ci95` | `tuple[float, float] \| None` | 95 percent Student t interval on `delta`, uncorrected for multiplicity. Pooled variance with `n_a + n_b - 2` degrees of freedom for `student_t`, separate variances with Welch-Satterthwaite degrees of freedom (passed to the quantile unrounded) for `welch_t`. `None` for `tukey_hsd`, whose interval is a studentised-range interval rather than a t interval, when a condition has fewer than two replicate values, or when the plugin stored no replicate values. |
 | `p` | `float \| None` | Unadjusted p value of the two-sample test. |
-| `p_adjusted` | `float \| None` | p value after the correction named by `correction`. |
+| `p_adjusted` | `float \| None` | p value after the correction named by `correction`. `None` when the plugin stored no corrected value, which makes the comparison a description rather than a decision; the verdict then reads `no test recorded`. |
 | `test` | `str` | `student_t`, `welch_t` or `tukey_hsd`. |
 | `correction` | `str` | `BH` (Benjamini-Hochberg), `tukey_hsd`, or the configured post-hoc name. |
 | `cohens_d` | `float \| None` | Standardised mean difference, oriented like `delta`: positive means `b` is larger. The framework's own `PairwiseResult.cohens_d` uses the opposite sign and is flipped here. |
@@ -77,6 +79,8 @@ branch on them without parsing the rest.
 | `larger` | `b` differs from `a` after correction and `delta` is positive |
 | `smaller` | `b` differs from `a` after correction and `delta` is negative |
 | `no significant difference` | the test ran and `p_adjusted` did not clear alpha |
+| `no test recorded` | the plugin stored no multiplicity-corrected p value, so the row describes a difference without deciding it |
+| `changed` | the difference is significant but the two means are equal at the stored precision |
 | `not testable` | a condition has fewer than two replicates, so no test exists |
 
 A single-condition report has no comparison, and its one sentence states the

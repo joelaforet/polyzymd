@@ -2,23 +2,19 @@
 
 :func:`analyze` takes an analysis name and one or more simulation config paths,
 builds a comparison in memory, runs the existing plugin pipeline and returns a
-:class:`ProtocolReport`. The report states, for every number it carries, what
-the number is: the metric and its unit, the replicate count behind each mean,
-the interval and its method, the test and the multiplicity correction, the
-frames each replicate contributed, and the package versions and file hashes
-that produced it. :meth:`ProtocolReport.to_agent_text` renders at most 25 lines
-of it, which is what ``polyzymd analyze --format agent`` prints.
+:class:`ProtocolReport` in which every number states what it is. Every field is
+described in ``docs/source/reference/analysis_protocol_report.md``.
 
-The replicate is the sampling unit throughout. Condition means, their standard
-errors and their 95 percent intervals are computed across replicates, never
-across frames, and both cross-condition tests and the interval on a difference
-of means use the replicate counts as their sample sizes.
+Plugins store their statistics in three shapes: the MDAnalysis comparison
+artifact, the framework scalar ``ComparisonResult``, and a plugin's own
+``BaseComparisonResult``, which may group rows by run label or pair label and
+may nest them one level deeper. :func:`_read` maps all three onto the report
+models themselves, so the rest of the module has one shape to render. A result
+grouped by run reports one group at a time, named in ``run``, the rest listed
+in ``all_runs``.
 
-Examples
---------
->>> from polyzymd.analyses.protocols import analyze  # doctest: +SKIP
->>> report = analyze("rg", ["A/config.yaml", "B/config.yaml"])  # doctest: +SKIP
->>> print(report.to_agent_text())  # doctest: +SKIP
+The replicate is the sampling unit throughout: every mean, interval and test
+uses replicates, never frames, as its sample.
 
 References
 ----------
@@ -40,18 +36,42 @@ from __future__ import annotations
 
 import hashlib
 import math
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Iterator, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from polyzymd.analyses.exceptions import AnalysisError, ProtocolError
 
+if TYPE_CHECKING:
+    from polyzymd.analyses.base import Analysis
+    from polyzymd.config.comparison import ComparisonConfig
+
+# Verdict vocabulary. Kept small so a caller can branch on it without parsing
+# the rest of the sentence.
+VERDICT_LARGER = "larger"
+VERDICT_SMALLER = "smaller"
+VERDICT_CHANGED = "changed"
+VERDICT_NO_DIFFERENCE = "no significant difference"
+VERDICT_NO_TEST = "no test recorded"
+VERDICT_NOT_TESTABLE = "not testable"
+VERDICT_VOCABULARY = (
+    VERDICT_LARGER,
+    VERDICT_SMALLER,
+    VERDICT_CHANGED,
+    VERDICT_NO_DIFFERENCE,
+    VERDICT_NO_TEST,
+    VERDICT_NOT_TESTABLE,
+)
+
+MAX_AGENT_LINES = 25
+"""Line budget of :meth:`ProtocolReport.to_agent_text`."""
+
+_MAX_PRINTED_VALUES = 6
+
 __all__ = [
-    "VERDICT_LARGER",
-    "VERDICT_NOT_TESTABLE",
-    "VERDICT_NO_DIFFERENCE",
-    "VERDICT_SMALLER",
+    "MAX_AGENT_LINES",
     "VERDICT_VOCABULARY",
     "ConditionReport",
     "PairwiseReport",
@@ -63,51 +83,15 @@ __all__ = [
     "run_protocol",
 ]
 
-# Verdict vocabulary. Kept small so a caller can branch on it without parsing
-# the rest of the sentence.
-VERDICT_LARGER = "larger"
-VERDICT_SMALLER = "smaller"
-VERDICT_NO_DIFFERENCE = "no significant difference"
-VERDICT_NOT_TESTABLE = "not testable"
-VERDICT_VOCABULARY = (
-    VERDICT_LARGER,
-    VERDICT_SMALLER,
-    VERDICT_NO_DIFFERENCE,
-    VERDICT_NOT_TESTABLE,
-)
 
-MAX_AGENT_LINES = 25
-"""Line budget of :meth:`ProtocolReport.to_agent_text`."""
-
-_MAX_PRINTED_REPLICATE_VALUES = 6
-
-
-# ---------------------------------------------------------------------------
-# Report models
-# ---------------------------------------------------------------------------
+# Report models. Field meanings live in reference/analysis_protocol_report.md,
 
 
 class ConditionReport(BaseModel):
-    """One condition, summarised across its replicates.
+    """One condition's mean with the uncertainty and sample size behind it.
 
-    Attributes
-    ----------
-    label : str
-        Condition label, taken from ``--label`` or from the config directory.
-    n_replicates : int
-        Number of replicates that contributed to ``mean``.
-    mean : float
-        Mean of the primary metric across replicates.
-    sem : float or None
-        Standard error of that mean across replicates, ``None`` for one
-        replicate, where it does not exist.
-    ci95 : tuple of float or None
-        Lower and upper limits of the 95 percent Student t interval on the
-        mean, ``None`` for one replicate.
-    ci_method : str or None
-        Interval method, ``"student_t"`` when an interval exists.
-    replicate_values : list of float
-        The per-replicate values behind the mean, in replicate order.
+    ``ci_method`` is ``"student_t"`` from replicate values and
+    ``"student_t_from_sem"`` when it was rebuilt from a stored standard error.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -122,40 +106,12 @@ class ConditionReport(BaseModel):
 
 
 class PairwiseReport(BaseModel):
-    """One cross-condition comparison of the primary metric.
+    """One comparison of the primary metric, control against one condition.
 
-    Attributes
-    ----------
-    a, b : str
-        Labels of the two conditions. ``a`` is the control when one is set.
-    delta : float
-        ``mean(b) - mean(a)`` in the metric's unit.
-    delta_ci95 : tuple of float or None
-        95 percent Student t interval on ``delta``, uncorrected for
-        multiplicity. ``None`` when either condition has one replicate.
-    p : float or None
-        Unadjusted p value of the two-sample test.
-    p_adjusted : float or None
-        p value after the multiplicity correction named by ``correction``.
-    test : str
-        Two-sample test, ``"student_t"``, ``"welch_t"`` or ``"tukey_hsd"``.
-    correction : str
-        Multiplicity correction, ``"BH"``, ``"tukey_hsd"`` or ``"none"``.
-    cohens_d : float or None
-        Standardised mean difference, oriented like ``delta``, so a positive
-        value means ``b`` is larger. The framework's own
-        ``PairwiseResult.cohens_d`` uses the opposite sign, control minus
-        treatment, and is flipped on the way in.
-    hedges_g : float or None
-        Small-sample-corrected standardised mean difference, oriented like
-        ``cohens_d``, when the plugin reports one.
-    direction : str
-        The plugin's own direction word for the change, such as ``"increased"``.
-    significant : bool
-        Whether the adjusted p value cleared the configured alpha.
-    testable : bool
-        ``False`` when a condition has fewer than two replicates, which makes
-        the test undefined rather than non-significant.
+    ``delta`` is ``mean(b) - mean(a)`` and ``cohens_d`` is oriented to match it.
+    ``p_adjusted`` of ``None`` means the plugin stored no corrected p value, so
+    the row describes a difference rather than deciding it; ``testable`` of
+    ``False`` means a condition has fewer than two replicates.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -176,22 +132,7 @@ class PairwiseReport(BaseModel):
 
 
 class ProtocolProvenance(BaseModel):
-    """What produced the numbers in a report.
-
-    Attributes
-    ----------
-    polyzymd_version : str
-        Version of the package that ran the protocol.
-    mdanalysis_version : str or None
-        Installed MDAnalysis version, ``None`` when it cannot be determined.
-    config_hashes : dict
-        SHA-256 of each simulation config file, keyed by condition label.
-    settings_fingerprint : str or None
-        Fingerprint of the resolved plugin settings, the same one the aggregate
-        cache is validated against.
-    output_paths : dict
-        Files and directories the run wrote, keyed by role.
-    """
+    """Versions, config hashes and output paths of one protocol run."""
 
     polyzymd_version: str
     mdanalysis_version: str | None = None
@@ -203,38 +144,9 @@ class ProtocolProvenance(BaseModel):
 class ProtocolReport(BaseModel):
     """A validated answer to "what is this metric, and does it differ?".
 
-    Attributes
-    ----------
-    analysis : str
-        Canonical analysis name, for example ``"rg"``.
-    protocol_version : str
-        The plugin's ``protocol_version``. Together with ``analysis`` it
-        identifies the code that defined the metric.
-    metric : str
-        Primary metric key, the first one the plugin reports.
-    unit : str or None
-        Unit of ``metric``, ``None`` for a dimensionless metric.
-    all_metrics : list of str
-        Every metric key the plugin reported, ``metric`` first.
-    equilibration : str
-        Equilibration window discarded from the start of every replicate,
-        applied uniformly.
-    frames_per_replicate : dict
-        Frames each replicate of a condition contributed, keyed by label, from
-        the condition artifact's frame-selection provenance. ``None`` for a
-        plugin that records no frame selection.
-    conditions : list of ConditionReport
-        One entry per condition, in the order the configs were given.
-    pairwise : list of PairwiseReport
-        One entry per comparison of the primary metric. Empty for one
-        condition.
-    warnings : list of str
-        Everything the run wants the reader to know before trusting the number.
-    provenance : ProtocolProvenance
-        Versions, config hashes and output paths.
-    verdict : list of str
-        One sentence per pairwise comparison, or one sentence describing the
-        single condition.
+    ``run`` names the selected run or pair label for a plugin that measures one
+    metric on several selections; ``all_metrics`` and ``all_runs`` list the
+    rest, the selected one first.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -243,7 +155,9 @@ class ProtocolReport(BaseModel):
     protocol_version: str
     metric: str
     unit: str | None = None
+    run: str | None = None
     all_metrics: list[str] = Field(default_factory=list)
+    all_runs: list[str] = Field(default_factory=list)
     equilibration: str
     frames_per_replicate: dict[str, int | None] = Field(default_factory=dict)
     conditions: list[ConditionReport] = Field(default_factory=list)
@@ -253,114 +167,34 @@ class ProtocolReport(BaseModel):
     verdict: list[str] = Field(default_factory=list)
 
     def to_agent_text(self, max_lines: int = MAX_AGENT_LINES) -> str:
-        """Render the report as compact fixed-vocabulary text.
+        """Render the report as at most ``max_lines`` lines of fixed-vocabulary text.
 
-        Parameters
-        ----------
-        max_lines : int, optional
-            Line budget, by default 25. Condition and comparison lines are
-            dropped first when the report does not fit, and the dropped count
-            is stated.
-
-        Returns
-        -------
-        str
-            At most ``max_lines`` newline-terminated lines, with no table
-            borders, no colour and no blank lines.
+        Condition and comparison lines are dropped first when the report does
+        not fit, and the dropped count is stated on the last line. The output
+        has no table borders, no colour and no blank lines.
         """
+        run = f"  run {self.run}" if self.run else ""
         header = (
             f"# polyzymd analyze {self.analysis}  metric {self.metric}"
-            f"  unit {self.unit or 'none'}  eq {self.equilibration}"
+            f"  unit {self.unit or 'none'}{run}  eq {self.equilibration}"
             f"  conditions {len(self.conditions)}"
             f"  replicates {','.join(str(c.n_replicates) for c in self.conditions) or 'none'}"
             f"  protocol {self.analysis}/{self.protocol_version}"
         )
-        condition_lines = [self._condition_line(condition) for condition in self.conditions]
-        pairwise_lines = [self._pairwise_line(pair) for pair in self.pairwise]
-        warning_lines = [f"warning: {text}" for text in self.warnings]
-        verdict_lines = [f"verdict: {text}" for text in self.verdict]
-
-        fixed = 1 + len(warning_lines) + len(verdict_lines)
-        budget = max(max_lines - fixed, 0)
-        condition_lines, pairwise_lines, dropped = _fit_blocks(
-            condition_lines, pairwise_lines, budget
+        tail = [f"warning: {text}" for text in self.warnings]
+        tail += [f"verdict: {text}" for text in self.verdict]
+        body = _fit(
+            [_condition_line(item) for item in self.conditions],
+            [_pairwise_line(item) for item in self.pairwise],
+            max(max_lines - 1 - len(tail), 0),
         )
-        lines = [header, *condition_lines, *pairwise_lines, *warning_lines, *verdict_lines]
-        if dropped:
-            lines.append(f"# {dropped} line(s) omitted; use --format json for the full report")
+        lines = [header, *body, *tail]
         if len(lines) > max_lines:
-            kept = lines[: max_lines - 1]
-            kept.append(
-                f"# {len(lines) - max_lines + 1} line(s) omitted; "
-                "use --format json for the full report"
-            )
-            lines = kept
+            lines = lines[: max_lines - 1] + [_omitted(len(lines) - max_lines + 1)]
         return "\n".join(lines) + "\n"
 
-    def _condition_line(self, condition: ConditionReport) -> str:
-        """Render one condition as a single line.
 
-        Parameters
-        ----------
-        condition : ConditionReport
-            Condition to render.
-
-        Returns
-        -------
-        str
-            One line with the mean, its uncertainty and the replicate values.
-        """
-        parts = [
-            f"{condition.label}  n {condition.n_replicates}",
-            f"mean {_num(condition.mean)}",
-            f"sem {_num(condition.sem)}",
-            f"ci95 {_interval(condition.ci95)}",
-        ]
-        values = condition.replicate_values
-        shown = ", ".join(_num(value) for value in values[:_MAX_PRINTED_REPLICATE_VALUES])
-        if len(values) > _MAX_PRINTED_REPLICATE_VALUES:
-            shown += f", +{len(values) - _MAX_PRINTED_REPLICATE_VALUES} more"
-        parts.append(f"values {shown or 'none'}")
-        return "  ".join(parts)
-
-    def _pairwise_line(self, pair: PairwiseReport) -> str:
-        """Render one comparison as a single line.
-
-        Parameters
-        ----------
-        pair : PairwiseReport
-            Comparison to render.
-
-        Returns
-        -------
-        str
-            One line with the difference, its interval, the p values and the
-            significance word.
-        """
-        if not pair.testable:
-            flag = "not_testable"
-        elif pair.significant:
-            flag = "significant"
-        else:
-            flag = "not_significant"
-        return "  ".join(
-            [
-                f"{pair.a} vs {pair.b}",
-                f"delta {_signed(pair.delta)}",
-                f"ci95 {_interval(pair.delta_ci95)}",
-                f"p {_num(pair.p)}",
-                f"p_adj {_num(pair.p_adjusted)}",
-                f"test {pair.test}",
-                f"correction {pair.correction}",
-                f"d {_num(pair.cohens_d)}",
-                flag,
-            ]
-        )
-
-
-# ---------------------------------------------------------------------------
 # Public entry points
-# ---------------------------------------------------------------------------
 
 
 def analyze(
@@ -373,38 +207,36 @@ def analyze(
     labels: Sequence[str] | None = None,
     output_dir: Path | None = None,
     recompute: bool = False,
+    run: str | None = None,
 ) -> ProtocolReport:
     """Run one analysis over one or more simulation conditions.
 
-    The first config is the control: every comparison is reported as control
-    against one other condition. With a single config no comparison is possible
-    and ``pairwise`` is empty.
+    The first config is the control: every comparison is control against one
+    other condition. With a single config no comparison is possible and
+    ``pairwise`` is empty.
 
     Parameters
     ----------
     name : str
-        Canonical analysis name, for example ``"rg"``. ``list_analyses()`` in
-        :mod:`polyzymd.analyses.discovery` lists them.
+        Canonical analysis name, for example ``"rg"``.
     configs : sequence of Path or str
         Simulation ``config.yaml`` paths, control first.
     replicates : sequence of int, optional
-        Replicate numbers to include in every condition. When omitted, the
-        replicates present on disk for each condition are used.
+        Replicates for every condition. Defaults to those found on disk.
     equilibration : str, optional
-        Equilibration window to discard, for example ``"10ns"``. Defaults to
-        the package default of ``"10ns"``, applied uniformly to every
-        replicate of every condition.
+        Window discarded from every replicate, for example ``"10ns"``. Applied
+        uniformly; defaults to the package default.
     settings : dict, optional
         Plugin settings, validated against the plugin's ``Settings`` model.
     labels : sequence of str, optional
-        Condition labels, one per config. Defaults to each config's parent
-        directory name.
+        One label per config. Defaults to each config's directory name.
     output_dir : Path, optional
-        Directory the run writes ``analysis/``, ``comparison/`` and
-        ``figures/`` into, by default the current directory.
+        Where ``analysis/``, ``comparison/`` and ``figures/`` are written.
     recompute : bool, optional
-        Recompute replicates instead of reusing cached results, by default
-        ``False``.
+        Recompute replicates instead of reusing cached results.
+    run : str, optional
+        Run or pair label to report, for a plugin that measures one metric on
+        several selections. Defaults to the first one.
 
     Returns
     -------
@@ -414,12 +246,11 @@ def analyze(
     Raises
     ------
     ProtocolError
-        If the analysis name is unknown, no configs are given, a config is
-        missing, the labels do not match the configs, the settings are invalid,
-        or no replicates can be found.
+        If the name is unknown, a config is missing, the labels do not match
+        the configs, the settings are invalid, or no replicates are found.
     """
     analysis_cls = get_analysis_class(name)
-    comparison_config = _build_comparison_config(
+    config = _build_config(
         analysis_cls,
         configs,
         replicates=replicates,
@@ -429,56 +260,32 @@ def analyze(
         output_dir=output_dir,
     )
     return run_protocol(
-        analysis_cls(),
-        comparison_config,
-        equilibration=equilibration,
-        recompute=recompute,
+        analysis_cls(), config, equilibration=equilibration, recompute=recompute, run=run
     )
 
 
 def run_protocol(
-    analysis: Any,
-    config: Any,
+    analysis: "str | Analysis",
+    config: "ComparisonConfig",
     *,
     equilibration: str | None = None,
     recompute: bool = False,
+    run: str | None = None,
 ) -> ProtocolReport:
-    """Run the comparison pipeline for an existing comparison config.
+    """Run the pipeline for an existing comparison config and report it.
 
-    This is what ``polyzymd analyze -f comparison.yaml`` calls, and what
-    :func:`analyze` calls once it has built a config in memory.
-
-    Parameters
-    ----------
-    analysis : Analysis
-        Analysis plugin instance.
-    config : ComparisonConfig
-        Comparison configuration.
-    equilibration : str, optional
-        Equilibration override. Defaults to the config's own value.
-    recompute : bool, optional
-        Recompute replicates, by default ``False``.
-
-    Returns
-    -------
-    ProtocolReport
-        The validated report.
-
-    Raises
-    ------
-    ProtocolError
-        If the pipeline produced no comparable result.
+    ``analysis`` is a plugin instance or a canonical analysis name. This is what
+    ``polyzymd analyze -f comparison.yaml`` calls, and what :func:`analyze`
+    calls once it has built a config in memory. Raises ``ProtocolError`` if the
+    name is unknown or the pipeline produced no comparable result.
     """
     from polyzymd.analyses.orchestrator import run_comparison
 
-    resolved_equilibration = equilibration or config.defaults.equilibration_time
+    if isinstance(analysis, str):
+        analysis = get_analysis_class(analysis)()
+    resolved = equilibration or config.defaults.equilibration_time
     try:
-        pipeline_result = run_comparison(
-            analysis,
-            config,
-            recompute=recompute,
-            equilibration=resolved_equilibration,
-        )
+        result = run_comparison(analysis, config, recompute=recompute, equilibration=resolved)
     except AnalysisError:
         raise
     except (FileNotFoundError, ValueError, OSError) as exc:
@@ -489,47 +296,23 @@ def run_protocol(
                 "directories hold production trajectories."
             ),
         ) from exc
-    return build_report(
-        analysis,
-        config,
-        pipeline_result,
-        equilibration=resolved_equilibration,
-    )
+    return build_report(analysis, config, result, equilibration=resolved, run=run)
 
 
 def build_report(
-    analysis: Any,
-    config: Any,
+    analysis: "Analysis",
+    config: "ComparisonConfig",
     pipeline_result: Mapping[str, Any],
     *,
     equilibration: str | None = None,
+    run: str | None = None,
 ) -> ProtocolReport:
     """Turn a finished comparison pipeline result into a report.
 
-    ``polyzymd compare run --format agent`` uses this to render a comparison it
-    has already run, so both commands report the same fields from the same
-    numbers.
-
-    Parameters
-    ----------
-    analysis : Analysis
-        Analysis plugin instance that produced the result.
-    config : ComparisonConfig
-        Comparison configuration the pipeline ran.
-    pipeline_result : mapping
-        Return value of :func:`polyzymd.analyses.orchestrator.run_comparison`.
-    equilibration : str, optional
-        Equilibration window actually applied. Defaults to the config's value.
-
-    Returns
-    -------
-    ProtocolReport
-        The validated report.
-
-    Raises
-    ------
-    ProtocolError
-        If the comparison produced no condition with a usable metric.
+    ``polyzymd compare run --format agent`` renders a comparison it has already
+    run through this, so both commands report the same fields. Raises
+    ``ProtocolError`` if no condition carries a usable metric, or if ``run``
+    names a group the plugin did not report.
     """
     comparison = pipeline_result.get("comparison")
     if comparison is None:
@@ -541,91 +324,56 @@ def build_report(
             ),
         )
 
+    read = _read(comparison, analysis.name)
+    group = _select_group(read, run, analysis.name)
+    conditions = [item for name, item in read.series if name == group]
+    by_label = {item.label: item for item in conditions}
+    pairwise = [
+        _complete(row, by_label, read.test)
+        for name, row in read.rows
+        if name == group and row.a in by_label and row.b in by_label
+    ]
+    by_run = read.grouped_by_run
+    metric = read.metric if by_run else group
+    unit = read.units.get(group) or read.units.get(read.metric)
     aggregated = dict(pipeline_result.get("aggregated") or {})
-    metric_names, unit, condition_records = _normalize_conditions(analysis, comparison)
-    primary = metric_names[0]
-    conditions = [_condition_report(record, primary) for record in condition_records]
-    by_label = {condition.label: condition for condition in conditions}
-
-    test, correction = _resolve_test_names(comparison, config)
-    pairwise = _pairwise_reports(comparison, by_label, primary, test, correction)
-
-    warnings = _collect_warnings(comparison, aggregated, conditions, pairwise, primary)
-    provenance = _collect_provenance(analysis, config, pipeline_result)
-    verdict = _build_verdict(primary, unit, conditions, pairwise)
+    ordered = [group] + [name for name in read.groups if name != group]
 
     return ProtocolReport(
         analysis=analysis.name,
         protocol_version=str(getattr(analysis, "protocol_version", "1")),
-        metric=primary,
+        metric=metric,
         unit=unit,
-        all_metrics=metric_names,
+        run=group if by_run else None,
+        all_metrics=[metric] if by_run else ordered,
+        all_runs=ordered if by_run else [],
         equilibration=equilibration or config.defaults.equilibration_time,
-        frames_per_replicate=_frames_per_replicate(aggregated, conditions),
+        frames_per_replicate=_frames(aggregated, conditions),
         conditions=conditions,
         pairwise=pairwise,
-        warnings=warnings,
-        provenance=provenance,
-        verdict=verdict,
+        warnings=_warnings(comparison, aggregated, conditions, pairwise, group, read),
+        provenance=_provenance(analysis, config, pipeline_result),
+        verdict=_verdict(metric, unit, conditions, pairwise),
     )
 
 
-# ---------------------------------------------------------------------------
-# Config construction
-# ---------------------------------------------------------------------------
-
-
-def get_analysis_class(name: str) -> Any:
-    """Look up an analysis plugin class by name.
-
-    Parameters
-    ----------
-    name : str
-        Canonical analysis name.
-
-    Returns
-    -------
-    type
-        The plugin class.
-
-    Raises
-    ------
-    ProtocolError
-        If no plugin has that name.
-    """
+def get_analysis_class(name: str) -> type["Analysis"]:
+    """Look up an analysis plugin class by name, raising ``ProtocolError`` if unknown."""
     from polyzymd.analyses.discovery import get_analysis, list_all_names
 
     try:
         return get_analysis(name)
     except KeyError as exc:
-        available = ", ".join(list_all_names())
         raise ProtocolError(
-            f"Unknown analysis {name!r}.",
-            hint=f"Use one of: {available}.",
+            f"Unknown analysis {name!r}.", hint=f"Use one of: {', '.join(list_all_names())}."
         ) from exc
 
 
-def _resolve_labels(configs: Sequence[Path], labels: Sequence[str] | None) -> list[str]:
-    """Pick a label for every condition.
+# Config construction
 
-    Parameters
-    ----------
-    configs : sequence of Path
-        Resolved simulation config paths.
-    labels : sequence of str or None
-        Explicit labels, one per config.
 
-    Returns
-    -------
-    list of str
-        Unique labels in config order.
-
-    Raises
-    ------
-    ProtocolError
-        If explicit labels are given but their count differs from the configs,
-        or if two explicit labels are the same.
-    """
+def _labels(configs: Sequence[Path], labels: Sequence[str] | None) -> list[str]:
+    """Pick a unique label per condition, defaulting to the config directory name."""
     if labels is not None:
         chosen = [str(label) for label in labels]
         if len(chosen) != len(configs):
@@ -635,52 +383,28 @@ def _resolve_labels(configs: Sequence[Path], labels: Sequence[str] | None) -> li
             )
         if len(set(chosen)) != len(chosen):
             raise ProtocolError(
-                "Condition labels must be unique.",
-                hint="Give each --label a different name.",
+                "Condition labels must be unique.", hint="Give each --label a different name."
             )
         return chosen
 
-    derived: list[str] = []
-    for path in configs:
-        parent = path.parent.name
-        candidate = parent or path.stem
-        if candidate in {"", ".", ".."}:
-            candidate = path.stem
-        derived.append(candidate)
     seen: dict[str, int] = {}
     unique: list[str] = []
-    for candidate in derived:
-        count = seen.get(candidate, 0)
-        seen[candidate] = count + 1
-        unique.append(candidate if count == 0 else f"{candidate}_{count + 1}")
+    for path in configs:
+        base = path.parent.name if path.parent.name not in {"", ".", ".."} else path.stem
+        seen[base] = seen.get(base, 0) + 1
+        unique.append(base if seen[base] == 1 else f"{base}_{seen[base]}")
     return unique
 
 
-def _discover_replicates(config_path: Path, label: str) -> list[int]:
-    """Find the replicates present on disk for one simulation config.
-
-    Parameters
-    ----------
-    config_path : Path
-        Simulation config path.
-    label : str
-        Condition label, used in the error message.
-
-    Returns
-    -------
-    list of int
-        Replicate numbers found under the config's scratch directory.
-
-    Raises
-    ------
-    ProtocolError
-        If the config cannot be read or no replicate directory exists.
-    """
+def _replicates_on_disk(config_path: Path, label: str) -> list[int]:
+    """Find the replicates with directories under the config's scratch directory."""
     from polyzymd.config.schema import SimulationConfig
 
     try:
-        sim_config = SimulationConfig.from_yaml(config_path)
-        found = [int(replicate) for replicate, _ in sim_config.discover_replicate_dirs()]
+        found = [
+            int(replicate)
+            for replicate, _ in SimulationConfig.from_yaml(config_path).discover_replicate_dirs()
+        ]
     except (OSError, ValueError, KeyError) as exc:
         raise ProtocolError(
             f"Condition {label!r}: could not read {config_path}: {exc}",
@@ -688,15 +412,15 @@ def _discover_replicates(config_path: Path, label: str) -> list[int]:
         ) from exc
     if not found:
         raise ProtocolError(
-            f"Condition {label!r}: no replicate directories under the scratch directory "
-            f"of {config_path}.",
+            f"Condition {label!r}: no replicate directories under the scratch directory of "
+            f"{config_path}.",
             hint="Pass --replicates 1-3 to state which replicates to analyze.",
         )
     return sorted(found)
 
 
-def _build_comparison_config(
-    analysis_cls: Any,
+def _build_config(
+    analysis_cls: type["Analysis"],
     configs: Sequence[Path | str],
     *,
     replicates: Sequence[int] | None,
@@ -704,37 +428,8 @@ def _build_comparison_config(
     settings: dict | None,
     labels: Sequence[str] | None,
     output_dir: Path | None,
-) -> Any:
-    """Build an in-memory comparison config from simulation config paths.
-
-    Parameters
-    ----------
-    analysis_cls : type
-        Analysis plugin class.
-    configs : sequence of Path or str
-        Simulation config paths, control first.
-    replicates : sequence of int or None
-        Replicates for every condition, or ``None`` to discover them.
-    equilibration : str or None
-        Equilibration window, or ``None`` for the package default.
-    settings : dict or None
-        Plugin settings.
-    labels : sequence of str or None
-        Condition labels.
-    output_dir : Path or None
-        Directory the run writes its outputs into.
-
-    Returns
-    -------
-    ComparisonConfig
-        Configuration equivalent to a hand-written ``comparison.yaml``.
-
-    Raises
-    ------
-    ProtocolError
-        If no configs are given, a config file is missing, or the settings are
-        rejected by the plugin's settings model.
-    """
+) -> "ComparisonConfig":
+    """Build the in-memory equivalent of a hand-written comparison.yaml."""
     from pydantic import ValidationError
 
     from polyzymd.config.comparison import ComparisonConfig
@@ -744,7 +439,6 @@ def _build_comparison_config(
             "No simulation configs given.",
             hint="Pass at least one -c config.yaml; the first one is the control.",
         )
-
     paths = [Path(item).expanduser().resolve() for item in configs]
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
@@ -753,30 +447,27 @@ def _build_comparison_config(
             hint="Check the -c paths; each one must be a simulation config.yaml.",
         )
 
-    resolved_labels = _resolve_labels(paths, labels)
-    conditions = []
-    for label, path in zip(resolved_labels, paths, strict=True):
-        condition_replicates = (
-            [int(replicate) for replicate in replicates]
-            if replicates
-            else _discover_replicates(path, label)
-        )
-        conditions.append({"label": label, "config": path, "replicates": condition_replicates})
-
-    defaults: dict[str, Any] = {}
-    if equilibration is not None:
-        defaults["equilibration_time"] = equilibration
-
-    payload: dict[str, Any] = {
-        "name": f"{analysis_cls.name}_protocol",
-        "description": "Comparison built in memory by polyzymd.analyses.protocols.analyze",
-        "control": resolved_labels[0],
-        "conditions": conditions,
-        "defaults": defaults,
-        "plugins": {analysis_cls.name: dict(settings)} if settings else {},
-    }
+    chosen = _labels(paths, labels)
     try:
-        comparison_config = ComparisonConfig(**payload)
+        config = ComparisonConfig(
+            name=f"{analysis_cls.name}_protocol",
+            description="Comparison built in memory by polyzymd.analyses.protocols.analyze",
+            control=chosen[0],
+            conditions=[
+                {
+                    "label": label,
+                    "config": path,
+                    "replicates": (
+                        [int(value) for value in replicates]
+                        if replicates
+                        else _replicates_on_disk(path, label)
+                    ),
+                }
+                for label, path in zip(chosen, paths, strict=True)
+            ],
+            defaults={"equilibration_time": equilibration} if equilibration else {},
+            plugins={analysis_cls.name: dict(settings)} if settings else {},
+        )
     except (ValidationError, ValueError) as exc:
         fields = ", ".join(sorted(analysis_cls.Settings.model_fields)) or "none"
         raise ProtocolError(
@@ -785,840 +476,557 @@ def _build_comparison_config(
         ) from exc
 
     root = Path(output_dir).expanduser().resolve() if output_dir else Path.cwd()
-    comparison_config.source_path = root / "comparison.yaml"
-    return comparison_config
+    config.source_path = root / "comparison.yaml"
+    return config
 
 
-# ---------------------------------------------------------------------------
-# Result normalization
-# ---------------------------------------------------------------------------
+# Normalization: three stored shapes onto the report models
 
 
-def _comparison_payload(comparison: Any) -> dict[str, Any] | None:
-    """Return the payload of an MDA comparison artifact, if this is one.
+@dataclass
+class _Read:
+    """What :func:`_read` recovered, with each entry tagged by its group."""
 
-    Parameters
-    ----------
-    comparison : Any
-        Comparison result of any supported shape.
+    metric: str
+    groups: list[str] = field(default_factory=list)
+    series: list[tuple[str, ConditionReport]] = field(default_factory=list)
+    rows: list[tuple[str, PairwiseReport]] = field(default_factory=list)
+    units: dict[str, str | None] = field(default_factory=dict)
+    test: str = "student_t"
+    correction: str = "BH"
+    grouped_by_run: bool = False
 
-    Returns
-    -------
-    dict or None
-        The artifact payload, or ``None`` for a non-artifact result.
-    """
-    payload = getattr(comparison, "payload", None)
-    if isinstance(payload, Mapping) and "condition_summaries" in payload:
-        return dict(payload)
+
+def _dump(obj: Any) -> dict[str, Any]:
+    """Return a plain dictionary for a pydantic model or a mapping."""
+    return dict(obj.model_dump()) if hasattr(obj, "model_dump") else dict(obj or {})
+
+
+def _metric_keys(summary: Mapping[str, Any]) -> list[str]:
+    """Name every metric in a condition mapping by pairing a mean key with its sem."""
+    names = []
+    for key in summary:
+        if key.endswith("_mean") and f"{key[:-5]}_sem" in summary:
+            names.append(key[:-5])
+        elif f"{key}_sem" in summary:
+            names.append(key)
+    return names
+
+
+def _lookup(summary: Mapping[str, Any], metric: str, suffix: str) -> Any:
+    """Read one statistic of a metric, accepting the key spellings plugins use."""
+    for key in (f"{metric}_{suffix}", f"{suffix}_{metric}"):
+        if key in summary:
+            return summary[key]
     return None
 
 
-def _metric_names_from_summary(summary: Mapping[str, Any]) -> list[str]:
-    """List metric keys in a scalar condition summary, in reported order.
+def _condition(
+    label: str, values: Sequence[float], summary: Mapping[str, Any], metric: str
+) -> ConditionReport:
+    """Summarise one condition from replicate values, or from a stored mean and sem."""
+    from polyzymd.analyses.shared.statistics import (
+        CI_METHOD_STUDENT_T,
+        mean_sem_ci,
+        student_t_coverage_factor,
+    )
 
-    Parameters
-    ----------
-    summary : mapping
-        One serialized ``ConditionSummary``.
+    if values:
+        stats = mean_sem_ci(values)
+        limits = None if stats.ci_low is None else (stats.ci_low, stats.ci_high)
+        return ConditionReport(
+            label=label,
+            n_replicates=len(values),
+            mean=stats.mean,
+            sem=stats.sem,
+            ci95=limits,
+            ci_method=stats.ci_method,
+            replicate_values=list(values),
+        )
 
-    Returns
-    -------
-    list of str
-        Metric names, taken from the ``<metric>_mean`` keys.
+    mean = _float(summary[metric] if metric in summary else _lookup(summary, metric, "mean"))
+    sem = _optional_float(_lookup(summary, metric, "sem"))
+    n = int(summary.get("n_replicates", 0) or 0)
+    factor = student_t_coverage_factor(n) if sem is not None and n > 1 else None
+    limits = None if factor is None else (mean - factor * sem, mean + factor * sem)
+    return ConditionReport(
+        label=label,
+        n_replicates=n,
+        mean=mean,
+        sem=sem,
+        ci95=limits,
+        ci_method=f"{CI_METHOD_STUDENT_T}_from_sem" if limits else None,
+    )
+
+
+def _group_summaries(summary: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Return a condition's per-run or per-pair summaries, empty when it has none."""
+    for key, value in summary.items():
+        if key.endswith("_summaries") and isinstance(value, list) and value:
+            entries = [_dump(entry) for entry in value]
+            if "label" in entries[0] and "per_replicate_means" in entries[0]:
+                return entries
+    return []
+
+
+def _iter_rows(source: Mapping[str, Any]) -> Iterator[dict[str, Any]]:
+    """Yield every pairwise row, flattening the one level some plugins nest."""
+    for row in source.get("pairwise_comparisons") or []:
+        row = _dump(row)
+        nested = row.get("aggregate_comparisons")
+        if isinstance(nested, list) and nested:
+            yield from (_dump(inner) for inner in nested)
+        else:
+            yield row
+
+
+def _row(raw: Mapping[str, Any], stem: str, test: str, correction: str) -> PairwiseReport:
+    """Build one comparison, trying the plain field name then the prefixed one.
+
+    ``delta`` is NaN when the row stores no condition means; :func:`_complete`
+    fills it from the condition summaries.
     """
-    return [key[: -len("_mean")] for key in summary if key.endswith("_mean")]
+
+    def get(name: str) -> Any:
+        return raw.get(name, raw.get(f"{stem}_{name}"))
+
+    mean_a = _optional_float(raw.get("condition_a_mean"))
+    mean_b = _optional_float(raw.get("condition_b_mean"))
+    testable = get("testable")
+    testable = True if testable is None else bool(testable)
+    return PairwiseReport(
+        a=str(raw.get("condition_a", "")),
+        b=str(raw.get("condition_b", "")),
+        delta=float("nan") if mean_a is None or mean_b is None else mean_b - mean_a,
+        p=_optional_float(get("p_value")),
+        p_adjusted=_optional_float(get("p_value_adjusted")),
+        test=test,
+        correction=correction,
+        cohens_d=_negate(_optional_float(get("cohens_d"))),
+        hedges_g=_negate(_optional_float(get("hedges_g"))),
+        direction=str(get("direction") or "unchanged"),
+        significant=bool(get("significant")) and testable,
+        testable=testable,
+    )
 
 
-def _normalize_conditions(
-    analysis: Any,
-    comparison: Any,
-) -> tuple[list[str], str | None, list[dict[str, Any]]]:
-    """Reduce any comparison result shape to metric names and condition records.
+def _complete(
+    row: PairwiseReport, by_label: Mapping[str, ConditionReport], test: str
+) -> PairwiseReport:
+    """Fill in the difference and its interval from the two condition summaries."""
+    first, second = by_label[row.a], by_label[row.b]
+    delta = second.mean - first.mean if math.isnan(row.delta) else row.delta
+    return row.model_copy(
+        update={
+            "delta": delta,
+            "delta_ci95": _difference_ci(first.replicate_values, second.replicate_values, test),
+        }
+    )
 
-    Three shapes reach here: the MDA ``ComparisonArtifact`` produced by the
-    built-in plugins, the framework ``ComparisonResult`` produced by the scalar
-    pipeline, and the custom ``BaseComparisonResult`` produced by plugins that
-    override ``compare()``.
 
-    Parameters
-    ----------
-    analysis : Analysis
-        Analysis plugin instance, used only for error messages.
-    comparison : Any
-        Comparison result.
-
-    Returns
-    -------
-    tuple
-        Metric names with the primary one first, the primary metric's unit, and
-        one record per condition holding its per-metric statistics.
-
-    Raises
-    ------
-    ProtocolError
-        If the result carries no condition or no metric.
-    """
-    payload = _comparison_payload(comparison)
-    if payload is not None:
-        summaries = [dict(item) for item in payload.get("condition_summaries", [])]
-        metadata = payload.get("metric_metadata") or {}
-    else:
-        summaries = [
-            item.model_dump() if hasattr(item, "model_dump") else dict(item)
-            for item in getattr(comparison, "conditions", [])
-        ]
-        metadata = {}
-
+def _read(comparison: Any, analysis_name: str) -> _Read:
+    """Map any comparison result shape onto groups, condition summaries and rows."""
+    raw = getattr(comparison, "payload", None)
+    payload = dict(raw) if isinstance(raw, Mapping) and "condition_summaries" in raw else None
+    body = _dump(comparison)
+    source = payload or body
+    key = "condition_summaries" if payload else "conditions"
+    summaries = [_dump(item) for item in source.get(key) or []]
     if not summaries:
         raise ProtocolError(
-            f"{analysis.name}: the comparison reported no conditions.",
+            f"{analysis_name}: the comparison reported no conditions.",
             hint="Check that each condition has aggregated replicate results on disk.",
         )
 
-    scalar = [summary for summary in summaries if _metric_names_from_summary(summary)]
-    if scalar:
-        records, metric_names = _scalar_condition_records(summaries)
+    metric = str(body.get("metric") or "")
+    stem = metric[5:] if metric.startswith("mean_") else metric
+    read = _Read(metric=metric or analysis_name)
+    read.test, read.correction = _tests(payload, body)
+
+    if _group_summaries(summaries[0]):
+        read.grouped_by_run = True
+        for summary in summaries:
+            label = str(summary.get("label", ""))
+            for entry in _group_summaries(summary):
+                group = str(entry.get("label", ""))
+                if group not in read.groups:
+                    read.groups.append(group)
+                values = [_float(value) for value in entry.get("per_replicate_means") or []]
+                read.series.append((group, _condition(label, values, entry, metric)))
     else:
-        records, metric_names = _custom_condition_records(comparison, summaries, analysis)
-
-    primary = metric_names[0]
-    unit = None
-    for record in records:
-        stats = record["metrics"].get(primary)
-        if stats and stats.get("unit"):
-            unit = stats["unit"]
-            break
-    if unit is None and isinstance(metadata, Mapping):
-        entry = metadata.get(primary)
-        if isinstance(entry, Mapping):
-            unit = entry.get("unit")
-    return metric_names, unit, records
-
-
-def _scalar_condition_records(
-    summaries: Sequence[Mapping[str, Any]],
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Build condition records from scalar condition summaries.
-
-    Parameters
-    ----------
-    summaries : sequence of mapping
-        Serialized ``ConditionSummary`` objects.
-
-    Returns
-    -------
-    tuple
-        Condition records and the metric names in reported order.
-    """
-    metric_names: list[str] = []
-    for summary in summaries:
-        for metric in _metric_names_from_summary(summary):
-            if metric not in metric_names:
-                metric_names.append(metric)
-
-    records: list[dict[str, Any]] = []
-    for summary in summaries:
-        metrics: dict[str, dict[str, Any]] = {}
-        for metric in metric_names:
-            if f"{metric}_mean" not in summary:
-                continue
-            values = summary.get(f"{metric}_replicate_values") or []
-            metrics[metric] = {
-                "mean": _as_float(summary.get(f"{metric}_mean")),
-                "sem": _as_optional_float(summary.get(f"{metric}_sem")),
-                "ci_low": _as_optional_float(summary.get(f"{metric}_ci95_low")),
-                "ci_high": _as_optional_float(summary.get(f"{metric}_ci95_high")),
-                "ci_method": summary.get(f"{metric}_ci_method"),
-                "unit": summary.get(f"{metric}_unit"),
-                "values": [_as_float(value) for value in values],
-            }
-        records.append(
-            {
-                "label": str(summary.get("label", "")),
-                "n_replicates": int(summary.get("n_replicates", 0) or 0),
-                "metrics": metrics,
-            }
-        )
-    return records, metric_names
-
-
-def _custom_condition_records(
-    comparison: Any,
-    summaries: Sequence[Mapping[str, Any]],
-    analysis: Any,
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Build condition records from a plugin's own comparison result.
-
-    Plugins that override ``compare()`` report one primary metric per condition
-    through ``BaseConditionSummary``. The interval is recomputed here from the
-    replicate values with the package's one interval estimator.
-
-    Parameters
-    ----------
-    comparison : Any
-        Custom comparison result.
-    summaries : sequence of mapping
-        Serialized condition summaries.
-    analysis : Analysis
-        Analysis plugin instance, used for error messages.
-
-    Returns
-    -------
-    tuple
-        Condition records and a single-entry metric name list.
-
-    Raises
-    ------
-    ProtocolError
-        If the summaries carry no replicate values.
-    """
-    from polyzymd.analyses.shared.statistics import mean_sem_ci
-
-    metric = str(getattr(comparison, "metric", None) or f"{analysis.name}_metric")
-    objects = list(getattr(comparison, "conditions", []))
-    records: list[dict[str, Any]] = []
-    for index, summary in enumerate(summaries):
-        values = [_as_float(value) for value in summary.get("replicate_values") or []]
-        if not values:
+        for summary in summaries:
+            label = str(summary.get("label", ""))
+            names = _metric_keys(summary)
+            if not names and summary.get("replicate_values"):
+                # BaseConditionSummary declares one metric, named at the top
+                # level, with its values on the condition itself.
+                names = [read.metric]
+            for name in names:
+                if name not in read.groups:
+                    read.groups.append(name)
+                key = "replicate_values" if name == read.metric else f"{name}_replicate_values"
+                values = [_float(value) for value in summary.get(key) or []]
+                read.series.append((name, _condition(label, values, summary, name)))
+        if not read.groups:
             raise ProtocolError(
-                f"{analysis.name}: condition {summary.get('label')!r} reported no "
-                "replicate values, so no mean can be stated.",
-                hint="Use 'polyzymd compare run' with --format json to inspect the raw result.",
+                f"{analysis_name}: no condition reported a usable metric.",
+                hint="Run 'polyzymd compare run --format json' to inspect the raw result.",
             )
-        stats = mean_sem_ci(values)
-        obj = objects[index] if index < len(objects) else None
-        mean = _as_optional_float(getattr(obj, "primary_metric_value", None))
-        records.append(
-            {
-                "label": str(summary.get("label", "")),
-                "n_replicates": int(summary.get("n_replicates", len(values)) or len(values)),
-                "metrics": {
-                    metric: {
-                        "mean": stats.mean if mean is None else mean,
-                        "sem": stats.sem,
-                        "ci_low": stats.ci_low,
-                        "ci_high": stats.ci_high,
-                        "ci_method": stats.ci_method,
-                        "unit": getattr(comparison, "unit", None),
-                        "values": values,
-                    }
-                },
-            }
-        )
-    return records, [metric]
+        read.metric = read.groups[0]
+
+    label_key = _group_key(source)
+    for entry in _iter_rows(source):
+        group = str(entry.get("metric") or entry.get(label_key) or read.groups[0])
+        read.rows.append((group, _row(entry, stem, read.test, read.correction)))
+
+    read.units = _units(source, summaries, read.groups)
+    return read
 
 
-def _condition_report(record: Mapping[str, Any], metric: str) -> ConditionReport:
-    """Build a condition report for the primary metric.
-
-    Parameters
-    ----------
-    record : mapping
-        Condition record from normalization.
-    metric : str
-        Primary metric name.
-
-    Returns
-    -------
-    ConditionReport
-        Report entry for this condition.
-    """
-    stats = record["metrics"].get(metric, {})
-    ci_low = stats.get("ci_low")
-    ci_high = stats.get("ci_high")
-    ci95 = (ci_low, ci_high) if ci_low is not None and ci_high is not None else None
-    return ConditionReport(
-        label=record["label"],
-        n_replicates=record["n_replicates"],
-        mean=stats.get("mean", float("nan")),
-        sem=stats.get("sem"),
-        ci95=ci95,
-        ci_method=stats.get("ci_method"),
-        replicate_values=list(stats.get("values") or []),
-    )
+def _group_key(source: Mapping[str, Any]) -> str:
+    """Name the row field carrying the run or pair label, if there is one."""
+    for row in source.get("pairwise_comparisons") or []:
+        for key in _dump(row):
+            if key.endswith("_label"):
+                return key
+    return "metric"
 
 
-def _resolve_test_names(comparison: Any, config: Any) -> tuple[str, str]:
-    """Name the two-sample test and the multiplicity correction.
+def _units(
+    source: Mapping[str, Any], summaries: Sequence[Mapping[str, Any]], groups: Sequence[str]
+) -> dict[str, str | None]:
+    """Collect each group's unit from the metric metadata and the conditions."""
+    units: dict[str, str | None] = dict.fromkeys(groups)
+    metadata = source.get("metric_metadata") or {}
+    if isinstance(metadata, Mapping):
+        for name, entry in metadata.items():
+            if isinstance(entry, Mapping) and entry.get("unit"):
+                units[str(name)] = str(entry["unit"])
+    for summary in summaries:
+        for group in list(units):
+            value = _lookup(summary, group, "unit")
+            if value:
+                units[group] = str(value)
+    return units
 
-    Parameters
-    ----------
-    comparison : Any
-        Comparison result.
-    config : ComparisonConfig
-        Comparison configuration, used when the result names nothing.
 
-    Returns
-    -------
-    tuple of str
-        Test name and correction name.
-    """
-    payload = _comparison_payload(comparison)
+def _tests(payload: Mapping[str, Any] | None, body: Mapping[str, Any]) -> tuple[str, str]:
+    """Name the two-sample test and the multiplicity correction the plugin used."""
     parameters = (payload or {}).get("statistical_parameters") or {}
-    defaults = getattr(config, "defaults", None)
-    ttest = (
-        parameters.get("ttest_method")
-        or getattr(comparison, "ttest_method", None)
-        or getattr(defaults, "ttest_method", "student")
-    )
-    posthoc = (
-        parameters.get("posthoc_method")
-        or getattr(comparison, "posthoc_method", None)
-        or getattr(defaults, "posthoc_method", "ttest_bh")
-    )
+    ttest = parameters.get("ttest_method") or body.get("ttest_method") or "student"
+    posthoc = parameters.get("posthoc_method") or body.get("posthoc_method") or "ttest_bh"
     if posthoc == "tukey_hsd":
         return "tukey_hsd", "tukey_hsd"
-    test = "welch_t" if ttest == "welch" else "student_t"
-    correction = "BH" if posthoc == "ttest_bh" else str(posthoc)
-    return test, correction
+    return (
+        "welch_t" if ttest == "welch" else "student_t",
+        "BH" if posthoc == "ttest_bh" else str(posthoc),
+    )
 
 
-def _pairwise_rows(comparison: Any) -> list[dict[str, Any]]:
-    """Return every pairwise comparison as a plain dictionary.
-
-    Parameters
-    ----------
-    comparison : Any
-        Comparison result.
-
-    Returns
-    -------
-    list of dict
-        Serialized pairwise results.
-    """
-    payload = _comparison_payload(comparison)
-    if payload is not None:
-        return [dict(item) for item in payload.get("pairwise_comparisons", [])]
-    rows = []
-    for item in getattr(comparison, "pairwise_comparisons", []) or []:
-        rows.append(item.model_dump() if hasattr(item, "model_dump") else dict(item))
-    return rows
-
-
-def _pairwise_reports(
-    comparison: Any,
-    conditions: Mapping[str, ConditionReport],
-    metric: str,
-    test: str,
-    correction: str,
-) -> list[PairwiseReport]:
-    """Build the pairwise section for the primary metric.
-
-    Parameters
-    ----------
-    comparison : Any
-        Comparison result.
-    conditions : mapping
-        Condition reports keyed by label.
-    metric : str
-        Primary metric name.
-    test : str
-        Test name from :func:`_resolve_test_names`.
-    correction : str
-        Correction name from :func:`_resolve_test_names`.
-
-    Returns
-    -------
-    list of PairwiseReport
-        One entry per comparison of the primary metric.
-    """
-    rows = _pairwise_rows(comparison)
-    for_metric = [row for row in rows if row.get("metric") == metric]
-    if not for_metric:
-        metrics_present = {row.get("metric") for row in rows}
-        if len(metrics_present) <= 1:
-            for_metric = rows
-
-    reports: list[PairwiseReport] = []
-    for row in for_metric:
-        label_a = str(row.get("condition_a", ""))
-        label_b = str(row.get("condition_b", ""))
-        first = conditions.get(label_a)
-        second = conditions.get(label_b)
-        if first is None or second is None:
-            continue
-        testable = bool(row.get("testable", True))
-        reports.append(
-            PairwiseReport(
-                a=label_a,
-                b=label_b,
-                delta=second.mean - first.mean,
-                delta_ci95=_difference_ci(first.replicate_values, second.replicate_values, test),
-                p=_as_optional_float(row.get("p_value")),
-                p_adjusted=_as_optional_float(row.get("p_value_adjusted")),
-                test=test,
-                correction=correction,
-                cohens_d=_flip_sign(_as_optional_float(row.get("cohens_d"))),
-                hedges_g=_flip_sign(_as_optional_float(row.get("hedges_g"))),
-                direction=str(row.get("direction", "unchanged")),
-                significant=bool(row.get("significant", False)) and testable,
-                testable=testable,
-            )
+def _select_group(read: _Read, run: str | None, analysis_name: str) -> str:
+    """Choose the group to report, defaulting to the first one the plugin listed."""
+    if not read.groups:
+        raise ProtocolError(
+            f"{analysis_name}: the comparison reported no metric.",
+            hint="Run 'polyzymd compare run --format json' to inspect the raw result.",
         )
-    return reports
+    if run is None:
+        return read.groups[0]
+    if run not in read.groups:
+        raise ProtocolError(
+            f"{analysis_name}: no run or metric named {run!r}.",
+            hint=f"Use one of: {', '.join(read.groups)}.",
+        )
+    return run
+
+
+# Statistics, provenance and wording
 
 
 def _difference_ci(
-    values_a: Sequence[float],
-    values_b: Sequence[float],
-    test: str,
+    values_a: Sequence[float], values_b: Sequence[float], test: str
 ) -> tuple[float, float] | None:
     """Return the 95 percent interval on ``mean(b) - mean(a)``.
 
-    The interval uses the same variance assumption as the reported test: a
-    pooled variance with ``n_a + n_b - 2`` degrees of freedom for Student's t,
-    and separate variances with Welch-Satterthwaite degrees of freedom for
-    Welch's t [2]_. It is the interval on this one difference and carries no
+    The interval matches the variance assumption of the reported test: a pooled
+    variance with ``n_a + n_b - 2`` degrees of freedom for Student's t, and
+    separate variances with Welch-Satterthwaite degrees of freedom for Welch's
+    t [2]_. Tukey HSD gets no interval, because a studentised-range interval is
+    not a t interval. The interval covers this one difference and carries no
     multiplicity correction, so a comparison can be non-significant after the
     correction while its interval excludes zero.
-
-    Parameters
-    ----------
-    values_a, values_b : sequence of float
-        Replicate values of the two conditions.
-    test : str
-        ``"welch_t"``, ``"student_t"`` or ``"tukey_hsd"``.
-
-    Returns
-    -------
-    tuple of float or None
-        Lower and upper limits, or ``None`` when either condition has fewer
-        than two replicates or both variances are zero.
     """
     from polyzymd.analyses.shared.statistics import student_t_coverage_factor
 
-    n_a = len(values_a)
-    n_b = len(values_b)
-    if n_a < 2 or n_b < 2:
+    n_a, n_b = len(values_a), len(values_b)
+    if test == "tukey_hsd" or n_a < 2 or n_b < 2:
         return None
 
-    mean_a = sum(values_a) / n_a
-    mean_b = sum(values_b) / n_b
+    mean_a, mean_b = sum(values_a) / n_a, sum(values_b) / n_b
     var_a = sum((value - mean_a) ** 2 for value in values_a) / (n_a - 1)
     var_b = sum((value - mean_b) ** 2 for value in values_b) / (n_b - 1)
 
     if test == "welch_t":
-        standard_error = math.sqrt(var_a / n_a + var_b / n_b)
-        if standard_error == 0.0:
+        error = math.sqrt(var_a / n_a + var_b / n_b)
+        spread = (var_a / n_a) ** 2 / (n_a - 1) + (var_b / n_b) ** 2 / (n_b - 1)
+        if error == 0.0 or spread == 0.0:
             return None
-        denominator = (var_a / n_a) ** 2 / (n_a - 1) + (var_b / n_b) ** 2 / (n_b - 1)
-        if denominator == 0.0:
-            return None
-        degrees_of_freedom = (var_a / n_a + var_b / n_b) ** 2 / denominator
+        degrees = (var_a / n_a + var_b / n_b) ** 2 / spread
     else:
         pooled = ((n_a - 1) * var_a + (n_b - 1) * var_b) / (n_a + n_b - 2)
-        standard_error = math.sqrt(pooled * (1.0 / n_a + 1.0 / n_b))
-        if standard_error == 0.0:
+        error = math.sqrt(pooled * (1.0 / n_a + 1.0 / n_b))
+        degrees = float(n_a + n_b - 2)
+        if error == 0.0:
             return None
-        degrees_of_freedom = float(n_a + n_b - 2)
 
-    # student_t_coverage_factor takes a replicate count and uses n - 1 degrees
-    # of freedom, so a difference with df degrees of freedom asks for df + 1.
-    factor = student_t_coverage_factor(int(round(degrees_of_freedom)) + 1)
+    # student_t_coverage_factor quantiles at n - 1 degrees of freedom, so a
+    # difference with df degrees of freedom asks for df + 1. Welch's fractional
+    # df is passed through unrounded.
+    factor = student_t_coverage_factor(degrees + 1.0)
     if factor is None:
         return None
-    half_width = factor * standard_error
     delta = mean_b - mean_a
-    return (delta - half_width, delta + half_width)
+    return (delta - factor * error, delta + factor * error)
 
 
-# ---------------------------------------------------------------------------
-# Warnings, provenance, verdict
-# ---------------------------------------------------------------------------
-
-
-def _frames_per_replicate(
-    aggregated: Mapping[str, Any],
-    conditions: Sequence[ConditionReport],
+def _frames(
+    aggregated: Mapping[str, Any], conditions: Sequence[ConditionReport]
 ) -> dict[str, int | None]:
-    """Read the frames each replicate contributed, per condition.
-
-    Parameters
-    ----------
-    aggregated : mapping
-        Aggregated condition results keyed by label.
-    conditions : sequence of ConditionReport
-        Conditions in report order.
-
-    Returns
-    -------
-    dict
-        Frames per replicate keyed by condition label, ``None`` when the plugin
-        records no frame selection.
-    """
+    """Read the frames each replicate contributed from the condition provenance."""
     frames: dict[str, int | None] = {}
     for condition in conditions:
-        artifact = aggregated.get(condition.label)
-        provenance = getattr(artifact, "provenance", None)
+        provenance = getattr(aggregated.get(condition.label), "provenance", None)
         selection = provenance.get("frame_selection") if isinstance(provenance, Mapping) else None
         count = selection.get("n_frames_selected") if isinstance(selection, Mapping) else None
         frames[condition.label] = int(count) if isinstance(count, (int, float)) else None
     return frames
 
 
-def _collect_warnings(
+def _warnings(
     comparison: Any,
     aggregated: Mapping[str, Any],
     conditions: Sequence[ConditionReport],
     pairwise: Sequence[PairwiseReport],
-    metric: str,
+    group: str,
+    read: _Read,
 ) -> list[str]:
-    """Gather everything a reader needs before trusting the numbers.
-
-    Parameters
-    ----------
-    comparison : Any
-        Comparison result.
-    aggregated : mapping
-        Aggregated condition results keyed by label.
-    conditions : sequence of ConditionReport
-        Condition reports.
-    pairwise : sequence of PairwiseReport
-        Pairwise reports.
-    metric : str
-        Primary metric name.
-
-    Returns
-    -------
-    list of str
-        Deduplicated warnings, sampling warnings first.
-    """
-    warnings: list[str] = []
-    for condition in conditions:
-        if condition.n_replicates < 2:
+    """Gather the sampling caveats first, then the warnings the artifacts carry."""
+    warnings = []
+    for item in conditions:
+        if item.n_replicates < 2:
             warnings.append(
-                f"condition {condition.label} has one replicate, so it has no standard error "
-                f"and no interval for {metric}"
+                f"condition {item.label} has one replicate, so {group} has no "
+                "standard error and no interval"
             )
-        elif condition.n_replicates < 3:
+        elif item.n_replicates < 3:
             warnings.append(
-                f"condition {condition.label} has {condition.n_replicates} replicates, "
-                "so its 95 percent interval is about 12.7 times its standard error"
+                f"condition {item.label} has {item.n_replicates} replicates, so its "
+                "95 percent interval is about 12.7 times its standard error"
             )
     if any(not pair.testable for pair in pairwise):
         warnings.append(
-            "at least one comparison is not testable because a condition has fewer than "
-            "two replicates; not testable is not the same as not different"
+            "a comparison is not testable because a condition has fewer than two "
+            "replicates; not testable is not the same as not different"
         )
-    for source in (comparison, *aggregated.values()):
-        for text in getattr(source, "warnings", []) or []:
-            warnings.append(str(text))
+    if pairwise and all(pair.p_adjusted is None for pair in pairwise):
+        warnings.append(
+            "these comparisons carry no multiplicity-corrected p value, so each "
+            "describes a difference rather than deciding it"
+        )
+    if conditions and not any(item.replicate_values for item in conditions):
+        warnings.append(
+            "this plugin stored no per-replicate values, so intervals were rebuilt "
+            "from stored standard errors and differences get none"
+        )
+    if len(read.groups) > 1:
+        kind = "runs" if read.grouped_by_run else "metrics"
+        others = ", ".join(name for name in read.groups if name != group)
+        warnings.append(f"reporting {group}; this analysis also reported {kind} {others}")
+    for origin in (comparison, *aggregated.values()):
+        warnings.extend(str(text) for text in getattr(origin, "warnings", []) or [])
 
     seen: set[str] = set()
-    unique: list[str] = []
-    for text in warnings:
-        if text not in seen:
-            seen.add(text)
-            unique.append(text)
-    return unique
+    return [text for text in warnings if not (text in seen or seen.add(text))]
 
 
-def _collect_provenance(
-    analysis: Any,
-    config: Any,
-    pipeline_result: Mapping[str, Any],
+def _provenance(
+    analysis: "Analysis", config: "ComparisonConfig", pipeline_result: Mapping[str, Any]
 ) -> ProtocolProvenance:
-    """Record versions, config hashes and output paths.
+    """Record package versions, config hashes and the paths the run wrote."""
+    from importlib.metadata import PackageNotFoundError, version
 
-    Parameters
-    ----------
-    analysis : Analysis
-        Analysis plugin instance.
-    config : ComparisonConfig
-        Comparison configuration.
-    pipeline_result : mapping
-        Pipeline result with ``comparison_path`` and ``plots``.
-
-    Returns
-    -------
-    ProtocolProvenance
-        Provenance block for the report.
-    """
     from polyzymd import __version__
     from polyzymd.analyses._framework.lifecycle import _resolve_settings
 
-    hashes: dict[str, str] = {}
+    hashes = {}
     for condition in getattr(config, "conditions", []):
-        path = Path(condition.config)
         try:
-            hashes[condition.label] = hashlib.sha256(path.read_bytes()).hexdigest()
+            hashes[condition.label] = hashlib.sha256(
+                Path(condition.config).read_bytes()
+            ).hexdigest()
         except OSError:
             continue
-
     try:
-        settings = _resolve_settings(analysis, config)
-        fingerprint = analysis.aggregate_settings_fingerprint(settings)
+        fingerprint = analysis.aggregate_settings_fingerprint(_resolve_settings(analysis, config))
     except (AnalysisError, ValueError, TypeError):
         fingerprint = None
+    try:
+        mdanalysis = version("MDAnalysis")
+    except PackageNotFoundError:
+        mdanalysis = None
 
-    output_paths: dict[str, str] = {}
-    comparison_path = pipeline_result.get("comparison_path")
-    if comparison_path is not None:
-        output_paths["comparison_result"] = str(comparison_path)
+    paths = {}
+    if pipeline_result.get("comparison_path") is not None:
+        paths["comparison_result"] = str(pipeline_result["comparison_path"])
     plots = list(pipeline_result.get("plots") or [])
     if plots:
-        output_paths["figures"] = str(Path(plots[0]).parent)
+        paths["figures"] = str(Path(plots[0]).parent)
 
     return ProtocolProvenance(
         polyzymd_version=__version__,
-        mdanalysis_version=_mdanalysis_version(),
+        mdanalysis_version=mdanalysis,
         config_hashes=hashes,
         settings_fingerprint=fingerprint,
-        output_paths=output_paths,
+        output_paths=paths,
     )
 
 
-def _mdanalysis_version() -> str | None:
-    """Return the installed MDAnalysis version without importing it.
-
-    Returns
-    -------
-    str or None
-        The version string, or ``None`` when MDAnalysis is not installed.
-    """
-    from importlib.metadata import PackageNotFoundError, version
-
-    try:
-        return version("MDAnalysis")
-    except PackageNotFoundError:
-        return None
-
-
-def _build_verdict(
+def _verdict(
     metric: str,
     unit: str | None,
     conditions: Sequence[ConditionReport],
     pairwise: Sequence[PairwiseReport],
 ) -> list[str]:
-    """Write one sentence per comparison, or one for a single condition.
-
-    Parameters
-    ----------
-    metric : str
-        Primary metric name.
-    unit : str or None
-        Unit of the metric.
-    conditions : sequence of ConditionReport
-        Condition reports.
-    pairwise : sequence of PairwiseReport
-        Pairwise reports.
-
-    Returns
-    -------
-    list of str
-        Sentences using the fixed verdict vocabulary.
-    """
+    """Write one sentence per comparison, or one per condition when there are none."""
     unit_text = f" {unit}" if unit else ""
     if not pairwise:
-        return [_single_condition_verdict(condition, metric, unit_text) for condition in conditions]
+        return [
+            f"{item.label} {metric} {_num(item.mean)}{unit_text} "
+            + (
+                f"(95% CI {_interval(item.ci95)}, n {item.n_replicates})"
+                if item.ci95
+                else f"(no interval, n {item.n_replicates})"
+            )
+            for item in conditions
+        ]
 
-    by_label = {condition.label: condition for condition in conditions}
-    sentences: list[str] = []
+    counts = {item.label: item.n_replicates for item in conditions}
+    sentences = []
     for pair in pairwise:
-        first = by_label.get(pair.a)
-        second = by_label.get(pair.b)
-        counts = f"n {first.n_replicates if first else 0} vs {second.n_replicates if second else 0}"
+        n_text = f"n {counts.get(pair.a, 0)} vs {counts.get(pair.b, 0)}"
         evidence = (
-            f"delta {_signed(pair.delta)}{unit_text}, "
-            f"95% CI {_interval(pair.delta_ci95)}, "
-            f"p_adj {_num(pair.p_adjusted if pair.p_adjusted is not None else pair.p)}, "
-            f"{counts}"
+            f"delta {_signed(pair.delta)}{unit_text}, 95% CI {_interval(pair.delta_ci95)}, "
+            f"p_adj {_num(pair.p_adjusted)}, p {_num(pair.p)}, {n_text}"
         )
         if not pair.testable:
             sentences.append(
-                f"{VERDICT_NOT_TESTABLE}: {metric} for {pair.a} vs {pair.b} needs at least "
-                f"two replicates per condition ({counts})"
+                f"{VERDICT_NOT_TESTABLE}: {metric} for {pair.a} vs {pair.b} needs at least two "
+                f"replicates per condition ({n_text})"
             )
-        elif pair.significant:
-            word = VERDICT_LARGER if pair.delta > 0 else VERDICT_SMALLER
-            sentences.append(f"{pair.b} {word} {metric} than {pair.a} ({evidence})")
-        else:
+        elif pair.p_adjusted is None:
+            sentences.append(
+                f"{VERDICT_NO_TEST} for {metric} between {pair.a} and {pair.b}; the plugin "
+                f"stored no multiplicity-corrected p value ({evidence})"
+            )
+        elif not pair.significant:
             sentences.append(
                 f"{VERDICT_NO_DIFFERENCE} in {metric} between {pair.a} and {pair.b} ({evidence})"
             )
+        else:
+            word = (
+                VERDICT_CHANGED
+                if pair.delta == 0
+                else (VERDICT_LARGER if pair.delta > 0 else VERDICT_SMALLER)
+            )
+            sentences.append(f"{pair.b} {word} {metric} than {pair.a} ({evidence})")
     return sentences
 
 
-def _single_condition_verdict(condition: ConditionReport, metric: str, unit_text: str) -> str:
-    """Write the sentence describing one condition on its own.
-
-    Parameters
-    ----------
-    condition : ConditionReport
-        The condition.
-    metric : str
-        Primary metric name.
-    unit_text : str
-        Preformatted unit, empty for a dimensionless metric.
-
-    Returns
-    -------
-    str
-        One sentence stating the mean, its interval and the replicate count.
-    """
-    if condition.ci95 is None:
-        return (
-            f"{condition.label} {metric} {_num(condition.mean)}{unit_text} "
-            f"(no interval, n {condition.n_replicates})"
-        )
-    return (
-        f"{condition.label} {metric} {_num(condition.mean)}{unit_text} "
-        f"(95% CI {_interval(condition.ci95)}, n {condition.n_replicates})"
-    )
-
-
-# ---------------------------------------------------------------------------
 # Formatting helpers
-# ---------------------------------------------------------------------------
 
 
-def _as_float(value: Any) -> float:
-    """Coerce a value to float, mapping anything unusable to NaN.
-
-    Parameters
-    ----------
-    value : Any
-        Candidate value.
-
-    Returns
-    -------
-    float
-        The value as a float, or NaN.
-    """
+def _float(value: Any) -> float:
+    """Coerce to float, mapping anything unusable to NaN."""
     try:
         return float(value)
     except (TypeError, ValueError):
         return float("nan")
 
 
-def _as_optional_float(value: Any) -> float | None:
-    """Coerce a value to float, keeping ``None`` as ``None``.
-
-    Parameters
-    ----------
-    value : Any
-        Candidate value.
-
-    Returns
-    -------
-    float or None
-        The value as a float, or ``None``.
-    """
+def _optional_float(value: Any) -> float | None:
+    """Coerce to float, keeping ``None``, NaN and unusable values as ``None``."""
     if value is None:
         return None
     try:
-        return float(value)
+        result = float(value)
     except (TypeError, ValueError):
         return None
+    return None if math.isnan(result) else result
 
 
-def _flip_sign(value: float | None) -> float | None:
-    """Reorient an effect size from control-minus-treatment to b-minus-a.
-
-    Parameters
-    ----------
-    value : float or None
-        Effect size as the framework reports it.
-
-    Returns
-    -------
-    float or None
-        The same magnitude with the sign of ``delta``, or ``None``.
-    """
-    if value is None:
-        return None
-    return -value
+def _negate(value: float | None) -> float | None:
+    """Reorient an effect size from control minus treatment to b minus a."""
+    return None if value is None else -value
 
 
 def _num(value: float | None) -> str:
-    """Format one number with four significant digits.
-
-    Parameters
-    ----------
-    value : float or None
-        Number to format.
-
-    Returns
-    -------
-    str
-        The formatted number, or ``"na"``.
-    """
+    """Format one number with four significant digits, or ``na``."""
     if value is None:
         return "na"
-    if isinstance(value, float) and math.isnan(value):
-        return "nan"
-    return f"{value:.4g}"
+    return "nan" if math.isnan(value) else f"{value:.4g}"
 
 
 def _signed(value: float | None) -> str:
-    """Format one number with an explicit sign.
-
-    Parameters
-    ----------
-    value : float or None
-        Number to format.
-
-    Returns
-    -------
-    str
-        The signed number, or ``"na"``.
-    """
+    """Format one number with an explicit sign, or ``na``."""
     if value is None:
         return "na"
-    if isinstance(value, float) and math.isnan(value):
-        return "nan"
-    return f"{value:+.4g}"
+    return "nan" if math.isnan(value) else f"{value:+.4g}"
 
 
 def _interval(limits: Sequence[float] | None) -> str:
-    """Format an interval as ``"low to high"``.
-
-    Parameters
-    ----------
-    limits : sequence of float or None
-        Lower and upper limits.
-
-    Returns
-    -------
-    str
-        The formatted interval, or ``"na"``.
-    """
-    if limits is None:
-        return "na"
-    return f"{_num(limits[0])} to {_num(limits[1])}"
+    """Format an interval as ``low to high``, or ``na``."""
+    return "na" if limits is None else f"{_num(limits[0])} to {_num(limits[1])}"
 
 
-def _fit_blocks(
-    condition_lines: list[str],
-    pairwise_lines: list[str],
-    budget: int,
-) -> tuple[list[str], list[str], int]:
-    """Trim the condition and comparison blocks to a line budget.
-
-    Parameters
-    ----------
-    condition_lines : list of str
-        One line per condition.
-    pairwise_lines : list of str
-        One line per comparison.
-    budget : int
-        Lines available for both blocks together.
-
-    Returns
-    -------
-    tuple
-        Trimmed condition lines, trimmed comparison lines, and the number of
-        lines dropped.
-    """
-    total = len(condition_lines) + len(pairwise_lines)
-    if total <= budget:
-        return condition_lines, pairwise_lines, 0
-    # One line of the budget goes to the omission notice.
-    room = max(budget - 1, 0)
-    keep_conditions = min(len(condition_lines), max(room // 2, 1) if room else 0)
-    keep_pairwise = max(room - keep_conditions, 0)
+def _condition_line(condition: ConditionReport) -> str:
+    """Render one condition on a single line."""
+    shown = ", ".join(_num(value) for value in condition.replicate_values[:_MAX_PRINTED_VALUES])
+    extra = len(condition.replicate_values) - _MAX_PRINTED_VALUES
+    if extra > 0:
+        shown += f", +{extra} more"
     return (
-        condition_lines[:keep_conditions],
-        pairwise_lines[:keep_pairwise],
-        total - keep_conditions - keep_pairwise,
+        f"{condition.label}  n {condition.n_replicates}  mean {_num(condition.mean)}"
+        f"  sem {_num(condition.sem)}  ci95 {_interval(condition.ci95)}"
+        f"  values {shown or 'none'}"
     )
+
+
+def _pairwise_line(pair: PairwiseReport) -> str:
+    """Render one comparison on a single line."""
+    if not pair.testable:
+        flag = "not_testable"
+    elif pair.p_adjusted is None:
+        flag = "no_test"
+    else:
+        flag = "significant" if pair.significant else "not_significant"
+    return (
+        f"{pair.a} vs {pair.b}  delta {_signed(pair.delta)}  ci95 {_interval(pair.delta_ci95)}"
+        f"  p {_num(pair.p)}  p_adj {_num(pair.p_adjusted)}  test {pair.test}"
+        f"  correction {pair.correction}  d {_num(pair.cohens_d)}  {flag}"
+    )
+
+
+def _omitted(count: int) -> str:
+    """Render the line accounting for dropped lines."""
+    return f"# {count} line(s) omitted; use --format json for the full report"
+
+
+def _fit(conditions: list[str], pairwise: list[str], budget: int) -> list[str]:
+    """Trim the condition and comparison blocks to a shared line budget."""
+    total = len(conditions) + len(pairwise)
+    if total <= budget:
+        return conditions + pairwise
+    room = max(budget - 1, 0)
+    keep_a = min(len(conditions), max(room // 2, 1) if room else 0)
+    keep_b = max(room - keep_a, 0)
+    return conditions[:keep_a] + pairwise[:keep_b] + [_omitted(total - keep_a - keep_b)]

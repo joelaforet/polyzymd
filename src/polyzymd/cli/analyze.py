@@ -1,49 +1,30 @@
 """The ``polyzymd analyze`` command.
 
 One command that turns simulation configs into a validated number. The work
-lives in :mod:`polyzymd.analyses.protocols`; this module only parses options,
-picks a renderer and sets the exit code.
-
-Exit codes are 0 on success and 2 on a typed analysis error, whose message and
-fix hint are printed on one line each.
+lives in :mod:`polyzymd.analyses.protocols`; this module parses options, picks
+a renderer and sets the exit code, which is 0 on success and 2 on a typed
+analysis error whose message and fix hint are printed one line each.
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 
 from polyzymd.cli.env_warnings import warn_if_wrong_pixi_env
 
-ANALYSIS_PIXI_ENVS = ("analysis",)
+if TYPE_CHECKING:
+    from polyzymd.analyses.protocols import ProtocolReport
 
+ANALYSIS_PIXI_ENVS = ("analysis",)
 EXIT_ANALYSIS_ERROR = 2
 
 
-def _parse_setting_overrides(raw: tuple[str, ...]) -> dict[str, Any]:
-    """Parse ``--set key=value`` pairs into a settings dictionary.
-
-    Values are read as YAML scalars, so ``--set n_bins=50`` gives an integer
-    and ``--set align=false`` gives a boolean. A dotted key nests.
-
-    Parameters
-    ----------
-    raw : tuple of str
-        Raw ``key=value`` strings.
-
-    Returns
-    -------
-    dict
-        Settings to hand to the plugin.
-
-    Raises
-    ------
-    ProtocolError
-        If an entry has no ``=``, an empty key, or an unparsable value.
-    """
+def _settings(raw: tuple[str, ...]) -> dict[str, Any]:
+    """Parse ``key=value`` pairs, reading each value as YAML and nesting dotted keys."""
     import yaml
 
     from polyzymd.analyses.exceptions import ProtocolError
@@ -64,32 +45,15 @@ def _parse_setting_overrides(raw: tuple[str, ...]) -> dict[str, Any]:
                 f"Cannot read the value of setting {key!r}: {exc}",
                 hint="Quote the value, for example --set selection='name CA'.",
             ) from exc
-        target = settings
-        parts = key.split(".")
+        target, parts = settings, key.split(".")
         for part in parts[:-1]:
             target = target.setdefault(part, {})
         target[parts[-1]] = parsed
     return settings
 
 
-def _parse_replicates(spec: str | None) -> list[int] | None:
-    """Parse a replicate range string such as ``"1-3"``.
-
-    Parameters
-    ----------
-    spec : str or None
-        Range string, or ``None`` to discover replicates on disk.
-
-    Returns
-    -------
-    list of int or None
-        Replicate numbers, or ``None``.
-
-    Raises
-    ------
-    ProtocolError
-        If the range cannot be parsed.
-    """
+def _replicates(spec: str | None) -> list[int] | None:
+    """Parse a replicate range such as ``1-3``, or return ``None`` to use the disk."""
     if spec is None:
         return None
 
@@ -105,76 +69,47 @@ def _parse_replicates(spec: str | None) -> list[int] | None:
         ) from exc
 
 
-def _render(report: Any, output_format: str, analysis_name: str) -> str:
-    """Render a report in the requested format.
+def _table(report: "ProtocolReport") -> str:
+    """Render the report as an aligned plain-text table."""
+    unit = f" [{report.unit}]" if report.unit else ""
+    run = f"  run {report.run}" if report.run else ""
+    lines = [
+        f"{report.analysis}  metric {report.metric}{unit}{run}"
+        f"  (equilibration {report.equilibration})",
+        "",
+        f"{'condition':<28}{'n':>4}{'mean':>14}{'sem':>12}{'95% CI':>28}",
+    ]
+    for item in report.conditions:
+        interval = f"{item.ci95[0]:.4g} to {item.ci95[1]:.4g}" if item.ci95 else "none"
+        sem = "none" if item.sem is None else f"{item.sem:.4g}"
+        lines.append(
+            f"{item.label:<28}{item.n_replicates:>4}{item.mean:>14.4g}{sem:>12}{interval:>28}"
+        )
+    if report.pairwise:
+        lines += ["", f"{'comparison':<40}{'delta':>12}{'p_adj':>12}{'significant':>14}"]
+        for pair in report.pairwise:
+            adjusted = "none" if pair.p_adjusted is None else f"{pair.p_adjusted:.4g}"
+            lines.append(
+                f"{pair.a + ' vs ' + pair.b:<40}{pair.delta:>+12.4g}"
+                f"{adjusted:>12}{str(pair.significant):>14}"
+            )
+    lines += [f"warning: {text}" for text in report.warnings]
+    lines += [""] + [f"verdict: {text}" for text in report.verdict]
+    return "\n".join(lines)
 
-    Parameters
-    ----------
-    report : ProtocolReport
-        The report to render.
-    output_format : str
-        ``"agent"``, ``"json"`` or ``"table"``.
-    analysis_name : str
-        Analysis name, used for the table heading.
 
-    Returns
-    -------
-    str
-        Text to print.
-    """
+def _render(report: "ProtocolReport", output_format: str) -> str:
+    """Render the report in the requested format."""
     if output_format == "json":
         return report.model_dump_json(indent=2)
     if output_format == "agent":
         return report.to_agent_text()
-    return _render_table(report, analysis_name)
+    return _table(report)
 
 
-def _render_table(report: Any, analysis_name: str) -> str:
-    """Render a report as an aligned plain-text table.
-
-    Parameters
-    ----------
-    report : ProtocolReport
-        The report to render.
-    analysis_name : str
-        Analysis name shown in the heading.
-
-    Returns
-    -------
-    str
-        Table text.
-    """
-    unit = f" [{report.unit}]" if report.unit else ""
-    lines = [
-        f"{analysis_name}  metric {report.metric}{unit}  "
-        f"(equilibration {report.equilibration})",
-        "",
-        f"{'condition':<24}{'n':>4}{'mean':>14}{'sem':>12}{'95% CI':>28}",
-    ]
-    for condition in report.conditions:
-        interval = (
-            f"{condition.ci95[0]:.4g} to {condition.ci95[1]:.4g}" if condition.ci95 else "none"
-        )
-        sem = "none" if condition.sem is None else f"{condition.sem:.4g}"
-        lines.append(
-            f"{condition.label:<24}{condition.n_replicates:>4}"
-            f"{condition.mean:>14.4g}{sem:>12}{interval:>28}"
-        )
-    if report.pairwise:
-        lines.append("")
-        lines.append(f"{'comparison':<28}{'delta':>12}{'p_adj':>12}{'significant':>14}")
-        for pair in report.pairwise:
-            adjusted = "none" if pair.p_adjusted is None else f"{pair.p_adjusted:.4g}"
-            lines.append(
-                f"{pair.a + ' vs ' + pair.b:<28}{pair.delta:>+12.4g}"
-                f"{adjusted:>12}{str(pair.significant):>14}"
-            )
-    for text in report.warnings:
-        lines.append(f"warning: {text}")
-    lines.append("")
-    for sentence in report.verdict:
-        lines.append(f"verdict: {sentence}")
-    return "\n".join(lines)
+def _one_line(text: str) -> str:
+    """Collapse a message to one line."""
+    return " ".join(text.split())
 
 
 @click.command("analyze")
@@ -197,6 +132,7 @@ def _render_table(report: Any, analysis_name: str) -> str:
 )
 @click.option(
     "--replicates",
+    "replicate_spec",
     default=None,
     help="Replicates to analyze, for example 1-3 or 1,3,5. Default: those found on disk.",
 )
@@ -211,6 +147,11 @@ def _render_table(report: Any, analysis_name: str) -> str:
     "labels",
     multiple=True,
     help="Condition label, one per -c in the same order. Default: the config's directory name.",
+)
+@click.option(
+    "--run",
+    default=None,
+    help="Run or pair label to report when the analysis measures several. Default: the first.",
 )
 @click.option(
     "--set",
@@ -242,17 +183,16 @@ def _render_table(report: Any, analysis_name: str) -> str:
     help="Directory for analysis/, comparison/ and figures/. Default: the current directory.",
 )
 @click.option(
-    "--recompute",
-    is_flag=True,
-    help="Recompute replicates instead of reusing cached results.",
+    "--recompute", is_flag=True, help="Recompute replicates instead of reusing cached results."
 )
 def analyze_command(
     name: str,
     configs: tuple[Path, ...],
     comparison_file: Path | None,
-    replicates: str | None,
+    replicate_spec: str | None,
     equilibration: str | None,
     labels: tuple[str, ...],
+    run: str | None,
     setting_overrides: tuple[str, ...],
     output_format: str,
     output_path: Path | None,
@@ -276,37 +216,37 @@ def analyze_command(
     from polyzymd.analyses.exceptions import AnalysisError, ProtocolError
 
     try:
-        report, analysis_name = _run(
+        report = _run(
             name=name,
             configs=configs,
             comparison_file=comparison_file,
-            replicates=replicates,
+            replicate_spec=replicate_spec,
             equilibration=equilibration,
             labels=labels,
+            run=run,
             setting_overrides=setting_overrides,
             output_dir=output_dir,
             recompute=recompute,
         )
     except AnalysisError as exc:
-        click.echo(f"error: {_one_line(str(exc))}", err=True)
         hint = getattr(exc, "hint", None)
+        click.echo(f"error: {_one_line(str(exc))}", err=True)
         if hint:
             click.echo(f"fix: {_one_line(hint)}", err=True)
         sys.exit(EXIT_ANALYSIS_ERROR)
     except (FileNotFoundError, ValueError, OSError) as exc:
         wrapped = ProtocolError(
-            str(exc),
-            hint="Check the -c or -f paths and the replicate directories they point at.",
+            str(exc), hint="Check the -c or -f paths and the replicate directories."
         )
         click.echo(f"error: {_one_line(str(wrapped))}", err=True)
         click.echo(f"fix: {wrapped.hint}", err=True)
         sys.exit(EXIT_ANALYSIS_ERROR)
 
-    rendered = _render(report, output_format, analysis_name)
+    rendered = _render(report, output_format)
     click.echo(rendered)
     if output_path is not None:
         try:
-            Path(output_path).write_text(rendered if rendered.endswith("\n") else rendered + "\n")
+            Path(output_path).write_text(rendered.rstrip("\n") + "\n")
         except OSError as exc:
             raise click.ClickException(f"Could not write output file: {exc}") from exc
 
@@ -316,113 +256,56 @@ def _run(
     name: str,
     configs: tuple[Path, ...],
     comparison_file: Path | None,
-    replicates: str | None,
+    replicate_spec: str | None,
     equilibration: str | None,
     labels: tuple[str, ...],
+    run: str | None,
     setting_overrides: tuple[str, ...],
     output_dir: Path | None,
     recompute: bool,
-) -> tuple[Any, str]:
-    """Resolve the options and run the protocol.
-
-    Parameters
-    ----------
-    name : str
-        Analysis name.
-    configs : tuple of Path
-        Simulation config paths.
-    comparison_file : Path or None
-        Existing comparison.yaml.
-    replicates : str or None
-        Replicate range string.
-    equilibration : str or None
-        Equilibration override.
-    labels : tuple of str
-        Condition labels.
-    setting_overrides : tuple of str
-        ``key=value`` settings.
-    output_dir : Path or None
-        Output root.
-    recompute : bool
-        Whether to recompute replicates.
-
-    Returns
-    -------
-    tuple
-        The report and the analysis name.
-
-    Raises
-    ------
-    ProtocolError
-        If both or neither of -c and -f are given, or if the comparison file is
-        missing.
-    """
+) -> "ProtocolReport":
+    """Resolve the options and run the protocol, through -f or through -c configs."""
     from polyzymd.analyses.exceptions import ProtocolError
-    from polyzymd.analyses.protocols import analyze, get_analysis_class, run_protocol
+    from polyzymd.analyses.protocols import analyze, run_protocol
 
     if configs and comparison_file is not None:
         raise ProtocolError(
             "Give either -c simulation configs or -f comparison.yaml, not both.",
             hint="Drop -f to build the comparison from the -c configs.",
         )
-
-    settings = _parse_setting_overrides(setting_overrides)
-    replicate_numbers = _parse_replicates(replicates)
+    settings = _settings(setting_overrides)
 
     if comparison_file is not None:
         from polyzymd.config.comparison import ComparisonConfig
 
+        if settings:
+            raise ProtocolError(
+                "--set cannot be combined with -f.",
+                hint="Put plugin settings in the comparison.yaml plugins section.",
+            )
         path = Path(comparison_file).expanduser().resolve()
         if not path.is_file():
             raise ProtocolError(
                 f"Comparison config not found: {path}",
                 hint="Run 'polyzymd compare init -n <name>' to create one.",
             )
-        analysis_cls = get_analysis_class(name)
         try:
-            comparison_config = ComparisonConfig.from_yaml(path)
+            config = ComparisonConfig.from_yaml(path)
         except (ValueError, OSError) as exc:
             raise ProtocolError(
                 f"Could not load {path}: {exc}",
                 hint="Fix the comparison.yaml, or use -c config.yaml instead.",
             ) from exc
-        if settings:
-            raise ProtocolError(
-                "--set cannot be combined with -f.",
-                hint="Put plugin settings in the comparison.yaml plugins section.",
-            )
-        report = run_protocol(
-            analysis_cls(),
-            comparison_config,
-            equilibration=equilibration,
-            recompute=recompute,
-        )
-        return report, analysis_cls.name
+        return run_protocol(name, config, equilibration=equilibration, recompute=recompute, run=run)
 
-    report = analyze(
+    return analyze(
         name,
         list(configs),
-        replicates=replicate_numbers,
+        replicates=_replicates(replicate_spec),
         equilibration=equilibration,
         settings=settings or None,
         labels=list(labels) or None,
         output_dir=output_dir,
         recompute=recompute,
+        run=run,
     )
-    return report, report.analysis
-
-
-def _one_line(text: str) -> str:
-    """Collapse a message to a single line.
-
-    Parameters
-    ----------
-    text : str
-        Message, possibly multi-line.
-
-    Returns
-    -------
-    str
-        The message with newlines and repeated spaces removed.
-    """
-    return " ".join(text.split())

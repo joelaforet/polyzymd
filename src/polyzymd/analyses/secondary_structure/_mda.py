@@ -37,6 +37,7 @@ DSSP_STATE_LABELS: dict[str, str] = {"C": "coil", "H": "helix", "E": "strand"}
 DSSP_MATRIX_SIDECAR = "dssp_state_matrix.npz"
 HELIX_FRACTION_METRIC = "helix_fraction"
 SS_METRIC_METADATA: dict[str, Any] = {
+    "unit": "fraction",
     "higher_is_better": True,
     "direction_labels": ("destabilizing", "unchanged", "stabilizing"),
     "description": "Mean fraction of DSSP states assigned as helix",

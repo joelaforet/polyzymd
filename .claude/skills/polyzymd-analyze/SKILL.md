@@ -3,7 +3,7 @@ name: polyzymd-analyze
 description: Get a validated number out of PolyzyMD trajectories with ONE command, `polyzymd analyze <name> -c config.yaml [-c other.yaml]`. Use whenever the question is "what is the Rg / RMSF / SASA / contact count of this system" or "does condition A differ from condition B". Do not write your own MDAnalysis loop for an analysis that already exists.
 ---
 
-# /polyzymd-analyze — one command, one validated number
+# polyzymd-analyze, one command for one validated number
 
 ## 1. The command
 
@@ -39,6 +39,8 @@ verdict: B larger mean_rg than A (delta +0.31 A, 95% CI 0.02 to 0.6, p_adj 0.041
   it is the interval on the difference, uncorrected for multiplicity.
 - `delta` is `mean(b) - mean(a)`, and `d` has the same sign.
 - `significant` uses `p_adj` against the configured alpha, 0.05 by default.
+- `run` in the header names the selection when an analysis measures several
+  (rg does protein and polymer); `--run LABEL` picks another.
 
 Verdict vocabulary, fixed so you can branch on it:
 
@@ -46,6 +48,7 @@ Verdict vocabulary, fixed so you can branch on it:
 |---|---|
 | `larger` / `smaller` | the second condition differs from the control after correction |
 | `no significant difference` | the test ran and did not clear alpha; read the CI before calling it "the same" |
+| `no test recorded` | the plugin stored no corrected p value; the line describes, it does not decide |
 | `not testable` | a condition has fewer than two replicates, so no test exists |
 
 Report the verdict sentence verbatim, with the unit and the replicate counts.

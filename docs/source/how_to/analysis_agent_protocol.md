@@ -54,6 +54,18 @@ pixi run -e analysis polyzymd analyze rmsf \
   --set selection='name CA' --set reference_mode=average
 ```
 
+## Pick a selection when the analysis measures several
+
+Some analyses report one metric for several selections: rg measures the protein
+and the polymer oligomers, sasa measures four contexts, distances measures each
+atom pair. The report covers one of them at a time, names it in `run`, and
+lists the rest in `all_runs`. Pick another with `--run`:
+
+```bash
+pixi run -e analysis polyzymd analyze rg -c A/config.yaml -c B/config.yaml \
+  --run "Polymer Oligomers"
+```
+
 ## Get the full record
 
 `--format json` prints the whole `ProtocolReport`, including every metric the
@@ -101,6 +113,13 @@ pixi run -e analysis polyzymd compare run rmsf -f comparison.yaml --format agent
   so it can exclude zero while `p_adj` does not clear alpha.
 - `not testable` means a condition has fewer than two replicates, so no test
   exists. It does not mean the conditions are the same.
+- `no test recorded` means the plugin stored a raw p value but no
+  multiplicity-corrected one, so the line describes a difference without
+  deciding it. Distances is the analysis that does this today.
+- A plugin that stores only means and standard errors, such as contacts, gets
+  its condition intervals rebuilt from the standard error and the replicate
+  count; `ci_method` then reads `student_t_from_sem` and no interval is given
+  on a difference.
 - Every `warning:` line is part of the answer. A warning that a condition has
   two replicates changes how wide the interval really is.
 
