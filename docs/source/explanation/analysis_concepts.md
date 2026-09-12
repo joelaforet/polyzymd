@@ -175,6 +175,56 @@ plugins:
   contacts: {}
 ```
 
+## Periodic boundaries, whole molecules, and alignment
+
+Molecular dynamics runs in a periodic box, and the coordinates written to a
+trajectory are usually wrapped back into the primary cell. A molecule that
+drifts across a face of the box is then stored in pieces, with some atoms at one
+edge and the rest at the opposite edge. Nothing in the file says whether that
+happened, so an observable computed from raw coordinates can be right on one
+frame and badly wrong on the next.
+
+Which observables care depends on what they measure. A radius of gyration is a
+spread about a center of mass, so a molecule stored in two pieces reports a
+radius of roughly half a box length rather than its real size. Alignment and
+RMSD have the same problem, because fitting a structure that is split in two
+fits a shape the molecule never adopted. A pair distance is different. The
+minimum image convention gives the distance to the nearest periodic copy of the
+second point, which is the physically meaningful separation whether or not the
+molecules were wrapped, so distances need the box rather than whole molecules.
+PolyzyMD therefore makes wholeness an explicit choice at load time through
+`pbc_policy`, records the choice in provenance, and refuses to unwrap a topology
+that has no bonds, because unwrapping walks the bond graph.
+
+Alignment does not belong anywhere in a distance calculation, for two reasons.
+The first is that a distance is invariant under rotation and translation, so
+removing rigid-body motion cannot change a correct answer, and paying for a full
+in-memory copy of the trajectory to do it buys nothing. The second is that it
+was actively harmful here. MDAnalysis applies the minimum image convention by
+building box vectors from the stored `(a, b, c, alpha, beta, gamma)` and
+assuming those vectors describe the lattice of the coordinates it is handed.
+Aligning in memory rotates every coordinate but copies the box unchanged, so the
+two no longer agree. For a pair separated by less than half a box length in
+every Cartesian component the wrapping is a no-op and the answer survives, which
+is why catalytic-triad distances looked fine. For a long pair, such as a domain
+center of mass against a polymer center of mass in a 90 Angstrom box, a
+component can be folded against the wrong lattice vector and the reported
+distance is wrong. Distances and the catalytic triad now measure the coordinates
+as the trajectory stores them.
+
+### References
+
+- Michaud-Agrawal, N., Denning, E. J., Woolf, T. B., and Beckstein, O. (2011).
+  MDAnalysis: a toolkit for the analysis of molecular dynamics simulations.
+  *Journal of Computational Chemistry*, 32(10), 2319-2327.
+  doi:10.1002/jcc.21787
+- MDAnalysis `MDAnalysis.lib.distances` documentation, on the `box` argument and
+  the minimum image convention:
+  <https://docs.mdanalysis.org/stable/documentation_pages/lib/distances.html>
+- MDAnalysis `MDAnalysis.transformations.wrap` documentation, on `unwrap` and
+  its bond requirement:
+  <https://docs.mdanalysis.org/stable/documentation_pages/transformations/wrap.html>
+
 ## Statistical comparison
 
 When you have two or more conditions, the compare stage produces statistical
