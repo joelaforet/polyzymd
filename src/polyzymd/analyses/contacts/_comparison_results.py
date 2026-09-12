@@ -40,11 +40,11 @@ class AggregateComparisonResult(BaseModel):
         Label of condition B
     condition_a_mean : float
         Mean value for condition A
-    condition_a_sem : float
+    condition_a_sem : float or None
         SEM for condition A
     condition_b_mean : float
         Mean value for condition B
-    condition_b_sem : float
+    condition_b_sem : float or None
         SEM for condition B
     t_statistic : float
         T-test statistic
@@ -72,9 +72,9 @@ class AggregateComparisonResult(BaseModel):
     condition_a: str
     condition_b: str
     condition_a_mean: float
-    condition_a_sem: float
+    condition_a_sem: float | None
     condition_b_mean: float
-    condition_b_sem: float
+    condition_b_sem: float | None
     t_statistic: float
     p_value: float
     p_value_adjusted: float | None = None
@@ -93,7 +93,7 @@ class ContactsResidenceTimeSummary(BaseModel):
     """Descriptive event-conditioned residence time summary in ns."""
 
     mean_ns: float = 0.0
-    sem_ns: float = 0.0
+    sem_ns: float | None = None
     n_events: int = 0
     replicates_with_events: list[int] = Field(default_factory=list)
     replicate_means_ns: list[float] = Field(default_factory=list)
@@ -114,11 +114,11 @@ class ContactsConditionSummary(BaseModel):
         Number of protein residues
     coverage_mean : float
         Mean coverage fraction (residues contacted / total)
-    coverage_sem : float
+    coverage_sem : float or None
         SEM of coverage
     mean_contact_fraction : float
         Mean of mean contact fractions across replicates
-    mean_contact_fraction_sem : float
+    mean_contact_fraction_sem : float or None
         SEM of mean contact fraction
     residence_time_by_polymer_type : dict[str, ContactsResidenceTimeSummary]
         Event-conditioned mean +/- SEM residence time in ns for each polymer type.
@@ -131,9 +131,9 @@ class ContactsConditionSummary(BaseModel):
     n_replicates: int
     n_residues: int
     coverage_mean: float
-    coverage_sem: float
+    coverage_sem: float | None
     mean_contact_fraction: float
-    mean_contact_fraction_sem: float
+    mean_contact_fraction_sem: float | None
     residence_time_by_polymer_type: dict[str, ContactsResidenceTimeSummary] = Field(
         default_factory=dict
     )

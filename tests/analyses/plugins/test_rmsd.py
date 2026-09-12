@@ -1016,7 +1016,7 @@ def test_format_markdown() -> None:
     """Markdown formatting should include markdown sections and table headers."""
     text = format_rmsd_comparison(_make_comparison_result(), "markdown")
     assert "## RMSD Comparison: protein_backbone" in text
-    assert "| Condition | Mean RMSD (Å) | SEM | Rank |" in text
+    assert "| Condition | Mean RMSD (Å) | 95% CI | SEM | Rank |" in text
 
 
 def test_format_markdown_regression_includes_non_significant_and_non_testable() -> None:
@@ -1134,13 +1134,16 @@ def test_format_markdown_regression_includes_non_significant_and_non_testable() 
     assert text == (
         "## RMSD Comparison: run_1\n"
         "\n"
-        "| Condition | Mean RMSD (Å) | SEM | Rank |\n"
-        "|-----------|---------------|-----|------|\n"
-        "| Control | 1.00 | 0.10 | 1 |\n"
+        "Uncertainty: 95% CI (Student t) across replicates; not estimable from a single "
+        "replicate; production window t >= 10ns.\n"
+        "\n"
+        "| Condition | Mean RMSD (Å) | 95% CI | SEM | Rank |\n"
+        "|-----------|---------------|--------|-----|------|\n"
+        "| Control | 1.00 | [-0.27, 2.27] | 0.10 | 1 |\n"
         "  - Convergence: 2/2 replicates converged (2 assessable), median t_conv = 10.0 ns\n"
-        "| Treatment_A | 1.05 | 0.09 | 2 |\n"
+        "| Treatment_A | 1.05 | [-0.09, 2.19] | 0.09 | 2 |\n"
         "  - Convergence: 1/2 replicates converged (2 assessable), median t_conv = 12.5 ns\n"
-        "| Treatment_B | 1.08 | n/a | 3 |\n"
+        "| Treatment_B | 1.08 | n/a (single replicate) | n/a (single replicate) | 3 |\n"
         "  - Convergence: 0/1 replicates converged (1 assessable), median t_conv = n/a\n"
         "\n"
         "*SEM: n/a (single replicate; not estimable).*\n"

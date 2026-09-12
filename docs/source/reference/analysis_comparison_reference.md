@@ -336,6 +336,51 @@ identify conditions where one or more replicates failed to reach a stable
 plateau, which may warrant longer production runs or additional replicates.
 :::
 
+## Uncertainty fields
+
+Every metric summary in a condition or comparison artifact carries these
+fields. The replicate is the sampling unit for all of them.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mean` | `float` | Mean of the replicate values |
+| `sem` | `float \| null` | Standard error of the mean across replicates, `s / sqrt(n)` with `ddof = 1`. `null` when a single replicate makes it inestimable |
+| `std` | `float \| null` | Sample standard deviation across replicates. `null` for a single replicate |
+| `n` | `int` | Number of replicates |
+| `unit` | `str \| null` | Physical unit of `mean`, for example `"A"`, `"A^2"`, `"fraction"`, `"%"`, `"ns"`. `null` marks a dimensionless metric |
+| `ci95_low` | `float \| null` | Lower limit of the 95 percent confidence interval. `null` for a single replicate |
+| `ci95_high` | `float \| null` | Upper limit of the 95 percent confidence interval. `null` for a single replicate |
+| `ci_method` | `str \| null` | Interval method, `"student_t"` when an interval exists |
+
+The interval is `mean +/- t(0.975, n - 1) * sem`. The coverage factor is 4.303
+at `n = 3` and 2.776 at `n = 5`. The interval is symmetric and is not clipped
+to a physical range, so for a fraction, an occupancy or a coverage near 0 or 1
+a limit can fall outside `[0, 1]`. Read such a limit as an indication of spread
+rather than a bound.
+
+Each condition artifact payload and each comparison artifact payload also
+carries an `uncertainty` block:
+
+```json
+{
+  "uncertainty": {
+    "kind": "sem_across_replicates",
+    "n": 3,
+    "coverage": 0.95,
+    "method": "student_t"
+  }
+}
+```
+
+`kind` names the standard uncertainty, `n` the replicate count behind the
+narrowest interval in the artifact, `coverage` the probability the interval
+covers, and `method` how the coverage factor was obtained.
+
+The default scalar comparison also writes `<metric>_unit`, `<metric>_ci95_low`,
+`<metric>_ci95_high` and `<metric>_ci_method` into each entry of
+`condition_summaries`, alongside the existing `<metric>_mean`, `<metric>_sem`
+and `<metric>_replicate_values`.
+
 ## Statistical Terms
 
 - `p-value`: significance of the observed difference under the null hypothesis
@@ -346,6 +391,8 @@ plateau, which may warrant longer production runs or additional replicates.
 - `ANOVA`: omnibus test across multiple conditions, reported uncorrected and
   gating nothing
 - `SEM`: standard error of the mean across replicates
+- `95% CI`: two-sided Student t confidence interval across replicates,
+  `mean +/- t(0.975, n - 1) * SEM`
 - `Benjamini-Hochberg (BH)`: step-up procedure for controlling the false
   discovery rate across multiple hypothesis tests
 - `Adjusted p-value (p_adj)`: p-value corrected for multiple comparisons via

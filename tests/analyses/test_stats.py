@@ -158,9 +158,12 @@ def test_format_scalar_singleton_sem_rendered_as_not_available() -> None:
     assert "n/a" in text_output
     assert "SEM: n/a (single replicate; not estimable)" in text_output
     assert "0.1000" not in text_output
-    assert "| 1.0000 | n/a | 1 |" in markdown_output
+    assert "| 1.0000 | n/a (single replicate) | n/a (single replicate) | 1 |" in markdown_output
     assert "*SEM: n/a (single replicate; not estimable).*" in markdown_output
     assert "0.1000" not in markdown_output
+    # The table names its own interval so a reader never has to guess.
+    assert "95% CI (Student t)" in text_output
+    assert "95% CI (Student t)" in markdown_output
 
 
 def test_default_scalar_singleton_anova_not_testable() -> None:
@@ -588,10 +591,10 @@ def test_format_scalar_comparison_artifact_payload_handles_malformed_ranking_val
         higher_is_better=False,
     )
 
-    assert "1. PEG: nan A ± nan A" in text_output
-    assert "2. Control: nan A ± nan A" in text_output
-    assert "| 1 | PEG | nan A | nan A |" in markdown_output
-    assert "| 2 | Control | nan A | nan A |" in markdown_output
+    assert "1. PEG: nan A n/a, SEM n/a" in text_output
+    assert "2. Control: nan A n/a, SEM n/a" in text_output
+    assert "| 1 | PEG | nan A n/a | n/a |" in markdown_output
+    assert "| 2 | Control | nan A n/a | n/a |" in markdown_output
 
 
 def test_format_scalar_comparison_artifact_payload_handles_malformed_delta_mean() -> None:

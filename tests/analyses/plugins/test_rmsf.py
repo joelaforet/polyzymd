@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import builtins
+import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -753,6 +755,28 @@ class TestRMSFArtifacts:
         assert result.payload["per_replicate_mean_rmsf"] == pytest.approx([1.5, 2.5])
         assert result.payload["metric_metadata"][MEAN_RMSF_METRIC]["higher_is_better"] is False
         assert not (tmp_path / "aggregated" / "result.json").exists()
+
+    def test_aggregate_single_replicate_writes_null_per_residue_sem(
+        self, condition: Condition, tmp_path: Path
+    ) -> None:
+        """One replicate gives no per-residue spread, so the SEM row is null."""
+
+        solo = replace(condition, replicates=(1,))
+        result = aggregate_rmsf_artifacts(
+            condition_label=solo.label,
+            replicates=solo.replicates,
+            settings=RMSFSettings(),
+            equilibration="0ns",
+            output_dir=tmp_path / "aggregated",
+            artifacts=[_replicate_artifact(tmp_path, solo, 1, [1.0, 1.5, 2.0])],
+            settings_fingerprint=RMSFAnalysis._make_settings_cache_tag(RMSFSettings()),
+        )
+
+        assert result.payload["sem_rmsf_per_residue"] == [None, None, None]
+        assert result.payload["profile"]["sem_rmsf_per_residue"] == [None, None, None]
+        assert result.payload["overall_sem_rmsf"] is None
+        loaded = json.loads(result.model_dump_json())
+        assert loaded["payload"]["sem_rmsf_per_residue"] == [None, None, None]
 
     def test_aggregate_stores_reference_secondary_structure_annotation(
         self,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -11,6 +12,9 @@ from polyzymd.analyses._framework.comparison_models import ComparisonResult, Met
 from polyzymd.analyses.mda.aggregation import AggregatedMetric
 from polyzymd.analyses.mda.artifacts import ComparisonArtifact, ConditionArtifact
 from polyzymd.analyses.mda.base import MDAnalysisExtensionError
+from polyzymd.analyses.shared.statistics import mean_sem_ci, uncertainty_block
+
+logger = logging.getLogger("polyzymd.analyses")
 
 
 class MDAComparisonError(MDAnalysisExtensionError):
@@ -77,8 +81,11 @@ class _DerivedMetricStatistics:
 
     values: list[float]
     mean: float
-    std: float
-    sem: float
+    std: float | None
+    sem: float | None
+    ci95_low: float | None = None
+    ci95_high: float | None = None
+    ci_method: str | None = None
 
 
 def compare_condition_artifacts(
@@ -281,11 +288,16 @@ def _build_metric_values(
             summary = _validated_aggregated_metric(raw_metric, artifact, ctx, metric_key)
             metadata = _metric_metadata_for(artifact, metric_key, raw_metric)
             _merge_metric_metadata(metric_metadata, metric_key, metadata, artifact, ctx)
+            unit = metadata.get("unit")
             condition_metrics[metric_key] = MetricValue(
                 name=metric_key,
                 mean=summary.mean,
                 sem=summary.sem,
                 replicate_values=summary.values,
+                unit=None if unit is None else str(unit),
+                ci95_low=summary.ci95_low,
+                ci95_high=summary.ci95_high,
+                ci_method=summary.ci_method,
                 higher_is_better=metadata.get("higher_is_better", True),
                 direction_labels=metadata.get(
                     "direction_labels", ("decreased", "unchanged", "increased")
@@ -366,8 +378,12 @@ def _validated_aggregated_metric(
         ) from exc
 
     for value_name in ("mean", "sem", "std"):
+        value = getattr(summary, value_name)
+        if value is None and value_name in ("sem", "std") and summary.n == 1:
+            # A single replicate has no estimable spread; None is the honest value.
+            continue
         _validate_finite_scalar(
-            getattr(summary, value_name),
+            value,
             ctx=ctx,
             condition_label=artifact.condition_label,
             metric_key=metric_key,
@@ -428,20 +444,22 @@ def _derive_metric_statistics(values: Sequence[float]) -> _DerivedMetricStatisti
     """
 
     derived_values = [float(value) for value in values]
-    mean = sum(derived_values) / len(derived_values)
-    if len(derived_values) == 1:
-        std = 0.0
-    else:
-        std = math.sqrt(
-            sum((value - mean) ** 2 for value in derived_values) / (len(derived_values) - 1)
-        )
-    sem = std / math.sqrt(len(derived_values))
-    return _DerivedMetricStatistics(values=derived_values, mean=mean, std=std, sem=sem)
+    stats = mean_sem_ci(derived_values)
+    std = None if stats.sem is None else stats.sem * math.sqrt(len(derived_values))
+    return _DerivedMetricStatistics(
+        values=derived_values,
+        mean=stats.mean,
+        std=std,
+        sem=stats.sem,
+        ci95_low=stats.ci_low,
+        ci95_high=stats.ci_high,
+        ci_method=stats.ci_method,
+    )
 
 
 def _validate_stored_statistic_matches(
-    stored: float,
-    derived: float,
+    stored: float | None,
+    derived: float | None,
     *,
     statistic_name: str,
     artifact: ConditionArtifact,
@@ -452,9 +470,9 @@ def _validate_stored_statistic_matches(
 
     Parameters
     ----------
-    stored : float
-        Statistic stored in the condition artifact.
-    derived : float
+    stored : float or None
+        Statistic stored in the condition artifact, ``None`` for one replicate.
+    derived : float or None
         Statistic recalculated from ``AggregatedMetric.values``.
     statistic_name : str
         Name used in diagnostics.
@@ -466,8 +484,23 @@ def _validate_stored_statistic_matches(
         Metric key.
     """
 
-    if math.isclose(stored, derived, rel_tol=1e-9, abs_tol=1e-12):
+    if stored is None and derived is None:
         return
+    if derived is None and stored == 0.0:
+        # Artifacts written before singleton uncertainty became null store 0.0
+        # where no spread exists. Read them, but do not write that value again.
+        logger.warning(
+            "%s: condition %r metric %r stores %s=0.0 for a single replicate; "
+            "that uncertainty is not estimable. Recompute the condition to record it as null.",
+            ctx.analysis_name,
+            artifact.condition_label,
+            metric_key,
+            statistic_name,
+        )
+        return
+    if stored is not None and derived is not None:
+        if math.isclose(stored, derived, rel_tol=1e-9, abs_tol=1e-12):
+            return
     raise MDAComparisonError(
         f"{ctx.analysis_name}: condition {artifact.condition_label!r} metric {metric_key!r} "
         f"stored {statistic_name}={stored!r} does not match value-derived "
@@ -600,6 +633,12 @@ def _merge_metric_metadata(
             )
 
 
+def _min_replicate_count(artifacts: Sequence[ConditionArtifact]) -> int:
+    """Return the smallest replicate count, which governs the weakest interval."""
+
+    return min((len(artifact.replicates) for artifact in artifacts), default=0)
+
+
 def _comparison_result_to_artifact(
     comparison: ComparisonResult,
     artifacts: Sequence[ConditionArtifact],
@@ -635,6 +674,7 @@ def _comparison_result_to_artifact(
         "ranking": comparison.ranking,
         "rankings_by_metric": comparison.rankings_by_metric,
         "metric_metadata": _json_metric_metadata(metric_metadata),
+        "uncertainty": uncertainty_block(_min_replicate_count(artifacts)),
         "statistical_parameters": {
             "fdr_alpha": ctx.fdr_alpha,
             "ttest_method": ctx.ttest_method,
