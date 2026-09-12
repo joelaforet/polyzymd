@@ -61,14 +61,11 @@ The RMSD analysis module computes:
 
 | Feature | Description |
 |---------|-------------|
-| **Mean RMSD** | Average deviation from reference structure (Å) |
-| **SEM** | Autocorrelation-corrected standard error of the mean |
-| **Median RMSD** | Robust central tendency measure |
-| **Min / Max RMSD** | Extremes of conformational deviation |
-| **Final RMSD** | Last-frame RMSD (convergence diagnostic) |
-| **Timeseries** | Full per-frame RMSD saved as NPZ sidecar |
-| **Multi-run** | Multiple named selections in a single analysis |
-| **Convergence Detection** | Sliding-window slope diagnostic; detects when RMSD has plateaued |
+| **Mean RMSD** | Mean over the replicates of each replicate's mean deviation (Å) |
+| **SEM and 95 percent interval** | Spread across replicates, with the replicate count reported beside it |
+| **Timeseries** | Full per-frame RMSD of every replicate, saved as an NPZ sidecar |
+| **Multi-run** | Multiple named selections and reference modes in one analysis |
+| **Correlation diagnostics** | Statistical inefficiency and effective sample size per replicate, reported but never used to shrink an error bar |
 
 ```{tip}
 **RMSD vs RMSF vs Distances — when to use which:**
@@ -238,27 +235,22 @@ different polymer compositions), use the `compare run rmsd` command:
 polyzymd compare run rmsd -f comparison.yaml --eq-time 10ns
 ```
 
-This provides **per-run**:
-- **Ranking**: Conditions sorted by mean RMSD (lowest = most stable)
-- **Pairwise t-tests**: With p-values, Cohen's d, percent change
-- **Direction labels**: `stabilizing` (lower RMSD), `destabilizing` (higher), or `unchanged`
-- **ANOVA**: Omnibus test when 3+ conditions are present
+Each run is tested on its own, against the control condition, on
+replicate-level means. Every test in the run forms one Benjamini-Hochberg
+family, so the reported `p_adj` already carries the correction.
 
 **Example output:**
 
 ```text
-RMSD Comparison — Protein Backbone
-===================================
-Ranking: With Polymer > No Polymer (lower RMSD = more stable)
-
-No Polymer:   1.856 ± 0.034 Å
-With Polymer: 1.612 ± 0.028 Å
-
-With Polymer vs No Polymer:
-  Change: -13.1% (stabilizing)
-  p-value: 0.0089 *
-  Cohen's d: 2.41 (large)
+# rmsd  eq 10ns
+no_polymer  rmsd_protein_backbone_ref_centroid  mean_of_timeseries  mean 1.856 A  sem 0.034  ci95 1.709 to 2.003  n 3
+with_polymer  rmsd_protein_backbone_ref_centroid  mean_of_timeseries  mean 1.612 A  sem 0.028  ci95 1.492 to 1.732  n 3
+no_polymer vs with_polymer  rmsd_protein_backbone_ref_centroid  delta -0.244  p_adj 0.0089  test student_t  correction benjamini_hochberg  significant
 ```
+
+The observable name ends in the reference mode, so a table that mixes a
+centroid-referenced run with an externally referenced one cannot pass them off
+as the same quantity.
 
 See {doc}`analysis_compare_conditions` for the full multi-plugin comparison
 workflow.
@@ -266,11 +258,10 @@ workflow.
 ## Reference and Troubleshooting
 
 For the full list of configuration fields, default values, output file
-structure, plotting options, convergence details, CLI options, and
-troubleshooting fixes, see {doc}`../reference/analysis_rmsd_reference`.
+structure, CLI options, and troubleshooting fixes, see {doc}`../reference/analysis_rmsd_reference`.
 
-For deeper interpretation guidance, see {doc}`../explanation/analysis_rmsd_best_practices`
-and {doc}`../explanation/convergence_detection`.
+For deeper interpretation guidance, see
+{doc}`../explanation/analysis_rmsd_best_practices`.
 
 ## Next Steps
 

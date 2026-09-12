@@ -1,41 +1,74 @@
-# RMSD Plugin Reference
+# RMSD plugin reference
 
 For a step-by-step guide to running RMSD analysis, see
 {doc}`../how_to/analysis_rmsd_quickstart`.
 
-## Configuration Reference
+The plugin measures the deviation of a selection from a reference structure,
+frame by frame, in angstrom. It reports one observable of kind
+`mean_of_timeseries` per configured run and leaves aggregation, uncertainty,
+cross-condition tests, storage and formatting to the analysis framework.
 
-All fields for `RMSDRunSettings`:
+## Configuration reference
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `label` | `str` | *required* | Human-readable run label (must be unique) |
-| `selection` | `str` | `"protein and name CA"` | MDAnalysis selection for RMSD calculation |
-| `alignment_selection` | `str` | `"protein and name CA"` | MDAnalysis selection for trajectory alignment |
-| `reference_mode` | `str` | `"centroid"` | Reference mode: `centroid`, `average`, `frame`, or `external` |
-| `reference_frame` | `int` | `0` | 0-indexed frame for `reference_mode: frame` |
-| `reference_file` | `str \| None` | `null` | Path to external PDB for `reference_mode: external` |
-| `centroid_selection` | `str \| None` | `null` | Selection for centroid finding; defaults to `alignment_selection` |
-| `convergence_window_size_ns` | `float` | `15.0` | Sliding window size for convergence detection (ns) |
-| `convergence_step_size_ns` | `float` | `5.0` | Step between successive windows (ns) |
-| `convergence_slope_threshold` | `float` | `0.0005` | Max absolute slope to qualify as "flat" (Å/ns) |
-| `convergence_sustained_for_ns` | `float` | `15.0` | Required sustained duration below threshold (ns) |
-
-Top-level `RMSDSettings` contains a single field:
+Top-level `RMSDSettings`:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `runs` | `list[RMSDRunSettings]` | *required* | One or more named RMSD runs (at least one required) |
+| `runs` | `list[RMSDRunSettings]` | required, at least one | Named RMSD runs to compute |
+
+All fields of `RMSDRunSettings`:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `label` | `str` | *required* | Run label, unique within the file |
+| `selection` | `str` | `"protein and name CA"` | MDAnalysis selection whose deviation is measured |
+| `alignment_selection` | `str` | `"protein and name CA"` | MDAnalysis selection used to superimpose the trajectory |
+| `reference_mode` | `str` | `"centroid"` | `centroid`, `average`, `frame`, or `external` |
+| `reference_frame` | `int` | `0` | 0-indexed frame used when `reference_mode: frame` |
+| `reference_file` | `str \| None` | `null` | External PDB used when `reference_mode: external` |
+| `centroid_selection` | `str \| None` | `null` | Selection used to find the representative frame; defaults to `alignment_selection` |
 
 ```{note}
-Run labels must be unique within a single `comparison.yaml`. Duplicate labels
-raise a validation error.
+Run labels must be unique within one `comparison.yaml`. A duplicate label
+raises a validation error, because two runs would otherwise write one
+observable name.
 ```
 
-## Output Files
+### Settings removed in 1.3.0
 
-Results are saved as canonical v1.3 artifacts. JSON files are stable artifact
-envelopes, while per-frame RMSD arrays are stored in NPZ sidecars.
+`convergence_window_size_ns`, `convergence_step_size_ns`,
+`convergence_slope_threshold` and `convergence_sustained_for_ns` no longer do
+anything. They still parse for one release and raise a `DeprecationWarning`, so
+an existing `comparison.yaml` keeps working, and they will be rejected in the
+release after that. The sliding-window convergence flag they configured was
+removed because its default slope threshold sat below the scatter of successive
+window means, so the flag tracked noise.
+
+## Observable names
+
+Each run reports one observable named `rmsd_<label slug>_ref_<reference_mode>`,
+where the slug is the label lowercased with every run of non-alphanumeric
+characters replaced by an underscore. A run labelled `Protein Backbone` with
+`reference_mode: centroid` reports `rmsd_protein_backbone_ref_centroid`.
+
+The reference mode is part of the name on purpose. A centroid or average
+reference differs between replicates and between conditions, so such a run
+measures spread within a replicate, not deviation from a shared structure. Only
+`external` mode measures every condition against one structure. Keeping the
+mode in the name stops a comparison table from presenting the two as one
+quantity.
+
+| Mode | Reference structure |
+|------|---------------------|
+| `centroid` | The frame of the production window closest to the aligned mean |
+| `average` | The mean position of each selected atom over the aligned window |
+| `frame` | The frame named by `reference_frame` |
+| `external` | The structure in `reference_file` |
+
+## Output files
+
+Results are canonical v1.3 artifacts. The JSON files carry the reduced
+observables; the full per-frame series is an NPZ sidecar.
 
 ```text
 <comparison_workspace>/
@@ -44,45 +77,69 @@ envelopes, while per-frame RMSD arrays are stored in NPZ sidecars.
 │       └── rmsd/
 │           ├── run_1/
 │           │   ├── result.json
-│           │   └── sidecars/
-│           │       ├── rmsd_Protein_Backbone_timeseries.npz
-│           │       └── rmsd_Active_Site_timeseries.npz
+│           │   └── observables.npz
 │           ├── run_2/
-│           │   └── ...
 │           ├── run_3/
-│           │   └── ...
 │           └── aggregated/
-│               ├── result.json
-│               └── sidecars/
-│                   └── rmsd_Protein_Backbone_timeseries.npz
+│               └── result.json
 └── comparison/
     └── rmsd/
         └── result.json
 ```
 
-The canonical paths are:
-
 | Level | Artifact | Path |
 |-------|----------|------|
 | Per replicate | `ReplicateArtifact` | `analysis/<condition>/rmsd/run_<replicate>/result.json` |
+| Per-frame series | NPZ sidecar | `analysis/<condition>/rmsd/run_<replicate>/observables.npz` |
 | Per condition | `ConditionArtifact` | `analysis/<condition>/rmsd/aggregated/result.json` |
-| Cross condition | Comparison result | `comparison/rmsd/result.json` |
-| Large arrays | NPZ sidecars | `analysis/<condition>/rmsd/**/sidecars/*.npz` |
+| Cross condition | `ComparisonArtifact` | `comparison/rmsd/result.json` |
 
-Each replicate artifact contains JSON-compatible summaries for all configured
-runs. Raw per-frame RMSD timeseries are sidecars referenced from `payload` and
-listed in `sidecars` with recorded size and hash metadata.
+The NPZ sidecar holds one array per observable, keyed by observable name, with
+one value per analysed frame.
 
-### Artifact envelope fields
+### Replicate payload
+
+`payload["observables"]` is a list of `ObservableEstimate` records:
 
 | Field | Description |
 |-------|-------------|
-| `payload` | RMSD run summaries, scalar metrics, convergence diagnostics, and sidecar paths |
-| `metadata` | Settings such as selections, reference modes, equilibration labels, and units |
-| `provenance` | Input topology/trajectory identity and workflow details |
-| `sidecars` | Validated references to `sidecars/*.npz` arrays for timeseries and aggregate profiles |
+| `name` | Observable name, reference mode included |
+| `kind` | `"mean_of_timeseries"` |
+| `unit` | `"A"` |
+| `value` | Mean RMSD of this replicate |
+| `n_frames` | Frames in the production window |
+| `statistical_inefficiency` | Correlation diagnostic g, or `null` for a short or constant series |
+| `n_eff` | Effective sample size within the replicate, reported but never used to shrink an error bar |
+| `higher_is_better` | `false` |
 
-Use `ArtifactStore` for programmatic access:
+`provenance["identity"]` carries the polyzymd version, the plugin source hash,
+the settings fingerprint, the config hash, the equilibration setting and the
+identity of every input file. A replicate is recomputed when any of these
+changes and reused when none does.
+
+### Condition payload
+
+`payload["observables"]` is a list of `ObservableAggregate` records, one per
+observable, computed across replicates:
+
+| Field | Description |
+|-------|-------------|
+| `replicate_values` | One mean RMSD per replicate, the sample every statistic is computed from |
+| `mean`, `sem` | Mean and standard error across replicates, `ddof = 1` |
+| `ci95_low`, `ci95_high`, `ci_method`, `coverage` | Student t interval on the mean, `null` for a single replicate |
+| `n_replicates` | Size of the replicate sample |
+| `n_eff_min` | Smallest effective sample size among the replicates |
+
+### Comparison payload
+
+`payload["comparisons"]` holds one `ObservableComparison` per observable and
+non-control condition, with `delta`, `percent_change`, `p_value`, `p_adjusted`,
+`correction`, `cohens_d`, `significant`, `testable` and `note`. Tests run on
+replicate-level values, and every test in the run forms one
+Benjamini-Hochberg family unless the config asks for Tukey's test with three or
+more conditions.
+
+Read an artifact with `ArtifactStore`:
 
 ```python
 from pathlib import Path
@@ -91,119 +148,21 @@ from polyzymd.analyses.mda import ArtifactStore
 
 replicate = ArtifactStore(Path("analysis/PEGylated/rmsd/run_1")).read_replicate_result()
 condition = ArtifactStore(Path("analysis/PEGylated/rmsd/aggregated")).read_condition_result()
-print(replicate.payload["runs"][0]["mean_rmsd"])
-print(condition.payload["runs"][0]["metrics"]["mean_rmsd"])
+print(replicate.payload["observables"][0]["value"])
+print(condition.payload["observables"][0]["mean"])
 ```
 
-### JSON result structure
+## Figures
 
-Per-replicate result (`ReplicateArtifact`), representative structure:
+Figures come from the framework, keyed on the observable kind, not from the
+plugin, so there are no rmsd-specific plot settings any more. A
+`mean_of_timeseries` observable gives a comparison bar chart with the replicate
+points overlaid and a per-replicate time series panel, both footnoted with the
+interval, the replicate count and the production window. Until the generic
+figures land, `polyzymd compare run rmsd --plot` writes no figure; the per-frame
+series in the NPZ sidecar is the input for a plot of your own.
 
-```python
-{
-    "schema_version": "1",
-    "artifact_type": "replicate",
-    "analysis_name": "rmsd",
-    "condition_label": "PEGylated",
-    "replicate": 1,
-    "payload": {
-        "runs": [
-            {
-                "run_label": "Protein Backbone",
-                "selection": "protein and name CA",
-                "alignment_selection": "protein and name CA",
-                "reference_mode": "centroid",
-                "mean_rmsd": 1.823,
-                "std_rmsd": 0.312,
-                "median_rmsd": 1.791,
-                "sem_rmsd": 0.078,
-                "converged": true,
-                "convergence_time_ns": 12.5,
-                "timeseries_sidecar": "sidecars/rmsd_Protein_Backbone_timeseries.npz"
-            }
-        ]
-    },
-    "metadata": {"equilibration": "10ns", "time_unit": "ns"},
-    "provenance": {"trajectory_files": ["..."], "n_frames_used": 9000},
-    "sidecars": [
-        {
-            "path": "sidecars/rmsd_Protein_Backbone_timeseries.npz",
-            "metadata": {"kind": "timeseries", "run_label": "Protein Backbone"}
-        }
-    ]
-}
-```
-
-Aggregated result (`ConditionArtifact`), representative structure:
-
-```python
-{
-    "schema_version": "1",
-    "artifact_type": "condition",
-    "analysis_name": "rmsd",
-    "condition_label": "PEGylated",
-    "replicates": [1, 2, 3],
-    "payload": {
-        "runs": [
-            {
-                "run_label": "Protein Backbone",
-                "selection": "protein and name CA",
-                "metrics": {
-                    "mean_rmsd": {"values": [1.823, 1.891, 1.854], "mean": 1.856, "sem": 0.034}
-                },
-                "convergence": {
-                    "n_converged_replicates": 3,
-                    "convergence_fraction": 1.0,
-                    "mean_convergence_time_ns": 13.2
-                }
-            }
-        ]
-    },
-    "metadata": {"equilibration": "10ns"},
-    "provenance": {"source_replicates": [1, 2, 3]}
-}
-```
-
-## Plot Types
-
-The RMSD plugin generates figures through `polyzymd compare plot-all`:
-
-| Plot output | Description |
-|-------------|-------------|
-| `rmsd_timeseries_<run>.png` | Mean RMSD vs time with SEM shading, one per run |
-| `rmsd_comparison_<run>.png` | Grouped bar chart of mean RMSD across conditions, one per run |
-| `rmsd_convergence_<condition>_<run>.png` | Dual-axis plot: RMSD timeseries with sliding-window slope and convergence marker (requires `show_convergence_plots: true`) |
-
-**Timeseries plot features:**
-- Mean RMSD curve per condition with SEM shading
-- Legend placed outside the plot area (`bbox_to_anchor=(1.02, 0.5)`)
-- Optional per-replicate traces via `show_per_replicate: true`
-
-RMSD plot behavior can be customized in `comparison.yaml`:
-
-```yaml
-plot_settings:
-  rmsd:
-    show_per_replicate: false    # Overlay individual replicate traces
-    figsize: [10, 6]             # Default figure size (bar charts)
-    timeseries_figsize: [12, 5]  # Timeseries figure size (wider)
-    show_convergence_plots: false  # Generate per-replicate convergence diagnostics
-    convergence_figsize: [12, 5]   # Convergence panel figure size
-```
-
-## Convergence Detection
-
-Convergence detection is always on — every RMSD run automatically applies a
-sliding-window slope heuristic to determine whether the RMSD timeseries has
-plateaued. This is a purely additive diagnostic: it does not affect ranking,
-statistical tests, or any other comparison output. Convergence results appear
-as additional fields in per-replicate and aggregated JSON files, and optional
-convergence plots can be enabled via `show_convergence_plots: true`.
-
-For a conceptual explanation of the algorithm, its parameters, and its
-limitations, see {doc}`../explanation/convergence_detection`.
-
-## Common CLI Options
+## Common CLI options
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -217,93 +176,50 @@ limitations, see {doc}`../explanation/convergence_detection`.
 
 ## Troubleshooting
 
-### "Selection matched no atoms"
+### "selection ... matched no atoms"
 
-**Cause:** MDAnalysis selection doesn't match any atoms in your topology.
+The MDAnalysis selection matches nothing in the topology. Check residue
+numbering in the PDB against MDAnalysis, verify atom names, and rerun with
+`polyzymd --debug compare run rmsd -f comparison.yaml` for the full context.
+An empty selection raises `SelectionError`; it never yields an RMSD of zero.
 
-**Fix:**
-- Check residue numbering in your PDB vs. MDAnalysis (0-indexed vs 1-indexed)
-- Verify atom names match your topology
-- Use `polyzymd --debug compare run rmsd -f comparison.yaml ...` for detailed
-  diagnostics
+### "reference_mode='external' needs reference_file to name an existing PDB file"
 
-### "At least one RMSD run must be defined"
+External mode was requested without a readable PDB. Give an absolute path, or a
+path relative to the working directory. The check runs when the settings are
+parsed, not part way through a trajectory.
 
-**Cause:** The `runs` list in `plugins.rmsd` is empty or missing.
+### "selection ... matches N atoms in the trajectory but M in ..."
 
-**Fix:** Add at least one run entry with a `label` field:
+The selection string picks different atom counts in the trajectory and in the
+external reference. Make the atom naming consistent, check that the external
+PDB covers the same residues, or narrow the selection.
 
-```yaml
-plugins:
-  rmsd:
-    runs:
-      - label: "Protein Backbone"
-```
+### "rmsd needs a contiguous production window"
 
-### "reference_file does not exist"
+The frame selection listed explicit frame indices. The centroid and average
+references are defined on a window, so the plugin needs a start, stop and step.
+Use an equilibration time rather than an explicit frame list.
 
-**Cause:** Using `reference_mode: external` but the PDB path is invalid.
+### Very high RMSD values, above 10 Å
 
-**Fix:** Provide an absolute path or a path relative to the working directory:
+Usually the alignment selection, the reference mode, or the system itself.
+Check that `alignment_selection` matches atoms in the system, compare against
+`reference_mode: "average"`, verify the trajectory files are complete, and
+inspect the structures for unfolding or a large conformational change.
 
-```yaml
-reference_mode: "external"
-reference_file: "/absolute/path/to/crystal.pdb"
-```
-
-### "atom count mismatch between trajectory and external PDB"
-
-**Cause:** The `selection` string matches different numbers of atoms in the
-trajectory vs. the external reference PDB.
-
-**Fix:**
-- Ensure both systems use the same atom naming convention
-- Check that the external PDB contains the same residues as your simulation
-- Use a more specific selection if topologies differ
-
-### Very high RMSD values (> 10 Å)
-
-**Cause:** Usually indicates alignment issues, wrong selection, or unfolding.
-
-**Fix:**
-- Check that `alignment_selection` matches atoms in your system
-- Try `reference_mode: "average"` to compare
-- Verify trajectory files are complete
-- Check for protein unfolding or large conformational changes
-
-### "Low statistical reliability" warning
-
-**Cause:** Long correlation time relative to trajectory length.
-
-**This is informational, not an error.** Results are still valid but
-uncertainties may be underestimated.
-
-**Mitigation:**
-- Use multiple replicates (aggregated SEM is more reliable)
-- Run longer simulations
-- Results are still useful for qualitative comparisons
-
-### Missing replicate data
-
-**Message:** `Skipping replicate N: trajectory data not found`
-
-**Cause:** The requested replicate hasn't completed or path is incorrect.
-
-**Fix:** This is informational — analysis continues with available replicates.
-Check simulation status if unexpected.
-
-## RMSD vs RMSF Comparison
+## RMSD compared with RMSF
 
 | Feature | RMSD | RMSF |
 |---------|------|------|
-| **Measures** | Global deviation from reference | Per-residue fluctuation |
-| **Output** | One value per frame (timeseries) | One value per residue (profile) |
-| **Reference** | Fixed structure (centroid/average/external) | Time-averaged position |
-| **Detects** | Conformational drift, unfolding | Flexible loops, rigid core |
-| **Multi-run** | Yes (`runs` list with different selections) | Single selection |
-| **Best for** | Equilibration assessment, stability comparison | Flexibility mapping |
+| Measures | Global deviation from a reference | Per-residue fluctuation |
+| Output | One value per frame | One value per residue |
+| Reference | Fixed structure, centroid, average, frame or external | Time-averaged position |
+| Detects | Conformational drift, unfolding | Flexible loops, rigid core |
+| Multi-run | Yes, a `runs` list with different selections | Single selection |
+| Best for | Stability comparison, equilibration assessment | Flexibility mapping |
 
 ```{tip}
-Use RMSD first to assess overall stability and choose equilibration time,
-then use RMSF to identify which regions drive flexibility differences.
+Use RMSD first to judge overall stability and choose an equilibration time,
+then use RMSF to find which regions drive a flexibility difference.
 ```

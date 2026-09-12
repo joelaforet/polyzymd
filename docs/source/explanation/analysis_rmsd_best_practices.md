@@ -397,11 +397,9 @@ inspection.
 drift, metastable trapping, or convergence issues in observables other than
 RMSD.
 
-**Better interpretation:** Use convergence diagnostics as one input among
-several. Inspect the RMSD timeseries, run multiple independent replicates when
-possible, and check other relevant observables such as Rg, SASA, contacts, or
-active-site distances. See {doc}`/explanation/convergence_detection` for a full
-discussion of limitations.
+**Better interpretation:** Judge convergence from several inputs. Inspect the
+RMSD timeseries, run multiple independent replicates, and check other relevant
+observables such as Rg, SASA, contacts, or active-site distances.
 
 ## RMSD as one equilibration diagnostic
 
@@ -419,29 +417,21 @@ motion, unfolding, or simply insufficient sampling. Distinguish these by
 inspecting structures and complementary observables.
 ```
 
-### Automated convergence detection
+### Why PolyzyMD reports no convergence flag
 
-```{versionadded} 1.3.0
-```
+PolyzyMD once ran a sliding-window slope heuristic on every RMSD timeseries and
+stored a converged flag next to the metric. It was removed in 1.3.0. Its default
+slope threshold of 0.0005 A/ns sits below the scatter of successive window
+means on real trajectories, so the flag tracked noise rather than drift, and no
+published method backed the particular window, step and sustained-duration
+defaults it shipped with.
 
-PolyzyMD can run a sliding-window convergence diagnostic on RMSD timeseries. The
-diagnostic evaluates whether reference-relative RMSD changes remain below a
-configured threshold over a sustained interval. The resulting information is
-stored as part of the canonical RMSD artifact payload and provenance, with
-condition-level summaries represented in aggregated artifacts. Larger timeseries
-or plot-ready data may be represented through sidecars referenced by the
-artifact.
-
-**This is a diagnostic tool, not a definitive convergence proof.** The
-heuristic can miss slow drift below the slope threshold, and convergence in
-RMSD does not guarantee convergence of other observables. Always use multiple
-replicates and visual inspection alongside automated diagnostics.
+Read the per-frame series instead. It is written to the NPZ sidecar of every
+replicate, the framework plots it per replicate, and agreement between
+independent replicates is the evidence that matters.
 
 For command-oriented usage, see the
-[RMSD Quick Start Guide](../how_to/analysis_rmsd_quickstart.md). For a full
-conceptual treatment of convergence diagnostics — including the algorithm,
-parameters, tuning guidance, and limitations — see
-{doc}`/explanation/convergence_detection`.
+[RMSD Quick Start Guide](../how_to/analysis_rmsd_quickstart.md).
 
 ## References
 
@@ -478,7 +468,6 @@ Analysis of how protein size affects expected RMSD values.
 ## See Also
 
 - [Quick Start Guide](../how_to/analysis_rmsd_quickstart.md) — Get results fast
-- [Convergence Detection](convergence_detection.md) — Conceptual guide to convergence: algorithm, parameters, and limitations
 - [Statistics Best Practices](analysis_statistics_best_practices.md) — Foundational statistics for MD
 - [RMSF Best Practices](analysis_rmsf_best_practices.md) — Per-residue fluctuation analysis
 - [Reference Structure Selection](analysis_reference_selection.md) — Choose alignment reference

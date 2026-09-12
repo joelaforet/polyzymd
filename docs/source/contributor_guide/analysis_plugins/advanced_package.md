@@ -36,9 +36,10 @@ change.
 
 ## Use built-in packages as examples, not import targets
 
-Built-in plugins such as `rmsf`, `distances`, `contacts`, `sasa`, `rg`, `rmsd`,
+Built-in plugins such as `rmsf`, `distances`, `contacts`, `sasa`, `rg`,
 `hydrogen_bonds`, `secondary_structure`, and `catalytic_triad` show real package
-shapes. Their private helper modules are useful examples of organization:
+shapes. `rmsd` is not one of them any more: it is written against the
+observable contract and is a single module. Their private helper modules are useful examples of organization:
 
 - `_mda.py` for trajectory-native job and collector helpers;
 - `_plotters.py` for artifact-only plotting helpers;

@@ -69,14 +69,15 @@ Each plugin's `plot_settings` block inherits this key.
 
 ```yaml
 plugins:
-  rmsd:
+  rmsf:
     plot_settings:
       error_bar: ci95
 ```
 
 Whichever value is set, the figure carries a footnote naming the interval, the
 number of replicates and the production window, and per-replicate points stay
-overlaid on the bars. `hydrogen_bonds` has no plot settings model, so its
+overlaid on the bars. `hydrogen_bonds` has no plot settings model, and neither
+does a plugin written against the observable contract such as `rmsd`, so their
 figures always use the default.
 
 ## `rmsf`
@@ -247,7 +248,7 @@ plugin raises `SelectionError` unless `allow_empty_groups` is true. Set
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `runs` | `list[RMSDRunSettings]` | `[]` (must be non-empty) | Named RMSD runs to compute |
+| `runs` | `list[RMSDRunSettings]` | required, at least one | Named RMSD runs to compute |
 
 `RMSDRunSettings` entries in `runs`:
 
