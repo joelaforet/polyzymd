@@ -86,8 +86,8 @@ def _fragment_run(**overrides: Any) -> Any:
     return RgRunSettings(**fields)
 
 
-def _run_rg(universe: Any, run: Any) -> Any:
-    """Run the Rg analysis object for one universe.
+def _run_rg(universe: Any, run: Any) -> dict[str, Any]:
+    """Measure one Rg run over a whole universe, keyed by observable name.
 
     Parameters
     ----------
@@ -98,15 +98,18 @@ def _run_rg(universe: Any, run: Any) -> Any:
 
     Returns
     -------
-    Any
-        Completed ``AnalysisBase`` instance.
+    dict[str, Any]
+        Observables the plugin returned.
     """
 
-    from polyzymd.analyses.rg._mda import build_rg_analysis
+    from polyzymd.analyses.mda.frame_selection import FrameSelection
+    from polyzymd.analyses.rg import Rg, RgSettings
 
-    analysis = build_rg_analysis(universe=universe, run=run, replicate=1, timestep_ps=1.0)
-    analysis.run()
-    return analysis
+    frames = FrameSelection(start=0, stop=len(universe.trajectory), step=1)
+    return {
+        observable.name: observable
+        for observable in Rg().compute(universe, frames, RgSettings(runs=[run]))
+    }
 
 
 def test_rg_fragment_mode_measures_each_bonded_chain() -> None:
@@ -114,10 +117,9 @@ def test_rg_fragment_mode_measures_each_bonded_chain() -> None:
 
     universe = _two_chain_universe()
 
-    analysis = _run_rg(universe, _fragment_run())
+    observables = _run_rg(universe, _fragment_run())
 
-    assert analysis.results.fragment_counts_per_frame.tolist() == [2]
-    fragment_rg = np.asarray(analysis.results.fragment_rg_values)
+    fragment_rg = np.asarray(observables["rg_polymer_fragments"].values)
     assert fragment_rg.shape == (2,)
     np.testing.assert_allclose(
         fragment_rg,
@@ -125,7 +127,8 @@ def test_rg_fragment_mode_measures_each_bonded_chain() -> None:
         rtol=1e-6,
     )
     whole_selection_rg = float(universe.atoms.radius_of_gyration())
-    assert not math.isclose(float(analysis.results.rg_values[0]), whole_selection_rg, rel_tol=1e-3)
+    reduced = float(observables["rg_polymer"].values[0])
+    assert not math.isclose(reduced, whole_selection_rg, rel_tol=1e-3)
 
 
 def test_rg_fragment_mode_without_bonds_raises_typed_error() -> None:
@@ -151,10 +154,10 @@ def test_rg_fragment_mode_fallback_is_opt_in() -> None:
     universe = _two_chain_universe()
     universe.del_TopologyAttr("bonds")
 
-    analysis = _run_rg(universe, _fragment_run(allow_single_fragment_fallback=True))
+    observables = _run_rg(universe, _fragment_run(allow_single_fragment_fallback=True))
 
-    assert analysis.results.fragment_counts_per_frame.tolist() == [1]
-    assert analysis.results.fragment_topology["fallback_used"] is True
+    assert len(observables["rg_polymer_fragments"].values) == 1
+    assert "fragment_fallback" in observables["rg_polymer"].metadata
 
 
 def test_identify_polymer_chains_without_bonds_raises_typed_error() -> None:
@@ -270,9 +273,9 @@ def test_partially_bonded_topology_allows_the_bonded_selection() -> None:
 
     universe = _partially_bonded_universe()
 
-    analysis = _run_rg(universe, _fragment_run(selection="resname ALA"))
+    observables = _run_rg(universe, _fragment_run(selection="resname ALA"))
 
-    assert analysis.results.fragment_counts_per_frame.tolist() == [1]
+    assert len(observables["rg_polymer_fragments"].values) == 1
 
 
 def _mostly_bonded_universe(n_unbonded: int) -> Any:

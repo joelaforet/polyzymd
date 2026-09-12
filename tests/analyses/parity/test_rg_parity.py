@@ -68,9 +68,7 @@ def test_selection_mode_matches_the_old_per_frame_series(
 ) -> None:
     """Per-frame protein Rg is unchanged by the port."""
     expected = reference["runs"]["Protein"]["rg_per_frame"]
-    np.testing.assert_allclose(
-        observables["rg_protein"].values, expected, rtol=0.0, atol=ATOL
-    )
+    np.testing.assert_allclose(observables["rg_protein"].values, expected, rtol=0.0, atol=ATOL)
 
 
 def test_fragment_profile_matches_the_old_per_fragment_means(
@@ -81,9 +79,7 @@ def test_fragment_profile_matches_the_old_per_fragment_means(
     profile = observables["rg_polymer_oligomers_fragments"]
     assert len(profile.values) == run["n_fragments"]
     assert profile.index == list(range(run["n_fragments"]))
-    np.testing.assert_allclose(
-        profile.values, run["fragment_rg_mean"], rtol=0.0, atol=ATOL
-    )
+    np.testing.assert_allclose(profile.values, run["fragment_rg_mean"], rtol=0.0, atol=ATOL)
 
 
 def test_fragment_reduction_matches_the_old_equal_weighted_series(
@@ -143,9 +139,7 @@ def test_fragments_mode_on_a_protein_without_conect_records_raises() -> None:
 
     universe = _universe(CONTROL_TOPOLOGY, CONTROL_TRAJECTORY)
     settings = RgSettings(
-        runs=[
-            RgRunSettings(label="Protein", selection="protein", calculation_mode="fragments")
-        ]
+        runs=[RgRunSettings(label="Protein", selection="protein", calculation_mode="fragments")]
     )
     with pytest.raises(TopologyBondsMissingError):
         Rg().compute(universe, FrameSelection(start=0, stop=2, step=1), settings)

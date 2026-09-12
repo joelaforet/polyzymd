@@ -6,7 +6,7 @@ import importlib.util
 import math
 import types
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 import numpy as np
 import pytest
@@ -23,7 +23,7 @@ from polyzymd.analyses.contract import (
 from polyzymd.analyses.contract_runner import contract_analysis
 from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.mda.artifacts import ComparisonArtifact, ConditionArtifact
-from polyzymd.analyses.rg_contract import Rg2Analysis, RgSettings
+from polyzymd.analyses.rg import RgAnalysis, RgSettings
 from tests.analyses.conftest import make_simulation_config, make_synthetic_universe
 
 RG_SETTINGS = RgSettings(runs=[{"label": "protein", "selection": "all"}])
@@ -214,31 +214,31 @@ def test_a_plugin_that_misses_the_protocol_is_named() -> None:
         contract_analysis(Incomplete)
 
 
-def test_rg2_satisfies_the_protocol() -> None:
-    """The prototype port is an instance of the runtime-checkable protocol."""
-    from polyzymd.analyses.rg_contract import RgContract
+def test_rg_satisfies_the_protocol() -> None:
+    """The ported plugin is an instance of the runtime-checkable protocol."""
+    from polyzymd.analyses.rg import Rg
 
-    assert isinstance(RgContract(), AnalysisProtocol)
+    assert isinstance(Rg(), AnalysisProtocol)
 
 
-def test_runner_executes_rg2_end_to_end(tmp_path: Path, run_contract_analysis: Any) -> None:
+def test_runner_executes_rg_end_to_end(tmp_path: Path, run_contract_analysis: Any) -> None:
     """run_analysis computes, persists and aggregates a contract plugin."""
-    aggregate = run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+    aggregate = run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
 
     assert isinstance(aggregate, ConditionArtifact)
     assert aggregate.replicates == [1, 2, 3]
     observable = ObservableAggregate.model_validate(aggregate.payload["observables"][0])
-    assert observable.name == "protein"
+    assert observable.name == "rg_protein"
     assert observable.unit == "A"
     assert observable.n_replicates == 3
     assert observable.replicate_values == pytest.approx([1.5, 2.0, 2.5], abs=1e-5)
     assert observable.mean == pytest.approx(2.0, abs=1e-5)
 
-    replicate_dir = tmp_path / "analysis" / "A" / "rg2" / "run_1"
+    replicate_dir = tmp_path / "analysis" / "A" / "rg" / "run_1"
     assert (replicate_dir / "result.json").exists()
     assert (replicate_dir / "observables.npz").exists()
     identity = aggregate.provenance["identity"]
-    assert identity["plugin"] == "rg2"
+    assert identity["plugin"] == "rg"
     assert identity["polyzymd_version"]
     assert identity["config_hash"]
 
@@ -247,11 +247,11 @@ def test_runner_reuses_a_replicate_whose_identity_matches(
     tmp_path: Path, run_contract_analysis: Any
 ) -> None:
     """A second run reuses the cached replicate instead of recomputing it."""
-    run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
-    marker = tmp_path / "analysis" / "A" / "rg2" / "run_1" / "observables.npz"
+    run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+    marker = tmp_path / "analysis" / "A" / "rg" / "run_1" / "observables.npz"
     stamp = marker.stat().st_mtime_ns
 
-    run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+    run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
 
     assert marker.stat().st_mtime_ns == stamp
 
@@ -260,12 +260,12 @@ def test_runner_recomputes_when_an_input_file_changes(
     tmp_path: Path, run_contract_analysis: Any
 ) -> None:
     """Extending a trajectory changes its file identity and invalidates the cache."""
-    run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
-    marker = tmp_path / "analysis" / "A" / "rg2" / "run_1" / "observables.npz"
+    run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+    marker = tmp_path / "analysis" / "A" / "rg" / "run_1" / "observables.npz"
     stamp = marker.stat().st_mtime_ns
 
     run_contract_analysis(
-        Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path, inputs=OTHER_INPUTS
+        RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path, inputs=OTHER_INPUTS
     )
 
     assert marker.stat().st_mtime_ns != stamp
@@ -273,23 +273,23 @@ def test_runner_recomputes_when_an_input_file_changes(
 
 def test_runner_recomputes_when_settings_change(tmp_path: Path, run_contract_analysis: Any) -> None:
     """A different settings fingerprint invalidates the cached replicate."""
-    run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+    run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
 
     aggregate = run_contract_analysis(
-        Rg2Analysis,
+        RgAnalysis,
         RgSettings(runs=[{"label": "everything", "selection": "all"}]),
         _scaled_universes,
         root=tmp_path,
     )
 
-    assert aggregate.payload["observables"][0]["name"] == "everything"
+    assert aggregate.payload["observables"][0]["name"] == "rg_everything"
 
 
 def test_runner_compares_two_conditions(tmp_path: Path, run_contract_analysis: Any) -> None:
     """The adapter produces a comparison artifact and a readable report."""
     aggregates = {
         label: run_contract_analysis(
-            Rg2Analysis,
+            RgAnalysis,
             RG_SETTINGS,
             _universes_from(base),
             label=label,
@@ -307,13 +307,13 @@ def test_runner_compares_two_conditions(tmp_path: Path, run_contract_analysis: A
         for label in aggregates
     ]
 
-    comparison = Rg2Analysis().compare(
+    comparison = RgAnalysis().compare(
         ComparisonContext(
             name="project",
             conditions=conditions,
             excluded_conditions=[],
             control_label="A",
-            analysis_dirs={label: tmp_path / "analysis" / label / "rg2" for label in aggregates},
+            analysis_dirs={label: tmp_path / "analysis" / label / "rg" for label in aggregates},
             results_dir=tmp_path / "results",
             equilibration="0ns",
             settings=RG_SETTINGS,
@@ -329,7 +329,7 @@ def test_runner_compares_two_conditions(tmp_path: Path, run_contract_analysis: A
     assert entry["correction"] == "benjamini_hochberg"
     assert entry["significant"] is True
 
-    report = Rg2Analysis().format(comparison)
+    report = RgAnalysis().format(comparison)
     assert "p_adj" in report
     assert "mean 2 A" in report
 
@@ -358,3 +358,26 @@ def test_contract_scaffold_renders_and_imports(tmp_path: Path) -> None:
             types.SimpleNamespace(start=0, stop=3, step=1, frames=None),
             module.ProbeContractSettings(),
         )
+
+
+def _condition(values: Sequence[float]) -> list[ObservableAggregate]:
+    """One condition whose single observable holds the given replicate values."""
+    return aggregate_observables([[_series([value - 0.05, value + 0.05])] for value in values])
+
+
+def test_welch_widens_the_p_value_and_the_family_of_one_leaves_it_alone() -> None:
+    """The properties every plugin used to prove for itself hold once, here.
+
+    Group A has a standard deviation of 0.1 and group B one of 1.0, so Welch's
+    test keeps the t statistic and loses degrees of freedom. With one test in
+    the family the Benjamini-Hochberg adjusted p-value is the raw one.
+    """
+    conditions = {"A": _condition((10.0, 10.1, 9.9)), "B": _condition((12.0, 13.0, 11.0))}
+
+    welch = compare_observables(conditions, ttest_method="welch")[0]
+    student = compare_observables(conditions, ttest_method="student")[0]
+
+    assert welch.test == "welch_t" and student.test == "student_t"
+    assert welch.p_value > student.p_value
+    assert welch.correction == "benjamini_hochberg"
+    assert welch.p_adjusted == pytest.approx(welch.p_value)

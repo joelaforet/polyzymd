@@ -82,9 +82,7 @@ class RgRunSettings(BaseModel):
     def _check_fragment_options(self) -> RgRunSettings:
         """Reject fragment-only options on a selection-mode run."""
         if self.calculation_mode == "selection" and self.fragment_weighting != "equal":
-            raise ValueError(
-                "fragment_weighting applies only when calculation_mode is 'fragments'"
-            )
+            raise ValueError("fragment_weighting applies only when calculation_mode is 'fragments'")
         low, high = self.histogram_range or DEFAULT_HISTOGRAM_RANGE
         if not low < high:
             raise ValueError(f"histogram_range {(low, high)} is empty or reversed")
@@ -145,12 +143,17 @@ class Rg:
             usable bonds and ``allow_single_fragment_fallback`` is off.
         """
         has_bonds, bond_source = topology_bond_source(universe)
-        metadata = {
+        base = {
             "pbc_policy": "as_loaded",
             "topology_has_bonds": has_bonds,
             "bond_source": bond_source,
         }
-        groups = [(run, self._group(universe, run)) for run in settings.runs]
+        resolved = [self._group(universe, run) for run in settings.runs]
+        groups = [(run, group) for run, (group, _) in zip(settings.runs, resolved, strict=True)]
+        metadata = [
+            base if fallback is None else {**base, "fragment_fallback": fallback}
+            for _, fallback in resolved
+        ]
         weights = [_weights(run, group) for run, group in groups]
         series: list[list[float]] = [[] for _ in groups]
         fragment_frames: list[list[Any]] = [[] for _ in groups]
@@ -174,33 +177,33 @@ class Rg:
                     kind="mean_of_timeseries",
                     unit="A",
                     values=series[position],
-                    metadata=metadata,
+                    metadata=metadata[position],
                 )
             )
             if run.calculation_mode == "fragments":
                 observables.extend(
-                    _fragment_observables(run, slug, np.asarray(fragment_frames[position]), metadata)
+                    _fragment_observables(
+                        run, slug, np.asarray(fragment_frames[position]), metadata[position]
+                    )
                 )
         return observables
 
     @staticmethod
-    def _group(universe: Any, run: RgRunSettings) -> Sequence[Any]:
-        """Resolve a run to the atom groups it measures, one per fragment."""
+    def _group(universe: Any, run: RgRunSettings) -> tuple[Sequence[Any], str | None]:
+        """Resolve a run to the groups it measures, and any bond fallback used."""
         atoms = universe.select_atoms(run.selection)
         if len(atoms) == 0:
             raise ReplicateError(
                 f"rg run {run.label!r} selection {run.selection!r} matched no atoms"
             )
         if run.calculation_mode == "selection":
-            return [atoms]
-        fragments, fallback = require_topology_bonds(
+            return [atoms], None
+        return require_topology_bonds(
             atoms,
             context=f"Rg run {run.label!r} in fragment mode",
             topology_path=getattr(universe, "filename", None),
             allow_fallback=run.allow_single_fragment_fallback,
         )
-        del fallback
-        return fragments
 
 
 def _fragment_observables(
