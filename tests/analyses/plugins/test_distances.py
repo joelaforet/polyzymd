@@ -121,7 +121,7 @@ class TestSettings:
         )
         assert s.threshold == 3.5
         assert s.use_pbc is True
-        assert s.align_trajectory is True
+        assert s.align_trajectory is False
         assert len(s.pairs) == 1
 
     def test_empty_pairs_rejected(self):
@@ -177,11 +177,13 @@ class TestSettings:
             )
 
     def test_alignment_frame_required(self):
+        """The legacy alignment validator still fires when alignment is asked for."""
         from polyzymd.analyses.distances import DistancePairSettings, DistancesSettings
 
         with pytest.raises(ValueError):
             DistancesSettings(
                 pairs=[DistancePairSettings(label="A", selection_a="a", selection_b="b")],
+                align_trajectory=True,
                 alignment_mode="frame",
                 # alignment_frame not provided
             )
@@ -274,7 +276,7 @@ def _make_distance_artifacts(tmp_path, condition_label, settings, n_reps: int = 
     import numpy as np
 
     from polyzymd.analyses._framework.cache_identity import settings_fingerprint
-    from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
+    from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact, pair_distance_version
 
     analysis_dir = tmp_path
     artifacts = []
@@ -347,6 +349,7 @@ def _make_distance_artifacts(tmp_path, condition_label, settings, n_reps: int = 
             provenance={"frame_selection": {"start": 0, "stop": 2, "step": 1}},
             metadata={
                 "settings_fingerprint": settings_fingerprint(settings),
+                "pair_distance_version": pair_distance_version(),
                 "config_hash": "hash123",
                 "polyzymd_version": "1.0.0-test",
                 "equilibration_time": 100.0,
@@ -484,6 +487,68 @@ class TestRunReplicate:
             jobs = analysis.build_mda_jobs(ctx)
 
         assert jobs is expected_jobs
+
+    def test_pair_distance_times_match_source_reader(self):
+        """Distances read the source reader, so frame times are not shifted."""
+        import numpy as np
+
+        mda = pytest.importorskip("MDAnalysis")
+
+        from polyzymd.analyses.distances import DistancePairSettings, DistancesSettings
+        from polyzymd.analyses.distances._mda import build_distance_jobs
+        from polyzymd.analyses.mda import FrameSelection, MDABackendPolicy
+
+        universe = mda.Universe.empty(
+            2,
+            n_residues=2,
+            n_segments=2,
+            atom_resindex=[0, 1],
+            residue_segindex=[0, 1],
+            trajectory=True,
+        )
+        universe.add_TopologyAttr("names", ["CA", "CA"])
+        universe.add_TopologyAttr("types", ["C", "C"])
+        universe.add_TopologyAttr("resids", [1, 2])
+        universe.add_TopologyAttr("resnames", ["ALA", "ALA"])
+        universe.add_TopologyAttr("segids", ["A", "B"])
+        universe.add_TopologyAttr("masses", [12.0, 12.0])
+        coords = np.asarray(
+            [
+                [[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]],
+                [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0]],
+                [[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]],
+            ],
+            dtype=np.float32,
+        )
+        dimensions = np.tile(np.asarray([40.0, 40.0, 40.0, 90.0, 90.0, 90.0]), (3, 1))
+        universe.load_new(coords, order="fac", dimensions=dimensions, dt=2.0)
+        source_times = [float(ts.time) for ts in universe.trajectory]
+
+        settings = DistancesSettings(
+            pairs=[
+                DistancePairSettings(
+                    label="pair",
+                    selection_a="index 0",
+                    selection_b="index 1",
+                )
+            ],
+            align_trajectory=True,
+        )
+        ctx = SimpleNamespace(
+            universe=universe,
+            replicate=1,
+            frame_selection=FrameSelection(start=0, stop=None, step=1, timestep_ps=2.0),
+            backend_policy=MDABackendPolicy(),
+            universe_policy=SimpleNamespace(metadata={}, provenance=None),
+            replicate_context=SimpleNamespace(condition=SimpleNamespace(label="cond")),
+        )
+
+        with pytest.warns(DeprecationWarning, match="align_trajectory"):
+            jobs = build_distance_jobs(ctx, settings)
+        jobs[0].analysis.run()
+
+        np.testing.assert_allclose(jobs[0].analysis.results.times_ps, source_times)
+        assert [float(ts.time) for ts in universe.trajectory] == source_times
 
     def test_collector_writes_summary_json_and_npz_sidecar(self, tmp_path, monkeypatch):
         """Distance collector should summarize JSON and retain raw distances in a sidecar."""
@@ -775,6 +840,40 @@ class TestAggregate:
         results[1].payload["pair_results"] = results[1].payload["pairs"]
 
         with pytest.raises(ValueError, match="expected 2"):
+            analysis.aggregate(ctx, results)
+
+    def test_aggregate_rejects_stale_pair_distance_version(self, tmp_path):
+        """Artifacts written before alignment was removed are refused."""
+        from polyzymd.analyses.base import AggregateContext, Condition
+        from polyzymd.analyses.distances import (
+            DistancePairSettings,
+            DistancesAnalysis,
+            DistancesSettings,
+        )
+
+        analysis = DistancesAnalysis()
+        settings = DistancesSettings(
+            pairs=[
+                DistancePairSettings(label="P0", selection_a="sel_a_0", selection_b="sel_b_0"),
+            ]
+        )
+        condition = Condition(
+            label="test",
+            config_path=Path("/tmp/config.yaml"),
+            replicates=(1, 2),
+            sim_config=MagicMock(),
+        )
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1, 2),
+            output_dir=tmp_path / "aggregated",
+            equilibration="100ns",
+            settings=settings,
+        )
+        results = _make_distance_artifacts(tmp_path, "test", settings, n_reps=2)
+        results[1].metadata["pair_distance_version"] = "1"
+
+        with pytest.raises(ValueError, match="clear stale caches"):
             analysis.aggregate(ctx, results)
 
     def test_aggregate_rejects_pair_order_and_threshold_mismatch(self, tmp_path):

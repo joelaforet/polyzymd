@@ -248,10 +248,15 @@ def build_pair_distance_analysis(
 def pair_distance_version() -> str:
     """Return the pair-distance primitive schema version.
 
+    Version 2 is the first version measured without a preceding in-memory
+    alignment. Artifacts written by version 1 hold distances that were computed
+    from rotated coordinates against an unrotated box, so aggregation rejects
+    them rather than mixing the two.
+
     Returns
     -------
     str
         Version string for provenance records.
     """
 
-    return "1"
+    return "2"
