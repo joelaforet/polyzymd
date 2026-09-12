@@ -1,9 +1,9 @@
 # The observable contract
 
-Today a new PolyzyMD analysis costs a 337-line scaffold, nine hook overrides and
-two vocabularies (`Analysis` in `base.py` and the `mda/` artifact layer). This
-document defines the contract that replaces all of it with a settings model and
-one function, and sets out how the nine shipped plugins move onto it.
+A new PolyzyMD analysis costs a 337-line scaffold, nine hook overrides and two
+vocabularies (`Analysis` in `base.py` and the `mda/` artifact layer). This
+document defines the contract that replaces that with a settings model and one
+function, and how the nine shipped plugins move onto it.
 
 ## What an Observable is
 
@@ -18,9 +18,9 @@ class Observable(BaseModel):
 ```
 
 A plugin returns one `Observable` per reported quantity per replicate, holding
-raw per-frame numbers. It never averages across replicates, never runs a test,
-never writes a file. The replicate stays the sampling unit because the plugin
-has no way to cross that boundary.
+raw per-frame numbers. It never averages across replicates, runs a test or
+writes a file. The replicate stays the sampling unit because the plugin has no
+way to cross that boundary.
 
 ## The five kinds
 
@@ -29,12 +29,24 @@ has no way to cross that boundary.
 | `mean_of_timeseries` | mean of the series | mean, SEM and Student t 95 percent interval over replicates | t-test on replicate means |
 | `fluctuation` | sample standard deviation | same, on the fluctuation | same |
 | `fraction` | mean of the 0/1 series | same, on the fraction | same |
-| `distribution` | mean, with the full series kept in the NPZ sidecar | same | same, shape comparison pending |
 | `profile` | the per-index vector | per-index mean and SEM across replicates | not tested pairwise yet |
 
+A fifth kind, `distribution`, was dropped before merge: it reduced exactly like
+`mean_of_timeseries` while the documentation promised a shape test that did not
+exist. A distribution is expressed today as a `profile` over histogram bins. A
+dedicated kind returns when a plugin needs a real shape statistic, with the test
+that goes with it.
+
+A fluctuation over one frame has no estimate, and aggregation raises
+`PluginContractError` when fewer than two replicates remain estimable. A pair
+where either side has one replicate carries `testable=False` and the note
+"single replicate", as the framework's `PairwiseResult` does, and prints as "not
+testable". A `control_label` naming no compared condition raises and lists the
+labels that exist.
+
 Correlation inside a replicate never shrinks an error bar. The shared
-`statistical_inefficiency` gives g and N_eff per replicate, as a diagnostic
-(`n_eff_min`) so a reader can see when one replicate is barely decorrelated.
+`statistical_inefficiency` gives g and N_eff per replicate as a diagnostic
+(`n_eff_min`), so a reader can see a barely decorrelated replicate.
 
 Every test in one run forms a single Benjamini-Hochberg family, across all
 observables and all pairs, using `benjamini_hochberg` from
@@ -44,29 +56,31 @@ t-test method (`student` or `welch`) and alpha come from the comparison config,
 so whether a result is corrected no longer depends on which plugin ran.
 
 `aggregate_observables` uses `compute_sem` from `shared/statistics.py`. The
-Student t half width is computed in one private helper carrying a TODO to call
-`mean_sem_ci` once the confidence-intervals branch lands; there is deliberately
-no second public interval estimator.
+Student t half width sits in one private helper carrying a TODO to call
+`mean_sem_ci` once the confidence-intervals branch lands; there is no second
+public interval estimator.
 
 ## What the framework writes to disk
 
-Nothing new. Replicates are `ReplicateArtifact`, conditions are
-`ConditionArtifact`, comparisons are `ComparisonArtifact`, all from
-`mda/artifacts.py`, all written through `mda/store.py`. The payload of each is
-a list of observable records instead of a per-plugin result model.
+Nothing new. Replicates, conditions and comparisons stay `ReplicateArtifact`,
+`ConditionArtifact` and `ComparisonArtifact` from `mda/artifacts.py`, written
+through `mda/store.py`. Each payload is a list of observable records instead of
+a per-plugin result model.
 
 The runner writes a `provenance.identity` block the plugin cannot omit or get
 wrong: `polyzymd_version`, `plugin`, `plugin_code_hash` (SHA-256 of the plugin
-class source, so a fixed bug invalidates the cache), `settings_fingerprint`,
-`config_hash` and `equilibration`, plus `inputs`, the topology and trajectory
-`FileIdentity` records the universe provider already computes. The per-frame
-series goes to an `observables.npz` sidecar beside `result.json`, hashed and
-validated by the store, which is what later makes generic time-series and
-distribution plots possible without re-running the trajectory.
+module source, so a fix in a module-level helper invalidates the cache too),
+`settings_fingerprint`, `config_hash`, `equilibration` and `inputs`, the
+topology and trajectory `FileIdentity` records the universe provider already
+computes. The per-frame series goes to an `observables.npz` sidecar beside
+`result.json`, hashed and validated by the store, which is what later makes
+generic time-series and shape plots possible without re-running the trajectory.
 
-A replicate is reused when its stored identity matches on version, code hash,
-settings fingerprint, config hash and equilibration. This closes the gap the
-review names in M4, where `compare run` recomputed every replicate every time.
+A replicate is reused only when every one of those fields matches, `inputs`
+included, so extending a trajectory and rerunning recomputes rather than
+reporting a stale number. Reading the current file identity costs one provider
+call and does not load the trajectory. This closes the M4 gap, where
+`compare run` recomputed every replicate every time.
 
 ## How a contract plugin is discovered
 
@@ -78,15 +92,19 @@ MyAnalysis = contract_analysis(My)
 ```
 
 `contract_analysis` generates the `Analysis` subclass that the existing
-discovery scan finds, so nothing in `discovery.py` changes yet.
+discovery scan finds, so nothing in `discovery.py` changes yet. It checks the
+plugin against the runtime-checkable `AnalysisProtocol` first and names the
+attributes that are missing, so the protocol is enforced rather than described.
+`Observable` rejects the scaffold's placeholder unit, so an analysis cannot
+reach disk without stating what its numbers mean.
 
 A module-level `compute` function plus a `Settings` class would save the class
 statement and the `self` argument, about three lines. A class was chosen anyway
 because it keeps `name`, `Settings`, `references` and `compute` in one place an
 agent can read and edit without scanning a module, because a second analysis can
-live in the same file, and because the wrapper needs one object to hold rather
-than three module attributes to find by name. The token cost is the same for
-the agent: the scaffold writes the class header.
+live in the same file, and because the wrapper holds one object rather than
+three module attributes found by name. The scaffold writes the class header, so
+the agent pays nothing for it.
 
 Out of tree, the same file installed from any package registers through the
 entry-point group `polyzymd.analyses`:
@@ -162,8 +180,11 @@ pixi run -e analysis polyzymd new-analysis my_metric --style contract
 pixi run -e analysis polyzymd compare run my_metric -f comparison.yaml
 ```
 
-The scaffold emits a 53-line plugin (20 lines of code, 1.6 kB) and a 44-line
-test with two known answers (1.7 kB). Reading the 74-line `polyzymd-extend`
+The scaffold emits a 59-line plugin (25 lines of code) and a 50-line test with
+two known answers, both failing until the author replaces the placeholder unit.
+The test uses two fixtures from `tests/analyses/conftest.py`,
+`synthetic_universe` and `run_contract_analysis`, so the end-to-end check over
+three replicates is five lines and needs no trajectory. Reading the 74-line `polyzymd-extend`
 skill costs about 800 tokens and the two generated files about 800 more, so a
 new analysis costs an agent roughly 1,600 tokens of reading and a few hundred of
 editing. The current scaffold is 337 plus 277 lines, about 4,900 tokens to read
@@ -173,36 +194,42 @@ before a line is changed.
 
 Fragment mode (`calculation_mode: fragments`, mass or equal weighting, the
 single-fragment and missing-bond fallbacks) is about 220 lines in `rg/_mda.py`
-and returns as a `distribution` observable per fragment plus one
-`mean_of_timeseries` for the reduction, roughly 40 lines. Fragment Rg histograms
-(about 180 lines of aggregation and sidecar code) become a framework
-`distribution` aggregation, no plugin code. The three plot families
-(`plot_rg_timeseries`, `plot_rg_comparison_bars`, `plot_rg_distributions`, 790
-lines) become the generic plotters keyed on kind, phase 2 of the review, about
-300 lines shared by every plugin. Per-selection skip handling for an empty
-selection is one raise here instead of a `RgSkippedRunPayload` ladder.
+and returns as one `mean_of_timeseries` for the reduction plus a `profile` over
+histogram bins for the spread, roughly 40 lines. Fragment Rg histograms (about
+180 lines of aggregation and sidecar code) become framework profile aggregation,
+no plugin code. The three plot families (`plot_rg_timeseries`,
+`plot_rg_comparison_bars`, `plot_rg_distributions`, 790 lines) become the
+generic plotters keyed on kind, phase 2 of the review, about 300 lines shared by
+every plugin. An empty selection is one raise here instead of a
+`RgSkippedRunPayload` ladder.
 
 ## Porting, one plugin per pull request
 
-Order: rmsf, rg, rmsd, sasa, then distances, then secondary_structure,
-catalytic_triad, hydrogen_bonds, and contacts last because residence times need
-an optional `Aggregator` protocol. Each pull request rewrites one plugin against
-the contract, keeps its name, and deletes the plugin's `compare()`, `aggregate()`,
-`extract_metrics()`, `_comparison_results.py`, `_formatters.py`,
-`_plot_settings.py` and its copy of `_apply_fdr_correction`,
-`_coerce_and_validate_aggregated_result`, `mdanalysis_version`,
-`_combined_warnings` and `_effective_timestep_ps`. Its tests move to known
-answers on the observable, not on the plugin's own result model.
+Order: rmsf, rg, rmsd, sasa, distances, secondary_structure, catalytic_triad,
+hydrogen_bonds, and contacts last because residence times need an optional
+`Aggregator` protocol. Each pull request rewrites one plugin against the contract, keeps its name, and
+deletes that plugin's `compare()`, `aggregate()`, `extract_metrics()`,
+`_comparison_results.py`, `_formatters.py`, `_plot_settings.py` and its copies of
+the five helpers the review lists as duplicated. Its tests move to known answers
+on the observable.
 
-Measured targets for the deletions: `_comparison_results.py` across five plugins
-1,427 lines, `_formatters.py` 1,875, `_plotters.py` and `_plot_settings.py`
-about 3,900, per-plugin `compare()` methods 832 (rmsd 174, rg 185, sasa 222,
-distances 251). After the ports, the framework layer loses
-`_framework/compare.py` (152), most of `_framework/comparison_models.py` (252),
-most of `mda/plugin.py` (322), `_framework/contract.py` (111) and the
-`__module__` rewriting in `base.py`, with `mda/comparison.py` (733) and much of
-`stats.py` (1,291) replaced by `compare_observables`. That is between 10,000 and
-12,000 lines out against the 1,235 added here.
+Measured deletion targets: `_comparison_results.py` across five plugins 1,427
+lines, `_formatters.py` 1,875, `_plotters.py` with `_plot_settings.py` about
+3,900, per-plugin `compare()` 832. The framework then loses
+`_framework/compare.py` (152), most of `comparison_models.py` (252) and
+`mda/plugin.py` (322), `_framework/contract.py` (111) and the `__module__`
+rewriting, with `mda/comparison.py` (733) and much of `stats.py` (1,291)
+replaced by `compare_observables`. Between 10,000 and 12,000 lines out against the
+1,351 added here, 674 of which are code and the rest docstrings.
+
+## Why there are three models, not two
+
+`ObservableEstimate` was kept rather than folded into its neighbours. It carries
+`value`, `n_frames`, the statistical inefficiency and `n_eff`, none of which
+exist on `Observable` (raw per-frame values) or `ObservableAggregate` (across
+replicates). Merging it would give one model that is sometimes raw and sometimes
+reduced, with half its fields empty in each state, and the persisted replicate
+payload would lose its type.
 
 ## One hook the base class lacks
 

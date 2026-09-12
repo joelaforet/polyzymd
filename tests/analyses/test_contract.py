@@ -6,28 +6,28 @@ import importlib.util
 import math
 import types
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-import MDAnalysis as mda
 import numpy as np
 import pytest
-from MDAnalysis.coordinates.memory import MemoryReader
 
 from polyzymd.analyses._framework.contexts import ComparisonContext, Condition
-from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
 from polyzymd.analyses.contract import (
+    AnalysisProtocol,
     Observable,
     ObservableAggregate,
     aggregate_observables,
     compare_observables,
     reduce_observable,
 )
+from polyzymd.analyses.contract_runner import contract_analysis
 from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.mda.artifacts import ComparisonArtifact, ConditionArtifact
 from polyzymd.analyses.rg_contract import Rg2Analysis, RgSettings
-from polyzymd.analyses.shared.window import TrajectoryWindow
+from tests.analyses.conftest import make_simulation_config, make_synthetic_universe
 
-CROSS = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]], dtype=np.float32)
+RG_SETTINGS = RgSettings(runs=[{"label": "protein", "selection": "all"}])
+OTHER_INPUTS = ({"path": "/tmp/run.xtc", "format": "xtc", "size_bytes": 99, "mtime_ns": 7},)
 
 
 def _series(values: Any, kind: str = "mean_of_timeseries", name: str = "x") -> Observable:
@@ -35,98 +35,12 @@ def _series(values: Any, kind: str = "mean_of_timeseries", name: str = "x") -> O
     return Observable(name=name, kind=kind, unit="A", values=values)
 
 
-def _universe(scale: float = 1.0, n_frames: int = 8) -> mda.Universe:
-    """Four unit-mass atoms on a cross, held still, at the requested scale."""
-    universe = mda.Universe.empty(4, n_residues=1, atom_resindex=[0] * 4, trajectory=True)
-    universe.add_TopologyAttr("masses", [1.0] * 4)
-    universe.load_new(np.stack([CROSS * scale] * n_frames), format=MemoryReader)
-    return universe
+def _universes_from(base: float) -> Callable[[int], Any]:
+    """Replicate factory whose radius of gyration rises by 0.5 per replicate."""
+    return lambda replicate: make_synthetic_universe(scale=base + 0.5 * replicate)
 
 
-def _sim_config(label: str) -> types.SimpleNamespace:
-    """Minimal stand-in for the fields the config hash reads."""
-    return types.SimpleNamespace(
-        name=label,
-        enzyme=types.SimpleNamespace(name="enzyme", pdb_path="/tmp/enzyme.pdb"),
-        thermodynamics=types.SimpleNamespace(temperature=300.0, pressure=1.0),
-        output=types.SimpleNamespace(
-            projects_directory="/tmp/projects",
-            effective_scratch_directory="/tmp/scratch",
-            naming_template="{name}",
-        ),
-        substrate=None,
-        polymers=None,
-    )
-
-
-def _stub_analysis_class(scale: float) -> type:
-    """Rg2 with the trajectory loader replaced by an in-memory universe."""
-
-    class _StubProvider:
-        def __init__(self, config: Any, loader: Any = None) -> None:
-            self.config = config
-
-        def load_universe(self, replicate: int) -> mda.Universe:
-            return _universe(scale=scale + 0.5 * replicate)
-
-        def provenance_for(self, replicate: int) -> dict[str, Any]:
-            return {
-                "topology": {
-                    "path": "/tmp/topology.pdb",
-                    "format": "pdb",
-                    "size_bytes": 1,
-                    "mtime_ns": 2,
-                },
-                "trajectories": [],
-                "warnings": [],
-            }
-
-    class _StubLoader:
-        def __init__(self, config: Any) -> None:
-            self.config = config
-
-    class _StubRg2(Rg2Analysis):
-        def _trajectory_loader_factory(self) -> type:
-            return _StubLoader
-
-        def _mda_universe_provider_factory(self) -> type:
-            return _StubProvider
-
-        def get_trajectory_window(
-            self, ctx: Any, replicate: int, loader: Any, universe: Any
-        ) -> TrajectoryWindow:
-            n_frames = len(universe.trajectory)
-            return TrajectoryWindow(
-                start=0,
-                stop=n_frames,
-                step=1,
-                equilibration_start=0,
-                n_frames_total=n_frames,
-                n_frames_selected=n_frames,
-                timestep_ps=1.0,
-                equilibration_ps=0.0,
-                equilibration="0ns",
-            )
-
-    return _StubRg2
-
-
-def _run_condition(label: str, scale: float, root: Path) -> tuple[Condition, ConditionArtifact]:
-    """Run rg2 for one condition with three replicates and return its aggregate."""
-    condition = Condition(
-        label=label,
-        config_path=root / f"{label}.yaml",
-        replicates=(1, 2, 3),
-        sim_config=_sim_config(label),
-    )
-    lifecycle = AnalysisLifecycle(_stub_analysis_class(scale)())
-    aggregate = lifecycle.run_analysis(
-        condition,
-        RgSettings(runs=[{"label": "protein", "selection": "all"}]),
-        "0ns",
-        root / "analysis" / label / "rg2",
-    )
-    return condition, aggregate
+_scaled_universes = _universes_from(1.0)
 
 
 def test_mean_of_timeseries_gives_sigma_over_root_n() -> None:
@@ -164,12 +78,34 @@ def test_fraction_outside_the_unit_interval_is_rejected() -> None:
         _series([0.0, 1.5], kind="fraction")
 
 
+def test_the_scaffold_unit_placeholder_is_rejected() -> None:
+    """An author must replace the placeholder unit with a real one."""
+    with pytest.raises(ValueError, match="has not stated its unit"):
+        Observable(name="x", kind="mean_of_timeseries", unit="TODO", values=[1.0])
+
+
 def test_fluctuation_reduces_to_the_sample_standard_deviation() -> None:
     """A fluctuation observable reduces to the standard deviation of its series."""
     estimate = reduce_observable(_series([1.0, 2.0, 3.0, 4.0, 5.0], kind="fluctuation"))
 
     assert estimate.value == pytest.approx(math.sqrt(2.5))
     assert estimate.n_frames == 5
+
+
+def test_single_frame_fluctuation_has_no_estimate() -> None:
+    """One frame cannot fluctuate, so the replicate contributes no value."""
+    assert reduce_observable(_series([2.0], kind="fluctuation")).value is None
+
+
+def test_too_few_estimable_replicates_is_rejected() -> None:
+    """Aggregation refuses to report a mean over fewer than two estimates."""
+    replicates = [
+        [_series([1.0, 2.0], kind="fluctuation")],
+        [_series([3.0], kind="fluctuation")],
+    ]
+
+    with pytest.raises(PluginContractError, match="estimable replicate"):
+        aggregate_observables(replicates)
 
 
 def test_profile_averages_each_index_across_replicates() -> None:
@@ -184,6 +120,8 @@ def test_profile_averages_each_index_across_replicates() -> None:
     assert aggregate.index == [10.0, 11.0]
     assert aggregate.profile_mean == pytest.approx([2.0, 4.0])
     assert aggregate.profile_sem == pytest.approx([1.0, 1.0])
+    assert aggregate.ci_method == "student_t"
+    assert aggregate.coverage == pytest.approx(0.95)
     assert aggregate.mean is None
 
 
@@ -212,15 +150,14 @@ def test_missing_observable_in_one_replicate_is_rejected() -> None:
 def test_comparison_uses_one_benjamini_hochberg_family() -> None:
     """Every test in the run is adjusted together, and the largest is unchanged."""
     conditions = {
-        "control": aggregate_observables(
-            [[_series([v], name="a"), _series([v], name="b")] for v in (1.0, 1.1, 0.9)]
-        ),
-        "low": aggregate_observables(
-            [[_series([v], name="a"), _series([v], name="b")] for v in (1.02, 1.11, 0.93)]
-        ),
-        "high": aggregate_observables(
-            [[_series([v], name="a"), _series([v], name="b")] for v in (5.0, 5.1, 4.9)]
-        ),
+        label: aggregate_observables(
+            [[_series([v], name="a"), _series([v], name="b")] for v in values]
+        )
+        for label, values in (
+            ("control", (1.0, 1.1, 0.9)),
+            ("low", (1.02, 1.11, 0.93)),
+            ("high", (5.0, 5.1, 4.9)),
+        )
     }
 
     comparisons = compare_observables(conditions, control_label="control", fdr_alpha=0.05)
@@ -233,8 +170,28 @@ def test_comparison_uses_one_benjamini_hochberg_family() -> None:
     assert all(a >= r for a, r in zip(adjusted, raw, strict=True))
     assert max(adjusted) == pytest.approx(max(raw))
     high = [c for c in comparisons if c.condition == "high"]
-    assert all(c.significant for c in high)
+    assert all(c.significant and c.testable for c in high)
     assert all(c.delta == pytest.approx(4.0, abs=1e-6) for c in high)
+
+
+def test_unknown_control_label_is_rejected() -> None:
+    """A control that names no compared condition is an error, not a fallback."""
+    aggregates = aggregate_observables([[_series([1.0])], [_series([2.0])]])
+
+    with pytest.raises(PluginContractError, match="is not among the compared conditions"):
+        compare_observables({"a": aggregates, "b": aggregates}, control_label="A")
+
+
+def test_a_single_replicate_condition_is_not_testable() -> None:
+    """One replicate gives no test, and the pair says so instead of no difference."""
+    control = aggregate_observables([[_series([1.0])], [_series([1.2])], [_series([0.9])]])
+    thin = aggregate_observables([[_series([5.0])]])
+
+    comparison = compare_observables({"control": control, "thin": thin})[0]
+
+    assert comparison.testable is False
+    assert comparison.note == "single replicate"
+    assert comparison.significant is False
 
 
 def test_profiles_are_not_tested_pairwise() -> None:
@@ -247,9 +204,26 @@ def test_profiles_are_not_tested_pairwise() -> None:
     assert compare_observables({"a": aggregates, "b": aggregates}) == []
 
 
-def test_runner_executes_rg2_end_to_end(tmp_path: Path) -> None:
+def test_a_plugin_that_misses_the_protocol_is_named() -> None:
+    """contract_analysis enforces the protocol and says what is missing."""
+
+    class Incomplete:
+        name = "incomplete"
+
+    with pytest.raises(PluginContractError, match=r"Settings.*compute.*references"):
+        contract_analysis(Incomplete)
+
+
+def test_rg2_satisfies_the_protocol() -> None:
+    """The prototype port is an instance of the runtime-checkable protocol."""
+    from polyzymd.analyses.rg_contract import RgContract
+
+    assert isinstance(RgContract(), AnalysisProtocol)
+
+
+def test_runner_executes_rg2_end_to_end(tmp_path: Path, run_contract_analysis: Any) -> None:
     """run_analysis computes, persists and aggregates a contract plugin."""
-    _, aggregate = _run_condition("A", 1.0, tmp_path)
+    aggregate = run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
 
     assert isinstance(aggregate, ConditionArtifact)
     assert aggregate.replicates == [1, 2, 3]
@@ -257,7 +231,6 @@ def test_runner_executes_rg2_end_to_end(tmp_path: Path) -> None:
     assert observable.name == "protein"
     assert observable.unit == "A"
     assert observable.n_replicates == 3
-    # Rg of a unit cross scaled by s is exactly s.
     assert observable.replicate_values == pytest.approx([1.5, 2.0, 2.5], abs=1e-5)
     assert observable.mean == pytest.approx(2.0, abs=1e-5)
 
@@ -270,54 +243,81 @@ def test_runner_executes_rg2_end_to_end(tmp_path: Path) -> None:
     assert identity["config_hash"]
 
 
-def test_runner_reuses_a_replicate_whose_identity_matches(tmp_path: Path) -> None:
+def test_runner_reuses_a_replicate_whose_identity_matches(
+    tmp_path: Path, run_contract_analysis: Any
+) -> None:
     """A second run reuses the cached replicate instead of recomputing it."""
-    _run_condition("A", 1.0, tmp_path)
+    run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
     marker = tmp_path / "analysis" / "A" / "rg2" / "run_1" / "observables.npz"
     stamp = marker.stat().st_mtime_ns
 
-    _run_condition("A", 1.0, tmp_path)
+    run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
 
     assert marker.stat().st_mtime_ns == stamp
 
 
-def test_runner_recomputes_when_settings_change(tmp_path: Path) -> None:
-    """A different settings fingerprint invalidates the cached replicate."""
-    condition, _ = _run_condition("A", 1.0, tmp_path)
-    analysis = _stub_analysis_class(1.0)()
-    lifecycle = AnalysisLifecycle(analysis)
+def test_runner_recomputes_when_an_input_file_changes(
+    tmp_path: Path, run_contract_analysis: Any
+) -> None:
+    """Extending a trajectory changes its file identity and invalidates the cache."""
+    run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+    marker = tmp_path / "analysis" / "A" / "rg2" / "run_1" / "observables.npz"
+    stamp = marker.stat().st_mtime_ns
 
-    lifecycle.run_analysis(
-        condition,
-        RgSettings(runs=[{"label": "everything", "selection": "all"}]),
-        "0ns",
-        tmp_path / "analysis" / "A" / "rg2",
+    run_contract_analysis(
+        Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path, inputs=OTHER_INPUTS
     )
 
-    artifact = analysis._load_aggregated_result(tmp_path / "analysis" / "A" / "rg2" / "aggregated")
-    assert artifact.payload["observables"][0]["name"] == "everything"
+    assert marker.stat().st_mtime_ns != stamp
 
 
-def test_runner_compares_two_conditions(tmp_path: Path) -> None:
+def test_runner_recomputes_when_settings_change(tmp_path: Path, run_contract_analysis: Any) -> None:
+    """A different settings fingerprint invalidates the cached replicate."""
+    run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+
+    aggregate = run_contract_analysis(
+        Rg2Analysis,
+        RgSettings(runs=[{"label": "everything", "selection": "all"}]),
+        _scaled_universes,
+        root=tmp_path,
+    )
+
+    assert aggregate.payload["observables"][0]["name"] == "everything"
+
+
+def test_runner_compares_two_conditions(tmp_path: Path, run_contract_analysis: Any) -> None:
     """The adapter produces a comparison artifact and a readable report."""
-    control, control_aggregate = _run_condition("A", 1.0, tmp_path)
-    treatment, treatment_aggregate = _run_condition("B", 3.0, tmp_path)
-    analysis = _stub_analysis_class(1.0)()
+    aggregates = {
+        label: run_contract_analysis(
+            Rg2Analysis,
+            RG_SETTINGS,
+            _universes_from(base),
+            label=label,
+            root=tmp_path,
+        )
+        for label, base in (("A", 1.0), ("B", 3.0))
+    }
+    conditions = [
+        Condition(
+            label=label,
+            config_path=tmp_path / f"{label}.yaml",
+            replicates=(1, 2, 3),
+            sim_config=make_simulation_config(label),
+        )
+        for label in aggregates
+    ]
 
-    comparison = analysis.compare(
+    comparison = Rg2Analysis().compare(
         ComparisonContext(
             name="project",
-            conditions=[control, treatment],
+            conditions=conditions,
             excluded_conditions=[],
             control_label="A",
-            analysis_dirs={
-                "A": tmp_path / "analysis" / "A" / "rg2",
-                "B": tmp_path / "analysis" / "B" / "rg2",
-            },
+            analysis_dirs={label: tmp_path / "analysis" / label / "rg2" for label in aggregates},
             results_dir=tmp_path / "results",
             equilibration="0ns",
-            settings=RgSettings(runs=[{"label": "protein", "selection": "all"}]),
-            aggregated_results={"A": control_aggregate, "B": treatment_aggregate},
+            settings=RG_SETTINGS,
+            aggregated_results=aggregates,
         )
     )
 
@@ -329,7 +329,7 @@ def test_runner_compares_two_conditions(tmp_path: Path) -> None:
     assert entry["correction"] == "benjamini_hochberg"
     assert entry["significant"] is True
 
-    report = analysis.format(comparison)
+    report = Rg2Analysis().format(comparison)
     assert "p_adj" in report
     assert "mean 2 A" in report
 
@@ -352,9 +352,9 @@ def test_contract_scaffold_renders_and_imports(tmp_path: Path) -> None:
 
     assert module.ProbeContractAnalysis.name == "probe_contract"
     assert module.ProbeContractAnalysis.Settings is module.ProbeContractSettings
-    observables = module.ProbeContract().compute(
-        _universe(scale=2.0, n_frames=3),
-        types.SimpleNamespace(start=0, stop=3, step=1, frames=None),
-        module.ProbeContractSettings(),
-    )
-    assert reduce_observable(observables[0]).value == pytest.approx(2.0, abs=1e-5)
+    with pytest.raises(ValueError, match="has not stated its unit"):
+        module.ProbeContract().compute(
+            make_synthetic_universe(scale=2.0, n_frames=3),
+            types.SimpleNamespace(start=0, stop=3, step=1, frames=None),
+            module.ProbeContractSettings(),
+        )

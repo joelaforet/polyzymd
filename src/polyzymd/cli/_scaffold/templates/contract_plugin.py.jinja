@@ -39,14 +39,20 @@ class {{ spec.class_name }}:
     ) -> Sequence[Observable]:
         """Measure the observable on every production frame.
 
-        Replace the body with the real measurement. Return one Observable per
-        reported quantity; the framework owns persistence, uncertainty,
-        comparison and plotting.
+        Replace the unit and the body with the real measurement. Return one
+        Observable per reported quantity; the framework owns persistence,
+        uncertainty, comparison and plotting. The generated tests fail until the
+        unit is stated.
         """
         group = universe.select_atoms(settings.selection)
         values = [float(group.radius_of_gyration()) for _ in iter_frames(universe, frames)]
         return [
-            Observable(name="{{ spec.name }}", kind="mean_of_timeseries", unit="A", values=values)
+            Observable(
+                name="{{ spec.name }}",
+                kind="mean_of_timeseries",
+                unit="TODO",
+                values=values,
+            )
         ]
 
 

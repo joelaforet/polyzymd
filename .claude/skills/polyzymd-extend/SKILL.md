@@ -44,11 +44,14 @@ The framework does all of that from `kind`.
 | `mean_of_timeseries` | one number per frame | mean | mean, SEM, 95 percent CI over replicates |
 | `fluctuation` | one number per frame | sample standard deviation | same, on the fluctuation |
 | `fraction` | 0 or 1 per frame | occupancy | same, on the fraction |
-| `distribution` | one number per frame | mean, series kept in the NPZ sidecar | same, plus the shape |
 | `profile` | one number per index | the vector | per-index mean and SEM, no pairwise test yet |
 
-Every observable states a `unit`. A `profile` also states an `index`, one entry
-per value (residue IDs, bin centres).
+There is no distribution kind. Express a shape as a `profile` over histogram
+bins; the raw per-frame series is kept in the NPZ sidecar either way.
+
+Every observable states a `unit`, and the scaffold placeholder `"TODO"` is
+rejected, so the generated tests fail until you replace it. A `profile` also
+states an `index`, one entry per value (residue IDs, bin centres).
 
 ## 4. Citations
 
@@ -57,9 +60,25 @@ heading and repeat it in `references`; the comparison artifact carries it.
 
 ## 5. The one test to write
 
-Assert a known answer on a synthetic universe (the Rg of a unit cross is 1.0),
-then that `aggregate_observables` over three identical replicates gives a zero
-SEM and `n_replicates == 3`. The scaffolded test has both; replace the numbers.
+Two fixtures in `tests/analyses/conftest.py` do the setup: `synthetic_universe`
+is four unit-mass atoms on a cross, whose radius of gyration is exactly 1.0, and
+`run_contract_analysis(AnalysisClass, settings, universe)` runs the real
+lifecycle over three replicates and returns the `ConditionArtifact`.
+
+```python
+def test_aggregates(synthetic_universe, run_contract_analysis):
+    artifact = run_contract_analysis(MyAnalysis, MySettings(), synthetic_universe)
+    aggregate = ObservableAggregate.model_validate(artifact.payload["observables"][0])
+    assert aggregate.n_replicates == 3
+    assert aggregate.replicate_values == pytest.approx([1.0, 1.0, 1.0])
+    assert aggregate.mean == pytest.approx(1.0) and aggregate.sem == pytest.approx(0.0)
+```
+
+Assert on the aggregate fields, not on the raw observable: `mean`, `sem`,
+`ci95_low`, `ci95_high`, `n_replicates`, `replicate_values`, and for a profile
+`profile_mean`, `profile_sem` and `index`. A comparison entry carries `delta`,
+`p_value`, `p_adjusted`, `significant`, `testable` and `note`. The scaffolded
+test has both tests already; replace the numbers.
 
 ```bash
 PYTHONPATH=$PWD/src pixi run -e test pytest tests/analyses/plugins/test_<name>.py -q

@@ -3834,8 +3834,8 @@ def new_analysis(
     --style contract creates:
 
     \b
-      src/polyzymd/analyses/<NAME>.py             — Settings plus compute()
-      tests/analyses/plugins/test_<NAME>.py       — two known-answer tests
+      src/polyzymd/analyses/<NAME>.py             Settings plus compute()
+      tests/analyses/plugins/test_<NAME>.py       two known-answer tests
 
     Advanced package scaffolds create:
 
