@@ -37,7 +37,6 @@ from tests.analyses.conftest import (  # noqa: E402
 T_FACTOR_N3 = 4.302652729749462
 
 PLUGINS_WITH_PLOT_SETTINGS = (
-    "rmsd",
     "rmsf",
     "rg",
     "sasa",
@@ -313,8 +312,7 @@ class TestRealPlottersCarryTheFootnote:
     """Render the bar plotters whose own tests stub save_figure.
 
     Those tests replace ``save_figure`` before the conftest audit can see the
-    figure, so deleting a footnote call in RMSD or Rg would otherwise go
-    unnoticed. These render the same plotters with the real ``save_figure`` and
+    figure, so deleting a footnote call in Rg would otherwise go unnoticed. These render the same plotters with the real ``save_figure`` and
     read the footnote back off the saved figure.
     """
 
@@ -332,7 +330,7 @@ class TestRealPlottersCarryTheFootnote:
             kwargs["close"] = False
             return original(fig, output_path, plot_settings, **kwargs)
 
-        for module_name in ("polyzymd.analyses.rmsd._plotters", "polyzymd.analyses.rg._plotters"):
+        for module_name in ("polyzymd.analyses.rg._plotters",):
             import importlib
 
             monkeypatch.setattr(importlib.import_module(module_name), "save_figure", _capture)
