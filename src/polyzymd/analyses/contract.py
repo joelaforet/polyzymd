@@ -11,6 +11,10 @@ cross-condition tests (:func:`compare_observables`). The reduction and the
 uncertainty depend only on ``Observable.kind``, so two plugins that declare the
 same kind get the same statistics.
 
+There are four kinds. A distribution shape is expressed today as a ``profile``
+over histogram bins; a dedicated distribution kind with a shape test is
+deferred until a plugin needs one.
+
 The replicate is the sampling unit. Every mean, SEM and interval reported here
 is computed over replicate-level values, never over frames. Correlation inside
 one replicate is reported as a diagnostic (the statistical inefficiency g and
@@ -39,7 +43,17 @@ doi:10.1093/biomet/34.1-2.28
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, Iterator, Literal, Mapping, Protocol, Sequence
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Iterator,
+    Literal,
+    Mapping,
+    Protocol,
+    Sequence,
+    runtime_checkable,
+)
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -62,17 +76,8 @@ ObservableKind = Literal[
     "mean_of_timeseries",
     "fluctuation",
     "fraction",
-    "distribution",
     "profile",
 ]
-
-#: Kinds whose values are a per-frame time series within one replicate.
-TIMESERIES_KINDS: tuple[str, ...] = (
-    "mean_of_timeseries",
-    "fluctuation",
-    "fraction",
-    "distribution",
-)
 
 CI_METHOD: str = "student_t"
 DEFAULT_COVERAGE: float = 0.95
@@ -93,7 +98,8 @@ class Observable(BaseModel):
         ``"profile"``.
     unit : str or None, optional
         Physical unit of ``values``, for example ``"A"`` or ``"nm^2"``. Use
-        ``None`` only for a dimensionless quantity.
+        ``None`` only for a dimensionless quantity. The scaffold placeholder
+        ``"TODO"`` is rejected.
     index : array_like or None, optional
         Residue IDs or bin centres, required for ``"profile"`` and rejected
         for every other kind.
@@ -127,6 +133,11 @@ class Observable(BaseModel):
             raise ValueError(f"observable {self.name!r} has no values")
         if not np.all(np.isfinite(array)):
             raise ValueError(f"observable {self.name!r} has non-finite values")
+        if self.unit is not None and self.unit.strip().upper() == "TODO":
+            raise ValueError(
+                f"observable {self.name!r} has not stated its unit; replace the scaffold "
+                "placeholder with the physical unit, or use None if it is dimensionless"
+            )
         if self.kind == "fraction" and (array.min() < 0.0 or array.max() > 1.0):
             raise ValueError(f"observable {self.name!r} is a fraction outside [0, 1]")
         if self.kind == "profile":
@@ -191,13 +202,18 @@ class ObservableComparison(BaseModel):
     correction: str
     cohens_d: float | None = None
     significant: bool = False
+    testable: bool = True
+    note: str | None = None
 
 
+@runtime_checkable
 class AnalysisProtocol(Protocol):
     """What a contract plugin provides.
 
     An object satisfying this protocol is everything the framework needs to run
     an analysis. It carries no lifecycle hooks and no persistence code.
+    ``contract_analysis`` checks an instance against it and names what is
+    missing, so the protocol is enforced rather than documented.
 
     Attributes
     ----------
@@ -208,7 +224,8 @@ class AnalysisProtocol(Protocol):
         YAML file.
     references : tuple of str
         Citations for the method, in the NumPy ``References`` style used by the
-        rest of the package. Optional but expected for a published analysis.
+        rest of the package. Required; use an empty tuple only for an analysis
+        that implements no published method.
     """
 
     name: ClassVar[str]
@@ -264,10 +281,11 @@ def iter_frames(universe: Any, frames: FrameSelection) -> Iterator[Any]:
 def reduce_observable(observable: Observable | ObservableEstimate) -> ObservableEstimate:
     """Reduce one replicate's observable to its replicate-level value.
 
-    The reduction is fixed by ``kind``: ``mean_of_timeseries`` and
-    ``distribution`` take the mean of the series, ``fluctuation`` takes its
-    sample standard deviation, ``fraction`` takes the mean of the indicator
-    series, and ``profile`` keeps the per-index vector unchanged.
+    The reduction is fixed by ``kind``: ``mean_of_timeseries`` takes the mean of
+    the series, ``fluctuation`` takes its sample standard deviation, ``fraction``
+    takes the mean of the indicator series, and ``profile`` keeps the per-index
+    vector unchanged. A fluctuation over a single frame has no estimate, so its
+    ``value`` is ``None``.
 
     Parameters
     ----------
@@ -297,7 +315,7 @@ def reduce_observable(observable: Observable | ObservableEstimate) -> Observable
             profile=values.tolist(), index=list(observable.index or []), **common
         )
     if observable.kind == "fluctuation":
-        value = float(np.std(values, ddof=1)) if values.size > 1 else 0.0
+        value = float(np.std(values, ddof=1)) if values.size > 1 else None
     else:
         value = float(np.mean(values))
     g = _inefficiency(values)
@@ -338,7 +356,8 @@ def aggregate_observables(
     ------
     PluginContractError
         If the replicates disagree on which observables exist, on their kind or
-        unit, or on the length of a profile.
+        unit, or on the length of a profile, or if fewer than two replicates
+        yield an estimate.
     """
     if not replicates:
         raise PluginContractError("aggregate_observables() needs at least one replicate")
@@ -368,17 +387,28 @@ def aggregate_observables(
         )
         if head.kind == "profile":
             stacked = np.asarray([est.profile for est in estimates], dtype=np.float64)
+            profile_sem = _profile_sem(stacked)
             aggregates.append(
                 aggregate.model_copy(
                     update={
                         "index": head.index,
                         "profile_mean": np.mean(stacked, axis=0).tolist(),
-                        "profile_sem": _profile_sem(stacked),
+                        "profile_sem": profile_sem,
+                        "ci_method": None if profile_sem is None else CI_METHOD,
+                        "coverage": None if profile_sem is None else float(coverage),
                     }
                 )
             )
             continue
-        values = [float(est.value) for est in estimates]
+        estimable = [est for est in estimates if est.value is not None]
+        if len(estimable) < len(estimates) and len(estimable) < 2:
+            raise PluginContractError(
+                f"observable {name!r} has {len(estimable)} estimable replicate(s) of "
+                f"{len(estimates)}; a {head.kind} needs at least two frames per replicate "
+                "and at least two replicates"
+            )
+        aggregate = aggregate.model_copy(update={"n_replicates": len(estimable)})
+        values = [float(est.value) for est in estimable]
         stat = compute_sem(values)
         half_width = _student_t_half_width(stat.sem, stat.n_samples, coverage)
         aggregates.append(
@@ -418,7 +448,7 @@ def compare_observables(
         Aggregates keyed by condition label, in the order to report.
     control_label : str or None, optional
         Condition every other condition is tested against. Defaults to the
-        first key.
+        first key. A label that names no compared condition is an error.
     ttest_method : str, optional
         ``"student"`` or ``"welch"``, by default ``"student"``.
     posthoc_method : str, optional
@@ -430,12 +460,23 @@ def compare_observables(
     -------
     list[ObservableComparison]
         One entry per observable and non-control condition. Profiles are not
-        tested and are omitted.
+        tested and are omitted. A pair with fewer than two replicates on either
+        side is reported with ``testable=False`` and a note.
+
+    Raises
+    ------
+    PluginContractError
+        If ``control_label`` names no compared condition.
     """
     labels = list(aggregates_by_condition)
+    if control_label is not None and control_label not in labels:
+        raise PluginContractError(
+            f"control condition {control_label!r} is not among the compared conditions "
+            f"{labels}; check the label spelling in the comparison config"
+        )
     if len(labels) < 2:
         return []
-    control = control_label if control_label in labels else labels[0]
+    control = control_label or labels[0]
     samples = {
         label: {agg.name: agg for agg in aggregates}
         for label, aggregates in aggregates_by_condition.items()
@@ -458,6 +499,7 @@ def compare_observables(
             }
         for position, label in enumerate(others, start=1):
             treatment = samples[label][name]
+            note = _untestable_note(control_agg, treatment)
             ttest = independent_ttest(
                 control_agg.replicate_values, treatment.replicate_values, method=ttest_method
             )
@@ -477,6 +519,8 @@ def compare_observables(
                     p_value=tukey_p.get(position) if use_tukey else p_value,
                     correction="tukey_hsd" if use_tukey else "benjamini_hochberg",
                     cohens_d=_effect_size(control_agg.replicate_values, treatment.replicate_values),
+                    testable=note is None,
+                    note=note,
                 )
             )
     return _adjust(comparisons, fdr_alpha=fdr_alpha, use_tukey=use_tukey)
@@ -491,7 +535,8 @@ def _adjust(
             comparison.model_copy(
                 update={
                     "p_adjusted": comparison.p_value,
-                    "significant": comparison.p_value is not None
+                    "significant": comparison.testable
+                    and comparison.p_value is not None
                     and comparison.p_value <= fdr_alpha,
                 }
             )
@@ -500,7 +545,10 @@ def _adjust(
     adjusted = benjamini_hochberg([c.p_value for c in comparisons], alpha=fdr_alpha)
     return [
         comparison.model_copy(
-            update={"p_adjusted": result.adjusted_p_value, "significant": result.significant}
+            update={
+                "p_adjusted": result.adjusted_p_value,
+                "significant": comparison.testable and result.significant,
+            }
         )
         for comparison, result in zip(comparisons, adjusted, strict=True)
     ]
@@ -529,6 +577,13 @@ def _check_consistent(name: str, estimates: Sequence[ObservableEstimate]) -> Non
             raise PluginContractError(
                 f"profile observable {name!r} has a different index between replicates"
             )
+
+
+def _untestable_note(control: ObservableAggregate, treatment: ObservableAggregate) -> str | None:
+    """Reason a pair cannot be tested, or None when both sides have a sample."""
+    if min(control.n_replicates, treatment.n_replicates) >= 2:
+        return None
+    return "single replicate"
 
 
 def _inefficiency(values: np.ndarray) -> float | None:

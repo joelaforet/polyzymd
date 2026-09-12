@@ -47,7 +47,14 @@ from polyzymd.analyses.mda.store import ArtifactStore
 logger = logging.getLogger("polyzymd.analyses")
 
 #: Identity fields that must match before a cached replicate is reused.
-_CACHE_KEYS = ("polyzymd_version", "plugin_code_hash", "settings_fingerprint", "config_hash")
+_CACHE_KEYS = (
+    "polyzymd_version",
+    "plugin_code_hash",
+    "settings_fingerprint",
+    "config_hash",
+    "equilibration",
+    "inputs",
+)
 
 
 class ContractAnalysis(Analysis):
@@ -119,8 +126,8 @@ class ContractAnalysis(Analysis):
             ctx.replicate_context.sim_config,
             ctx.replicate_context.settings,
             ctx.replicate_context.equilibration,
+            inputs=_input_identity(ctx.universe_policy.as_dict()),
         )
-        identity["inputs"] = _input_identity(ctx.universe_policy.as_dict())
 
         def collect(collector_ctx: Any, completed_jobs: Sequence[Any]) -> ReplicateArtifact:
             results = completed_jobs[0].results
@@ -276,13 +283,13 @@ class ContractAnalysis(Analysis):
 
     def _run_compute_stage(self, ctx: Any, replicate: int) -> Any:
         """Reuse a replicate whose identity still matches, otherwise compute it."""
-        cached = self._reusable(ctx)
+        cached = self._reusable(ctx, replicate)
         if cached is not None:
             logger.info("%s: reusing replicate %d from cache", self.name, replicate)
             return cached
         return super()._run_compute_stage(ctx, replicate)
 
-    def _reusable(self, ctx: Any) -> ReplicateArtifact | None:
+    def _reusable(self, ctx: Any, replicate: int) -> ReplicateArtifact | None:
         """Load the cached replicate artifact when its identity block matches."""
         path = ctx.result_path or self.replicate_result_path(ctx.output_dir)
         if ctx.recompute or not Path(path).exists():
@@ -291,15 +298,38 @@ class ContractAnalysis(Analysis):
             artifact = ArtifactStore(ctx.output_dir).read_replicate_result(
                 Path(path).relative_to(ctx.output_dir)
             )
-        except Exception:
+            current = self._identity(
+                ctx.sim_config,
+                ctx.settings,
+                ctx.equilibration,
+                inputs=self._current_inputs(ctx, replicate),
+            )
+        except Exception as exc:
+            logger.debug("%s: cannot check replicate cache, recomputing: %s", self.name, exc)
             return None
         stored = artifact.provenance.get("identity", {})
-        current = self._identity(ctx.sim_config, ctx.settings, ctx.equilibration)
         if any(stored.get(key) != current[key] for key in _CACHE_KEYS):
             return None
-        return artifact if stored.get("equilibration") == current["equilibration"] else None
+        return artifact
 
-    def _identity(self, sim_config: Any, settings: BaseModel, equilibration: str) -> dict[str, Any]:
+    def _current_inputs(self, ctx: Any, replicate: int) -> list[dict[str, Any]]:
+        """File identity of the topology and trajectories now on disk."""
+        from polyzymd.analyses.mda.lifecycle import _build_universe_provider, _provenance_for
+
+        loader = self._trajectory_loader_factory()(ctx.sim_config)
+        provenance = _provenance_for(_build_universe_provider(self, ctx, loader), replicate)
+        if hasattr(provenance, "as_dict"):
+            provenance = provenance.as_dict()
+        return _input_identity({"provenance": provenance})
+
+    def _identity(
+        self,
+        sim_config: Any,
+        settings: BaseModel,
+        equilibration: str,
+        *,
+        inputs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         """Build the framework-written identity block for one replicate."""
         from polyzymd import __version__
         from polyzymd.analyses._framework.cache_identity import compute_config_hash
@@ -311,6 +341,7 @@ class ContractAnalysis(Analysis):
             "settings_fingerprint": self.aggregate_settings_fingerprint(settings),
             "config_hash": compute_config_hash(sim_config),
             "equilibration": equilibration,
+            "inputs": inputs,
         }
 
 
@@ -331,17 +362,28 @@ def contract_analysis(plugin: Any) -> type[ContractAnalysis]:
     Raises
     ------
     PluginContractError
-        If the plugin is missing ``name``, ``Settings`` or ``compute``, or if
+        If the plugin does not satisfy
+        :class:`~polyzymd.analyses.contract.AnalysisProtocol`, or if
         ``Settings`` is not a pydantic model.
     """
     instance = plugin() if isinstance(plugin, type) else plugin
-    name = getattr(instance, "name", "")
-    settings_cls = getattr(instance, "Settings", None)
+    if not isinstance(instance, AnalysisProtocol):
+        missing = sorted(
+            attribute
+            for attribute in ("name", "Settings", "compute", "references")
+            if not hasattr(instance, attribute)
+        )
+        raise PluginContractError(
+            f"{type(instance).__name__} does not satisfy AnalysisProtocol; it is missing "
+            f"{missing}. A plugin declares name, Settings, references and compute()."
+        )
+    name = instance.name
+    settings_cls = instance.Settings
     if not isinstance(name, str) or not name.strip():
         raise PluginContractError(f"{type(instance).__name__} must define name as a string")
     if not (isinstance(settings_cls, type) and issubclass(settings_cls, BaseModel)):
         raise PluginContractError(f"{name}.Settings must be a pydantic BaseModel subclass")
-    if not callable(getattr(instance, "compute", None)):
+    if not callable(instance.compute):
         raise PluginContractError(f"{name} must define compute(universe, frames, settings)")
     return type(
         f"{_class_prefix(name)}ContractAnalysis",
@@ -400,12 +442,15 @@ def _input_identity(policy: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _code_hash(plugin: Any) -> str:
-    """Short SHA-256 of the plugin source, so a fixed bug invalidates caches."""
-    try:
-        source = inspect.getsource(type(plugin))
-    except (OSError, TypeError):
-        return "unknown"
-    return hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]
+    """Short SHA-256 of the plugin module source, so any fix invalidates caches."""
+    plugin_type = type(plugin)
+    for target in (inspect.getmodule(plugin_type), plugin_type):
+        try:
+            source = inspect.getsource(target)
+        except (OSError, TypeError):
+            continue
+        return hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]
+    return "unknown"
 
 
 def _class_prefix(name: str) -> str:
@@ -434,10 +479,14 @@ def _format_comparison(payload: dict[str, Any]) -> str:
     """One line describing a pairwise test, always naming the adjusted p-value."""
     delta = payload.get("delta")
     p_adjusted = payload.get("p_adjusted")
+    head = (
+        f"{payload['control']} vs {payload['condition']}  {payload['name']}  "
+        f"delta {'n/a' if delta is None else format(delta, '+.4g')}"
+    )
+    if not payload.get("testable", True):
+        return f"{head}  not testable ({payload.get('note') or 'no sample'})"
     verdict = "significant" if payload.get("significant") else "no significant difference"
     return (
-        f"{payload['control']} vs {payload['condition']}  {payload['name']}  "
-        f"delta {'n/a' if delta is None else format(delta, '+.4g')}  "
-        f"p_adj {'n/a' if p_adjusted is None else format(p_adjusted, '.4g')}  "
+        f"{head}  p_adj {'n/a' if p_adjusted is None else format(p_adjusted, '.4g')}  "
         f"test {payload['test']}  correction {payload['correction']}  {verdict}"
     )
