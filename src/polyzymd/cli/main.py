@@ -3783,9 +3783,10 @@ def info() -> None:
 )
 @click.option(
     "--style",
-    type=click.Choice(["dict"], case_sensitive=False),
+    type=click.Choice(["dict", "contract"], case_sensitive=False),
     default=None,
-    help="Advanced package style; only dict canonical artifacts are supported.",
+    help="Scaffold style: 'contract' for an observable-contract plugin, "
+    "'dict' for the advanced canonical-artifact package.",
 )
 @click.option(
     "--advanced",
@@ -3829,6 +3830,12 @@ def new_analysis(
     \b
       src/polyzymd/analyses/<NAME>.py             — simple MDAnalysis-native plugin
       tests/analyses/plugins/test_<NAME>.py       — contributor-focused tests
+
+    --style contract creates:
+
+    \b
+      src/polyzymd/analyses/<NAME>.py             — Settings plus compute()
+      tests/analyses/plugins/test_<NAME>.py       — two known-answer tests
 
     Advanced package scaffolds create:
 

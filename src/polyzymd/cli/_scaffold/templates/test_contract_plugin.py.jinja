@@ -1,0 +1,44 @@
+"""Tests for the {{ spec.name }} analysis."""
+
+from __future__ import annotations
+
+import MDAnalysis as mda
+import numpy as np
+import pytest
+from MDAnalysis.coordinates.memory import MemoryReader
+
+from polyzymd.analyses.contract import aggregate_observables
+from polyzymd.analyses.mda.frame_selection import FrameSelection
+from polyzymd.analyses.{{ spec.name }} import {{ spec.class_name }}, {{ spec.class_name }}Settings
+
+
+@pytest.fixture
+def universe() -> mda.Universe:
+    """Four atoms on a unit cross, five frames, all masses equal."""
+    u = mda.Universe.empty(4, n_residues=1, atom_resindex=[0] * 4, trajectory=True)
+    u.add_TopologyAttr("masses", [1.0] * 4)
+    cross = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]], dtype=np.float32)
+    u.load_new(np.stack([cross] * 5), format=MemoryReader)
+    return u
+
+
+def test_compute_reports_one_value_per_selected_frame(universe: mda.Universe) -> None:
+    """The observable covers the production window and declares its unit."""
+    frames = FrameSelection(start=0, stop=5, step=1, n_frames_total=5)
+    observables = {{ spec.class_name }}().compute(universe, frames, {{ spec.class_name }}Settings())
+
+    assert [observable.kind for observable in observables] == ["mean_of_timeseries"]
+    assert len(observables[0].values) == 5
+    assert observables[0].unit == "A"
+
+
+def test_aggregate_reports_sem_over_replicates(universe: mda.Universe) -> None:
+    """Three identical replicates give a zero SEM and n equal to three."""
+    frames = FrameSelection(start=0, stop=5, step=1, n_frames_total=5)
+    plugin = {{ spec.class_name }}()
+    replicates = [plugin.compute(universe, frames, {{ spec.class_name }}Settings()) for _ in range(3)]
+
+    aggregate = aggregate_observables(replicates)[0]
+
+    assert aggregate.n_replicates == 3
+    assert aggregate.sem == pytest.approx(0.0)
