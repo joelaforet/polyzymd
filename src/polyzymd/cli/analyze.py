@@ -69,42 +69,11 @@ def _replicates(spec: str | None) -> list[int] | None:
         ) from exc
 
 
-def _table(report: "ProtocolReport") -> str:
-    """Render the report as an aligned plain-text table."""
-    unit = f" [{report.unit}]" if report.unit else ""
-    run = f"  run {report.run}" if report.run else ""
-    lines = [
-        f"{report.analysis}  metric {report.metric}{unit}{run}"
-        f"  (equilibration {report.equilibration})",
-        "",
-        f"{'condition':<28}{'n':>4}{'mean':>14}{'sem':>12}{'95% CI':>28}",
-    ]
-    for item in report.conditions:
-        interval = f"{item.ci95[0]:.4g} to {item.ci95[1]:.4g}" if item.ci95 else "none"
-        sem = "none" if item.sem is None else f"{item.sem:.4g}"
-        lines.append(
-            f"{item.label:<28}{item.n_replicates:>4}{item.mean:>14.4g}{sem:>12}{interval:>28}"
-        )
-    if report.pairwise:
-        lines += ["", f"{'comparison':<40}{'delta':>12}{'p_adj':>12}{'significant':>14}"]
-        for pair in report.pairwise:
-            adjusted = "none" if pair.p_adjusted is None else f"{pair.p_adjusted:.4g}"
-            lines.append(
-                f"{pair.a + ' vs ' + pair.b:<40}{pair.delta:>+12.4g}"
-                f"{adjusted:>12}{str(pair.significant):>14}"
-            )
-    lines += [f"warning: {text}" for text in report.warnings]
-    lines += [""] + [f"verdict: {text}" for text in report.verdict]
-    return "\n".join(lines)
-
-
 def _render(report: "ProtocolReport", output_format: str) -> str:
     """Render the report in the requested format."""
     if output_format == "json":
         return report.model_dump_json(indent=2)
-    if output_format == "agent":
-        return report.to_agent_text()
-    return _table(report)
+    return report.to_agent_text()
 
 
 def _one_line(text: str) -> str:
@@ -162,10 +131,10 @@ def _one_line(text: str) -> str:
 @click.option(
     "--format",
     "output_format",
-    type=click.Choice(["agent", "json", "table"]),
+    type=click.Choice(["agent", "json"]),
     default="agent",
     show_default=True,
-    help="agent prints at most 25 lines, json prints the full ProtocolReport, table is aligned.",
+    help="agent prints at most 25 lines; json prints the full ProtocolReport.",
 )
 @click.option(
     "-o",

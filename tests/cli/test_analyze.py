@@ -163,19 +163,6 @@ class TestSuccess:
         restored = ProtocolReport.model_validate_json(result.output)
         assert restored == _report()
 
-    def test_table_format_lists_conditions_and_verdict(
-        self, stub_analyze: dict[str, object], config_paths: list[Path]
-    ) -> None:
-        """--format table prints an aligned summary and the verdict."""
-        result = CliRunner().invoke(
-            analyze_command,
-            ["rg", "-c", str(config_paths[0]), "--format", "table"],
-        )
-
-        assert result.exit_code == 0
-        assert "condition" in result.output
-        assert "verdict:" in result.output
-
     def test_options_reach_the_protocol(
         self, stub_analyze: dict[str, object], config_paths: list[Path]
     ) -> None:
