@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
@@ -36,6 +37,15 @@ if TYPE_CHECKING:
     from polyzymd.analyses.mda import ArtifactSidecarRef, MDAReplicateJobContext
 
 LOGGER = logging.getLogger(__name__)
+
+DISTANCES_ALIGNMENT_DEPRECATION = (
+    "align_trajectory and the alignment_* settings no longer affect distances. "
+    "Distances are invariant under rigid-body motion, and aligning the trajectory "
+    "in memory rotated the coordinates while leaving the box vectors unrotated, "
+    "which corrupted minimum-image distances for pairs separated by more than half "
+    "a box length. The settings are accepted for backward compatibility and will be "
+    "removed in a future release."
+)
 
 
 @dataclass(frozen=True)
@@ -97,19 +107,27 @@ def build_distance_jobs(
     -------
     list of MDAAnalysisJob
         Single job measuring all configured pairs as a pair x frame matrix.
+
+    Notes
+    -----
+    Coordinates are read as the trajectory stores them. The ``align_trajectory``
+    and ``alignment_*`` settings are still accepted, but they no longer change
+    the measurement. Requesting alignment raises a ``DeprecationWarning``, logs
+    a warning, and records the message on the replicate artifact.
     """
 
-    from polyzymd.analyses.shared.alignment import align_trajectory
-
-    alignment = settings.get_alignment_config()
-    if getattr(alignment, "enabled", False):
-        align_trajectory(
-            ctx.universe,
-            alignment,
-            start_frame=ctx.frame_selection.start,
-            stop_frame=ctx.frame_selection.stop,
-            step_frame=ctx.frame_selection.step,
+    job_warnings: list[str] = []
+    if getattr(settings, "align_trajectory", False):
+        # DeprecationWarning is hidden outside __main__, so log it and carry it
+        # into the artifact as well. The settings fingerprint moved with the
+        # default, so a user who set this explicitly is also recomputing.
+        warnings.warn(
+            DISTANCES_ALIGNMENT_DEPRECATION,
+            DeprecationWarning,
+            stacklevel=2,
         )
+        LOGGER.warning("%s", DISTANCES_ALIGNMENT_DEPRECATION)
+        job_warnings.append(DISTANCES_ALIGNMENT_DEPRECATION)
     resolved_pairs = resolve_distance_pairs(
         universe=ctx.universe,
         pairs=settings.get_pair_selections(),
@@ -120,7 +138,11 @@ def build_distance_jobs(
         **ctx.universe_policy.metadata,
         "distance_settings": settings.model_dump(mode="json"),
         "pair_distance_version": pair_distance_version(),
-        "pbc_policy": {"use_pbc": settings.use_pbc, "box_source": "timestep.dimensions"},
+        "pbc_policy": {
+            "use_pbc": settings.use_pbc,
+            "box_source": "timestep.dimensions",
+            "alignment_applied": False,
+        },
     }
     return [
         MDAAnalysisJob(
@@ -129,6 +151,7 @@ def build_distance_jobs(
                 universe=ctx.universe,
                 pairs=resolved_pairs,
                 use_pbc=settings.use_pbc,
+                initial_warnings=job_warnings,
             ),
             frame_selection=ctx.frame_selection,
             backend_policy=ctx.backend_policy,
@@ -287,7 +310,11 @@ class DistanceArtifactCollector:
                 "universe_policy": strict_json_payload(
                     ctx.universe_policy.as_dict(), analysis_name=ctx.analysis_name
                 ),
-                "pbc_policy": {"use_pbc": settings.use_pbc, "box_source": "timestep.dimensions"},
+                "pbc_policy": {
+                    "use_pbc": settings.use_pbc,
+                    "box_source": "timestep.dimensions",
+                    "alignment_applied": False,
+                },
             },
             metadata={
                 "result_kind": "distances_mda_replicate",
@@ -614,6 +641,7 @@ def _validate_and_order_artifacts(
     """Validate distance artifact identity, settings, pairs, and sidecars."""
 
     expected = [int(rep) for rep in expected_replicates]
+    expected_version = pair_distance_version()
     expected_pairs = settings.get_pair_selections()
     expected_thresholds = settings.get_pair_thresholds()
     by_replicate: dict[int, ReplicateArtifact] = {}
@@ -633,6 +661,13 @@ def _validate_and_order_artifacts(
                 f"{artifact.metadata.get('settings_fingerprint')}, expected {settings_fingerprint}"
             )
         validate_autocorrelation_estimator_version(artifact, analysis_label="Distances")
+        artifact_version = artifact.metadata.get("pair_distance_version")
+        if artifact_version != expected_version:
+            raise ValueError(
+                f"Distances artifact replicate {artifact.replicate} has pair_distance_version "
+                f"{artifact_version!r}, expected {expected_version!r}. Recompute this replicate "
+                "or clear stale caches before aggregating."
+            )
         _validate_pair_payloads(
             artifact,
             expected_pairs,

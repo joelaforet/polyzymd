@@ -105,6 +105,10 @@ class ContactsSettings(BaseModel):
         or ``none``.
     compute_residence_times : bool
         If ``True``, compute residence time statistics.
+    allow_single_fragment_fallback : bool
+        Opt in to the pre-1.3 behaviour where a topology without bonds put
+        every polymer residue in chain 0. The default raises
+        :class:`~polyzymd.analyses.exceptions.TopologyBondsMissingError`.
     protein_groups : dict[str, list[int]] | None
         Custom protein groups as ``{name: [resid, ...]}``.
     protein_partitions : dict[str, list[str]] | None
@@ -137,6 +141,13 @@ class ContactsSettings(BaseModel):
     )
     compute_residence_times: bool = Field(
         default=True, description="Compute residence time statistics"
+    )
+    allow_single_fragment_fallback: bool = Field(
+        default=False,
+        description=(
+            "Assign every polymer residue to chain 0 when the topology has no bonds, "
+            "instead of raising TopologyBondsMissingError"
+        ),
     )
 
     protein_groups: dict[str, list[int]] | None = Field(
