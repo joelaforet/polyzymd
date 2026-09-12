@@ -98,7 +98,7 @@ comparison_workspace/
 │       └── catalytic_triad/
 │           ├── run_1/
 │           │   ├── result.json
-│           │   └── sidecars/observables.npz
+│           │   └── observables.npz
 │           ├── run_2/
 │           ├── run_3/
 │           └── aggregated/result.json
@@ -111,7 +111,7 @@ comparison_workspace/
 | Per replicate | `ReplicateArtifact` | `analysis/<condition>/catalytic_triad/run_<replicate>/result.json` |
 | Per condition | `ConditionArtifact` | `analysis/<condition>/catalytic_triad/aggregated/result.json` |
 | Cross condition | `ComparisonArtifact` | `comparison/catalytic_triad/result.json` |
-| Per-frame series | NPZ sidecar | `analysis/<condition>/catalytic_triad/run_<replicate>/sidecars/observables.npz` |
+| Per-frame series | NPZ sidecar | `analysis/<condition>/catalytic_triad/run_<replicate>/observables.npz` |
 
 Read saved artifacts through the public store:
 

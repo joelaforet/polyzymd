@@ -102,15 +102,15 @@ the former `pair_results` records.
 └── analysis/
     └── distances/
         ├── run_1/
-        │   ├── replicate.json
+        │   ├── result.json
         │   └── observables.npz
         ├── run_2/
         ├── run_3/
         └── aggregated/
-            └── condition.json
+            └── result.json
 ```
 
-Each `replicate.json` holds one `ObservableEstimate` per observable, with its
+Each run's `result.json` holds one `ObservableEstimate` per observable, with its
 kind, unit, frame count, statistical inefficiency and effective sample size. The
 condition artifact holds one `ObservableAggregate` per observable, with the
 replicate values, the mean, the SEM, the interval and its coverage.
