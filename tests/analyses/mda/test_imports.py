@@ -51,11 +51,7 @@ def test_public_facade_reexports_primitives() -> None:
         MDAUniversePolicy,
     )
     from polyzymd.analyses.mda.lifecycle import MDAReplicateJobContext
-    from polyzymd.analyses.mda.pair_distance import (
-        PairDistanceSpec,
-        build_pair_distance_analysis,
-        pair_distance_version,
-    )
+    from polyzymd.analyses.mda.pair_distance import PairSelection, pair_distance_matrix
     from polyzymd.analyses.mda.plugin import (
         MDAArtifactCollector,
         MDACollectorContext,
@@ -100,9 +96,8 @@ def test_public_facade_reexports_primitives() -> None:
     assert mda.MDAJobResult is MDAJobResult
     assert mda.MDAUniversePolicy is MDAUniversePolicy
     assert mda.MDAReplicateJobContext is MDAReplicateJobContext
-    assert mda.PairDistanceSpec is PairDistanceSpec
-    assert mda.build_pair_distance_analysis is build_pair_distance_analysis
-    assert mda.pair_distance_version is pair_distance_version
+    assert mda.PairSelection is PairSelection
+    assert mda.pair_distance_matrix is pair_distance_matrix
     assert mda.MDAArtifactCollector is MDAArtifactCollector
     assert mda.MDACollectorContext is MDACollectorContext
     assert mda.StrictJSONMDAResultCollector is StrictJSONMDAResultCollector
@@ -144,9 +139,8 @@ def test_public_facade_reexports_primitives() -> None:
         "MDAJobResult",
         "MDAUniversePolicy",
         "MDAReplicateJobContext",
-        "PairDistanceSpec",
-        "build_pair_distance_analysis",
-        "pair_distance_version",
+        "PairSelection",
+        "pair_distance_matrix",
         "MDAArtifactCollector",
         "MDACollectorContext",
         "StrictJSONMDAResultCollector",
@@ -158,8 +152,8 @@ def test_public_facade_reexports_primitives() -> None:
     }
 
 
-def test_pair_distance_star_import_excludes_aggregation_internals() -> None:
-    """Pair-distance star imports should expose only public MDAnalysis primitives."""
+def test_pair_distance_star_import_exposes_only_the_public_names() -> None:
+    """Pair-distance star imports should expose only the measurement and its model."""
 
     from polyzymd.analyses.mda import pair_distance
 
@@ -167,16 +161,10 @@ def test_pair_distance_star_import_excludes_aggregation_internals() -> None:
 
     exec("from polyzymd.analyses.mda.pair_distance import *", namespace)
 
-    assert set(pair_distance.__all__) == {
-        "PairDistanceSpec",
-        "build_pair_distance_analysis",
-        "pair_distance_version",
-    }
-    assert "PairDistanceSpec" in namespace
-    assert "build_pair_distance_analysis" in namespace
-    assert "pair_distance_version" in namespace
-    assert "PairAggregatedStats" not in namespace
-    assert "aggregate_distance_pair_stats" not in namespace
+    assert set(pair_distance.__all__) == {"PairSelection", "pair_distance_matrix"}
+    assert "PairSelection" in namespace
+    assert "pair_distance_matrix" in namespace
+    assert "_resolve" not in namespace
 
 
 def test_import_does_not_load_heavy_simulation_modules() -> None:

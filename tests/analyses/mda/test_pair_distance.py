@@ -1,282 +1,127 @@
-"""Tests for the shared pair-distance MDAnalysis primitive."""
+"""Tests for the shared pair-distance measurement."""
 
 from __future__ import annotations
 
-import sys
-from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import numpy as np
 import pytest
 
-from polyzymd.analyses.mda import (
-    PairDistanceSpec,
-    build_pair_distance_analysis,
-)
-from polyzymd.analyses.mda.pair_distance import aggregate_distance_pair_stats
-from polyzymd.analyses.shared.selections import SelectionMode
+from polyzymd.analyses.exceptions import SelectionError
+from polyzymd.analyses.mda import FrameSelection, PairSelection, pair_distance_matrix
+
+mda = pytest.importorskip("MDAnalysis")
+
+BOX = [30.0, 30.0, 30.0, 90.0, 90.0, 90.0]
 
 
-class _FakeTrajectory:
-    """Trajectory fake that exposes frame-specific timestep metadata."""
+def _universe(n_frames: int = 3) -> Any:
+    """Build a four-atom universe whose second residue walks along x."""
 
-    def __init__(self, dimensions: list[Any], timestep_ps: float = 2.0) -> None:
-        """Store fake timestep dimensions for each frame."""
+    from MDAnalysis.coordinates.memory import MemoryReader
 
-        self.dimensions = dimensions
-        self.timestep_ps = timestep_ps
-        self.current_frame = 0
-
-    def __len__(self) -> int:
-        """Return the number of fake frames."""
-
-        return len(self.dimensions)
-
-    def __getitem__(self, frame: int) -> SimpleNamespace:
-        """Return a fake timestep and update the current frame."""
-
-        self.current_frame = int(frame)
-        return SimpleNamespace(
-            frame=int(frame),
-            time=float(frame) * self.timestep_ps,
-            dimensions=self.dimensions[int(frame)],
+    universe = mda.Universe.empty(
+        4,
+        n_residues=2,
+        atom_resindex=[0, 0, 1, 1],
+        residue_segindex=[0, 0],
+        trajectory=True,
+    )
+    universe.add_TopologyAttr("name", ["OD1", "OD2", "OG", "NE2"])
+    universe.add_TopologyAttr("resname", ["ASP", "SER"])
+    universe.add_TopologyAttr("resid", [1, 2])
+    universe.add_TopologyAttr("masses", [16.0, 16.0, 16.0, 14.0])
+    frames = []
+    for frame in range(n_frames):
+        frames.append(
+            [
+                [0.0, 1.0, 0.0],
+                [0.0, -1.0, 0.0],
+                [3.0 + frame, 0.0, 0.0],
+                [29.0, 0.0, 0.0],
+            ]
         )
+    universe.load_new(np.asarray(frames, dtype=np.float32), format=MemoryReader)
+    for timestep in universe.trajectory:
+        timestep.dimensions = BOX
+    return universe
 
 
-class _FakeAnalysisBase:
-    """Minimal ``AnalysisBase`` fake that drives the analysis frame loop."""
+def _frames() -> FrameSelection:
+    """Frame selection covering the whole trajectory."""
 
-    def __init__(self, trajectory: _FakeTrajectory) -> None:
-        """Store the trajectory and allocate a results namespace."""
-
-        self._trajectory = trajectory
-        self.results = SimpleNamespace()
-
-    def run(self, start: int = 0, stop: int | None = None, step: int = 1, **kwargs: Any) -> Any:
-        """Run the fake AnalysisBase lifecycle for selected frames."""
-
-        if kwargs:
-            raise ValueError(f"Unexpected backend kwargs: {sorted(kwargs)}")
-        if stop is None:
-            stop = len(self._trajectory)
-        self.frames = np.asarray(list(range(start, stop, step)), dtype=np.int64)
-        self.times = self.frames.astype(np.float64) * float(self._trajectory.timestep_ps)
-        self._prepare()
-        for frame in self.frames:
-            self._ts = self._trajectory[int(frame)]
-            self._single_frame()
-        self._conclude()
-        return self
+    return FrameSelection(start=0, stop=None, step=1, timestep_ps=1.0)
 
 
-class _FakeAtomGroup:
-    """One-atom group with frame-dependent positions."""
+def test_matrix_is_pairs_by_frames_in_configuration_order() -> None:
+    """One row per pair, one column per frame, in the order the pairs are given."""
 
-    def __init__(self, trajectory: _FakeTrajectory, positions: list[list[float]]) -> None:
-        """Store positions indexed by the trajectory current frame."""
-
-        self._trajectory = trajectory
-        self._positions = np.asarray(positions, dtype=np.float64)
-
-    def __len__(self) -> int:
-        """Return one atom for single-position reductions."""
-
-        return 1
-
-    @property
-    def positions(self) -> np.ndarray:
-        """Return the current frame position as an atom-position array."""
-
-        return np.asarray([self._positions[self._trajectory.current_frame]], dtype=np.float64)
-
-
-@pytest.fixture
-def fake_mdanalysis_pair_modules(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
-    """Install fake MDAnalysis modules and record ``calc_bonds`` box arguments."""
-
-    calc_bonds_boxes: list[Any] = []
-
-    def calc_bonds(positions_a: np.ndarray, positions_b: np.ndarray, box: Any = None) -> np.ndarray:
-        """Record the forwarded PBC box and compute Euclidean pair distances."""
-
-        calc_bonds_boxes.append(None if box is None else np.asarray(box).copy())
-        return np.linalg.norm(np.asarray(positions_b) - np.asarray(positions_a), axis=1)
-
-    mda_module = ModuleType("MDAnalysis")
-    analysis_module = ModuleType("MDAnalysis.analysis")
-    base_module = ModuleType("MDAnalysis.analysis.base")
-    lib_module = ModuleType("MDAnalysis.lib")
-    distances_module = ModuleType("MDAnalysis.lib.distances")
-    base_module.AnalysisBase = _FakeAnalysisBase
-    distances_module.calc_bonds = calc_bonds
-
-    monkeypatch.setitem(sys.modules, "MDAnalysis", mda_module)
-    monkeypatch.setitem(sys.modules, "MDAnalysis.analysis", analysis_module)
-    monkeypatch.setitem(sys.modules, "MDAnalysis.analysis.base", base_module)
-    monkeypatch.setitem(sys.modules, "MDAnalysis.lib", lib_module)
-    monkeypatch.setitem(sys.modules, "MDAnalysis.lib.distances", distances_module)
-    return calc_bonds_boxes
-
-
-def test_pair_distance_analysis_collects_pair_frame_matrix_and_forwards_boxes(
-    fake_mdanalysis_pair_modules: list[Any],
-) -> None:
-    """The custom AnalysisBase should collect pair x frame arrays via calc_bonds."""
-
-    boxes = [np.asarray([10.0, 11.0, 12.0, 90.0, 90.0, 90.0]) + idx for idx in range(3)]
-    trajectory = _FakeTrajectory(boxes)
-    universe = SimpleNamespace(trajectory=trajectory)
     pairs = [
-        PairDistanceSpec(
-            label="Configured A",
-            selection_a="sel a1",
-            selection_b="sel b1",
-            atoms_a=_FakeAtomGroup(trajectory, [[0.0, 0.0, 0.0]] * 3),
-            atoms_b=_FakeAtomGroup(trajectory, [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [3.0, 0.0, 0.0]]),
-            mode_a=SelectionMode.SINGLE,
-            mode_b=SelectionMode.SINGLE,
-            threshold=2.5,
-        ),
-        PairDistanceSpec(
-            label="Configured B",
-            selection_a="sel a2",
-            selection_b="sel b2",
-            atoms_a=_FakeAtomGroup(trajectory, [[0.0, 1.0, 0.0]] * 3),
-            atoms_b=_FakeAtomGroup(trajectory, [[0.0, 3.0, 0.0], [0.0, 4.0, 0.0], [0.0, 5.0, 0.0]]),
-            mode_a=SelectionMode.SINGLE,
-            mode_b=SelectionMode.SINGLE,
-            threshold=None,
-        ),
+        PairSelection(label="mid-ser", selection_a="midpoint(name OD1 OD2)", selection_b="name OG"),
+        PairSelection(label="ser-his", selection_a="name OG", selection_b="name NE2"),
     ]
 
-    analysis = build_pair_distance_analysis(universe=universe, pairs=pairs, use_pbc=True).run(
-        start=0, stop=3, step=1
-    )
+    matrix = pair_distance_matrix(_universe(), _frames(), pairs, use_pbc=False)
 
-    np.testing.assert_allclose(
-        analysis.results.distance_matrix,
-        np.asarray([[1.0, 2.0, 3.0], [2.0, 3.0, 4.0]], dtype=np.float64),
-    )
-    assert analysis.results.distance_matrix.shape == (2, 3)
-    np.testing.assert_array_equal(analysis.results.frames, np.asarray([0, 1, 2], dtype=np.int64))
-    np.testing.assert_allclose(analysis.results.times_ps, np.asarray([0.0, 2.0, 4.0]))
-    assert analysis.results.warnings == []
-    assert len(fake_mdanalysis_pair_modules) == 3
-    for observed_box, expected_box in zip(fake_mdanalysis_pair_modules, boxes, strict=True):
-        np.testing.assert_allclose(observed_box, expected_box)
+    assert matrix.shape == (2, 3)
+    np.testing.assert_allclose(matrix[0], [3.0, 4.0, 5.0], atol=1e-6)
+    np.testing.assert_allclose(matrix[1], [26.0, 25.0, 24.0], atol=1e-6)
 
 
-@pytest.mark.parametrize(
-    ("dimensions", "message"),
-    [
-        ([None, None], "no box dimensions"),
-        ([np.asarray([0.0, 10.0, 10.0, 90.0, 90.0, 90.0])] * 2, "box is invalid"),
-    ],
-)
-def test_pair_distance_analysis_warns_once_and_disables_invalid_pbc_boxes(
-    fake_mdanalysis_pair_modules: list[Any],
-    dimensions: list[Any],
-    message: str,
-) -> None:
-    """Missing or invalid boxes should disable PBC for affected frames with one warning."""
+def test_minimum_image_folds_a_pair_across_the_boundary() -> None:
+    """With the box, the 26 Angstrom separation folds to 4 Angstrom."""
 
-    trajectory = _FakeTrajectory(dimensions)
-    universe = SimpleNamespace(trajectory=trajectory)
+    pairs = [PairSelection(label="ser-his", selection_a="name OG", selection_b="name NE2")]
+
+    matrix = pair_distance_matrix(_universe(), _frames(), pairs, use_pbc=True)
+
+    np.testing.assert_allclose(matrix[0], [4.0, 5.0, 6.0], atol=1e-6)
+
+
+def test_midpoint_and_centre_of_mass_syntax_reduce_a_group_to_one_point() -> None:
+    """The extended selection syntax picks the midpoint or the centre of mass."""
+
     pairs = [
-        PairDistanceSpec(
-            label="Configured label",
-            selection_a="sel a",
-            selection_b="sel b",
-            atoms_a=_FakeAtomGroup(trajectory, [[0.0, 0.0, 0.0]] * 2),
-            atoms_b=_FakeAtomGroup(trajectory, [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]),
-            mode_a=SelectionMode.SINGLE,
-            mode_b=SelectionMode.SINGLE,
-        )
+        PairSelection(
+            label="midpoint", selection_a="midpoint(name OD1 OD2)", selection_b="name OG"
+        ),
+        PairSelection(label="com", selection_a="com(resid 1)", selection_b="name OG"),
     ]
 
-    analysis = build_pair_distance_analysis(universe=universe, pairs=pairs, use_pbc=True).run(
-        start=0, stop=2, step=1
-    )
+    matrix = pair_distance_matrix(_universe(), _frames(), pairs, use_pbc=False)
 
-    assert fake_mdanalysis_pair_modules == [None, None]
-    assert len(analysis.results.warnings) == 1
-    assert message in analysis.results.warnings[0]
+    np.testing.assert_allclose(matrix[0], matrix[1], atol=1e-6)
+    np.testing.assert_allclose(matrix[0], [3.0, 4.0, 5.0], atol=1e-6)
 
 
-def test_aggregate_distance_pair_stats_collects_replicate_values() -> None:
-    """Pair aggregation should summarize per-replicate distance statistics."""
+def test_a_selection_matching_no_atoms_raises_a_typed_error() -> None:
+    """An empty selection is an error, not a silent zero."""
 
-    replicate_results = [
-        SimpleNamespace(
-            pair_results=[
-                SimpleNamespace(
-                    mean_distance=2.0,
-                    std_distance=0.1,
-                    median_distance=1.9,
-                    fraction_below_threshold=0.75,
-                    kde_peak=1.8,
-                )
-            ]
-        ),
-        SimpleNamespace(
-            pair_results=[
-                SimpleNamespace(
-                    mean_distance=4.0,
-                    std_distance=0.2,
-                    median_distance=3.7,
-                    fraction_below_threshold=0.25,
-                    kde_peak=3.4,
-                )
-            ]
-        ),
-    ]
+    pairs = [PairSelection(label="missing", selection_a="name ZZZ", selection_b="name OG")]
 
-    stats = aggregate_distance_pair_stats(replicate_results, pair_idx=0)
-
-    assert stats.mean_stats.mean == pytest.approx(3.0)
-    assert stats.median_stats.mean == pytest.approx(2.8)
-    assert stats.fraction_stats is not None
-    assert stats.fraction_stats.mean == pytest.approx(0.5)
-    assert stats.kde_peak_stats is not None
-    assert stats.kde_peak_stats.mean == pytest.approx(2.6)
-    assert stats.per_rep_means == [2.0, 4.0]
-    assert stats.per_rep_stds == [0.1, 0.2]
-    assert stats.per_rep_medians == [1.9, 3.7]
-    assert stats.per_rep_fractions == [0.75, 0.25]
-    assert stats.per_rep_kde_peaks == [1.8, 3.4]
+    with pytest.raises(SelectionError, match="matched no atoms"):
+        pair_distance_matrix(_universe(), _frames(), pairs, use_pbc=False)
 
 
-def test_aggregate_distance_pair_stats_allows_optional_pair_metrics() -> None:
-    """Optional threshold and KDE metrics should remain absent when unavailable."""
+def test_an_ambiguous_endpoint_says_how_to_reduce_it() -> None:
+    """A bare multi-atom endpoint is rejected with the syntax that fixes it."""
 
-    replicate_results = [
-        SimpleNamespace(
-            pair_results=[
-                SimpleNamespace(
-                    mean_distance=2.0,
-                    std_distance=0.1,
-                    median_distance=1.9,
-                    fraction_below_threshold=None,
-                    kde_peak=None,
-                )
-            ]
-        ),
-        SimpleNamespace(
-            pair_results=[
-                SimpleNamespace(
-                    mean_distance=4.0,
-                    std_distance=0.2,
-                    median_distance=3.7,
-                    fraction_below_threshold=None,
-                    kde_peak=None,
-                )
-            ]
-        ),
-    ]
+    pairs = [PairSelection(label="ambiguous", selection_a="name OD1 OD2", selection_b="name OG")]
 
-    stats = aggregate_distance_pair_stats(replicate_results, pair_idx=0)
+    with pytest.raises(SelectionError, match="midpoint"):
+        pair_distance_matrix(_universe(), _frames(), pairs, use_pbc=False)
 
-    assert stats.fraction_stats is None
-    assert stats.kde_peak_stats is None
-    assert stats.per_rep_fractions == []
-    assert stats.per_rep_kde_peaks == []
+
+def test_a_trajectory_without_a_box_falls_back_to_plain_distances(caplog) -> None:
+    """A frame with no usable box is measured without the minimum image, with a warning."""
+
+    universe = _universe()
+    for timestep in universe.trajectory:
+        timestep.dimensions = None
+    pairs = [PairSelection(label="ser-his", selection_a="name OG", selection_b="name NE2")]
+
+    with caplog.at_level("WARNING"):
+        matrix = pair_distance_matrix(universe, _frames(), pairs, use_pbc=True)
+
+    np.testing.assert_allclose(matrix[0], [26.0, 25.0, 24.0], atol=1e-6)
+    assert sum("no usable box" in record.message for record in caplog.records) == 1

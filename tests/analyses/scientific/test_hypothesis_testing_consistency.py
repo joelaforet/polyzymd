@@ -220,60 +220,6 @@ def _sasa_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContex
     return SASAAnalysis(), _context(tmp_path, settings, aggregated, ttest_method)
 
 
-def _distances_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]:
-    from polyzymd.analyses.distances import (
-        DistancePairSettings,
-        DistancesAnalysis,
-        DistancesSettings,
-    )
-
-    settings = DistancesSettings(
-        pairs=[
-            DistancePairSettings(
-                label="catalytic_pair",
-                selection_a="resid 1 and name CA",
-                selection_b="resid 2 and name CA",
-            )
-        ]
-    )
-
-    def artifact(label: str, values: tuple[float, ...]) -> ConditionArtifact:
-        pair_results = [
-            {
-                "pair_label": "catalytic_pair",
-                "selection1": "resid 1 and name CA",
-                "selection2": "resid 2 and name CA",
-                "threshold": None,
-                "overall_mean": float(np.mean(values)),
-                "overall_sem": 0.05,
-                "overall_fraction_below": None,
-                "sem_fraction_below": None,
-                "per_replicate_means": list(values),
-                "per_replicate_fractions_below": [],
-                "replicates": [1, 2, 3],
-                "n_replicates": 3,
-            }
-        ]
-        return ConditionArtifact(
-            analysis_name="distances",
-            condition_label=label,
-            replicates=[1, 2, 3],
-            payload={
-                "pair_results": pair_results,
-                "pairs": pair_results,
-                "n_replicates": 3,
-            },
-            metadata=_base_metadata(settings),
-            provenance={"frame_selection": {"equilibration": "10ns"}},
-        )
-
-    aggregated = {
-        "Control": artifact("Control", LOW_VARIANCE),
-        "Treated": artifact("Treated", HIGH_VARIANCE),
-    }
-    return DistancesAnalysis(), _context(tmp_path, settings, aggregated, ttest_method)
-
-
 def _contacts_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]:
     from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
     from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
@@ -367,7 +313,6 @@ CASES = {
     "rmsd": _rmsd_case,
     "rg": _rg_case,
     "sasa": _sasa_case,
-    "distances": _distances_case,
     "contacts": _contacts_case,
 }
 
@@ -375,12 +320,7 @@ CASES = {
 def _pairwise_p_values(plugin: str, result: Any) -> list[tuple[float, float | None]]:
     """Return ``(p_value, p_value_adjusted)`` for every testable pairwise test."""
     pairs: list[tuple[float, float | None]] = []
-    if plugin == "distances":
-        for comparison in result.pairwise_comparisons:
-            pairs.append((comparison.distance_p_value, comparison.distance_p_value_adjusted))
-            if comparison.fraction_p_value is not None:
-                pairs.append((comparison.fraction_p_value, comparison.fraction_p_value_adjusted))
-    elif plugin == "contacts":
+    if plugin == "contacts":
         for comparison in result.pairwise_comparisons:
             for aggregate in comparison.aggregate_comparisons:
                 if aggregate.metric != "mean_contact_fraction":
@@ -425,7 +365,7 @@ def test_pairwise_results_carry_adjusted_p_values(plugin: str, tmp_path: Path) -
         assert adjusted_p >= raw_p
 
 
-@pytest.mark.parametrize("plugin", ["distances", "rg", "rmsd", "sasa"])
+@pytest.mark.parametrize("plugin", ["rg", "rmsd", "sasa"])
 def test_single_comparison_leaves_p_value_unchanged(plugin: str, tmp_path: Path) -> None:
     """A family of one test must have an adjusted p-value equal to the raw one."""
     analysis, ctx = CASES[plugin](tmp_path, "welch")
@@ -444,11 +384,7 @@ def test_direction_labels_require_significance(plugin: str, tmp_path: Path) -> N
     analysis, ctx = CASES[plugin](tmp_path, "welch")
     result = analysis.compare(ctx)
 
-    if plugin == "distances":
-        checked = [
-            (c.distance_significant, c.distance_direction) for c in result.pairwise_comparisons
-        ]
-    elif plugin == "contacts":
+    if plugin == "contacts":
         checked = [
             (aggregate.significant, aggregate.direction)
             for comparison in result.pairwise_comparisons

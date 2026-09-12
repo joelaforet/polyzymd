@@ -1,0 +1,115 @@
+"""Active-site geometry of a catalytic triad.
+
+A serine hydrolase triad works through a hydrogen-bonded charge-relay system,
+so the geometry that matters is whether every link of the relay is short at the
+same time. This plugin reports each configured pair separately and then the
+fraction of frames in which every pair is within the cutoff at once.
+
+Fractions are stored as fractions with unit ``"fraction"``. Reporting them as a
+percentage is a display choice and is left to whatever renders them.
+
+References
+----------
+Hedstrom, L. (2002). Serine protease mechanism and specificity. *Chemical
+Reviews*, 102(12), 4501-4524. doi:10.1021/cr000033x
+
+Blow, D. M. (1976). Structure and mechanism of chymotrypsin. *Accounts of
+Chemical Research*, 9(4), 145-152. doi:10.1021/ar50100a004
+
+Michaud-Agrawal, N., Denning, E. J., Woolf, T. B. & Beckstein, O. (2011).
+MDAnalysis: a toolkit for the analysis of molecular dynamics simulations.
+*Journal of Computational Chemistry*, 32(10), 2319-2327. doi:10.1002/jcc.21787
+"""
+
+from __future__ import annotations
+
+from typing import Any, ClassVar, Sequence
+
+import numpy as np
+from pydantic import BaseModel, Field
+
+from polyzymd.analyses.contract import Observable
+from polyzymd.analyses.contract_runner import contract_analysis
+from polyzymd.analyses.mda.pair_distance import PairSelection, pair_distance_matrix
+
+#: Observable name of the all-pairs-at-once contact fraction.
+SIMULTANEOUS_CONTACT = "simultaneous_contact_fraction"
+
+
+class CatalyticTriadSettings(BaseModel):
+    """Settings for the catalytic triad analysis."""
+
+    pairs: list[PairSelection] = Field(min_length=1, description="Triad pairs to monitor")
+    threshold: float = Field(default=3.5, gt=0.0, description="Contact cutoff in angstrom")
+    name: str = Field(default="catalytic_triad", description="Name of the active site")
+    description: str | None = Field(default=None, description="What the active site is")
+
+
+class CatalyticTriad:
+    """Per-pair distances and the simultaneous contact fraction of a triad."""
+
+    name: ClassVar[str] = "catalytic_triad"
+    Settings: ClassVar[type[BaseModel]] = CatalyticTriadSettings
+    references: ClassVar[tuple[str, ...]] = (
+        "Hedstrom 2002, Chem Rev 102:4501, doi:10.1021/cr000033x",
+        "Blow 1976, Acc Chem Res 9:145, doi:10.1021/ar50100a004",
+        "Michaud-Agrawal et al. 2011, J Comput Chem 32:2319, doi:10.1002/jcc.21787",
+    )
+
+    def compute(
+        self, universe: Any, frames: Any, settings: CatalyticTriadSettings
+    ) -> Sequence[Observable]:
+        """Measure the triad over the production window.
+
+        Parameters
+        ----------
+        universe : MDAnalysis.Universe
+            Universe loaded by the framework.
+        frames : FrameSelection
+            Production window resolved by the framework.
+        settings : CatalyticTriadSettings
+            Pairs and the contact cutoff.
+
+        Returns
+        -------
+        Sequence[Observable]
+            Per pair a ``mean_of_timeseries`` distance in angstrom and a
+            ``fraction`` of frames within the cutoff, then one ``fraction`` for
+            the frames in which every pair is within the cutoff at once.
+        """
+        cutoff = float(settings.threshold)
+        matrix = pair_distance_matrix(universe, frames, settings.pairs, use_pbc=True)
+        within = matrix < cutoff
+        observables: list[Observable] = []
+        for pair, series, contact in zip(settings.pairs, matrix, within, strict=True):
+            observables.append(
+                Observable(
+                    name=pair.label,
+                    kind="mean_of_timeseries",
+                    unit="A",
+                    values=series,
+                    higher_is_better=False,
+                )
+            )
+            observables.append(
+                Observable(
+                    name=f"{pair.label} within {cutoff:g} A",
+                    kind="fraction",
+                    unit="fraction",
+                    values=contact.astype(np.float64),
+                    higher_is_better=True,
+                )
+            )
+        observables.append(
+            Observable(
+                name=SIMULTANEOUS_CONTACT,
+                kind="fraction",
+                unit="fraction",
+                values=np.all(within, axis=0).astype(np.float64),
+                higher_is_better=True,
+            )
+        )
+        return observables
+
+
+CatalyticTriadAnalysis = contract_analysis(CatalyticTriad)
