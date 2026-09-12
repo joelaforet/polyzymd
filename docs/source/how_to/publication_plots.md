@@ -292,24 +292,6 @@ What changes:
 - `timeseries_figsize` changes the width/height of RMSD time plots
 - `show_convergence_plots: true` adds convergence diagnostics
 
-### RMSF example
-
-```yaml
-plot_settings:
-  style: "compact"
-  rmsf:
-    show_error: true
-    highlight_residues: [77, 133, 156]
-    figsize_profile: [14, 4]
-    figsize_comparison: [8, 6]
-```
-
-What changes:
-
-- `show_error` turns error shading/bars on or off
-- `highlight_residues` adds vertical markers at selected residue IDs
-- `figsize_*` controls profile and comparison figure sizes
-
 ### Contacts example
 
 ```yaml

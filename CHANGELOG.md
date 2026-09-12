@@ -224,6 +224,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`rmsf` is written against the observable contract.**  The plugin package
+  fell from 2,195 lines across four modules to one module of 273 lines.  It
+  reports the per-residue fluctuation about the mean structure of the aligned
+  production window as a `profile` observable named `rmsf`, in angstrom,
+  indexed by residue ID, and the mean over residues as `rmsf_mean`, which is
+  the quantity compared across conditions.  The settings keys are unchanged.
+  In `reference_mode: external` the deviation from the reference structure is
+  now reported as a separate observable, `rmsd_about_reference_per_residue`,
+  instead of being stored under the RMSF name; the ordinary `rmsf` profile is
+  reported in that mode too.  The secondary-structure annotation bar under the
+  profile plot is gone with the plugin's plotters, and RMSF figures return when
+  the framework's kind-keyed plotters land, so `compare run --plot` produces no
+  RMSF figures until then.  A `plot_settings.rmsf` block in an existing
+  `comparison.yaml` still loads and raises a `DeprecationWarning` saying it
+  does nothing.  Parity with the previous implementation was checked on 100
+  frames of the LipA 363 K control run for the centroid, frame and average
+  reference modes; the profiles agree exactly, difference 0.0 at every residue.
+
+- **A profile observable can declare a scalar, and a plugin can declare the
+  files its answer depends on.**  An `Observable` of kind `profile` may set
+  `reduce` to `"mean_over_index"` or `"sum_over_index"`, which reports a second
+  observable, `<name>_mean` or `<name>_total`, of the kind `reduced_kind`
+  states (`mean_of_timeseries` by default).  Profiles are not tested pairwise,
+  so without it a plugin whose result is a profile had no number a comparison
+  could use.  A plugin may also define `identity_files(settings)`; the runner
+  records those files in the replicate identity block as `FileIdentity`
+  entries, so replacing an external reference structure in place recomputes the
+  replicate instead of reusing a stale one.
+
 - **The periodic box is computed first, from the protein and substrate alone.**
   `SolventBuilder.compute_box_vectors()` derives the cell from the solute
   bounding box plus `2 * (polymers.packing.padding + solvent.box.padding)`
