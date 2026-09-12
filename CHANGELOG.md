@@ -43,7 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference modes, and the ported code reproduces each series exactly.  An
   observable is now named `rmsd_<run label>_ref_<reference mode>`, so a
   comparison table cannot present a centroid-referenced run and an
-  externally referenced run as one quantity.
+  externally referenced run as one quantity.  `alignment_selection` now does
+  what its name says: when it differs from `selection`, each frame is
+  superimposed on it and the deviation is reported for `selection`, which is
+  how a loop or a ligand is measured against a rigid core.  The old code
+  superimposed the whole trajectory in place and then ignored the result,
+  because the measurement minimises over rigid motions itself, so
+  `alignment_selection` had no effect on any reported number and every run paid
+  for a full in-memory copy of the trajectory.  Only `average` mode still
+  superimposes in place, because its reference is a mean structure.  A
+  `plot_settings.rmsd` block still loads and warns that it is ignored.
 
 ### Removed
 

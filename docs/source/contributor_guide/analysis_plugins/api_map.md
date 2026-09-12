@@ -121,10 +121,10 @@ from polyzymd.analyses.shared import aa_classification, centroid, selections
 from polyzymd.analyses.shared.selectors import base, polymer, protein, solvent
 ```
 
-For statistics and convergence checks:
+For statistics:
 
 ```python
-from polyzymd.analyses.shared import autocorrelation, convergence
+from polyzymd.analyses.shared import autocorrelation
 from polyzymd.analyses.shared import inferential_statistics, statistics
 ```
 

@@ -22,7 +22,7 @@ All fields of `RMSDRunSettings`:
 |-------|------|---------|-------------|
 | `label` | `str` | *required* | Run label, unique within the file |
 | `selection` | `str` | `"protein and name CA"` | MDAnalysis selection whose deviation is measured |
-| `alignment_selection` | `str` | `"protein and name CA"` | MDAnalysis selection used to superimpose the trajectory |
+| `alignment_selection` | `str` | `"protein and name CA"` | MDAnalysis selection that superposition minimises over; see below when it differs from `selection` |
 | `reference_mode` | `str` | `"centroid"` | `centroid`, `average`, `frame`, or `external` |
 | `reference_frame` | `int` | `0` | 0-indexed frame used when `reference_mode: frame` |
 | `reference_file` | `str \| None` | `null` | External PDB used when `reference_mode: external` |
@@ -64,6 +64,32 @@ quantity.
 | `average` | The mean position of each selected atom over the aligned window |
 | `frame` | The frame named by `reference_frame` |
 | `external` | The structure in `reference_file` |
+
+## What `alignment_selection` does
+
+The measurement superimposes each frame on the reference itself, so the plugin
+runs no separate alignment pass over the trajectory. `alignment_selection`
+names the atoms that superposition minimises over.
+
+When `alignment_selection` equals `selection`, the reported value is the
+minimised RMSD of those atoms, which is the usual global stability number.
+
+When the two differ, each frame is superimposed on `alignment_selection` and
+the deviation is then reported for `selection`. That is how a loop, a lid or a
+bound ligand is measured against a rigid core. Superimpose on the core, then
+ask how far the other group moved. The two settings answer different questions,
+and the second is not a refinement of the first. Superimposing a group on itself always
+hides its own displacement, so a run whose `selection` is a small flexible
+group and whose `alignment_selection` is the same group reports almost nothing.
+
+A superposition group of fewer than three atoms leaves the rotation
+undetermined, and the plugin raises `SelectionError` rather than reporting the
+NaN that MDAnalysis returns.
+
+`average` mode is the one mode that superimposes the trajectory in place,
+because a mean structure has no meaning until every frame shares a frame of
+reference. The value it then reports is unaffected by that pass, for the same
+reason as above.
 
 ## Output files
 
@@ -159,17 +185,19 @@ plugin, so there are no rmsd-specific plot settings any more. A
 `mean_of_timeseries` observable gives a comparison bar chart with the replicate
 points overlaid and a per-replicate time series panel, both footnoted with the
 interval, the replicate count and the production window. Until the generic
-figures land, `polyzymd compare run rmsd --plot` writes no figure; the per-frame
-series in the NPZ sidecar is the input for a plot of your own.
+figures land, `polyzymd compare run-all --plot` writes no figure for rmsd; the
+per-frame series in the NPZ sidecar is the input for a plot of your own. A
+`plot_settings.rmsd` block in an existing comparison file still loads and warns
+that it does nothing.
 
 ## Common CLI options
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-f, --file` | `comparison.yaml` | Path to comparison configuration |
-| `--eq-time` | `0ns` | Equilibration time to skip |
+| `--eq-time` | none, falls back to `defaults.equilibration_time` in the file | Override the equilibration time to skip |
 | `--recompute` | off | Ignore cached results and recompute |
-| `--format` | `table` | Output format (`table` or `json`) |
+| `--format` | `table` | Output format (`table`, `markdown`, `json` or `agent`) |
 | `-o, --output` | (none) | Save formatted output to file |
 | `-q, --quiet` | off | Suppress INFO messages |
 | `--debug` | off | Enable DEBUG logging |
@@ -183,11 +211,13 @@ numbering in the PDB against MDAnalysis, verify atom names, and rerun with
 `polyzymd --debug compare run rmsd -f comparison.yaml` for the full context.
 An empty selection raises `SelectionError`; it never yields an RMSD of zero.
 
-### "reference_mode='external' needs reference_file to name an existing PDB file"
+### "reference_file ... does not exist on this machine"
 
 External mode was requested without a readable PDB. Give an absolute path, or a
-path relative to the working directory. The check runs when the settings are
-parsed, not part way through a trajectory.
+path relative to the working directory. A path that does not exist where the
+settings are parsed is a warning, because a comparison file often names a
+cluster path and is validated on a laptop; it becomes a `ReplicateError` on the
+machine that reads the trajectory.
 
 ### "selection ... matches N atoms in the trajectory but M in ..."
 

@@ -178,8 +178,13 @@ plugins:
 ```
 
 Each run produces an independent RMSD timeseries. During comparison, each run
-is ranked and tested separately — averaging RMSD from different selections is
-not meaningful.
+is tested separately, because averaging RMSD from different selections is not
+meaningful.
+
+Set `alignment_selection` to the same string as `selection` for a global
+stability number. Set it to a rigid core and leave `selection` on a loop, a lid
+or a ligand to ask how far that group moved relative to the core. The reference
+page explains what changes.
 
 ```{important}
 **Runs ≠ Replicates.** A "run" is a named RMSD selection (e.g., "Protein

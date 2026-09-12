@@ -312,8 +312,9 @@ class TestRealPlottersCarryTheFootnote:
     """Render the bar plotters whose own tests stub save_figure.
 
     Those tests replace ``save_figure`` before the conftest audit can see the
-    figure, so deleting a footnote call in Rg would otherwise go unnoticed. These render the same plotters with the real ``save_figure`` and
-    read the footnote back off the saved figure.
+    figure, so deleting a footnote call in Rg would otherwise go unnoticed.
+    These render the same plotters with the real ``save_figure`` and read the
+    footnote back off the saved figure.
     """
 
     @staticmethod
