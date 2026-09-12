@@ -110,15 +110,22 @@ def build_distance_jobs(
     -----
     Coordinates are read as the trajectory stores them. The ``align_trajectory``
     and ``alignment_*`` settings are still accepted, but they no longer change
-    the measurement, and requesting alignment raises a ``DeprecationWarning``.
+    the measurement. Requesting alignment raises a ``DeprecationWarning``, logs
+    a warning, and records the message on the replicate artifact.
     """
 
+    job_warnings: list[str] = []
     if getattr(settings, "align_trajectory", False):
+        # DeprecationWarning is hidden outside __main__, so log it and carry it
+        # into the artifact as well. The settings fingerprint moved with the
+        # default, so a user who set this explicitly is also recomputing.
         warnings.warn(
             DISTANCES_ALIGNMENT_DEPRECATION,
             DeprecationWarning,
             stacklevel=2,
         )
+        LOGGER.warning("%s", DISTANCES_ALIGNMENT_DEPRECATION)
+        job_warnings.append(DISTANCES_ALIGNMENT_DEPRECATION)
     resolved_pairs = resolve_distance_pairs(
         universe=ctx.universe,
         pairs=settings.get_pair_selections(),
@@ -142,6 +149,7 @@ def build_distance_jobs(
                 universe=ctx.universe,
                 pairs=resolved_pairs,
                 use_pbc=settings.use_pbc,
+                initial_warnings=job_warnings,
             ),
             frame_selection=ctx.frame_selection,
             backend_policy=ctx.backend_policy,

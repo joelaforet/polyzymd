@@ -937,8 +937,7 @@ def apply_pbc_policy(
         If ``"make_whole"`` is requested and the topology has no bonds.
     """
 
-    from polyzymd.analyses.exceptions import TopologyBondsMissingError
-    from polyzymd.analyses.shared.topology import topology_bond_source
+    from polyzymd.analyses.shared.topology import require_topology_bonds
 
     policy = str(pbc_policy)
     if policy not in PBC_POLICIES:
@@ -948,16 +947,16 @@ def apply_pbc_policy(
 
     from MDAnalysis import transformations
 
-    has_bonds, _ = topology_bond_source(universe)
-    if not has_bonds:
-        raise TopologyBondsMissingError(
-            context="pbc_policy='make_whole'",
-            n_atoms=len(universe.atoms),
-            topology=topology,
-        )
     atoms = universe.select_atoms(selection)
     if len(atoms) == 0:
         atoms = universe.atoms
+    # Unwrapping walks the bond graph of these atoms, so the bonds that matter
+    # are the ones inside this selection, not the ones anywhere in the topology.
+    require_topology_bonds(
+        atoms,
+        context="pbc_policy='make_whole'",
+        topology_path=topology,
+    )
     universe.trajectory.add_transformations(transformations.unwrap(atoms))
     LOGGER.info(
         "Applied pbc_policy='make_whole' to %d of %d atoms (selection %r)",

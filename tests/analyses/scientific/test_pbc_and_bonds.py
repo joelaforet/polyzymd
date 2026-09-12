@@ -275,6 +275,87 @@ def test_partially_bonded_topology_allows_the_bonded_selection() -> None:
     assert analysis.results.fragment_counts_per_frame.tolist() == [1]
 
 
+def _mostly_bonded_universe(n_unbonded: int) -> Any:
+    """Build a 40-atom universe with a chosen number of unbonded atoms.
+
+    Parameters
+    ----------
+    n_unbonded : int
+        How many of the 40 atoms are left without bonds.
+
+    Returns
+    -------
+    Any
+        MDAnalysis universe whose first ``40 - n_unbonded`` atoms form one
+        bonded chain.
+    """
+
+    n_atoms = 40
+    n_bonded = n_atoms - n_unbonded
+    universe = mda.Universe.empty(
+        n_atoms,
+        n_residues=1,
+        atom_resindex=[0] * n_atoms,
+        residue_segindex=[0],
+        trajectory=True,
+    )
+    universe.add_TopologyAttr("name", [f"C{index}" for index in range(n_atoms)])
+    universe.add_TopologyAttr("type", ["C"] * n_atoms)
+    universe.add_TopologyAttr("resname", ["SBM"])
+    universe.add_TopologyAttr("resid", [1])
+    universe.add_TopologyAttr("segid", ["C"])
+    universe.add_TopologyAttr("mass", [12.0] * n_atoms)
+    universe.add_bonds([(index, index + 1) for index in range(n_bonded - 1)])
+    positions = np.zeros((n_atoms, 3), dtype=np.float32)
+    positions[:, 0] = np.arange(n_atoms, dtype=np.float32)
+    universe.atoms.positions = positions
+    universe.dimensions = [BOX_LENGTH, BOX_LENGTH, BOX_LENGTH, 90.0, 90.0, 90.0]
+    return universe
+
+
+def test_a_few_unbonded_atoms_are_tolerated() -> None:
+    """One stray atom in forty is below the singleton limit."""
+
+    from polyzymd.analyses.shared.topology import require_topology_bonds
+
+    fragments, fallback = require_topology_bonds(
+        _mostly_bonded_universe(1).atoms, context="Rg run 'polymer' in fragment mode"
+    )
+
+    assert fallback is None
+    assert len(fragments) == 2
+
+
+def test_mostly_unbonded_selection_is_rejected_with_counts() -> None:
+    """A selection where singletons pass the limit fails and names the counts."""
+
+    from polyzymd.analyses.exceptions import TopologyBondsMissingError
+    from polyzymd.analyses.shared.topology import require_topology_bonds
+
+    with pytest.raises(TopologyBondsMissingError) as excinfo:
+        require_topology_bonds(
+            _mostly_bonded_universe(4).atoms,
+            context="Rg run 'polymer' in fragment mode",
+        )
+
+    message = str(excinfo.value)
+    assert "4 of the 40 selected atoms are single-atom fragments" in message
+    assert "10 percent" in message
+
+
+def test_partially_bonded_selection_is_rejected_by_rg_fragment_mode() -> None:
+    """A protein-plus-polymer selection with unbonded polymer fails, not averages to zero."""
+
+    from polyzymd.analyses.exceptions import TopologyBondsMissingError
+
+    universe = _partially_bonded_universe()
+
+    with pytest.raises(TopologyBondsMissingError) as excinfo:
+        _run_rg(universe, _fragment_run(selection="all"))
+
+    assert "3 of the 6 selected atoms are single-atom fragments" in str(excinfo.value)
+
+
 def _pair_universe() -> Any:
     """Build a two-atom universe whose pair spans the periodic boundary.
 
@@ -652,6 +733,25 @@ def test_loader_make_whole_requires_bonds(tmp_path: Path) -> None:
 
     with pytest.raises(TopologyBondsMissingError):
         apply_pbc_policy(universe, "make_whole", topology=tmp_path / "solvated_system.pdb")
+
+
+def test_loader_make_whole_checks_the_selection_it_unwraps(tmp_path: Path) -> None:
+    """``make_whole`` fails when most of its own selection has no bonds."""
+
+    from polyzymd.analyses.exceptions import TopologyBondsMissingError
+    from polyzymd.analyses.shared.loader import apply_pbc_policy
+    from polyzymd.analyses.shared.topology import topology_bond_source
+
+    universe = _partially_bonded_universe()
+
+    # The topology-level report says bonds exist, which is why the check has to
+    # be made against the atoms that are about to be unwrapped.
+    assert topology_bond_source(universe)[0] is True
+
+    with pytest.raises(TopologyBondsMissingError) as excinfo:
+        apply_pbc_policy(universe, "make_whole", topology=tmp_path / "solvated_system.pdb")
+
+    assert "single-atom fragments" in str(excinfo.value)
 
 
 def test_loader_make_whole_unwraps_split_molecule(tmp_path: Path) -> None:

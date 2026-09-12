@@ -29,9 +29,18 @@ if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
 __all__ = [
+    "SINGLETON_ATOM_FRACTION_LIMIT",
     "require_topology_bonds",
     "topology_bond_source",
 ]
+
+#: Largest share of a selection that may sit in single-atom fragments before the
+#: selection counts as unbonded. A real polymer selection has none. A protein
+#: whose CONECT records MDAnalysis refused has almost all of its atoms here, and
+#: a mixed protein-and-polymer selection in that state still reports a quarter of
+#: its atoms as singletons while producing fragment Rg values near zero, so an
+#: all-or-nothing test would let it through.
+SINGLETON_ATOM_FRACTION_LIMIT = 0.05
 
 
 def _no_data_error() -> tuple[type[BaseException], ...]:
@@ -79,8 +88,14 @@ def _missing_bond_reason(atom_group: AtomGroup) -> str | None:
         return "The topology carries no bond information."
     if not fragments:
         return "The selection resolved to no topology fragments."
-    if len(atom_group) > 1 and all(len(fragment) == 1 for fragment in fragments):
-        return "Every selected atom is its own fragment, so the selection has no bonds."
+    n_atoms = len(atom_group)
+    singleton_atoms = sum(len(fragment) for fragment in fragments if len(fragment) == 1)
+    if n_atoms > 1 and singleton_atoms > n_atoms * SINGLETON_ATOM_FRACTION_LIMIT:
+        percent = 100.0 * singleton_atoms / n_atoms
+        return (
+            f"{singleton_atoms} of the {n_atoms} selected atoms are single-atom fragments "
+            f"({percent:.0f} percent), so most of the selection carries no bonds."
+        )
     return None
 
 
@@ -132,14 +147,14 @@ def require_topology_bonds(
     return [atom_group], f"{context}: {reason} Treating the whole selection as one fragment."
 
 
-def topology_bond_source(universe: Universe | Any) -> tuple[bool, str]:
+def topology_bond_source(universe: Universe) -> tuple[bool, str]:
     """Report whether a universe carries bonds and where they came from.
 
     Parameters
     ----------
-    universe : Universe or Any
-        Loaded MDAnalysis universe, or any object without a ``bonds``
-        attribute.
+    universe : Universe
+        Loaded MDAnalysis universe. Objects without a ``bonds`` attribute are
+        reported as carrying no bonds.
 
     Returns
     -------

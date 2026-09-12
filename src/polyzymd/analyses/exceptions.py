@@ -63,7 +63,7 @@ class TopologyBondsMissingError(AnalysisError):
         context : str
             What needed the bonds, for example "Rg run 'polymer' in fragment mode".
         n_atoms : int
-            Number of atoms in the topology or selection that carries no bonds.
+            Number of atoms in the selection that carries no usable bonds.
         topology : object or None, optional
             Topology file path, when it is known.
         detail : str or None, optional
@@ -74,13 +74,14 @@ class TopologyBondsMissingError(AnalysisError):
         self.topology = str(topology) if topology is not None else None
         message = (
             f"{context} needs topology bonds, but the topology "
-            f"{self.topology or '(path unknown)'} loaded {self.n_atoms} atoms with no "
-            "bonds. MDAnalysis skips CONECT records when a PDB holds atom serials "
-            "above 99999, which OpenMM writes in hexadecimal, so solvated systems "
-            "above that size load without bonds. There are two fixes. Load a "
-            "topology that carries bonds, such as the OpenMM system XML read "
-            "through ParmEd, or guess bonds for the protein and polymer selection "
-            "by loading that subset with MDAnalysis.Universe(..., guess_bonds=True)."
+            f"{self.topology or '(path unknown)'} provides none it can use for the "
+            f"{self.n_atoms} atoms it measures. MDAnalysis skips CONECT records when a "
+            "PDB holds atom serials above 99999, which OpenMM writes in hexadecimal, so "
+            "solvated systems above that size load without bonds, sometimes for only "
+            "part of the system. There are two fixes. Load a topology that carries "
+            "bonds, such as the OpenMM system XML read through ParmEd, or guess bonds "
+            "for the protein and polymer selection by loading that subset with "
+            "MDAnalysis.Universe(..., guess_bonds=True)."
         )
         if detail:
             message = f"{message} {detail}"
