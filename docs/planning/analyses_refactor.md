@@ -186,7 +186,9 @@ first, so do not fan them out.
       smallest and already declares a statistical policy.
   - Branch: `analyses/port-scalar-plugins`
   - Owner:
-  - Status: not started
+  - Status: rmsf ported on `analyses/port-rmsf`, one module of 273 lines
+    against 2,195, parity exact on the LipA 363 K control run. rg, rmsd and
+    sasa not started.
 
 - [ ] Port the plotters to the generic per-kind plotting path.
   - Branch: `analyses/port-plotters`
