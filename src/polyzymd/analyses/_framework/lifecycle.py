@@ -15,6 +15,13 @@ from typing import TYPE_CHECKING, Any, Callable, Sequence
 from pydantic import BaseModel
 
 from polyzymd.analyses._framework.aggregate_validation import AggregateValidationError
+from polyzymd.analyses._framework.cache_identity import (
+    recorded_input_identities,
+    recorded_trajectory_paths,
+    verify_input_identity,
+    verify_input_set,
+    warn_on_version_mismatch,
+)
 from polyzymd.analyses._framework.contexts import (
     AggregateContext,
     ComparisonContext,
@@ -30,9 +37,11 @@ from polyzymd.analyses.exceptions import (
     PluginContractError,
     ReplicateError,
     ReplicateSkippedError,
+    StaleCacheError,
 )
 from polyzymd.analyses.mda.artifacts import ReplicateArtifact
 from polyzymd.analyses.mda.job import MDABackendPolicy
+from polyzymd.analyses.mda.lifecycle import build_trajectory_loader
 from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 
 if TYPE_CHECKING:
@@ -296,11 +305,30 @@ class AnalysisLifecycle:
         Returns
         -------
         Any
-            Plugin replicate result.
+            Plugin replicate result, either loaded from a fresh cache or newly
+            computed.
+
+        Notes
+        -----
+        A cached ``result.json`` is reused only when it records the identity of
+        the input files it was computed from and every one of those files still
+        has the recorded size and modification time. A result that records no
+        input identity cannot be checked, so it is recomputed.
         """
 
         output_dir.mkdir(parents=True, exist_ok=True)
         result_path = self.analysis.replicate_result_path(output_dir)
+        if not recompute:
+            cached = self._reusable_replicate_result(
+                condition=condition,
+                settings=settings,
+                equilibration=equilibration,
+                output_dir=output_dir,
+                result_path=result_path,
+                replicate=replicate,
+            )
+            if cached is not None:
+                return cached
         ctx = ReplicateContext(
             condition=condition,
             replicate=replicate,
@@ -326,6 +354,7 @@ class AnalysisLifecycle:
                 f"condition='{condition.label}' replicate={replicate}: {type(e).__name__}: {e}"
             ) from e
         _check_compute_result(result, "compute_stage", self.analysis.name)
+        _stamp_replicate_identity(result, self.analysis, settings, equilibration)
         try:
             _save_replicate_result(self.analysis, result, output_dir, result_path)
         except OSError as save_err:
@@ -334,6 +363,94 @@ class AnalysisLifecycle:
                 f"condition='{condition.label}' replicate={replicate}: {save_err}"
             ) from save_err
         return result
+
+    def _reusable_replicate_result(
+        self,
+        *,
+        condition: Condition,
+        settings: BaseModel,
+        equilibration: str,
+        output_dir: Path,
+        result_path: Path,
+        replicate: int,
+    ) -> Any:
+        """Return a cached replicate result when it is provably still valid.
+
+        Returns ``None`` when there is no cache, the cache cannot be read, its
+        identity cannot be checked, or its inputs or cache key changed, in
+        which case the caller recomputes. ``equilibration`` is part of the key
+        because it drives the frame selection, so a result computed under a
+        different window is not a cache hit even when every file is unchanged.
+        """
+
+        if not result_path.exists():
+            return None
+        try:
+            cached = self.analysis._load_replicate_result(output_dir)
+        except (ArtifactStoreError, OSError, ValueError) as exc:
+            logger.info(
+                "%s: recomputing replicate %d because the cache at %s is unreadable: %s",
+                self.analysis.name,
+                replicate,
+                result_path,
+                exc,
+            )
+            return None
+        if cached is None:
+            return None
+        recorded = recorded_input_identities(cached)
+        if not recorded:
+            logger.info(
+                "%s: recomputing replicate %d because %s records no input file identity",
+                self.analysis.name,
+                replicate,
+                result_path,
+            )
+            return None
+        mismatches = verify_input_identity(recorded, output_dir)
+        try:
+            loader = build_trajectory_loader(self.analysis, condition.sim_config)
+            current = [str(path) for path in loader.get_trajectory_info(replicate).trajectory_files]
+        except (AttributeError, ImportError, OSError, TypeError, ValueError) as exc:
+            # Without the current layout a segment that appeared since the cache
+            # was written cannot be seen, so say so rather than pass quietly.
+            logger.warning(
+                "%s: cannot resolve the trajectory layout for replicate %d, so the cached "
+                "result is not checked for new segments: %s",
+                self.analysis.name,
+                replicate,
+                exc,
+            )
+        else:
+            mismatches += verify_input_set(recorded_trajectory_paths(cached), current)
+        if mismatches:
+            logger.info(
+                "%s: recomputing replicate %d for '%s' because its inputs changed: %s",
+                self.analysis.name,
+                replicate,
+                condition.label,
+                "; ".join(mismatches),
+            )
+            return None
+        key_mismatch = _cache_key_mismatch(self.analysis, cached, settings, equilibration)
+        if key_mismatch is not None:
+            logger.info(
+                "%s: recomputing replicate %d for '%s': %s",
+                self.analysis.name,
+                replicate,
+                condition.label,
+                key_mismatch,
+            )
+            return None
+        warn_on_version_mismatch(cached, result_path)
+        logger.info(
+            "%s: reusing cached replicate %d for '%s' from %s",
+            self.analysis.name,
+            replicate,
+            condition.label,
+            result_path,
+        )
+        return cached
 
     def aggregate_condition_from_disk(
         self,
@@ -391,6 +508,17 @@ class AnalysisLifecycle:
                     expected_path,
                 )
                 continue
+            _assert_replicate_inputs_unchanged(
+                self.analysis,
+                result,
+                rep_dir,
+                self.analysis.replicate_result_path(rep_dir),
+                condition,
+                rep,
+                settings,
+                equilibration,
+            )
+            warn_on_version_mismatch(result, self.analysis.replicate_result_path(rep_dir))
             loaded_results.append(result)
             successful_reps.append(rep)
 
@@ -1307,6 +1435,123 @@ def _resolve_mda_backend_policy(config: ComparisonConfig) -> MDABackendPolicy:
     if hasattr(policy_config, "to_policy"):
         return policy_config.to_policy()
     return policy_config
+
+
+REPLICATE_CACHE_KEY_FIELDS = ("settings_fingerprint", "equilibration")
+
+
+def _replicate_cache_key(
+    analysis: Analysis, settings: BaseModel, equilibration: str
+) -> dict[str, str]:
+    """Build the identity a cached replicate result must match to be reused.
+
+    Everything that changes which frames the compute stage reads, or how it
+    reads them, belongs here. Settings drive the analysis itself; the
+    equilibration window drives the frame selection.
+    """
+
+    key = {"equilibration": str(equilibration)}
+    fingerprint = analysis.aggregate_settings_fingerprint(settings)
+    if fingerprint is not None:
+        key["settings_fingerprint"] = str(fingerprint)
+    return key
+
+
+def _stamp_replicate_identity(
+    result: Any, analysis: Analysis, settings: BaseModel, equilibration: str
+) -> None:
+    """Record the cache key on a replicate artifact before it is written.
+
+    The framework stamps this for every plugin, so reuse does not depend on a
+    plugin remembering to record its own identity. Results that are not
+    artifact envelopes carry no metadata to stamp; they are never reused.
+    """
+
+    if not isinstance(result, ReplicateArtifact):
+        return
+    result.metadata.update(_replicate_cache_key(analysis, settings, equilibration))
+
+
+def _cache_key_mismatch(
+    analysis: Analysis, result: Any, settings: BaseModel, equilibration: str
+) -> str | None:
+    """Explain why a cached replicate result does not match the running command.
+
+    Returns ``None`` when it matches. A cache that records no key cannot be
+    shown to match, so it is stale, the same rule the identity check follows.
+    """
+
+    expected = _replicate_cache_key(analysis, settings, equilibration)
+    metadata = getattr(result, "metadata", None)
+    if metadata is None and isinstance(result, dict):
+        metadata = result.get("metadata")
+    if not isinstance(metadata, dict):
+        return "the cached result records no cache key"
+    for field, value in expected.items():
+        stored = metadata.get(field)
+        if stored is None and field == "settings_fingerprint":
+            stored = metadata.get("settings_fp")
+        if stored is None:
+            return f"the cached result records no {field}"
+        if str(stored) != value:
+            return f"{field} changed: cached {stored}, current {value}"
+    return None
+
+
+def _assert_replicate_inputs_unchanged(
+    analysis: Analysis,
+    result: Any,
+    run_dir: Path,
+    result_path: Path,
+    condition: Condition,
+    replicate: int,
+    settings: BaseModel,
+    equilibration: str,
+) -> None:
+    """Refuse a cached replicate result that no longer matches this run.
+
+    Aggregation from disk has no compute stage to fall back on, so a cache that
+    cannot be shown to match is an error rather than a recompute. It also reads
+    artifacts only, never trajectories, so this checks the identity the result
+    recorded rather than re-resolving the engine layout.
+
+    An artifact envelope that records no input identity is stale: the framework
+    writes that block for every plugin, so its absence means the file predates
+    the check or was hand-edited, and there is no way to tell what it read. A
+    plain result payload is left alone, since the framework never promised to
+    verify one.
+
+    Raises
+    ------
+    StaleCacheError
+        If the result cannot be shown to describe the current inputs.
+    """
+
+    recorded = recorded_input_identities(result)
+    if not recorded:
+        if isinstance(result, ReplicateArtifact):
+            raise StaleCacheError(
+                f"{analysis.name}: cached result {result_path} for condition="
+                f"'{condition.label}' replicate={replicate} records no input file "
+                "identity, so there is no way to tell which trajectory it was computed "
+                "from. Rerun with --recompute to recompute this replicate."
+            )
+        return
+    mismatches = verify_input_identity(recorded, run_dir)
+    if mismatches:
+        raise StaleCacheError(
+            f"{analysis.name}: cached result {result_path} for condition="
+            f"'{condition.label}' replicate={replicate} was computed from input files "
+            f"that have changed: {'; '.join(mismatches)}. Rerun with --recompute to "
+            "recompute this replicate from the current trajectory."
+        )
+    key_mismatch = _cache_key_mismatch(analysis, result, settings, equilibration)
+    if key_mismatch is not None:
+        raise StaleCacheError(
+            f"{analysis.name}: cached result {result_path} for condition="
+            f"'{condition.label}' replicate={replicate} does not match this run: "
+            f"{key_mismatch}. Rerun with --recompute to recompute this replicate."
+        )
 
 
 def _save_replicate_result(
