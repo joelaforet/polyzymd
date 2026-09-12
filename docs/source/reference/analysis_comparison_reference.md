@@ -200,9 +200,8 @@ What this does and does not guarantee:
   (`simulation/continuation.py:828`), so its frame count is not recorded
   anywhere. Treat the last interrupted segment of a chain as partial.
 - Excluding a segment that other segments continue from leaves a hole in the
-  concatenated time line. The lineage check catches it and names the excluded
-  segments as a possible cause, but the fix is to wait for the run or to pass
-  `require_complete=False`, not to quarantine anything.
+  concatenated time line. The lineage check reports it and names the excluded
+  segments as a possible cause.
 - The contiguity check reads only the first and last time of each segment plus
   its frame interval. It proves that segment boundaries line up. It does not
   detect a dropped or duplicated frame inside a segment.
@@ -213,8 +212,10 @@ What this does and does not guarantee:
 The GROMACS engine records no per-file status, because its layout is a single
 production XTC rather than a chain of segments. It accepts `require_complete`
 for interface parity and ignores it, and its `segment_status` and
-`excluded_segments` are always empty. Check the job state yourself before
-analyzing a live GROMACS run.
+`excluded_segments` are always empty.
+
+For what to do when a run is still in flight, see
+{doc}`../how_to/analysis_compare_conditions`.
 
 ## Plotting Smoke Test
 

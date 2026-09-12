@@ -150,10 +150,27 @@ class TestSegmentStatusFiltering:
         assert layout.segment_status == {}
 
 
+def _segment_path(index: int) -> Path:
+    """Return the canonical trajectory path for one production segment.
+
+    Parameters
+    ----------
+    index : int
+        Segment index.
+
+    Returns
+    -------
+    Path
+        Path of the form ``production_<N>/production_<N>_trajectory.dcd``.
+    """
+
+    return Path(f"production_{index}") / f"production_{index}_trajectory.dcd"
+
+
 class TestExclusionWarningText:
     """The warning must say what the exclusion did to the time line."""
 
-    def test_middle_exclusion_warning_describes_the_hole(self, tmp_path: Path) -> None:
+    def test_middle_exclusion_warning_describes_the_hole(self) -> None:
         """Excluding a segment other than the last one leaves a gap, and says so."""
 
         from polyzymd.analyses.shared.loader import _segment_completeness_warning
@@ -162,7 +179,7 @@ class TestExclusionWarningText:
         layout = TrajectoryLayout(
             trajectory_format="dcd",
             topology_format="pdb",
-            trajectory_paths=[Path("production_0.dcd"), Path("production_2.dcd")],
+            trajectory_paths=[_segment_path(0), _segment_path(2)],
             segment_status={0: "completed", 1: "failed", 2: "completed"},
             excluded_segments=[1],
         )
@@ -173,7 +190,7 @@ class TestExclusionWarningText:
         assert "gap" in warning
         assert "[1]" in warning
 
-    def test_trailing_exclusion_warning_describes_a_short_window(self, tmp_path: Path) -> None:
+    def test_trailing_exclusion_warning_describes_a_short_window(self) -> None:
         """Excluding the last segment shortens the window instead."""
 
         from polyzymd.analyses.shared.loader import _segment_completeness_warning
@@ -182,8 +199,33 @@ class TestExclusionWarningText:
         layout = TrajectoryLayout(
             trajectory_format="dcd",
             topology_format="pdb",
-            trajectory_paths=[Path("production_0.dcd")],
+            trajectory_paths=[_segment_path(0)],
             segment_status={0: "completed", 1: "running"},
+            excluded_segments=[1],
+        )
+
+        warning = _segment_completeness_warning(layout)
+
+        assert warning is not None
+        assert "gap" not in warning
+        assert "ends before" in warning
+
+    def test_segment_listed_but_never_read_is_not_a_gap(self) -> None:
+        """A later segment that wrote no frames is absent, not a hole.
+
+        A completed segment with zero samples is skipped without being
+        excluded, so it appears in ``segment_status`` but contributes no file.
+        Reading the status instead of the files called that a gap.
+        """
+
+        from polyzymd.analyses.shared.loader import _segment_completeness_warning
+        from polyzymd.engines.base import TrajectoryLayout
+
+        layout = TrajectoryLayout(
+            trajectory_format="dcd",
+            topology_format="pdb",
+            trajectory_paths=[_segment_path(0)],
+            segment_status={0: "completed", 1: "running", 2: "completed"},
             excluded_segments=[1],
         )
 

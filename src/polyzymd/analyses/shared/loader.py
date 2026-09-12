@@ -824,6 +824,30 @@ def _wrap_timestamp_preserving_trajectory(trajectory: Any) -> Any:
     return _TimestampPreservingTrajectory(trajectory)
 
 
+def _segment_indices(trajectory_paths: "Sequence[Path]") -> list[int]:
+    """Return the production segment index of each trajectory file.
+
+    Parameters
+    ----------
+    trajectory_paths : sequence of Path
+        Trajectory files in chain order.
+
+    Returns
+    -------
+    list of int
+        Segment index per file whose parent directory is named
+        ``production_<N>``. Legacy single-directory layouts contribute nothing,
+        since they have no segment index.
+    """
+
+    indices = []
+    for path in trajectory_paths:
+        match = re.fullmatch(r"production_(\d+)", Path(path).parent.name)
+        if match is not None:
+            indices.append(int(match.group(1)))
+    return indices
+
+
 def _segment_completeness_warning(layout: "TrajectoryLayout") -> str | None:
     """Describe production segments the engine left out or flagged.
 
@@ -841,9 +865,12 @@ def _segment_completeness_warning(layout: "TrajectoryLayout") -> str | None:
 
     excluded = list(getattr(layout, "excluded_segments", []))
     if excluded:
-        status = dict(getattr(layout, "segment_status", {}) or {})
+        # Derive the kept segments from the files that will actually be read.
+        # A segment can appear in segment_status and still be absent from the
+        # chain, for example a completed segment that wrote no frames, and
+        # reading the status instead would call that a gap.
         highest_kept = max(
-            (index for index in status if index not in excluded),
+            _segment_indices(getattr(layout, "trajectory_paths", [])),
             default=-1,
         )
         if any(index < highest_kept for index in excluded):
