@@ -14,15 +14,17 @@ from typing import TYPE_CHECKING, Any
 
 from polyzymd.analyses.shared.plotting import (
     ArtifactPlotData,
+    annotate_uncertainty,
     apply_axis_style,
     apply_legend,
+    band_half_widths,
+    error_bar_half_widths,
     get_condition_colors,
     get_output_path,
     load_canonical_plot_artifacts,
     order_condition_labels,
     save_figure,
     scatter_replicate_values,
-    suppress_singleton_errors,
 )
 
 if TYPE_CHECKING:
@@ -129,6 +131,7 @@ def plot_rmsd_timeseries(
     for run_label in comparison_result.run_labels:
         fig, ax = plt.subplots(figsize=plot_settings.timeseries_figsize)
         had_data = False
+        n_replicates_seen = 0
 
         for idx, condition_label in enumerate(condition_labels):
             time_ns, rmsd_matrix = plot_data.timeseries.get(condition_label, {}).get(
@@ -145,12 +148,10 @@ def plot_rmsd_timeseries(
 
             color = colors[idx] if idx < len(colors) else f"C{idx}"
             mean_rmsd = np.mean(rmsd_matrix, axis=0)
-            if rmsd_matrix.shape[0] > 1:
-                sem_rmsd = np.std(rmsd_matrix, axis=0, ddof=1) / np.sqrt(
-                    float(rmsd_matrix.shape[0])
-                )
-            else:
-                sem_rmsd = np.zeros_like(mean_rmsd)
+            band_half_width = band_half_widths(
+                rmsd_matrix,
+                error_bar=plot_settings.error_bar,
+            )
 
             if plot_settings.show_per_replicate:
                 for rep_trace in rmsd_matrix:
@@ -171,15 +172,16 @@ def plot_rmsd_timeseries(
                 label=condition_label,
                 zorder=3,
             )
-            if rmsd_matrix.shape[0] > 1:
+            if band_half_width is not None:
                 ax.fill_between(
                     time_ns,
-                    mean_rmsd - sem_rmsd,
-                    mean_rmsd + sem_rmsd,
+                    mean_rmsd - band_half_width,
+                    mean_rmsd + band_half_width,
                     color=color,
                     alpha=0.2,
                     zorder=2,
                 )
+            n_replicates_seen = max(n_replicates_seen, int(rmsd_matrix.shape[0]))
             had_data = True
 
         if not had_data:
@@ -202,6 +204,13 @@ def plot_rmsd_timeseries(
             borderaxespad=0,
         )
         fig.tight_layout(rect=[0, 0, 0.78, 1])
+        annotate_uncertainty(
+            fig,
+            ctx.plot_settings,
+            "rmsd",
+            n_replicates=n_replicates_seen,
+            equilibration=getattr(ctx, "equilibration", None),
+        )
 
         safe_label = _sanitize_run_label(run_label)
         output_path = get_output_path(
@@ -279,7 +288,11 @@ def plot_rmsd_comparison_bars(
         ax.bar(
             positions,
             means,
-            yerr=suppress_singleton_errors(sems, replicate_values),
+            yerr=error_bar_half_widths(
+                sems,
+                replicate_values,
+                error_bar=plot_settings.error_bar,
+            ),
             color=colors,
             edgecolor=theme.bar_edgecolor,
             linewidth=theme.bar_linewidth,
@@ -305,6 +318,13 @@ def plot_rmsd_comparison_bars(
         )
 
         fig.tight_layout()
+        annotate_uncertainty(
+            fig,
+            ctx.plot_settings,
+            "rmsd",
+            n_replicates=min((len(values) for values in replicate_values if values), default=0),
+            equilibration=getattr(ctx, "equilibration", None),
+        )
 
         safe_label = _sanitize_run_label(run_label)
         output_path = get_output_path(

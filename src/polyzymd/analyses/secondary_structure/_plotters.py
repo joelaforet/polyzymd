@@ -14,13 +14,17 @@ from typing import Any, Sequence
 import numpy as np
 
 from polyzymd.analyses.shared.plotting import (
+    annotate_uncertainty,
     apply_axis_style,
     apply_legend,
+    error_bar_half_widths,
     get_condition_colors,
     get_output_path,
     get_theme,
     grouped_bars,
     order_condition_labels,
+    plugin_plot_settings,
+    resolve_error_bar,
     save_figure,
     scatter_replicate_values,
     suppress_singleton_errors,
@@ -129,6 +133,7 @@ def _plot_ss_content_bars(
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
+    equilibration: str | None = None,
 ) -> list[Path]:
     """Generate grouped SS-content bars from condition artifacts."""
     import matplotlib.pyplot as plt
@@ -174,6 +179,9 @@ def _plot_ss_content_bars(
     replicate_values = [helix_reps, strand_reps, coil_reps]
     has_reps = any(any(r for r in reps) for reps in replicate_values)
 
+    error_bar = resolve_error_bar(
+        plugin_plot_settings(plot_settings, "secondary_structure"), plot_settings
+    )
     fig, ax = plt.subplots(figsize=(max(8, n * 1.6), 5))
     grouped_bars(
         ax,
@@ -182,6 +190,7 @@ def _plot_ss_content_bars(
         ss_bar_colors,
         plot_settings,
         reference_line=None,
+        error_bar=error_bar,
         replicate_values=replicate_values if has_reps else None,
     )
     ax.set_xticks(x)
@@ -197,6 +206,16 @@ def _plot_ss_content_bars(
     )
 
     plt.tight_layout()
+    annotate_uncertainty(
+        fig,
+        plot_settings,
+        "secondary_structure",
+        n_replicates=min(
+            (len(values) for group in replicate_values for values in group if values),
+            default=0,
+        ),
+        equilibration=equilibration,
+    )
     output_path = get_output_path(output_dir, "ss_content_bars", plot_settings)
     return [save_figure(fig, output_path, plot_settings)]
 
@@ -206,6 +225,7 @@ def _plot_ss_individual_bars(
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
+    equilibration: str | None = None,
 ) -> list[Path]:
     """Generate per-SS-type bar charts from condition artifacts."""
     cond_labels: list[str] = []
@@ -240,6 +260,7 @@ def _plot_ss_individual_bars(
         ss_data,
         output_dir,
         plot_settings,
+        equilibration,
         control_label=_control_label_from_data(data),
         has_reps=has_reps,
     )
@@ -408,6 +429,7 @@ def _render_ss_individual_plots(
     ss_data: dict[str, dict[str, list[Any]]],
     output_dir: Path,
     plot_settings: Any,
+    equilibration: str | None = None,
     *,
     control_label: str | None,
     has_reps: bool,
@@ -433,7 +455,13 @@ def _render_ss_individual_plots(
         ax.bar(
             x,
             means,
-            yerr=suppress_singleton_errors(sems, ss_data[internal_key].get("reps")),
+            yerr=error_bar_half_widths(
+                sems,
+                ss_data[internal_key].get("reps"),
+                error_bar=resolve_error_bar(
+                    plugin_plot_settings(plot_settings, "secondary_structure"), plot_settings
+                ),
+            ),
             color=condition_colors,
             alpha=t.bar_alpha,
             edgecolor=t.bar_edgecolor,
@@ -463,6 +491,16 @@ def _render_ss_individual_plots(
         )
 
         plt.tight_layout()
+        annotate_uncertainty(
+            fig,
+            plot_settings,
+            "secondary_structure",
+            n_replicates=min(
+                (len(values) for values in ss_data[internal_key].get("reps") or [] if values),
+                default=0,
+            ),
+            equilibration=equilibration,
+        )
         output_path = get_output_path(output_dir, f"ss_{internal_key}_bars", plot_settings)
         generated.append(save_figure(fig, output_path, plot_settings))
 

@@ -59,6 +59,25 @@ production trajectory with `trjconv -pbc nojump` and then `-center -pbc mol -ur
 compact`, and the engine prefers those files. OpenMM writes no such variant, so
 the same plugin sees different coordinate semantics on the two engines. The
 field records which one was read rather than leaving it implied by a filename.
+## Plot settings shared by every plugin
+
+Each plugin's `plot_settings` block inherits this key.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `error_bar` | `"ci95" \| "sem"` | `"ci95"` | Interval drawn on comparison bars and shaded bands. `ci95` draws the 95 percent Student t confidence interval across replicates. `sem` draws one standard error, which at `n = 3` is 4.3 times narrower |
+
+```yaml
+plugins:
+  rmsd:
+    plot_settings:
+      error_bar: ci95
+```
+
+Whichever value is set, the figure carries a footnote naming the interval, the
+number of replicates and the production window, and per-replicate points stay
+overlaid on the bars. `hydrogen_bonds` has no plot settings model, so its
+figures always use the default.
 
 ## `rmsf`
 
