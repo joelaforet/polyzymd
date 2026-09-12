@@ -49,6 +49,15 @@ The framework does all of that from `kind`.
 There is no distribution kind. Express a shape as a `profile` over histogram
 bins; the raw per-frame series is kept in the NPZ sidecar either way.
 
+A profile is not tested pairwise, so give it a comparable scalar with
+`reduce="mean_over_index"` or `"sum_over_index"`, reported as `<name>_mean` or
+`<name>_total`. Add `reduced_kind="fluctuation"` or `"fraction"` when that
+scalar is one, and set `n_frames` on the profile so the scalar counts frames
+rather than indices. If your answer depends on a file the framework does not
+load, such as a reference structure your settings name, add
+`identity_files(settings) -> Sequence[Path]` so replacing that file recomputes
+the replicate.
+
 Every observable states a `unit`, and the scaffold placeholder `"TODO"` is
 rejected, so the generated tests fail until you replace it. A `profile` also
 states an `index`, one entry per value (residue IDs, bin centres).
