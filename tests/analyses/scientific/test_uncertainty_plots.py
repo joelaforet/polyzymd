@@ -41,7 +41,6 @@ PLUGINS_WITH_PLOT_SETTINGS = (
     "rmsf",
     "rg",
     "sasa",
-    "contacts",
     "distances",
     "secondary_structure",
     "catalytic_triad",

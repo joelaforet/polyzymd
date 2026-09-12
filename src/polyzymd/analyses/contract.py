@@ -103,9 +103,18 @@ class Observable(BaseModel):
     index : array_like or None, optional
         Residue IDs or bin centres, required for ``"profile"`` and rejected
         for every other kind.
+    index_label : str or None, optional
+        What the index counts, for example ``"Residue"`` or ``"Rg (A)"``. Used
+        as the x axis label of the generated profile figure. ``None`` leaves
+        the figure to label the axis generically.
     higher_is_better : bool or None, optional
         Direction that counts as an improvement, used by formatters. ``None``
         when the quantity has no preferred direction.
+    metadata : dict, optional
+        JSON-compatible facts about how the value was measured, for example the
+        periodic boundary policy or whether the topology carried bonds. The
+        framework copies it onto the replicate estimate and writes it into the
+        replicate artifact. It takes no part in the statistics.
     """
 
     name: str = Field(min_length=1)
@@ -113,7 +122,9 @@ class Observable(BaseModel):
     values: list[float]
     unit: str | None = None
     index: list[float] | None = None
+    index_label: str | None = None
     higher_is_better: bool | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(frozen=True)
 
@@ -157,7 +168,9 @@ class ObservableEstimate(BaseModel):
     value: float | None = None
     profile: list[float] | None = None
     index: list[float] | None = None
+    index_label: str | None = None
     higher_is_better: bool | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     n_frames: int
     statistical_inefficiency: float | None = None
     n_eff: float | None = None
@@ -180,6 +193,7 @@ class ObservableAggregate(BaseModel):
     profile_mean: list[float] | None = None
     profile_sem: list[float] | None = None
     index: list[float] | None = None
+    index_label: str | None = None
     n_eff_min: float | None = None
     higher_is_better: bool | None = None
 
@@ -307,7 +321,9 @@ def reduce_observable(observable: Observable | ObservableEstimate) -> Observable
         "name": observable.name,
         "kind": observable.kind,
         "unit": observable.unit,
+        "index_label": observable.index_label,
         "higher_is_better": observable.higher_is_better,
+        "metadata": dict(observable.metadata),
         "n_frames": int(values.size),
     }
     if observable.kind == "profile":
@@ -392,6 +408,7 @@ def aggregate_observables(
                 aggregate.model_copy(
                     update={
                         "index": head.index,
+                        "index_label": head.index_label,
                         "profile_mean": np.mean(stacked, axis=0).tolist(),
                         "profile_sem": profile_sem,
                         "ci_method": None if profile_sem is None else CI_METHOD,
