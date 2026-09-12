@@ -20,7 +20,7 @@ import inspect
 import logging
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, ClassVar, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from pydantic import BaseModel
 
@@ -45,6 +45,9 @@ from polyzymd.analyses.mda.artifacts import (
 from polyzymd.analyses.mda.job import MDAAnalysisJob
 from polyzymd.analyses.mda.plugin import frame_selection_payload
 from polyzymd.analyses.mda.store import ArtifactStore
+
+if TYPE_CHECKING:
+    from polyzymd.analyses.base import PlotContext
 
 logger = logging.getLogger("polyzymd.analyses")
 
@@ -255,7 +258,7 @@ class ContractAnalysis(Analysis):
             },
         )
 
-    def plot(self, ctx: Any) -> list[Path]:
+    def plot(self, ctx: PlotContext) -> list[Path]:
         """Render the figures every observable kind calls for.
 
         Parameters

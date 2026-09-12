@@ -26,6 +26,8 @@ class SyntheticSettings(BaseModel):
     kind: str = "mean_of_timeseries"
     n_index: int = 0
     integer_index: bool = True
+    index_label: str | None = None
+    high_occupancy: bool = False
 
 
 class Synthetic:
@@ -56,10 +58,15 @@ class Synthetic:
                     unit="A",
                     values=(scale + 0.1 * index).tolist(),
                     index=index.tolist(),
+                    index_label=settings.index_label,
                 )
             ]
         if settings.kind == "fraction":
-            filled = min(n_frames, int(round(scale * 4)))
+            filled = (
+                n_frames - int(round((2.5 - scale) * 4.8))
+                if settings.high_occupancy
+                else min(n_frames, int(round(scale * 4)))
+            )
             return [
                 Observable(
                     name="bound",
@@ -101,7 +108,13 @@ def rendered(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def render(tmp_path: Path, run_contract_analysis: Any) -> Callable[..., list[Path]]:
     """Run the synthetic plugin over two conditions and plot the result."""
 
-    def _render(settings: SyntheticSettings, labels: Sequence[str] = ("A", "B")) -> list[Path]:
+    def _render(
+        settings: SyntheticSettings,
+        labels: Sequence[str] = ("A", "B"),
+        mutate: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> list[Path]:
+        import json
+
         from polyzymd.analyses._framework.contexts import Condition, PlotContext
         from polyzymd.config.comparison import PlotSettings
 
@@ -113,6 +126,11 @@ def render(tmp_path: Path, run_contract_analysis: Any) -> Callable[..., list[Pat
                 label=label,
                 root=tmp_path,
             )
+            if mutate is not None:
+                path = tmp_path / "analysis" / label / "synthetic" / "aggregated" / "result.json"
+                payload = json.loads(path.read_text())
+                mutate(label, payload["payload"]["observables"][0])
+                path.write_text(json.dumps(payload))
         conditions = [
             Condition(
                 label=label,
@@ -165,6 +183,13 @@ def _error_half_widths(ax: Any) -> list[float]:
     return half_widths
 
 
+def _bars(ax: Any) -> list[Any]:
+    """Every bar container on an axes, in the order the series were drawn."""
+    from matplotlib.container import BarContainer
+
+    return [container for container in ax.containers if isinstance(container, BarContainer)]
+
+
 def _footnotes(fig: Any) -> str:
     """Every figure-level text joined, so a footnote can be matched in one go."""
     return " | ".join(text.get_text() for text in fig.texts)
@@ -213,30 +238,46 @@ def test_the_comparison_figure_says_what_its_error_bars_are(
     assert "t >= 5ns" in footnote
 
 
-def test_a_fraction_is_drawn_on_a_clamped_axis(
+def test_a_fraction_is_drawn_with_its_physical_bound_marked(
     render: Callable[..., list[Path]], rendered: dict[str, Any]
 ) -> None:
-    """A fraction gets bars only, on an axis pinned to [0, 1]."""
+    """A fraction gets bars only, with 1.0 drawn as a line rather than as a clip."""
     paths = render(SyntheticSettings(kind="fraction"))
 
     assert [path.name for path in paths] == ["synthetic_bound_comparison.png"]
-    figure = rendered["synthetic_bound_comparison.png"]
-    assert figure.axes[0].get_ylim() == (0.0, 1.0)
-    assert figure.axes[0].get_ylabel() == "bound (fraction)"
+    axes = rendered["synthetic_bound_comparison.png"].axes[0]
+    assert axes.get_ylim()[0] == 0.0
+    assert axes.get_ylim()[1] >= 1.0
+    assert axes.get_ylabel() == "bound (fraction)"
+    assert "Physical bound (fraction = 1)" in [line.get_label() for line in axes.lines]
+
+
+def test_a_fraction_interval_past_one_is_shown_whole(
+    render: Callable[..., list[Path]], rendered: dict[str, Any]
+) -> None:
+    """An interval whose upper arm passes 1.0 is never cut off at the bound."""
+    render(SyntheticSettings(kind="fraction", high_occupancy=True))
+
+    axes = rendered["synthetic_bound_comparison.png"].axes[0]
+    arms = _error_half_widths(axes)
+    tops = [
+        container.patches[0].get_height() + arm
+        for container, arm in zip(_bars(axes), arms, strict=True)
+    ]
+
+    assert max(tops) > 1.0
+    assert axes.get_ylim()[1] >= max(tops)
 
 
 def test_a_categorical_profile_is_drawn_as_bars_up_to_thirty_categories(
     render: Callable[..., list[Path]], rendered: dict[str, Any]
 ) -> None:
     """Thirty residue labels still fit as grouped bars, one group per label."""
-    from matplotlib.container import BarContainer
-
     render(SyntheticSettings(kind="profile", n_index=30))
 
     axes = rendered["synthetic_occupancy_comparison.png"].axes[0]
-    bars = [container for container in axes.containers if isinstance(container, BarContainer)]
 
-    assert [len(container) for container in bars] == [30, 30]
+    assert [len(container) for container in _bars(axes)] == [30, 30]
     assert len(axes.get_xticks()) == 30
     assert _error_half_widths(axes)
 
@@ -296,6 +337,138 @@ def test_a_contract_plugin_gets_the_default_plot_settings_model() -> None:
 
     assert Rg2Analysis.PlotSettingsModel is ContractPlotSettings
     assert SyntheticAnalysis.PlotSettingsModel is ContractPlotSettings
+
+
+def test_profiles_are_aligned_on_the_index_every_condition_reports(
+    render: Callable[..., list[Path]], rendered: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    """A residue missing from one condition is dropped, and the drop is logged."""
+
+    def _drop_last(label: str, observable: dict[str, Any]) -> None:
+        if label != "B":
+            return
+        for key in ("index", "profile_mean", "profile_sem"):
+            observable[key] = observable[key][:-1]
+
+    with caplog.at_level("WARNING", logger="polyzymd.analyses.contract_plots"):
+        render(SyntheticSettings(kind="profile", n_index=10), mutate=_drop_last)
+
+    axes = rendered["synthetic_occupancy_comparison.png"].axes[0]
+
+    assert [len(container) for container in _bars(axes)] == [9, 9]
+    assert "keeps the 9 index entries every condition reports and drops [9.0]" in caplog.text
+
+
+def test_incompatible_profile_indices_raise_a_named_contract_error(
+    render: Callable[..., list[Path]],
+) -> None:
+    """Conditions that share no index entry are an error, not a numpy traceback."""
+    from polyzymd.analyses.exceptions import PluginContractError
+
+    def _shift(label: str, observable: dict[str, Any]) -> None:
+        if label == "B":
+            observable["index"] = [value + 100.0 for value in observable["index"]]
+
+    with pytest.raises(PluginContractError, match="occupancy.*incompatible"):
+        render(SyntheticSettings(kind="profile", n_index=10), mutate=_shift)
+
+
+def test_a_condition_with_no_estimate_leaves_a_gap(
+    render: Callable[..., list[Path]], rendered: dict[str, Any]
+) -> None:
+    """A null mean is hatched out and named in the tick label, never drawn as zero."""
+
+    def _blank(label: str, observable: dict[str, Any]) -> None:
+        if label == "B":
+            observable.update({"mean": None, "sem": None, "ci95_low": None, "ci95_high": None})
+
+    render(SyntheticSettings(kind="mean_of_timeseries"), mutate=_blank)
+
+    axes = rendered["synthetic_size_comparison.png"].axes[0]
+    hatched = [
+        patch for container in _bars(axes) for patch in container.patches if patch.get_hatch()
+    ]
+
+    assert len(hatched) == 1
+    assert hatched[0].get_height() < 0.1 * float(axes.get_ylim()[1])
+    assert axes.get_xticklabels()[0].get_text() == "size (n/a: B)"
+
+
+def test_unequal_replicate_counts_get_their_own_t_factor(
+    tmp_path: Path, render: Callable[..., list[Path]], rendered: dict[str, Any]
+) -> None:
+    """With no replicate points to count from, each bar still uses its own n."""
+
+    def _thin(label: str, observable: dict[str, Any]) -> None:
+        if label != "B":
+            return
+        observable["replicate_values"] = observable["replicate_values"][:2]
+        observable["n_replicates"] = 2
+
+    render(SyntheticSettings(kind="mean_of_timeseries"), mutate=_thin)
+
+    half_widths = _error_half_widths(rendered["synthetic_size_comparison.png"].axes[0])
+    factors = [
+        half / _aggregate(tmp_path, label, "size").sem
+        for half, label in zip(half_widths, ("A", "B"), strict=True)
+    ]
+
+    assert factors == pytest.approx([STUDENT_T_AT_THREE, 12.706204736432095], rel=1e-6)
+
+
+def test_the_band_comes_from_the_aggregate_not_the_sidecars(
+    render: Callable[..., list[Path]], rendered: dict[str, Any]
+) -> None:
+    """Zeroing the stored profile SEM removes that condition's band on its own.
+
+    The replicate profiles in the sidecars still differ, so a band recomputed
+    from them would survive. Only a band read from the aggregate disappears,
+    which is what keeps the figure and the text report saying the same thing.
+    """
+    from matplotlib.collections import PolyCollection
+
+    def _flatten(label: str, observable: dict[str, Any]) -> None:
+        if label == "B":
+            observable["profile_sem"] = [0.0] * len(observable["profile_sem"])
+
+    render(SyntheticSettings(kind="profile", n_index=40))
+    both = _band_count(rendered["synthetic_occupancy_comparison.png"], PolyCollection)
+    rendered.clear()
+    render(SyntheticSettings(kind="profile", n_index=40), mutate=_flatten)
+    one = _band_count(rendered["synthetic_occupancy_comparison.png"], PolyCollection)
+
+    assert (both, one) == (2, 1)
+
+
+def _band_count(fig: Any, poly: type) -> int:
+    """How many shaded bands the first axes of a figure carries."""
+    return sum(isinstance(collection, poly) for collection in fig.axes[0].collections)
+
+
+def test_a_profile_labels_its_axis_from_the_observable(
+    render: Callable[..., list[Path]], rendered: dict[str, Any]
+) -> None:
+    """index_label reaches the figure, and "Index" stands in when it is absent."""
+    render(SyntheticSettings(kind="profile", n_index=40, index_label="Residue"))
+    assert rendered["synthetic_occupancy_comparison.png"].axes[0].get_xlabel() == "Residue"
+
+    rendered.clear()
+    render(SyntheticSettings(kind="profile", n_index=40))
+    assert rendered["synthetic_occupancy_comparison.png"].axes[0].get_xlabel() == "Index"
+
+
+def test_the_footnote_promises_points_only_when_points_are_drawn(
+    tmp_path: Path, run_contract_analysis: Any
+) -> None:
+    """Turning the replicate overlay off drops the sentence about the points."""
+    from polyzymd.analyses.shared.plotting import add_uncertainty_footnote
+
+    figure = matplotlib.figure.Figure()
+
+    assert "Points are per-replicate values." in add_uncertainty_footnote(
+        figure, n_replicates=3, points=True
+    )
+    assert "Points" not in add_uncertainty_footnote(figure, n_replicates=3, points=False)
 
 
 def test_rg2_writes_its_figures_through_run_comparison(

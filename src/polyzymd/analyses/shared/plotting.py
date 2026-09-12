@@ -1088,7 +1088,7 @@ def grouped_bars(
     bar_width: float | None = None,
     show_error: bool = True,
     error_bar: str = "ci95",
-    n_replicates: int | None = None,
+    n_replicates: "int | Sequence[int] | None" = None,
     reference_line: float | None = 0.0,
     reference_label: str = "Neutral (0)",
     replicate_values: "Sequence[Sequence[Sequence[float]]] | None" = None,
@@ -1102,9 +1102,9 @@ def grouped_bars(
 
     ``errors`` holds the standard error of each bar. It is converted to the
     interval named by ``error_bar`` using the per-bar replicate counts from
-    ``replicate_values``, or the shared count in ``n_replicates`` when the
-    per-bar values are not available. Without either, no error bar is drawn, so
-    a figure never shows a raw SEM under a footnote claiming an interval.
+    ``replicate_values``, or the counts in ``n_replicates`` when the per-bar
+    values are not available. Without either, no error bar is drawn, so a
+    figure never shows a raw SEM under a footnote claiming an interval.
 
     Parameters
     ----------
@@ -1124,6 +1124,11 @@ def grouped_bars(
         is computed as ``0.8 / len(series)``.
     show_error : bool, optional
         If ``False``, error bars are suppressed, by default ``True``.
+    n_replicates : int or sequence of int or None, optional
+        Replicate count behind every bar, or one count per series when the
+        series were sampled differently. Used only when ``replicate_values``
+        is ``None``, which is where the per-bar counts would otherwise come
+        from.
     reference_line : float | None, optional
         Y-value for a horizontal reference line.  Set to ``None`` to
         skip, by default ``0.0``.
@@ -1157,6 +1162,7 @@ def grouped_bars(
 
     n = len(series)
     w = bar_width if bar_width is not None else 0.8 / max(n, 1)
+    counts = list(n_replicates) if isinstance(n_replicates, (list, tuple)) else [n_replicates] * n
 
     if replicate_values is not None:
         if len(replicate_values) != n:
@@ -1188,7 +1194,7 @@ def grouped_bars(
                 )
             else:
                 errors_for_plot = error_bar_half_widths(
-                    list(errors), error_bar=error_bar, n_replicates=n_replicates
+                    list(errors), error_bar=error_bar, n_replicates=counts[i]
                 )
             if errors_for_plot is not None:
                 bar_kwargs["yerr"] = errors_for_plot
@@ -1459,6 +1465,7 @@ def annotate_uncertainty(
     replicate_values: "Sequence[Any] | None" = None,
     n_replicates: int | None = None,
     equilibration: str | None = None,
+    points: bool = True,
 ) -> str:
     """Resolve a plugin's error-bar setting and footnote the figure with it.
 
@@ -1484,6 +1491,7 @@ def annotate_uncertainty(
         ),
         n_replicates=n_replicates,
         equilibration=equilibration,
+        points=points,
     )
 
 
@@ -1493,11 +1501,14 @@ def add_uncertainty_footnote(
     error_bar: str = "ci95",
     n_replicates: int | None = None,
     equilibration: str | None = None,
+    points: bool = True,
 ) -> str:
     """Write the sentence saying what a figure's error bars mean, and return it.
 
     Grossfield et al. (2018) ask that every figure describe the meaning and
-    basis of its uncertainties. This is that sentence.
+    basis of its uncertainties. This is that sentence. Pass ``points=False``
+    on a figure that draws no per-replicate points, so the footnote does not
+    promise marks the reader cannot find.
     """
     what = (
         "Error bars: 1 SEM (not a 95% interval)"
@@ -1510,7 +1521,8 @@ def add_uncertainty_footnote(
         else " across replicates"
     )
     window = f"; production window t >= {equilibration}" if equilibration else ""
-    text = f"{what}{across}{window}. Points are per-replicate values."
+    marks = " Points are per-replicate values." if points else ""
+    text = f"{what}{across}{window}.{marks}"
     fig.text(
         0.01,
         0.01,

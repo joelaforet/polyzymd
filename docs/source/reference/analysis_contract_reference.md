@@ -12,7 +12,7 @@ plugin may change.
 |---|---|---|---|
 | `mean_of_timeseries` | one number per frame | mean over frames | comparison bars, time series |
 | `fluctuation` | one number per frame | sample standard deviation over frames | comparison bars, time series |
-| `fraction` | 0 or 1 per frame | occupancy over frames | comparison bars on a `[0, 1]` axis |
+| `fraction` | 0 or 1 per frame | occupancy over frames | comparison bars with 1.0 marked |
 | `profile` | one number per index | the vector itself | one line per condition with a band, or grouped bars |
 
 ## Generated figures
@@ -23,8 +23,12 @@ them without writing any plotting code.
 
 **Comparison bars.** One figure per scalar observable, one bar per condition,
 the bar height being the mean over replicates. The error bar is the interval
-named by `error_bar`, and the per-replicate values are drawn as jittered points
-on top of it. A `fraction` observable is drawn on an axis pinned to `[0, 1]`.
+named by `error_bar`, computed from that condition's own replicate count, and
+the per-replicate values are drawn as jittered points on top of it. A
+`fraction` observable gets a dashed line at 1.0 labelled as the physical bound,
+and the axis is widened to show an interval that reaches past it rather than
+cutting the arm off. A condition with no estimate is drawn as a hatched gap and
+named in the tick label as `n/a`, never as a zero bar.
 
 **Time series.** One figure per `mean_of_timeseries` and `fluctuation`
 observable, reading the per-frame values from the `observables.npz` sidecar
@@ -36,7 +40,21 @@ The x axis is the frame index inside the production window.
 and holds no more than `max_categories_for_bars` entries, which is how residue
 labels and pair labels arrive, the profile is drawn as grouped bars, one group
 per category. Otherwise it is drawn as one line per condition over the index,
-with a shaded band at the chosen interval and a faint trace per replicate.
+with a shaded band at the chosen interval and a faint trace per replicate. The
+x axis is labelled from the observable's `index_label`, falling back to
+`Index` or `Category`.
+
+Conditions may disagree on the index when a residue or a pair is absent from
+one system. The figure keeps the intersection, which is the part every
+condition measured, and logs a warning naming the dropped entries. Conditions
+that share no index entry at all raise `PluginContractError` naming the
+observable.
+
+Every bar, every error bar and every band is read from the condition-level
+aggregate, so a figure can never disagree with the text report. The NPZ
+sidecars supply only the faint replicate traces and the per-frame panels; a
+missing sidecar costs the traces and is logged, and never changes an
+interval.
 
 Every figure that draws an error bar or a band carries a footnote naming the
 interval, the number of replicates behind it and the production window, as
@@ -62,7 +80,8 @@ file is parsed into it.
 | field | type | default | meaning |
 |---|---|---|---|
 | `error_bar` | `"ci95"` or `"sem"` | `"ci95"` | Interval drawn on bars and bands. `"ci95"` is the Student t interval across replicates, 4.303 times the standard error at n = 3. |
-| `figsize` | `(float, float)` | `(10.0, 6.0)` | Width and height of every generated figure, in inches. |
+| `figsize` | `(float, float)` | `(10.0, 6.0)` | Width and height of the bar and profile figures, in inches. |
+| `timeseries_figsize` | `(float, float)` | `(12.0, 5.0)` | Width and height of the per-frame panels, which are usually wider. |
 | `show_replicates` | `bool` | `true` | Draw the per-replicate points on bars and the per-replicate traces on lines. |
 | `max_categories_for_bars` | `int` | `30` | Longest categorical profile still drawn as grouped bars. |
 

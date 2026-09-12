@@ -60,7 +60,8 @@ leave it off and the plugin uses the default, whose fields are `error_bar`,
 
 Every observable states a `unit`, and the scaffold placeholder `"TODO"` is
 rejected, so the generated tests fail until you replace it. A `profile` also
-states an `index`, one entry per value (residue IDs, bin centres).
+states an `index`, one entry per value (residue IDs, bin centres), and may set
+`index_label` to name the x axis of its figure.
 
 ## 4. Citations
 
