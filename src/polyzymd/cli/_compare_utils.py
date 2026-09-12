@@ -13,15 +13,33 @@ import click
 import yaml
 from pydantic import ValidationError
 
+DEFAULT_COMPARE_FORMATS = ("table", "markdown", "json")
 
-def common_compare_options(func):
+
+def common_compare_options(func=None, *, formats=DEFAULT_COMPARE_FORMATS):
     """Decorator adding shared Click options for compare subcommands.
 
     Adds: -f/--file, --eq-time, --format, -o/--output, -q/--quiet, --debug
 
     Note: --recompute is not included here because subcommands decide whether
     a recompute flag is meaningful for their workflow.
+
+    Parameters
+    ----------
+    func : callable, optional
+        The command function, when the decorator is used bare.
+    formats : sequence of str, optional
+        Choices offered by ``--format``. A subcommand that can render an extra
+        format passes its own tuple, for example ``compare run`` which also
+        accepts ``agent``.
+
+    Returns
+    -------
+    callable
+        The decorated command, or a decorator when ``func`` is ``None``.
     """
+    if func is None:
+        return functools.partial(common_compare_options, formats=formats)
 
     @click.option(
         "--debug",
@@ -45,9 +63,9 @@ def common_compare_options(func):
     @click.option(
         "--format",
         "output_format",
-        type=click.Choice(["table", "markdown", "json"]),
+        type=click.Choice(list(formats)),
         default="table",
-        help="Output format: table (default), markdown, or json.",
+        help=f"Output format: table (default), {', '.join(formats[1:])}.",
     )
     @click.option(
         "--eq-time",
