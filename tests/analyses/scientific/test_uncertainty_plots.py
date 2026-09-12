@@ -38,7 +38,6 @@ T_FACTOR_N3 = 4.302652729749462
 
 PLUGINS_WITH_PLOT_SETTINGS = (
     "rmsd",
-    "rmsf",
     "rg",
     "sasa",
     "contacts",
