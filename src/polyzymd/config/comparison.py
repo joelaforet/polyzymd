@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
@@ -576,6 +577,17 @@ class PlotSettings(BaseModel):
                         f"Invalid value for plot settings '{key}': "
                         f"expected dict or {settings_class.__name__}"
                     )
+            elif key in plugin_registry:
+                # A plugin ported to the observable contract has no plot
+                # settings of its own; the framework draws its figures from the
+                # observable kind. Keep the block so an existing comparison
+                # file still loads, and say that it does nothing.
+                warnings.warn(
+                    f"plot_settings block '{key}' is ignored: {key} is an observable-contract "
+                    "analysis and its figures come from the framework. Remove the block.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
             else:
                 raise ValueError(
                     f"Unknown plot settings key '{key}'. "
