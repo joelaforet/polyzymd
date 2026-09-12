@@ -1,0 +1,59 @@
+"""{{ spec.title }} analysis.
+
+Say in one sentence what this measures and in what unit.
+
+References
+----------
+Author, A. B. (2020). Title of the method paper. *Journal*, 1(1), 1-10.
+doi:10.0000/placeholder
+"""
+
+from __future__ import annotations
+
+from typing import Any, ClassVar, Sequence
+
+from pydantic import BaseModel, Field
+
+from polyzymd.analyses.contract import Observable, iter_frames
+from polyzymd.analyses.contract_runner import contract_analysis
+
+
+class {{ spec.class_name }}Settings(BaseModel):
+    """Settings for the {{ spec.name }} analysis."""
+
+    selection: str = Field(default="all", description="MDAnalysis selection to measure")
+
+
+class {{ spec.class_name }}:
+    """Measure {{ spec.title }} for one replicate."""
+
+    name: ClassVar[str] = "{{ spec.name }}"
+    Settings: ClassVar[type[BaseModel]] = {{ spec.class_name }}Settings
+    references: ClassVar[tuple[str, ...]] = ("Author 2020, Journal 1:1, doi:10.0000/placeholder",)
+
+    def compute(
+        self,
+        universe: Any,
+        frames: Any,
+        settings: {{ spec.class_name }}Settings,
+    ) -> Sequence[Observable]:
+        """Measure the observable on every production frame.
+
+        Replace the unit and the body with the real measurement. Return one
+        Observable per reported quantity; the framework owns persistence,
+        uncertainty, comparison and plotting. The generated tests fail until the
+        unit is stated.
+        """
+        group = universe.select_atoms(settings.selection)
+        values = [float(group.radius_of_gyration()) for _ in iter_frames(universe, frames)]
+        return [
+            Observable(
+                name="{{ spec.name }}",
+                kind="mean_of_timeseries",
+                unit="TODO",
+                values=values,
+            )
+        ]
+
+
+{{ spec.class_name }}Analysis = contract_analysis({{ spec.class_name }})

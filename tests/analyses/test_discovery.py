@@ -115,6 +115,7 @@ class TestDiscovery:
             "distances",
             "hydrogen_bonds",
             "rg",
+            "rg2",
             "rmsd",
             "rmsf",
             "sasa",

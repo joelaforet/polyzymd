@@ -6,7 +6,9 @@ from dataclasses import dataclass
 
 # Default single-file MDAnalysis-native scaffold style
 DEFAULT_STYLE = "simple"
-VALID_STYLES = (DEFAULT_STYLE, "dict")
+# Single-file observable-contract scaffold: a Settings model plus compute()
+CONTRACT_STYLE = "contract"
+VALID_STYLES = (DEFAULT_STYLE, "dict", CONTRACT_STYLE)
 ADVANCED_STYLES = ("dict",)
 
 
@@ -23,7 +25,8 @@ class ScaffoldSpec:
     style : str
         Scaffold style. ``"simple"`` creates the default single-file
         MDAnalysis-native contributor path. ``"dict"`` creates an advanced
-        package scaffold using canonical artifact payloads.
+        package scaffold using canonical artifact payloads. ``"contract"``
+        creates the single-file observable-contract plugin.
     """
 
     name: str
@@ -48,9 +51,9 @@ class ScaffoldSpec:
         Returns
         -------
         bool
-            True when ``style`` is the default simple scaffold style.
+            True for the simple and contract scaffold styles.
         """
-        return self.style == DEFAULT_STYLE
+        return self.style in (DEFAULT_STYLE, CONTRACT_STYLE)
 
     @property
     def uses_package_layout(self) -> bool:
@@ -62,3 +65,14 @@ class ScaffoldSpec:
             True when ``style`` requests an advanced package scaffold.
         """
         return self.style in ADVANCED_STYLES
+
+    @property
+    def uses_contract_layout(self) -> bool:
+        """Return whether the scaffold should emit an observable-contract plugin.
+
+        Returns
+        -------
+        bool
+            True when ``style`` requests the contract scaffold.
+        """
+        return self.style == CONTRACT_STYLE
