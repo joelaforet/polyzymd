@@ -26,7 +26,6 @@ _PLOTTER_MODULES = tuple(
         "contacts",
         "distances",
         "hydrogen_bonds",
-        "secondary_structure",
         "catalytic_triad",
     )
 )

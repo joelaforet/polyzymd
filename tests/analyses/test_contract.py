@@ -214,6 +214,19 @@ def test_a_plugin_that_misses_the_protocol_is_named() -> None:
         contract_analysis(Incomplete)
 
 
+def test_a_plugin_keeps_its_slurm_resource_hint() -> None:
+    """A plugin that needs more memory than the default says so on the class."""
+    from polyzymd.analyses.base import SlurmResourceHint
+    from polyzymd.analyses.rg_contract import RgContract
+
+    class Hungry(RgContract):
+        name = "hungry"
+        slurm_resource_hint = SlurmResourceHint(mem="16G")
+
+    assert contract_analysis(Hungry).slurm_resource_hint == SlurmResourceHint(mem="16G")
+    assert contract_analysis(RgContract).slurm_resource_hint is None
+
+
 def test_rg2_satisfies_the_protocol() -> None:
     """The prototype port is an instance of the runtime-checkable protocol."""
     from polyzymd.analyses.rg_contract import RgContract
