@@ -1,273 +1,151 @@
-# Distances Plugin Reference
+# Distances plugin reference
 
 For a step-by-step task guide, see
 {doc}`../how_to/analysis_distances_quickstart`.
 
-## Configuration Reference
+## Settings
 
 All fields for `plugins.distances`:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `threshold` | `float` | `3.5` | Global default threshold in Angstroms |
-| `pairs` | `list[DistancePair]` | *required* | One or more named distance pairs |
-| `use_pbc` | `bool` | `true` | Apply periodic boundary conditions using minimum-image distance |
-| `align_trajectory` | `bool` | `false` | Deprecated and ignored since 1.3.0. Setting it to `true` raises a `DeprecationWarning` |
-| `alignment_selection` | `str` | `"protein and name CA"` | Deprecated and ignored since 1.3.0 |
-| `alignment_mode` | `str` | `"centroid"` | Deprecated and ignored since 1.3.0. Accepted values are still validated as `centroid`, `average`, or `frame` |
-| `alignment_frame` | `int \| None` | `null` | Deprecated and ignored since 1.3.0 |
+| `pairs` | `list[DistancePair]` | *required* | One or more named pairs, at least one |
+| `threshold` | `float \| null` | `3.5` | Threshold in angstrom for pairs that do not set their own. `null` reports distances only |
+| `use_pbc` | `bool` | `true` | Take minimum-image distances against the box of the measured frame |
 
 Each entry in `pairs`:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `label` | `str` | *required* | Human-readable pair label |
-| `selection_a` | `str` | *required* | Selection for group A |
-| `selection_b` | `str` | *required* | Selection for group B |
-| `threshold` | `float` | global `threshold` | Per-pair threshold override |
-| `below_label` | `str` | `"Below {threshold}Å"` | Label for distance `<= threshold` state |
-| `above_label` | `str` | `"Above {threshold}Å"` | Label for distance `> threshold` state |
+| `label` | `str` | *required* | Name the pair is reported under |
+| `selection_a` | `str` | *required* | First endpoint selection |
+| `selection_b` | `str` | *required* | Second endpoint selection |
+| `threshold` | `float \| null` | global `threshold` | Threshold for this pair |
+| `below_label` | `str \| null` | `"below <threshold> A"` | Name of the below-threshold state |
 
-### Selection syntax extensions
+An endpoint is one point. A selection that matches several atoms is rejected
+unless it is wrapped in `midpoint(...)` or `com(...)`, and a selection that
+matches no atoms raises `SelectionError` with the topology diagnostics.
 
-Distances supports MDAnalysis selections plus helper wrappers:
+### Selection syntax
 
-| Syntax | Description | Typical use |
-|--------|-------------|-------------|
-| `midpoint(selection)` | Geometric midpoint of selected atoms | Carboxylate oxygens (Asp/Glu) |
-| `com(selection)` | Center of mass of selected atoms | Whole residues, ligands, or rings |
-| `pdbindex N` | Atom by PDB serial index (1-indexed) | Copying atom IDs from PDB/PyMOL |
-
-Example pair definitions:
+| Syntax | Meaning | Typical use |
+|--------|---------|-------------|
+| `midpoint(selection)` | Centre of geometry of the selected atoms | Carboxylate oxygens of Asp or Glu |
+| `com(selection)` | Centre of mass of the selected atoms | A whole residue, ligand or domain |
+| `pdbindex N` | Atom by PDB serial number, 1-indexed | Copying atom IDs from PyMOL |
 
 ```yaml
 plugins:
   distances:
+    threshold: 3.5
     pairs:
       - label: "His156-Asp133"
         selection_a: "protein and resid 156 and name ND1"
         selection_b: "midpoint(protein and resid 133 and name OD1 OD2)"
-      - label: "Ligand-COM to Ser77"
-        selection_a: "com(resname LIG)"
-        selection_b: "protein and resid 77 and name OG"
-      - label: "Restraint atom check"
-        selection_a: "pdbindex 2740"
-        selection_b: "pdbindex 3011"
+      - label: "Ser77(OG)-Substrate"
+        selection_a: "protein and resid 76 and name OG"
+        selection_b: "resname RBY and name C13x"
+        threshold: 10.0
+        below_label: "Within 10 Angstrom"
 ```
 
 ```{important}
 Residue indices restart by chain in PolyzyMD systems. For protein residues,
-prefer `protein and resid ...` to avoid accidental multi-chain matches.
+prefer `protein and resid ...` to avoid an accidental multi-chain match.
 ```
 
-### PBC and alignment behavior
+## Observables
 
-- `use_pbc: true` computes minimum-image distances for wrapped trajectories
-- Orthorhombic boxes are fully supported for PBC correction
-- Triclinic boxes trigger a warning and fall back to Euclidean distance
-- The box used for the minimum-image calculation is the one stored in the
-  frame being measured, read from `Timestep.dimensions`
+One pair produces one or two observables.
+
+| Observable | Kind | Unit | Meaning |
+|------------|------|------|---------|
+| `<label>` | `mean_of_timeseries` | `A` | Distance between the two endpoints, per frame |
+| `<label> <below_label>` | `fraction` | `fraction` | Frames in which the distance is strictly below the threshold |
+
+The framework reduces each replicate to one number per observable, then reports
+the mean over replicates with its SEM and a Student t interval, and tests
+conditions against the control on replicate-level values. Nothing averages one
+pair into another. The per-frame series of every observable is kept in the
+replicate's `observables.npz` sidecar.
+
+## Periodic boundaries
+
+With `use_pbc: true` the distance uses the minimum image convention against the
+box stored in the frame being measured, read from `Timestep.dimensions`. A frame
+whose box is missing or degenerate is measured without periodicity, and the run
+logs one warning saying so.
 
 ```{versionchanged} 1.3.0
-Distances are no longer aligned before measurement. `align_trajectory` and the
+Distances are measured without alignment. `align_trajectory` and the
 `alignment_*` fields are still accepted so existing `comparison.yaml` files keep
-loading, but they no longer change any number, and requesting alignment raises a
-`DeprecationWarning`. A distance is invariant under rigid-body motion, so
-alignment could never improve it, while aligning in memory rotated the
-coordinates without rotating the box vectors and so corrupted minimum-image
-distances for pairs separated by more than half a box length. For the reasoning,
-see {doc}`../explanation/analysis_concepts`.
-
-`pair_distance_version` moves from `"1"` to `"2"` in the same release, and
-aggregation rejects any replicate artifact still carrying version 1 with the
-usual stale-cache message. Recompute affected replicates rather than mixing the
-two conventions.
+loading, but they change nothing and raise a `DeprecationWarning`. A distance is
+invariant under rigid-body motion, so alignment could never improve it, while
+aligning in memory rotated the coordinates without rotating the box vectors and
+so corrupted minimum-image distances for pairs separated by more than half a box
+length. For the reasoning, see {doc}`../explanation/analysis_concepts`.
 ```
 
-Removing the alignment step also removes the in-memory reader it installed, so
-reported frame times now come from the trajectory files themselves and match
-the times reported by contacts, Rg, and the other file-backed plugins.
-
-The measured coordinates follow the `pbc_policy` applied at load time. See
-{doc}`analysis_plugin_settings` for that option and for the provenance fields
-that record it.
-
-### Cache invalidation by settings
-
-Distances cache keys include equilibration and geometry settings. Changing
-PBC/alignment settings produces new cache filenames automatically, for example:
-
-```text
-distances_Ser77-His156_eq10ns_pbc_align-centroid.json
-distances_Ser77-His156_eq10ns_nopbc_noalign.json
+```{versionchanged} 1.3.0
+The plugin is written against the observable contract. The per-pair `above_label`
+field and the `plot_settings.distances` block are accepted for one release and
+ignored, the KDE distribution figures are replaced by the shared contract
+figures, and the per-replicate and aggregated files hold observables rather than
+the former `pair_results` records.
 ```
 
-## Output Files
-
-Results are saved under your project analysis directory:
+## Output files
 
 ```text
 <projects_directory>/
 └── analysis/
     └── distances/
         ├── run_1/
-        │   ├── distances_Ser77-His156_eq10ns_pbc_align-centroid.json
-        │   └── distances_His156-Asp133_eq10ns_pbc_align-centroid.json
+        │   ├── replicate.json
+        │   └── observables.npz
         ├── run_2/
-        │   └── ...
         ├── run_3/
-        │   └── ...
         └── aggregated/
-            └── distances_reps1-3_eq10ns.json
+            └── condition.json
 ```
 
-Per-replicate result structure (representative):
+Each `replicate.json` holds one `ObservableEstimate` per observable, with its
+kind, unit, frame count, statistical inefficiency and effective sample size. The
+condition artifact holds one `ObservableAggregate` per observable, with the
+replicate values, the mean, the SEM, the interval and its coverage.
 
-```python
-{
-    "config_hash": "abc123...",
-    "replicate": 1,
-    "equilibration_time": 10.0,
-    "equilibration_unit": "ns",
-    "n_frames_total": 10000,
-    "n_frames_used": 9000,
-    "pair_results": [
-        {
-            "pair_label": "Ser77-His156",
-            "selection1": "protein and resid 77 and name OG",
-            "selection2": "protein and resid 156 and name NE2",
-            "mean_distance": 3.42,
-            "std_distance": 0.87,
-            "sem_distance": 0.15,
-            "median_distance": 3.31,
-            "min_distance": 2.61,
-            "max_distance": 5.87,
-            "kde_peak": 3.18,
-            "threshold": 3.5,
-            "fraction_below_threshold": 0.624,
-            "correlation_time": 245.3,
-            "n_independent_frames": 34.6,
-            "histogram_edges": [...],
-            "histogram_counts": [...],
-            "kde_x": [...],
-            "kde_y": [...]
-        }
-    ]
-}
-```
-
-Aggregated result structure (representative):
-
-```python
-{
-    "replicates": [1, 2, 3],
-    "n_replicates": 3,
-    "pair_summaries": [
-        {
-            "pair_label": "Ser77-His156",
-            "overall_mean": 3.39,
-            "overall_sem": 0.11,
-            "overall_median": 3.28,
-            "per_replicate_means": [3.42, 3.31, 3.45],
-            "per_replicate_sems": [0.15, 0.13, 0.16],
-            "threshold": 3.5,
-            "overall_fraction_below_threshold": 0.61
-        }
-    ]
-}
-```
-
-## Plot Types
-
-Generate figures with:
-
-```bash
-polyzymd compare plot-all -f comparison.yaml
-```
-
-Distances plot outputs:
-
-| Plot output | Description |
-|-------------|-------------|
-| `distance_kde_<pair>.png` | Distribution overlays across conditions for one pair |
-| `distance_threshold_bars.png` | Grouped bars of fraction below threshold |
-| `distance_state_<pair>.png` | Per-pair below/above threshold state summary |
-
-`plot_settings.distances` options:
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `show_threshold` | `true` | Draw threshold line on distributions |
-| `use_kde` | `true` | Use KDE overlays (else histogram emphasis) |
-| `generate_state_bars` | `true` | Generate per-pair state bar figures |
-
-## Common CLI Options
+## Commands
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-f, --file` | `comparison.yaml` | Comparison config path |
 | `--eq-time` | `0ns` | Equilibration time to discard |
-| `--recompute` | off | Ignore cached results and recompute |
-| `--format` | `table` | Output format (`table` or `json`) |
+| `--recompute` | off | Ignore cached replicates and measure again |
+| `--format` | `table` | Output format, `table` or `json` |
 | `-o, --output` | (none) | Write formatted output to a file |
-| `-q, --quiet` | off | Suppress INFO logs |
-| `--debug` | off | Enable DEBUG logging |
-
-Typical run commands:
 
 ```bash
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns --recompute --format json
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
+polyzymd compare run distances -f comparison.yaml --eq-time 200ns
+polyzymd compare run distances -f comparison.yaml --eq-time 200ns --format json
 ```
 
 ## Troubleshooting
 
-### "Selection matched no atoms"
+### "selection ... matched no atoms"
 
-**Cause:** Selection string does not match topology atoms.
+The selection does not match the topology. Add chain-aware qualifiers such as
+`protein and resid ...`, check atom names and residue IDs against the topology,
+and read the diagnostics block in the error, which lists what the topology does
+contain.
 
-**Fix:**
-- Add chain-aware qualifiers, such as `protein and resid ...`
-- Verify atom names and residue IDs in your topology
-- Re-run with `--debug` for expanded selection diagnostics
+### "selection ... matched N atoms, and a pair endpoint is one point"
 
-### Very wide or multimodal distance distribution
+Wrap the selection in `midpoint(...)` or `com(...)` to say which point of the
+group you mean.
 
-**Cause:** Selection may include flexible groups or unintended atoms.
+### Long-distance outliers near the box boundary
 
-**Fix:**
-- Confirm each selection resolves to the intended atom/group
-- Use `midpoint(...)` or `com(...)` where chemically appropriate
-- Inspect atom selections in a molecular viewer
-
-### Apparent long-distance outliers near box boundaries
-
-**Cause:** PBC handling disabled or unsupported box geometry.
-
-**Fix:**
-- Ensure `use_pbc: true`
-- Check logs for triclinic fallback warnings
-- Check whether a measured group can straddle a periodic boundary. Centers of
-  mass of a split molecule are meaningless, and only a whole-molecule
-  trajectory or a `make_whole` load fixes that
-
-### "Low statistical reliability" warning
-
-**Cause:** Correlation time is large relative to trajectory length.
-
-**Fix:**
-- Add replicates and compare aggregated results
-- Extend production trajectory length
-- Treat uncertainty estimates as conservative qualitative guidance
-
-### Missing replicate data
-
-**Message:** `Skipping replicate N: trajectory data not found`
-
-**Cause:** Replicate output is missing or incomplete.
-
-**Fix:**
-- Confirm the requested replicate finished simulation
-- Verify scratch/project path mapping in config
-- Re-run analysis after data is available
+Check that `use_pbc` is true, and check whether a measured group can straddle a
+periodic boundary. The centre of mass of a split molecule is meaningless, and
+only a whole-molecule trajectory or a `make_whole` load fixes that.

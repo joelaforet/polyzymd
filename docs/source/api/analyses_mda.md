@@ -23,4 +23,4 @@ perform heavy imports lazily when they actually build or run an analysis.
 | Aggregation | `aggregate_replicate_artifacts`, `aggregate_replicate_artifacts_from_disk`, `ExplicitReplicateMetricPolicy` | {doc}`analyses_mda/aggregation_comparison` |
 | Comparison | `compare_condition_artifacts`, `MDAComparisonContext` | {doc}`analyses_mda/aggregation_comparison` |
 | Universe provenance | `UniverseProvider`, `UniverseProvenance`, `FileIdentity` | {doc}`analyses_mda/universe_primitives` |
-| Shared primitives | `AnalysisBaseLike`, `MDARunKwargs`, `PairDistanceSpec`, `build_pair_distance_analysis` | {doc}`analyses_mda/universe_primitives` |
+| Shared primitives | `AnalysisBaseLike`, `MDARunKwargs`, `PairSelection`, `pair_distance_matrix` | {doc}`analyses_mda/universe_primitives` |

@@ -95,11 +95,11 @@ figures always use the default.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `name` | `str` | `"catalytic_triad"` | Name of the triad/active-site definition |
-| `pairs` | `list[TriadPairSettings]` | required | Distance pairs to monitor |
+| `pairs` | `list[PairSelection]` | required | Distance pairs to monitor, at least one |
 | `threshold` | `float` | `3.5` | Contact threshold in Å |
 | `description` | `str \| null` | `null` | Optional human-readable description |
 
-`TriadPairSettings` entries in `pairs`:
+`PairSelection` entries in `pairs`:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -112,14 +112,13 @@ figures always use the default.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `threshold` | `float \| null` | `3.5` | Global distance threshold (Å) for contact-style state analysis |
-| `pairs` | `list[DistancePairSettings]` | `[]` (must be non-empty) | Distance pairs to monitor |
+| `pairs` | `list[DistancePair]` | required | Distance pairs to monitor, at least one |
 | `use_pbc` | `bool` | `true` | Use minimum-image PBC-aware distances |
-| `align_trajectory` | `bool` | `false` | Deprecated and ignored since 1.3.0; setting it to `true` raises a `DeprecationWarning` |
-| `alignment_selection` | `str` | `"protein and name CA"` | Deprecated and ignored since 1.3.0 |
-| `alignment_mode` | `str` | `"centroid"` | Deprecated and ignored since 1.3.0; still validated as `centroid`, `average`, or `frame` |
-| `alignment_frame` | `int \| null` | `null` | Deprecated and ignored since 1.3.0 |
 
-`DistancePairSettings` entries in `pairs`:
+The `align_trajectory` and `alignment_*` keys are accepted for one release,
+ignored, and raise a `DeprecationWarning`.
+
+`DistancePair` entries in `pairs`:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -127,8 +126,7 @@ figures always use the default.
 | `selection_a` | `str` | required | First atom/point selection |
 | `selection_b` | `str` | required | Second atom/point selection |
 | `threshold` | `float \| null` | `null` | Per-pair threshold override (falls back to global `threshold`) |
-| `below_label` | `str \| null` | `null` | Display label for below-threshold state |
-| `above_label` | `str \| null` | `null` | Display label for above-threshold state |
+| `below_label` | `str \| null` | `null` | Name of the below-threshold state; defaults to `"below <threshold> A"`. `above_label` is accepted for one release and ignored |
 
 ## `contacts`
 
