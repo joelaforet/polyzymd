@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`rg` is written against the observable contract.**  The plugin is one
+  module instead of a six-file package, and the framework owns aggregation,
+  uncertainty, testing, caching and persistence.  Selection mode reports
+  `rg_<label>` as a mean of a timeseries; fragment mode adds
+  `rg_<label>_fragments`, the mean Rg of each bonded fragment, and
+  `rg_<label>_distribution`, the density of the fragment values over fixed
+  bins.  Every settings key is unchanged and one is new, `histogram_range`,
+  which replaces bin edges that used to be derived by pooling the replicates of
+  a condition.  An empty selection now raises instead of skipping the run, the
+  uncertainty is taken across replicates instead of being corrected for
+  autocorrelation within one, and `polyzymd compare run rg --plot` writes no
+  figures until the generic per-kind plotters land.
+
 ### Added
 
 - **`polyzymd status --format agent|json`.**  `status` accepts repeated `-c`

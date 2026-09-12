@@ -201,40 +201,25 @@ extended conformational states. This is often seen with:
 For oscillating systems, report the **range and period** of oscillation rather
 than just the mean Rg.
 
-## How PolyzyMD Handles Autocorrelation
+## How PolyzyMD handles autocorrelation
 
-Rg timeseries are correlated — adjacent frames are similar because MD
-evolves continuously. PolyzyMD reports correlation-aware diagnostics and
-uncertainty estimates for the Rg timeseries:
+Rg timeseries are correlated, because adjacent frames are similar while MD
+evolves continuously. PolyzyMD reports that correlation as a diagnostic and
+never lets it shrink an error bar:
 
-1. **Computes Rg timeseries** using MDAnalysis `AtomGroup.radius_of_gyration()`
-2. **Estimates correlation behavior** using autocorrelation-based diagnostics
-3. **Reports an effective-sample-size estimate** based on statistical
-   inefficiency rather than raw frame count
-4. **Reports correlation-aware SEM estimates** for within-trajectory summaries
+1. It computes the Rg timeseries with MDAnalysis `AtomGroup.radius_of_gyration()`.
+2. It estimates the statistical inefficiency g of each replicate series and the
+   effective sample size that follows from it.
+3. It reports the smallest effective sample size over the replicates of a
+   condition as `n_eff_min`.
+4. It takes the mean, the SEM and the 95 percent interval across replicates,
+   with the replicate as the sampling unit, not across frames.
 
-### Example Autocorrelation Output
-
-```text
-Run: Whole Protein
-  Correlation time: 3821 ps (3.8 ns)
-  Statistical inefficiency: 473.7
-  Independent samples: 19 (from 9000 frames)
-  SEM (corrected): 0.098 Å
-```
-
-This means:
-- Rg values appear to decorrelate on roughly nanosecond timescales for this
-  analyzed window
-- The raw 9000 frames contain far less independent information than the frame
-  count alone suggests
-- The reported SEM is a correlation-aware estimate, not a guarantee that all
-  sampling limitations have been removed
-
-These estimates depend on stationarity, sampling quality, and the reliability of
-the autocorrelation estimate. If the trajectory drifts, switches slowly between
-states, or samples too few transitions, correlation-aware uncertainty can still
-understate the true uncertainty in the condition-level conclusion.
+A barely decorrelated replicate therefore shows up as a small `n_eff_min` next
+to the number, rather than as a narrow interval computed from thousands of
+correlated frames. Grossfield et al. (2018) ask for exactly that separation: a
+correlation diagnostic describes one trajectory, while an uncertainty on a
+condition needs independent trajectories.
 
 ```{seealso}
 For the mathematical details of autocorrelation functions and the LiveCoMS
@@ -559,9 +544,10 @@ and field-level configuration details.
 ### Statistical Comparison with Fragment Mode
 
 The **reduced Rg timeseries** (per-frame mean across fragments) is the
-primary metric used for cross-condition statistical comparison (t-tests,
-ANOVA, ranking). This is stored in `rg_values` in the NPZ sidecar and
-drives the mean, SEM, and correlation time reported in JSON results.
+primary metric used for cross-condition statistical comparison. It is the
+`rg_<label>` observable, stored under that name in the `observables.npz`
+sidecar, and its per-replicate mean is what the condition-level statistics and
+the tests are built from.
 
 The **fragment Rg distribution** is supplementary and descriptive. Fragment
 values pooled across frames and trajectories are correlated and should not be
