@@ -6,7 +6,6 @@ independent samples. This module provides tools to:
 1. Compute the autocorrelation function (ACF) of an observable
 2. Estimate the correlation time (τ) from the ACF
 3. Compute statistical inefficiency (g) for proper uncertainty quantification
-4. Select independent frames based on τ for proper statistics
 
 Key Concepts
 ------------
@@ -22,37 +21,68 @@ Key Concepts
 - **Independent samples**: For proper SEM calculation, we need N_eff independent
   samples, not N_frames correlated observations.
 
-Methods for τ estimation
-------------------------
-- **First zero crossing**: τ is lag where ACF first crosses zero
-- **Exponential fit**: Fit ACF = exp(-t/τ) and extract τ
-- **Integration**: τ = ∫ACF(t)dt from 0 to first zero (or cutoff)
+Method for τ estimation
+-----------------------
+One estimator is offered. The statistical inefficiency is summed directly
+from the normalised ACF over positive lags,
+
+    g = 1 + 2*Σ_{t>=1} C(t)*(1 - t/N),
+
+with the sum truncated at the first non-positive C(t) beyond a short minimum
+lag, and the integrated correlation time follows from it as
+τ = (g - 1)/2 * Δt. Earlier releases also offered a first-zero-crossing
+estimator and an exponential fit. Both were withdrawn because neither
+estimates the integrated correlation time. On an AR(1) series with φ = 0.9
+the first-zero method overestimated g by a factor of five and the
+exponential fit by up to two.
 
 Statistical Validity
 --------------------
 The number of effective independent samples (N_eff) is computed as:
     N_eff = N / g = N / (1 + 2*Σ C(t)*(1-t/N))
 
-This matches the algorithm from Chodera et al. (2007) with the finite-size
-correction factor (1-t/N). When N_eff < 10, statistical estimates (mean, SEM)
-may be unreliable, and users should be warned per LiveCoMS best practices
-(Grossfield et al., 2018).
+N_eff is a real number and is reported as one. It is not rounded down to a
+whole frame count.
 
 For multiple timeseries of different lengths (e.g., replicates), use
 `statistical_inefficiency_multiple()` which correctly handles the averaging.
 
+`MIN_RECOMMENDED_N_INDEPENDENT` is a convention of this package, not a
+threshold taken from any reference below. Grossfield et al. (2018) give no
+such cutoff; they discuss small sample counts in the context of plotting
+every replicate rather than a summary statistic.
+
+Not implemented
+---------------
+Block averaging (Flyvbjerg and Petersen 1989, J. Chem. Phys. 91:461,
+doi:10.1063/1.457480) is an alternative route to g. It is not implemented
+anywhere in this package.
+
 References
 ----------
-- Flyvbjerg & Petersen (1989) J. Chem. Phys. 91:461 (block averaging)
-- Chodera et al. (2007) J. Chem. Theory Comput. 3:26 (statistical inefficiency)
-- Grossfield et al. (2018) LiveCoMS 1:5067 (uncertainty quantification)
+Chodera, J. D., Swope, W. C., Pitera, J. W., Seok, C., and Dill, K. A. (2007).
+    Use of the weighted histogram analysis method for the analysis of simulated
+    and parallel tempering simulations. Journal of Chemical Theory and
+    Computation, 3(1), 26-41. doi:10.1021/ct0502864
+Shirts, M. R., and Chodera, J. D. (2008). Statistically optimal analysis of
+    samples from multiple equilibrium states. The Journal of Chemical Physics,
+    129(12), 124105. doi:10.1063/1.2978177. The estimator here follows the
+    algorithm of pymbar's MIT-licensed `timeseries` module, which accompanies
+    that paper, without taking pymbar as a dependency.
+Janke, W. (2002). Statistical analysis of simulations: data correlations and
+    error estimation. In J. Grotendorst, D. Marx, and A. Muramatsu (Eds.),
+    Quantum Simulations of Complex Many-Body Systems, NIC Series vol. 10,
+    423-445. John von Neumann Institute for Computing.
+Grossfield, A., Patrone, P. N., Roe, D. R., Schultz, A. J., Siderius, D. W.,
+    and Zuckerman, D. M. (2018). Best practices for quantifying the uncertainty
+    in molecular simulation. Living Journal of Computational Molecular Science,
+    1(1), 5067. doi:10.33011/livecoms.1.1.5067
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from enum import Enum
 from typing import Literal
 
 import numpy as np
@@ -60,16 +90,24 @@ from numpy.typing import ArrayLike, NDArray
 
 logger = logging.getLogger(__name__)
 
-# Minimum recommended independent samples for reliable statistics
+# Minimum recommended independent samples for reliable statistics.
+# House convention of this package; see the module docstring.
 MIN_RECOMMENDED_N_INDEPENDENT = 10
 
+# Lags shorter than this are always summed, so that a single noisy negative
+# value near lag zero cannot truncate the sum. Same default as pymbar.
+DEFAULT_MINTIME = 3
 
-class CorrelationTimeMethod(str, Enum):
-    """Method for estimating correlation time from ACF."""
+# Identifies which correlation estimator produced a stored number. Version "1"
+# was the trapezoid integration that counted lag zero twice and floored tau at
+# one timestep; version "2" is the pymbar-style sum below. Plugins stamp this on
+# every replicate artifact whose sem_* field divides by an effective sample
+# count, and refuse to aggregate artifacts that disagree, because the two
+# versions give sem values that differ by a factor of about the square root of
+# three for a fast observable. Bump it whenever the estimator changes a number.
+AUTOCORRELATION_ESTIMATOR_VERSION = "2"
 
-    FIRST_ZERO = "first_zero"
-    EXPONENTIAL_FIT = "exponential_fit"
-    INTEGRATION = "integration"
+_WITHDRAWN_METHODS = ("first_zero", "exponential_fit")
 
 
 @dataclass
@@ -122,8 +160,9 @@ class CorrelationTimeResult:
         Unit of tau (same as timestep unit)
     method : str
         Method used for estimation
-    n_independent : int
-        Estimated number of independent samples in trajectory
+    n_independent : float
+        Estimated number of independent samples in the trajectory, N/g. This
+        is a real number and is deliberately not rounded down to whole frames.
     statistical_inefficiency : float
         g = 1 + 2*tau/dt, factor by which variance is inflated
     warning : str | None
@@ -133,7 +172,7 @@ class CorrelationTimeResult:
     tau: float
     tau_unit: str
     method: str
-    n_independent: int
+    n_independent: float
     statistical_inefficiency: float
     warning: str | None = None
 
@@ -252,7 +291,7 @@ def estimate_correlation_time(
     acf_or_timeseries: ACFResult | ArrayLike,
     timestep: float = 1.0,
     timestep_unit: str = "frames",
-    method: Literal["first_zero", "exponential_fit", "integration"] = "integration",
+    method: Literal["integration"] = "integration",
     n_frames: int | None = None,
 ) -> CorrelationTimeResult:
     """Estimate correlation time from ACF or raw timeseries.
@@ -265,11 +304,10 @@ def estimate_correlation_time(
         Time between frames (only used if passing raw timeseries)
     timestep_unit : str, optional
         Unit of timestep (only used if passing raw timeseries)
-    method : {"first_zero", "exponential_fit", "integration"}
-        Method for estimating τ:
-        - "first_zero": Lag where ACF first crosses zero
-        - "exponential_fit": Fit ACF = exp(-t/τ)
-        - "integration": τ = ∫ACF(t)dt (recommended, most robust)
+    method : {"integration"}
+        Estimator for τ. Only "integration" is supported: g is summed from
+        the normalised ACF over positive lags and τ = (g - 1)/2 * Δt. The
+        former "first_zero" and "exponential_fit" values raise ValueError.
     n_frames : int, optional
         Total number of frames (for computing n_independent).
         Only needed if passing ACFResult.
@@ -279,86 +317,64 @@ def estimate_correlation_time(
     CorrelationTimeResult
         Contains tau, method used, n_independent, statistical_inefficiency
 
+    Raises
+    ------
+    ValueError
+        If ``method`` is one of the withdrawn estimators, or is unknown.
+
     Examples
     --------
     >>> acf_result = compute_acf(rmsd, timestep=10.0, timestep_unit="ps")
     >>> tau_result = estimate_correlation_time(acf_result, method="integration")
     >>> print(f"Correlation time: {tau_result.tau:.1f} {tau_result.tau_unit}")
-    >>> print(f"Independent samples: {tau_result.n_independent}")
+    >>> print(f"Independent samples: {tau_result.n_independent:.1f}")
 
     Notes
     -----
-    The "integration" method is most robust for noisy ACFs. It computes:
-        τ = ∫₀^∞ ACF(t) dt ≈ Σ ACF[i] * dt
+    Passing a raw timeseries is the accurate path, because the sum then runs
+    over every available lag. Passing an ACFResult truncates the sum at the
+    ACF's own ``max_lag`` (``N // 4`` by default), which underestimates g
+    when the correlation time approaches a quarter of the trajectory.
 
-    Integration stops at first zero crossing to avoid noise contribution.
+    For an uncorrelated series g approaches 1 and τ approaches 0. Neither is
+    floored at one timestep, so N_eff approaches N as it should.
     """
+    if method in _WITHDRAWN_METHODS:
+        raise ValueError(
+            f"Correlation-time method {method!r} is no longer supported because it does "
+            "not estimate the integrated correlation time. Use method='integration', "
+            "which sums the normalised ACF per Chodera et al. (2007)."
+        )
+    if method != "integration":
+        raise ValueError(f"Unknown method: {method}")
+
     # Handle input type
     if isinstance(acf_or_timeseries, ACFResult):
         acf_result = acf_or_timeseries
         dt = acf_result.timestep
         unit = acf_result.timestep_unit
-        acf = acf_result.acf
-        lags = acf_result.lags
         if n_frames is None:
             n_frames = acf_result.n_samples
+        g = _statistical_inefficiency_from_acf(acf_result.acf, n_frames)
     else:
-        # Compute ACF from raw timeseries
-        acf_result = compute_acf(
-            acf_or_timeseries,
-            timestep=timestep,
-            timestep_unit=timestep_unit,
-        )
-        acf = acf_result.acf
-        lags = acf_result.lags
+        series = np.asarray(acf_or_timeseries, dtype=np.float64)
         dt = timestep
         unit = timestep_unit
-        n_frames = len(np.asarray(acf_or_timeseries))
+        if n_frames is None:
+            n_frames = int(series.size)
+        g = statistical_inefficiency(series)
 
-    # Handle degenerate constant-series ACF explicitly
-    if len(acf) > 1 and np.isclose(acf[0], 1.0) and np.allclose(acf[1:], 0.0):
-        g = 1.0
-        n_independent = max(1, int(n_frames / g))
-        return CorrelationTimeResult(
-            tau=0.0,
-            tau_unit=unit,
-            method=method,
-            n_independent=n_independent,
-            statistical_inefficiency=g,
-            warning=None,
-        )
+    # Integrated correlation time implied by g = 1 + 2*tau/dt
+    tau = 0.5 * (g - 1.0) * dt
 
-    # Find first zero crossing
-    zero_crossing_idx = _find_first_zero_crossing(acf)
-
-    if method == "first_zero":
-        if zero_crossing_idx is None:
-            # ACF never crosses zero, use full length
-            tau = lags[-1]
-        else:
-            tau = float(lags[zero_crossing_idx])
-
-    elif method == "exponential_fit":
-        tau = _fit_exponential_acf(lags, acf, zero_crossing_idx)
-
-    elif method == "integration":
-        tau = _integrate_acf(lags, acf, zero_crossing_idx, dt, n_frames=n_frames)
-
-    else:
-        raise ValueError(f"Unknown method: {method}")
-
-    # Compute statistical inefficiency: g = 1 + 2*τ/dt
-    # This is the factor by which variance is inflated due to correlation
-    g = 1.0 + 2.0 * tau / dt
-
-    # Number of independent samples
-    n_independent = max(1, int(n_frames / g))
+    # Number of independent samples, kept as a real number
+    n_independent = n_effective(n_frames, g)
 
     # Generate warning if statistics may be unreliable
     warning = None
     if n_independent < MIN_RECOMMENDED_N_INDEPENDENT:
         warning = (
-            f"Low statistical reliability: only {n_independent} independent samples "
+            f"Low statistical reliability: only {n_independent:.1f} independent samples "
             f"(recommended >= {MIN_RECOMMENDED_N_INDEPENDENT}). "
             f"Correlation time τ = {tau:.1f} {unit} is comparable to or longer than "
             f"the trajectory sampling window. Consider: (1) extending simulation time, "
@@ -377,162 +393,50 @@ def estimate_correlation_time(
     )
 
 
-def get_independent_indices(
+def _statistical_inefficiency_from_acf(
+    acf: NDArray[np.float64],
     n_frames: int,
-    correlation_time: float,
-    timestep: float = 1.0,
-    start_frame: int = 0,
-) -> NDArray[np.int64]:
-    """Get frame indices for independent samples.
+    mintime: int = DEFAULT_MINTIME,
+) -> float:
+    """Sum a normalised ACF into a statistical inefficiency.
 
-    Selects frames separated by at least 2*τ (correlation time) to
-    ensure approximate independence for statistical analysis.
+    Implements g = 1 + 2*Σ_{t>=1} C(t)*(1 - t/N) with the sum truncated at
+    the first non-positive C(t) at lag t >= ``mintime``. Lag zero is excluded
+    from the sum; it is the leading 1.
 
     Parameters
     ----------
-    n_frames : int
-        Total number of frames in trajectory
-    correlation_time : float
-        Correlation time τ (in same units as timestep)
-    timestep : float, optional
-        Time between frames. Default is 1.0.
-    start_frame : int, optional
-        First frame to consider (after equilibration). Default is 0.
-        Note: Frame indices are 0-indexed internally, but user-facing
-        documentation uses 1-indexed (PyMOL convention).
-
-    Returns
-    -------
-    NDArray[np.int64]
-        Array of frame indices (0-indexed) that are approximately independent
-
-    Examples
-    --------
-    >>> # Get independent frames for RMSF calculation
-    >>> tau_result = estimate_correlation_time(rmsd, timestep=10.0)
-    >>> indices = get_independent_indices(
-    ...     n_frames=10000,
-    ...     correlation_time=tau_result.tau,
-    ...     timestep=10.0,
-    ...     start_frame=1000,  # Skip first 1000 frames for equilibration
-    ... )
-    >>> print(f"Using {len(indices)} independent frames")
-
-    Notes
-    -----
-    Frame indices returned are 0-indexed (for direct use with MDAnalysis).
-    When displaying to users, add 1 for PyMOL convention.
-
-    The spacing is set to 2*τ/timestep, which gives frames with
-    negligible correlation (ACF < 0.05 for exponential decay).
-    """
-    if n_frames <= start_frame:
-        raise ValueError(f"start_frame ({start_frame}) >= n_frames ({n_frames})")
-
-    # Convert correlation time to frame spacing
-    # Use 2*τ for good independence (ACF ≈ exp(-2) ≈ 0.14)
-    frame_spacing = max(1, int(np.ceil(2.0 * correlation_time / timestep)))
-
-    # Generate indices
-    indices = np.arange(start_frame, n_frames, frame_spacing, dtype=np.int64)
-
-    return indices
-
-
-def _find_first_zero_crossing(acf: NDArray[np.float64]) -> int | None:
-    """Find index of first zero crossing in ACF."""
-    nonpositive = np.where(acf <= 0.0)[0]
-    if len(nonpositive) > 0:
-        return int(nonpositive[0])
-    return None
-
-
-def _fit_exponential_acf(
-    lags: NDArray[np.float64],
-    acf: NDArray[np.float64],
-    zero_crossing_idx: int | None,
-) -> float:
-    """Fit exponential decay to ACF and extract τ."""
-    # Only fit up to first zero crossing (or halfway)
-    if zero_crossing_idx is not None:
-        fit_end = zero_crossing_idx
-    else:
-        fit_end = len(acf) // 2
-
-    fit_end = max(3, fit_end)  # Need at least 3 points
-
-    # ACF = exp(-t/τ) => log(ACF) = -t/τ
-    # Linear fit: y = -x/τ where y = log(ACF), x = t
-    acf_positive = np.maximum(acf[:fit_end], 1e-10)  # Avoid log(0)
-    log_acf = np.log(acf_positive)
-
-    # Linear regression
-    try:
-        slope, _ = np.polyfit(lags[:fit_end], log_acf, 1)
-        tau = -1.0 / slope if slope < 0 else lags[fit_end]
-    except (np.linalg.LinAlgError, ValueError):
-        # Fallback to integration if fit fails
-        tau = lags[fit_end]
-
-    return float(max(tau, lags[1]))  # At least one timestep
-
-
-def _integrate_acf(
-    lags: NDArray[np.float64],
-    acf: NDArray[np.float64],
-    zero_crossing_idx: int | None,
-    dt: float,
-    n_frames: int | None = None,
-    use_finite_size_correction: bool = True,
-) -> float:
-    """Estimate τ by integrating ACF.
-
-    Parameters
-    ----------
-    lags : NDArray[np.float64]
-        Time lags
     acf : NDArray[np.float64]
-        Autocorrelation values
-    zero_crossing_idx : int | None
-        Index of first zero crossing
-    dt : float
-        Timestep
-    n_frames : int | None
-        Total number of frames (for finite-size correction)
-    use_finite_size_correction : bool
-        If True, apply (1-t/N) weighting per Chodera et al. 2007
+        Normalised autocorrelation function, ``acf[0] == 1``, indexed by lag
+        in frames.
+    n_frames : int
+        Number of samples the ACF was computed from, used for the (1 - t/N)
+        finite-size weight.
+    mintime : int
+        Lags below this are summed unconditionally, so that one noisy
+        negative value near lag zero cannot truncate the sum.
 
     Returns
     -------
     float
-        Estimated correlation time τ
+        Statistical inefficiency g, at least 1.0.
     """
-    # Integrate up to first zero crossing
-    if zero_crossing_idx is not None:
-        int_end = zero_crossing_idx + 1
-    else:
-        # Find where ACF drops below threshold
-        below_threshold = np.where(acf < 0.05)[0]
-        if len(below_threshold) > 0:
-            int_end = below_threshold[0] + 1
-        else:
-            int_end = len(acf)
+    values = np.asarray(acf, dtype=np.float64)
+    n = int(n_frames)
+    if values.size < 2 or n < 3:
+        return 1.0
 
-    # Apply finite-size correction if requested
-    if use_finite_size_correction and n_frames is not None and n_frames > 0:
-        # Weight ACF by (1 - t/N) per Chodera et al. 2007
-        # This accounts for reduced sample size at longer lags
-        lag_indices = np.arange(int_end)
-        weights = 1.0 - lag_indices / n_frames
-        weighted_acf = acf[:int_end] * weights
-    else:
-        weighted_acf = acf[:int_end]
+    lags = np.arange(1, values.size, dtype=np.float64)
+    tail = values[1:]
 
-    # Trapezoidal integration (trapezoid in numpy 2.0+, trapz in older versions)
-    trapz_func = getattr(np, "trapezoid", np.trapz)
-    tau = float(trapz_func(weighted_acf, lags[:int_end]))
+    # pymbar truncation rule: stop at the first non-positive C(t), t >= mintime
+    nonpositive = np.nonzero((tail <= 0.0) & (lags >= float(mintime)))[0]
+    end = int(nonpositive[0]) if nonpositive.size > 0 else tail.size
 
-    return max(tau, dt)  # At least one timestep
+    weights = np.maximum(1.0 - lags[:end] / float(n), 0.0)
+    g = 1.0 + 2.0 * float(np.sum(tail[:end] * weights))
+
+    return max(1.0, g)
 
 
 # =============================================================================
@@ -542,7 +446,7 @@ def _integrate_acf(
 
 def statistical_inefficiency(
     timeseries: ArrayLike,
-    mintime: int = 3,
+    mintime: int = DEFAULT_MINTIME,
     fft: bool = True,
 ) -> float:
     """Compute statistical inefficiency g directly from a timeseries.
@@ -589,14 +493,19 @@ def statistical_inefficiency(
     Notes
     -----
     This implementation follows the algorithm from Chodera et al. (2007)
-    J. Chem. Theory Comput. 3:26, with the finite-size correction.
+    J. Chem. Theory Comput. 3:26, as coded in pymbar's MIT-licensed
+    `timeseries` module, with the finite-size correction.
 
     For binary (0/1) data, the algorithm works correctly as the variance
     of a Bernoulli random variable is p(1-p).
 
     References
     ----------
-    Chodera et al. (2007) J. Chem. Theory Comput. 3:26
+    Chodera, J. D., Swope, W. C., Pitera, J. W., Seok, C., and Dill, K. A.
+        (2007). Journal of Chemical Theory and Computation, 3(1), 26-41.
+        doi:10.1021/ct0502864
+    Shirts, M. R., and Chodera, J. D. (2008). The Journal of Chemical
+        Physics, 129(12), 124105. doi:10.1063/1.2978177
     """
     x = np.asarray(timeseries, dtype=np.float64)
     n = len(x)
@@ -629,30 +538,12 @@ def statistical_inefficiency(
         for t in range(n):
             acf[t] = np.mean(delta_x[: n - t] * delta_x[t:]) / var
 
-    # Compute g = 1 + 2 * sum(C(t) * (1 - t/N))
-    # Start with g = 1 (for lag 0, C(0) = 1, but we don't count it in the sum)
-    g = 1.0
-
-    # Sum over positive lags with finite-size correction
-    for t in range(1, n):
-        # Finite-size correction factor
-        weight = 1.0 - float(t) / n
-
-        # Check for zero crossing (after mintime)
-        if t >= mintime and acf[t] <= 0:
-            break
-
-        g += 2.0 * acf[t] * weight
-
-    # Ensure g >= 1
-    g = max(1.0, g)
-
-    return float(g)
+    return _statistical_inefficiency_from_acf(acf, n, mintime=mintime)
 
 
 def statistical_inefficiency_multiple(
     timeseries_list: list[ArrayLike],
-    mintime: int = 3,
+    mintime: int = DEFAULT_MINTIME,
 ) -> float:
     """Compute statistical inefficiency from multiple timeseries of different lengths.
 
