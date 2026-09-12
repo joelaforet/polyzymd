@@ -82,6 +82,26 @@ def test_fragment_profile_matches_the_old_per_fragment_means(
     np.testing.assert_allclose(profile.values, run["fragment_rg_mean"], rtol=0.0, atol=ATOL)
 
 
+def test_the_first_frames_of_the_fragment_matrix_are_unchanged(
+    reference: dict[str, Any], observables: dict[str, Any]
+) -> None:
+    """Spot check the per-frame per-fragment values, not only their mean.
+
+    The profile averages over the window, so a per-fragment error that cancels
+    across frames would pass the profile test alone. The reference keeps the
+    first 20 frames of the old matrix for this.
+    """
+    run = reference["runs"]["Polymer Oligomers"]
+    universe = _universe(reference["topology"], reference["trajectory"])
+    window = reference["frames"]
+    group = universe.select_atoms(run["selection"])
+    computed = []
+    for _ in universe.trajectory[window["start"] : window["start"] + 20 : window["step"]]:
+        computed.append([fragment.radius_of_gyration() for fragment in group.fragments])
+
+    np.testing.assert_allclose(computed, run["fragment_rg_first_20_frames"], rtol=0.0, atol=ATOL)
+
+
 def test_fragment_reduction_matches_the_old_equal_weighted_series(
     reference: dict[str, Any], observables: dict[str, Any]
 ) -> None:
