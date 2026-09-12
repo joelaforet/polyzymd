@@ -137,7 +137,7 @@ first, so do not fan them out.
       the contract tests.
   - Branch: `analyses/observable-contract`
   - Owner:
-  - Status: in review fixes (design, `rg2` prototype, `--style contract` scaffold, `polyzymd-extend` skill; PR to follow)
+  - Status: in review (PR 112; `rg2` prototype, `--style contract` scaffold, `polyzymd-extend` skill)
 
 - [ ] Give the framework one persistence path with a framework-written identity
       block holding the polyzymd version, the plugin source hash, the settings
@@ -223,7 +223,7 @@ Joe's standing requirement is that this refactor reduces lines and complexity. E
 | 109 | `analyses/confidence-intervals` | 908 | 407 | +501 |
 | 110 | `analyses/confidence-interval-plots` | 632 | 80 | +552 |
 | 111 | `analyses/agent-protocol` | 1442 | 22 | +1420 |
-| tbd | `analyses/observable-contract` | 1144 | 6 | +1138 (rg reimplemented in 84 lines against 3,881; the eight ports that follow delete an estimated 10,000 to 12,000) |
+| 112 | `analyses/observable-contract` | 1357 | 6 | +1351 (rg reimplemented in 84 lines against 3,881; the eight ports that follow delete an estimated 10,000 to 12,000) |
 
 Figures are from `git diff --numstat <base>..<tip> -- 'src/**/*.py'` at the time each pull request was last reviewed; update the row when a branch changes.
 
