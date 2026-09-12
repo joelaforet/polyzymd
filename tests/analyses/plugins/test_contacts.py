@@ -416,6 +416,7 @@ class TestContactsMDAArtifacts:
             cutoff=4.5,
             grouping_mode="aa_class",
             raw_timestep_ps=1.0,
+            allow_single_fragment_fallback=True,
         )
         analysis.run(start=0, stop=2, step=1)
 
@@ -448,6 +449,7 @@ class TestContactsMDAArtifacts:
             cutoff=0.5,
             grouping_mode="none",
             raw_timestep_ps=1.0,
+            allow_single_fragment_fallback=True,
         )
         with patch("MDAnalysis.lib.distances.capped_distance", side_effect=_fake_capped_distance):
             analysis.run(start=0, stop=1, step=1)
@@ -465,6 +467,7 @@ class TestContactsMDAArtifacts:
             cutoff=0.1,
             grouping_mode="none",
             raw_timestep_ps=1.0,
+            allow_single_fragment_fallback=True,
         )
         analysis.run(start=0, stop=2, step=1)
 
@@ -483,7 +486,7 @@ class TestContactsMDAArtifacts:
         )
         from polyzymd.analyses.mda import FrameSelection, MDAAnalysisJob
 
-        settings = ContactsSettings()
+        settings = ContactsSettings(allow_single_fragment_fallback=True)
         analysis = build_contact_event_analysis(
             universe=_make_contact_universe(),
             protein_selection="chainid A",
@@ -491,6 +494,7 @@ class TestContactsMDAArtifacts:
             cutoff=4.5,
             grouping_mode="aa_class",
             raw_timestep_ps=1.0,
+            allow_single_fragment_fallback=True,
         )
         job = MDAAnalysisJob(
             name="contacts",
@@ -541,6 +545,7 @@ class TestContactsSparseEventUtilities:
         assert atom_to_res.tolist() == [0, 1]
 
     def test_fragment_lookup_falls_back_without_bond_topology(self):
+        """The single-fragment fallback stays available behind the opt-in flag."""
         from polyzymd.analyses.contacts._events import fragments_or_single
 
         mdanalysis_module = ModuleType("MDAnalysis")
@@ -563,10 +568,16 @@ class TestContactsSparseEventUtilities:
             {"MDAnalysis": mdanalysis_module, "MDAnalysis.exceptions": exceptions_module},
         ):
             atoms = _AtomGroup()
-            assert fragments_or_single(atoms, context="test", warnings=warnings) == [atoms]
+            assert fragments_or_single(
+                atoms,
+                context="test",
+                warnings=warnings,
+                allow_single_fragment_fallback=True,
+            ) == [atoms]
 
         assert warnings == [
-            "test: topology has no bond information; treating the selected polymer as one fragment"
+            "test: The topology carries no bond information. "
+            "Treating the whole selection as one fragment."
         ]
 
     def test_detection_fingerprint_records_cutoff_and_detection_policy(self):

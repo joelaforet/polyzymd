@@ -83,6 +83,7 @@ def build_contacts_jobs(
         cutoff=float(settings.cutoff),
         grouping_mode=settings.grouping,
         raw_timestep_ps=ctx.frame_selection.timestep_ps,
+        allow_single_fragment_fallback=settings.allow_single_fragment_fallback,
     )
     policy = MDAUniversePolicy(
         condition_label=ctx.replicate_context.condition.label,
@@ -96,6 +97,7 @@ def build_contacts_jobs(
             "polymer_types_filter": normalize_polymer_types(settings.polymer_types),
             "cutoff_angstrom": float(settings.cutoff),
             "grouping": settings.grouping,
+            "allow_single_fragment_fallback": settings.allow_single_fragment_fallback,
             "pbc_policy": CONTACTS_PBC_POLICY,
             "contact_semantics": CONTACT_SEMANTICS_VERSION,
             "implementation_version": CONTACTS_MDA_IMPLEMENTATION_VERSION,
@@ -120,11 +122,16 @@ def build_contact_event_analysis(
     cutoff: float,
     grouping_mode: str,
     raw_timestep_ps: float | None,
+    allow_single_fragment_fallback: bool = False,
 ) -> Any:
     """Build an ``AnalysisBase`` sparse residue-pair contact detector.
 
     MDAnalysis owns trajectory iteration. The analysis streams residue-pair
     contact starts and stops instead of allocating a frame-by-residue cube.
+    Polymer chain identity comes from bonded fragments, so a topology without
+    bonds raises
+    :class:`~polyzymd.analyses.exceptions.TopologyBondsMissingError` unless
+    ``allow_single_fragment_fallback`` is set.
     """
 
     from MDAnalysis.analysis.base import AnalysisBase
@@ -145,7 +152,8 @@ def build_contact_event_analysis(
                 self.polymer_atoms, self.polymer_residues
             )
             self.polymer_chain_indices, self.fragment_warnings = identify_polymer_chains(
-                self.polymer_atoms
+                self.polymer_atoms,
+                allow_single_fragment_fallback=allow_single_fragment_fallback,
             )
             self.protein_identity = [
                 residue_identity(residue, group=classify_residue(residue, self.grouping))
