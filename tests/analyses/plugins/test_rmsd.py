@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from polyzymd.analyses.contract import ObservableAggregate
-from polyzymd.analyses.exceptions import SelectionError
+from polyzymd.analyses.exceptions import ReplicateError, SelectionError
 from polyzymd.analyses.mda.frame_selection import FrameSelection
 from polyzymd.analyses.rmsd import (
     RMSD,
@@ -26,6 +26,7 @@ from tests.analyses.conftest import CROSS
 
 SCALES = (1.0, 1.2, 1.4, 1.6, 1.8)
 EXPECTED_MEAN = 0.4  # mean of |s - 1| over SCALES
+TAIL_OFFSETS = (0.0, 0.1, 0.2, 0.3, 0.4)
 
 
 def _growing_cross() -> Any:
@@ -38,6 +39,34 @@ def _growing_cross() -> Any:
     universe.add_TopologyAttr("masses", [1.0] * 4)
     cross = np.asarray(CROSS, dtype=np.float32)
     universe.load_new(np.stack([cross * scale for scale in SCALES]), format=MemoryReader)
+    return universe
+
+
+def _core_and_tail() -> Any:
+    """Rigid four-atom core plus a rigid three-atom tail that slides along z.
+
+    Superposing on the core leaves the transform at the identity, because the
+    core is the same in every frame and in the reference, so the deviation of
+    the tail is exactly how far it slid. Superposing on the tail instead carries
+    the tail onto itself and reports nothing.
+    """
+    import MDAnalysis as mda
+    import numpy as np
+    from MDAnalysis.coordinates.memory import MemoryReader
+
+    names = ["CA"] * 4 + ["TL"] * 3
+    universe = mda.Universe.empty(
+        len(names), n_residues=1, atom_resindex=[0] * len(names), trajectory=True
+    )
+    universe.add_TopologyAttr("masses", [1.0] * len(names))
+    universe.add_TopologyAttr("names", names)
+    cross = np.asarray(CROSS, dtype=np.float32)
+    tail = np.asarray([[0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [0.0, 1.0, 1.0]], dtype=np.float32)
+    frames = [
+        np.vstack([cross, tail + np.asarray([0.0, 0.0, offset], dtype=np.float32)])
+        for offset in TAIL_OFFSETS
+    ]
+    universe.load_new(np.stack(frames), format=MemoryReader)
     return universe
 
 
@@ -140,7 +169,38 @@ def test_duplicate_run_labels_are_rejected() -> None:
         RMSDSettings(runs=[_run(), _run()])
 
 
-def test_external_mode_needs_a_reference_file_that_exists() -> None:
-    """External mode fails at settings time rather than mid-trajectory."""
-    with pytest.raises(ValueError, match="existing PDB file"):
-        _run(reference_mode="external", reference_file="/nowhere/missing.pdb")
+def test_a_missing_external_reference_warns_then_fails_at_compute_time() -> None:
+    """A comparison file naming a cluster path validates off the cluster."""
+    with pytest.warns(UserWarning, match="not on this machine"):
+        run = _run(reference_mode="external", reference_file="/nowhere/missing.pdb")
+    universe = _growing_cross()
+
+    with pytest.raises(ReplicateError, match="does not exist"):
+        RMSD().compute(universe, _frames(universe), RMSDSettings(runs=[run]))
+
+
+def test_external_mode_still_needs_a_reference_file() -> None:
+    """The setting itself is required; only its presence on disk is deferred."""
+    with pytest.raises(ValueError, match="needs reference_file"):
+        _run(reference_mode="external")
+
+
+def test_the_alignment_selection_chooses_what_superposition_minimises() -> None:
+    """Superposing on the core measures the tail; superposing on the tail hides it."""
+    universe = _core_and_tail()
+    on_tail = _run(label="tail", selection="name TL", alignment_selection="name TL")
+    on_core = _run(label="tail", selection="name TL", alignment_selection="name CA")
+
+    settings = RMSDSettings(runs=[on_tail])
+    hidden = RMSD().compute(universe, _frames(universe), settings)[0]
+    settings = RMSDSettings(runs=[on_core])
+    measured = RMSD().compute(universe, _frames(universe), settings)[0]
+
+    assert hidden.values == pytest.approx([0.0] * len(TAIL_OFFSETS), abs=1e-6)
+    assert measured.values == pytest.approx(list(TAIL_OFFSETS), abs=1e-6)
+
+
+def test_two_labels_that_slug_the_same_are_rejected() -> None:
+    """Two runs whose names collide would overwrite each other in the sidecar."""
+    with pytest.raises(ValueError, match="unique observable names"):
+        RMSDSettings(runs=[_run(label="Core Frame"), _run(label="core_frame")])

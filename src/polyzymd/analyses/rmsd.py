@@ -7,9 +7,16 @@ two runs measured against different references under one name.
 
 The per-frame value is the minimised RMSD between the selection and the
 reference structure, computed by MDAnalysis with the quaternion characteristic
-polynomial solution of the Kabsch problem. The trajectory is superimposed on
-``alignment_selection`` first because the centroid and average references are
-defined in aligned space.
+polynomial solution of the Kabsch problem. MDAnalysis superimposes every frame
+itself, so no separate alignment pass runs over the trajectory.
+
+``alignment_selection`` chooses the atoms that superposition minimises over.
+When it equals ``selection``, the reported value is the minimised RMSD of those
+atoms. When it differs, each frame is superimposed on ``alignment_selection``
+and the deviation is reported for ``selection``, which is how a flexible loop
+or a bound ligand is measured against a rigid core. ``average`` mode is the one
+mode that superimposes the trajectory in place, because a mean structure means
+nothing until every frame shares a frame of reference.
 
 Aggregation over replicates, uncertainty, cross-condition tests, persistence and
 formatting belong to the framework.
@@ -115,13 +122,22 @@ class RMSDRunSettings(BaseModel):
 
     @model_validator(mode="after")
     def _check_external_reference(self) -> RMSDRunSettings:
-        """Require an existing PDB file in external mode."""
+        """Require a reference file in external mode, and warn if it is not here.
+
+        The file is read on the machine that runs the trajectory, so a missing
+        path is a warning at parse time and an error at compute time. That way a
+        comparison file naming a cluster path still validates on a laptop.
+        """
         if self.reference_mode != "external":
             return self
-        if self.reference_file is None or not Path(self.reference_file).exists():
-            raise ValueError(
-                f"run {self.label!r}: reference_mode='external' needs reference_file to name an "
-                f"existing PDB file, got {self.reference_file}"
+        if self.reference_file is None:
+            raise ValueError(f"run {self.label!r}: reference_mode='external' needs reference_file")
+        if not Path(self.reference_file).exists():
+            warnings.warn(
+                f"rmsd run {self.label!r}: reference_file {self.reference_file} is not on this "
+                "machine; it must exist where the analysis runs",
+                UserWarning,
+                stacklevel=2,
             )
         return self
 
@@ -133,11 +149,19 @@ class RMSDSettings(BaseModel):
 
     @field_validator("runs", mode="after")
     @classmethod
-    def _unique_labels(cls, runs: list[RMSDRunSettings]) -> list[RMSDRunSettings]:
-        """Reject two runs that would write one observable name."""
-        labels = [run.label for run in runs]
-        if len(set(labels)) != len(labels):
-            raise ValueError(f"rmsd run labels must be unique, got {labels}")
+    def _unique_observable_names(cls, runs: list[RMSDRunSettings]) -> list[RMSDRunSettings]:
+        """Reject two runs that would write one observable name.
+
+        Two labels that differ only in case or punctuation, such as ``Core
+        Frame`` and ``core_frame``, reach the same slug, and the second would
+        then overwrite the first in the sidecar.
+        """
+        names = [observable_name(run) for run in runs]
+        if len(set(names)) != len(names):
+            raise ValueError(
+                "rmsd run labels must give unique observable names, got "
+                f"{[run.label for run in runs]} for {names}"
+            )
         return runs
 
 
@@ -196,83 +220,131 @@ def _measure(universe: Any, frames: Any, run: RMSDRunSettings) -> Observable:
     from MDAnalysis.analysis.rms import RMSD as MDAnalysisRMSD
 
     start, stop, step = _window(universe, frames)
-    reference_frame = align_trajectory(
+    scope = _scope(universe, run)
+    reference = _reference_universe(universe, frames, run, scope, start, stop)
+    on_core = run.alignment_selection != run.selection
+    analysis = MDAnalysisRMSD(
         universe,
-        _alignment_config(run),
-        start_frame=start,
-        stop_frame=stop,
-        step_frame=step,
+        reference,
+        select=run.alignment_selection if on_core else run.selection,
+        groupselections=[run.selection] if on_core else None,
     )
-    group = _select(universe, run.selection, run.label)
-    reference = _reference_atoms(universe, frames, run, group, reference_frame)
-    analysis = MDAnalysisRMSD(group, reference=reference, select="all", ref_frame=0)
     analysis.run(start=start, stop=stop, step=step)
     return Observable(
         name=observable_name(run),
         kind="mean_of_timeseries",
         unit="A",
-        values=np.asarray(analysis.results.rmsd[:, 2], dtype=np.float64),
+        values=np.asarray(analysis.results.rmsd[:, 3 if on_core else 2], dtype=np.float64),
         higher_is_better=False,
     )
 
 
-def _alignment_config(run: RMSDRunSettings) -> AlignmentConfig:
-    """Alignment configuration for one run, with the 1-indexed frame the helper expects."""
-    return AlignmentConfig(
-        enabled=True,
-        reference_mode=run.reference_mode,
-        reference_frame=run.reference_frame + 1 if run.reference_mode == "frame" else None,
-        selection=run.alignment_selection,
-        centroid_selection=run.centroid_selection or run.alignment_selection,
-        reference_file=run.reference_file,
-    )
+def _scope(universe: Any, run: RMSDRunSettings) -> Any:
+    """Atoms the reference structure must carry, measured and superposed alike.
+
+    Also rejects a superposition group of fewer than three atoms, which leaves
+    the rotation undetermined and makes MDAnalysis return NaN.
+    """
+    measured = _select(universe, run.selection, run.label)
+    superposed = measured
+    if run.alignment_selection != run.selection:
+        superposed = _select(universe, run.alignment_selection, run.label)
+        measured = measured | superposed
+    if len(superposed) < 3:
+        raise SelectionError(
+            f"rmsd run {run.label!r}: superposition needs at least three atoms, but "
+            f"{run.alignment_selection!r} matches {len(superposed)}"
+        )
+    return measured
 
 
-def _reference_atoms(
-    universe: Any, frames: Any, run: RMSDRunSettings, group: Any, reference_frame: int | None
+def _reference_universe(
+    universe: Any, frames: Any, run: RMSDRunSettings, scope: Any, start: int, stop: int
 ) -> Any:
-    """Materialise the reference structure as a one-frame atom group."""
+    """Universe holding the reference structure of one run in a single frame."""
     import MDAnalysis as mda
     from MDAnalysis.coordinates.memory import MemoryReader
 
     if run.reference_mode == "external":
-        positions = _external_positions(run, group)
-    elif run.reference_mode == "average":
-        positions = _average_positions(universe, frames, group)
+        return _external_universe(universe, run)
+    if run.reference_mode == "average":
+        positions = _average_positions(universe, frames, run, scope, start, stop)
     else:
-        if reference_frame is None:
-            raise ReplicateError(
-                f"rmsd run {run.label!r}: alignment returned no reference frame for mode "
-                f"{run.reference_mode!r}"
+        universe.trajectory[_reference_frame(universe, run, start, stop)]
+        positions = scope.positions.astype(np.float64)
+    reference = mda.Merge(scope)
+    reference.load_new(positions[np.newaxis, :, :], format=MemoryReader)
+    return reference
+
+
+def _reference_frame(universe: Any, run: RMSDRunSettings, start: int, stop: int) -> int:
+    """Index of the frame that ``frame`` and ``centroid`` mode measure against."""
+    if run.reference_mode == "centroid":
+        from polyzymd.analyses.shared.centroid import find_centroid_frame
+
+        return int(
+            find_centroid_frame(
+                universe,
+                selection=run.centroid_selection or run.alignment_selection,
+                start_frame=start,
+                stop_frame=stop,
+                verbose=False,
             )
-        universe.trajectory[reference_frame]
-        positions = group.positions.astype(np.float64)
-    reference_universe = mda.Merge(group)
-    reference_universe.load_new(positions[np.newaxis, :, :], format=MemoryReader)
-    return reference_universe.atoms
+        )
+    if not 0 <= run.reference_frame < len(universe.trajectory):
+        raise ReplicateError(
+            f"rmsd run {run.label!r}: reference_frame {run.reference_frame} is outside the "
+            f"trajectory, which holds {len(universe.trajectory)} frames"
+        )
+    return int(run.reference_frame)
 
 
-def _external_positions(run: RMSDRunSettings, group: Any) -> np.ndarray:
-    """Reference positions read from the external PDB file of one run."""
+def _external_universe(universe: Any, run: RMSDRunSettings) -> Any:
+    """Universe of the external PDB, checked against the trajectory atom by atom."""
     import MDAnalysis as mda
 
-    reference = mda.Universe(str(run.reference_file))
-    atoms = _select(reference, run.selection, run.label, source=str(run.reference_file))
-    if len(atoms) != len(group):
-        raise SelectionError(
-            f"rmsd run {run.label!r}: selection {run.selection!r} matches {len(group)} atoms in "
-            f"the trajectory but {len(atoms)} in {run.reference_file}"
+    path = Path(str(run.reference_file))
+    if not path.exists():
+        raise ReplicateError(
+            f"rmsd run {run.label!r}: reference_file {path} does not exist on this machine"
         )
-    return atoms.positions.astype(np.float64)
+    reference = mda.Universe(str(path))
+    for selection in dict.fromkeys((run.alignment_selection, run.selection)):
+        atoms = _select(reference, selection, run.label, source=str(path))
+        expected = len(universe.select_atoms(selection))
+        if len(atoms) != expected:
+            raise SelectionError(
+                f"rmsd run {run.label!r}: selection {selection!r} matches {expected} atoms in "
+                f"the trajectory but {len(atoms)} in {path}"
+            )
+    return reference
 
 
-def _average_positions(universe: Any, frames: Any, group: Any) -> np.ndarray:
-    """Mean position of every selected atom over the aligned production window."""
-    total = np.zeros_like(group.positions, dtype=np.float64)
+def _average_positions(
+    universe: Any, frames: Any, run: RMSDRunSettings, scope: Any, start: int, stop: int
+) -> np.ndarray:
+    """Mean position of every atom in ``scope``, taken in a common frame of reference.
+
+    This is the one place the trajectory is superimposed in place. A mean taken
+    over frames that still carry rigid-body drift is not a structure.
+    """
+    align_trajectory(
+        universe,
+        AlignmentConfig(enabled=True, reference_mode="average", selection=run.alignment_selection),
+        start_frame=start,
+        stop_frame=stop,
+        step_frame=int(frames.step or 1),
+    )
+    total = np.zeros_like(scope.positions, dtype=np.float64)
     n_frames = 0
     for _ in iter_frames(universe, frames):
-        total += group.positions
+        total += scope.positions
         n_frames += 1
+    if n_frames == 0:
+        raise ReplicateError(
+            f"rmsd run {run.label!r}: the production window holds no frames, so there is no "
+            "average structure to measure against"
+        )
     return total / float(n_frames)
 
 
