@@ -1566,7 +1566,8 @@
       0.761938689369649
      ]
     }
-   }
+   },
+   "topology_md5": "33a8df0f7fbec8f3e58b3188bcb4899d"
   },
   "polymer_50_50": {
    "topology": "/home/joelaforet/Shirts-Lab-Linux/polyzymd-realdata/LipA_ResorufinButyrate_SBMA-EGMA_A50_B50_1000ns_363K_run1/solvated_system.pdb",
@@ -3120,7 +3121,8 @@
       0.7270363125700058
      ]
     }
-   }
+   },
+   "topology_md5": "345da22890196fbc61169e9a42f31e41"
   }
  }
 }

@@ -15,6 +15,13 @@ square nanometre, so every area is multiplied by 100 to reach square angstrom.
 Solvent and ions are excluded because they are never part of a target or a
 context selection.
 
+``chunk_size`` is not only a memory setting. ``mdtraj.shrake_rupley`` returns
+slightly different areas for the same frame depending on how many frames are in
+the array and where the frame sits in it, so two chunk sizes give per-frame
+totals that differ by up to about 0.1 percent. The setting therefore has to be
+held fixed across every condition of a comparison, and it is recorded in each
+observable's metadata so a mixed comparison can be spotted after the fact.
+
 References
 ----------
 Shrake, A. & Rupley, J. A. (1973). Environment and exposure to solvent of
@@ -36,7 +43,7 @@ from __future__ import annotations
 
 import tempfile
 import warnings
-from typing import Any, ClassVar, Sequence
+from typing import Any, ClassVar, NamedTuple, Sequence
 
 import numpy as np
 from pydantic import BaseModel, Field, model_validator
@@ -64,13 +71,21 @@ class SASARun(BaseModel):
 
     @model_validator(mode="after")
     def _reject_per_run_stride(self) -> SASARun:
-        """Warn that a per-context stride no longer selects frames."""
+        """Warn that a per-context stride no longer selects frames.
+
+        The warning is a ``UserWarning`` rather than a ``DeprecationWarning``
+        because ignoring it changes how much data is analysed: a config asking
+        for ``stride: 5`` now analyses five times the frames it used to, and
+        Python hides deprecation warnings from the people running the analysis.
+        """
         if self.stride != 1:
             warnings.warn(
-                f"sasa run {self.label!r} sets stride={self.stride}; the framework now resolves "
-                "one frame window for every observable, so the setting is ignored. Remove it and "
-                "set the window with --eq-time instead. It will be rejected in v1.4.",
-                DeprecationWarning,
+                f"sasa run {self.label!r} sets stride={self.stride}, which is ignored since "
+                "v1.3: the framework resolves one frame window for every observable, so this "
+                f"run now analyses every frame of the window instead of every {self.stride}th. "
+                "Remove the setting and choose the window with --eq-time. It is rejected in "
+                "v1.4.",
+                UserWarning,
                 stacklevel=2,
             )
         return self
@@ -141,6 +156,13 @@ class SASA:
             totals, residue_areas = _sasa_series(
                 universe, frames, context, target_local, groups, settings
             )
+            metadata = {
+                "target_selection": run.target_selection,
+                "context_selection": run.context_selection or run.target_selection,
+                "probe_radius_nm": settings.probe_radius_nm,
+                "n_sphere_points": settings.n_sphere_points,
+                "chunk_size": settings.chunk_size,
+            }
             observables.append(
                 Observable(
                     name=f"sasa_{run.label}",
@@ -148,6 +170,7 @@ class SASA:
                     unit="A^2",
                     values=totals,
                     higher_is_better=False,
+                    metadata=metadata,
                 )
             )
             observables.append(
@@ -155,9 +178,11 @@ class SASA:
                     name=f"relative_sasa_{run.label}",
                     kind="profile",
                     unit="fraction",
-                    index=[float(resid) for resid, _, _ in groups],
+                    index=[float(residue.resindex) for residue in groups],
+                    index_label="residue index",
                     values=np.mean(residue_areas, axis=0) / _max_asa(run.label, groups),
                     higher_is_better=False,
+                    metadata={**metadata, "residue_labels": [r.label for r in groups]},
                 )
             )
         return observables
@@ -181,13 +206,28 @@ def _check_selections(run: SASARun, target: Any, context: Any) -> None:
         )
 
 
-def _index_target(target: Any, context: Any) -> tuple[np.ndarray, list[tuple[int, str, list[int]]]]:
+class _TargetResidue(NamedTuple):
+    """One target residue and the context-local indices of its target atoms."""
+
+    resindex: int
+    resid: int
+    resname: str
+    chain: str
+    atoms: list[int]
+
+    @property
+    def label(self) -> str:
+        """Readable identity, ``chain:resid:resname``, for the profile axis."""
+        return f"{self.chain}:{self.resid}:{self.resname}"
+
+
+def _index_target(target: Any, context: Any) -> tuple[np.ndarray, list[_TargetResidue]]:
     """Locate the target inside its context and group it into residues.
 
-    Returns the context-local index of every target atom, and one
-    ``(resid, resname, context-local indices)`` entry per target residue in
-    trajectory order. Grouping keys on the topology residue index, so two
-    residues that share a chain, a residue ID and a residue name stay separate.
+    Returns the context-local index of every target atom and one residue entry
+    per target residue in trajectory order. Grouping keys on the topology
+    residue index, which is unique, so two residues that share a chain, a
+    residue ID and a residue name stay separate.
     """
     local = {int(index): position for position, index in enumerate(context.indices.tolist())}
     target_local = [local[int(index)] for index in target.indices.tolist()]
@@ -196,15 +236,30 @@ def _index_target(target: Any, context: Any) -> tuple[np.ndarray, list[tuple[int
         grouped.setdefault(int(resindex), []).append(position)
     residues = {int(residue.resindex): residue for residue in target.residues}
     return np.asarray(target_local), [
-        (int(residues[resindex].resid), str(residues[resindex].resname), positions)
+        _TargetResidue(
+            resindex=resindex,
+            resid=int(residues[resindex].resid),
+            resname=str(residues[resindex].resname),
+            chain=_chain_of(residues[resindex]),
+            atoms=positions,
+        )
         for resindex, positions in grouped.items()
     ]
 
 
-def _max_asa(label: str, groups: Sequence[tuple[int, str, list[int]]]) -> np.ndarray:
+def _chain_of(residue: Any) -> str:
+    """Chain identifier of a residue, falling back to the segment ID."""
+    for attribute in ("chainID", "chainid", "segid"):
+        value = getattr(residue, attribute, None)
+        if value:
+            return str(value)
+    return ""
+
+
+def _max_asa(label: str, groups: Sequence[_TargetResidue]) -> np.ndarray:
     """Maximum accessible area of every target residue, in square angstrom."""
-    maxima = [get_max_asa(resname) for _, resname, _ in groups]
-    unknown = sorted({resname for (_, resname, _), value in zip(groups, maxima) if value is None})
+    maxima = [get_max_asa(residue.resname) for residue in groups]
+    unknown = sorted({residue.resname for residue, value in zip(groups, maxima) if value is None})
     if unknown:
         raise ReplicateError(
             f"sasa run {label!r}: residues {unknown} have no maximum accessible area in the "
@@ -219,19 +274,21 @@ def _sasa_series(
     frames: Any,
     context: Any,
     target_local: np.ndarray,
-    groups: Sequence[tuple[int, str, list[int]]],
+    groups: Sequence[_TargetResidue],
     settings: SASASettings,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Per-frame total target area and per-frame per-residue area, both in A^2.
 
     Coordinates are buffered ``chunk_size`` frames at a time so a long window
-    does not hold the whole trajectory in memory. Chunking does not change the
-    numbers, because Shrake-Rupley treats every frame independently.
+    does not hold the whole trajectory in memory. The buffer is not free of
+    consequence: ``mdtraj.shrake_rupley`` gives the same frame slightly
+    different areas depending on the size of the array it arrives in, so the
+    chunk size has to match across the conditions being compared.
     """
     import mdtraj as md
 
     topology = _mdtraj_topology(context)
-    residue_indices = [positions for _, _, positions in groups]
+    residue_indices = [residue.atoms for residue in groups]
     totals: list[np.ndarray] = []
     residues: list[np.ndarray] = []
     buffer: list[np.ndarray] = []

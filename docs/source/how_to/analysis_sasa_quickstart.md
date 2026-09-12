@@ -143,7 +143,10 @@ PY
 ## Keep memory bounded on long trajectories
 
 SASA is CPU-intensive. `chunk_size` sets how many frames go to MDTraj at once,
-which bounds memory without changing the numbers.
+which bounds memory. It is not free of consequence: MDTraj returns slightly
+different areas for the same frame depending on the size of the array it
+arrives in, worth about 0.1 percent of the total, so use one value for every
+condition you intend to compare.
 
 ```yaml
 plugins:
@@ -158,7 +161,8 @@ plugins:
 
 Practical guidance:
 
-- Lower `chunk_size` if memory is tight.
+- Lower `chunk_size` if memory is tight, and then use the same value for every
+  condition of the comparison.
 - Lower `n_sphere_points` for an exploratory scan, then restore 960 for the
   final numbers.
 - Narrow the window with `--eq-time` rather than a per-run stride. A per-run
@@ -178,11 +182,12 @@ requests look right. SASA has a high execution-cost hint, so use the full HPC
 guide for scheduler options, monitoring, and troubleshooting:
 {doc}`hpc_execution`.
 
-## Generate plots after a completed run
+## Know why there are no plot files yet
 
 Figures are drawn from the observable kind in the contract runner, which is
 still being written. A `sasa` run today writes artifacts and the text report but
-no figures.
+no figures. A `plot_settings.sasa` block in an existing comparison file still
+loads and warns that it does nothing.
 
 ## Quick output checks
 

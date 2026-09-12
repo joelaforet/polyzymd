@@ -52,6 +52,38 @@ SETTINGS = SASASettings(
 )
 
 
+def make_cluster_universe(n_atoms: int = 30, n_frames: int = 40) -> Any:
+    """One overlapping cluster of carbons, repeated as identical frames.
+
+    Parameters
+    ----------
+    n_atoms : int, optional
+        Atoms in the cluster, by default 30.
+    n_frames : int, optional
+        Number of identical copies of the one frame, by default 40.
+
+    Returns
+    -------
+    MDAnalysis.Universe
+        Universe whose every frame holds the same coordinates.
+    """
+    import MDAnalysis as mda
+    from MDAnalysis.coordinates.memory import MemoryReader
+
+    universe = mda.Universe.empty(
+        n_atoms, n_residues=n_atoms, atom_resindex=list(range(n_atoms)), trajectory=True
+    )
+    universe.add_TopologyAttr("names", ["CA"] * n_atoms)
+    universe.add_TopologyAttr("types", ["C"] * n_atoms)
+    universe.add_TopologyAttr("elements", ["C"] * n_atoms)
+    universe.add_TopologyAttr("resnames", ["ALA"] * n_atoms)
+    universe.add_TopologyAttr("resids", list(range(1, n_atoms + 1)))
+    universe.add_TopologyAttr("segids", ["A"])
+    frame = np.random.default_rng(0).normal(scale=3.5, size=(n_atoms, 3)).astype(np.float32)
+    universe.load_new(np.stack([frame] * n_frames), format=MemoryReader)
+    return universe
+
+
 @pytest.fixture
 def two_residues() -> Any:
     """Two isolated carbon atoms in separate alanine residues."""
@@ -72,6 +104,9 @@ class TestObservables:
 
         assert total.unit == "A^2"
         assert total.kind == "mean_of_timeseries"
+        assert total.metadata["chunk_size"] == 100
+        assert total.metadata["probe_radius_nm"] == 0.14
+        assert total.metadata["n_sphere_points"] == 960
         np.testing.assert_allclose(total.values, [2.0 * ISOLATED_CARBON_A2] * 3, rtol=1e-6)
 
     def test_relative_profile_divides_by_the_tien_maximum(self, two_residues: Any) -> None:
@@ -85,7 +120,9 @@ class TestObservables:
 
         assert profile.kind == "profile"
         assert profile.unit == "fraction"
-        assert profile.index == [1.0, 2.0]
+        assert profile.index == [0.0, 1.0]
+        assert profile.index_label == "residue index"
+        assert profile.metadata["residue_labels"] == ["A:1:ALA", "A:2:ALA"]
         np.testing.assert_allclose(profile.values, [ISOLATED_CARBON_A2 / 121.0] * 2, rtol=1e-6)
 
     def test_protonation_variant_uses_its_parent_residue(self) -> None:
@@ -118,12 +155,60 @@ class TestLifecycle:
         assert total.n_replicates == 3
         assert total.mean == pytest.approx(2.0 * ISOLATED_CARBON_A2, rel=1e-6)
         assert total.sem == pytest.approx(0.0)
-        assert aggregates["relative_sasa_all"].index == [1.0, 2.0]
+        profile = aggregates["relative_sasa_all"]
+        assert profile.index == [0.0, 1.0]
+        assert profile.index_label == "residue index"
+        assert profile.metadata["chunk_size"] == 100
 
     def test_analysis_keeps_the_expensive_resource_hints(self) -> None:
         """The generated class carries the hints the orchestrator submits with."""
         assert SASAAnalysis.execution_cost_hint == "high"
         assert SASAAnalysis.slurm_resource_hint.mem == "8G"
+
+
+class TestChunkSize:
+    """chunk_size changes the numbers, so it is pinned and recorded."""
+
+    def test_chunking_changes_the_totals_by_about_a_tenth_of_a_percent(self) -> None:
+        """MDTraj gives one frame different areas depending on the array it is in.
+
+        ``mdtraj.shrake_rupley`` takes a different code path once the frame
+        array is long enough, so identical frames come back with slightly
+        different areas. The effect is real and small, and it is pinned here so
+        a future MDTraj release that removes it is noticed rather than quietly
+        changing every stored SASA number. If this test fails because the two
+        series are now equal, delete the warnings about chunk_size in the
+        module docstring and in the reference page.
+        """
+        from polyzymd.analyses.mda.frame_selection import FrameSelection
+
+        universe = make_cluster_universe()
+        frames = FrameSelection(start=0, stop=40, step=1)
+
+        def totals(chunk_size: int) -> np.ndarray:
+            settings = SASASettings(
+                runs=[SASARun(label="all", target_selection="all")], chunk_size=chunk_size
+            )
+            observables = SASA().compute(universe, frames, settings)
+            return np.asarray(next(o for o in observables if o.name == "sasa_all").values)
+
+        one_at_a_time, all_at_once = totals(1), totals(40)
+
+        assert not np.array_equal(one_at_a_time, all_at_once)
+        spread = np.max(np.abs(all_at_once - one_at_a_time)) / np.mean(one_at_a_time)
+        assert spread < 2e-3
+
+    def test_one_frame_per_chunk_is_self_consistent(self) -> None:
+        """With one frame per call, identical frames give identical areas."""
+        from polyzymd.analyses.mda.frame_selection import FrameSelection
+
+        settings = SASASettings(runs=[SASARun(label="all", target_selection="all")], chunk_size=1)
+        observables = SASA().compute(
+            make_cluster_universe(), FrameSelection(start=0, stop=40, step=1), settings
+        )
+        values = np.asarray(next(o for o in observables if o.name == "sasa_all").values)
+
+        assert len(np.unique(values)) == 1
 
 
 class TestInvalidInput:
@@ -169,7 +254,7 @@ class TestInvalidInput:
                 ]
             )
 
-    def test_per_run_stride_is_deprecated(self) -> None:
-        """A per-context stride no longer selects frames and says so."""
-        with pytest.deprecated_call(match="stride"):
+    def test_per_run_stride_warns_where_the_user_will_see_it(self) -> None:
+        """A per-context stride changes how much data is analysed, so it warns loudly."""
+        with pytest.warns(UserWarning, match="ignored since"):
             SASARun(label="a", target_selection="protein", stride=5)

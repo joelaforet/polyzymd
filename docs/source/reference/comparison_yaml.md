@@ -179,7 +179,7 @@ use CA-only selections such as `protein and name CA`.
 | `runs` | list | **(required)** | Contexts to measure, labels unique (see sub-fields) |
 | `probe_radius_nm` | float | `0.14` | MDTraj Shrake-Rupley probe radius in nanometers |
 | `n_sphere_points` | int | `960` | Number of sphere points for MDTraj Shrake-Rupley SASA |
-| `chunk_size` | int | `100` | Frames per MDTraj call, for memory management |
+| `chunk_size` | int | `100` | Frames per MDTraj call; bounds memory and shifts areas by about 0.1 percent, so hold it fixed across a comparison |
 
 Each entry in `runs`:
 

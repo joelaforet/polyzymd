@@ -18,6 +18,7 @@ without the data still passes.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -37,12 +38,19 @@ def _reference() -> dict[str, Any]:
 
 
 def _universe(entry: dict[str, Any]) -> Any:
-    """Universe for one frozen replicate, or a skip when the files are absent."""
+    """Universe for one frozen replicate, or a skip when the files are absent.
+
+    The topology md5 is checked before anything is measured, so a reference
+    that no longer describes the file on disk fails loudly instead of failing
+    as a wrong number.
+    """
     import MDAnalysis as mda
 
     topology, trajectory = Path(entry["topology"]), Path(entry["trajectory"])
     if not (topology.exists() and trajectory.exists()):
         pytest.skip(f"real trajectory not on this machine: {trajectory}")
+    digest = hashlib.md5(topology.read_bytes()).hexdigest()
+    assert digest == entry["topology_md5"], f"{topology} is not the frozen topology"
     universe = mda.Universe(str(topology), str(trajectory))
     assert universe.atoms.n_atoms == entry["n_atoms"]
     return universe
@@ -84,7 +92,12 @@ def test_sasa_matches_the_frozen_reference(dataset: str) -> None:
         assert total.unit == "A^2"
         assert len(total.values) == window["stop"] - window["start"]
         np.testing.assert_allclose(total.values, run["total_sasa_a2"], rtol=0, atol=TOLERANCE_A2)
-        assert profile.index == [float(resid) for resid in run["residue_resids"]]
+        labels = profile.metadata["residue_labels"]
+        assert [label.split(":")[1] for label in labels] == [
+            str(resid) for resid in run["residue_resids"]
+        ]
+        assert [label.split(":")[2] for label in labels] == run["residue_resnames"]
+        assert profile.index_label == "residue index"
         np.testing.assert_allclose(
             profile.values, run["residue_mean_relative_sasa"], rtol=0, atol=TOLERANCE_A2
         )
@@ -101,3 +114,5 @@ def test_reference_records_its_provenance() -> None:
         "n_sphere_points": 960,
         "chunk_size": 50,
     }
+    for entry in _reference()["datasets"].values():
+        assert len(entry["topology_md5"]) == 32

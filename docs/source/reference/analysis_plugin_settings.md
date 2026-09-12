@@ -168,7 +168,7 @@ DSSP requires complete residues; do not use CA-only selections such as
 | `runs` | `list[SASARun]` | required, non-empty, labels unique | Contexts to measure |
 | `probe_radius_nm` | `float` | `0.14` | MDTraj Shrake-Rupley probe radius (nm) |
 | `n_sphere_points` | `int` | `960` | MDTraj Shrake-Rupley sphere point count |
-| `chunk_size` | `int` | `100` | Frames per MDTraj call; bounds memory, does not change the numbers |
+| `chunk_size` | `int` | `100` | Frames per MDTraj call; bounds memory and shifts areas by about 0.1 percent, so hold it fixed across a comparison |
 
 `SASARun` entries in `runs`:
 

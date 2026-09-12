@@ -233,8 +233,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sphere count and the nm^2 to A^2 conversion are unchanged, and the per-frame
   totals reproduce the previous implementation exactly on real trajectories.  A
   selection matching no atoms now raises `SelectionError` instead of reporting
-  an area of zero, and a per-run `stride` is deprecated and ignored because the
-  framework resolves one frame window for every observable.
+  an area of zero.  A per-run `stride` is ignored because the framework resolves
+  one frame window for every observable, and it warns as a `UserWarning`
+  because ignoring it changes how many frames are analysed.  A
+  `plot_settings.sasa` block in an existing comparison file still loads and
+  warns that it does nothing.
+
+  The per-replicate sidecar now holds the per-frame series of each observable
+  and nothing else.  Four arrays the old sidecar wrote are gone: the per-atom
+  areas `atom_sasa_a2`, the per-frame per-residue areas `residue_sasa_a2` (the
+  observable keeps only the per-residue mean over the window), the `time_ns`
+  axis, and the residue identity arrays, whose content is now the
+  `residue_labels` list in the profile's metadata.
+
+  While porting it, `chunk_size` turned out not to be the pure memory setting
+  it was documented as.  `mdtraj.shrake_rupley` returns slightly different
+  areas for the same frame depending on how many frames are in the array it is
+  given, so two chunk sizes shift the totals by about 0.1 percent.  The
+  behaviour is unchanged from before the port, but the documentation that
+  called it free of consequence was wrong.  `chunk_size` must be held fixed
+  across the conditions of a comparison, it is recorded in each observable's
+  metadata, and a test pins the effect so a future MDTraj release that removes
+  it is noticed.
 
 - **The periodic box is computed first, from the protein and substrate alone.**
   `SolventBuilder.compute_box_vectors()` derives the cell from the solute

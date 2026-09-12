@@ -27,7 +27,7 @@ plugins:
 | `runs` | list | required | at least one entry; labels must be unique | Contexts to measure. |
 | `probe_radius_nm` | float | `0.14` | `> 0` | Shrake-Rupley probe radius in nanometers. |
 | `n_sphere_points` | int | `960` | `>= 100` | Test points on each atom sphere. Higher is more accurate and slower. |
-| `chunk_size` | int | `100` | `>= 1` | Frames sent to MDTraj per call. It bounds memory and does not change the numbers. |
+| `chunk_size` | int | `100` | `>= 1` | Frames sent to MDTraj per call. It bounds memory and it changes the numbers slightly, so hold it fixed across a comparison (see below). |
 
 ### `runs` entries
 
@@ -67,6 +67,20 @@ The project chain convention is A = protein, B = substrate, C = polymer, and
 D+ = solvent/ions/other. Solvent and ions are excluded from every calculation
 because they are never named in a target or context selection.
 
+## Why `chunk_size` has to match across conditions
+
+`mdtraj.shrake_rupley` returns slightly different areas for the same frame
+depending on how many frames are in the array it is given and where the frame
+sits in that array. Forty identical frames come back with three distinct totals.
+The effect is about 0.1 percent of the total area, which is smaller than any
+real difference this analysis is used to detect, but it is a systematic offset
+between two runs rather than noise that averages out.
+
+So `chunk_size` is part of the method, not only a memory knob. Use the same
+value for every condition of a comparison. The value used is written into each
+observable's `metadata`, so a comparison assembled from runs with different
+chunk sizes can be spotted after the fact.
+
 ## Observables
 
 Each configured run reports two observables.
@@ -74,7 +88,7 @@ Each configured run reports two observables.
 | Name | Kind | Unit | Description |
 |------|------|------|-------------|
 | `sasa_<label>` | `mean_of_timeseries` | `A^2` | Total area of the target in that context, one value per frame. |
-| `relative_sasa_<label>` | `profile` | `fraction` | Mean over frames of each target residue's area divided by the maximum accessible area of its residue type, indexed by residue ID. |
+| `relative_sasa_<label>` | `profile` | `fraction` | Mean over frames of each target residue's area divided by the maximum accessible area of its residue type. |
 
 The maximum accessible areas are the empirical tripeptide values of Tien et al.
 2013, held in `polyzymd.analyses.shared.aa_classification.MAX_ASA_TABLE`. A
@@ -82,7 +96,13 @@ target residue whose name is not in that table raises `ReplicateError`, so the
 per-residue profile applies to standard amino acids only.
 
 Residues are grouped by topology residue index, so two residues that share a
-chain, a residue ID and a residue name stay separate.
+chain, a residue ID and a residue name stay separate. The profile's `index` is
+that residue index and `index_label` is `"residue index"`, because a residue ID
+alone is not unique on a multi-chain target. The readable identities are in
+`metadata["residue_labels"]` as `chain:resid:resname`, one per index entry.
+
+Both observables carry the selections, the probe radius, the sphere count and
+the chunk size in `metadata`.
 
 ## Canonical output paths
 
