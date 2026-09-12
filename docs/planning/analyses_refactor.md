@@ -220,8 +220,8 @@ Joe's standing requirement is that this refactor reduces lines and complexity. E
 | 106 | `analyses/segment-cache-freshness` | 288 | 36 | +252 |
 | 107 | `analyses/cache-freshness` | 594 | 69 | +525 |
 | 108 | `analyses/pbc-alignment` | 570 | 135 | +435 |
-| 109 | `analyses/confidence-intervals` | 908 | 407 | +501 |
-| 110 | `analyses/confidence-interval-plots` | 632 | 80 | +552 |
+| 109 | `analyses/confidence-intervals` | 913 | 408 | +505 |
+| 110 | `analyses/confidence-interval-plots` | 660 | 87 | +573 |
 | 111 | `analyses/agent-protocol` | 1442 | 22 | +1420 |
 | 112 | `analyses/observable-contract` | 1357 | 6 | +1351 (rg reimplemented in 84 lines against 3,881; the eight ports that follow delete an estimated 10,000 to 12,000) |
 
