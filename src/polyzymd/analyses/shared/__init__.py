@@ -4,11 +4,8 @@ This package provides contributor-facing utilities that are broadly reusable
 across analysis plugins. Framework internals, CLI helpers, and plugin-private
 artifact helpers live with their owning packages.
 
-In particular, selectors and custom selections are not re-exported from this
-package root and should be imported from:
-
-- ``polyzymd.analyses.shared.selectors``
-- ``polyzymd.analyses.shared.selections``
+Custom selections are not re-exported from this package root; import them from
+``polyzymd.analyses.shared.selections``.
 
 Sub-modules
 -----------
