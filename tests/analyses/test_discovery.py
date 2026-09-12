@@ -550,5 +550,5 @@ class TestDiscoveryImportCost:
         )
         result = json.loads(completed.stdout.strip().splitlines()[-1])
 
-        assert len(result["names"]) == 9, result["names"]
+        assert len(result["names"]) == 10, result["names"]
         assert result["heavy"] == []
