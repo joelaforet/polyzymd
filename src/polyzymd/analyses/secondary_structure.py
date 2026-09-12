@@ -6,6 +6,12 @@ production frame with ``mdtraj.compute_dssp(simplified=True)`` and reports four
 strand, in coil, and unassigned) plus two ``profile`` observables (the fraction
 of the window each residue spends in helix and in strand).
 
+Only ``ss_helix`` and ``ss_strand`` are tested across conditions. The four
+fractions sum to one in every frame, so testing all four would put two
+dependent tests into the multiple-comparison family and weaken the adjusted
+p-values of the two that carry independent information. ``ss_coil`` and
+``ss_unassigned`` are still aggregated and reported with their uncertainty.
+
 ``unassigned`` counts residues mdtraj returns as ``NA`` because they carry no
 usable backbone or an unrecognised residue name. The previous implementation
 encoded those residues as coil, which inflated the coil fraction and hid a
@@ -76,7 +82,7 @@ class SecondaryStructure:
         "McGibbon et al. 2015, Biophys J 109:1528, doi:10.1016/j.bpj.2015.08.015",
     )
     #: DSSP holds the whole window of protein coordinates in memory.
-    slurm_resource_hint: ClassVar[SlurmResourceHint] = SlurmResourceHint(mem="16G")
+    slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(mem="16G")
 
     def compute(
         self, universe: Any, frames: Any, settings: SecondaryStructureSettings
@@ -99,6 +105,10 @@ class SecondaryStructure:
             ``ss_coil`` and ``ss_unassigned``, each a per-frame fraction of the
             selected residues, and two ``profile`` observables named
             ``helix_occupancy`` and ``strand_occupancy`` indexed by residue ID.
+            ``ss_helix`` and ``ss_strand`` declare ``higher_is_better=True``
+            and are the two that enter the cross-condition tests; ``ss_coil``
+            and ``ss_unassigned`` are ``tested=False`` because they are
+            determined by the other two.
 
         Raises
         ------
@@ -122,8 +132,12 @@ class SecondaryStructure:
                 name=f"ss_{label}",
                 kind="fraction",
                 unit="fraction",
-                values=(classes == char).mean(axis=1),
+                values=np.asarray((classes == char).mean(axis=1), dtype=np.float64).tolist(),
                 higher_is_better=True if label in ("helix", "strand") else None,
+                # Coil and unassigned are what the other two are not, so testing
+                # all four would add two dependent tests to the correction
+                # family. They are still aggregated and reported.
+                tested=label in ("helix", "strand"),
             )
             for char, label in DSSP_CLASSES.items()
         ]
@@ -132,8 +146,8 @@ class SecondaryStructure:
                 name=f"{label}_occupancy",
                 kind="profile",
                 unit="fraction",
-                values=(classes == char).mean(axis=0),
-                index=residue_ids,
+                values=np.asarray((classes == char).mean(axis=0), dtype=np.float64).tolist(),
+                index=[float(residue_id) for residue_id in residue_ids],
             )
             for char, label in (("H", "helix"), ("E", "strand"))
         ]

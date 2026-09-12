@@ -121,6 +121,41 @@ def test_every_observable_states_its_unit_and_kind(fixed_dssp: None) -> None:
         assert observables[name].unit == "fraction"
 
 
+def test_only_helix_and_strand_enter_the_correction_family(fixed_dssp: None) -> None:
+    """Coil and unassigned are determined by the other two, so they are not tested."""
+    observables = compute()
+
+    assert observables["ss_helix"].tested is True
+    assert observables["ss_strand"].tested is True
+    assert observables["ss_coil"].tested is False
+    assert observables["ss_unassigned"].tested is False
+    assert observables["ss_helix"].higher_is_better is True
+    assert observables["ss_strand"].higher_is_better is True
+
+
+def test_an_empty_production_window_raises(fixed_dssp: None) -> None:
+    """A window past the end of the trajectory is an error, not an empty observable."""
+    with pytest.raises(ReplicateError, match="selected no frames"):
+        SecondaryStructure().compute(
+            make_protein_universe(),
+            FrameSelection(start=10, stop=12, step=1),
+            SecondaryStructureSettings(),
+        )
+
+
+def test_a_topology_without_chain_ids_says_to_set_a_selection() -> None:
+    """GROMACS topologies lose chain IDs, so the chain default cannot resolve."""
+    universe = make_protein_universe()
+    universe.del_TopologyAttr("chainIDs")
+
+    with pytest.raises(ReplicateError, match="chainid A") as excinfo:
+        SecondaryStructure().compute(
+            universe, FrameSelection(start=0, stop=3, step=1), SecondaryStructureSettings()
+        )
+
+    assert "explicit selection" in (excinfo.value.hint or "")
+
+
 def test_explicit_selection_overrides_chain_id(fixed_dssp: None) -> None:
     """A configured selection replaces the chain convention."""
     observables = compute(SecondaryStructureSettings(chain_id="Z", selection="protein"))

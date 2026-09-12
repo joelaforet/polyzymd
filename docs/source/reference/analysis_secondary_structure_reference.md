@@ -62,6 +62,15 @@ mean over its frames, and the condition-level mean, SEM and 95 percent interval
 are computed across replicates. Profiles are averaged element-wise across
 replicates and are not tested pairwise.
 
+Only `ss_helix` and `ss_strand` enter the cross-condition tests. Because the
+four fractions sum to one, `ss_coil` and `ss_unassigned` are determined by the
+other two and carry no independent information, so they are declared
+`tested=False`: they are aggregated and reported with their mean, SEM and
+interval, but they produce no pairwise test and do not enlarge the
+Benjamini-Hochberg family. The family for one `polyzymd compare run` is every
+tested, non-profile observable of every plugin in the run, crossed with every
+non-control condition.
+
 `ss_unassigned` counts residues mdtraj cannot assign because they have no usable
 backbone or carry a residue name mdtraj does not know. MDAnalysis accepts many
 more residue names under the `protein` keyword than mdtraj does, so a non-zero

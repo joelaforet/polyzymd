@@ -18,6 +18,7 @@ asserts the sum anyway so it keeps holding on a window where it is not.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -53,6 +54,11 @@ def observables(reference: dict) -> dict:
             f"real trajectory data is not on this machine: {trajectory} is missing. "
             "Copy the run from the cluster to run the parity check."
         )
+    digest = hashlib.md5(topology.read_bytes()).hexdigest()  # noqa: S324
+    assert digest == reference["topology_md5"], (
+        f"the topology at {topology} is not the one the reference was frozen from "
+        f"({digest} instead of {reference['topology_md5']}); the parity numbers do not apply"
+    )
     universe = mda.Universe(str(topology), str(trajectory))
     window = reference["frames"]
     frames = FrameSelection(start=window["start"], stop=window["stop"], step=window["step"])

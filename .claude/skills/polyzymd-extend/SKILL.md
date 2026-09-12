@@ -49,6 +49,12 @@ The framework does all of that from `kind`.
 There is no distribution kind. Express a shape as a `profile` over histogram
 bins; the raw per-frame series is kept in the NPZ sidecar either way.
 
+If one observable is a function of others you already report, such as the last
+class of a set of fractions that sums to one, declare it `tested=False`. It is
+still aggregated and reported with its uncertainty, but it stays out of the
+pairwise tests and out of the Benjamini-Hochberg family, so it cannot weaken the
+adjusted p-values of the quantities that carry independent information.
+
 Every observable states a `unit`, and the scaffold placeholder `"TODO"` is
 rejected, so the generated tests fail until you replace it. A `profile` also
 states an `index`, one entry per value (residue IDs, bin centres).

@@ -451,6 +451,39 @@ class TestUnknownAnalysisDiagnostics:
         assert "discovered analysis type with PlotSettingsModel" in message
         assert "feature/mda-analysis-migration" not in message
 
+    def test_plot_settings_for_a_contract_analysis_loads_with_a_warning(
+        self, tmp_path: Path
+    ) -> None:
+        """A campaign file keeps loading after a plugin is ported to the contract.
+
+        A contract analysis has no PlotSettingsModel because the framework draws
+        its figures from the observable kind, so the block does nothing. It must
+        not fail validation for the whole campaign; it warns and is ignored.
+        """
+        yaml_path = tmp_path / "comparison.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "contract-plot-settings",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "plugins": {"secondary_structure": {}},
+                    "plot_settings": {
+                        "secondary_structure": {
+                            "generate_timeline": True,
+                            "diff_colormap": "RdBu_r",
+                        }
+                    },
+                }
+            )
+        )
+
+        with pytest.warns(DeprecationWarning, match="secondary_structure"):
+            config = ComparisonConfig.from_yaml(yaml_path)
+
+        assert getattr(config.plot_settings, "secondary_structure", None) is None
+
 
 class TestPluginSettingsCanonicalNames:
     """Plugin settings should use canonical analysis names only."""
