@@ -18,7 +18,7 @@ import click
 import yaml
 from pydantic import ValidationError
 
-from polyzymd.analyses.exceptions import PluginContractError
+from polyzymd.analyses.exceptions import AnalysisError, PluginContractError
 from polyzymd.cli._compare_utils import (
     common_compare_options,
     load_comparison_config,
@@ -515,7 +515,7 @@ def _output_validation_result(result: dict, output_format: str) -> None:
     required=False,
     default=None,
 )
-@common_compare_options
+@common_compare_options(formats=("table", "markdown", "json", "agent"))
 @click.option(
     "--recompute",
     is_flag=True,
@@ -552,6 +552,7 @@ def run_comparison(
         polyzymd compare run rmsf
         polyzymd compare run catalytic_triad --eq-time 10ns
         polyzymd compare run contacts --format markdown
+        polyzymd compare run rg --format agent
         polyzymd compare run --list
     """
     warn_if_wrong_pixi_env("compare run", ANALYSIS_PIXI_ENVS)
@@ -631,7 +632,16 @@ def run_comparison(
     click.echo()
 
     # Format and display
-    if output_format == "json":
+    if output_format == "agent":
+        from polyzymd.analyses.protocols import build_report
+
+        try:
+            formatted = build_report(
+                analysis, config, pipeline_result, equilibration=equilibration
+            ).to_agent_text()
+        except AnalysisError as e:
+            raise click.ClickException(f"Could not build the agent report: {e}") from e
+    elif output_format == "json":
         # JSON output: serialize directly, skip plugin formatter
         if hasattr(result, "model_dump_json"):
             formatted = result.model_dump_json(indent=2)

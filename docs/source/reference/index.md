@@ -74,6 +74,7 @@ Benchmarks <benchmarks>
 :maxdepth: 1
 
 Comparison YAML Schema <comparison_yaml>
+ProtocolReport Schema <analysis_protocol_report>
 Analysis Plugin Settings Reference <analysis_plugin_settings>
 Comparison and Plotting Reference <analysis_comparison_reference>
 RMSD Plugin Reference <analysis_rmsd_reference>
