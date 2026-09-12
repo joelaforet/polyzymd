@@ -49,6 +49,15 @@ The framework does all of that from `kind`.
 There is no distribution kind. Express a shape as a `profile` over histogram
 bins; the raw per-frame series is kept in the NPZ sidecar either way.
 
+The kind also picks the figures, so plots come free and you never write a
+plotter: the time-series kinds get a comparison bar chart and a per-frame panel,
+a `fraction` gets bars on a `[0, 1]` axis, and a `profile` gets a line per
+condition with a 95 percent band, or grouped bars when its index names at most
+30 categories. To change a figure, subclass `ContractPlotSettings` and attach it
+to the plugin as `PlotSettings: ClassVar[type[BasePlotSettings]] = MyPlotSettings`;
+leave it off and the plugin uses the default, whose fields are `error_bar`,
+`figsize`, `show_replicates` and `max_categories_for_bars`.
+
 Every observable states a `unit`, and the scaffold placeholder `"TODO"` is
 rejected, so the generated tests fail until you replace it. A `profile` also
 states an `index`, one entry per value (residue IDs, bin centres).

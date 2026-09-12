@@ -76,6 +76,7 @@ Benchmarks <benchmarks>
 Comparison YAML Schema <comparison_yaml>
 ProtocolReport Schema <analysis_protocol_report>
 Analysis Plugin Settings Reference <analysis_plugin_settings>
+Observable Contract Reference <analysis_contract_reference>
 Comparison and Plotting Reference <analysis_comparison_reference>
 RMSD Plugin Reference <analysis_rmsd_reference>
 Rg Plugin Reference <analysis_rg_reference>
