@@ -165,19 +165,19 @@ DSSP requires complete residues; do not use CA-only selections such as
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `runs` | `list[SASARunSettings]` | `[]` (must be non-empty) | SASA runs to compute |
+| `runs` | `list[SASARun]` | required, non-empty, labels unique | Contexts to measure |
 | `probe_radius_nm` | `float` | `0.14` | MDTraj Shrake-Rupley probe radius (nm) |
 | `n_sphere_points` | `int` | `960` | MDTraj Shrake-Rupley sphere point count |
-| `chunk_size` | `int` | `100` | Frames per chunk for SASA computation |
+| `chunk_size` | `int` | `100` | Frames per MDTraj call; bounds memory, does not change the numbers |
 
-`SASARunSettings` entries in `runs`:
+`SASARun` entries in `runs`:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `label` | `str` | required | Human-readable run label |
-| `target_selection` | `str` | required | Selection whose SASA is reported |
-| `context_selection` | `str \| null` | `null` | Environment/context selection for SASA computation (`null` defaults to `target_selection`) |
-| `stride` | `int` | `1` | Frame stride (1 means every frame) |
+| `label` | `str` | required | Context name used in the observable names |
+| `target_selection` | `str` | required | Selection whose area is reported |
+| `context_selection` | `str \| null` | `null` | Selection allowed to block the surface (`null` defaults to `target_selection`) |
+| `stride` | `int` | `1` | Deprecated since v1.3 and ignored; the framework resolves one frame window from `--eq-time` |
 
 ## `hydrogen_bonds`
 

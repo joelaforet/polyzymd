@@ -140,10 +140,10 @@ print(sorted(set(u.select_atoms("chainid C").residues.resnames)))
 PY
 ```
 
-## Use stride and chunking for long trajectories
+## Keep memory bounded on long trajectories
 
-SASA can be CPU-intensive. Increase `stride` to sample fewer frames, and adjust
-`chunk_size` to control memory use.
+SASA is CPU-intensive. `chunk_size` sets how many frames go to MDTraj at once,
+which bounds memory without changing the numbers.
 
 ```yaml
 plugins:
@@ -152,16 +152,18 @@ plugins:
       - label: "protein_with_polymer"
         target_selection: "protein"
         context_selection: "protein or chainid C"
-        stride: 5
     chunk_size: 50
+    n_sphere_points: 960
 ```
 
 Practical guidance:
 
-- Use `stride: 1` for final production analyses when feasible.
-- Use `stride: 5` or `stride: 10` for exploratory scans of long trajectories.
 - Lower `chunk_size` if memory is tight.
-- Keep the same stride across conditions when comparing means.
+- Lower `n_sphere_points` for an exploratory scan, then restore 960 for the
+  final numbers.
+- Narrow the window with `--eq-time` rather than a per-run stride. A per-run
+  `stride` is deprecated and ignored, so every observable shares one frame
+  window and the conditions stay comparable.
 
 ## Run on SLURM instead of locally
 
@@ -178,21 +180,9 @@ guide for scheduler options, monitoring, and troubleshooting:
 
 ## Generate plots after a completed run
 
-If you ran compute/compare without plots, generate plots from cached outputs:
-
-```bash
-polyzymd compare plot-all -f comparison.yaml
-```
-
-The most common SASA plot files are:
-
-- `sasa_comparison_<run>.png`
-- `sasa_normalized_comparison_<run>.png`
-- `sasa_timeseries_<run>.png`
-- `sasa_profile_<run>.png`
-
-See {doc}`../reference/analysis_sasa_reference` for plot meanings and output
-paths.
+Figures are drawn from the observable kind in the contract runner, which is
+still being written. A `sasa` run today writes artifacts and the text report but
+no figures.
 
 ## Quick output checks
 
@@ -204,7 +194,7 @@ ls analysis/<condition>/sasa/aggregated/
 ls comparison/sasa/
 ```
 
-Inspect condition summaries from the comparison result:
+Inspect the condition aggregates from the comparison result:
 
 ```bash
 python - <<'PY'
@@ -212,14 +202,19 @@ import json
 from pathlib import Path
 
 result = json.loads(Path("comparison/sasa/result.json").read_text())
-for condition in result["conditions"]:
-    print(condition["label"])
-    for run in condition["run_summaries"]:
-        print(f"  {run['label']}: {run['mean_sasa']:.1f} ± {run['sem_sasa']:.1f} A^2")
+for label, observables in result["payload"]["conditions"].items():
+    print(label)
+    for observable in observables:
+        if observable["kind"] == "mean_of_timeseries":
+            print(
+                f"  {observable['name']}: {observable['mean']:.1f}"
+                f" +/- {observable['sem']:.1f} {observable['unit']}"
+                f" (n={observable['n_replicates']} replicates)"
+            )
 PY
 ```
 
-Check direction labels for pairwise comparisons:
+Check the pairwise tests:
 
 ```bash
 python - <<'PY'
@@ -227,12 +222,12 @@ import json
 from pathlib import Path
 
 result = json.loads(Path("comparison/sasa/result.json").read_text())
-for comparison in result["pairwise_comparisons"]:
+for comparison in result["payload"]["comparisons"]:
     print(
-        comparison["run_label"],
-        comparison["condition_a"], "vs", comparison["condition_b"],
-        comparison["direction"],
-        f"{comparison['percent_change']:.1f}%",
+        comparison["name"],
+        comparison["control"], "vs", comparison["condition"],
+        f"delta {comparison['delta']:+.1f} {comparison['unit']}",
+        f"p_adj {comparison['p_adjusted']:.3g}",
     )
 PY
 ```
@@ -241,9 +236,10 @@ PY
 
 | Symptom | Fix |
 |---------|-----|
-| A run reports zero atoms | Test the `target_selection` and `context_selection` against the topology. |
-| SASA is too slow | Increase `stride`, lower `n_sphere_points` for exploration, or submit to SLURM. |
+| A run raises `SelectionError` for zero atoms | Test the `target_selection` and `context_selection` against the topology. |
+| SASA is too slow | Shorten the window with `--eq-time`, lower `n_sphere_points` for exploration, or submit to SLURM. |
 | Memory use is too high | Lower `chunk_size`. |
+| A run raises `ReplicateError` naming Tien | The target holds a residue with no maximum accessible area; restrict `target_selection` to standard amino acids. |
 | Monomer-specific run looks empty | Verify `resname` values and chain C membership in the topology. |
 | Changed selections but results did not change | Re-run with `--recompute`. |
 

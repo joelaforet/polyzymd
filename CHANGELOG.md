@@ -224,6 +224,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`sasa` is written against the observable contract.**  The plugin is one
+  module that returns observables, and the framework owns persistence,
+  aggregation, uncertainty, comparison and formatting.  Each configured run now
+  reports `sasa_<label>` in A^2 as a `mean_of_timeseries` and
+  `relative_sasa_<label>` as a per-residue `profile` against the Tien et al.
+  2013 maximum accessible areas.  The Shrake-Rupley call, the probe radius, the
+  sphere count and the nm^2 to A^2 conversion are unchanged, and the per-frame
+  totals reproduce the previous implementation exactly on real trajectories.  A
+  selection matching no atoms now raises `SelectionError` instead of reporting
+  an area of zero, and a per-run `stride` is deprecated and ignored because the
+  framework resolves one frame window for every observable.
+
 - **The periodic box is computed first, from the protein and substrate alone.**
   `SolventBuilder.compute_box_vectors()` derives the cell from the solute
   bounding box plus `2 * (polymers.packing.padding + solvent.box.padding)`

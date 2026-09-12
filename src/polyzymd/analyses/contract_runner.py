@@ -352,6 +352,9 @@ def contract_analysis(plugin: Any) -> type[ContractAnalysis]:
     ----------
     plugin : AnalysisProtocol
         Plugin class or instance with ``name``, ``Settings`` and ``compute``.
+        An optional ``execution_cost_hint`` or ``slurm_resource_hint`` on the
+        plugin is copied onto the generated class, so an expensive analysis can
+        still tell the orchestrator what it needs.
 
     Returns
     -------
@@ -385,17 +388,17 @@ def contract_analysis(plugin: Any) -> type[ContractAnalysis]:
         raise PluginContractError(f"{name}.Settings must be a pydantic BaseModel subclass")
     if not callable(instance.compute):
         raise PluginContractError(f"{name} must define compute(universe, frames, settings)")
-    return type(
-        f"{_class_prefix(name)}ContractAnalysis",
-        (ContractAnalysis,),
-        {
-            "name": name,
-            "Settings": settings_cls,
-            "plugin": instance,
-            "references": tuple(getattr(instance, "references", ())),
-            "__doc__": inspect.getdoc(instance) or f"Contract analysis {name}.",
-        },
-    )
+    attributes: dict[str, Any] = {
+        "name": name,
+        "Settings": settings_cls,
+        "plugin": instance,
+        "references": tuple(getattr(instance, "references", ())),
+        "__doc__": inspect.getdoc(instance) or f"Contract analysis {name}.",
+    }
+    for hint in ("execution_cost_hint", "slurm_resource_hint"):
+        if getattr(instance, hint, None) is not None:
+            attributes[hint] = getattr(instance, hint)
+    return type(f"{_class_prefix(name)}ContractAnalysis", (ContractAnalysis,), attributes)
 
 
 def _validated(observables: Any) -> list[Observable]:
