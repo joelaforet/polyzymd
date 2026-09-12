@@ -27,12 +27,25 @@ class TrajectoryLayout(BaseModel):
         Trajectory format identifier, for example ``"dcd"`` or ``"xtc"``.
     topology_format : str
         Topology format identifier, for example ``"pdb"`` or ``"gro"``.
+    segment_status : dict[int, str]
+        Status recorded for each production segment index by the engine's own
+        progress tracking. Empty when the engine does not track per-segment
+        status or when the run has no progress file.
+    excluded_segments : list[int]
+        Segment indices left out of ``trajectory_paths`` because they are not
+        complete. Empty when every discovered segment was included.
+    incomplete_segments : list[int]
+        Segment indices that were included even though they are not complete.
+        Non-empty only when the caller asked for incomplete segments.
     """
 
     topology_path: Path | None = None
     trajectory_paths: list[Path] = Field(default_factory=list)
     trajectory_format: str
     topology_format: str
+    segment_status: dict[int, str] = Field(default_factory=dict)
+    excluded_segments: list[int] = Field(default_factory=list)
+    incomplete_segments: list[int] = Field(default_factory=list)
 
 
 class EngineSubmitRequest(BaseModel):
@@ -190,7 +203,13 @@ class SimulationEngine(ABC):
         """
 
     @abstractmethod
-    def resolve_trajectory_layout(self, working_dir: Path, replicate: int) -> TrajectoryLayout:
+    def resolve_trajectory_layout(
+        self,
+        working_dir: Path,
+        replicate: int,
+        *,
+        require_complete: bool = True,
+    ) -> TrajectoryLayout:
         """Resolve trajectory files and topology for downstream analysis.
 
         Parameters
@@ -199,6 +218,9 @@ class SimulationEngine(ABC):
             Replicate working directory.
         replicate : int
             Replicate index.
+        require_complete : bool, optional
+            Leave out segments the engine records as still running or failed,
+            by default True. Engines without per-segment status ignore it.
 
         Returns
         -------
