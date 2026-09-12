@@ -204,7 +204,12 @@ Rankings:
 
 When studying enzyme catalysis across multiple conditions, the standard
 reference modes (`centroid`, `average`) use a **condition-specific** reference:
-each condition's trajectory determines its own reference structure.
+each condition's trajectory determines its own reference structure. Before
+2026-09-12 the `centroid` and `frame` modes superposed the trajectory onto an
+arbitrary frame instead of the requested one; the reported RMSD values were
+unaffected because RMSD superposes each frame onto its reference anyway, but a
+`centroid` run with a frame stride could pick a different reference frame and so
+should be recomputed.
 
 The `external` reference mode uses a **condition-independent** reference,
 typically a crystal structure representing a specific geometry of interest. RMSD
