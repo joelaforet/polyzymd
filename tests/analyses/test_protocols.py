@@ -574,6 +574,95 @@ class TestArtifactShape:
         assert report.pairwise[0].cohens_d == pytest.approx(-4.2)
         assert report.verdict[0].startswith("B larger mean_rg than A")
 
+    def test_observable_contract_payload_is_read(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A contract plugin's comparison payload reports its observables."""
+        from polyzymd.analyses.mda.artifacts import ComparisonArtifact
+        from polyzymd.config.comparison import ComparisonConfig
+
+        _install_toy(monkeypatch)
+        configs = _write_configs(tmp_path, ["A", "B"])
+        config = ComparisonConfig(
+            name="observable_case",
+            control="A",
+            conditions=[
+                {"label": "A", "config": configs[0], "replicates": [1, 2, 3]},
+                {"label": "B", "config": configs[1], "replicates": [1, 2, 3]},
+            ],
+        )
+
+        def aggregate(label: str, mean: float, values: list[float]) -> dict[str, Any]:
+            return {
+                "name": "rg_protein",
+                "kind": "mean_of_timeseries",
+                "unit": "A",
+                "n_replicates": 3,
+                "replicate_values": values,
+                "mean": mean,
+                "sem": 0.05,
+                "ci95_low": mean - 0.13,
+                "ci95_high": mean + 0.13,
+                "ci_method": "student_t",
+            }
+
+        artifact = ComparisonArtifact(
+            analysis_name="toy_protocol",
+            conditions=["A", "B"],
+            payload={
+                "conditions": {
+                    "A": [
+                        aggregate("A", 18.4, [18.4, 18.5, 18.3]),
+                        {
+                            "name": "rg_protein_fragments",
+                            "kind": "profile",
+                            "unit": "A",
+                            "n_replicates": 3,
+                            "profile_mean": [1.0, 2.0],
+                            "index": [0.0, 1.0],
+                        },
+                    ],
+                    "B": [aggregate("B", 18.71, [18.7, 18.8, 18.63])],
+                },
+                "comparisons": [
+                    {
+                        "name": "rg_protein",
+                        "kind": "mean_of_timeseries",
+                        "unit": "A",
+                        "control": "A",
+                        "condition": "B",
+                        "n_control": 3,
+                        "n_condition": 3,
+                        "delta": 0.31,
+                        "test": "welch_t",
+                        "p_value": 0.006,
+                        "p_adjusted": 0.006,
+                        "correction": "benjamini_hochberg",
+                        "cohens_d": 4.2,
+                        "significant": True,
+                        "testable": True,
+                    }
+                ],
+            },
+        )
+        pipeline_result = {
+            "comparison": artifact,
+            "aggregated": {},
+            "comparison_path": tmp_path / "comparison.json",
+            "plots": [],
+        }
+
+        report = build_report(ToyProtocolAnalysis(), config, pipeline_result)
+
+        assert report.run == "rg_protein"
+        assert report.all_runs == ["rg_protein"]
+        assert report.unit == "A"
+        assert [condition.label for condition in report.conditions] == ["A", "B"]
+        assert report.pairwise[0].test == "welch_t"
+        assert report.pairwise[0].delta == pytest.approx(0.31)
+        assert report.pairwise[0].direction == "higher"
+        assert report.pairwise[0].significant is True
+
 
 class _CustomSummary(BaseConditionSummary):
     """Condition summary for a plugin that overrides compare()."""
