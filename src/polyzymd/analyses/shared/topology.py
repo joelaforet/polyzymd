@@ -1,14 +1,12 @@
 """Topology bond checks shared by fragment-based observables.
 
-Fragment-based observables (Rg in fragment mode, contacts polymer chain
-identity) are only meaningful when the atoms they measure are connected by
-bonds. Two failure modes matter. A topology can carry no bonds at all, which is
-what MDAnalysis produces for a PDB whose atom serials run above 99999, and a
-topology can carry bonds for some molecules and not others, which is what
-happens when only the standard residues have usable CONECT records. The second
-case does not raise inside MDAnalysis; it silently yields one singleton
-fragment per atom. Both are checked here against the selection actually being
-measured, not against the universe as a whole.
+Rg in fragment mode and contacts chain identity mean nothing unless the atoms
+they measure are bonded. A topology can carry no bonds at all, which is what
+MDAnalysis produces for a PDB whose atom serials run above 99999, or bonds for
+some molecules and not others, which is what happens when only the standard
+residues have usable CONECT records. The second case raises nothing inside
+MDAnalysis and silently yields one singleton fragment per atom, so both are
+checked here against the selection being measured rather than the universe.
 
 References
 ----------
@@ -35,47 +33,18 @@ __all__ = [
 ]
 
 #: Largest share of a selection that may sit in single-atom fragments before the
-#: selection counts as unbonded. A real polymer selection has none. A protein
-#: whose CONECT records MDAnalysis refused has almost all of its atoms here, and
-#: a mixed protein-and-polymer selection in that state still reports a quarter of
-#: its atoms as singletons while producing fragment Rg values near zero, so an
-#: all-or-nothing test would let it through.
+#: selection counts as unbonded. A mixed protein-and-polymer selection on a
+#: topology whose protein lost its CONECT records reports a quarter of its atoms
+#: as singletons, so an all-or-nothing test would let it through.
 SINGLETON_ATOM_FRACTION_LIMIT = 0.05
 
 
-def _no_data_error() -> tuple[type[BaseException], ...]:
-    """Return the exception classes MDAnalysis raises for absent bond topology.
-
-    Returns
-    -------
-    tuple[type[BaseException], ...]
-        ``NoDataError`` when MDAnalysis is importable, plus ``AttributeError``
-        for objects that expose no bond attributes at all.
-    """
-
-    try:
-        from MDAnalysis.exceptions import NoDataError
-    except ImportError:  # pragma: no cover - MDAnalysis is a hard dependency here
-        return (AttributeError,)
-    return (NoDataError, AttributeError)
-
-
 def _missing_bond_reason(atom_group: AtomGroup) -> str | None:
-    """Explain why a selection has no usable bond topology.
+    """Name why a selection has no usable bonds, or return None when it has."""
 
-    Parameters
-    ----------
-    atom_group : AtomGroup
-        Selection that a fragment-based observable is about to measure.
+    from MDAnalysis.exceptions import NoDataError
 
-    Returns
-    -------
-    str or None
-        A sentence naming the problem, or ``None`` when the selection has
-        usable bonds.
-    """
-
-    errors = _no_data_error()
+    errors = (NoDataError, AttributeError)
     try:
         n_bonds = len(atom_group.bonds)
     except errors:

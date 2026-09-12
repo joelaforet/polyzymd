@@ -188,7 +188,8 @@ class TestSettings:
                 # alignment_frame not provided
             )
 
-    def test_alignment_config(self):
+    def test_alignment_fields_are_still_accepted(self):
+        """Deprecated alignment fields load and round-trip without being used."""
         from polyzymd.analyses.distances import DistancePairSettings, DistancesSettings
 
         s = DistancesSettings(
@@ -197,9 +198,9 @@ class TestSettings:
             alignment_selection="backbone",
             alignment_mode="centroid",
         )
-        cfg = s.get_alignment_config()
-        assert cfg.enabled is True
-        assert cfg.selection == "backbone"
+
+        assert s.align_trajectory is True
+        assert s.alignment_selection == "backbone"
 
     def test_serialization_roundtrip(self):
         from polyzymd.analyses.distances import DistancePairSettings, DistancesSettings

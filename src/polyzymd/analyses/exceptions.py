@@ -58,16 +58,8 @@ class TopologyBondsMissingError(AnalysisError):
     ) -> None:
         """Build a bond-requirement error naming the topology and the fixes.
 
-        Parameters
-        ----------
-        context : str
-            What needed the bonds, for example "Rg run 'polymer' in fragment mode".
-        n_atoms : int
-            Number of atoms in the selection that carries no usable bonds.
-        topology : object or None, optional
-            Topology file path, when it is known.
-        detail : str or None, optional
-            Extra text appended to the message, such as an underlying error.
+        ``context`` says what needed the bonds, ``n_atoms`` is the size of the
+        selection that has none, and ``detail`` is appended to the message.
         """
         self.context = context
         self.n_atoms = int(n_atoms)

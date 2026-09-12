@@ -55,8 +55,6 @@ class _TrajectoryLoaderLike(Protocol):
 
 LoaderFactory = Callable[..., _TrajectoryLoaderLike]
 
-TRAJECTORY_VARIANTS: tuple[str, ...] = ("centered", "nojump", "raw")
-
 GRO_CHAIN_ID_WARNING_TEMPLATE = (
     "Using GRO topology {path} — GRO files may not preserve chain identifiers. "
     "Chain-based selections (chainid A/B/C) used by analysis plugins may be unreliable. "
@@ -65,23 +63,11 @@ GRO_CHAIN_ID_WARNING_TEMPLATE = (
 
 
 def trajectory_variant(paths: "Sequence[Path]") -> str | None:
-    """Name the trajectory variant the engine selected.
+    """Name which GROMACS trajectory variant the engine picked, if any.
 
-    GROMACS runs write post-processed trajectories next to the raw one, and the
-    engine prefers the whole-molecule centered file when it exists. The choice
-    changes what the coordinates mean, so it belongs in provenance rather than
-    only in a filename.
-
-    Parameters
-    ----------
-    paths : sequence of Path
-        Trajectory files resolved for one replicate.
-
-    Returns
-    -------
-    str or None
-        ``"centered"``, ``"nojump"``, ``"raw"``, or ``None`` when no trajectory
-        was resolved.
+    The engine prefers the whole-molecule centered file when the run wrote one,
+    and that changes what the coordinates mean, so the choice belongs in
+    provenance rather than only in a filename.
     """
     names = [Path(path).name.lower() for path in paths]
     if not names:
@@ -284,36 +270,13 @@ class UniverseProvider:
         return universe
 
     def _pbc_kwargs(self, policy: str) -> dict[str, Any]:
-        """Return the periodic boundary keyword to forward to the loader.
-
-        The keyword is forwarded only when it differs from the loader default,
-        so loaders that predate the option keep working.
-
-        Parameters
-        ----------
-        policy : str
-            Periodic boundary policy resolved for this call.
-
-        Returns
-        -------
-        dict[str, Any]
-            Either an empty mapping or ``{"pbc_policy": policy}``.
-        """
+        """Forward the policy only when it differs from the loader default."""
 
         return {} if policy == "as_is" else {"pbc_policy": policy}
 
     def _record_universe_facts(self, replicate: int, universe: Any, policy: str) -> None:
-        """Add loaded-universe facts to the cached provenance for a replicate.
+        """Add what loading established to the cached provenance."""
 
-        Parameters
-        ----------
-        replicate : int
-            Replicate index whose provenance is updated.
-        universe : Any
-            Universe returned by the loader.
-        policy : str
-            Periodic boundary policy that was applied.
-        """
         from polyzymd.analyses.shared.topology import topology_bond_source
 
         provenance = self._provenance_cache.get(replicate)

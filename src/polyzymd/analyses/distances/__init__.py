@@ -269,27 +269,6 @@ class DistancesSettings(BaseModel):
         """Get per-pair thresholds, falling back to the global threshold."""
         return [p.threshold if p.threshold is not None else self.threshold for p in self.pairs]
 
-    def get_alignment_config(self) -> Any:
-        """Build an ``AlignmentConfig`` from these settings.
-
-        Kept so existing callers and configuration files keep working. The
-        distances compute path no longer aligns, so nothing in this plugin
-        consumes the returned configuration.
-
-        Returns
-        -------
-        AlignmentConfig
-            Configuration for trajectory alignment.
-        """
-        from polyzymd.analyses.shared.alignment import AlignmentConfig
-
-        return AlignmentConfig(
-            enabled=self.align_trajectory,
-            reference_mode=self.alignment_mode,
-            reference_frame=self.alignment_frame,
-            selection=self.alignment_selection,
-        )
-
 
 # ---------------------------------------------------------------------------
 # Plugin

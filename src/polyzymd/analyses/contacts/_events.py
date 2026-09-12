@@ -210,18 +210,24 @@ def identify_polymer_chains(
     Raises
     ------
     TopologyBondsMissingError
-        If the topology has no bonds and the fallback is not enabled.
+        If the selected atoms have no bonds and the fallback is not enabled.
     """
+
+    from polyzymd.analyses.shared.topology import require_topology_bonds
 
     query_residues = query_atoms.residues
     chain_indices = np.zeros(len(query_residues), dtype=np.int64)
     warnings: list[str] = []
-    fragments = fragments_or_single(
-        query_atoms.atoms,
+    atoms = query_atoms.atoms
+    fragments, fallback_reason = require_topology_bonds(
+        atoms,
         context="contacts polymer chain detection",
-        warnings=warnings,
-        allow_single_fragment_fallback=allow_single_fragment_fallback,
+        topology_path=getattr(getattr(atoms, "universe", None), "filename", None),
+        allow_fallback=allow_single_fragment_fallback,
     )
+    if fallback_reason is not None:
+        LOGGER.warning("%s", fallback_reason)
+        warnings.append(fallback_reason)
     residue_lookup = {
         unique_residue_key(residue): idx for idx, residue in enumerate(query_residues)
     }
@@ -231,53 +237,6 @@ def identify_polymer_chains(
             if query_idx is not None:
                 chain_indices[query_idx] = chain_idx
     return chain_indices, warnings
-
-
-def fragments_or_single(
-    atom_group: Any,
-    *,
-    context: str,
-    warnings: list[str] | None = None,
-    allow_single_fragment_fallback: bool = False,
-) -> list[Any]:
-    """Return bonded fragments, or raise when the selection has no bonds.
-
-    Parameters
-    ----------
-    atom_group : Any
-        MDAnalysis atom group whose fragments are requested.
-    context : str
-        What needed the fragments, used in the warning and error text.
-    warnings : list of str or None, optional
-        Collector for the fallback warning, when the fallback is enabled.
-    allow_single_fragment_fallback : bool, optional
-        Return the whole group as one fragment instead of raising, by default
-        False.
-
-    Returns
-    -------
-    list[Any]
-        One entry per bonded fragment.
-
-    Raises
-    ------
-    TopologyBondsMissingError
-        If the selected atoms have no bonds and the fallback is not enabled.
-    """
-
-    from polyzymd.analyses.shared.topology import require_topology_bonds
-
-    fragments, fallback_reason = require_topology_bonds(
-        atom_group,
-        context=context,
-        topology_path=getattr(getattr(atom_group, "universe", None), "filename", None),
-        allow_fallback=allow_single_fragment_fallback,
-    )
-    if fallback_reason is not None:
-        LOGGER.warning("%s", fallback_reason)
-        if warnings is not None:
-            warnings.append(fallback_reason)
-    return fragments
 
 
 def _residue_index(residue: Any) -> int:

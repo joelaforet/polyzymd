@@ -546,7 +546,7 @@ class TestContactsSparseEventUtilities:
 
     def test_fragment_lookup_falls_back_without_bond_topology(self):
         """The single-fragment fallback stays available behind the opt-in flag."""
-        from polyzymd.analyses.contacts._events import fragments_or_single
+        from polyzymd.analyses.shared.topology import require_topology_bonds
 
         mdanalysis_module = ModuleType("MDAnalysis")
         exceptions_module = ModuleType("MDAnalysis.exceptions")
@@ -559,26 +559,25 @@ class TestContactsSparseEventUtilities:
 
         class _AtomGroup:
             @property
-            def fragments(self):
+            def bonds(self):
                 raise NoDataError("No bond information")
 
-        warnings = []
         with patch.dict(
             "sys.modules",
             {"MDAnalysis": mdanalysis_module, "MDAnalysis.exceptions": exceptions_module},
         ):
             atoms = _AtomGroup()
-            assert fragments_or_single(
+            fragments, fallback_reason = require_topology_bonds(
                 atoms,
                 context="test",
-                warnings=warnings,
-                allow_single_fragment_fallback=True,
-            ) == [atoms]
+                allow_fallback=True,
+            )
 
-        assert warnings == [
+        assert fragments == [atoms]
+        assert fallback_reason == (
             "test: The topology carries no bond information. "
             "Treating the whole selection as one fragment."
-        ]
+        )
 
     def test_detection_fingerprint_records_cutoff_and_detection_policy(self):
         from polyzymd.analyses.contacts import ContactsSettings

@@ -1484,23 +1484,10 @@ def _remove_stale_path(path: Path) -> None:
 def _no_conditions_message(
     analysis_name: str, failures: Sequence[tuple[str, BaseException]]
 ) -> str:
-    """Build the error text raised when no condition survived analysis.
+    """Quote the shared cause when every condition failed the same way.
 
-    When every condition failed the same way, the first message is quoted so a
-    user sees the actual cause instead of only the summary line. Typed analysis
-    errors carry their own remedy text, which is what makes this worth quoting.
-
-    Parameters
-    ----------
-    analysis_name : str
-        Name of the analysis plugin.
-    failures : sequence of tuple of str and BaseException
-        Condition label and exception for each failed condition.
-
-    Returns
-    -------
-    str
-        Error message for the raised ``ValueError``.
+    Typed analysis errors carry their own remedy text, so a user sees what to do
+    instead of only the summary line.
     """
 
     base = f"{analysis_name}: no conditions succeeded analysis."

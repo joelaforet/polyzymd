@@ -907,34 +907,13 @@ def apply_pbc_policy(
 
     ``"as_is"`` leaves coordinates exactly as the trajectory stores them, which
     is what every PolyzyMD analysis did before this option existed.
-    ``"make_whole"`` registers an MDAnalysis ``unwrap`` transformation on the
-    protein and polymer selection so molecules split across a periodic boundary
-    are rejoined before any measurement reads their coordinates. Unwrapping
-    walks the bond graph, so a topology without bonds cannot be made whole.
-
-    Parameters
-    ----------
-    universe : Universe
-        Loaded MDAnalysis universe.
-    pbc_policy : str, optional
-        Either ``"as_is"`` (default) or ``"make_whole"``.
-    topology : Path or str or None, optional
-        Topology path used in error messages.
-    selection : str, optional
-        Selection unwrapped by ``"make_whole"``, by default everything that is
-        not water or a monatomic ion.
-
-    Returns
-    -------
-    str
-        The policy that was applied.
-
-    Raises
-    ------
-    ValueError
-        If ``pbc_policy`` is not a known policy.
-    TopologyBondsMissingError
-        If ``"make_whole"`` is requested and the topology has no bonds.
+    ``"make_whole"`` registers an MDAnalysis ``unwrap`` transformation on
+    ``selection``, everything that is not water or a monatomic ion by default,
+    so molecules split across a periodic boundary are rejoined before any
+    measurement reads them. Unwrapping walks the bond graph, so it raises
+    ``TopologyBondsMissingError`` when those atoms have no bonds. ``topology``
+    is named in that message. Returns the policy that was applied, and raises
+    ``ValueError`` for an unknown one.
     """
 
     from polyzymd.analyses.shared.topology import require_topology_bonds
