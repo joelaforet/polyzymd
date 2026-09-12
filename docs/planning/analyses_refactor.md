@@ -28,7 +28,7 @@ one item rather than the plan.
       the commit gate hook, and add `CITATION.cff` and the references page.
   - Branch: `analyses/infra`
   - Owner:
-  - Status: in review
+  - Status: in review (PR 105)
 
 - [ ] Make `estimate_correlation_time` a thin wrapper around
       `statistical_inefficiency()`, remove the `max(tau, dt)` floor, and re-pin
@@ -40,34 +40,34 @@ one item rather than the plan.
       exists.
   - Branch: `analyses/correlation-time`
   - Owner:
-  - Status: not started
+  - Status: in review (PR 103)
 
 - [ ] Restrict hydrogen bond donors and acceptors to N and O, with S optional,
       and record the effective selections in provenance.
   - Branch: `analyses/hbond-selections`
   - Owner:
-  - Status: not started
+  - Status: in review (PR 102)
 
 - [ ] Thread `ttest_method` and `posthoc_method` through every plugin
       `compare()`, add the Benjamini-Hochberg correction to distances, and
       define the correction family once so the ANOVA applies it consistently.
   - Branch: `analyses/test-threading`
   - Owner:
-  - Status: not started
+  - Status: in review (PR 104)
 
 - [ ] Add `ci95_low`, `ci95_high`, `ci_method` and `unit` to every metric model,
       label every error bar and band with what it means and over how many
       replicates, and add an `uncertainty` block to every artifact.
   - Branch: `analyses/confidence-intervals`
   - Owner:
-  - Status: not started
+  - Status: in review (PR 109, data layer; PR 110 `analyses/confidence-interval-plots` stacked on it)
 
 - [ ] Consult the per-segment status in `progress.json` before loading, and
       refuse a cached replicate whose recorded size or mtime differs from what
       is on disk.
   - Branch: `analyses/segment-cache-freshness`
   - Owner:
-  - Status: not started
+  - Status: in review (PR 106; PR 107 `analyses/cache-freshness` and PR 108 `analyses/pbc-alignment` stacked on it)
 
 - [ ] Declare a periodic boundary policy on load, record it, and fail rather
       than warn when fragment mode or chain identity needs bonds that are
@@ -75,7 +75,7 @@ one item rather than the plan.
       the minimum image convention when the frames are aligned.
   - Branch: `analyses/pbc-alignment`
   - Owner:
-  - Status: not started
+  - Status: in review (PR 108, stacked on PR 106)
 
 ## Phase 1, agent protocol (v1.3.0)
 
@@ -84,7 +84,7 @@ one item rather than the plan.
       Fix the seaborn import.
   - Branch: `analyses/agent-protocol`
   - Owner:
-  - Status: not started
+  - Status: in progress (stacked on `analyses/confidence-intervals`)
 
 - [ ] Add `load(config, replicate, window=...)` and
       `load_files(topology, trajectories, dt_ps=...)` returning a
@@ -137,7 +137,7 @@ first, so do not fan them out.
       the contract tests.
   - Branch: `analyses/observable-contract`
   - Owner:
-  - Status: not started
+  - Status: in progress (design and `rg2` prototype)
 
 - [ ] Give the framework one persistence path with a framework-written identity
       block holding the polyzymd version, the plugin source hash, the settings
@@ -206,3 +206,25 @@ The audit asks that these keep their current shape through the collapse:
 `mda/universe.py`, `shared/inferential_statistics.py`,
 `shared/autocorrelation.py` after the estimator fix, the internals of
 `shared/loader.py`, `discovery.py` and `exceptions.py`.
+
+## Source-line ledger
+
+Joe's standing requirement is that this refactor reduces lines and complexity. Every pull request reports its net change in source lines (files under `src/`, tests and docs excluded) and the reviewer blocks unexplained growth. Correctness fixes carry tests and a few new fields, so Phase 0 grows the source; the reduction comes from the Observable contract and the plugin ports that follow it, which delete the per-plugin aggregation, comparison, formatting and plotting stacks.
+
+| PR | Branch | Source added | Source removed | Net |
+|---|---|---|---|---|
+| 105 | `analyses/infra` | 0 | 0 | 0 |
+| 102 | `analyses/hbond-selections` | 304 | 35 | +269 |
+| 103 | `analyses/correlation-time` | 263 | 288 | -25 |
+| 104 | `analyses/test-threading` | 857 | 352 | +505 |
+| 106 | `analyses/segment-cache-freshness` | 288 | 36 | +252 |
+| 107 | `analyses/cache-freshness` | 594 | 69 | +525 |
+| 108 | `analyses/pbc-alignment` | 570 | 135 | +435 |
+| 109 | `analyses/confidence-intervals` | 908 | 407 | +501 |
+| 110 | `analyses/confidence-interval-plots` | 632 | 80 | +552 |
+
+Figures are from `git diff --numstat <base>..<tip> -- 'src/**/*.py'` at the time each pull request was last reviewed; update the row when a branch changes.
+
+## Validation on real data
+
+The LipA 363 K campaign (`/projects/jola3134/Enzyme_Immobilization/polyzymd_sims_config_and_run_files/LipA_363K_REDO`, six conditions, five replicates) was used read-only to check the Phase 0 branches against real artifacts and topologies. In the 50:50 replicate 1 hydrogen bond artifact only 0.8 percent of 16.1 million recorded events had nitrogen or oxygen at both ends, and the reported protein-polymer count of 132.9 per frame falls to 12.4 when carbon and self-paired hydrogen events are removed. Every campaign RMSF profile was computed from 4 of 2,000 production frames. Polymer fragment-mode Rg used 38 real fragments with no fallback. Real runs keep one `progress.json` at the run root and interrupted segments are the normal restart case. The full notes are kept with the audit outside the repository.
