@@ -172,6 +172,10 @@ example `selection: "protein"`, `selection: "protein and resid 1:269"`, or
 `selection: "protein and resindex 0:268"`. DSSP needs complete residues; do not
 use CA-only selections such as `protein and name CA`.
 
+The plugin reports the per-frame fraction of residues in helix, strand, coil and
+unassigned, and the per-residue helix and strand occupancy over the window. See
+{doc}`analysis_secondary_structure_reference` for the full list.
+
 ### `plugins.sasa`
 
 | Field | Type | Default | Description |
@@ -502,16 +506,6 @@ level as `style`, `dpi`, etc.
 | `generate_cf_by_partition_bars` | `true` | Contact fraction by user partition bar charts |
 | `generate_rt_by_aa_class_bars` | `true` | Residence time by amino acid class bar chart |
 | `generate_rt_by_partition_bars` | `true` | Residence time by user partition bar charts |
-
-**`plot_settings.secondary_structure`:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `generate_timeline` | `true` | Residue × time SS heatmap |
-| `generate_content_bars` | `true` | Helix/strand/coil fraction bars |
-| `generate_individual_bars` | `true` | One bar chart per SS type |
-| `generate_diff_heatmap` | `true` | Δ(helix persistence) vs control |
-| `diff_colormap` | `"RdBu_r"` | Diverging colormap for diff heatmap |
 
 ---
 

@@ -37,7 +37,7 @@ change.
 ## Use built-in packages as examples, not import targets
 
 Built-in plugins such as `rmsf`, `distances`, `contacts`, `sasa`, `rg`, `rmsd`,
-`hydrogen_bonds`, `secondary_structure`, and `catalytic_triad` show real package
+`hydrogen_bonds`, and `catalytic_triad` show real package
 shapes. Their private helper modules are useful examples of organization:
 
 - `_mda.py` for trajectory-native job and collector helpers;

@@ -110,7 +110,7 @@ shared-utility autodoc blocks.
 | `rmsf` | `polyzymd.analyses.rmsf` | Per-residue profile artifacts | Default scalar comparison |
 | `sasa` | `polyzymd.analyses.sasa` | SASA artifacts and sidecars | Custom multi-run comparison |
 | `catalytic_triad` | `polyzymd.analyses.catalytic_triad` | Pair-distance-derived artifacts | Default scalar comparison |
-| `secondary_structure` | `polyzymd.analyses.secondary_structure` | Secondary-structure matrix artifacts | Default scalar comparison |
+| `secondary_structure` | `polyzymd.analyses.secondary_structure` | Four DSSP fractions and two occupancy profiles | Observable contract |
 
 Built-in plugin packages expose their public `Analysis` subclass and supported
 settings/result contracts from the package root. Helper modules with leading

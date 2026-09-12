@@ -224,6 +224,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`secondary_structure` runs on the observable contract, and residues DSSP
+  cannot assign are no longer counted as coil.**  The plugin reports four
+  `fraction` observables (`ss_helix`, `ss_strand`, `ss_coil`, `ss_unassigned`)
+  and two `profile` observables (`helix_occupancy`, `strand_occupancy`) from one
+  `compute()`, and the framework owns persistence, aggregation, uncertainty,
+  comparison and formatting.  The old encoder started from an all-coil state
+  matrix and overwrote only H and E, so every residue mdtraj returned as `NA`
+  was scored as coil; those residues now have their own fraction, and a non-zero
+  `ss_unassigned` says the selection needs attention.  The `chain_id` and
+  `selection` settings are unchanged.  The plugin's four plots are gone with the
+  rest of its bespoke machinery.
+
 - **The periodic box is computed first, from the protein and substrate alone.**
   `SolventBuilder.compute_box_vectors()` derives the cell from the solute
   bounding box plus `2 * (polymers.packing.padding + solvent.box.padding)`

@@ -344,7 +344,7 @@ Common next additions to `comparison.yaml` are:
 - `contacts` for polymer coverage and contact fraction
 - `distances` for custom atom-pair distances
 - `catalytic_triad` for active-site geometry
-- `secondary_structure` for helix/strand persistence and content
+- `secondary_structure` for helix and strand content and per-residue occupancy
 - `hydrogen_bonds` for hydrogen-bond occupancy and lifetime summaries
 
 For end-to-end examples, see:
