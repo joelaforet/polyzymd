@@ -13,18 +13,34 @@ from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
 
 
 class _FakeTrajectory:
-    """Minimal trajectory object with a finite frame count."""
+    """Minimal trajectory object that records the frame the caller seeks to."""
+
+    def __init__(self) -> None:
+        """Start on frame zero with no seeks recorded."""
+
+        self.seeks: list[int] = []
+        self.frame = 0
 
     def __len__(self) -> int:
         """Return the fake trajectory length."""
 
         return 100
 
+    def __getitem__(self, index: int) -> int:
+        """Record a seek to ``index`` and return it."""
+
+        self.seeks.append(index)
+        self.frame = index
+        return index
+
 
 class _FakeUniverse:
     """Minimal universe object for alignment tests."""
 
-    trajectory = _FakeTrajectory()
+    def __init__(self) -> None:
+        """Give each fake universe its own trajectory."""
+
+        self.trajectory = _FakeTrajectory()
 
     def select_atoms(self, selection: str) -> "_FakeAtomGroup":
         """Return fake atoms for external-reference validation."""
@@ -94,8 +110,15 @@ def fake_mdanalysis(monkeypatch: pytest.MonkeyPatch):
         del args, kwargs
         return _FakeUniverse()
 
+    def fake_merge(atom_group) -> _FakeUniverse:
+        """Return a one-frame reference universe built from an atom group."""
+
+        del atom_group
+        return _FakeUniverse()
+
     mdanalysis_module = types.ModuleType("MDAnalysis")
     mdanalysis_module.Universe = make_universe
+    mdanalysis_module.Merge = fake_merge
     analysis_module = types.ModuleType("MDAnalysis.analysis")
     align_module = types.ModuleType("MDAnalysis.analysis.align")
     align_module.AverageStructure = FakeAverageStructure
@@ -145,18 +168,20 @@ def test_centroid_reference_alignment_uses_selected_production_window(
         selection: str,
         start_frame: int,
         stop_frame: int | None,
+        step_frame: int,
         verbose: bool,
     ) -> int:
         """Capture centroid selection arguments and return a frame."""
 
         del universe, selection, verbose
-        centroid_calls.append({"start": start_frame, "stop": stop_frame})
+        centroid_calls.append({"start": start_frame, "stop": stop_frame, "step": step_frame})
         return 12
 
     monkeypatch.setattr(centroid, "find_centroid_frame", fake_find_centroid_frame)
 
+    universe = _FakeUniverse()
     ref_frame = align_trajectory(
-        _FakeUniverse(),
+        universe,
         AlignmentConfig(reference_mode="centroid"),
         start_frame=10,
         stop_frame=60,
@@ -165,8 +190,9 @@ def test_centroid_reference_alignment_uses_selected_production_window(
 
     assert ref_frame == 12
     assert average_runs == []
-    assert centroid_calls == [{"start": 10, "stop": 60}]
+    assert centroid_calls == [{"start": 10, "stop": 60, "step": 5}]
     assert align_runs == [{"start": 10, "stop": 60, "step": 5}]
+    assert universe.trajectory.seeks == [12]
 
 
 def test_frame_reference_alignment_uses_selected_production_window(fake_mdanalysis) -> None:
@@ -174,8 +200,9 @@ def test_frame_reference_alignment_uses_selected_production_window(fake_mdanalys
 
     average_runs, align_runs = fake_mdanalysis
 
+    universe = _FakeUniverse()
     ref_frame = align_trajectory(
-        _FakeUniverse(),
+        universe,
         AlignmentConfig(reference_mode="frame", reference_frame=20),
         start_frame=10,
         stop_frame=60,
@@ -185,6 +212,7 @@ def test_frame_reference_alignment_uses_selected_production_window(fake_mdanalys
     assert ref_frame == 19
     assert average_runs == []
     assert align_runs == [{"start": 10, "stop": 60, "step": 5}]
+    assert universe.trajectory.seeks == [19]
 
 
 def test_external_reference_alignment_uses_selected_production_window(
