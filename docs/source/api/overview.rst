@@ -38,7 +38,7 @@ Package Structure
     │   ├── _framework/   # Private/internal lifecycle and artifact internals
     │   ├── mda/          # Public MDAnalysis job and artifact layer
     │   ├── shared/       # Reusable utilities (TrajectoryLoader, alignment, etc.)
-    │   ├── rmsd/         # RMSD plugin package
+    │   ├── rmsd.py       # RMSD plugin, observable contract
     │   ├── rg/           # Rg plugin package
     │   ├── rmsf/         # RMSF plugin package
     │   ├── contacts/     # Contacts plugin package

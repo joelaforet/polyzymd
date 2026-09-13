@@ -267,10 +267,6 @@ Each entry in `runs`:
 | `reference_frame` | int | `0` | Frame index to use as reference when `reference_mode` is `"frame"` |
 | `reference_file` | path | `null` | Path to external PDB reference structure |
 | `centroid_selection` | string | `null` | MDAnalysis selection for centroid computation. If `null`, uses `alignment_selection`. |
-| `convergence_window_size_ns` | float | `15.0` | Rolling window size in nanoseconds for convergence detection |
-| `convergence_step_size_ns` | float | `5.0` | Step size in nanoseconds between convergence windows |
-| `convergence_slope_threshold` | float | `0.0005` | Maximum slope (Å/ns) for a window to be considered converged |
-| `convergence_sustained_for_ns` | float | `15.0` | Duration in nanoseconds that convergence must be sustained |
 
 ### `plugins.rg`
 

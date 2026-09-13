@@ -62,10 +62,6 @@ def _validator_call(analysis_name: str, artifact: ReplicateArtifact, tmp_path):
         "settings_fingerprint": FINGERPRINT,
         "artifacts": [artifact],
     }
-    if analysis_name == "rmsd":
-        from polyzymd.analyses.rmsd._mda import _validate_and_order_artifacts as validate
-
-        return validate(run_labels=["default"], **common)
     if analysis_name == "rg":
         from polyzymd.analyses.rg._mda import _validate_and_order_artifacts as validate
 
@@ -87,7 +83,7 @@ def _validator_call(analysis_name: str, artifact: ReplicateArtifact, tmp_path):
     raise AssertionError(f"unhandled analysis {analysis_name}")
 
 
-PLUGINS = ["rmsd", "rg", "sasa", "distances", "catalytic_triad"]
+PLUGINS = ["rg", "sasa", "distances", "catalytic_triad"]
 
 
 @pytest.mark.parametrize("analysis_name", PLUGINS)

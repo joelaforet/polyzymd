@@ -106,42 +106,34 @@ def _base_metadata(settings: Any) -> dict[str, Any]:
 
 
 def _rmsd_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]:
+    """The ported rmsd plugin, whose comparison runs through the contract."""
+    from polyzymd.analyses.contract import Observable, aggregate_observables
     from polyzymd.analyses.rmsd import RMSDAnalysis, RMSDRunSettings, RMSDSettings
 
     settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
 
     def artifact(label: str, values: tuple[float, ...]) -> ConditionArtifact:
+        aggregates = aggregate_observables(
+            [
+                [
+                    Observable(
+                        name="rmsd_protein_backbone_ref_centroid",
+                        kind="mean_of_timeseries",
+                        unit="A",
+                        values=[value],
+                    )
+                ]
+                for value in values
+            ]
+        )
         return ConditionArtifact(
             analysis_name="rmsd",
             condition_label=label,
             replicates=[1, 2, 3],
             payload={
-                "runs": [
-                    {
-                        "run_label": "protein_backbone",
-                        "selection": "protein and name CA",
-                        "alignment_selection": "protein and name CA",
-                        "replicates": [1, 2, 3],
-                        "n_replicates": 3,
-                        "overall_mean": float(np.mean(values)),
-                        "overall_sem": 0.05,
-                        "overall_median": float(np.median(values)),
-                        "per_replicate_means": list(values),
-                        "per_replicate_stds": [0.2, 0.2, 0.2],
-                        "per_replicate_medians": list(values),
-                        "per_replicate_convergence_times_ns": [None, None, None],
-                        "per_replicate_convergence_assessable": [True, True, True],
-                        "n_converged_replicates": 0,
-                        "n_assessable_replicates": 3,
-                        "convergence_fraction": 0.0,
-                        "all_converged": False,
-                    }
-                ],
-                "metrics": {},
-                "replicate_metrics": {},
-                "n_replicates": 3,
+                "observables": [aggregate.model_dump(mode="json") for aggregate in aggregates]
             },
-            metadata={**_base_metadata(settings), "selection_string": "protein and name CA"},
+            metadata=_base_metadata(settings),
             provenance={"frame_selection": {"equilibration": "10ns"}},
         )
 
@@ -387,7 +379,10 @@ CASES = {
 def _pairwise_p_values(plugin: str, result: Any) -> list[tuple[float, float | None]]:
     """Return ``(p_value, p_value_adjusted)`` for every testable pairwise test."""
     pairs: list[tuple[float, float | None]] = []
-    if plugin == "distances":
+    if plugin == "rmsd":
+        for comparison in result.payload["comparisons"]:
+            pairs.append((comparison["p_value"], comparison["p_adjusted"]))
+    elif plugin == "distances":
         for comparison in result.pairwise_comparisons:
             pairs.append((comparison.distance_p_value, comparison.distance_p_value_adjusted))
             if comparison.fraction_p_value is not None:
@@ -448,9 +443,13 @@ def test_single_comparison_leaves_p_value_unchanged(plugin: str, tmp_path: Path)
     assert adjusted_p == pytest.approx(raw_p)
 
 
-@pytest.mark.parametrize("plugin", sorted(CASES))
+@pytest.mark.parametrize("plugin", sorted(set(CASES) - {"rmsd"}))
 def test_direction_labels_require_significance(plugin: str, tmp_path: Path) -> None:
-    """Direction labels must not claim a change that the test did not find."""
+    """Direction labels must not claim a change that the test did not find.
+
+    The ported plugins are left out because the contract reports a signed delta
+    and a significance flag rather than a direction word.
+    """
     from polyzymd.analyses.shared.inferential_statistics import NO_SIGNIFICANT_CHANGE
 
     analysis, ctx = CASES[plugin](tmp_path, "welch")

@@ -56,9 +56,7 @@ If you are adding or reviewing an analysis plugin, read these pages first:
 1. {doc}`analysis_concepts` for the analysis lifecycle and plugin boundaries.
 2. {doc}`analysis_statistics_best_practices` for replicate-level interpretation
    and statistical expectations.
-3. {doc}`convergence_detection` for deciding whether trajectory summaries are
-   interpretable.
-4. {doc}`analysis_reference_selection` for how structural references affect
+3. {doc}`analysis_reference_selection` for how structural references affect
    RMSF and related fluctuation metrics.
 
 ## Concepts and Design
@@ -85,7 +83,6 @@ pages for caveats tied to particular metrics.
 :maxdepth: 1
 
 Statistics best practices for MD analysis <analysis_statistics_best_practices>
-Establishing convergence in MD simulations <convergence_detection>
 Methods and references <references>
 ```
 

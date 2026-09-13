@@ -272,25 +272,11 @@ Common ranges:
 In addition to global settings, plugins can define their own plot options under
 `plot_settings.<plugin_name>`.
 
-### RMSD example
-
-```yaml
-plot_settings:
-  format: "pdf"
-  style: "compact"
-  rmsd:
-    show_per_replicate: true
-    figsize: [10, 6]
-    timeseries_figsize: [12, 5]
-    show_convergence_plots: true
-    convergence_figsize: [12, 5]
+```{note}
+A plugin written against the observable contract, such as `rmsd`, has no
+per-plugin plot settings. Its figures come from the framework, keyed on the
+observable kind, and follow the global settings above.
 ```
-
-What changes:
-
-- `show_per_replicate: true` overlays each replicate trace
-- `timeseries_figsize` changes the width/height of RMSD time plots
-- `show_convergence_plots: true` adds convergence diagnostics
 
 ### RMSF example
 
