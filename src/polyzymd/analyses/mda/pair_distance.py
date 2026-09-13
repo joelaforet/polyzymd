@@ -61,6 +61,7 @@ def pair_distance_matrix(
     pairs: Sequence[PairSelection],
     *,
     use_pbc: bool = True,
+    notes: list[str] | None = None,
 ) -> NDArray[np.float64]:
     """Measure every pair on every production frame.
 
@@ -74,8 +75,13 @@ def pair_distance_matrix(
         Pairs to measure, in report order.
     use_pbc : bool, optional
         Take minimum-image distances when the timestep has a valid box, by
-        default True. A frame without one is measured without periodicity and
-        logs a warning once.
+        default True. A frame without one is measured without periodicity.
+    notes : list of str or None, optional
+        List that messages about the measurement are appended to, such as an
+        endpoint that spans several chains or a frame with no usable box. A
+        plugin passes one in and puts it under the ``warnings`` key of its
+        observables' metadata, so the message reaches the replicate artifact
+        instead of only the log.
 
     Returns
     -------
@@ -85,14 +91,19 @@ def pair_distance_matrix(
     Raises
     ------
     SelectionError
-        If a selection matches no atoms.
+        If a selection matches no atoms, or matches several atoms without
+        saying which point of the group is meant.
     """
     from MDAnalysis.lib.distances import calc_bonds
 
     from polyzymd.analyses.shared.selections import get_position
 
+    collected: list[str] = [] if notes is None else notes
     resolved = [
-        (_resolve(universe, pair.selection_a), _resolve(universe, pair.selection_b))
+        (
+            _resolve(universe, pair.selection_a, pair.label, collected),
+            _resolve(universe, pair.selection_b, pair.label, collected),
+        )
         for pair in pairs
     ]
     rows: list[NDArray[np.float64]] = []
@@ -101,9 +112,10 @@ def pair_distance_matrix(
         box = _box(timestep) if use_pbc else None
         if use_pbc and box is None and not warned:
             warned = True
-            LOGGER.warning(
+            _note(
+                collected,
                 "pair distances: the timestep carries no usable box, so affected frames are "
-                "measured without the minimum-image convention"
+                "measured without the minimum-image convention",
             )
         positions_a = np.asarray(
             [get_position(atoms, mode) for (atoms, mode), _ in resolved], dtype=np.float64
@@ -117,9 +129,17 @@ def pair_distance_matrix(
     return np.asarray(rows, dtype=np.float64).T
 
 
-def _resolve(universe: Any, selection: str) -> tuple[Any, Any]:
-    """Atom group and position mode for one endpoint, or a diagnostic error."""
-    from polyzymd.analyses.shared.diagnostics import get_selection_diagnostics
+def _resolve(universe: Any, selection: str, label: str, notes: list[str]) -> tuple[Any, Any]:
+    """Atom group and position mode for one endpoint, or a diagnostic error.
+
+    A selection that spans several chains is measured, not refused, because
+    residue numbers restart per chain and a midpoint or centre of mass then
+    silently averages over the copies. The note says so.
+    """
+    from polyzymd.analyses.shared.diagnostics import (
+        get_selection_diagnostics,
+        warn_if_multi_chain_selection,
+    )
     from polyzymd.analyses.shared.selections import SelectionMode, parse_selection_string
 
     parsed = parse_selection_string(selection)
@@ -134,7 +154,20 @@ def _resolve(universe: Any, selection: str) -> tuple[Any, Any]:
             f"selection {selection!r} matched {len(atoms)} atoms, and a pair endpoint is one "
             "point. Wrap it in midpoint(...) or com(...) to reduce the group to one position."
         )
+    if warn_if_multi_chain_selection(atoms, selection, f"for distance pair {label!r}"):
+        notes.append(
+            f"selection {selection!r} of pair {label!r} matched atoms from several chains, so "
+            "the measured point averages over the copies. Restrict it with 'protein and' or "
+            "'chainid A and'."
+        )
     return atoms, parsed.mode
+
+
+def _note(notes: list[str], message: str) -> None:
+    """Record a measurement message once, and log it."""
+    if message not in notes:
+        notes.append(message)
+    LOGGER.warning("%s", message)
 
 
 def _box(timestep: Any) -> NDArray[np.float32] | None:

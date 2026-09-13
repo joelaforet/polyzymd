@@ -3,7 +3,10 @@
 A serine hydrolase triad works through a hydrogen-bonded charge-relay system,
 so the geometry that matters is whether every link of the relay is short at the
 same time. This plugin reports each configured pair separately and then the
-fraction of frames in which every pair is within the cutoff at once.
+fraction of frames in which every pair is within the cutoff at once. A pair is
+within the cutoff when its distance is strictly less than it, which is the
+convention the deleted implementation used and which the observable metadata
+records.
 
 Fractions are stored as fractions with unit ``"fraction"``. Reporting them as a
 percentage is a display choice and is left to whatever renders them.
@@ -26,23 +29,34 @@ from __future__ import annotations
 from typing import Any, ClassVar, Sequence
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from polyzymd.analyses.contract import Observable
+from polyzymd.analyses.contract import Observable, warn_unknown_settings
 from polyzymd.analyses.contract_runner import contract_analysis
 from polyzymd.analyses.mda.pair_distance import PairSelection, pair_distance_matrix
 
 #: Observable name of the all-pairs-at-once contact fraction.
 SIMULTANEOUS_CONTACT = "simultaneous_contact_fraction"
 
+#: Comparison used against the cutoff, recorded in every fraction's metadata.
+THRESHOLD_OPERATOR = "strict_less_than"
+
 
 class CatalyticTriadSettings(BaseModel):
     """Settings for the catalytic triad analysis."""
+
+    model_config = ConfigDict(extra="allow")
 
     pairs: list[PairSelection] = Field(min_length=1, description="Triad pairs to monitor")
     threshold: float = Field(default=3.5, gt=0.0, description="Contact cutoff in angstrom")
     name: str = Field(default="catalytic_triad", description="Name of the active site")
     description: str | None = Field(default=None, description="What the active site is")
+
+    @model_validator(mode="after")
+    def _check_keys(self) -> CatalyticTriadSettings:
+        """Name every key this model does not define, so a typo is not absorbed."""
+        warn_unknown_settings(self)
+        return self
 
 
 class CatalyticTriad:
@@ -75,13 +89,32 @@ class CatalyticTriad:
         Sequence[Observable]
             Per pair a ``mean_of_timeseries`` distance in angstrom and a
             ``fraction`` of frames within the cutoff, then one ``fraction`` for
-            the frames in which every pair is within the cutoff at once.
+            the frames in which every pair is within the cutoff at once. The
+            per-pair fraction is a monotone function of the same series as the
+            pair's mean distance, so it is reported with its uncertainty but
+            kept out of the tests; the simultaneous fraction carries
+            information no single pair does and is tested.
         """
         cutoff = float(settings.threshold)
-        matrix = pair_distance_matrix(universe, frames, settings.pairs, use_pbc=True)
+        notes: list[str] = []
+        matrix = pair_distance_matrix(universe, frames, settings.pairs, use_pbc=True, notes=notes)
         within = matrix < cutoff
+        shared: dict[str, Any] = {
+            "active_site": settings.name,
+            "pbc": "minimum_image",
+            "alignment": "none",
+        }
+        if settings.description:
+            shared["description"] = settings.description
+        if notes:
+            shared["warnings"] = notes
         observables: list[Observable] = []
         for pair, series, contact in zip(settings.pairs, matrix, within, strict=True):
+            metadata = {
+                **shared,
+                "selection_a": pair.selection_a,
+                "selection_b": pair.selection_b,
+            }
             observables.append(
                 Observable(
                     name=pair.label,
@@ -89,6 +122,7 @@ class CatalyticTriad:
                     unit="A",
                     values=series,
                     higher_is_better=False,
+                    metadata=metadata,
                 )
             )
             observables.append(
@@ -98,6 +132,14 @@ class CatalyticTriad:
                     unit="fraction",
                     values=contact.astype(np.float64),
                     higher_is_better=True,
+                    # A monotone functional of the series the pair's mean
+                    # distance is already tested on.
+                    tested=False,
+                    metadata={
+                        **metadata,
+                        "threshold": cutoff,
+                        "threshold_operator": THRESHOLD_OPERATOR,
+                    },
                 )
             )
         observables.append(
@@ -107,6 +149,12 @@ class CatalyticTriad:
                 unit="fraction",
                 values=np.all(within, axis=0).astype(np.float64),
                 higher_is_better=True,
+                metadata={
+                    **shared,
+                    "pairs": [pair.label for pair in settings.pairs],
+                    "threshold": cutoff,
+                    "threshold_operator": THRESHOLD_OPERATOR,
+                },
             )
         )
         return observables

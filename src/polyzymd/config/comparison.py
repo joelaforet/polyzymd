@@ -175,11 +175,13 @@ class PluginSettingsContainer(BaseModel):
 # Plot Settings Configuration
 # ============================================================================
 
-# Per-analysis plot settings classes (RMSFPlotSettings, TriadPlotSettings, etc.)
+# Per-analysis plot settings classes (SASAPlotSettings, ContactsPlotSettings, etc.)
 # live in their respective plugin packages at analyses/<name>/_plot_settings.py.
 # Each plugin exposes its plot settings model via
 # Analysis.PlotSettingsModel. PlotSettings.__init__ discovers plugins and
-# builds a mapping from analysis name to plot settings model.
+# builds a mapping from analysis name to plot settings model. A plugin ported to
+# the observable contract has no such model; its figures come from the
+# framework, keyed on observable kind.
 
 
 class SemanticConditionColorConfig(BaseModel):
@@ -578,10 +580,13 @@ class PlotSettings(BaseModel):
                         f"expected dict or {settings_class.__name__}"
                     )
             elif key in plugin_registry:
+                # A plugin ported to the observable contract has no plot
+                # settings of its own; the framework draws its figures from the
+                # observable kind. Keep the block so an existing comparison
+                # file still loads, and say that it does nothing.
                 warnings.warn(
-                    f"Plot settings for '{key}' are ignored since that analysis moved to the "
-                    "observable contract, where the framework draws the figures. Remove the "
-                    "block from the comparison file.",
+                    f"plot_settings block '{key}' is ignored: {key} is an observable-contract "
+                    "analysis and its figures come from the framework. Remove the block.",
                     DeprecationWarning,
                     stacklevel=2,
                 )

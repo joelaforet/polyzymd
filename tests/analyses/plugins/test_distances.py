@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import pytest
 
 from polyzymd.analyses.contract import ObservableAggregate
-from polyzymd.analyses.distances import Distances, DistancesAnalysis, DistancesSettings
+from polyzymd.analyses.distances import (
+    THRESHOLD_OPERATOR,
+    Distances,
+    DistancesAnalysis,
+    DistancesSettings,
+)
 from polyzymd.analyses.mda import FrameSelection
 
 mda = pytest.importorskip("MDAnalysis")
@@ -16,14 +21,15 @@ mda = pytest.importorskip("MDAnalysis")
 BOX = [40.0, 40.0, 40.0, 90.0, 90.0, 90.0]
 
 
-def _universe(separation: float, n_frames: int = 4) -> Any:
-    """Two atoms held ``separation`` angstrom apart for every frame."""
+def _universe(separation: float | Sequence[float], n_frames: int = 4) -> Any:
+    """Two atoms held apart by ``separation``, one value or one per frame."""
 
     from MDAnalysis.coordinates.memory import MemoryReader
 
     universe = mda.Universe.empty(
         2,
         n_residues=2,
+        n_segments=2,
         atom_resindex=[0, 1],
         residue_segindex=[0, 1],
         trajectory=True,
@@ -31,8 +37,16 @@ def _universe(separation: float, n_frames: int = 4) -> Any:
     universe.add_TopologyAttr("name", ["OG", "C13x"])
     universe.add_TopologyAttr("resname", ["SER", "RBY"])
     universe.add_TopologyAttr("resid", [1, 2])
+    universe.add_TopologyAttr("segid", ["A", "B"])
     universe.add_TopologyAttr("masses", [16.0, 12.0])
-    positions = np.asarray([[[0.0, 0.0, 0.0], [separation, 0.0, 0.0]]] * n_frames, dtype=np.float32)
+    series = (
+        [float(separation)] * n_frames
+        if isinstance(separation, (int, float))
+        else [float(value) for value in separation]
+    )
+    positions = np.asarray(
+        [[[0.0, 0.0, 0.0], [value, 0.0, 0.0]] for value in series], dtype=np.float32
+    )
     universe.load_new(positions, format=MemoryReader)
     for timestep in universe.trajectory:
         timestep.dimensions = BOX
@@ -131,3 +145,60 @@ def test_the_condition_aggregate_reports_replicate_level_uncertainty(
     assert distance.sem == pytest.approx(1.0 / np.sqrt(3.0), abs=1e-6)
     assert distance.unit == "A" and distance.n_replicates == 3
     assert aggregates["Ser-Substrate below 3.5 A"].mean == pytest.approx(1.0 / 3.0)
+
+
+def test_a_distance_exactly_at_the_threshold_is_not_a_contact() -> None:
+    """The comparison is strictly less than, so a frame at 3.5 A does not count."""
+
+    universe = _universe([3.4, 3.5, 3.6, 3.5])
+
+    observables = Distances().compute(universe, _frames(), _settings())
+
+    np.testing.assert_allclose(observables[1].values, [1.0, 0.0, 0.0, 0.0])
+    assert observables[1].metadata["threshold_operator"] == THRESHOLD_OPERATOR
+    assert observables[1].metadata["threshold"] == pytest.approx(3.5)
+
+
+def test_the_contact_fraction_is_reported_but_not_tested() -> None:
+    """The fraction is a monotone functional of the tested distance series."""
+
+    observables = Distances().compute(_universe(3.0), _frames(), _settings())
+
+    assert observables[0].tested is True
+    assert observables[1].tested is False
+
+
+def test_observables_record_how_they_were_measured() -> None:
+    """Metadata states the periodic policy, the alignment and the selections."""
+
+    observables = Distances().compute(_universe(3.0), _frames(), _settings())
+
+    assert observables[0].metadata["pbc"] == "minimum_image"
+    assert observables[0].metadata["alignment"] == "none"
+    assert observables[0].metadata["selection_a"] == "name OG"
+
+
+def test_a_misspelled_setting_is_named_rather_than_absorbed() -> None:
+    """An unknown key such as 'thresold' warns instead of silently doing nothing."""
+
+    with pytest.warns(UserWarning, match="thresold"):
+        _settings(thresold=3.5)
+
+
+def test_a_measurement_warning_reaches_the_replicate_artifact(
+    tmp_path: Any, run_contract_analysis: Any
+) -> None:
+    """A note about the measurement is written next to the numbers it qualifies."""
+
+    from polyzymd.analyses.mda import ArtifactStore
+
+    universe = _universe(3.0)
+    for timestep in universe.trajectory:
+        timestep.dimensions = None
+    run_contract_analysis(DistancesAnalysis, _settings(), universe, root=tmp_path)
+
+    replicate = ArtifactStore(
+        tmp_path / "analysis" / "A" / "distances" / "run_1"
+    ).read_replicate_result()
+
+    assert any("no usable box" in warning for warning in replicate.warnings)

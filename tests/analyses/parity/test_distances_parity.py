@@ -15,6 +15,7 @@ tests skip, so a checkout with no mount still passes.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -55,12 +56,21 @@ def _settings_payload(reference: dict[str, Any]) -> dict[str, Any]:
 
 
 def _universe(reference: dict[str, Any]) -> Any:
-    """Rebuild the universe the reference was frozen from, or skip."""
+    """Rebuild the universe the reference was frozen from, or skip.
+
+    The topology is checked by digest, because a parity number means nothing
+    against a different system that happens to sit at the same path.
+    """
 
     inputs = reference["inputs"]
     topology, trajectory = Path(inputs["topology"]), Path(inputs["trajectory"])
     if not topology.exists() or not trajectory.exists():
         pytest.skip(f"real trajectory data is not present at {trajectory}")
+    digest = hashlib.md5(topology.read_bytes()).hexdigest()
+    assert digest == inputs["topology_md5"], (
+        f"{topology} is not the topology the reference was frozen from "
+        f"({digest} instead of {inputs['topology_md5']})"
+    )
     return mda.Universe(str(topology), str(trajectory))
 
 

@@ -26,7 +26,8 @@
    "step": 1
   },
   "polyzymd_commit": "6156c87e21e8b76f40c81378de9a5ccd9a142dcd",
-  "mdanalysis_version": "2.10.0"
+  "mdanalysis_version": "2.10.0",
+  "topology_md5": "33a8df0f7fbec8f3e58b3188bcb4899d"
  },
  "n_frames": 100,
  "pairs": [

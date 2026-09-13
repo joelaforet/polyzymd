@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 import numpy as np
 import pytest
+from pydantic import BaseModel, ConfigDict
 
 from polyzymd.analyses._framework.contexts import ComparisonContext, Condition
 from polyzymd.analyses.contract import (
@@ -19,6 +20,7 @@ from polyzymd.analyses.contract import (
     aggregate_observables,
     compare_observables,
     reduce_observable,
+    warn_unknown_settings,
 )
 from polyzymd.analyses.contract_runner import contract_analysis
 from polyzymd.analyses.exceptions import PluginContractError
@@ -202,6 +204,60 @@ def test_profiles_are_not_tested_pairwise() -> None:
     aggregates = aggregate_observables(profile)
 
     assert compare_observables({"a": aggregates, "b": aggregates}) == []
+
+
+def test_an_untested_observable_stays_out_of_the_correction_family() -> None:
+    """tested=False is still aggregated and reported, but never tested."""
+
+    def replicate(scale: float) -> list[Observable]:
+        return [
+            Observable(name="primary", kind="mean_of_timeseries", unit="A", values=[scale, scale]),
+            Observable(
+                name="derived",
+                kind="fraction",
+                unit="fraction",
+                values=[scale / 10.0, scale / 10.0],
+                tested=False,
+            ),
+        ]
+
+    control = aggregate_observables([replicate(1.0), replicate(1.5), replicate(2.0)])
+    treated = aggregate_observables([replicate(3.0), replicate(3.5), replicate(4.0)])
+    comparisons = compare_observables({"control": control, "treated": treated})
+
+    assert {aggregate.name for aggregate in control} == {"primary", "derived"}
+    assert [comparison.name for comparison in comparisons] == ["primary"]
+
+
+def test_measurement_metadata_reaches_the_replicate_estimate() -> None:
+    """Per-observable provenance survives the reduction the framework runs."""
+    observable = Observable(
+        name="pair",
+        kind="mean_of_timeseries",
+        unit="A",
+        values=[1.0, 2.0],
+        metadata={"pbc": "minimum_image", "warnings": ["one endpoint spans two chains"]},
+    )
+
+    estimate = reduce_observable(observable)
+
+    assert estimate.metadata["pbc"] == "minimum_image"
+    assert estimate.metadata["warnings"] == ["one endpoint spans two chains"]
+
+
+def test_unknown_settings_keys_are_named_by_kind() -> None:
+    """A deprecated key and a misspelled key get different warnings."""
+
+    class Settings(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+        threshold: float = 3.5
+
+    settings = Settings(threshold=3.5, align_trajectory=True, thresold=4.0)
+
+    with pytest.warns(DeprecationWarning, match="align_trajectory"):
+        with pytest.warns(UserWarning, match="thresold"):
+            warn_unknown_settings(settings, deprecated={"align_trajectory": "It is ignored."})
 
 
 def test_a_plugin_that_misses_the_protocol_is_named() -> None:
