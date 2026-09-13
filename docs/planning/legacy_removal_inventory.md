@@ -137,3 +137,50 @@ campaign tree already holds. `mda/store.py` reads and writes them.
 valid, and step 4 changes it on purpose, so the parity run after step 4 is the
 check that it still reproduces frozen numbers rather than silently recomputing
 everything.
+
+## What the removal actually did
+
+Recorded on 2026-09-13, after the branch finished. The module went from 26,722
+lines in 45 files to 21,479 lines in 40 files, a drop of 5,243. The 20,000
+target was not reached; the reasons are below.
+
+| Step | Commit subject | Lines after | Change |
+| --- | --- | --- | --- |
+| 1 | inventory the legacy framework before removal | 26,722 | 0 |
+| 2 | delete the scalar comparison engine | 23,619 | -3,103 |
+| 3 | collapse the two analysis lifecycles | 22,077 | -1,542 |
+| 4 | hash the code a cached replicate depends on | 22,179 | +102 |
+| 5 | read one comparison shape in the report | 21,981 | -198 |
+| 6 | delete public names with no caller | 21,479 | -502 |
+
+The scaffold change the inventory lists as its own step landed inside step 2,
+because the simple and advanced templates instantiate the result models step 2
+deletes and no commit in between would have had a passing test suite.
+
+### Where the remaining lines are
+
+| Area | Lines | Why they stay |
+| --- | --- | --- |
+| `shared/` | 7,490 | `loader.py` (1,891) resolves and validates trajectory inputs, `plotting.py` (1,331) draws every figure the framework generates, `inferential_statistics.py` (793) and `autocorrelation.py` (714) are the cited statistics. All live. |
+| top level | 6,697 | The nine plugins are 2,778 of it. `base.py` (972) is the lifecycle, `protocols.py` (960) the agent report, `contract.py` (875) the contract itself, `contract_plots.py` (612) and `orchestrator.py` (679) the figures and the scheduler. |
+| `_framework/` | 3,285 | `lifecycle.py` (1,792) is the runner that walks conditions and replicates, resolves settings, writes caches and reports failures. `io.py` (477) and `aggregate_validation.py` (477) read and check stored aggregates. |
+| `mda/` | 3,253 | The artifact envelopes, the store, frame selection, the universe provider and the job seam. |
+
+### Judged too risky to delete
+
+`mda/job.py` (539). `MDAAnalysisJob` and `MDABackendPolicy` are where the
+`mda_backend_policy` block of `comparison.yaml` is applied. No contract plugin
+builds an `AnalysisBase` job, so the key configures nothing today, but deleting
+the seam would make a documented settings key silently inert. Per the branch
+rule, a key a campaign file can name keeps a one-release deprecation shim, and
+writing that shim is a separate change.
+
+The `AggregatedResultClass` and `ReplicateResultClass` hooks in
+`_framework/io.py`. They are `None` for every plugin, but the generic reload
+path still reads a plain JSON aggregate through them, which the lifecycle tests
+rely on. Tightening the reader to accept only a `ConditionArtifact` is a
+behaviour change to the stored-result contract, not a deletion, and it belongs
+with a migration note.
+
+`shared/inferential_statistics.py`. The result models and typing protocols look
+unreferenced from outside the module, and they are its own return annotations.

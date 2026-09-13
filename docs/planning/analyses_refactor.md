@@ -149,20 +149,24 @@ first, so do not fan them out.
   - Owner:
   - Status: not started
 
-- [ ] Give the framework one aggregation path per `kind`, covering the
+- [x] Give the framework one aggregation path per `kind`, covering the
       N_eff-corrected mean and SEM, fluctuation, binomial fraction, kernel
       density estimate and per-index profile.
   - Branch: `analyses/framework-aggregation`
   - Owner:
-  - Status: not started
+  - Status: done by the ports and `analyses/remove-legacy-framework`.
+    `contract.aggregate_observables` is the only aggregation path;
+    `mda/aggregation.py` is deleted.
 
-- [ ] Give the framework one comparison path, taking Welch or Student and
+- [x] Give the framework one comparison path, taking Welch or Student and
       Benjamini-Hochberg or Tukey from a single defaults object, and one
       generic plotting and formatting path per `kind` with an optional
       `extra_plots` hook.
   - Branch: `analyses/framework-comparison`
   - Owner:
-  - Status: not started
+  - Status: done. `contract.compare_observables` is the only comparison path;
+    `_framework/compare.py`, `mda/comparison.py` and the bespoke parts of
+    `stats.py` are deleted.
 
 - [x] Collapse the `MDA*Context` classes into the four framework contexts and
       delete the `ConditionSummary` and `ComparisonResult` family in favour of
@@ -207,12 +211,14 @@ first, so do not fan them out.
 
 ## Wave 4, removing the legacy framework
 
-- [ ] Delete the old `Analysis` hook surface and everything that served it, now
+- [x] Delete the old `Analysis` hook surface and everything that served it, now
       that all nine plugins are contract plugins. The plan, module by module,
-      is in [legacy_removal_inventory.md](legacy_removal_inventory.md).
+      and what the removal actually did, are in
+      [legacy_removal_inventory.md](legacy_removal_inventory.md).
   - Branch: `analyses/remove-legacy-framework`
   - Owner:
-  - Status: in progress
+  - Status: in review. 26,722 lines to 21,479. `mda/job.py` stays until
+    `mda_backend_policy` gets its deprecation shim.
 
 ## What stays untouched
 
