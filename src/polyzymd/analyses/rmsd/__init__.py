@@ -217,6 +217,18 @@ class RMSDAnalysis(Analysis):
         combined = f"{ALIGNMENT_VERSION}:{base}"
         return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:8]
 
+    def aggregate_settings_fingerprint(self, settings: BaseModel | None) -> str | None:
+        """Return the RMSD artifact settings fingerprint.
+
+        The framework stamps replicate artifacts with this value and the
+        aggregate validators compare against it, so it has to be the same tag
+        that :meth:`_make_settings_cache_tag` produces.
+        """
+
+        if settings is None:
+            return None
+        return self._make_settings_cache_tag(settings)
+
     @classmethod
     def _coerce_and_validate_aggregated_result(
         cls,
