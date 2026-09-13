@@ -479,10 +479,35 @@ class TestUnknownAnalysisDiagnostics:
             )
         )
 
-        with pytest.warns(DeprecationWarning, match="secondary_structure"):
+        with pytest.warns(UserWarning, match="secondary_structure"):
             config = ComparisonConfig.from_yaml(yaml_path)
 
         assert getattr(config.plot_settings, "secondary_structure", None) is None
+
+    def test_plot_settings_block_survives_without_a_plugins_entry(
+        self, tmp_path: Path
+    ) -> None:
+        """A campaign file keeps loading after its plugin moved to the contract."""
+        yaml_path = tmp_path / "comparison.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "contract-plot-test",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "plugins": {},
+                    "plot_settings": {"sasa": {"dpi": 300}},
+                }
+            )
+        )
+
+        with pytest.warns(UserWarning, match="observable-contract"):
+            config = ComparisonConfig.from_yaml(yaml_path)
+
+        assert config.plot_settings is not None
+        with pytest.raises(AttributeError):
+            _ = config.plot_settings.sasa
 
 
 class TestPluginSettingsCanonicalNames:

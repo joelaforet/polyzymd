@@ -119,6 +119,11 @@ class Observable(BaseModel):
         the pairwise tests and out of the multiple-comparison family, so it
         cannot inflate the adjusted p-values of the quantities that carry
         independent information.
+    metadata : dict, optional
+        JSON-compatible facts about how the value was measured, for example the
+        periodic boundary policy or whether the topology carried bonds. The
+        framework copies it onto the replicate estimate and writes it into the
+        replicate artifact. It takes no part in the statistics.
     """
 
     name: str = Field(min_length=1)
@@ -129,6 +134,7 @@ class Observable(BaseModel):
     index_label: str | None = None
     higher_is_better: bool | None = None
     tested: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(frozen=True)
 
@@ -158,7 +164,7 @@ class Observable(BaseModel):
         if self.kind == "profile":
             if self.index is None or len(self.index) != array.size:
                 raise ValueError(f"profile observable {self.name!r} needs one index per value")
-        elif self.index is not None:
+        elif self.index is not None or self.index_label is not None:
             raise ValueError(f"observable {self.name!r} has an index but kind is not 'profile'")
         return self
 
@@ -175,6 +181,7 @@ class ObservableEstimate(BaseModel):
     index_label: str | None = None
     higher_is_better: bool | None = None
     tested: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
     n_frames: int
     statistical_inefficiency: float | None = None
     n_eff: float | None = None
@@ -198,6 +205,7 @@ class ObservableAggregate(BaseModel):
     profile_sem: list[float] | None = None
     index: list[float] | None = None
     index_label: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     n_eff_min: float | None = None
     higher_is_better: bool | None = None
     tested: bool = True
@@ -329,11 +337,14 @@ def reduce_observable(observable: Observable | ObservableEstimate) -> Observable
         "index_label": observable.index_label,
         "higher_is_better": observable.higher_is_better,
         "tested": observable.tested,
+        "metadata": dict(observable.metadata),
         "n_frames": int(values.size),
     }
     if observable.kind == "profile":
         return ObservableEstimate(
-            profile=values.tolist(), index=list(observable.index or []), **common
+            profile=values.tolist(),
+            index=list(observable.index or []),
+            **common,
         )
     if observable.kind == "fluctuation":
         value = float(np.std(values, ddof=1)) if values.size > 1 else None
@@ -404,6 +415,7 @@ def aggregate_observables(
             unit=head.unit,
             higher_is_better=head.higher_is_better,
             tested=head.tested,
+            metadata=dict(head.metadata),
             n_replicates=len(estimates),
             n_eff_min=_min_or_none([est.n_eff for est in estimates]),
         )

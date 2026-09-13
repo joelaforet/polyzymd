@@ -1,8 +1,7 @@
 # SASA Plugin Reference
 
 This page is lookup documentation for the `sasa` analysis plugin: settings,
-selection behavior, output paths, artifact fields, comparison outputs, and plot
-files.
+selection behavior, the observables it reports, and the files it writes.
 
 For a guided workflow, see {doc}`../tutorials/sasa_analysis`. For practical
 recipes and commands, see {doc}`../how_to/analysis_sasa_quickstart`.
@@ -15,7 +14,7 @@ Top-level comparison YAML key: `plugins.sasa`.
 plugins:
   sasa:
     runs:
-      - label: "protein_total"
+      - label: "protein_isolated"
         target_selection: "protein"
 ```
 
@@ -25,194 +24,148 @@ plugins:
 
 | Field | Type | Default | Constraints | Description |
 |-------|------|---------|-------------|-------------|
-| `runs` | list | required | at least one entry; labels must be unique | Named SASA computations to run. |
+| `runs` | list | required | at least one entry; labels must be unique | Contexts to measure. |
 | `probe_radius_nm` | float | `0.14` | `> 0` | Shrake-Rupley probe radius in nanometers. |
-| `n_sphere_points` | int | `960` | `>= 100` | Number of test points on each atom sphere. Higher is more accurate and slower. |
-| `chunk_size` | int | `100` | `>= 1` | Frames processed per chunk for memory-managed computation. |
+| `n_sphere_points` | int | `960` | `>= 100` | Test points on each atom sphere. Higher is more accurate and slower. |
+| `chunk_size` | int | `100` | `>= 1` | Frames sent to MDTraj per call. It bounds memory and it changes the numbers slightly, so hold it fixed across a comparison (see below). |
 
 ### `runs` entries
 
 | Field | Type | Default | Constraints | Description |
 |-------|------|---------|-------------|-------------|
-| `label` | string | required | non-empty; must not contain `/` or `\` | Human-readable run label used in summaries and plot filenames. |
-| `target_selection` | string | required | non-empty | MDAnalysis selection for atoms whose SASA is reported. |
-| `context_selection` | string or null | `target_selection` | blank values become omitted | MDAnalysis selection for atoms included as surface blockers during SASA computation. |
-| `stride` | int | `1` | `>= 1` | Analyze every Nth selected frame. |
+| `label` | string | required | non-empty | Name used in the observable names. |
+| `target_selection` | string | required | non-empty | MDAnalysis selection for the atoms whose area is reported. |
+| `context_selection` | string or null | `target_selection` | must contain the target | MDAnalysis selection for the atoms allowed to block the surface. |
+| `stride` | int | `1` | `>= 1` | Deprecated since v1.3 and ignored. The framework resolves one frame window for every observable from `--eq-time`. Setting it raises a `DeprecationWarning`; it is rejected in v1.4. |
 
 ## Target and context behavior
 
-SASA runs separate what is reported from what can block the surface:
+A SASA run separates what is reported from what can block the surface.
 
 | Selection | Behavior |
 |-----------|----------|
-| `target_selection` | Defines the atoms/residues whose SASA values are summarized. |
-| `context_selection` | Defines the atoms present in the Shrake-Rupley surface calculation. |
+| `target_selection` | Atoms whose area is summed and grouped into residues. |
+| `context_selection` | Atoms present in the Shrake-Rupley calculation. |
 
-If `context_selection` is omitted, PolyzyMD sets it equal to
-`target_selection`. This is useful for self-SASA measurements such as whole
-protein SASA.
+When `context_selection` is omitted it equals `target_selection`, which reports
+the target's own surface. The target must be a subset of the context, otherwise
+the run raises `ReplicateError`, because a target atom outside the context would
+be measured without its own neighbors. A selection matching no atoms raises
+`SelectionError` rather than reporting an area of zero.
 
 Examples:
 
 | Goal | `target_selection` | `context_selection` |
 |------|--------------------|---------------------|
 | Whole-protein self-SASA | `protein` | `protein` or omitted |
-| Protein SASA with polymer shielding | `protein` | `protein or chainid C` |
+| Protein SASA with polymer shielding | `protein` | `protein or resname SBM EGM` |
+| Protein SASA with substrate present | `protein` | `protein or resname RBY` |
 | Active-site SASA | `protein and (resid 77 or resid 156 or resid 262)` | `protein` |
-| Active-site SASA with polymer shielding | `protein and (resid 77 or resid 156 or resid 262)` | `protein or chainid C` |
-| Monomer-specific shielding | `protein` | `protein or resname SBMA` |
+| Monomer-specific shielding | `protein` | `protein or resname SBM` |
 
 The project chain convention is A = protein, B = substrate, C = polymer, and
-D+ = solvent/ions/other. Use lowercase `chainid` in MDAnalysis selections.
+D+ = solvent/ions/other. Solvent and ions are excluded from every calculation
+because they are never named in a target or context selection.
+
+## Why `chunk_size` has to match across conditions
+
+`mdtraj.shrake_rupley` returns slightly different areas for the same frame
+depending on how many frames are in the array it is given and where the frame
+sits in that array. Forty identical frames come back with three distinct totals.
+The effect is about 0.1 percent of the total area, which is smaller than any
+real difference this analysis is used to detect, but it is a systematic offset
+between two runs rather than noise that averages out.
+
+So `chunk_size` is part of the method, not only a memory knob. Use the same
+value for every condition of a comparison. The value used is written into each
+observable's `metadata`, so a comparison assembled from runs with different
+chunk sizes can be spotted after the fact.
+
+## Observables
+
+Each configured run reports two observables.
+
+| Name | Kind | Unit | Description |
+|------|------|------|-------------|
+| `sasa_<label>` | `mean_of_timeseries` | `A^2` | Total area of the target in that context, one value per frame. |
+| `relative_sasa_<label>` | `profile` | `fraction` | Mean over frames of each target residue's area divided by the maximum accessible area of its residue type. |
+
+The maximum accessible areas are the empirical tripeptide values of Tien et al.
+2013, held in `polyzymd.analyses.shared.aa_classification.MAX_ASA_TABLE`. A
+target residue whose name is not in that table raises `ReplicateError`, so the
+per-residue profile applies to standard amino acids only.
+
+Residues are grouped by topology residue index, so two residues that share a
+chain, a residue ID and a residue name stay separate. The profile's `index` is
+that residue index and `index_label` is `"residue index"`, because a residue ID
+alone is not unique on a multi-chain target. The readable identities are in
+`metadata["residue_labels"]` as `chain:resid:resname`, one per index entry.
+
+Both observables carry the selections, the probe radius, the sphere count and
+the chunk size in `metadata`.
 
 ## Canonical output paths
 
-SASA writes canonical artifact outputs for compute and aggregate stages, plus a
-comparison output and plots.
-
 | Level | Path | Contents |
 |-------|------|----------|
-| Per replicate | `analysis/<condition>/sasa/run_<replicate>/result.json` | `ReplicateArtifact` envelope with per-run payload summaries and sidecar references. |
-| Per replicate sidecars | `analysis/<condition>/sasa/run_<replicate>/sidecars/*.npz` | Large arrays such as per-frame total SASA and per-residue SASA. |
-| Per condition | `analysis/<condition>/sasa/aggregated/result.json` | `ConditionArtifact` envelope with aggregate per-run summaries across replicates. |
-| Per condition sidecars | `analysis/<condition>/sasa/aggregated/sidecars/*.npz` | Aggregate arrays and supporting data, when written. |
-| Cross condition | `comparison/sasa/result.json` | Comparison output with condition summaries, pairwise tests, ANOVA-by-run, rankings, and metadata. |
-| Plots | `figures/sasa/` by default, or the configured plot output directory | SASA comparison, normalized-control, time-series, and profile plots. |
+| Per replicate | `analysis/<condition>/sasa/run_<replicate>/result.json` | `ReplicateArtifact` whose `payload.observables` holds one reduced estimate per observable. |
+| Per replicate sidecar | `analysis/<condition>/sasa/run_<replicate>/observables.npz` | Full per-frame series and per-residue vectors, one array per observable name. |
+| Per condition | `analysis/<condition>/sasa/aggregated/result.json` | `ConditionArtifact` whose `payload.observables` holds one aggregate per observable. |
+| Cross condition | `comparison/sasa/result.json` | `ComparisonArtifact` with the per-condition aggregates and the pairwise tests. |
 
-## Artifact envelope fields
+## Artifact fields
 
-Replicate and condition JSON files are artifact envelopes. The stable public
-concepts are the artifact envelope and the canonical paths, not private helper
-classes.
+A replicate estimate carries `name`, `kind`, `unit`, `n_frames`, the reduced
+`value` for a time-series kind or the `profile` and `index` for a profile, and
+the correlation diagnostics `statistical_inefficiency` and `n_eff`. The
+diagnostics are reported, never used to shrink an error bar.
 
-| Field | Meaning |
-|-------|---------|
-| `analysis_name` | Analysis plugin name, usually `sasa`. |
-| `condition_label` | Comparison condition label. |
-| `replicate` | Replicate number for replicate artifacts; absent or not meaningful for condition artifacts. |
-| `payload` | JSON-compatible SASA summaries, metrics, run labels, and relative sidecar paths. |
-| `metadata` | Settings fingerprints, software versions, equilibration labels, units, and related run metadata. |
-| `provenance` | Input trajectory/topology identity and workflow details. |
-| `sidecars` | Validated references to large sidecar files, including relative paths and integrity metadata. |
+A condition aggregate carries `replicate_values`, `mean`, `sem`, `ci95_low`,
+`ci95_high`, `ci_method`, `coverage` and `n_replicates` for a time-series kind,
+and `profile_mean`, `profile_sem` and `index` for a profile. Every statistic is
+computed across replicates, never across frames.
 
-Common replicate `payload` keys include:
+A comparison entry carries `control`, `condition`, `delta`, `percent_change`,
+`test`, `p_value`, `p_adjusted`, `correction`, `cohens_d`, `significant`,
+`testable` and `note`. Profiles are aggregated but not tested pairwise.
 
-| Key | Meaning |
-|-----|---------|
-| `run_results` | List of per-run summaries for the replicate. |
-| `n_runs` | Number of configured SASA runs. |
-| `n_frames_total` | Total frames available after the workflow frame selection. |
-| `n_frames_used` | Frames actually analyzed after per-run stride. |
-| `metrics` / `replicate_metrics` | Scalar metrics extracted from run summaries. |
-| `metric_metadata` | Units and labels for scalar metrics. |
+## Interpretation
 
-Common per-run payload fields include:
+A lower `sasa_protein_with_polymer` than `sasa_protein_isolated` in the same
+condition means polymer atoms cover protein surface. Comparing
+`sasa_protein_with_polymer` across conditions against the no-polymer control
+answers whether one formulation shields more than another. The `delta` in a
+comparison entry is in square angstrom and `percent_change` is relative to the
+control mean.
 
-| Key | Meaning |
-|-----|---------|
-| `label` | SASA run label. |
-| `target_selection` | Selection whose SASA is reported. |
-| `context_selection` | Selection used as the blocking context. |
-| `mean_sasa` | Mean SASA for the run in A^2. |
-| `sem_sasa` | Standard error estimate for the run in A^2. |
-| `sidecar_path` | Relative path to the NPZ sidecar for arrays. |
-| `probe_radius_nm` | Probe radius used for the calculation. |
-| `n_sphere_points` | Sphere point count used for the calculation. |
+## Figures
 
-## Loading artifacts with `ArtifactStore`
-
-Use the public MDAnalysis artifact API to inspect canonical artifacts:
-
-```python
-from pathlib import Path
-
-from polyzymd.analyses.mda import ArtifactStore
-
-replicate_store = ArtifactStore(Path("analysis/With Polymer/sasa/run_1"))
-replicate = replicate_store.read_replicate_result()
-print(replicate.payload["run_results"])
-
-condition_store = ArtifactStore(Path("analysis/With Polymer/sasa/aggregated"))
-condition = condition_store.read_condition_result()
-print(condition.payload)
-```
-
-Sidecar NPZ files are referenced from the artifact `sidecars` list and from
-payload fields such as `sidecar_path`. Treat sidecars as large validated data
-files linked by the artifact, not as independently discovered cache files.
-
-## Comparison output
-
-`comparison/sasa/result.json` contains cross-condition statistics organized by
-configured run label.
-
-| Field | Description |
-|-------|-------------|
-| `metric` | Comparison metric name, currently `mean_sasa`. |
-| `name` | Comparison study name. |
-| `n_runs` | Number of configured SASA runs. |
-| `run_labels` | Ordered list of run labels. |
-| `control_label` | Configured control condition, when present. |
-| `conditions` | Per-condition summaries with per-run means and SEMs. |
-| `pairwise_comparisons` | Per-run pairwise statistics between conditions. |
-| `anova_by_run` | Per-run ANOVA results when testable. |
-| `ranking_by_run` | Condition ranking for each run. |
-| `equilibration_time` | Equilibration cutoff used for the comparison. |
-
-Pairwise comparison entries include:
-
-| Field | Description |
-|-------|-------------|
-| `run_label` | SASA run being compared. |
-| `condition_a`, `condition_b` | Conditions in the comparison. |
-| `p_value`, `p_value_adjusted` | Raw and adjusted p-values when available. |
-| `cohens_d` | Effect size when available. |
-| `direction` | `shielding`, `exposure`, or `unchanged` based on SASA change. |
-| `significant` | Whether the comparison passed the configured significance rule. |
-| `percent_change` | Percent change from condition A to condition B. |
-| `testable` | Whether the comparison had enough data for a statistical test. |
-| `note` | Explanation for non-testable or special cases. |
-
-## Normalized-control formula
-
-Normalized comparison plots use the configured control condition as the
-denominator:
-
-```text
-percent change = (condition_mean - control_mean) / control_mean * 100
-```
-
-For a shielding run such as `protein_with_polymer`, negative values indicate
-lower SASA than the control and are consistent with polymer shielding. Positive
-values indicate increased exposure relative to the control.
-
-## Plot outputs
-
-For each configured run label, SASA may generate these plots under the
-configured plot output directory, usually `figures/sasa/`:
-
-| Plot output | Description |
-|-------------|-------------|
-| `sasa_comparison_<run>.png` | Mean SASA bar chart with SEM and replicate points. |
-| `sasa_normalized_comparison_<run>.png` | Percent change relative to the configured control. |
-| `sasa_timeseries_<run>.png` | Per-frame SASA traces summarized across conditions. |
-| `sasa_profile_<run>.png` | Per-residue mean SASA profile across conditions. |
-
-Time-axis plots assume uniformly saved frames. PolyzyMD maps frame index to time
-as `frame_index * dt`; variable-timestep concatenated trajectories are not
-supported.
+`compare run --plot` draws figures from the observable kind in the contract
+runner. Until that work lands, a `sasa` run writes artifacts and the text report
+but no figures.
 
 ## Units
 
 | Quantity | Unit |
 |----------|------|
 | `probe_radius_nm` | nm |
-| SASA values in outputs | A^2 |
-| Time sidecar arrays | ns |
+| `sasa_<label>` | A^2 |
+| `relative_sasa_<label>` | fraction of the maximum accessible area |
+
+## References
+
+- Shrake, A. & Rupley, J. A. (1973). Environment and exposure to solvent of
+  protein atoms. Lysozyme and insulin. *Journal of Molecular Biology*, 79(2),
+  351-371. doi:10.1016/0022-2836(73)90011-9
+- Tien, M. Z. et al. (2013). Maximum allowed solvent accessibilities of residues
+  in proteins. *PLoS ONE*, 8(11), e80635. doi:10.1371/journal.pone.0080635
+- McGibbon, R. T. et al. (2015). MDTraj: a modern open library for the analysis
+  of molecular dynamics trajectories. *Biophysical Journal*, 109(8), 1528-1532.
+  doi:10.1016/j.bpj.2015.08.015
 
 ## See also
 
-- {doc}`../tutorials/sasa_analysis` — guided shielding tutorial
-- {doc}`../how_to/analysis_sasa_quickstart` — task recipes and commands
-- {doc}`comparison_yaml` — comparison file schema
-- {doc}`analysis_comparison_reference` — shared comparison and plotting behavior
+- {doc}`../tutorials/sasa_analysis` (guided shielding tutorial)
+- {doc}`../how_to/analysis_sasa_quickstart` (task recipes and commands)
+- {doc}`comparison_yaml` (comparison file schema)
+- {doc}`analysis_comparison_reference` (shared comparison behavior)

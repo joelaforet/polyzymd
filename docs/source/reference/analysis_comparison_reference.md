@@ -43,8 +43,8 @@ plugins:
 `ttest_method`, `posthoc_method` and `fdr_alpha` from the `defaults:` block
 reach every plugin's comparison step, including the plugins listed below as
 "custom" in the plugin summary table. Asking for `ttest_method: "welch"` runs
-Welch's unequal-variance t-test in `rmsd`, `rg`, `sasa`, `contacts`,
-`distances` and the default scalar pipeline alike.
+Welch's unequal-variance t-test in `rmsd`, `rg`, `contacts`, `distances`,
+the observable contract plugins and the default scalar pipeline alike.
 
 The multiple-comparison family is defined once for the whole package:
 
@@ -131,7 +131,7 @@ Stable analysis plugins:
 | `distances` | No (custom) | Multiple distance metrics | Named distance pairs | FDR-corrected per-pair t-tests + omnibus ANOVA |
 | `catalytic_triad` | Yes | `simultaneous_contact_fraction` | Active-site geometry | FDR-corrected pairwise t-tests + omnibus ANOVA |
 | `secondary_structure` | Yes | `ss_helix` and `ss_strand` (`ss_coil` and `ss_unassigned` reported, not tested) | Secondary structure content | FDR-corrected pairwise t-tests over replicates |
-| `sasa` | No (custom) | Per-run mean SASA | Multi-run target/context model | FDR-corrected per-run pairwise t-tests + omnibus ANOVA |
+| `sasa` | Yes (observable contract) | `sasa_<label>` in A^2 | Target and context selections per measured context | Student or Welch t-test per observable, one Benjamini-Hochberg family |
 | `hydrogen_bonds` | Custom loader with default-style scalar statistics | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA per configured summary |
 
 ## Path Rules

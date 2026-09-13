@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import warnings
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -12,6 +13,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from polyzymd.analyses.base import BasePlotSettings
 from polyzymd.core.branding import prepend_file_header
 from polyzymd.utils.templates import render_package_template
+
+LOGGER = logging.getLogger(__name__)
 
 CANONICAL_PLOT_STYLES: tuple[str, ...] = ("compact", "large_elements", "low_ink")
 _PLOT_STYLE_ALLOWED_MESSAGE = "allowed values are 'compact', 'large_elements', and 'low_ink'"
@@ -582,12 +585,12 @@ class PlotSettings(BaseModel):
                 # settings of its own; the framework draws its figures from the
                 # observable kind. Keep the block so an existing comparison
                 # file still loads, and say that it does nothing.
-                warnings.warn(
+                message = (
                     f"plot_settings block '{key}' is ignored: {key} is an observable-contract "
-                    "analysis and its figures come from the framework. Remove the block.",
-                    DeprecationWarning,
-                    stacklevel=2,
+                    "analysis and its figures come from the framework. Remove the block."
                 )
+                warnings.warn(message, UserWarning, stacklevel=2)
+                LOGGER.warning(message)
             else:
                 raise ValueError(
                     f"Unknown plot settings key '{key}'. "

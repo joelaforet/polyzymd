@@ -77,6 +77,29 @@ MAX_ASA_TABLE: Final[dict[str, float]] = {
 }
 
 
+# Protonation and disulfide state variants written by common force field setups,
+# mapped to the residue name the tables are keyed on.
+PROTONATION_VARIANTS: Final[dict[str, str]] = {
+    "HIE": "HIS",
+    "HID": "HIS",
+    "HIP": "HIS",
+    "HSE": "HIS",
+    "HSD": "HIS",
+    "HSP": "HIS",
+    "CYSH": "CYS",
+    "CYX": "CYS",
+    "ASH": "ASP",
+    "GLH": "GLU",
+    "LYN": "LYS",
+}
+
+
+def _canonical_resname(resname: str) -> str:
+    """Upper-case residue name with a protonation variant mapped to its parent."""
+    normalized = resname.upper().strip()
+    return PROTONATION_VARIANTS.get(normalized, normalized)
+
+
 # =============================================================================
 # Amino Acid Classification
 # =============================================================================
@@ -167,24 +190,7 @@ def get_aa_class(resname: str) -> str:
     >>> get_aa_class("UNK")
     'unknown'
     """
-    # Handle common protonation state variants
-    variants = {
-        "HIE": "HIS",
-        "HID": "HIS",
-        "HIP": "HIS",
-        "HSE": "HIS",
-        "HSD": "HIS",
-        "HSP": "HIS",
-        "CYSH": "CYS",
-        "CYX": "CYS",
-        "ASH": "ASP",
-        "GLH": "GLU",
-        "LYN": "LYS",
-    }
-    normalized = resname.upper().strip()
-    normalized = variants.get(normalized, normalized)
-
-    return AA_CLASSIFICATION_TABLE.get(normalized, "unknown")
+    return AA_CLASSIFICATION_TABLE.get(_canonical_resname(resname), "unknown")
 
 
 def get_max_asa(resname: str) -> float | None:
@@ -206,10 +212,11 @@ def get_max_asa(resname: str) -> float | None:
     121.0
     >>> get_max_asa("TRP")
     264.0
+    >>> get_max_asa("HIE")  # Protonation variants map to their parent
+    216.0
     >>> get_max_asa("UNK")  # Returns None for unknown residues
     """
-    normalized = resname.upper().strip()
-    return MAX_ASA_TABLE.get(normalized)
+    return MAX_ASA_TABLE.get(_canonical_resname(resname))
 
 
 def get_residues_for_class(aa_class: str) -> list[str]:

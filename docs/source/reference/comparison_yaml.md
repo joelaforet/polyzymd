@@ -180,19 +180,19 @@ unassigned, and the per-residue helix and strand occupancy over the window. See
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `runs` | list | **(required)** | List of SASA run definitions (see sub-fields) |
+| `runs` | list | **(required)** | Contexts to measure, labels unique (see sub-fields) |
 | `probe_radius_nm` | float | `0.14` | MDTraj Shrake-Rupley probe radius in nanometers |
 | `n_sphere_points` | int | `960` | Number of sphere points for MDTraj Shrake-Rupley SASA |
-| `chunk_size` | int | `100` | Frames per chunk for memory management |
+| `chunk_size` | int | `100` | Frames per MDTraj call; bounds memory and shifts areas by about 0.1 percent, so hold it fixed across a comparison |
 
 Each entry in `runs`:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `label` | string | **(required)** | Name for this SASA computation |
+| `label` | string | **(required)** | Context name used in the observable names |
 | `target_selection` | string | **(required)** | MDAnalysis selection for the target surface |
-| `context_selection` | string | same as `target_selection` | Atoms to include in SASA context (affects shadowing) |
-| `stride` | int | `1` | Frame stride |
+| `context_selection` | string | same as `target_selection` | Atoms allowed to block the surface, must contain the target |
+| `stride` | int | `1` | Deprecated since v1.3 and ignored, the frame window comes from `--eq-time` |
 
 ### `plugins.catalytic_triad`
 

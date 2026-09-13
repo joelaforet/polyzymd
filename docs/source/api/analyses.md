@@ -108,7 +108,7 @@ shared-utility autodoc blocks.
 | `rmsd` | `polyzymd.analyses.rmsd` | One `mean_of_timeseries` observable per run | Observable contract |
 | `rg` | `polyzymd.analyses.rg` | Per-run radius-of-gyration artifacts | Custom multi-run comparison |
 | `rmsf` | `polyzymd.analyses.rmsf` | Per-residue profile artifacts | Default scalar comparison |
-| `sasa` | `polyzymd.analyses.sasa` | SASA artifacts and sidecars | Custom multi-run comparison |
+| `sasa` | `polyzymd.analyses.sasa` | Observable artifacts and an NPZ sidecar | Observable contract |
 | `catalytic_triad` | `polyzymd.analyses.catalytic_triad` | Pair-distance-derived artifacts | Default scalar comparison |
 | `secondary_structure` | `polyzymd.analyses.secondary_structure` | Four DSSP fractions and two occupancy profiles | Observable contract |
 

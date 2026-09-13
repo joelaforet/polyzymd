@@ -40,7 +40,6 @@ PLUGIN_NAMES = (
     "rmsd",
     "rmsf",
     "rg",
-    "sasa",
     "contacts",
     "distances",
     "hydrogen_bonds",
@@ -454,20 +453,6 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
             [1],
         )
         return metrics
-
-    if analysis_name == "sasa":
-        from polyzymd.analyses.sasa._mda import _condition_metrics as sasa_metrics
-
-        return sasa_metrics(
-            [
-                {
-                    "run_label": "run_1",
-                    "per_replicate_means": [100.0],
-                    "overall_mean": 100.0,
-                    "overall_sem": None,
-                }
-            ]
-        )
 
     if analysis_name == "rmsd":
         return {"run_1.mean_rmsd": metric_summary_payload("run_1.mean_rmsd", [1.0], unit="A")}

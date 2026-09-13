@@ -448,3 +448,39 @@ def test_contract_scaffold_renders_and_imports(tmp_path: Path) -> None:
             types.SimpleNamespace(start=0, stop=3, step=1, frames=None),
             module.ProbeContractSettings(),
         )
+
+
+def test_metadata_and_index_label_reach_the_aggregate() -> None:
+    """Per-observable provenance survives the reduction and the aggregation."""
+    replicates = [
+        [
+            Observable(
+                name="p",
+                kind="profile",
+                unit="A",
+                values=[1.0, 2.0],
+                index=[7.0, 8.0],
+                index_label="residue index",
+                metadata={"chunk_size": 50},
+            )
+        ]
+        for _ in range(2)
+    ]
+
+    aggregate = aggregate_observables(replicates)[0]
+
+    assert aggregate.index_label == "residue index"
+    assert aggregate.metadata == {"chunk_size": 50}
+    assert reduce_observable(replicates[0][0]).metadata == {"chunk_size": 50}
+
+
+def test_index_label_needs_a_profile() -> None:
+    """Labelling an index that does not exist is a contract error."""
+    with pytest.raises(ValueError, match="has an index but kind is not 'profile'"):
+        Observable(
+            name="x",
+            kind="mean_of_timeseries",
+            unit="A",
+            values=[1.0],
+            index_label="residue index",
+        )
