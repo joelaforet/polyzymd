@@ -178,13 +178,12 @@ class PluginSettingsContainer(BaseModel):
 # Plot Settings Configuration
 # ============================================================================
 
-# Per-analysis plot settings classes (TriadPlotSettings, SASAPlotSettings, etc.)
-# live in their respective plugin packages at analyses/<name>/_plot_settings.py.
-# Each plugin exposes its plot settings model via
-# Analysis.PlotSettingsModel. PlotSettings.__init__ discovers plugins and
-# builds a mapping from analysis name to plot settings model. A plugin ported to
-# the observable contract has no such model; its figures come from the
-# framework, keyed on observable kind.
+# Each plugin exposes its plot settings model via Analysis.PlotSettingsModel.
+# PlotSettings.__init__ discovers plugins and builds a mapping from analysis
+# name to plot settings model. Every built-in plugin is on the observable
+# contract, so its model is ContractPlotSettings and its figures come from the
+# framework, keyed on observable kind. A key in a block that the model does not
+# define is dropped, and dropping it is reported.
 
 
 class SemanticConditionColorConfig(BaseModel):

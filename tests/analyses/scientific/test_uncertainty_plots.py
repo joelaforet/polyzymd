@@ -29,11 +29,22 @@ from polyzymd.analyses.shared.plotting import (  # noqa: E402
     plugin_plot_settings,
     resolve_error_bar,
 )
-from tests.analyses.conftest import figure_draws_uncertainty  # noqa: E402
+from tests.analyses.conftest import (  # noqa: E402
+    _PLOTTER_MODULES,
+    figure_draws_uncertainty,
+)
 
 T_FACTOR_N3 = 4.302652729749462
 
-PLUGINS_WITH_PLOT_SETTINGS = ()
+
+def _registered_analyses() -> tuple[str, ...]:
+    """Every discovered analysis name, in a stable order."""
+    from polyzymd.analyses.discovery import list_analyses
+
+    return tuple(sorted(list_analyses()))
+
+
+PLUGINS_WITH_PLOT_SETTINGS = _registered_analyses()
 
 
 def _footnote_texts(fig: "plt.Figure") -> list[str]:
@@ -261,37 +272,37 @@ class TestEveryPluginFigureIsAudited:
                 "a test in this session replaced it"
             )
 
-    @pytest.mark.parametrize("analysis_name", PLUGINS_WITH_PLOT_SETTINGS)
+    @pytest.mark.parametrize("module_name", _PLOTTER_MODULES)
     def test_plotter_module_annotates_every_uncertainty_figure(
-        self, analysis_name: str, tmp_path: "Path"
+        self, module_name: str, tmp_path: "Path"
     ) -> None:
-        """Rendering a bar chart through a plugin's save_figure must be audited.
+        """Rendering a bar chart through a plotter's save_figure must be audited.
 
         Builds a minimal figure that draws an error bar, routes it through that
-        plugin's own ``save_figure`` reference, and checks that the audit
-        rejects it without a footnote and accepts it with one.
+        module's own ``save_figure`` reference, and checks that the audit
+        rejects it without a footnote and accepts it with one. Every plugin is
+        on the observable contract, so there is one such module.
         """
 
         import importlib
 
-        module = importlib.import_module(f"polyzymd.analyses.{analysis_name}._plotters")
+        module = importlib.import_module(module_name)
 
         from polyzymd.config.comparison import PlotSettings
 
         settings = PlotSettings(output_dir=tmp_path)
+        stem = module_name.rsplit(".", 1)[-1]
 
         fig, ax = plt.subplots()
         try:
             ax.bar([0], [1.0], yerr=[0.1])
             with pytest.raises(AssertionError, match="without a footnote"):
-                module.save_figure(
-                    fig, tmp_path / f"{analysis_name}_bad.png", settings, close=False
-                )
+                module.save_figure(fig, tmp_path / f"{stem}_bad.png", settings, close=False)
 
             add_uncertainty_footnote(fig, error_bar="ci95", n_replicates=3)
-            module.save_figure(fig, tmp_path / f"{analysis_name}_good.png", settings, close=False)
+            module.save_figure(fig, tmp_path / f"{stem}_good.png", settings, close=False)
         finally:
             plt.close(fig)
 
-        assert (tmp_path / f"{analysis_name}_good.png").exists()
-        assert not (tmp_path / f"{analysis_name}_bad.png").exists()
+        assert (tmp_path / f"{stem}_good.png").exists()
+        assert not (tmp_path / f"{stem}_bad.png").exists()

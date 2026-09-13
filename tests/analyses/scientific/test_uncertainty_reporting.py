@@ -405,7 +405,6 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
         # aggregate_observables and are covered in tests/analyses/test_contract.py.
         return {"rmsf_mean": metric_summary_payload("rmsf_mean", [1.5], unit="A")}
 
-
     if analysis_name == "rmsd":
         return {"run_1.mean_rmsd": metric_summary_payload("run_1.mean_rmsd", [1.0], unit="A")}
 

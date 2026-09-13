@@ -773,6 +773,8 @@ def test_welch_widens_the_p_value_and_the_family_of_one_leaves_it_alone() -> Non
     assert welch.p_value > student.p_value
     assert welch.correction == "benjamini_hochberg"
     assert welch.p_adjusted == pytest.approx(welch.p_value)
+
+
 def test_a_plugin_can_return_an_extra_sidecar_array(
     tmp_path: Path, run_contract_analysis: Any
 ) -> None:
@@ -820,6 +822,8 @@ def test_a_plugin_hint_reaches_the_generated_class() -> None:
             return [_series([1.0, 2.0])]
 
     assert contract_analysis(Expensive).execution_cost_hint == "high"
+
+
 class _SidecarPlugin:
     """Contract plugin that returns an extra array beside its observables."""
 

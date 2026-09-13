@@ -14,6 +14,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("polyzymd.analyses")
 
+#: Analyses whose aggregate on disk must be a canonical ``ConditionArtifact``.
+#: Every built-in analysis is on the observable contract and writes one, so a
+#: legacy JSON aggregate under any of these names predates the port and is
+#: refused rather than half-read.
 _STRICT_CANONICAL_AGGREGATE_ANALYSES = frozenset(
     {
         "catalytic_triad",
@@ -21,6 +25,7 @@ _STRICT_CANONICAL_AGGREGATE_ANALYSES = frozenset(
         "distances",
         "hydrogen_bonds",
         "rg",
+        "rmsd",
         "rmsf",
         "sasa",
         "secondary_structure",

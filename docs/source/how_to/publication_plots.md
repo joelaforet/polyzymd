@@ -277,17 +277,16 @@ A plugin written against the observable contract draws its figures from the
 framework, keyed on the observable kind. It accepts `error_bar`, `figsize`,
 `timeseries_figsize`, `show_replicates` and `max_categories_for_bars` and
 nothing else; any other key in its block is ignored and reported as ignored.
-`rmsd`, `rmsf`, `rg`, `sasa`, `distances`, `catalytic_triad` and
-`secondary_structure` are on the contract. `contacts` and `hydrogen_bonds`
-still have plot settings of their own.
+Every built-in plugin is on the contract, so this is the whole of the
+per-plugin plot settings.
 ```
 
-### Plugins without a plot settings block
+### Keys a plugin used to accept
 
-`contacts` and the other plugins written against the observable contract take
-no `plot_settings` block. Their figures come from the observable kind, so the
-global settings above are all that apply to them. A block naming one of them is
-ignored with a warning and rejected in v1.4.
+A `plot_settings.<plugin>` block written for the plugin's own plotters, such as
+`contacts: {generate_contact_fraction_profile: true}`, still loads. The keys the
+framework model does not define are dropped, and a warning names them. They are
+rejected outright in v1.4.
 
 ## Re-generating plots after changing settings
 

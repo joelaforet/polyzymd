@@ -112,10 +112,11 @@ shared-utility autodoc blocks.
 | `catalytic_triad` | `polyzymd.analyses.catalytic_triad` | Observables, per pair plus the simultaneous contact fraction | Observable contract |
 | `secondary_structure` | `polyzymd.analyses.secondary_structure` | Four DSSP fractions and two occupancy profiles | Observable contract |
 
-Built-in plugin packages expose their public `Analysis` subclass and supported
-settings/result contracts from the package root. Helper modules with leading
-underscores inside those packages are implementation details unless a page
-explicitly labels them as internal developer reference.
+Every built-in plugin is written against the observable contract: one module
+holding a settings model, a `compute` function and the generated `Analysis`
+subclass. The framework owns persistence, aggregation, uncertainty, comparison,
+formatting and plotting, so a plugin exposes only its settings model and its
+generated analysis class.
 
 ## Private framework internals
 
