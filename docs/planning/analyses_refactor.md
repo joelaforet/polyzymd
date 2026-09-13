@@ -249,7 +249,7 @@ Order: wave 1 is contract plots plus rmsf, secondary structure, rmsd and sasa; w
 | 118 | `analyses/port-rmsf` | rmsf, 2,195 to 273 lines | -1,797 | exact, three modes |
 | 119 | `analyses/port-distances` | distances and catalytic_triad, 5,892 to 326 lines | -6,025 | exact, five pairs |
 | 120 | `analyses/port-rg` | rg, 3,987 to 288 lines | -3,555 | exact, protein and 38 fragments |
-| pending | `analyses/port-hydrogen-bonds` | hydrogen_bonds, 4,097 to 430 lines | -3,596 | exact, seven partitions; corrected protein-polymer count 7.07 per frame against 132.9 |
-| pending | `analyses/port-contacts` | contacts, 6,203 to 420 lines; shared/groupings and shared/selectors deleted | -7,378 | exact |
+| 122 | `analyses/port-hydrogen-bonds` | hydrogen_bonds, 4,097 to 430 lines | -3,459 | exact, seven partitions; corrected protein-polymer count 7.07 per frame against 132.9 |
+| 121 | `analyses/port-contacts` | contacts, 6,203 to 483 lines; shared/groupings and shared/selectors deleted | -7,302 | exact |
 
 Sum of the ports so far: about 30,700 source lines removed against about 1,900 added, before the legacy framework removal.
