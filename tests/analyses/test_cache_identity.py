@@ -183,10 +183,12 @@ class TestPluginFingerprintAgreement:
         ``_stamp_replicate_identity`` writes ``aggregate_settings_fingerprint``
         onto a replicate artifact, while aggregation compares against the
         plugin's own tag. A plugin that folds a version into one and not the
-        other rejects every artifact it just wrote.
+        other rejects every artifact it just wrote. Every built-in plugin now
+        runs on the observable contract, where the runner owns the identity
+        block, so the list this walks is empty; the check stays as a guard for
+        a plugin that brings a private tag back.
         """
 
-        checked = 0
         for name, analysis in self._analyses_with_a_private_cache_tag():
             settings = analysis.Settings()
             assert analysis.aggregate_settings_fingerprint(
@@ -194,37 +196,3 @@ class TestPluginFingerprintAgreement:
             ) == analysis._make_settings_cache_tag(
                 settings
             ), f"{name}: aggregate_settings_fingerprint and _make_settings_cache_tag disagree"
-            checked += 1
-        assert checked > 0
-
-    def test_stamped_rmsd_artifact_passes_aggregation(self, tmp_path: Path):
-        """An RMSD artifact stamped by the lifecycle is accepted by aggregation."""
-
-        from polyzymd.analyses._framework.lifecycle import _stamp_replicate_identity
-        from polyzymd.analyses.mda import ReplicateArtifact
-        from polyzymd.analyses.rmsd import RMSDAnalysis, RMSDSettings
-        from polyzymd.analyses.rmsd._mda import _validate_and_order_artifacts
-        from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
-
-        del tmp_path
-        analysis = RMSDAnalysis()
-        settings = RMSDSettings()
-        artifact = ReplicateArtifact(
-            analysis_name="rmsd",
-            condition_label="Control",
-            replicate=1,
-            payload={"runs": [{"label": run.label} for run in settings.runs]},
-            metadata={
-                "autocorrelation_estimator_version": AUTOCORRELATION_ESTIMATOR_VERSION,
-            },
-        )
-        _stamp_replicate_identity(artifact, analysis, settings, "10ns")
-
-        ordered = _validate_and_order_artifacts(
-            condition_label="Control",
-            expected_replicates=[1],
-            run_labels=[run.label for run in settings.runs],
-            settings_fingerprint=analysis._make_settings_cache_tag(settings),
-            artifacts=[artifact],
-        )
-        assert [a.replicate for a in ordered] == [1]

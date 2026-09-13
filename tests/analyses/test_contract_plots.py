@@ -333,9 +333,9 @@ def test_plot_settings_turn_the_replicate_overlay_off() -> None:
 
 def test_a_contract_plugin_gets_the_default_plot_settings_model() -> None:
     """A plugin that declares nothing still exposes ContractPlotSettings."""
-    from polyzymd.analyses.rg_contract import Rg2Analysis
+    from polyzymd.analyses.rg import RgAnalysis
 
-    assert Rg2Analysis.PlotSettingsModel is ContractPlotSettings
+    assert RgAnalysis.PlotSettingsModel is ContractPlotSettings
     assert SyntheticAnalysis.PlotSettingsModel is ContractPlotSettings
 
 
@@ -471,7 +471,7 @@ def test_the_footnote_promises_points_only_when_points_are_drawn(
     assert "Points" not in add_uncertainty_footnote(figure, n_replicates=3, points=False)
 
 
-def test_rg2_writes_its_figures_through_run_comparison(
+def test_rg_writes_its_figures_through_run_comparison(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A real plugin gets figures from the full comparison lifecycle, unedited."""
@@ -479,7 +479,7 @@ def test_rg2_writes_its_figures_through_run_comparison(
 
     from polyzymd.analyses._framework.contexts import Condition
     from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
-    from polyzymd.analyses.rg_contract import Rg2Analysis, RgSettings
+    from polyzymd.analyses.rg import RgAnalysis, RgSettings
     from polyzymd.config.comparison import PlotSettings
     from tests.analyses.conftest import _stubbed
 
@@ -507,7 +507,7 @@ def test_rg2_writes_its_figures_through_run_comparison(
     )
     config.model_copy = lambda deep=True: config
     stubbed = _stubbed(
-        Rg2Analysis,
+        RgAnalysis,
         lambda replicate: make_synthetic_universe(scale=1.0 + 0.5 * replicate, n_frames=8),
         (),
     )
@@ -517,7 +517,7 @@ def test_rg2_writes_its_figures_through_run_comparison(
     )
 
     assert [path.name for path in result["plots"]] == [
-        "rg2_protein_comparison.png",
-        "rg2_protein_timeseries.png",
+        "rg_rg_protein_comparison.png",
+        "rg_rg_protein_timeseries.png",
     ]
     assert all(path.exists() for path in result["plots"])

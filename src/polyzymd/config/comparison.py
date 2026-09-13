@@ -465,6 +465,37 @@ class PlotTheme(BaseModel):
         )
 
 
+def _warn_ignored_plot_keys(
+    analysis_name: str,
+    block: dict[str, Any],
+    settings_class: type[BasePlotSettings],
+    contract_class: type[BasePlotSettings],
+) -> None:
+    """Say out loud which keys of one plot_settings block the model drops.
+
+    Pydantic ignores an extra key, so a campaign file written for a plugin's
+    own plotters keeps loading unchanged after the plugin moves to the
+    observable contract, with every option silently doing nothing. Naming the
+    dropped keys is the only warning the user gets, so it is a ``UserWarning``
+    and a log line rather than a ``DeprecationWarning``, which Python hides
+    outside ``__main__``.
+    """
+    ignored = sorted(set(block) - set(settings_class.model_fields))
+    if not ignored:
+        return
+    accepted = sorted(settings_class.model_fields)
+    if issubclass(settings_class, contract_class):
+        reason = (
+            f"{analysis_name} is an observable-contract analysis, so the framework draws its "
+            f"figures from the observable kind and the settings it accepts are {accepted}."
+        )
+    else:
+        reason = f"The settings {analysis_name} accepts are {accepted}."
+    message = f"plot_settings block '{analysis_name}' ignores {ignored}. {reason}"
+    warnings.warn(message, UserWarning, stacklevel=3)
+    LOGGER.warning(message)
+
+
 class PlotSettings(BaseModel):
     """Global plot settings for comparison.yaml.
 
@@ -554,6 +585,7 @@ class PlotSettings(BaseModel):
             types are parsed into their settings classes; global keys are
             handled by Pydantic; unknown keys raise ``ValueError``.
         """
+        from polyzymd.analyses.contract_plots import ContractPlotSettings
         from polyzymd.analyses.discovery import list_analyses
 
         plugin_registry = list_analyses()
@@ -574,6 +606,7 @@ class PlotSettings(BaseModel):
             elif key in _plot_models:
                 settings_class = _plot_models[key]
                 if isinstance(value, dict):
+                    _warn_ignored_plot_keys(key, value, settings_class, ContractPlotSettings)
                     per_analysis[key] = settings_class(**value)
                 elif isinstance(value, BasePlotSettings):
                     per_analysis[key] = value

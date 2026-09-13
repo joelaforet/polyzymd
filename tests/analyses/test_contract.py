@@ -726,6 +726,7 @@ def test_index_label_needs_a_profile() -> None:
             index_label="residue index",
         )
 
+
 def _condition(values: Sequence[float]) -> list[ObservableAggregate]:
     """One condition whose single observable holds the given replicate values."""
     return aggregate_observables([[_series([value - 0.05, value + 0.05])] for value in values])

@@ -271,5 +271,3 @@ def test_pairwise_comparison_zero_control_not_similar() -> None:
     assert comp.percent_change > 0
     assert comp.direction != "similar"
     assert comp.direction == "higher"
-
-

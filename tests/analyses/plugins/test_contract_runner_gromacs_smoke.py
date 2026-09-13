@@ -19,7 +19,7 @@ import numpy as np
 from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
 from polyzymd.analyses.contract import ObservableEstimate
 from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
-from polyzymd.analyses.rg_contract import Rg2Analysis, RgSettings
+from polyzymd.analyses.rg import RgAnalysis, RgSettings
 from polyzymd.engines.gromacs import GromacsEngine
 from tests._support.gromacs_smoke import (
     create_gromacs_layout,
@@ -100,14 +100,14 @@ def test_contract_runner_writes_a_replicate_from_a_gromacs_layout(tmp_path: Path
             GromacsEngine, "resolve_trajectory_layout", autospec=True, wraps=original_resolve
         ) as resolve_spy,
     ):
-        result = AnalysisLifecycle(Rg2Analysis()).run_replicate_once(
+        result = AnalysisLifecycle(RgAnalysis()).run_replicate_once(
             condition, settings, "0ns", output_dir, 1, recompute=True
         )
 
     assert resolve_spy.call_count >= 1
     assert isinstance(result, ReplicateArtifact)
     estimate = ObservableEstimate.model_validate(result.payload["observables"][0])
-    assert estimate.name == "protein_rg"
+    assert estimate.name == "rg_protein_rg"
     assert estimate.value == RG_VALUE
     assert estimate.n_frames == N_FRAMES
     persisted = ArtifactStore(output_dir).read_replicate_result("result.json")

@@ -33,9 +33,7 @@ from tests.analyses.conftest import figure_draws_uncertainty  # noqa: E402
 
 T_FACTOR_N3 = 4.302652729749462
 
-PLUGINS_WITH_PLOT_SETTINGS = (
-    "contacts",
-)
+PLUGINS_WITH_PLOT_SETTINGS = ("contacts",)
 
 
 def _footnote_texts(fig: "plt.Figure") -> list[str]:

@@ -6,6 +6,12 @@
 topology and its md5, the trajectory, the window, the settings and the commit
 the old code was exported from. The test skips when that trajectory is not on
 this machine, so a checkout without the data still passes.
+
+The ``centroid`` entry was refrozen when this port met the alignment-reference
+fix. The old aligner passed the trajectory as its own reference, so MDAnalysis
+read the reference coordinates from whatever frame the universe sat on instead
+of from the centroid frame. The entry now holds what the same pre-port code
+produces with the corrected aligner, which the ported plugin reproduces exactly.
 """
 
 from __future__ import annotations

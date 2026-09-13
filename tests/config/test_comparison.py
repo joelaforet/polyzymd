@@ -482,11 +482,11 @@ class TestUnknownAnalysisDiagnostics:
         with pytest.warns(UserWarning, match="secondary_structure"):
             config = ComparisonConfig.from_yaml(yaml_path)
 
-        assert getattr(config.plot_settings, "secondary_structure", None) is None
+        block = config.plot_settings.secondary_structure
+        assert not hasattr(block, "generate_timeline")
+        assert not hasattr(block, "diff_colormap")
 
-    def test_plot_settings_block_survives_without_a_plugins_entry(
-        self, tmp_path: Path
-    ) -> None:
+    def test_plot_settings_block_survives_without_a_plugins_entry(self, tmp_path: Path) -> None:
         """An existing campaign file keeps loading after a plugin is ported.
 
         A plugin on the observable contract has no plot settings model, because
@@ -512,9 +512,7 @@ class TestUnknownAnalysisDiagnostics:
             config = ComparisonConfig.from_yaml(yaml_path)
 
         assert config.name == "contract-plot-test"
-        assert config.plot_settings is not None
-        with pytest.raises(AttributeError):
-            _ = config.plot_settings.rg
+        assert config.plot_settings.rg.show_replicates is True
 
 
 class TestPluginSettingsCanonicalNames:

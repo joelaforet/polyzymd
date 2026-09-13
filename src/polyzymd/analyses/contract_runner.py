@@ -474,6 +474,7 @@ def _measurement_warnings(observables: Sequence[Observable]) -> list[str]:
                 messages.append(str(message))
     return messages
 
+
 def _observables_of(artifact: Any, analysis_name: str, condition_label: str) -> list[Any]:
     """Read the observables of a condition aggregate, or say the cache predates the port.
 

@@ -273,11 +273,14 @@ In addition to global settings, plugins can define their own plot options under
 `plot_settings.<plugin_name>`.
 
 ```{note}
-A plugin written against the observable contract, such as `rmsd`, has no
-per-plugin plot settings. Its figures come from the framework, keyed on the
-observable kind, and follow the global settings above.
+A plugin written against the observable contract draws its figures from the
+framework, keyed on the observable kind. It accepts `error_bar`, `figsize`,
+`timeseries_figsize`, `show_replicates` and `max_categories_for_bars` and
+nothing else; any other key in its block is ignored and reported as ignored.
+`rmsd`, `rmsf`, `rg`, `sasa`, `distances`, `catalytic_triad` and
+`secondary_structure` are on the contract. `contacts` and `hydrogen_bonds`
+still have plot settings of their own.
 ```
-
 
 ### Contacts example
 
