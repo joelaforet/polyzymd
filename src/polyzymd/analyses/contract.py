@@ -89,7 +89,10 @@ class Observable(BaseModel):
     Parameters
     ----------
     name : str
-        Identifier unique within the plugin, for example ``"protein_rg"``.
+        Identifier unique within the plugin, for example ``"protein_rg"``. It
+        may not be the name of a field of
+        :class:`ObservableAggregate`, because an aggregate holds both and a
+        reader could not tell which ``coverage`` a key meant.
     kind : ObservableKind
         How the framework reduces and compares the values. See the module
         docstring of :mod:`polyzymd.analyses.contract` for the five kinds.
@@ -103,9 +106,27 @@ class Observable(BaseModel):
     index : array_like or None, optional
         Residue IDs or bin centres, required for ``"profile"`` and rejected
         for every other kind.
+    index_label : str or None, optional
+        What the index counts, for example ``"Residue"`` or ``"Rg (A)"``. Used
+        as the x axis label of the generated profile figure. ``None`` leaves
+        the figure to label the axis generically.
     higher_is_better : bool or None, optional
         Direction that counts as an improvement, used by formatters. ``None``
         when the quantity has no preferred direction.
+    tested : bool, optional
+        Whether the observable enters the cross-condition tests, by default
+        ``True``. Set it to ``False`` for a quantity that is a function of
+        others the plugin already reports, such as the last class of a set of
+        fractions that sums to one. An untested observable is still reduced,
+        aggregated and reported with its uncertainty; it is only kept out of
+        the pairwise tests and out of the multiple-comparison family, so it
+        cannot inflate the adjusted p-values of the quantities that carry
+        independent information.
+    metadata : dict, optional
+        JSON-compatible facts about how the value was measured, for example the
+        periodic boundary policy or whether the topology carried bonds. The
+        framework copies it onto the replicate estimate and writes it into the
+        replicate artifact. It takes no part in the statistics.
     """
 
     name: str = Field(min_length=1)
@@ -113,7 +134,10 @@ class Observable(BaseModel):
     values: list[float]
     unit: str | None = None
     index: list[float] | None = None
+    index_label: str | None = None
     higher_is_better: bool | None = None
+    tested: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(frozen=True)
 
@@ -127,7 +151,13 @@ class Observable(BaseModel):
 
     @model_validator(mode="after")
     def _check_shape(self) -> Observable:
-        """Reject empty, non-finite, or mis-indexed observables."""
+        """Reject empty, non-finite, mis-indexed, or ambiguously named observables."""
+        if self.name in _AGGREGATE_FIELDS:
+            raise ValueError(
+                f"observable name {self.name!r} collides with a field of "
+                "ObservableAggregate, which reports both under one key. Qualify it, "
+                f"for example {self.name + '_per_frame'!r}"
+            )
         array = np.asarray(self.values, dtype=np.float64)
         if array.size == 0:
             raise ValueError(f"observable {self.name!r} has no values")
@@ -157,7 +187,10 @@ class ObservableEstimate(BaseModel):
     value: float | None = None
     profile: list[float] | None = None
     index: list[float] | None = None
+    index_label: str | None = None
     higher_is_better: bool | None = None
+    tested: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
     n_frames: int
     statistical_inefficiency: float | None = None
     n_eff: float | None = None
@@ -180,8 +213,15 @@ class ObservableAggregate(BaseModel):
     profile_mean: list[float] | None = None
     profile_sem: list[float] | None = None
     index: list[float] | None = None
+    index_label: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     n_eff_min: float | None = None
     higher_is_better: bool | None = None
+    tested: bool = True
+
+
+#: Field names an observable may not take, because an aggregate carries both.
+_AGGREGATE_FIELDS: frozenset[str] = frozenset(ObservableAggregate.model_fields)
 
 
 class ObservableComparison(BaseModel):
@@ -303,11 +343,14 @@ def reduce_observable(observable: Observable | ObservableEstimate) -> Observable
         return observable
 
     values = np.asarray(observable.values, dtype=np.float64)
-    common = {
+    common: dict[str, Any] = {
         "name": observable.name,
         "kind": observable.kind,
         "unit": observable.unit,
+        "index_label": observable.index_label,
         "higher_is_better": observable.higher_is_better,
+        "tested": observable.tested,
+        "metadata": dict(observable.metadata),
         "n_frames": int(values.size),
     }
     if observable.kind == "profile":
@@ -382,6 +425,8 @@ def aggregate_observables(
             kind=head.kind,
             unit=head.unit,
             higher_is_better=head.higher_is_better,
+            tested=head.tested,
+            metadata=dict(head.metadata),
             n_replicates=len(estimates),
             n_eff_min=_min_or_none([est.n_eff for est in estimates]),
         )
@@ -392,6 +437,7 @@ def aggregate_observables(
                 aggregate.model_copy(
                     update={
                         "index": head.index,
+                        "index_label": head.index_label,
                         "profile_mean": np.mean(stacked, axis=0).tolist(),
                         "profile_sem": profile_sem,
                         "ci_method": None if profile_sem is None else CI_METHOD,
@@ -459,9 +505,11 @@ def compare_observables(
     Returns
     -------
     list[ObservableComparison]
-        One entry per observable and non-control condition. Profiles are not
-        tested and are omitted. A pair with fewer than two replicates on either
-        side is reported with ``testable=False`` and a note.
+        One entry per observable and non-control condition. Profiles and
+        observables declared ``tested=False`` are omitted, so they neither get
+        a test nor enlarge the correction family. A pair with fewer than two
+        replicates on either side is reported with ``testable=False`` and a
+        note.
 
     Raises
     ------
@@ -485,7 +533,7 @@ def compare_observables(
 
     comparisons: list[ObservableComparison] = []
     for name, control_agg in samples[control].items():
-        if control_agg.kind == "profile":
+        if control_agg.kind == "profile" or not control_agg.tested:
             continue
         others = [label for label in labels if label != control and name in samples[label]]
         if use_tukey:
