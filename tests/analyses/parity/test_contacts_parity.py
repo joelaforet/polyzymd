@@ -17,13 +17,11 @@ the 40 ps time axis. The residence-time distribution is a histogram the old code
 did not build, so the reference bins the old event durations with the same edges
 the plugin uses.
 
-Two quantities the old plugin reported as replicate metrics are derived rather
-than reported now, and the test derives them the same way: its
-``mean_contact_fraction`` is the mean of the contact fraction profile, which the
-framework reports as ``contact_fraction_mean``, and its ``coverage`` was the
-share of residues touched at any point in the window, which is the share of the
-profile above zero. The observable now called ``coverage`` is the per-frame
-share instead, so both are checked.
+The old plugin reported two replicate metrics. Its ``mean_contact_fraction`` is
+the mean of the contact fraction profile, which is also the mean of
+``coverage_per_frame``, and the test checks it both ways. Its ``coverage`` was
+the share of residues touched at any point in the window, which the port
+reports as ``coverage_any_frame``.
 
 The tests skip when the trajectory is not on this machine, so a checkout without
 the data still passes.
@@ -79,7 +77,7 @@ def test_per_frame_series_match_the_old_detector() -> None:
     observables, _ = _observables(reference)
 
     counts = observables["contact_count"]
-    coverage = observables["coverage"]
+    coverage = observables["coverage_per_frame"]
     assert (counts.unit, coverage.unit) == ("count", "fraction")
     assert len(counts.values) == reference["frames"]["n_frames_used"]
     np.testing.assert_allclose(
@@ -103,12 +101,12 @@ def test_contact_fraction_profile_matches_the_old_replicate_metrics() -> None:
     assert float(np.mean(profile.values)) == pytest.approx(
         reference["mean_contact_fraction"], abs=TOLERANCE
     )
-    assert float(np.mean(observables["coverage"].values)) == pytest.approx(
+    assert float(np.mean(observables["coverage_per_frame"].values)) == pytest.approx(
         reference["mean_contact_fraction"], abs=TOLERANCE
     )
-    assert float(np.mean(np.asarray(profile.values) > 0.0)) == pytest.approx(
-        reference["coverage_any_frame"], abs=TOLERANCE
-    )
+    any_frame = observables["coverage_any_frame"]
+    assert any_frame.values == pytest.approx([reference["coverage_any_frame"]], abs=TOLERANCE)
+    assert any_frame.tested is False
 
 
 def test_residence_times_match_the_old_event_durations() -> None:

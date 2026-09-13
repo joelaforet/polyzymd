@@ -95,7 +95,8 @@ polyzymd compare run-all -f comparison.yaml --eq-time 10ns
 ## Key numbers to check first
 
 - `contact_count`: residue pairs in contact per frame
-- `coverage`: share of the protein in contact per frame
+- `coverage_per_frame`: share of the protein in contact per frame
+- `coverage_any_frame`: share touched at any point in the window
 - `contact_fraction`: which residues, as a profile over residue IDs
 - `residence_time_distribution`: whether contacts are brief or long lived
 

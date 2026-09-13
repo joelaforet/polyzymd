@@ -493,16 +493,8 @@ level as `style`, `dpi`, etc.
 | `use_kde` | `true` | KDE vs histogram |
 | `generate_state_bars` | `true` | Above/below threshold bars |
 
-**`plot_settings.contacts`:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `generate_contact_fraction_profile` | `true` | Per-residue contact fraction profile |
-| `generate_residence_time_profile` | `true` | Per-residue residence time profile |
-| `generate_cf_by_aa_class_bars` | `true` | Contact fraction by amino acid class bar chart |
-| `generate_cf_by_partition_bars` | `true` | Contact fraction by user partition bar charts |
-| `generate_rt_by_aa_class_bars` | `true` | Residence time by amino acid class bar chart |
-| `generate_rt_by_partition_bars` | `true` | Residence time by user partition bar charts |
+`contacts` takes no `plot_settings` block. Its figures come from the observable
+kind, so a block naming it is ignored with a warning and rejected in v1.4.
 
 **`plot_settings.secondary_structure`:**
 

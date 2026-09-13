@@ -467,7 +467,7 @@ class TestUnknownAnalysisDiagnostics:
             )
         )
 
-        with pytest.warns(DeprecationWarning, match="observable-contract analysis"):
+        with pytest.warns(UserWarning, match="without a PlotSettingsModel"):
             config = ComparisonConfig.from_yaml(yaml_path)
 
         assert "contacts" not in (config.plot_settings.model_extra or {})

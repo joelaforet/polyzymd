@@ -4,10 +4,18 @@ A contact is a protein residue and a polymer residue with at least one pair of
 atoms closer than the cutoff, measured with the minimum image convention. The
 plugin reports how many such residue pairs exist per frame
 (``contact_count``), what share of the protein is touched per frame
-(``coverage``), how often each protein residue is touched
+(``coverage_per_frame``) and at any point in the window
+(``coverage_any_frame``), how often each protein residue is touched
 (``contact_fraction``), how long contacts last
 (``residence_time_distribution``) and how long they last per residue
 (``mean_residence_time``).
+
+An event runs from the first frame a residue pair is inside the cutoff to the
+last consecutive frame it stays inside it. An event already running when the
+window opens is measured from the first frame of the window, and one still
+running when it closes is measured to the last, so both are shortened. An event
+longer than the top bin edge is counted in the top bin, and how many were is in
+each observable's metadata.
 
 Neighbour searching uses the MDAnalysis ``capped_distance`` grid search, so the
 cost grows with the number of atoms rather than with their square. Polymer
@@ -28,15 +36,11 @@ References
 Michaud-Agrawal, N., Denning, E. J., Woolf, T. B. & Beckstein, O. (2011).
 MDAnalysis: a toolkit for the analysis of molecular dynamics simulations.
 *Journal of Computational Chemistry*, 32(10), 2319-2327. doi:10.1002/jcc.21787
-
-Grossfield, A., Patrone, P. N., Roe, D. R., Schultz, A. J., Siderius, D. W. &
-Zuckerman, D. M. (2018). Best practices for quantifying the uncertainty in
-molecular simulations. *Living Journal of Computational Molecular Science*,
-1(1), 5067. doi:10.33011/livecoms.1.1.5067
 """
 
 from __future__ import annotations
 
+import logging
 import warnings
 from typing import Any, ClassVar, Sequence
 
@@ -49,8 +53,13 @@ from polyzymd.analyses.contract_runner import contract_analysis
 from polyzymd.analyses.exceptions import ReplicateError, SelectionError
 from polyzymd.analyses.shared.topology import require_topology_bonds, topology_bond_source
 
+LOGGER = logging.getLogger("polyzymd.analyses.contacts")
+
 #: Settings the pre-contract plugin accepted that no longer change anything.
 #: They are ignored with a warning for one release and rejected in v1.4.
+#: The warning is a ``UserWarning`` rather than a ``DeprecationWarning``
+#: because Python hides deprecation warnings outside ``__main__``, and silently
+#: dropping seven settings from a campaign config is not something to hide.
 RETIRED_SETTINGS: dict[str, str] = {
     "grouping": "residue class labels moved to the plots built from the contact profile",
     "compute_residence_times": "residence times are always reported, they cost nothing extra",
@@ -117,24 +126,34 @@ class ContactsSettings(BaseModel):
         min_length=2,
         description="Bin edges of the residence-time distribution in ns, increasing",
     )
+    retired_settings_ignored: str | None = Field(
+        default=None,
+        exclude=True,
+        description=(
+            "Set by the validator, not by a user: what the run ignored, carried into "
+            "each observable's metadata so the artifact records it too"
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
     def _drop_retired(cls, data: Any) -> Any:
-        """Ignore a retired setting with a warning instead of failing a run."""
+        """Ignore a retired setting, saying so where a person will see it."""
         if not isinstance(data, dict):
             return data
         retired = sorted(set(RETIRED_SETTINGS).intersection(data))
         if not retired:
             return data
         reasons = "; ".join(f"{key} ({RETIRED_SETTINGS[key]})" for key in retired)
-        warnings.warn(
+        message = (
             f"contacts ignores retired setting(s) {reasons}. Remove them from the "
-            "comparison config; they will be rejected in v1.4.",
-            DeprecationWarning,
-            stacklevel=2,
+            "comparison config; they will be rejected in v1.4."
         )
-        return {key: value for key, value in data.items() if key not in retired}
+        warnings.warn(message, UserWarning, stacklevel=2)
+        LOGGER.warning("%s", message)
+        kept = {key: value for key, value in data.items() if key not in retired}
+        kept["retired_settings_ignored"] = message
+        return kept
 
     @model_validator(mode="after")
     def _check_edges(self) -> ContactsSettings:
@@ -154,7 +173,6 @@ class Contacts:
     slurm_resource_hint: ClassVar[SlurmResourceHint] = SlurmResourceHint(mem="8G", time="02:00:00")
     references: ClassVar[tuple[str, ...]] = (
         "Michaud-Agrawal et al. 2011, J Comput Chem 32:2319, doi:10.1002/jcc.21787",
-        "Grossfield et al. 2018, LiveCoMS 1:5067, doi:10.33011/livecoms.1.1.5067",
     )
 
     def compute(
@@ -174,7 +192,7 @@ class Contacts:
         Returns
         -------
         tuple
-            The five observables, and the contact event table under the sidecar
+            The six observables, and the contact event table under the sidecar
             stem ``contact_events``.
 
         Raises
@@ -198,6 +216,8 @@ class Contacts:
             "polymer_chain_source": topology_bond_source(universe)[1],
             "n_polymer_chains": int(chain_of_polymer_residue.max()) + 1,
         }
+        if settings.retired_settings_ignored is not None:
+            metadata["retired_settings_ignored"] = settings.retired_settings_ignored
         protein_resids, protein_of_atom = _residue_index(protein)
         _, polymer_of_atom = _residue_index(polymer)
         n_protein = protein_resids.size
@@ -264,7 +284,12 @@ class Contacts:
             n_protein,
             settings,
             metadata,
-        ), {"contact_events": table}
+        ), {
+            # A (observables, extra_sidecars) pair: contract_runner._unpack writes
+            # each extra array as its own NPZ, because an event table is neither a
+            # per-frame series nor a profile.
+            "contact_events": table
+        }
 
 
 def _observables(
@@ -280,8 +305,10 @@ def _observables(
 ) -> list[Observable]:
     """Wrap the measured series and profiles as observables."""
     edges = np.asarray(settings.residence_time_edges_ns, dtype=np.float64)
+    overflow = int(np.count_nonzero(durations_ns >= edges[-1]))
     binned = np.histogram(np.clip(durations_ns, None, edges[-1] - 1e-12), bins=edges)[0]
     distribution = binned / binned.sum() if binned.sum() else binned.astype(np.float64)
+    metadata = {**metadata, "residence_time_overflow_events": overflow}
     mean_residence = np.zeros(n_protein, dtype=np.float64)
     for residue in np.unique(residues_of_event):
         mean_residence[residue] = float(np.mean(durations_ns[residues_of_event == residue]))
@@ -295,10 +322,21 @@ def _observables(
             metadata=metadata,
         ),
         Observable(
-            name="coverage",
+            name="coverage_per_frame",
             kind="fraction",
             unit="fraction",
             values=coverage,
+            metadata=metadata,
+        ),
+        Observable(
+            # The share of the protein touched at any point in the window, which
+            # is what the pre-1.3 artifact called "coverage". It is a function of
+            # contact_fraction, so it is reported but kept out of the tests.
+            name="coverage_any_frame",
+            kind="fraction",
+            unit="fraction",
+            values=[float(np.mean(contact_fraction > 0.0))],
+            tested=False,
             metadata=metadata,
         ),
         Observable(
@@ -342,12 +380,37 @@ def _polymer_selection(settings: ContactsSettings) -> str:
 
 
 def _select(universe: Any, role: str, selection: str, settings: ContactsSettings) -> Any:
-    """Select one side of the contact criterion, optionally without hydrogens."""
-    query = f"({selection}) and not name H*" if settings.heavy_atoms_only else selection
+    """Select one side of the contact criterion, optionally without hydrogens.
+
+    Hydrogens are excluded by element where the topology has elements, because
+    a name test misses a hydrogen named ``1HB`` and catches a mercury named
+    ``HG``. A topology without elements, which is what a PDB with no element
+    column gives, falls back to the name test and says so.
+    """
+    query = selection
+    if settings.heavy_atoms_only:
+        if _has_elements(universe):
+            query = f"({selection}) and not element H"
+        else:
+            query = f"({selection}) and not name H*"
+            LOGGER.warning(
+                "contacts: the topology carries no element information, so heavy_atoms_only "
+                "falls back to excluding atoms whose name starts with H"
+            )
     atoms = universe.select_atoms(query)
     if len(atoms) == 0:
         raise SelectionError(f"contacts: {role} selection {query!r} matched no atoms")
     return atoms
+
+
+def _has_elements(universe: Any) -> bool:
+    """Whether the topology carries element names the selection can test."""
+    from MDAnalysis.exceptions import NoDataError
+
+    try:
+        return len(universe.atoms.elements) > 0
+    except (NoDataError, AttributeError):
+        return False
 
 
 def _residue_index(atoms: Any) -> tuple[np.ndarray, np.ndarray]:

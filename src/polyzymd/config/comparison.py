@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import warnings
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -581,13 +582,17 @@ class PlotSettings(BaseModel):
                 # A plugin ported to the observable contract has no plot
                 # settings of its own; the framework draws its figures from the
                 # observable kind. Keep the block so an existing comparison
-                # file still loads, and say that it does nothing.
-                warnings.warn(
-                    f"plot_settings block '{key}' is ignored: {key} is an observable-contract "
-                    "analysis and its figures come from the framework. Remove the block.",
-                    DeprecationWarning,
-                    stacklevel=2,
+                # file still loads, and say that it does nothing. The warning
+                # is a UserWarning because Python hides deprecation warnings
+                # outside __main__, and a silently ignored block is how a
+                # campaign loses its figures without being told.
+                message = (
+                    f"plot_settings block '{key}' is ignored: {key} is a plugin without a "
+                    "PlotSettingsModel, so its figures come from the framework. "
+                    "Remove the block."
                 )
+                warnings.warn(message, UserWarning, stacklevel=2)
+                logging.getLogger("polyzymd.config").warning("%s", message)
             else:
                 raise ValueError(
                     f"Unknown plot settings key '{key}'. "

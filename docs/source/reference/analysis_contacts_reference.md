@@ -56,7 +56,9 @@ through the MDAnalysis `capped_distance` grid search.
 Hydrogens count toward the cutoff by default, which is what this plugin has
 always done and what the frozen parity reference reproduces. The literature
 convention for a 4.5 A criterion is heavy atoms only; `heavy_atoms_only: true`
-selects it and lowers every contact count.
+selects it and lowers every contact count. Hydrogens are excluded by element
+where the topology has elements, and by a name test on a topology that does
+not, which the run warns about.
 
 A selection matching no atoms raises `SelectionError` rather than reporting
 zero contacts. A window holding no frames raises `ReplicateError`.
@@ -74,26 +76,31 @@ behaviour; the run then emits a warning naming the topology.
 | Name | Kind | Unit | Description |
 |------|------|------|-------------|
 | `contact_count` | `mean_of_timeseries` | `count` | Number of distinct protein-polymer residue pairs in contact, one value per frame. |
-| `coverage` | `fraction` | `fraction` | Share of protein residues in contact with any polymer residue, one value per frame. |
+| `coverage_per_frame` | `fraction` | `fraction` | Share of protein residues in contact with any polymer residue, one value per frame. |
+| `coverage_any_frame` | `fraction` | `fraction` | Share of protein residues in contact at any point in the window, one value per replicate. It is a function of `contact_fraction`, so it is reported with its interval but declared `tested=False` and kept out of the pairwise tests and the correction family. |
 | `contact_fraction` | `profile` | `fraction` | Share of frames each protein residue is in contact, indexed by residue ID. |
 | `residence_time_distribution` | `profile` | `fraction` | Share of contact events whose duration falls in each bin, indexed by the lower bin edge in ns. |
 | `mean_residence_time` | `profile` | `ns` | Mean duration of the contact events of each protein residue, indexed by residue ID. Zero for a residue with no events. |
 
-Before v1.3 the plugin reported two replicate metrics. `mean_contact_fraction`
-is now the mean of `coverage` over frames, which is the same number. `coverage`
-meant the share of residues touched at any point in the window; that is the
-share of `contact_fraction` above zero, and the per-frame share is what the
-observable of that name now reports.
+Before v1.3 the plugin reported two replicate metrics, and neither name means
+what the port reports under it. `mean_contact_fraction` is the mean of
+`coverage_per_frame` over frames, the same number to floating-point noise. The
+old `coverage` is `coverage_any_frame`.
 
 An event runs from the first frame a residue pair is within the cutoff to the
 last consecutive frame it stays within it. Durations are whole numbers of
 frames, so the time axis of the window has to be evenly spaced; an uneven one
-raises `ReplicateError`. Events still open at the end of the window are closed
-at its last frame, which shortens them.
+raises `ReplicateError`. An event already running when the window opens is
+measured from the window's first frame and one still running when it closes is
+measured to its last, so both are shortened, and neither is marked. An event
+longer than the top bin edge is counted in the top bin; how many were is in
+`metadata["residence_time_overflow_events"]`, so widen
+`residence_time_edges_ns` when that count is not small.
 
 Every observable carries the cutoff, the PBC policy, `heavy_atoms_only`, the
-bond source of the chain identity and the number of polymer chains in
-`metadata`.
+bond source of the chain identity, the number of polymer chains, the
+residence-time overflow count and any retired settings the run ignored in
+`metadata`, at replicate level and at condition level.
 
 ## Canonical output paths
 
@@ -119,7 +126,8 @@ the correlation diagnostics `statistical_inefficiency` and `n_eff`. The
 diagnostics are reported, never used to shrink an error bar.
 
 A condition aggregate carries `replicate_values`, `mean`, `sem`, `ci95_low`,
-`ci95_high`, `ci_method`, `coverage` and `n_replicates` for a time-series kind,
+`ci95_high`, `ci_method`, the interval's own `coverage` field and `n_replicates`
+for a time-series kind,
 and `profile_mean`, `profile_sem` and `index` for a profile. Every statistic is
 computed across replicates, never across frames.
 
@@ -127,24 +135,13 @@ A comparison entry carries `control`, `condition`, `delta`, `percent_change`,
 `test`, `p_value`, `p_adjusted`, `correction`, `cohens_d`, `significant`,
 `testable` and `note`. Profiles are aggregated but not tested pairwise.
 
-## Interpretation
-
-A higher `contact_count` than the control means more residue pairs are in
-contact at any moment; a higher `coverage` means the contacts are spread over
-more of the protein rather than concentrated. Read them together: a formulation
-can raise the count while leaving coverage flat by binding one patch harder.
-
-`contact_fraction` names the patch. `residence_time_distribution` says whether
-the contacts are many brief touches or a few long ones, which the two scalars
-cannot distinguish.
-
 ## Units
 
 | Quantity | Unit |
 |----------|------|
 | `cutoff` | angstrom |
 | `contact_count` | count of residue pairs |
-| `coverage`, `contact_fraction` | fraction |
+| `coverage_per_frame`, `coverage_any_frame`, `contact_fraction` | fraction |
 | `residence_time_edges_ns`, `mean_residence_time` | ns |
 
 ## References

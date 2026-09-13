@@ -78,6 +78,31 @@ def test_fraction_outside_the_unit_interval_is_rejected() -> None:
         _series([0.0, 1.5], kind="fraction")
 
 
+def test_an_observable_named_like_an_aggregate_field_is_rejected() -> None:
+    """A name an aggregate already uses would be ambiguous in the payload."""
+    with pytest.raises(ValueError, match="collides with a field of ObservableAggregate"):
+        Observable(name="coverage", kind="fraction", values=[0.4, 0.6])
+    with pytest.raises(ValueError, match="collides with a field of ObservableAggregate"):
+        Observable(name="mean", kind="mean_of_timeseries", unit="A", values=[1.0])
+
+    assert Observable(name="coverage_per_frame", kind="fraction", values=[0.4]).name
+
+
+def test_an_untested_observable_is_aggregated_but_not_compared() -> None:
+    """tested=False keeps a derived quantity out of the correction family."""
+
+    def condition(base: float) -> list[ObservableAggregate]:
+        derived = Observable(name="derived", kind="fraction", values=[0.5], tested=False)
+        return aggregate_observables(
+            [[_series([base, base + 1.0], name="measured"), derived] for _ in range(3)]
+        )
+
+    aggregates = {"control": condition(1.0), "treated": condition(3.0)}
+
+    assert {aggregate.name for aggregate in aggregates["control"]} == {"measured", "derived"}
+    assert [comparison.name for comparison in compare_observables(aggregates)] == ["measured"]
+
+
 def test_the_scaffold_unit_placeholder_is_rejected() -> None:
     """An author must replace the placeholder unit with a real one."""
     with pytest.raises(ValueError, match="has not stated its unit"):

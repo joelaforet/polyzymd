@@ -72,7 +72,9 @@ def test_a_residue_pair_inside_the_cutoff_is_one_contact() -> None:
     measured, _ = observables(make_universe([2.0, 2.0, 30.0, 30.0]))
 
     assert measured["contact_count"].values == [1.0, 1.0, 0.0, 0.0]
-    assert measured["coverage"].values == [1.0, 1.0, 0.0, 0.0]
+    assert measured["coverage_per_frame"].values == [1.0, 1.0, 0.0, 0.0]
+    assert measured["coverage_any_frame"].values == [1.0]
+    assert measured["coverage_any_frame"].tested is False
     assert measured["contact_fraction"].values == [0.5]
     assert measured["contact_fraction"].index == [1.0]
 
@@ -171,12 +173,26 @@ def test_an_irregular_time_axis_raises() -> None:
 
 
 def test_a_retired_setting_warns_and_is_ignored() -> None:
-    """An old comparison file still loads, with a warning naming the setting."""
-    with pytest.warns(DeprecationWarning, match="grouping"):
-        settings = ContactsSettings(grouping="aa_class", top_residues=10)
+    """An old comparison file still loads, and a person is told what was dropped.
+
+    The warning is a ``UserWarning`` because Python hides deprecation warnings
+    outside ``__main__``, and the message also reaches the artifact through the
+    observable metadata, so a run that nobody watched still records it.
+    """
+    with pytest.warns(UserWarning, match="grouping"):
+        settings = ContactsSettings(
+            protein_selection="resname ALA",
+            polymer_selection="resname SBM EGM",
+            cutoff=4.0,
+            grouping="aa_class",
+            top_residues=10,
+        )
 
     assert not hasattr(settings, "grouping")
-    assert settings.cutoff == 4.5
+    assert "top_residues" in settings.retired_settings_ignored
+
+    measured, _ = observables(make_universe([2.0, 2.0, 2.0, 2.0]), settings)
+    assert "grouping" in measured["contact_count"].metadata["retired_settings_ignored"]
 
 
 def test_bin_edges_must_increase() -> None:
@@ -193,6 +209,38 @@ def test_the_analysis_class_carries_the_plugin_identity() -> None:
     assert analysis.execution_cost_hint == "high"
     assert analysis.slurm_resource_hint.mem == "8G"
     assert any("Michaud-Agrawal" in reference for reference in analysis.references)
+
+
+def test_two_bonded_fragments_get_distinct_chain_indices() -> None:
+    """Two polymer chains are two chains in the event table, not one."""
+    import MDAnalysis as mda
+    from MDAnalysis.coordinates.memory import MemoryReader
+
+    universe = mda.Universe.empty(
+        5,
+        n_residues=3,
+        n_segments=2,
+        atom_resindex=[0, 1, 1, 2, 2],
+        residue_segindex=[0, 1, 1],
+        trajectory=True,
+    )
+    universe.add_TopologyAttr("names", ["CA", "C1", "C2", "C1", "C2"])
+    universe.add_TopologyAttr("types", ["C"] * 5)
+    universe.add_TopologyAttr("resnames", ["ALA", "SBM", "EGM"])
+    universe.add_TopologyAttr("resids", [1, 2, 3])
+    universe.add_TopologyAttr("segids", ["A", "P"])
+    universe.add_bonds([(1, 2), (3, 4)])
+    positions = np.asarray(
+        [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 1.0, 0.0], [3.0, 0.0, 0.0], [3.0, 1.0, 0.0]],
+        dtype=np.float32,
+    )
+    universe.load_new(np.stack([positions] * 2), format=MemoryReader)
+    for timestep in universe.trajectory:
+        timestep.dimensions = [100.0, 100.0, 100.0, 90.0, 90.0, 90.0]
+
+    _, events = observables(universe)
+
+    assert sorted(set(events[:, 1].tolist())) == [0, 1]
 
 
 def test_every_observable_records_how_it_was_measured() -> None:
