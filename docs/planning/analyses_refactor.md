@@ -253,3 +253,5 @@ Order: wave 1 is contract plots plus rmsf, secondary structure, rmsd and sasa; w
 | 121 | `analyses/port-contacts` | contacts, 6,203 to 483 lines; shared/groupings and shared/selectors deleted | -7,302 | exact |
 
 Sum of the ports so far: about 30,700 source lines removed against about 1,900 added, before the legacy framework removal.
+
+Integration: `analyses_ported2` merges PRs 113 to 122 with one reconciled copy of each contract extension; nine contract plugins, 38 parity tests passing on real data, 26,722 lines against 57,254 on `analyses_ported`. The legacy framework removal (`analyses/remove-legacy-framework`) starts from it.
