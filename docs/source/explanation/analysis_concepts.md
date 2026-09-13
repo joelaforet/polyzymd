@@ -149,7 +149,7 @@ The available plugins are:
 | `contacts` | Intermolecular contacts between protein and other components |
 | `distances` | Distances between specified atom groups |
 | `catalytic_triad` | Catalytic triad geometry (active-site distances) |
-| `secondary_structure` | Secondary structure content (helix, sheet, coil fractions) |
+| `secondary_structure` | Secondary structure content (helix, strand, coil and unassigned fractions) |
 | `sasa` | Solvent-accessible surface area |
 | `hydrogen_bonds` | Hydrogen bond occupancy and lifetimes |
 

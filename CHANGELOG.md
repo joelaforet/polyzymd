@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Observable.tested`.**  A contract plugin can declare an observable
+  `tested=False` when it is a function of others it already reports, such as the
+  last class of a set of fractions that sums to one.  The observable is still
+  reduced, aggregated and reported with its mean, SEM and interval;
+  `compare_observables` leaves it out of the pairwise tests and out of the
+  multiple-comparison family, so a dependent quantity can no longer inflate the
+  adjusted p-values of the quantities that carry independent information.
+
 - **`polyzymd status --format agent|json`.**  `status` accepts repeated `-c`
   and `--all DIR`, makes one `squeue` call, and prints one line per replicate
   with a fixed verdict (`COMPLETED`, `RUNNING`, `QUEUED`, `DEAD`,
@@ -248,6 +256,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   concatenated.
 
 ### Changed
+
+- **`secondary_structure` runs on the observable contract, and residues DSSP
+  cannot assign are no longer counted as coil.**  The plugin reports four
+  `fraction` observables (`ss_helix`, `ss_strand`, `ss_coil`, `ss_unassigned`)
+  and two `profile` observables (`helix_occupancy`, `strand_occupancy`) from one
+  `compute()`, and the framework owns persistence, aggregation, uncertainty,
+  comparison and formatting.  The old encoder started from an all-coil state
+  matrix and overwrote only H and E, so every residue mdtraj returned as `NA`
+  was scored as coil; those residues now have their own fraction, and a non-zero
+  `ss_unassigned` says the selection needs attention.  The `chain_id` and
+  `selection` settings are unchanged.  The plugin's four plots are gone with the
+  rest of its bespoke machinery; an existing `plot_settings.secondary_structure`
+  block still loads but warns that it is ignored.
+
+  Only `ss_helix` and `ss_strand` are tested across conditions.  The four
+  fractions sum to one, so `ss_coil` and `ss_unassigned` are determined by the
+  other two; they are aggregated and reported with their uncertainty but are
+  kept out of the pairwise tests and out of the Benjamini-Hochberg family, which
+  for one `compare run` is every tested, non-profile observable of every plugin
+  in the run crossed with every non-control condition.
 
 - **The periodic box is computed first, from the protein and substrate alone.**
   `SolventBuilder.compute_box_vectors()` derives the cell from the solute

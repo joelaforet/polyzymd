@@ -435,6 +435,7 @@ def contract_analysis(plugin: Any) -> type[ContractAnalysis]:
             "PlotSettingsModel": getattr(instance, "PlotSettings", ContractPlotSettings),
             "plugin": instance,
             "references": tuple(getattr(instance, "references", ())),
+            "slurm_resource_hint": getattr(instance, "slurm_resource_hint", None),
             "__doc__": inspect.getdoc(instance) or f"Contract analysis {name}.",
         },
     )

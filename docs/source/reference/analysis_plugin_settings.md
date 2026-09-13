@@ -161,6 +161,10 @@ compatibility. GROMACS `.gro` topologies may not preserve chain IDs; use
 DSSP requires complete residues; do not use CA-only selections such as
 `protein and name CA`.
 
+Outputs are four `fraction` observables (`ss_helix`, `ss_strand`, `ss_coil`,
+`ss_unassigned`) and two `profile` observables (`helix_occupancy`,
+`strand_occupancy`).
+
 ## `sasa`
 
 | Key | Type | Default | Description |
