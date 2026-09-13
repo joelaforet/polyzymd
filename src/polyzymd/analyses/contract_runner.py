@@ -237,8 +237,9 @@ class ContractAnalysis(Analysis):
         Returns
         -------
         ComparisonArtifact or None
-            Comparison artifact, or ``None`` when fewer than two conditions
-            have an aggregate on disk.
+            Comparison artifact, or ``None`` when no condition has an aggregate
+            on disk. One condition gives an artifact holding its aggregates and
+            no comparisons, so a single-condition run still reports its numbers.
         """
         by_condition: dict[str, list[ObservableAggregate]] = {}
         for condition in ctx.conditions:
@@ -257,14 +258,18 @@ class ContractAnalysis(Analysis):
                 ObservableAggregate.model_validate(payload)
                 for payload in _observables_of(artifact, self.name, condition.label)
             ]
-        if len(by_condition) < 2:
+        if not by_condition:
             return None
-        comparisons = compare_observables(
-            by_condition,
-            control_label=ctx.effective_control,
-            ttest_method=ctx.ttest_method,
-            posthoc_method=ctx.posthoc_method,
-            fdr_alpha=ctx.fdr_alpha,
+        comparisons = (
+            compare_observables(
+                by_condition,
+                control_label=ctx.effective_control,
+                ttest_method=ctx.ttest_method,
+                posthoc_method=ctx.posthoc_method,
+                fdr_alpha=ctx.fdr_alpha,
+            )
+            if len(by_condition) > 1
+            else []
         )
         return ComparisonArtifact(
             analysis_name=self.name,

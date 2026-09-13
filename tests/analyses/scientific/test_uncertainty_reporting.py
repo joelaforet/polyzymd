@@ -16,7 +16,6 @@ import math
 
 import pytest
 
-from polyzymd.analyses._framework.comparison_models import MetricValue
 from polyzymd.analyses.exceptions import AnalysisError, StatisticsError
 from polyzymd.analyses.mda.aggregation import (
     AggregatedMetric,
@@ -126,15 +125,8 @@ class TestMeanSemCI:
             mean_sem_ci([])
 
 
-class TestMetricModelsDeclareUnitsAndIntervals:
-    """Condition-level metric models must expose unit and interval fields."""
-
-    @pytest.mark.parametrize("field", ["unit", "ci95_low", "ci95_high", "ci_method"])
-    def test_metric_value_exposes_field(self, field: str) -> None:
-        """MetricValue carries the unit and both confidence limits."""
-
-        metric = MetricValue.from_replicate_values("mean_rmsd", [1.0, 1.2, 1.1], unit="A")
-        assert hasattr(metric, field)
+class TestAggregatedMetricDeclaresUnitsAndIntervals:
+    """The condition-level metric model must expose unit and interval fields."""
 
     @pytest.mark.parametrize("field", ["unit", "ci95_low", "ci95_high", "ci_method"])
     def test_aggregated_metric_exposes_field(self, field: str) -> None:
@@ -150,34 +142,6 @@ class TestMetricModelsDeclareUnitsAndIntervals:
             unit="A",
         )
         assert field in metric.model_dump()
-
-    def test_metric_value_fills_the_interval_from_replicates(self) -> None:
-        """The interval is derived from the replicate values and the unit kept."""
-
-        metric = MetricValue.from_replicate_values("mean_rmsd", [2.0, 2.2, 2.4], unit="A")
-
-        assert metric.unit == "A"
-        assert metric.ci_method == "student_t"
-        assert metric.ci95_high == pytest.approx(2.2 + T_FACTOR_N3 * metric.sem)
-
-    def test_metric_value_scales_fractions_to_percent(self) -> None:
-        """A scale factor converts the unit of every replicate value."""
-
-        metric = MetricValue.from_replicate_values(
-            "helix_fraction", [0.70, 0.72, 0.74], unit="%", scale=100.0
-        )
-
-        assert metric.replicate_values == pytest.approx([70.0, 72.0, 74.0])
-        assert metric.unit == "%"
-
-    def test_single_replicate_metric_has_no_interval(self) -> None:
-        """A singleton condition reports None, not a zero-width interval."""
-
-        metric = MetricValue.from_replicate_values("mean_rmsd", [2.0], unit="A")
-
-        assert metric.sem is None
-        assert metric.ci95_low is None
-        assert metric.ci95_high is None
 
 
 class TestUncertaintyBlock:
@@ -438,42 +402,8 @@ class TestEveryPluginAggregatesOneReplicate:
             assert metric.get("unit"), f"{analysis_name}.{metric_name} declares no unit"
 
 
-class TestLegacyArtifactsStillShowAnInterval:
-    """An artifact written before the interval fields must not lose its interval."""
-
-    def test_payload_formatter_derives_the_interval_from_the_sem(self) -> None:
-        """With only ``sem`` stored, the table still prints real limits."""
-
-        from polyzymd.analyses.stats import format_scalar_comparison_artifact_payload
-
-        payload = {
-            "condition_summaries": [
-                {
-                    "label": "Control",
-                    "n_replicates": 3,
-                    "mean_rmsf_mean": 2.2,
-                    "mean_rmsf_sem": 0.1,
-                }
-            ],
-            "pairwise_comparisons": [],
-            "ranking": ["Control"],
-            "rankings_by_metric": {"mean_rmsf": ["Control"]},
-            "statistical_parameters": {"project_name": "legacy", "equilibration": "10ns"},
-        }
-
-        text = format_scalar_comparison_artifact_payload(
-            payload,
-            title="RMSF Comparison",
-            metric_label="Mean RMSF",
-            metric_unit="A",
-            metric_key="mean_rmsf",
-            output_format="text",
-        )
-
-        low = 2.2 - T_FACTOR_N3 * 0.1
-        high = 2.2 + T_FACTOR_N3 * 0.1
-        assert f"[{low:.4f} A, {high:.4f} A]" in text
-        assert "n/a" not in text
+class TestAggregateWithoutReplicates:
+    """An aggregate that names no replicates reports a null count."""
 
     def test_build_without_any_replicate_count_reports_null(self) -> None:
         """An aggregate that states no replicate count says so, rather than zero."""

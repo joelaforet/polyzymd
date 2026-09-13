@@ -25,19 +25,9 @@ from polyzymd.analyses._framework.aggregate_validation import (
 from polyzymd.analyses._framework.aggregate_validation import (
     validate_aggregated_result as _validate_aggregated_result_impl,
 )
-from polyzymd.analyses._framework.compare import default_compare as _default_compare
 from polyzymd.analyses._framework.comparison_models import (
-    ANOVAResult,
-    BaseComparisonResult,
-    BaseConditionSummary,
     BasePlotSettings,
-    ComparisonResult,
-    ConditionSummary,
-    MetricValue,
-    PairwiseResult,
     SlurmResourceHint,
-    TConditionSummary,
-    TPairwiseResult,
 )
 from polyzymd.analyses._framework.contexts import (
     AggregateContext,
@@ -90,45 +80,17 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
-    "ANOVAResult",
     "AggregateContext",
     "AggregateValidationError",
     "Analysis",
-    "BaseComparisonResult",
-    "BaseConditionSummary",
     "BasePlotSettings",
     "ComparisonContext",
-    "ComparisonResult",
     "Condition",
-    "ConditionSummary",
-    "MetricValue",
-    "PairwiseResult",
     "PlotContext",
     "PluginContractError",
     "ReplicateContext",
     "SlurmResourceHint",
-    "TConditionSummary",
-    "TPairwiseResult",
 ]
-
-for _public_class in (
-    BasePlotSettings,
-    SlurmResourceHint,
-    Condition,
-    ReplicateContext,
-    AggregateContext,
-    ComparisonContext,
-    PlotContext,
-    MetricValue,
-    ConditionSummary,
-    PairwiseResult,
-    ANOVAResult,
-    ComparisonResult,
-    BaseConditionSummary,
-    BaseComparisonResult,
-):
-    _public_class.__module__ = __name__
-del _public_class
 
 
 class Analysis(ABC):
@@ -405,23 +367,8 @@ class Analysis(ABC):
         BaseModel | None
             Comparison result, or ``None`` if comparison is not supported.
         """
-        return _default_compare(self, ctx)
-
-    def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
-        """Extract scalar metrics from an aggregated result for comparison.
-
-        Parameters
-        ----------
-        summary : Any
-            Aggregated result.
-
-        Returns
-        -------
-        dict[str, MetricValue]
-            Mapping from metric name to metric value.
-        """
-        del summary
-        return {}
+        del ctx
+        return None
 
     def aggregate_settings_fingerprint(self, settings: BaseModel | None) -> str | None:
         """Return the settings fingerprint expected on aggregate results.

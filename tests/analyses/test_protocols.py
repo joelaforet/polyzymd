@@ -9,15 +9,11 @@ from typing import Any, ClassVar, Sequence
 import pytest
 from pydantic import BaseModel
 
-from polyzymd.analyses.base import (
-    Analysis,
-    BaseComparisonResult,
-    BaseConditionSummary,
-    Condition,
-    MetricValue,
-    PairwiseResult,
-)
+from polyzymd.analyses.base import Condition
+from polyzymd.analyses.contract import Observable, reduce_replicate
+from polyzymd.analyses.contract_runner import contract_analysis
 from polyzymd.analyses.exceptions import ProtocolError
+from polyzymd.analyses.mda import ReplicateArtifact
 from polyzymd.analyses.protocols import (
     VERDICT_LARGER,
     VERDICT_NO_DIFFERENCE,
@@ -41,101 +37,65 @@ class ToyProtocolSettings(BaseModel):
     scale: float = 1.0
 
 
-class ToyProtocolAnalysis(Analysis):
-    """Plugin whose replicate values the test controls directly."""
+class ToyProtocolPlugin:
+    """Contract plugin whose observables the test supplies directly."""
 
-    name: ClassVar[str] = "toy_protocol"
+    name = "toy_protocol"
+    Settings = ToyProtocolSettings
+    references: tuple[str, ...] = ()
+
+    #: Observables reported per replicate; the second is added by the multi
+    #: metric variant below.
+    observable_names: tuple[str, ...] = ("mean_value",)
+
+    def compute(self, universe: Any, frames: Any, settings: Any) -> list[Observable]:
+        """Never called; the test drives the compute stage directly."""
+        raise AssertionError("the toy plugin computes through _run_compute_stage")
+
+
+class ToyMultiMetricPlugin(ToyProtocolPlugin):
+    """Toy plugin that reports two observables."""
+
+    name = "toy_multi"
+    observable_names: tuple[str, ...] = ("mean_value", "doubled_value")
+
+
+class ToyProtocolAnalysis(contract_analysis(ToyProtocolPlugin)):  # type: ignore[misc]
+    """Analysis that skips the universe and reports the test's values."""
+
     protocol_version: ClassVar[str] = "1"
-    Settings: ClassVar[type] = ToyProtocolSettings
-    min_replicates: ClassVar[int] = 1
 
-    def build_mda_jobs(self, ctx: Any) -> list[Any]:
-        """Return no MDA jobs; the compute stage is overridden.
+    def _run_compute_stage(self, ctx: Any, replicate: int) -> ReplicateArtifact:
+        """Write one replicate artifact from the values the test assigned.
 
-        Parameters
-        ----------
-        ctx : Any
-            Unused job context.
-
-        Returns
-        -------
-        list
-            Always empty.
+        The contract lifecycle owns aggregation, testing and formatting from
+        here, so the toy only has to produce the observables a real plugin's
+        ``compute()`` would have measured.
         """
-        del ctx
-        return []
-
-    def _run_compute_stage(self, ctx: Any, replicate: int) -> dict[str, Any]:
-        """Return the value the test assigned to this replicate.
-
-        Parameters
-        ----------
-        ctx : Any
-            Replicate context.
-        replicate : int
-            One-indexed replicate number.
-
-        Returns
-        -------
-        dict
-            Replicate value and number.
-        """
-        values = REPLICATE_VALUES[ctx.condition.label]
-        return {"value": float(values[replicate - 1]) * ctx.settings.scale, "replicate": replicate}
-
-    def aggregate(self, ctx: Any, results: Sequence[dict[str, Any]]) -> dict[str, Any]:
-        """Collect replicate values for one condition.
-
-        Parameters
-        ----------
-        ctx : Any
-            Aggregate context.
-        results : sequence of dict
-            Per-replicate results.
-
-        Returns
-        -------
-        dict
-            Replicate values and their count.
-        """
-        del ctx
-        values = [float(result["value"]) for result in results]
-        return {"replicate_values": values, "n_replicates": len(values)}
-
-    def extract_metrics(self, summary: dict[str, Any]) -> dict[str, MetricValue]:
-        """Expose one metric in angstrom.
-
-        Parameters
-        ----------
-        summary : dict
-            Aggregated result.
-
-        Returns
-        -------
-        dict
-            Mapping from metric name to metric value.
-        """
-        return {
-            "mean_value": MetricValue.from_replicate_values(
-                "mean_value",
-                summary["replicate_values"],
+        value = float(REPLICATE_VALUES[ctx.condition.label][replicate - 1]) * ctx.settings.scale
+        scales = {"mean_value": 1.0, "doubled_value": 2.0}
+        observables = [
+            Observable(
+                name=name,
+                kind="mean_of_timeseries",
+                values=[value * scales[name]],
                 unit="A",
             )
-        }
+            for name in self.plugin.observable_names
+        ]
+        return ReplicateArtifact(
+            analysis_name=self.name,
+            condition_label=ctx.condition.label,
+            replicate=replicate,
+            payload={
+                "observables": [
+                    estimate.model_dump(mode="json") for estimate in reduce_replicate(observables)
+                ]
+            },
+        )
 
     def plot(self, ctx: Any) -> list[Path]:
-        """Write a placeholder figure so the pipeline does not need matplotlib.
-
-        Parameters
-        ----------
-        ctx : Any
-            Plot context.
-
-        Returns
-        -------
-        list of Path
-            The written file.
-        """
+        """Write a placeholder figure so the pipeline does not need matplotlib."""
         out = ctx.output_dir / "toy_protocol.txt"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("figure")
@@ -143,31 +103,11 @@ class ToyProtocolAnalysis(Analysis):
 
 
 class ToyMultiMetricAnalysis(ToyProtocolAnalysis):
-    """Toy plugin that reports two metrics."""
+    """Toy analysis that reports two observables."""
 
     name: ClassVar[str] = "toy_multi"
     protocol_version: ClassVar[str] = "2"
-
-    def extract_metrics(self, summary: dict[str, Any]) -> dict[str, MetricValue]:
-        """Expose a primary metric and a secondary one.
-
-        Parameters
-        ----------
-        summary : dict
-            Aggregated result.
-
-        Returns
-        -------
-        dict
-            Two metrics, the primary one first.
-        """
-        values = summary["replicate_values"]
-        return {
-            "mean_value": MetricValue.from_replicate_values("mean_value", values, unit="A"),
-            "doubled_value": MetricValue.from_replicate_values(
-                "doubled_value", values, unit="A", scale=2.0
-            ),
-        }
+    plugin = ToyMultiMetricPlugin()
 
 
 def _install_toy(monkeypatch: pytest.MonkeyPatch, analysis_cls: type = ToyProtocolAnalysis) -> None:
@@ -301,7 +241,7 @@ class TestReportFields:
         assert pair.delta_ci95 is not None
         assert pair.p is not None and pair.p_adjusted is not None
         assert pair.test == "student_t"
-        assert pair.correction == "BH"
+        assert pair.correction == "benjamini_hochberg"
         assert pair.cohens_d is not None
         # The report orients the effect size like delta, so both are positive
         # when the second condition is larger.
@@ -326,7 +266,7 @@ class TestReportFields:
         )
 
         assert report.metric == "mean_value"
-        assert report.all_metrics == ["mean_value", "doubled_value"]
+        assert report.all_runs == ["mean_value", "doubled_value"]
         assert report.protocol_version == "2"
         assert report.conditions[0].mean == pytest.approx(10.1)
         assert len(report.pairwise) == 1
@@ -759,96 +699,3 @@ _LEGACY_PAYLOAD: dict[str, Any] = {
     ],
     "statistical_parameters": {"ttest_method": "welch", "posthoc_method": "ttest_bh"},
 }
-
-
-class _CustomSummary(BaseConditionSummary):
-    """Condition summary for a plugin that overrides compare()."""
-
-    @property
-    def primary_metric_value(self) -> float:
-        """Return the mean of the replicate values."""
-        return sum(self.replicate_values) / len(self.replicate_values)
-
-    @property
-    def primary_metric_sem(self) -> float | None:
-        """Return no SEM; the protocol recomputes it from the values."""
-        return None
-
-
-class _CustomComparison(BaseComparisonResult[_CustomSummary, PairwiseResult]):
-    """Comparison result for a plugin that overrides compare()."""
-
-    comparison_type: ClassVar[str] = "custom_toy"
-
-
-class TestCustomComparisonShape:
-    """A plugin's own comparison result is normalized too."""
-
-    def test_custom_result_reports_its_primary_metric(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """Replicate values from a custom result give a mean and an interval."""
-        from datetime import datetime
-
-        from polyzymd.config.comparison import ComparisonConfig
-
-        _install_toy(monkeypatch)
-        configs = _write_configs(tmp_path, ["A", "B"])
-        config = ComparisonConfig(
-            name="custom_case",
-            control="A",
-            conditions=[
-                {"label": "A", "config": configs[0], "replicates": [1, 2, 3]},
-                {"label": "B", "config": configs[1], "replicates": [1, 2, 3]},
-            ],
-        )
-        comparison = _CustomComparison(
-            metric="contact_fraction",
-            name="custom_case",
-            control_label="A",
-            conditions=[
-                _CustomSummary(
-                    label="A",
-                    config_path=str(configs[0]),
-                    n_replicates=3,
-                    replicate_values=[0.10, 0.12, 0.11],
-                ),
-                _CustomSummary(
-                    label="B",
-                    config_path=str(configs[1]),
-                    n_replicates=3,
-                    replicate_values=[0.30, 0.32, 0.31],
-                ),
-            ],
-            pairwise_comparisons=[
-                PairwiseResult(
-                    condition_a="A",
-                    condition_b="B",
-                    metric="contact_fraction",
-                    t_statistic=20.0,
-                    p_value=0.0001,
-                    p_value_adjusted=0.0001,
-                    cohens_d=16.0,
-                    effect_size_interpretation="large",
-                    direction="increased",
-                    significant=True,
-                    percent_change=181.8,
-                )
-            ],
-            ranking=["B", "A"],
-            equilibration_time="10ns",
-            created_at=datetime(2026, 1, 1),
-            polyzymd_version="1.3.0",
-        )
-
-        report = build_report(
-            ToyProtocolAnalysis(),
-            config,
-            {"comparison": comparison, "aggregated": {}, "plots": []},
-        )
-
-        assert report.metric == "contact_fraction"
-        assert report.conditions[0].mean == pytest.approx(0.11)
-        assert report.conditions[0].ci95 is not None
-        assert report.pairwise[0].delta == pytest.approx(0.2, abs=1e-9)
-        assert report.verdict[0].startswith("B larger contact_fraction than A")

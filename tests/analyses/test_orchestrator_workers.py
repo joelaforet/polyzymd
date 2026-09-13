@@ -9,8 +9,9 @@ from typing import Any, ClassVar, cast
 import pytest
 from pydantic import BaseModel
 
-from polyzymd.analyses.base import Analysis, Condition, MetricValue
+from polyzymd.analyses.base import Analysis, Condition
 from polyzymd.analyses.exceptions import PluginContractError, ReplicateError
+from polyzymd.analyses.mda import ComparisonArtifact
 from polyzymd.analyses.orchestrator import (
     aggregate_condition_from_disk,
     finalize_comparison_from_disk,
@@ -52,16 +53,16 @@ class _WorkerAnalysis(_MDAContractMixin, Analysis):
             "n_replicates": len(values),
         }
 
-    def extract_metrics(self, summary: dict[str, Any]) -> dict[str, MetricValue]:
-        return {
-            "worker_metric": MetricValue(
-                name="worker_metric",
-                mean=float(summary["mean_value"]),
-                sem=float(summary["sem_value"]),
-                replicate_values=[float(v) for v in summary["replicate_values"]],
-                higher_is_better=True,
-            )
-        }
+    def compare(self, ctx) -> Any:
+        """Return a comparison artifact shaped like a contract plugin's."""
+        labels = [getattr(condition, "label", condition) for condition in ctx.conditions]
+        return ComparisonArtifact(
+            analysis_name=self.name,
+            conditions=labels,
+            control_label=ctx.control_label,
+            effective_control=ctx.effective_control,
+            payload={"conditions": labels},
+        )
 
     def plot(self, ctx):
         out = ctx.output_dir / "worker_toy_plot.png"
@@ -340,7 +341,7 @@ def test_finalize_partial_with_one_condition_succeeds(
         allow_partial=True,
     )
     assert out["comparison"] is not None
-    assert out["comparison"].conditions[0].label == "B"
+    assert out["comparison"].conditions == ["B"]
 
 
 def test_finalize_partial_raises_with_zero_successful_conditions(
@@ -543,9 +544,6 @@ class _TypedWorkerAnalysis(_MDAContractMixin, Analysis):
             replicate_values=values,
             n_replicates=len(values),
         )
-
-    def extract_metrics(self, summary):
-        return {}
 
 
 class TestTypedReplicateRoundTrip:

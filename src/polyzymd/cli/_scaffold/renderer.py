@@ -42,7 +42,7 @@ def render_template(template_name: str, spec: ScaffoldSpec) -> str:
 
 
 def render_scaffold(spec: ScaffoldSpec, project_root: Path) -> dict[Path, str]:
-    """Render all files for one analysis scaffold.
+    """Render the plugin module and its test for one analysis scaffold.
 
     Parameters
     ----------
@@ -58,30 +58,7 @@ def render_scaffold(spec: ScaffoldSpec, project_root: Path) -> dict[Path, str]:
     """
     analyses_root = project_root / "src" / "polyzymd" / "analyses"
     tests_dir = project_root / "tests" / "analyses" / "plugins"
-
-    if spec.uses_package_layout:
-        plugin_dir = analyses_root / spec.name
-        test_path = tests_dir / f"test_{spec.name}.py"
-        files = {
-            plugin_dir / "__init__.py": render_template("advanced_plugin_init.py.jinja", spec),
-            plugin_dir / "_mda.py": render_template("advanced_mda.py.jinja", spec),
-            test_path: render_template(
-                "test_advanced_plugin.py.jinja",
-                spec,
-            ),
-        }
-        return files
-
-    test_path = tests_dir / f"test_{spec.name}.py"
-    if spec.uses_contract_layout:
-        return {
-            analyses_root / f"{spec.name}.py": render_template("contract_plugin.py.jinja", spec),
-            test_path: render_template("test_contract_plugin.py.jinja", spec),
-        }
     return {
-        analyses_root / f"{spec.name}.py": render_template("simple_mda_plugin.py.jinja", spec),
-        test_path: render_template(
-            "test_simple_mda_plugin.py.jinja",
-            spec,
-        ),
+        analyses_root / f"{spec.name}.py": render_template("contract_plugin.py.jinja", spec),
+        tests_dir / f"test_{spec.name}.py": render_template("test_contract_plugin.py.jinja", spec),
     }

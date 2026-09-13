@@ -152,7 +152,7 @@ Plots should read cached artifacts and sidecars rather than reloading
 trajectories or rerunning compute-stage analysis.
 
 For concrete commands and code examples, see
-{doc}`../contributor_guide/extending_analyses`.
+{doc}`../contributor_guide/analysis_plugins/index`.
 
 ## Comparison infrastructure is distributed
 
@@ -280,7 +280,7 @@ into module-level details or API reference pages.
 ## Related pages
 
 - contributor workflows: {doc}`../contributor_guide/contributing`
-- extending analyses: {doc}`../contributor_guide/extending_analyses`
+- writing an analysis: {doc}`../contributor_guide/analysis_plugins/index`
 - chain conventions: {doc}`residue_assignment`
 - SLURM usage: {doc}`../how_to/hpc_slurm`
 - API reference: {doc}`../api/index`

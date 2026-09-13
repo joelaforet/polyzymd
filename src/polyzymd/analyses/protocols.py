@@ -752,6 +752,7 @@ def _read_observables(payload: Mapping[str, Any], analysis_name: str) -> _Read:
                     test=read.test,
                     correction=read.correction,
                     cohens_d=_optional_float(row.get("cohens_d")),
+                    hedges_g=_hedges_g(row),
                     direction=_direction(change, delta, significant),
                     significant=significant,
                     testable=testable,
@@ -759,6 +760,28 @@ def _read_observables(payload: Mapping[str, Any], analysis_name: str) -> _Read:
             )
         )
     return read
+
+
+def _hedges_g(row: Mapping[str, Any]) -> float | None:
+    """Small-sample effect size for one comparison row.
+
+    A contract comparison stores Cohen's d and the two replicate counts. Hedges
+    (1981) J is a function of those counts alone, so the corrected value is
+    recovered here rather than stored twice.
+
+    References
+    ----------
+    Hedges, L. V. (1981). Distribution theory for Glass's estimator of effect
+    size and related estimators. Journal of Educational Statistics, 6(2),
+    107-128. doi:10.3102/10769986006002107
+    """
+    from polyzymd.analyses.shared.inferential_statistics import hedges_correction
+
+    d = _optional_float(row.get("cohens_d"))
+    n_control, n_condition = row.get("n_control"), row.get("n_condition")
+    if d is None or not isinstance(n_control, int) or not isinstance(n_condition, int):
+        return None
+    return d * hedges_correction(n_control, n_condition)
 
 
 def _limits(aggregate: Mapping[str, Any]) -> tuple[float, float] | None:

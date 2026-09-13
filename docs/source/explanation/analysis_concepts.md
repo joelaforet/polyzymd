@@ -163,7 +163,7 @@ comparison behavior, plotting behavior, and formatting behavior without changing
 the core orchestration code. The conceptual boundary is important because
 PolyzyMD owns artifact storage and orchestration, while plugins own the
 domain-specific measurement and interpretation logic. For a contributor-focused
-walkthrough, see {doc}`../contributor_guide/extending_analyses`.
+walkthrough, see {doc}`../contributor_guide/analysis_plugins/index`.
 
 You configure plugins in the `plugins:` block. For example, to run RMSF with a
 custom selection and contacts with defaults:

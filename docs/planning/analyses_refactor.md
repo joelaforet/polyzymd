@@ -118,12 +118,14 @@ one item rather than the plan.
   - Owner:
   - Status: not started
 
-- [ ] Rewrite the contributor guide so it matches the scaffold it documents,
-      covers `extract_metrics()`, and asks a contributor to cite the method,
-      write a known-answer test, and state what the error bar means.
-  - Branch: `analyses/contributor-guide`
+- [x] Rewrite the contributor guide so it matches the scaffold it documents and
+      asks a contributor to cite the method, write a known-answer test, and
+      state what the error bar means.
+  - Branch: `analyses/remove-legacy-framework`
   - Owner:
-  - Status: not started
+  - Status: done. The nine `analysis_plugins/` pages and `extending_analyses.md`
+    are replaced by one page, `analysis_plugins/index.md`, plus the checklist.
+    `extract_metrics()` no longer exists to cover.
 
 ## Phases 3 to 5, framework collapse (v1.4.0)
 
@@ -200,6 +202,15 @@ first, so do not fan them out.
   - Branch: `analyses/port-event-plugins`
   - Owner:
   - Status: not started
+
+## Wave 4, removing the legacy framework
+
+- [ ] Delete the old `Analysis` hook surface and everything that served it, now
+      that all nine plugins are contract plugins. The plan, module by module,
+      is in [legacy_removal_inventory.md](legacy_removal_inventory.md).
+  - Branch: `analyses/remove-legacy-framework`
+  - Owner:
+  - Status: in progress
 
 ## What stays untouched
 

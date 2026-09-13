@@ -17,7 +17,6 @@ from polyzymd.analyses.base import (
     Analysis,
     ComparisonContext,
     Condition,
-    MetricValue,
     PlotContext,
     ReplicateContext,
     SlurmResourceHint,
@@ -98,18 +97,6 @@ class ToyAnalysis(_MDAContractMixin, Analysis):
             replicates=list(ctx.replicates),
             settings_fingerprint=self.aggregate_settings_fingerprint(ctx.settings),
         )
-
-    def extract_metrics(self, summary: ToyAggregatedResult) -> dict[str, MetricValue]:
-        return {
-            "toy_metric": MetricValue(
-                name="toy_metric",
-                mean=summary.mean_value,
-                sem=summary.sem_value,
-                replicate_values=summary.replicate_values,
-                higher_is_better=False,
-                direction_labels=("stabilizing", "unchanged", "destabilizing"),
-            )
-        }
 
 
 @pytest.fixture
@@ -381,19 +368,6 @@ class TestAnalysisABC:
         )
         assert toy_analysis.plot(ctx) == []
 
-    def test_default_extract_metrics_returns_empty(self, toy_analysis):
-        """Default extract_metrics returns empty if not overridden on base."""
-        # ToyAnalysis DOES override extract_metrics, so test the base
-        base_result = Analysis.extract_metrics(toy_analysis, "some_summary")
-        assert base_result == {}
-        # ToyAnalysis's own implementation should return metrics
-        toy_result = toy_analysis.extract_metrics(
-            ToyAggregatedResult(
-                mean_value=1.0, sem_value=0.1, replicate_values=[0.9, 1.1], n_replicates=2
-            )
-        )
-        assert "toy_metric" in toy_result
-
     def test_default_slurm_resource_hint_is_none(self, toy_analysis) -> None:
         """Default slurm_resource_hint should be unset."""
         assert toy_analysis.slurm_resource_hint is None
@@ -636,209 +610,10 @@ class TestContextObjects:
         assert recompute_ctx.equilibration == "10ns"
         assert recompute_ctx.recompute is True
 
-    def test_metric_value_defaults(self):
-        mv = MetricValue(name="test", mean=1.0, sem=0.1, replicate_values=[0.9, 1.1])
-        assert mv.higher_is_better is True
-        assert mv.direction_labels == ("decreased", "unchanged", "increased")
-
 
 # ============================================================================
 # Tests: MetricValue and extract_metrics integration
 # ============================================================================
-
-
-class TestMetricExtraction:
-    """Test the extract_metrics -> default compare pipeline."""
-
-    def test_toy_extract_metrics(self, toy_analysis):
-        agg = ToyAggregatedResult(
-            mean_value=2.0, sem_value=0.3, replicate_values=[1.5, 2.0, 2.5], n_replicates=3
-        )
-        metrics = toy_analysis.extract_metrics(agg)
-        assert "toy_metric" in metrics
-        mv = metrics["toy_metric"]
-        assert mv.mean == 2.0
-        assert mv.sem == 0.3
-        assert mv.higher_is_better is False
-        assert mv.direction_labels[0] == "stabilizing"
-
-
-class TestDefaultCompareContract:
-    """Test default compare() contract enforcement behavior."""
-
-    def test_compare_raises_on_empty_extract_metrics(self, tmp_path: Path) -> None:
-        """Empty metric extraction should raise PluginContractError."""
-
-        class EmptyMetricsAnalysis(_MDAContractMixin, Analysis):
-            name: ClassVar[str] = "empty_metrics"
-            Settings: ClassVar[type] = ToySettings
-
-            def _run_compute_stage(self, ctx, replicate):
-                return {"replicate": replicate}
-
-            def aggregate(self, ctx, results):
-                return {"dummy": True}
-
-        analysis = EmptyMetricsAnalysis()
-        condition = Condition(
-            label="A",
-            config_path=tmp_path / "a.yaml",
-            replicates=(1, 2),
-            sim_config=object(),
-        )
-        ctx = ComparisonContext(
-            name="proj",
-            conditions=[condition],
-            excluded_conditions=[],
-            control_label=None,
-            analysis_dirs={"A": tmp_path / "analysis" / "A" / "empty_metrics"},
-            results_dir=tmp_path / "comparison" / "empty_metrics",
-            equilibration="10ns",
-            settings=ToySettings(),
-            recompute=False,
-            aggregated_results={
-                "A": {
-                    "dummy": True,
-                    "n_replicates": 2,
-                    "settings_fingerprint": analysis.aggregate_settings_fingerprint(ToySettings()),
-                }
-            },
-        )
-
-        with pytest.raises(
-            PluginContractError,
-            match=r"extract_metrics\(\) returned empty dict for condition 'A'",
-        ):
-            analysis.compare(ctx)
-
-    def test_compare_raises_when_extract_metrics_returns_non_dict(self, tmp_path: Path) -> None:
-        """extract_metrics must return a dict mapping metric names to MetricValue."""
-
-        class BadTypeAnalysis(_MDAContractMixin, Analysis):
-            name: ClassVar[str] = "bad_type"
-            Settings: ClassVar[type] = ToySettings
-
-            def _run_compute_stage(self, ctx, replicate):
-                return {"replicate": replicate}
-
-            def aggregate(self, ctx, results):
-                return {"dummy": True}
-
-            def extract_metrics(self, summary):
-                del summary
-                return ["not", "a", "dict"]
-
-        analysis = BadTypeAnalysis()
-        condition = Condition(
-            label="A",
-            config_path=tmp_path / "a.yaml",
-            replicates=(1, 2),
-            sim_config=object(),
-        )
-        ctx = ComparisonContext(
-            name="proj",
-            conditions=[condition],
-            excluded_conditions=[],
-            control_label=None,
-            analysis_dirs={"A": tmp_path / "analysis" / "A" / "bad_type"},
-            results_dir=tmp_path / "comparison" / "bad_type",
-            equilibration="10ns",
-            settings=ToySettings(),
-            recompute=False,
-            aggregated_results={
-                "A": {
-                    "dummy": True,
-                    "n_replicates": 2,
-                    "settings_fingerprint": analysis.aggregate_settings_fingerprint(ToySettings()),
-                }
-            },
-        )
-
-        with pytest.raises(
-            PluginContractError,
-            match=r"extract_metrics\(\) must return dict\[str, MetricValue\]",
-        ):
-            analysis.compare(ctx)
-
-    def test_compare_raises_when_extract_metrics_contains_non_metric_value(
-        self, tmp_path: Path
-    ) -> None:
-        """extract_metrics values must be MetricValue instances."""
-
-        class BadValueAnalysis(_MDAContractMixin, Analysis):
-            name: ClassVar[str] = "bad_value"
-            Settings: ClassVar[type] = ToySettings
-
-            def _run_compute_stage(self, ctx, replicate):
-                return {"replicate": replicate}
-
-            def aggregate(self, ctx, results):
-                return {"dummy": True}
-
-            def extract_metrics(self, summary):
-                del summary
-                return {"bad_metric": 123}
-
-        analysis = BadValueAnalysis()
-        condition = Condition(
-            label="A",
-            config_path=tmp_path / "a.yaml",
-            replicates=(1, 2),
-            sim_config=object(),
-        )
-        ctx = ComparisonContext(
-            name="proj",
-            conditions=[condition],
-            excluded_conditions=[],
-            control_label=None,
-            analysis_dirs={"A": tmp_path / "analysis" / "A" / "bad_value"},
-            results_dir=tmp_path / "comparison" / "bad_value",
-            equilibration="10ns",
-            settings=ToySettings(),
-            recompute=False,
-            aggregated_results={
-                "A": {
-                    "dummy": True,
-                    "n_replicates": 2,
-                    "settings_fingerprint": analysis.aggregate_settings_fingerprint(ToySettings()),
-                }
-            },
-        )
-
-        with pytest.raises(
-            PluginContractError,
-            match=r"returned invalid value for key 'bad_metric'.*expected MetricValue",
-        ):
-            analysis.compare(ctx)
-
-    def test_compare_skips_missing_result_file_with_warning(self, caplog, tmp_path: Path) -> None:
-        """Missing aggregated files should be skipped with warning, not contract error."""
-
-        analysis = ToyAnalysis()
-        condition = Condition(
-            label="A",
-            config_path=tmp_path / "a.yaml",
-            replicates=(1, 2),
-            sim_config=object(),
-        )
-        ctx = ComparisonContext(
-            name="proj",
-            conditions=[condition],
-            excluded_conditions=[],
-            control_label=None,
-            analysis_dirs={"A": tmp_path / "analysis" / "A" / "toy"},
-            results_dir=tmp_path / "comparison" / "toy",
-            equilibration="10ns",
-            settings=ToySettings(),
-            recompute=False,
-            aggregated_results={},
-        )
-
-        caplog.set_level("WARNING")
-        result = analysis.compare(ctx)
-
-        assert result is None
-        assert "missing aggregated result for condition 'A'" in caplog.text
 
 
 # ============================================================================

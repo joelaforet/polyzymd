@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A one-condition run reports its numbers again.**  A contract comparison over
+  a single condition used to return nothing, so `polyzymd analyze` with one
+  `-c` raised "the comparison produced no result".  It now writes a comparison
+  artifact holding that condition's aggregates and an empty comparison list, and
+  the report states the mean, the interval and the replicate count.
+
+- **The agent report states Hedges g on the contract path.**  A comparison
+  stores Cohen's d and the two replicate counts, and the small-sample correction
+  is a function of those counts alone, so `ProtocolReport` derives `hedges_g`
+  from what is stored rather than leaving it null.
+
 - **`rg` is written against the observable contract.**  The plugin is one
   module instead of a six-file package, and the framework owns aggregation,
   uncertainty, testing, caching and persistence.  Selection mode reports
@@ -83,6 +94,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `plot_settings.rmsd` block still loads and warns that it is ignored.
 
 ### Removed
+
+- **The metric-dictionary comparison engine.**  Every plugin reports
+  observables now, so the code that compared dictionaries of scalars has no
+  caller.  Deleted: `polyzymd.analyses._framework.compare.default_compare`,
+  `polyzymd.analyses.mda.comparison` with `MDAComparisonContext`,
+  `MDAComparisonError` and `compare_condition_artifacts`,
+  `polyzymd.analyses.shared.multi_run_comparison` with
+  `filter_summaries_with_run`, `build_condition_pairs` and
+  `apply_fdr_correction`, `polyzymd.analyses.shared.multi_run_formatting` in
+  full, and from `polyzymd.analyses.stats` the functions
+  `pairwise_comparisons`, `anova_test`, `rank_conditions`,
+  `default_scalar_comparison`, `format_scalar_comparison` and
+  `format_scalar_comparison_artifact_payload`.  `interpret_direction` and
+  `format_pct` stay, because `ProtocolReport` words a change with them.
+  The result models go with the engine: `MetricValue`, `ConditionSummary`,
+  `PairwiseResult`, `ANOVAResult`, `ComparisonResult`, `BaseConditionSummary`,
+  `BaseComparisonResult`, `TConditionSummary` and `TPairwiseResult` are gone
+  from `polyzymd.analyses.base` and from `polyzymd.analyses`.  `BasePlotSettings`
+  and `SlurmResourceHint` stay.  `Analysis.extract_metrics()` is gone, and
+  `Analysis.compare()` now returns `None` unless a subclass overrides it.  A
+  contract plugin is unaffected; the observable aggregate carries the same
+  numbers with the same units.
+
+- **The simple and advanced analysis scaffolds.**  `polyzymd new-analysis`
+  writes one style, the observable contract, so its `--style` and `--advanced`
+  options are gone and the five Jinja templates behind them are deleted.  A
+  scaffolded plugin is now a settings model, a `compute()` and one
+  `contract_analysis()` call, with two tests that run the real lifecycle over
+  the synthetic universe.  The nine contributor guide pages that taught the old
+  hooks are replaced by one page plus the checklist.
 
 - **The sliding-window RMSD convergence flag.**  Its default slope threshold of
   0.0005 A/ns sat below the scatter of successive window means, so the flag

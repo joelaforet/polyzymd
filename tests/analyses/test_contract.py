@@ -694,7 +694,7 @@ def test_contract_scaffold_renders_and_imports(tmp_path: Path) -> None:
     """The contract scaffold produces an importable plugin and a test file."""
     from polyzymd.cli.scaffold import generate_scaffold
 
-    created = generate_scaffold("probe_contract", tmp_path, style="contract")
+    created = generate_scaffold("probe_contract", tmp_path)
     plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "probe_contract.py"
     assert set(created) == {
         plugin_path,

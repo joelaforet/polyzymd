@@ -818,31 +818,19 @@ polyzymd new-analysis NAME [OPTIONS]
 
 Options:
   --class-name TEXT                 PascalCase class prefix
-  --style [dict]                    Advanced package style
-  --advanced                        Request the advanced MDAnalysis-native package scaffold
   --project-root DIRECTORY          Repository root
   --force                           Overwrite existing files
   --dry-run                         Print paths without writing files
 ```
 
-By default, the command creates a single-file MDAnalysis-native plugin at
-`src/polyzymd/analyses/<NAME>.py`. The generated analysis subclasses `Analysis`,
-builds an `MDAAnalysisJob.from_function()` job, returns a `ReplicateArtifact`
-with explicit `payload["metrics"]`, and relies on the default artifact
-aggregation path.
-
-Omit `--style` to use the default single-file scaffold.
-
-`--advanced` and `--style dict` create an advanced package scaffold at
-`src/polyzymd/analyses/<NAME>/` with lifecycle wiring in `__init__.py`, a
-lazy-imported `AnalysisBase` helper in `_mda.py`, and dict metrics stored in
-canonical artifacts.
+The command writes two files: the plugin at `src/polyzymd/analyses/<NAME>.py`,
+holding a pydantic settings model, a class with a `compute()` that returns
+observables, and the `contract_analysis()` call that discovery finds; and its
+tests at `tests/analyses/plugins/test_<NAME>.py`. There is one scaffold style.
 
 ```bash
 polyzymd new-analysis solvent_shell
-polyzymd new-analysis solvent_shell --advanced
-polyzymd new-analysis solvent_shell --style dict
-pixi run -e build pytest tests/analyses/plugins/test_solvent_shell.py -v
+PYTHONPATH=$PWD/src pixi run -e test pytest tests/analyses/plugins/test_solvent_shell.py -q
 ```
 
 ---

@@ -4,7 +4,7 @@
 analyses that run as MDAnalysis-compatible jobs and persist PolyzyMD artifacts.
 The primary contributor surface is the job, frame-selection, collector,
 artifact, and artifact-store API. Use these pages for lookup. For the contributor
-workflow, see {doc}`../contributor_guide/extending_analyses`.
+workflow, see {doc}`../contributor_guide/analysis_plugins/index`.
 
 The package is import-light: importing `polyzymd.analyses.mda` should not import
 MDAnalysis or other heavy simulation dependencies. Individual jobs and helpers
