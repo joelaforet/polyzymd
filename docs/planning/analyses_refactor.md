@@ -255,3 +255,5 @@ Order: wave 1 is contract plots plus rmsf, secondary structure, rmsd and sasa; w
 Sum of the ports so far: about 30,700 source lines removed against about 1,900 added, before the legacy framework removal.
 
 Integration: `analyses_ported2` merges PRs 113 to 122 with one reconciled copy of each contract extension; nine contract plugins, 38 parity tests passing on real data, 26,722 lines against 57,254 on `analyses_ported`. The legacy framework removal (`analyses/remove-legacy-framework`) starts from it.
+
+Legacy framework removal: PR 123 (`analyses/remove-legacy-framework`, against `analyses_ported2`). The module is 20,569 lines in 47 files, against 51,982 at the audit and 57,254 on `analyses_ported`. The whole test tree passes apart from two pre-existing environment failures, and the 38 real-data parity tests pass. A new analysis is 58 source lines plus a 50-line test from the scaffold. Recommended merge order for the port phase: 113, 114, 115 to 122 in any order, then 123.
