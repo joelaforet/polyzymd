@@ -64,11 +64,23 @@ One pair produces one or two observables.
 | `<label>` | `mean_of_timeseries` | `A` | Distance between the two endpoints, per frame |
 | `<label> <below_label>` | `fraction` | `fraction` | Frames in which the distance is strictly below the threshold |
 
+A frame counts as below the threshold when the distance is strictly less than
+it. Every fraction records that convention in its metadata as
+`threshold_operator: strict_less_than`, next to the periodic policy and the two
+selections it was measured from.
+
 The framework reduces each replicate to one number per observable, then reports
 the mean over replicates with its SEM and a Student t interval, and tests
 conditions against the control on replicate-level values. Nothing averages one
 pair into another. The per-frame series of every observable is kept in the
 replicate's `observables.npz` sidecar.
+
+Only the distances are tested. A contact fraction is a monotone function of the
+same per-frame series its pair's mean distance is computed from, so testing it
+as well would add nothing and would enlarge the Benjamini-Hochberg family that
+every test in the run shares. Contact fractions are reported with their mean,
+SEM and interval and carry `tested=False`, which keeps them out of the pairwise
+tests and out of the correction family.
 
 ## Periodic boundaries
 

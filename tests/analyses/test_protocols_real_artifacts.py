@@ -7,6 +7,15 @@ all three shapes a plugin can store: the MDAnalysis comparison artifact
 grouped by run or pair label (rg, rmsd, sasa, distances), and a custom result
 that nests its statistics one level deeper (contacts).
 
+The catalytic_triad and distances files were written by the implementations
+those two plugins had before they moved to the observable contract, and they
+are kept exactly as they were: the report builder still has to read artifacts a
+user already has on disk. Two things in them no longer match a fresh run. The
+triad file states its simultaneous contact fraction as a percentage, from 0.0
+to 26.65, because the old code multiplied by 100; a new run stores the same
+quantity as a fraction with unit "fraction". The distances file groups by pair
+label under a custom result, where a new run stores one observable per pair.
+
 Each case pins one hand-checked pair against the numbers in its own file, so a
 regression in the normalizer shows up as a wrong verdict rather than as a
 silently different number.

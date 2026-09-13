@@ -239,9 +239,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rather than as percentages; a report that wants percent multiplies at display
   time.  The `align_trajectory` and `alignment_*` settings, the per-pair
   `above_label` and the per-plugin `plot_settings` blocks are accepted for one
-  release with a `DeprecationWarning` and change nothing.  The KDE distribution
-  figures are gone with the per-plugin plotters; the shared contract figures
-  draw the distances, the per-pair bars and the threshold fractions.
+  release with a `DeprecationWarning` and change nothing, and any other
+  unrecognised key now warns by name so a typo such as `thresold` is not
+  absorbed.  A threshold comparison is strictly less than, recorded on every
+  fraction as `threshold_operator: strict_less_than`, and an endpoint selection
+  that spans several chains still warns, now onto the replicate artifact rather
+  than only the log.  The contact fractions are reported with their uncertainty
+  but kept out of the cross-condition tests, since each is a monotone function
+  of the series its pair's mean distance is already tested on.  The KDE
+  distribution figures are gone with the per-plugin plotters; the shared
+  contract figures draw the distances, the per-pair bars and the threshold
+  fractions.
 
 - **The periodic box is computed first, from the protein and substrate alone.**
   `SolventBuilder.compute_box_vectors()` derives the cell from the solute

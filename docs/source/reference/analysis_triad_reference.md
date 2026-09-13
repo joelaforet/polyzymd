@@ -57,12 +57,22 @@ A triad of *n* pairs produces `2n + 1` observables.
 The charge-relay system only works when every link is short at the same time, so
 the simultaneous fraction is the conjunction of the per-pair indicators and not
 the average of the per-pair fractions. It is stored as a fraction in `[0, 1]`; a
-report that wants a percentage multiplies at display time.
+report that wants a percentage multiplies at display time. A pair counts as
+within the cutoff when its distance is strictly less than it, and every fraction
+records that as `threshold_operator: strict_less_than` in its metadata, beside
+the name of the active site and the selections it was measured from.
 
 The framework reduces each replicate to one number per observable, reports the
 mean over replicates with its SEM and a Student t interval, and tests conditions
 against the control on replicate-level values. The per-frame series of every
 observable is kept in the replicate's `observables.npz` sidecar.
+
+The pair distances and the simultaneous fraction are tested; the per-pair
+contact fractions are not. A per-pair fraction is a monotone function of the
+same series as that pair's mean distance, so it would add no information to the
+Benjamini-Hochberg family that every test in the run shares, while the
+simultaneous fraction says something no single pair does. The untested
+observables still carry their mean, SEM and interval.
 
 ## Periodic boundaries
 
