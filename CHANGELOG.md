@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`rg` is written against the observable contract.**  The plugin is one
+  module instead of a six-file package, and the framework owns aggregation,
+  uncertainty, testing, caching and persistence.  Selection mode reports
+  `rg_<label>` as a mean of a timeseries; fragment mode adds
+  `rg_<label>_fragments`, the mean Rg of each bonded fragment, and
+  `rg_<label>_distribution`, the density of the fragment values over fixed
+  bins.  Every settings key is unchanged and one is new and required,
+  `histogram_range`, which replaces bin edges that used to be derived by
+  pooling the replicates of a condition: every replicate must report the same
+  bins and none of them can see its neighbours, so an existing comparison file
+  must add a range to each fragments run that keeps
+  `save_fragment_distribution: true`, or turn the distribution off.  A
+  `plot_settings.rg` block still loads and now warns that it does nothing.  An
+  empty selection now raises `SelectionError` instead of skipping the run, the
+  uncertainty is taken across replicates instead of being corrected for
+  autocorrelation within one, and `polyzymd compare run rg --plot` writes no
+  figures until the generic per-kind plotters land.
+
 ### Added
 
 - **`Observable.tested`.**  A contract plugin can declare an observable

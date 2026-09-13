@@ -29,15 +29,11 @@ from polyzymd.analyses.shared.plotting import (  # noqa: E402
     plugin_plot_settings,
     resolve_error_bar,
 )
-from tests.analyses.conftest import (  # noqa: E402
-    figure_draws_uncertainty,
-    figure_has_uncertainty_footnote,
-)
+from tests.analyses.conftest import figure_draws_uncertainty  # noqa: E402
 
 T_FACTOR_N3 = 4.302652729749462
 
 PLUGINS_WITH_PLOT_SETTINGS = (
-    "rg",
     "contacts",
 )
 
@@ -301,104 +297,3 @@ class TestEveryPluginFigureIsAudited:
 
         assert (tmp_path / f"{analysis_name}_good.png").exists()
         assert not (tmp_path / f"{analysis_name}_bad.png").exists()
-
-
-class TestRealPlottersCarryTheFootnote:
-    """Render the bar plotters whose own tests stub save_figure.
-
-    Those tests replace ``save_figure`` before the conftest audit can see the
-    figure, so deleting a footnote call in Rg would otherwise go unnoticed.
-    These render the same plotters with the real ``save_figure`` and read the
-    footnote back off the saved figure.
-    """
-
-    @staticmethod
-    def _captured_figures(monkeypatch: "pytest.MonkeyPatch") -> list:
-        """Record every figure handed to save_figure without closing it."""
-
-        from polyzymd.analyses.shared import plotting
-
-        captured: list = []
-        original = plotting.save_figure
-
-        def _capture(fig, output_path, plot_settings, **kwargs):
-            captured.append(fig)
-            kwargs["close"] = False
-            return original(fig, output_path, plot_settings, **kwargs)
-
-        for module_name in ("polyzymd.analyses.rg._plotters",):
-            import importlib
-
-            monkeypatch.setattr(importlib.import_module(module_name), "save_figure", _capture)
-        return captured
-
-    def test_rg_comparison_bars_are_footnoted(
-        self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch"
-    ) -> None:
-        """The Rg comparison bar chart carries the footnote when rendered."""
-
-        from datetime import datetime
-
-        from polyzymd.analyses.base import PlotContext
-        from polyzymd.analyses.rg._comparison_results import (
-            RgComparisonResult,
-            RgConditionSummary,
-            RgRunSummary,
-        )
-        from polyzymd.analyses.rg._plotters import plot_rg_comparison_bars
-        from polyzymd.config.comparison import PlotSettings
-
-        captured = self._captured_figures(monkeypatch)
-        comparison = RgComparisonResult(
-            metric="mean_rg",
-            name="rg_compare",
-            n_runs=1,
-            run_labels=["protein_rg"],
-            control_label="Control",
-            conditions=[
-                RgConditionSummary(
-                    label="Control",
-                    config_path="/fake/control.yaml",
-                    n_replicates=3,
-                    run_summaries=[
-                        RgRunSummary(
-                            label="protein_rg",
-                            selection="protein",
-                            mean_rg=10.5,
-                            sem_rg=0.5,
-                            per_replicate_means=[10.0, 10.5, 11.0],
-                            replicates=[1, 2, 3],
-                            n_replicates=3,
-                        )
-                    ],
-                )
-            ],
-            pairwise_comparisons=[],
-            anova_by_run=None,
-            ranking_by_run={"protein_rg": ["Control"]},
-            equilibration_time="10ns",
-            created_at=datetime.now(),
-            polyzymd_version="test",
-        )
-        ctx = PlotContext(
-            conditions=[],
-            analysis_dirs={},
-            results_dir=tmp_path,
-            output_dir=tmp_path / "figures",
-            settings=None,
-            plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
-            equilibration="10ns",
-        )
-
-        plot_rg_comparison_bars(ctx, comparison)
-
-        assert captured, "no figure was rendered"
-        try:
-            for fig in captured:
-                assert figure_draws_uncertainty(fig)
-                assert figure_has_uncertainty_footnote(fig), "rendered Rg bars lack a footnote"
-                assert "n = 3" in _footnote_texts(fig)[0]
-                assert "10ns" in _footnote_texts(fig)[0]
-        finally:
-            for fig in captured:
-                plt.close(fig)

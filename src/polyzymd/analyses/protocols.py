@@ -627,6 +627,12 @@ def _complete(
 def _read(comparison: Any, analysis_name: str) -> _Read:
     """Map any comparison result shape onto groups, condition summaries and rows."""
     raw = getattr(comparison, "payload", None)
+    if (
+        isinstance(raw, Mapping)
+        and "comparisons" in raw
+        and isinstance(raw.get("conditions"), Mapping)
+    ):
+        return _read_observables(raw, analysis_name)
     payload = dict(raw) if isinstance(raw, Mapping) and "condition_summaries" in raw else None
     body = _dump(comparison)
     source = payload or body
@@ -681,6 +687,103 @@ def _read(comparison: Any, analysis_name: str) -> _Read:
 
     read.units = _units(source, summaries, read.groups)
     return read
+
+
+def _read_observables(payload: Mapping[str, Any], analysis_name: str) -> _Read:
+    """Map an observable-contract comparison payload onto the report shape.
+
+    Every observable becomes one group, so a plugin reporting several
+    selections behaves like the per-run plugins do. Profiles carry no
+    replicate-level scalar and are skipped.
+    """
+    conditions = payload.get("conditions") or {}
+    if not conditions:
+        raise ProtocolError(
+            f"{analysis_name}: the comparison reported no conditions.",
+            hint="Check that each condition has aggregated replicate results on disk.",
+        )
+    read = _Read(metric=analysis_name, grouped_by_run=True)
+    for label, aggregates in conditions.items():
+        for aggregate in (_dump(item) for item in aggregates):
+            if aggregate.get("kind") == "profile":
+                continue
+            name = str(aggregate["name"])
+            if name not in read.groups:
+                read.groups.append(name)
+                read.units[name] = aggregate.get("unit")
+            read.series.append(
+                (
+                    name,
+                    ConditionReport(
+                        label=str(label),
+                        n_replicates=int(aggregate.get("n_replicates", 0) or 0),
+                        mean=_float(aggregate.get("mean")),
+                        sem=_optional_float(aggregate.get("sem")),
+                        ci95=_limits(aggregate),
+                        ci_method=aggregate.get("ci_method"),
+                        replicate_values=[
+                            _float(value) for value in aggregate.get("replicate_values") or []
+                        ],
+                    ),
+                )
+            )
+    if not read.groups:
+        raise ProtocolError(
+            f"{analysis_name}: every observable is a profile, which has no single value.",
+            hint="Run 'polyzymd compare run --format json' to read the profiles.",
+        )
+    read.metric = read.groups[0]
+    for row in (_dump(item) for item in payload.get("comparisons") or []):
+        read.test = str(row.get("test") or read.test)
+        read.correction = str(row.get("correction") or read.correction)
+        delta = _optional_float(row.get("delta"))
+        testable = bool(row.get("testable", True))
+        significant = bool(row.get("significant")) and testable
+        change = _optional_float(row.get("percent_change"))
+        read.rows.append(
+            (
+                str(row.get("name") or read.metric),
+                PairwiseReport(
+                    a=str(row.get("control", "")),
+                    b=str(row.get("condition", "")),
+                    delta=float("nan") if delta is None else delta,
+                    p=_optional_float(row.get("p_value")),
+                    p_adjusted=_optional_float(row.get("p_adjusted")),
+                    test=read.test,
+                    correction=read.correction,
+                    cohens_d=_optional_float(row.get("cohens_d")),
+                    direction=_direction(change, delta, significant),
+                    significant=significant,
+                    testable=testable,
+                ),
+            )
+        )
+    return read
+
+
+def _limits(aggregate: Mapping[str, Any]) -> tuple[float, float] | None:
+    """Interval of one aggregate, or None when it has no both-sided interval."""
+    low = _optional_float(aggregate.get("ci95_low"))
+    high = _optional_float(aggregate.get("ci95_high"))
+    return None if low is None or high is None else (low, high)
+
+
+def _direction(percent_change: float | None, delta: float | None, significant: bool) -> str:
+    """Name the direction of a change the corrected test actually found.
+
+    The words come from :func:`polyzymd.analyses.stats.interpret_direction`, the
+    same call the plugins that still own their comparison make, so the public
+    ``direction`` field has one vocabulary whichever path filled it.
+    """
+    from polyzymd.analyses.shared.inferential_statistics import NO_SIGNIFICANT_CHANGE
+    from polyzymd.analyses.stats import interpret_direction
+
+    if not significant:
+        return NO_SIGNIFICANT_CHANGE
+    change = percent_change
+    if change is None:
+        change = 0.0 if not delta else math.copysign(float("inf"), delta)
+    return interpret_direction(change)
 
 
 def _group_key(source: Mapping[str, Any]) -> str:

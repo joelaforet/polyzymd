@@ -7,8 +7,6 @@ report ±inf percent_change and the correct direction (not "similar").
 from __future__ import annotations
 
 import math
-from datetime import datetime
-from types import SimpleNamespace
 
 from polyzymd.analyses.base import (
     ComparisonResult,
@@ -17,8 +15,6 @@ from polyzymd.analyses.base import (
     PairwiseResult,
 )
 from polyzymd.analyses.contacts._comparison_results import AggregateComparisonResult
-from polyzymd.analyses.rg import RgAnalysis
-from polyzymd.analyses.rg._comparison_results import RgRunPairwiseComparison
 from polyzymd.analyses.shared.inferential_statistics import percent_change
 from polyzymd.analyses.stats import (
     format_pct,
@@ -108,30 +104,6 @@ def test_pairwise_result_inf_round_trip_json() -> None:
 
     assert math.isinf(loaded.percent_change)
     assert loaded.percent_change > 0
-
-
-def test_rg_pairwise_inf_round_trip_json() -> None:
-    """Rg pairwise model should preserve infinite percent_change across JSON round-trip."""
-    comparison = RgRunPairwiseComparison(
-        run_label="protein_backbone",
-        condition_a="Control",
-        condition_b="Treatment",
-        t_statistic=1.0,
-        p_value=0.01,
-        cohens_d=1.5,
-        effect_interpretation="large",
-        direction="expansion",
-        significant=True,
-        percent_change=math.inf,
-    )
-
-    payload = comparison.model_dump_json()
-    loaded = RgRunPairwiseComparison.model_validate_json(payload)
-
-    assert math.isinf(loaded.percent_change)
-    assert loaded.percent_change > 0
-
-
 
 
 def test_contacts_aggregate_inf_round_trip_json() -> None:
@@ -301,19 +273,3 @@ def test_pairwise_comparison_zero_control_not_similar() -> None:
     assert comp.direction == "higher"
 
 
-def test_rg_compare_run_handles_zero_control_infinite_direction() -> None:
-    """Custom Rg compare path should classify zero-control +inf as expansion."""
-    run_a = SimpleNamespace(mean_rg=0.0, per_replicate_means=[0.0, 0.0, 0.0])
-    run_b = SimpleNamespace(mean_rg=4.0, per_replicate_means=[3.8, 4.0, 4.2])
-
-    comp = RgAnalysis._compare_run(
-        run_label="protein",
-        condition_a="Control",
-        condition_b="Treatment",
-        run_a=run_a,
-        run_b=run_b,
-    )
-
-    assert math.isinf(comp.percent_change)
-    assert comp.percent_change > 0
-    assert comp.direction == "expansion"

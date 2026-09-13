@@ -137,7 +137,7 @@ first, so do not fan them out.
       the contract tests.
   - Branch: `analyses/observable-contract`
   - Owner:
-  - Status: in review (PR 112; `rg2` prototype, `--style contract` scaffold, `polyzymd-extend` skill)
+  - Status: in review (PR 112; `--style contract` scaffold, `polyzymd-extend` skill). The `rg2` prototype was promoted to `rg` by the rg port, which deleted `rg_contract/`.
 
 - [ ] Give the framework one persistence path with a framework-written identity
       block holding the polyzymd version, the plugin source hash, the settings

@@ -487,7 +487,13 @@ class TestUnknownAnalysisDiagnostics:
     def test_plot_settings_block_survives_without_a_plugins_entry(
         self, tmp_path: Path
     ) -> None:
-        """A campaign file keeps loading after its plugin moved to the contract."""
+        """An existing campaign file keeps loading after a plugin is ported.
+
+        A plugin on the observable contract has no plot settings model, because
+        the framework draws its figures from the observable kind. The block is
+        accepted and reported as doing nothing rather than failing the whole
+        config.
+        """
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
             yaml.dump(
@@ -497,7 +503,7 @@ class TestUnknownAnalysisDiagnostics:
                         {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                     ],
                     "plugins": {},
-                    "plot_settings": {"sasa": {"dpi": 300}},
+                    "plot_settings": {"rg": {"show_per_replicate": False}},
                 }
             )
         )
@@ -505,9 +511,10 @@ class TestUnknownAnalysisDiagnostics:
         with pytest.warns(UserWarning, match="observable-contract"):
             config = ComparisonConfig.from_yaml(yaml_path)
 
+        assert config.name == "contract-plot-test"
         assert config.plot_settings is not None
         with pytest.raises(AttributeError):
-            _ = config.plot_settings.sasa
+            _ = config.plot_settings.rg
 
 
 class TestPluginSettingsCanonicalNames:
