@@ -76,7 +76,6 @@ __all__ = [
     "ProtocolReport",
     "analyze",
     "build_report",
-    "get_analysis_class",
     "run_protocol",
 ]
 
@@ -246,7 +245,7 @@ def analyze(
         If the name is unknown, a config is missing, the labels do not match
         the configs, the settings are invalid, or no replicates are found.
     """
-    analysis_cls = get_analysis_class(name)
+    analysis_cls = _analysis_class(name)
     config = _build_config(
         analysis_cls,
         configs,
@@ -279,7 +278,7 @@ def run_protocol(
     from polyzymd.analyses.orchestrator import run_comparison
 
     if isinstance(analysis, str):
-        analysis = get_analysis_class(analysis)()
+        analysis = _analysis_class(analysis)()
     resolved = equilibration or config.defaults.equilibration_time
     try:
         result = run_comparison(analysis, config, recompute=recompute, equilibration=resolved)
@@ -354,7 +353,7 @@ def build_report(
     )
 
 
-def get_analysis_class(name: str) -> type["Analysis"]:
+def _analysis_class(name: str) -> type["Analysis"]:
     """Look up an analysis plugin class by name, raising ``ProtocolError`` if unknown."""
     from polyzymd.analyses.discovery import get_analysis, list_all_names
 

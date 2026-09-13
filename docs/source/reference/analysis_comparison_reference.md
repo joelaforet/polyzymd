@@ -38,37 +38,42 @@ plugins:
     selection: "protein and name CA"
 ```
 
-## Hypothesis Testing Across Plugins
+## Hypothesis testing across plugins
 
 `ttest_method`, `posthoc_method` and `fdr_alpha` from the `defaults:` block
-reach every plugin's comparison step, including the plugins listed below as
-"custom" in the plugin summary table. Asking for `ttest_method: "welch"` runs
-Welch's unequal-variance t-test in `rmsd`, `rg`, `contacts`, `distances`,
-the observable contract plugins and the default scalar pipeline alike.
+reach every plugin, because every plugin is compared by the same code:
+`polyzymd.analyses.contract.compare_observables`. There is no second comparison
+path and no per-plugin comparison code.
 
-The multiple-comparison family is defined once for the whole package:
+One observable is tested at a time, each condition against the control, on the
+replicate values. The rules are:
 
-- **One run, one family.** Every pairwise test the run produced, across all of
-  its metrics and all of its condition pairs, is corrected together with the
-  Benjamini-Hochberg step-up procedure. Each pairwise result carries both
-  `p_value` and `p_value_adjusted`, and `significant` is read from the
-  adjusted value.
-- **ANOVA is omnibus and uncorrected.** Its `p_value` is reported raw, its
-  `p_value_adjusted` is always `null`, and no pairwise test is gated on it.
-  Its `significant` flag compares the raw p-value with `fdr_alpha`.
-- **Effect sizes carry `hedges_g` next to `cohens_d`.** Hedges' g is Cohen's d
-  multiplied by `J = 1 - 3 / (4 * (n1 + n2) - 9)`. The Cohen adjective in
-  `effect_size_interpretation` is `null` when `n1 + n2 < 10`.
-- **Direction labels require significance.** A label such as `"stabilizing"`,
-  `"increased"`, `"closer"` or `"exposure"` is only assigned when the
-  corrected test is significant. Otherwise the field reads
+- **One run, one family.** Every pairwise test the run produced, across every
+  observable and every condition pair, is corrected together with the
+  Benjamini-Hochberg step-up procedure. Each comparison entry carries both
+  `p_value` and `p_adjusted`, and `significant` is read from the adjusted
+  value. With `posthoc_method: "tukey_hsd"` the family-wise Tukey adjustment
+  replaces Benjamini-Hochberg and `correction` says which one ran.
+- **No ANOVA.** Nothing reports an omnibus F test any more. It gated nothing,
+  and an uncorrected omnibus p-value next to corrected pairwise ones invited
+  the reader to treat it as a gate.
+- **An untested observable stays out of the family.** A plugin declares
+  `tested=False` for a quantity that is a function of others it already
+  reports, such as the last of a set of fractions that sums to one. It is still
+  aggregated and reported with its uncertainty, and it does not enter the
+  pairwise tests or inflate the adjusted p-values of the rest.
+- **A profile is not tested pairwise.** It has no single value. A plugin gives
+  it a comparable scalar with `reduce`, reported as `<name>_mean` or
+  `<name>_total`, and that scalar is tested.
+- **Effect sizes.** Each comparison carries `cohens_d`. The agent report adds
+  `hedges_g`, Cohen's d multiplied by `J = 1 - 3 / (4 * (n1 + n2) - 9)`.
+- **Direction labels require significance.** A direction word is only assigned
+  when the corrected test is significant. Otherwise the field reads
   `"no significant change"`.
 
 Full field tables are in {doc}`posthoc_testing`.
 
-## Stable Plugin Keys
-
-Stable analysis plugins:
+## Stable plugin keys
 
 - `rmsd`
 - `rg`
@@ -80,19 +85,27 @@ Stable analysis plugins:
 - `sasa`
 - `hydrogen_bonds`
 
-## Plugin Summary Table
+## What each plugin reports
 
-| Plugin | Default compare? | Primary metric | Key feature | Statistical method |
-|--------|-----------------|----------------|-------------|-------------------|
-| `rmsd` | No (custom) | `rmsd_<run>_ref_<mode>` | Backbone stability over time | Observable contract: per-run t-test on replicate means, one Benjamini-Hochberg family |
-| `rg` | No (custom) | `mean_rg` | Protein compactness | FDR-corrected per-run pairwise t-tests + omnibus ANOVA |
-| `rmsf` | Observable contract | `rmsf_mean` | Per-residue flexibility | t-test on replicate values, one Benjamini-Hochberg family across the whole run |
-| `contacts` | Yes | Contact count + coverage | Per-residue contact profile and contact events | Observable contract, one BH family per run |
-| `distances` | Yes (observable contract) | One distance and one contact fraction per pair | Named distance pairs | FDR-corrected t-tests over replicate values |
-| `catalytic_triad` | Yes (observable contract) | `simultaneous_contact_fraction` | Active-site geometry | FDR-corrected t-tests over replicate values |
-| `secondary_structure` | Yes | `ss_helix` and `ss_strand` (`ss_coil` and `ss_unassigned` reported, not tested) | Secondary structure content | FDR-corrected pairwise t-tests over replicates |
-| `sasa` | Yes (observable contract) | `sasa_<label>` in A^2 | Target and context selections per measured context | Student or Welch t-test per observable, one Benjamini-Hochberg family |
-| `hydrogen_bonds` | Yes (observable contract) | `hbonds_<summary>` in counts per frame | Named groups and the summaries that pair them | Student or Welch t-test per observable, one Benjamini-Hochberg family |
+Every plugin reports observables, and the `kind` of each one decides how it is
+reduced per replicate, whether it is tested, and which figure is drawn. The
+names below are the keys that appear in the comparison artifact.
+
+| Plugin | Observables | Kinds | Unit |
+|--------|-------------|-------|------|
+| `rmsd` | `rmsd_<run slug>_ref_<reference mode>`, one per configured run | `mean_of_timeseries` | `A` |
+| `rg` | `rg_<slug>`; in fragment mode also `rg_<slug>_fragments` and `rg_<slug>_distribution` | `mean_of_timeseries`, `profile`, `profile` | `A`, `A`, `1/A` |
+| `rmsf` | one per-residue profile per configured selection, reduced to `<name>_mean` | `profile` with `reduce="mean_over_index"` | `A` |
+| `contacts` | `contact_count`, `coverage_per_frame`, `coverage_any_frame`, `contact_fraction`, `residence_time_distribution` | `mean_of_timeseries`, `fraction`, `fraction`, `profile`, `profile` | `count`, `fraction`, `fraction`, `fraction`, `ns` |
+| `distances` | `<pair label>` and `<pair label> <state>` per configured pair | `mean_of_timeseries`, `fraction` | `A`, `fraction` |
+| `catalytic_triad` | `<pair label>`, `<pair label> within <cutoff> A`, and `simultaneous_contact_fraction` | `mean_of_timeseries`, `fraction`, `fraction` | `A`, `fraction`, `fraction` |
+| `secondary_structure` | `ss_helix`, `ss_strand`, `ss_coil`, `ss_unassigned`, plus a per-residue `<label>_occupancy` profile | `fraction`, `profile` | `fraction` |
+| `sasa` | `sasa_<label>` and `relative_sasa_<label>` per measured context | `mean_of_timeseries`, `profile` | `A^2`, `fraction` |
+| `hydrogen_bonds` | `hbonds_<summary>` per configured summary, plus `pair_occupancy_<summary>` | `mean_of_timeseries`, `profile` | `count`, `fraction` |
+
+The per-frame series behind every observable is written to
+`run_<replicate>/observables.npz`, keyed by observable name, so a value can be
+inspected frame by frame without rerunning the analysis.
 
 ## Path Rules
 
@@ -103,10 +116,11 @@ Stable analysis plugins:
 ## Replicate Counts
 
 All stable shipped analyses support `replicates: [1]` for smoke tests and
-protocol validation. One-replicate runs compute aggregate metrics and plots, but
-inferential statistics, FDR correction, and uncertainty bands require at least
-two independent replicates per condition. Singleton pairwise tests and ANOVA are
-reported as not testable rather than significant.
+protocol validation. One-replicate runs compute aggregates and plots, but a
+standard error, a confidence interval and a hypothesis test all need at least
+two independent replicates per condition. A singleton pairwise comparison is
+reported with `testable: false` and a `note` saying why, rather than as not
+significant.
 
 ## Commands
 
@@ -271,15 +285,17 @@ polyzymd compare plot-all
 
 ## Uncertainty fields
 
-Every metric summary in a condition or comparison artifact carries these
-fields. The replicate is the sampling unit for all of them.
+Every observable aggregate in a condition or comparison artifact carries these
+fields, under `payload["observables"]`. The replicate is the sampling unit for
+all of them.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `mean` | `float` | Mean of the replicate values |
 | `sem` | `float \| null` | Standard error of the mean across replicates, `s / sqrt(n)` with `ddof = 1`. `null` when a single replicate makes it inestimable |
 | `std` | `float \| null` | Sample standard deviation across replicates. `null` for a single replicate |
-| `n` | `int` | Number of replicates |
+| `n_replicates` | `int` | Number of replicates |
+| `replicate_values` | `list[float]` | The per-replicate values the mean was taken over |
 | `unit` | `str \| null` | Physical unit of `mean`, for example `"A"`, `"A^2"`, `"fraction"`, `"%"`, `"ns"`. `null` marks a dimensionless metric |
 | `ci95_low` | `float \| null` | Lower limit of the 95 percent confidence interval. `null` for a single replicate |
 | `ci95_high` | `float \| null` | Upper limit of the 95 percent confidence interval. `null` for a single replicate |
@@ -309,11 +325,6 @@ carries an `uncertainty` block:
 narrowest interval in the artifact, `coverage` the probability the interval
 covers, and `method` how the coverage factor was obtained.
 
-The default scalar comparison also writes `<metric>_unit`, `<metric>_ci95_low`,
-`<metric>_ci95_high` and `<metric>_ci_method` into each entry of
-`condition_summaries`, alongside the existing `<metric>_mean`, `<metric>_sem`
-and `<metric>_replicate_values`.
-
 ## Statistical Terms
 
 - `p-value`: significance of the observed difference under the null hypothesis
@@ -321,8 +332,6 @@ and `<metric>_replicate_values`.
   standard deviation
 - `Hedges' g`: Cohen's d after the small-sample bias correction
   `J = 1 - 3 / (4 * (n1 + n2) - 9)`
-- `ANOVA`: omnibus test across multiple conditions, reported uncorrected and
-  gating nothing
 - `SEM`: standard error of the mean across replicates
 - `95% CI`: two-sided Student t confidence interval across replicates,
   `mean +/- t(0.975, n - 1) * SEM`

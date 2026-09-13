@@ -44,6 +44,7 @@ doi:10.1093/biomet/34.1-2.28
 from __future__ import annotations
 
 import inspect
+import logging
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -106,7 +107,7 @@ class Observable(BaseModel):
         reader could not tell which ``coverage`` a key meant.
     kind : ObservableKind
         How the framework reduces and compares the values. See the module
-        docstring of :mod:`polyzymd.analyses.contract` for the five kinds.
+        docstring of :mod:`polyzymd.analyses.contract` for the four kinds.
     values : array_like
         Per-frame values for the time-series kinds, or per-index values for
         ``"profile"``.
@@ -733,7 +734,7 @@ def warn_unknown_settings(
     A settings model that accepts extra keys keeps an old comparison file
     loading, but it also swallows a typo such as ``thresold``. Call this from a
     model validator so every extra key is named out loud: a key listed in
-    ``deprecated`` gets its own message and a ``DeprecationWarning``, anything
+    ``deprecated`` gets its own message, anything
     else gets a ``UserWarning`` saying it is unknown and ignored.
 
     Parameters
@@ -744,21 +745,21 @@ def warn_unknown_settings(
         Keys that are accepted on purpose for one release, mapped to the
         sentence explaining what replaced them.
     """
+    logger = logging.getLogger("polyzymd.analyses")
     known = deprecated or {}
     for key in sorted(settings.model_extra or {}):
         if key in known:
-            warnings.warn(
-                f"{type(settings).__name__}: '{key}' is deprecated and ignored. {known[key]}",
-                DeprecationWarning,
-                stacklevel=3,
+            message = (
+                f"{type(settings).__name__}: '{key}' is ignored and will be rejected in the "
+                f"next release. {known[key]}"
             )
         else:
-            warnings.warn(
+            message = (
                 f"{type(settings).__name__}: '{key}' is not a setting of this analysis and is "
-                "ignored. Check the spelling against the plugin reference page.",
-                UserWarning,
-                stacklevel=3,
+                "ignored. Check the spelling against the plugin reference page."
             )
+        warnings.warn(message, UserWarning, stacklevel=3)
+        logger.warning(message)
 
 
 def _adjust(

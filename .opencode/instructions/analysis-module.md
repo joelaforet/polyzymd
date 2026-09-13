@@ -7,7 +7,7 @@ exists. If you add or delete a module, update this list in the same commit.
 
 ```
 src/polyzymd/analyses/
-├── contract.py          # Observable, the five kinds, aggregation, testing,
+├── contract.py          # Observable, the four kinds, aggregation, testing,
 │                        # and contract_analysis(), which builds the Analysis
 ├── base.py              # The Analysis lifecycle and the framework contexts
 ├── contract_plots.py    # One figure per observable kind
@@ -71,7 +71,7 @@ import `polyzymd.analyses._framework` from a plugin.
 5. Never aggregate across replicates, run a test, write a file or import
    matplotlib inside `compute()`. The framework does all of it from `kind`.
 
-## The five observable kinds
+## The four observable kinds
 
 | kind | values are | replicate value | reported as |
 |---|---|---|---|

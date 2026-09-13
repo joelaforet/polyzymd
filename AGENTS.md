@@ -81,7 +81,7 @@ src/polyzymd/
 
 | Layer | Files | Role |
 |-------|-------|------|
-| **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the **extension point** for contributors |
+| **Plugins** (public) | `rg.py`, `rmsf/`, `contacts/`, etc. | One module per analysis, holding a settings model and a `compute()`. The extension point for contributors |
 | **Private modules** | `_framework/`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics, autocorrelation — reusable across plugins |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/` | Stable public facade, auto-discovery, artifact lifecycle, default comparison utilities |
@@ -126,31 +126,33 @@ under `src/polyzymd/analyses/` and subclass `Analysis`:
 
 | Resource | Location | What It Documents |
 |----------|----------|-------------------|
-| **Scaffold CLI** | `polyzymd new-analysis <name>` | Generates a simple plugin, or an advanced package with tests |
+| **Scaffold CLI** | `polyzymd new-analysis <name>` | Writes one plugin module and its two tests |
 | `Analysis` base class | `analyses/base.py` | Stable public facade for the full contract, required methods, optional overrides, and context objects |
 | Plugin discovery | `analyses/discovery.py` | How auto-discovery works, naming rules |
 | Orchestrator | `analyses/orchestrator.py` | How the framework runs your plugin |
 | Shared utilities | `analyses/shared/` | `TrajectoryLoader`, alignment, statistics, autocorrelation |
-| Scaffold output | `polyzymd new-analysis <name>` | Simplest working plugin — start here |
+| Scaffold output | `polyzymd new-analysis <name>` | A working plugin to start from |
 | Richer example | `analyses/catalytic_triad/` | Default-compare lifecycle with DistanceCalculator + complex plotting |
 | Stats utilities | `analyses/stats.py` | `interpret_direction()`, `format_pct()` |
 | Contributor guide | `docs/source/contributor_guide/analysis_plugins/index.md` | Write an analysis plugin, with the checklist |
 
 Key rules:
 
-- **Required plugin attributes**: `name` (str), `Settings` (pydantic BaseModel),
-  `references` (tuple of str), and `compute(universe, frames, settings)`
-- **One lifecycle**: `contract_analysis()` builds the `Analysis` subclass. The
-  framework owns the universe, the production window, the replicate cache,
-  `ArtifactStore`, `ConditionArtifact`, `ComparisonArtifact`, aggregation,
-  hypothesis testing, plotting and formatting. There are no lifecycle hooks for
-  a plugin to override
-- **Kinds do the work**: `mean_of_timeseries`, `fluctuation`, `fraction` and
-  `profile` decide how a replicate reduces, how conditions compare, and which
-  figure is drawn
-- **Auto-discovery**: drop a module in `analyses/`, no imports, no registries
-- **Result saving**: artifacts go through `ArtifactStore`; do not introduce a
-  plugin-specific cache filename scheme
+A plugin declares `name` (str), `Settings` (a pydantic model), `references` (a
+tuple of citations) and `compute(universe, frames, settings)`, and nothing else.
+
+`contract_analysis()` builds the `Analysis` subclass that runs it. The framework
+owns the universe, the production window, the replicate cache, `ArtifactStore`,
+`ConditionArtifact`, `ComparisonArtifact`, aggregation, hypothesis testing,
+plotting and formatting. There are no lifecycle hooks to override.
+
+The `kind` of each observable does the work. `mean_of_timeseries`,
+`fluctuation`, `fraction` and `profile` decide how a replicate reduces, how
+conditions compare, and which figure is drawn.
+
+Discovery walks `analyses/`, so a new module needs no import and no registry
+entry. Artifacts persist through `ArtifactStore`; never introduce a
+plugin-specific cache filename scheme.
 
 ## Design Principles (Critical for Contributors)
 
@@ -169,11 +171,11 @@ system achieves this:
 
 When writing a new analysis plugin, **study existing implementations first**:
 
-1. **Read `analyses/contract.py`** — it defines the whole contract
-2. **Start with the scaffold output** — `polyzymd new-analysis <name>` writes a
-   working plugin and two tests
-3. **Study `analyses/rg.py`** for a short plugin, or `analyses/contacts/` for one
-   that also returns an extra sidecar
+1. Read `analyses/contract.py`, which defines the whole contract.
+2. Start with the scaffold output. `polyzymd new-analysis <name>` writes a
+   working plugin and two tests.
+3. Study `analyses/rg.py` for a short plugin, or `analyses/contacts/` for one
+   that also returns an extra sidecar.
 
 **Anti-pattern to avoid:**
 ```python
@@ -205,10 +207,10 @@ framework's, on `Analysis` in `analyses/base.py`.
 ### When Adding New Features
 
 1. **Read the guide**: `docs/source/contributor_guide/analysis_plugins/index.md`
-2. **Read `analyses/contract.py`** — the module docstring defines the contract
+2. Read `analyses/contract.py`, whose module docstring defines the contract
 3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
-4. **Study a matching example**: start with scaffold output (`polyzymd new-analysis <name>`), then use `rmsf/` for default compare with plots or `contacts/` for custom compare
-5. **Write your plugin** as a simple module or package in `analyses/`; for advanced trajectory-native packages, isolate MDAnalysis job helpers in `_mda.py`, and extract plotting to `_plotters.py` as complexity grows
+4. Study a matching example: start with the scaffold output, then read `analyses/rg.py` for a short plugin or `analyses/contacts/` for one that returns an extra sidecar
+5. Write your plugin as one module in `analyses/`. There is no plugin package and no place to put plotting or persistence code, because the framework owns both
 6. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
 
 ## Code Style

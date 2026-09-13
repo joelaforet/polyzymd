@@ -76,7 +76,7 @@ def test_per_frame_rmsd_matches_the_old_plugin(universe_factory, case_name: str)
         _skip_unless_available([stored["reference_file"]])
     atol = TOLERANCES.get(case_name, ATOL_NO_ALIGNMENT_PASS)
 
-    with pytest.warns(DeprecationWarning, match="convergence"):
+    with pytest.warns(UserWarning, match="convergence"):
         run = RMSDRunSettings.model_validate(stored)
     settings = RMSDSettings(runs=[run])
 

@@ -147,7 +147,6 @@ pixi run -e analysis polyzymd compare run solvent_shell -f comparison.yaml
 A plugin imports from three places and nowhere else.
 
 - `polyzymd.analyses.contract` for `Observable` and `iter_frames`.
-- `polyzymd.analyses.base` for `contract_analysis`.
 - `polyzymd.analyses.shared` for a helper that already exists, such as
   alignment, topology checks or amino acid classification.
 

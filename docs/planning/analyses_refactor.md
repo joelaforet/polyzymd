@@ -190,24 +190,27 @@ first, so do not fan them out.
   - Owner:
   - Status: not started
 
-- [ ] Port rmsf, rg, rmsd and sasa to `Observable`, rmsf first because it is
+- [x] Port rmsf, rg, rmsd and sasa to `Observable`, rmsf first because it is
       smallest and already declares a statistical policy.
   - Branch: `analyses/port-scalar-plugins`
   - Owner:
-  - Status: rmsf ported on `analyses/port-rmsf`, one module of 273 lines
+  - Status: merged. All four are contract modules on `analyses_ported2`.
     against 2,195, parity exact on the LipA 363 K control run. rg, rmsd and
     sasa not started.
 
-- [ ] Port the plotters to the generic per-kind plotting path.
-  - Branch: `analyses/port-plotters`
+- [x] Port the plotters to the generic per-kind plotting path.
+  - Branch: `analyses/contract-plots`
   - Owner:
-  - Status: not started
+  - Status: merged. `contract_plots.py` draws every figure from the observable
+    kind; no plugin has a `_plotters.py`.
 
-- [ ] Port contacts, hydrogen bonds and the catalytic triad, adding an optional
+- [x] Port contacts, hydrogen bonds and the catalytic triad, adding an optional
       `Aggregator` protocol for residence times.
-  - Branch: `analyses/port-event-plugins`
+  - Branch: `analyses/port-contacts`, `analyses/port-hydrogen-bonds`,
+    `analyses/port-catalytic-triad`
   - Owner:
-  - Status: not started
+  - Status: merged. Contact events and hydrogen-bond events are extra NPZ
+    sidecars returned from `compute()`.
 
 ## Wave 4, removing the legacy framework
 

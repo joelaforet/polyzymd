@@ -15,7 +15,7 @@ perform heavy imports lazily when they actually build or run an analysis.
 | Area | Public objects | Details |
 |------|----------------|---------|
 | Public facade | Re-exported public MDAnalysis-layer symbols | {doc}`analyses_mda/facade` |
-| Jobs | `MDAAnalysisJob`, `MDAFunctionAdapter`, `MDAJobResult`, `MDABackendPolicy`, `MDAUniversePolicy` | {doc}`analyses_mda/jobs` |
+| Replicate records | `MDAJobResult`, `MDAUniversePolicy` | {doc}`analyses_mda/jobs` |
 | Frame selection | `FrameSelection` | {doc}`analyses_mda/frame_selection` |
 | Replicate lifecycle | `MDAReplicateJobContext`, `run_replicate`, `frame_selection_payload` | {doc}`analyses_mda/lifecycle` |
 | Artifacts | `ReplicateArtifact`, `ConditionArtifact`, `ComparisonArtifact`, `ArtifactManifest`, `ArtifactSidecarRef` | {doc}`analyses_mda/artifacts_store` |

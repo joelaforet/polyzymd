@@ -83,22 +83,27 @@ The analysis package is split by public surface and private implementation:
 
 ```text
 src/polyzymd/analyses/
-├── base.py          # stable contributor facade: Analysis, contexts, metrics
-├── discovery.py     # plugin auto-discovery
-├── orchestrator.py  # comparison workflow orchestration facade
-├── stats.py         # default scalar comparison pipeline
-├── mda/             # public MDAnalysis extension layer
-├── shared/          # reusable utilities shared by plugins
-├── _framework/      # private/internal lifecycle, I/O, and contracts
-└── <plugin>/        # built-in and contributed analysis plugins
+├── contract.py        # Observable, the kinds, aggregation, testing, the factory
+├── base.py            # the Analysis lifecycle and the framework contexts
+├── contract_plots.py  # one figure per observable kind
+├── discovery.py       # plugin auto-discovery
+├── orchestrator.py    # comparison workflow orchestration facade
+├── protocols.py       # analyze() and ProtocolReport, the agent surface
+├── stats.py           # the two direction-wording helpers the report uses
+├── mda/               # public MDAnalysis extension layer
+├── shared/            # reusable utilities shared by plugins
+├── _framework/        # private lifecycle, I/O and validation
+└── <plugin>.py        # one module per analysis
 ```
 
 The important public/private boundary is intentional:
 
-- `polyzymd.analyses.base` is the stable contributor facade for `Analysis`,
-  lifecycle contexts, metrics, and comparison result models.
-- `polyzymd.analyses.mda` is the public MDAnalysis extension layer for jobs,
-  frame selection, artifacts, artifact storage, aggregation, and Universe
+- `polyzymd.analyses.contract` is what a plugin author imports: `Observable`,
+  `iter_frames` and `contract_analysis`.
+- `polyzymd.analyses.base` holds `Analysis` and the four lifecycle contexts a
+  plugin receives rather than builds.
+- `polyzymd.analyses.mda` is the public MDAnalysis extension layer for frame
+  selection, the replicate lifecycle, artifacts, artifact storage and Universe
   handling.
 - `_framework/` modules are private implementation details behind the public
   facade.

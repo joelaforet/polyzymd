@@ -2,15 +2,15 @@
 
 The lifecycle owns everything around ``plugin.compute()``: it loads the
 universe, resolves the production window, builds the artifact store, calls the
-plugin's jobs, and checks the artifact that comes back before the framework
-writes it.
+analysis, and checks the artifact that comes back before the framework writes
+it.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -23,16 +23,62 @@ from polyzymd.analyses.mda.frame_selection import (
     _normalize_frame_selector_values,
     _normalize_scalar_value,
 )
-from polyzymd.analyses.mda.job import MDAAnalysisJob, MDAJobResult, MDAUniversePolicy
 from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 from polyzymd.analyses.mda.universe import UniverseProvider
 from polyzymd.analyses.shared.loader import TrajectoryLoader
 
 if TYPE_CHECKING:
     from polyzymd.analyses._framework.contexts import ReplicateContext
-    from polyzymd.analyses.mda.job import MDABackendPolicy
 
 logger = logging.getLogger("polyzymd.analyses")
+
+
+@dataclass(frozen=True)
+class MDAUniversePolicy:
+    """Identity of the files one replicate was measured from.
+
+    It carries no universe, only the provenance the loader already recorded, so
+    an artifact can say which topology and trajectories produced its numbers.
+    """
+
+    condition_label: str | None = None
+    replicate: int | None = None
+    provenance: Any = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Freeze metadata to avoid accidental mutation after job execution."""
+
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+    def as_dict(self) -> dict[str, Any]:
+        """Serialize lightweight policy metadata to primitive values.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary containing condition, replicate, provenance, and metadata.
+        """
+
+        provenance = self.provenance
+        if hasattr(provenance, "as_dict"):
+            provenance = provenance.as_dict()
+        return {
+            "condition_label": self.condition_label,
+            "replicate": self.replicate,
+            "provenance": provenance,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class MDAJobResult:
+    """What one call to a plugin's ``compute()`` produced for one replicate."""
+
+    name: str
+    results: Any
+    frame_selection: FrameSelection
+    universe_policy: MDAUniversePolicy
 
 
 @dataclass(frozen=True)
@@ -73,11 +119,6 @@ class MDAReplicateJobContext:
         """Resolved plugin settings."""
         return self.replicate_context.settings
 
-    @property
-    def backend_policy(self) -> MDABackendPolicy:
-        """MDAnalysis backend policy resolved from the comparison config."""
-        return self.replicate_context.backend_policy
-
 
 def build_trajectory_loader(sim_config: Any) -> TrajectoryLoader:
     """Create the trajectory loader used for one condition."""
@@ -103,9 +144,8 @@ def run_replicate(analysis: Any, ctx: ReplicateContext, replicate: int) -> Repli
         block.
     """
     job_ctx = _job_context(analysis, ctx, replicate)
-    jobs = _validate_jobs(analysis.build_mda_jobs(job_ctx), analysis_name=analysis.name)
-    completed: Sequence[MDAJobResult] = [job.run() for job in jobs]
-    artifact = analysis.collect_replicate(job_ctx, completed)
+    measured = analysis.measure_replicate(job_ctx)
+    artifact = analysis.collect_replicate(job_ctx, measured)
     _validate_artifact(artifact, job_ctx, analysis_name=analysis.name)
     return artifact
 
@@ -168,26 +208,6 @@ def _known_warnings(
     if isinstance(provider_warnings, list):
         warnings.extend(str(warning) for warning in provider_warnings)
     return tuple(warnings)
-
-
-def _validate_jobs(
-    jobs: Sequence[MDAAnalysisJob], *, analysis_name: str
-) -> tuple[MDAAnalysisJob, ...]:
-    """Reject a job list that is not a non-empty sequence of jobs."""
-    if isinstance(jobs, (str, bytes)) or not isinstance(jobs, Sequence):
-        raise PluginContractError(
-            f"{analysis_name}.build_mda_jobs() must return a sequence of MDAAnalysisJob objects"
-        )
-    normalized_jobs = tuple(jobs)
-    if not normalized_jobs:
-        raise PluginContractError(f"{analysis_name}.build_mda_jobs() returned no jobs")
-    invalid = [job for job in normalized_jobs if not isinstance(job, MDAAnalysisJob)]
-    if invalid:
-        raise PluginContractError(
-            f"{analysis_name}.build_mda_jobs() returned {type(invalid[0]).__name__}; "
-            "expected MDAAnalysisJob"
-        )
-    return normalized_jobs
 
 
 def _validate_artifact(artifact: Any, ctx: MDAReplicateJobContext, *, analysis_name: str) -> None:

@@ -8,7 +8,7 @@ replicate lifecycle, artifact storage, and shared MDAnalysis primitives.
 
 MDAnalysis Extension-Layer API <analyses_mda>
 Public facade <analyses_mda/facade>
-Job execution <analyses_mda/jobs>
+Replicate records <analyses_mda/jobs>
 Frame selection <analyses_mda/frame_selection>
 Replicate lifecycle <analyses_mda/lifecycle>
 Artifact envelopes and store <analyses_mda/artifacts_store>

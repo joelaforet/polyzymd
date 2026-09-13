@@ -689,7 +689,7 @@ def save_figure(
 # ---------------------------------------------------------------------------
 
 
-def finite_numeric_values(values: Any) -> "np.ndarray":
+def _finite_numeric_values(values: Any) -> "np.ndarray":
     """Return finite numeric values as a one-dimensional float array.
 
     Parameters
@@ -742,7 +742,7 @@ def finite_numeric_values(values: Any) -> "np.ndarray":
     return value_array[np.isfinite(value_array)]
 
 
-def replicate_jitter_offsets(n_values: int, bar_width: float) -> "np.ndarray":
+def _replicate_jitter_offsets(n_values: int, bar_width: float) -> "np.ndarray":
     """Return deterministic offsets for replicate dot overlays.
 
     Offsets are centred on the corresponding bar position so overlays are
@@ -847,11 +847,11 @@ def scatter_replicate_values(
 
     n_scattered = 0
     for idx, values in enumerate(replicate_values):
-        rep_arr = finite_numeric_values(values)
+        rep_arr = _finite_numeric_values(values)
         if rep_arr.size == 0:
             continue
 
-        jitter = replicate_jitter_offsets(rep_arr.size, bar_width)
+        jitter = _replicate_jitter_offsets(rep_arr.size, bar_width)
         position_arr = np.full(rep_arr.shape, float(positions[idx]), dtype=float) + jitter
         if orientation == "vertical":
             x_values = position_arr
@@ -1158,7 +1158,7 @@ def error_bar_half_widths(
     counts: list[int] = []
     for index in range(len(sems)):
         if replicate_values is not None and index < len(replicate_values):
-            counts.append(int(finite_numeric_values(replicate_values[index]).size))
+            counts.append(int(_finite_numeric_values(replicate_values[index]).size))
         else:
             counts.append(int(n_replicates or 0))
 
@@ -1274,9 +1274,9 @@ def annotate_uncertainty(
     if n_replicates is None:
         n_replicates = min(
             (
-                int(finite_numeric_values(values).size)
+                int(_finite_numeric_values(values).size)
                 for values in replicate_values or []
-                if finite_numeric_values(values).size
+                if _finite_numeric_values(values).size
             ),
             default=0,
         )

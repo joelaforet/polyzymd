@@ -15,7 +15,7 @@ from polyzymd.analyses.mda import (
     ReplicateArtifact,
 )
 from polyzymd.analyses.shared.plotting import (
-    finite_numeric_values,
+    _finite_numeric_values,
     get_condition_color_map,
     get_condition_colors,
     get_palette_colors,
@@ -361,7 +361,7 @@ def test_artifact_store_load_npz_sidecar_rejects_tampering(tmp_path) -> None:
 
 def test_finite_numeric_values_skips_invalid_entries() -> None:
     """Finite filtering should retain numeric values and skip invalid ones."""
-    values = finite_numeric_values([1.0, "bad", float("nan"), "2.5", float("inf")])
+    values = _finite_numeric_values([1.0, "bad", float("nan"), "2.5", float("inf")])
 
     np.testing.assert_allclose(values, [1.0, 2.5])
 

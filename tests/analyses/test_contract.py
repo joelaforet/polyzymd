@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import math
+import os
 import types
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -12,6 +14,7 @@ import numpy as np
 import pytest
 from pydantic import BaseModel, ConfigDict
 
+import polyzymd
 from polyzymd.analyses._framework.contexts import ComparisonContext, Condition
 from polyzymd.analyses.contract import (
     AnalysisProtocol,
@@ -402,7 +405,7 @@ def test_unknown_settings_keys_are_named_by_kind() -> None:
 
     settings = Settings(threshold=3.5, align_trajectory=True, thresold=4.0)
 
-    with pytest.warns(DeprecationWarning, match="align_trajectory"):
+    with pytest.warns(UserWarning, match="align_trajectory"):
         with pytest.warns(UserWarning, match="thresold"):
             warn_unknown_settings(settings, deprecated={"align_trajectory": "It is ignored."})
 
@@ -490,15 +493,98 @@ def test_runner_recomputes_when_shared_code_changes(
     assert marker.stat().st_mtime_ns != stamp
 
 
-def test_the_framework_hash_covers_the_shared_modules_a_plugin_imports() -> None:
-    """Editing a shared module the plugin reaches changes the framework hash."""
-    from polyzymd.analyses.base import _framework_code_hash, _shared_imports
+def _hash_in(package_root: Path, module: str = "polyzymd.analyses.rg") -> str:
+    """Return the framework hash a fresh interpreter computes under *package_root*."""
+    import subprocess
+    import sys
 
-    reached = _shared_imports("polyzymd.analyses.rg")
+    script = (
+        "from polyzymd.analyses.base import _framework_code_hash;"
+        f"print(_framework_code_hash({module!r}))"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(package_root), "PATH": os.environ.get("PATH", "")},
+        check=True,
+    )
+    return completed.stdout.strip()
 
+
+def test_editing_a_shared_module_changes_the_framework_hash(tmp_path: Path) -> None:
+    """The hash follows the source of the modules a plugin reaches.
+
+    A copy of the installed package is hashed in a fresh interpreter, one line
+    is added to ``shared/statistics.py`` in that copy, and the same plugin
+    hashes differently. Nothing is monkeypatched, so the test fails if the walk
+    stops reaching that module.
+    """
+    import shutil
+
+    package = Path(inspect.getfile(polyzymd)).parent
+    root = tmp_path / "tree"
+    shutil.copytree(package, root / "polyzymd", ignore=shutil.ignore_patterns("__pycache__"))
+
+    before = _hash_in(root)
+    target = root / "polyzymd" / "analyses" / "shared" / "statistics.py"
+    target.write_text(target.read_text() + "\n_PROBE = 1\n")
+    after = _hash_in(root)
+
+    assert before != after
+
+
+def test_editing_a_plotter_leaves_the_framework_hash_alone(tmp_path: Path) -> None:
+    """A change to a figure must not discard a campaign's cached replicates."""
+    import shutil
+
+    package = Path(inspect.getfile(polyzymd)).parent
+    root = tmp_path / "tree"
+    shutil.copytree(package, root / "polyzymd", ignore=shutil.ignore_patterns("__pycache__"))
+
+    before = _hash_in(root)
+    target = root / "polyzymd" / "analyses" / "shared" / "plotting.py"
+    target.write_text(target.read_text() + "\n_PROBE = 1\n")
+    after = _hash_in(root)
+
+    assert before == after
+
+
+def test_the_framework_hash_reaches_frame_selection_and_the_universe() -> None:
+    """Frame selection and the universe decide numbers, so they are hashed."""
+    from polyzymd.analyses.base import _hashed_imports
+
+    reached = _hashed_imports("polyzymd.analyses.rg")
+
+    assert "polyzymd.analyses.mda.frame_selection" in reached
+    assert "polyzymd.analyses.mda.universe" in reached
+    assert "polyzymd.analyses.shared.window" in reached
     assert "polyzymd.analyses.shared.topology" in reached
-    assert "polyzymd.analyses.shared.statistics" in reached
-    assert _framework_code_hash("polyzymd.analyses.rg") != "unknown"
+
+
+def test_the_framework_hash_ignores_the_plotters() -> None:
+    """A change to a figure must not discard a campaign's cached replicates."""
+    from polyzymd.analyses.base import _hashed_imports
+
+    reached = _hashed_imports("polyzymd.analyses.rg")
+
+    assert "polyzymd.analyses.shared.plotting" not in reached
+    assert "polyzymd.analyses.contract_plots" not in reached
+
+
+def test_an_unreadable_module_is_an_error_rather_than_a_matching_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hash that skipped a module would compare equal to one taken before it changed."""
+    from polyzymd.analyses import base as analyses_base
+
+    monkeypatch.setattr(analyses_base, "_module_source", lambda name: None)
+    analyses_base._framework_code_hash.cache_clear()
+    try:
+        with pytest.raises(PluginContractError, match="cannot read the source of"):
+            analyses_base._framework_code_hash("polyzymd.analyses.rg")
+    finally:
+        analyses_base._framework_code_hash.cache_clear()
 
 
 def test_the_identity_block_records_the_build_it_came_from(
@@ -514,6 +600,7 @@ def test_the_identity_block_records_the_build_it_came_from(
     assert identity["polyzymd_version"] == __version__
     assert identity["framework_code_hash"] == _framework_code_hash("polyzymd.analyses.rg")
     assert "git_commit" in identity
+    assert "git_dirty" in identity
 
 
 def test_runner_recomputes_when_an_input_file_changes(

@@ -157,7 +157,7 @@ def test_an_empty_selection_raises_a_typed_error() -> None:
 
 def test_the_dropped_convergence_settings_still_parse() -> None:
     """A comparison file from the old plugin loads, with a deprecation warning."""
-    with pytest.warns(DeprecationWarning, match="convergence_window_size_ns"):
+    with pytest.warns(UserWarning, match="convergence_window_size_ns"):
         run = _run(convergence_window_size_ns=15.0, convergence_slope_threshold=0.0005)
 
     assert not hasattr(run, "convergence_window_size_ns")

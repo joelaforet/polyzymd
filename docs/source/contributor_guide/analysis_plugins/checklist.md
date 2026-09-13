@@ -27,8 +27,8 @@ Plugin: `PLUGIN_NAME`
 
 ### Imports
 
-- [ ] `Observable` and `iter_frames` come from `polyzymd.analyses.contract`.
-- [ ] `contract_analysis` comes from `polyzymd.analyses.base`.
+- [ ] `Observable`, `iter_frames` and `contract_analysis` all come from
+  `polyzymd.analyses.contract`.
 - [ ] Any other helper comes from `polyzymd.analyses.shared`.
 - [ ] Nothing is imported from `polyzymd.analyses._framework`.
 - [ ] MDAnalysis, mdtraj and matplotlib are not imported at module scope.

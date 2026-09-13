@@ -22,8 +22,7 @@ from polyzymd.analyses.base import (
 from polyzymd.analyses.exceptions import AggregationError, PluginContractError
 from polyzymd.analyses.mda import (
     ArtifactStore,
-    MDAAnalysisJob,
-    MDABackendPolicy,
+    MDAJobResult,
     MDAReplicateJobContext,
     MDAUniversePolicy,
 )
@@ -47,17 +46,7 @@ class _LifecycleSettings(BaseModel):
     scale: float = 1.0
 
 
-class _MDAContractMixin:
-    """Provide the required MDA lifecycle seam for direct compute fakes."""
-
-    def build_mda_jobs(self, ctx):
-        """Return no jobs for tests that override the internal dispatcher."""
-
-        del ctx
-        return []
-
-
-class _OrderAnalysis(_MDAContractMixin, Analysis):
+class _OrderAnalysis(Analysis):
     """Analysis that records compute and aggregate lifecycle calls."""
 
     name: ClassVar[str] = "lifecycle_order"
@@ -261,21 +250,6 @@ class _FakeMDAUniverseProvider:
         return _FakeMDAProvenance()
 
 
-class _FakeMDAAnalysisBase:
-    """AnalysisBase-like object that records run kwargs."""
-
-    def __init__(self) -> None:
-        """Initialize empty results."""
-
-        self.results: dict[str, Any] = {}
-
-    def run(self, **kwargs: Any) -> "_FakeMDAAnalysisBase":
-        """Store deterministic results and return self."""
-
-        self.results = {"value": 5.0, "run_kwargs": dict(kwargs)}
-        return self
-
-
 class _MDAJobOnlyAnalysis(Analysis):
     """Analysis that uses only the MDA job lifecycle hook."""
 
@@ -292,34 +266,30 @@ class _MDAJobOnlyAnalysis(Analysis):
         del ctx, replicate, loader, universe
         return _FakeMDAWindow()
 
-    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> list[MDAAnalysisJob]:
-        """Build one fake MDAnalysis-compatible job."""
+    def measure_replicate(self, ctx: MDAReplicateJobContext) -> MDAJobResult:
+        """Measure one replicate without a plugin, returning fixed numbers."""
 
-        self.events.append(f"build_mda:{ctx.replicate}")
+        self.events.append(f"measure:{ctx.replicate}")
         assert ctx.universe is not None
         assert ctx.frame_selection.run_kwargs() == {"start": 2, "stop": 8, "step": 2}
         assert isinstance(ctx.universe_policy, MDAUniversePolicy)
-        return [
-            MDAAnalysisJob(
-                name="fake_job",
-                analysis=_FakeMDAAnalysisBase(),
-                frame_selection=ctx.frame_selection,
-                backend_policy=ctx.backend_policy,
-                universe_policy=ctx.universe_policy,
-            )
-        ]
+        return MDAJobResult(
+            name="fake_job",
+            results={"value": 5.0, "frames": ctx.frame_selection.run_kwargs()},
+            frame_selection=ctx.frame_selection,
+            universe_policy=ctx.universe_policy,
+        )
 
     def collect_replicate(
-        self, ctx: MDAReplicateJobContext, completed_jobs: Sequence[Any]
+        self, ctx: MDAReplicateJobContext, measured: MDAJobResult
     ) -> ReplicateArtifact:
-        """Store the fake job results in a replicate artifact."""
+        """Store what was measured in a replicate artifact."""
 
-        job = completed_jobs[0]
         return ReplicateArtifact(
             analysis_name=self.name,
             condition_label=ctx.condition_label,
             replicate=ctx.replicate,
-            payload={"jobs": [{"name": job.name, "results": dict(job.results)}]},
+            payload={"jobs": [{"name": measured.name, "results": dict(measured.results)}]},
             provenance={"universe_policy": ctx.universe_policy.as_dict()},
             metadata={"settings_fingerprint": self.aggregate_settings_fingerprint(ctx.settings)},
             warnings=list(ctx.warnings),
@@ -336,7 +306,7 @@ class _MDAJobOnlyAnalysis(Analysis):
         job = artifact.payload["jobs"][0]
         return {
             "mean_value": job["results"]["value"],
-            "run_kwargs": job["results"]["run_kwargs"],
+            "frames": job["results"]["frames"],
             "warnings": artifact.warnings,
         }
 
@@ -569,45 +539,14 @@ def test_public_lifecycle_runs_mda_jobs_and_saves_artifact(tmp_path: Path) -> No
 
     result_path = output_dir / "run_1" / "result.json"
     saved = ReplicateArtifact.model_validate_json(result_path.read_text())
-    assert analysis.events == ["build_mda:1", "aggregate"]
+    assert analysis.events == ["measure:1", "aggregate"]
     assert result["mean_value"] == 5.0
-    assert result["run_kwargs"] == {"start": 2, "stop": 8, "step": 2}
+    assert result["frames"] == {"start": 2, "stop": 8, "step": 2}
     assert saved.artifact_type == "replicate"
     assert saved.payload["jobs"][0]["name"] == "fake_job"
     assert saved.payload["jobs"][0]["results"]["value"] == 5.0
     assert "fake provenance warning" in saved.warnings
     assert (output_dir / "aggregated" / "result.json").exists()
-
-
-def test_public_lifecycle_propagates_backend_policy_to_mda_job(tmp_path: Path) -> None:
-    """Replicate contexts should pass configured MDA backend policy to jobs."""
-
-    analysis = _MDAJobOnlyAnalysis()
-    condition = _condition(tmp_path, replicates=(1,))
-    output_dir = tmp_path / "analysis" / analysis.name
-
-    result = run_analysis(
-        analysis,
-        condition,
-        _LifecycleSettings(),
-        equilibration="10ns",
-        output_dir=output_dir,
-        recompute=False,
-        backend_policy=MDABackendPolicy(
-            backend="multiprocessing",
-            n_workers=2,
-            n_parts=4,
-        ),
-    )
-
-    assert result["run_kwargs"] == {
-        "start": 2,
-        "stop": 8,
-        "step": 2,
-        "backend": "multiprocessing",
-        "n_workers": 2,
-        "n_parts": 4,
-    }
 
 
 def _artifact_provenance(tmp_path: Path) -> dict[str, Any]:

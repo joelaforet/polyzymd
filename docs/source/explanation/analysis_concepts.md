@@ -250,34 +250,35 @@ as the trajectory stores them.
 
 ## Statistical comparison
 
-When you have two or more conditions, the compare stage produces statistical
-output so you can assess whether differences are meaningful. There are two
-comparison paths:
+When you have two or more conditions, the compare stage tests whether the
+differences are meaningful. There is one comparison path, shared by every
+plugin: `polyzymd.analyses.contract.compare_observables`. A plugin supplies no
+comparison code of its own.
 
-- **Default scalar/artifact comparison**: plugins that expose scalar metrics can
-  use the framework's default comparison behavior. In that path, PolyzyMD can
-  compute pairwise tests, effect sizes, optional omnibus statistics, and metric
-  rankings from the condition artifacts.
-- **Custom comparison**: plugins with richer result structures can implement
-  their own comparison behavior. These plugins still write comparison output,
-  but they may not produce the same tests, tables, or rankings as the default
-  scalar path.
+One observable is tested at a time, each condition against the control, on the
+replicate values rather than on frames. The stage computes:
 
-Every comparison plugin computes:
+- **Pairwise t-tests**, Student by default and Welch on request, with
+  Benjamini-Hochberg correction over one family per analysis run. The family
+  holds every pairwise test that run produced, across every observable and
+  every condition pair, so `p_adjusted` accounts for the whole run and
+  `significant` is read from it.
+- **Effect sizes**, Cohen's d on each comparison, with Hedges' g derived from
+  it in the agent report, so you can see how large a difference is and not
+  only whether it reached significance.
 
-- **Pairwise t-tests** between each pair of conditions, with
-  Benjamini–Hochberg FDR correction over one family per analysis run. The
-  family holds every pairwise test that run produced, across all of its
-  metrics and all of its condition pairs.
-- **Effect sizes** (Cohen's d and Hedges' g) for each pair, so you can see not
-  just whether a difference is significant but how large it is.
-- **ANOVA** when there are three or more conditions. It is reported as an
-  omnibus statement about whether any condition differs at all. It is not
-  adjusted, and the pairwise tests run whether or not it reaches significance,
-  so it gates nothing.
-- **Rankings** of conditions according to each metric's directionality. These
-  rankings are screening aids for follow-up interpretation, not biological truth
-  by themselves.
+Two things it deliberately does not do. There is no omnibus F test: it gated
+nothing, and reporting an uncorrected omnibus p-value next to corrected
+pairwise ones invited readers to treat it as a gate. And there are no rankings:
+a ranked table of condition means reads as a result while being nothing more
+than the means sorted, and the means are already in the report with their
+intervals.
+
+An observable a plugin declares `tested=False`, because it is a function of
+others the plugin already reports, is still aggregated and reported with its
+uncertainty but stays out of the tests and out of the correction family. A
+profile carries no single value, so a plugin gives it a comparable scalar with
+`reduce` and that scalar is tested instead.
 
 The comparison results are saved as JSON and also printed to the terminal when
 you run `polyzymd compare run`. For details on interpreting these outputs, see

@@ -15,12 +15,6 @@ def test_polyzymd_version_is_string():
     assert isinstance(get_polyzymd_version(), str)
 
 
-def test_results_base_reexport():
-    from polyzymd.analyses._framework import results_base
-
-    assert results_base.get_polyzymd_version is get_polyzymd_version
-
-
 def test_runtime_provenance_reads_environment(monkeypatch):
     monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "sim-cuda-12-4")
     monkeypatch.setenv("SLURM_JOB_ID", "123456")

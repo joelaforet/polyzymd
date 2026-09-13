@@ -3871,7 +3871,12 @@ def new_analysis(
     if not dry_run:
         colored_echo(f"\nPlugin '{name}' scaffolded successfully!", phase="cli")
         colored_echo(
-            f"Run tests: pixi run -e build pytest tests/analyses/plugins/test_{name}.py -v",
+            'The generated tests fail until you replace unit="TODO" with the real unit '
+            "and put the real measurement in compute().",
+            phase="cli",
+        )
+        colored_echo(
+            f"Run tests: pixi run -e test pytest tests/analyses/plugins/test_{name}.py -v",
             phase="cli",
         )
 

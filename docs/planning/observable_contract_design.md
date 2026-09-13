@@ -22,7 +22,7 @@ raw per-frame numbers. It never averages across replicates, runs a test or
 writes a file. The replicate stays the sampling unit because the plugin has no
 way to cross that boundary.
 
-## The five kinds
+## The four kinds
 
 | kind | replicate value | condition uncertainty | comparison |
 |---|---|---|---|

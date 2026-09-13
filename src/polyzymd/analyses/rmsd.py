@@ -38,6 +38,7 @@ MDAnalysis: a toolkit for the analysis of molecular dynamics simulations.
 
 from __future__ import annotations
 
+import logging
 import re
 import warnings
 from pathlib import Path
@@ -110,13 +111,13 @@ class RMSDRunSettings(BaseModel):
         dropped = [key for key in DEPRECATED_SETTINGS if key in data]
         if not dropped:
             return data
-        warnings.warn(
+        message = (
             f"rmsd: {', '.join(dropped)} no longer has an effect and will be rejected in the "
             "next release. The sliding-window convergence flag was removed because its slope "
-            "threshold sat below the noise of successive window means.",
-            DeprecationWarning,
-            stacklevel=2,
+            "threshold sat below the noise of successive window means."
         )
+        warnings.warn(message, UserWarning, stacklevel=2)
+        logging.getLogger("polyzymd.analyses").warning(message)
         return {key: value for key, value in data.items() if key not in dropped}
 
     @model_validator(mode="after")

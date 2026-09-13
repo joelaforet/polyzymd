@@ -115,7 +115,7 @@ def test_the_pair_threshold_and_its_state_label_name_the_fraction() -> None:
 def test_deprecated_alignment_settings_warn_and_change_nothing() -> None:
     """Alignment settings are accepted for one release and ignored."""
 
-    with pytest.warns(DeprecationWarning, match="align_trajectory"):
+    with pytest.warns(UserWarning, match="align_trajectory"):
         settings = _settings(align_trajectory=True, alignment_mode="frame", alignment_frame=0)
 
     observables = Distances().compute(_universe(3.0), _frames(), settings)

@@ -40,7 +40,6 @@ from polyzymd.analyses.exceptions import (
     StaleCacheError,
 )
 from polyzymd.analyses.mda.artifacts import ReplicateArtifact
-from polyzymd.analyses.mda.job import MDABackendPolicy
 from polyzymd.analyses.mda.lifecycle import build_trajectory_loader
 from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 
@@ -154,7 +153,6 @@ class AnalysisLifecycle:
         output_dir: Path,
         replicate: int,
         recompute: bool,
-        backend_policy: MDABackendPolicy | None = None,
     ) -> Any:
         """Run one replicate compute stage and save the canonical ``result.json``.
 
@@ -172,8 +170,6 @@ class AnalysisLifecycle:
             One-indexed replicate ID.
         recompute : bool
             Whether recomputation was requested.
-        backend_policy : MDABackendPolicy or None, optional
-            MDAnalysis internal backend policy for MDA job-backed analyses.
 
         Returns
         -------
@@ -211,7 +207,6 @@ class AnalysisLifecycle:
             recompute=recompute,
             settings=settings,
             result_path=result_path,
-            backend_policy=backend_policy or _default_mda_backend_policy(),
         )
         try:
             result = self.analysis._run_compute_stage(ctx, replicate)
@@ -426,7 +421,6 @@ class AnalysisLifecycle:
         equilibration: str = "0ns",
         output_dir: Path | None = None,
         recompute: bool = False,
-        backend_policy: MDABackendPolicy | None = None,
     ) -> Any:
         """Run compute and aggregate for one condition.
 
@@ -443,8 +437,6 @@ class AnalysisLifecycle:
             config path.
         recompute : bool, optional
             Force recomputation, by default ``False``.
-        backend_policy : MDABackendPolicy or None, optional
-            MDAnalysis internal backend policy for replicate jobs.
 
         Returns
         -------
@@ -478,7 +470,6 @@ class AnalysisLifecycle:
                     rep_dir,
                     rep,
                     recompute,
-                    backend_policy=backend_policy,
                 )
                 results.append(result)
                 successful.append(rep)
@@ -855,13 +846,12 @@ class AnalysisLifecycle:
             lambda analysis, cfg, eq: self.prepare_comparison_run(cfg, eq)
         )
         run_condition = self._run_analysis or (
-            lambda analysis, condition, settings, eq, output_dir, rec, backend: self.run_analysis(
+            lambda analysis, condition, settings, eq, output_dir, rec: self.run_analysis(
                 condition,
                 settings,
                 eq,
                 output_dir=output_dir,
                 recompute=rec,
-                backend_policy=backend,
             )
         )
         finalize_run = self._finalize_comparison_from_disk or (
@@ -884,7 +874,6 @@ class AnalysisLifecycle:
         settings = prepared_state["settings"]
         equilibration = prepared_state["equilibration"]
         analysis_root = prepared_state["analysis_root"]
-        backend_policy = prepared_state.get("mda_backend_policy", MDABackendPolicy())
         summary = self._execution_summary
         if summary is not None:
             summary(self.analysis, valid_conditions, settings, equilibration)
@@ -905,7 +894,6 @@ class AnalysisLifecycle:
                     equilibration,
                     cond_dir,
                     recompute,
-                    backend_policy,
                 )
                 if agg is not None:
                     analysis_dirs[cond.label] = cond_dir
@@ -1097,7 +1085,6 @@ class AnalysisLifecycle:
             "settings": settings,
             "equilibration": equilibration,
             "analysis_root": analysis_root,
-            "mda_backend_policy": _resolve_mda_backend_policy(config),
         }
 
     def _prepare_conditions_with_filter(
@@ -1274,42 +1261,6 @@ def _check_result_type(result: Any, method: str, analysis_name: str) -> None:
         f"{analysis_name}.{method}() returned {type(result).__name__}; "
         "expected dict, pydantic BaseModel, or None"
     )
-
-
-def _default_mda_backend_policy() -> MDABackendPolicy:
-    """Return the default MDAnalysis backend policy.
-
-    Returns
-    -------
-    MDABackendPolicy
-        Policy that forwards no backend keyword arguments.
-    """
-
-    from polyzymd.analyses.mda import MDABackendPolicy
-
-    return MDABackendPolicy()
-
-
-def _resolve_mda_backend_policy(config: ComparisonConfig) -> MDABackendPolicy:
-    """Resolve the comparison-level MDA backend policy.
-
-    Parameters
-    ----------
-    config : ComparisonConfig
-        Comparison configuration or a compatible test stand-in.
-
-    Returns
-    -------
-    MDABackendPolicy
-        Backend policy for replicate job construction.
-    """
-
-    policy_config = getattr(config, "mda_backend_policy", None)
-    if policy_config is None:
-        return _default_mda_backend_policy()
-    if hasattr(policy_config, "to_policy"):
-        return policy_config.to_policy()
-    return policy_config
 
 
 REPLICATE_CACHE_KEY_FIELDS = ("settings_fingerprint", "equilibration")

@@ -592,6 +592,12 @@ class TestNewAnalysisCLI:
         assert "--advanced" not in result.output
         assert "src/polyzymd/analyses/<NAME>/__init__.py" not in result.output
 
+    def test_success_message_warns_about_the_todo_unit(self, runner: CliRunner, cli):
+        """The scaffold says why the generated tests fail before any edit."""
+        result = runner.invoke(cli, ["solvent_shell", "--project-root", str(self.root)])
+        assert result.exit_code == 0, result.output
+        assert 'unit="TODO"' in result.output
+
     def test_success_message_shows_correct_test_path(self, runner: CliRunner, cli):
         result = runner.invoke(cli, ["solvent_shell", "--project-root", str(self.root)])
         assert result.exit_code == 0, result.output

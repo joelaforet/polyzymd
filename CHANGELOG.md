@@ -7,7 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Migration
+
+- **An existing campaign `comparison.yaml` needs two edits before it loads and
+  runs.**  First, every `rg` run that keeps `save_fragment_distribution: true`
+  must add a `histogram_range`, for example `histogram_range: [5.0, 40.0]`.  The
+  bin edges used to be derived by pooling the replicates of a condition, which
+  let one replicate see its neighbours; every replicate now reports the same
+  fixed bins, so the range has to be stated.  A file without it fails to load
+  with a validation error naming the run.  Turn the distribution off instead if
+  the shape is not wanted.  Second, delete any `mda_backend_policy` block: it is
+  ignored, it warns, and it will be rejected in the next release.
+
 ### Changed
+
+- **`mda_backend_policy` is ignored.**  The block chose a backend for
+  MDAnalysis `AnalysisBase.run()`, and no analysis builds an `AnalysisBase` job
+  any more.  It still parses for one release so an existing campaign file loads,
+  and a non-default value now raises a `UserWarning` and writes a log line
+  saying it is ignored and pointing at `polyzymd compare run --workers`.  It
+  will be rejected in the next release.  It also stopped policing its own
+  fields, so `n_workers` without a `backend` no longer raises.
+
+- **A settings key that is accepted for one release warns as a `UserWarning`.**
+  `warn_unknown_settings` and the `rmsd` convergence keys used a
+  `DeprecationWarning`, which Python hides by default, so the message reached
+  nobody running a campaign.  Both now warn as a `UserWarning` and write the
+  same sentence to the `polyzymd.analyses` log.
+
+- **The framework hash covers frame selection and the universe.**  The walk
+  behind `framework_code_hash` followed `analyses/shared/` only, so a change to
+  `mda/frame_selection.py`, which decides which frames a plugin sees, or to
+  `mda/universe.py`, which decides what it reads them from, left every cached
+  replicate looking current.  It now walks `analyses/mda/` too.
+  `shared/plotting.py` and `contract_plots.py` are excluded on purpose, because
+  they affect only the figure and a change to a figure must not discard a
+  campaign's cached replicates.  A module in the walk whose source cannot be
+  read now raises `PluginContractError` rather than hashing to the literal
+  `"unknown"`, which would have compared equal to a later reading of the same
+  broken install.  The identity block also records `git_dirty` next to
+  `git_commit`, since a commit alone does not identify a working tree.
 
 - **A cached replicate now notices a change in shared code.**  The identity
   block records `framework_code_hash`, a digest of `contract.py`, `base.py` and
@@ -108,6 +147,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The MDAnalysis job seam.**  A contract plugin's `compute()` is a plain
+  function that the lifecycle calls once per replicate, so wrapping it in a job
+  object added a layer that configured nothing.  `polyzymd.analyses.mda.job` is
+  deleted, taking `MDAAnalysisJob`, `MDAAnalysisJobError`, `MDAFunctionAdapter`
+  and `MDABackendPolicy` with it.  `MDAUniversePolicy` and `MDAJobResult` move
+  to `polyzymd.analyses.mda.lifecycle` and keep their place in the
+  `polyzymd.analyses.mda` import surface; `MDAJobResult` loses its `analysis`,
+  `run_kwargs` and `backend_policy` fields.  `Analysis.build_mda_jobs()` is
+  replaced by `Analysis.measure_replicate()`, and `collect_replicate()` now
+  takes that one result rather than a sequence of completed jobs.  The
+  `backend_policy` argument is gone from `run_replicate_once`, `run_analysis`
+  and `ReplicateContext`.
+
+- **More public names with no caller.**  `apply_family_correction`,
+  `one_way_anova`, `ANOVAResult`, `OmnibusTest`, `PairwiseTest`, `PValueReader`
+  and `CorrectionWriter` in `polyzymd.analyses.shared.inferential_statistics`;
+  `AAClass`, `get_aa_class`, `get_residues_for_class` and
+  `get_selection_for_class` in
+  `polyzymd.analyses.shared.aa_classification`.  The ANOVA went with the
+  comparison engine that reported it.  `finite_numeric_values` and
+  `replicate_jitter_offsets` in `polyzymd.analyses.shared.plotting` are now
+  private, since only that module's own plotters call them.
+
 - **Public names with no caller.**  The grep pass recorded in
   `docs/planning/legacy_removal_inventory.md` found these reachable from
   nothing but their own tests, and they are deleted:
@@ -117,8 +179,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `extract_settings_fingerprint_from_path` and `validate_settings_fingerprint`;
   `polyzymd.analyses.shared.plotting.has_replicate_uncertainty`,
   `suppress_singleton_errors` and `scatter_stacked_segment_replicates`;
-  `polyzymd.analyses.shared.statistics.metric_summary_payload`; and
-  `polyzymd.analyses.protocols.get_analysis_class`.
+  `polyzymd.analyses.shared.statistics.metric_summary_payload`;
+  `polyzymd.analyses.shared.paths.format_replicate_cache_token`;
+  `polyzymd.analyses.shared.centroid.get_reference_mode_description`; and
+  `polyzymd.analyses.shared.aa_classification.get_aa_class`,
+  `get_residues_for_class` and `get_selection_for_class`.
+  `polyzymd.analyses.protocols.get_analysis_class` leaves the public surface
+  and stays as the private `_analysis_class`, because its two callers inside
+  the module want the typed `ProtocolError` it raises.
 
 - **The two comparison shapes `ProtocolReport` used to read.**  Every plugin
   writes the comparison artifact of the observable contract, so the reader for
@@ -146,7 +214,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ReplicateMetricPolicy`, `ExplicitReplicateMetricPolicy`,
   `aggregate_replicate_artifacts`, `aggregate_replicate_artifacts_from_disk`
   and `validate_autocorrelation_estimator_version`, whose job the
-  `shared_versions` block of the replicate identity now does),
+  `framework_code_hash` of the replicate identity now does),
   `polyzymd.analyses._framework.contract.validate_analysis_subclass` and the
   `__init_subclass__` police that called it,
   `polyzymd.analyses._framework.results_base`, and the `Analysis` hooks
@@ -219,8 +287,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   artifacts are recomputed rather than reused, `RMSDAnalysis` overrides
   `aggregate_settings_fingerprint` so the tag the framework stamps on a
   replicate is the tag aggregation checks for, and the contract identity block
-  gained a `shared_versions` entry so a fix in a shared module invalidates
-  cached results that `plugin_code_hash` alone would leave looking current.
+  gained an entry covering the shared modules, so a fix in one of them
+  invalidates cached results that `plugin_code_hash` alone would leave looking
+  current.  That entry was a list of version constants when this landed and is
+  now the `framework_code_hash` described under Changed.
   The unused `AlignmentConfig.to_dict` and the unused
   `polyzymd.analyses.shared.centroid.find_reference_frame` are deleted.
 

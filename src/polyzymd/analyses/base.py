@@ -91,12 +91,11 @@ from polyzymd.analyses.mda.artifacts import (
     ConditionArtifact,
     ReplicateArtifact,
 )
-from polyzymd.analyses.mda.job import MDAAnalysisJob
 from polyzymd.analyses.mda.store import ArtifactStore
 from polyzymd.analyses.mda.universe import FileIdentity
 
 if TYPE_CHECKING:
-    from polyzymd.analyses.mda.lifecycle import MDAReplicateJobContext
+    from polyzymd.analyses.mda.lifecycle import MDAJobResult, MDAReplicateJobContext
 
 logger = logging.getLogger("polyzymd.analyses")
 
@@ -121,6 +120,25 @@ _CACHE_KEYS = (
 _FRAMEWORK_MODULES = (
     "polyzymd.analyses.contract",
     "polyzymd.analyses.base",
+)
+
+#: Package prefixes the framework hash walks into. ``mda`` is included because
+#: ``mda/frame_selection.py`` decides which frames a plugin sees and
+#: ``mda/universe.py`` decides what it reads them from, so either can change a
+#: number. ``contract_plots.py`` and ``shared/plotting.py`` are deliberately
+#: outside the walk: they only draw the figure, and a change to a figure must
+#: not throw away every cached replicate.
+_HASHED_PREFIXES = (
+    "polyzymd.analyses.shared.",
+    "polyzymd.analyses.mda.",
+)
+
+#: Modules inside a hashed prefix that only affect figures.
+_FIGURE_MODULES = frozenset(
+    {
+        "polyzymd.analyses.shared.plotting",
+        "polyzymd.analyses.contract_plots",
+    }
 )
 
 __all__ = [
@@ -183,8 +201,8 @@ class Analysis:
 
         return run_replicate(self, ctx, replicate)
 
-    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[MDAAnalysisJob]:
-        """Wrap ``plugin.compute`` as the single MDAnalysis job of a replicate.
+    def measure_replicate(self, ctx: MDAReplicateJobContext) -> MDAJobResult:
+        """Run ``plugin.compute`` once over the production window.
 
         Parameters
         ----------
@@ -194,51 +212,49 @@ class Analysis:
 
         Returns
         -------
-        Sequence[MDAAnalysisJob]
-            One job whose results hold the reduced observables and a reference
-            to the NPZ sidecar with the full per-frame series, plus one sidecar
-            per extra array the plugin returned.
+        MDAJobResult
+            The reduced observables, a reference to the NPZ sidecar holding the
+            full per-frame series, one sidecar per extra array the plugin
+            returned, and any measurement warnings.
         """
+        from polyzymd.analyses.mda.lifecycle import MDAJobResult
 
-        def run(universe: Any, **frame_kwargs: Any) -> dict[str, Any]:
-            del frame_kwargs
-            observables, extras = _unpack(
-                self.plugin.compute(universe, ctx.frame_selection, ctx.settings)
+        observables, extras = _unpack(
+            self.plugin.compute(ctx.universe, ctx.frame_selection, ctx.settings)
+        )
+        estimates = reduce_replicate(observables)
+        sidecars = [
+            ctx.artifact_store.write_npz_sidecar(
+                "observables.npz",
+                **{observable.name: observable.values for observable in observables},
             )
-            estimates = reduce_replicate(observables)
-            sidecars = [
-                ctx.artifact_store.write_npz_sidecar(
-                    "observables.npz",
-                    **{observable.name: observable.values for observable in observables},
-                )
-            ]
-            sidecars += [
-                ctx.artifact_store.write_npz_sidecar(f"sidecars/{stem}.npz", **{stem: array})
-                for stem, array in extras.items()
-            ]
-            return {
+        ]
+        sidecars += [
+            ctx.artifact_store.write_npz_sidecar(f"sidecars/{stem}.npz", **{stem: array})
+            for stem, array in extras.items()
+        ]
+        return MDAJobResult(
+            name=self.name,
+            results={
                 "observables": [estimate.model_dump(mode="json") for estimate in estimates],
                 "sidecars": [sidecar.model_dump(mode="json") for sidecar in sidecars],
                 "warnings": _measurement_warnings(observables),
-            }
-
-        return [
-            MDAAnalysisJob.from_function(
-                self.name, run, ctx.universe, frame_selection=ctx.frame_selection
-            )
-        ]
+            },
+            frame_selection=ctx.frame_selection,
+            universe_policy=ctx.universe_policy,
+        )
 
     def collect_replicate(
-        self, ctx: MDAReplicateJobContext, completed_jobs: Sequence[Any]
+        self, ctx: MDAReplicateJobContext, measured: MDAJobResult
     ) -> ReplicateArtifact:
-        """Build the replicate artifact from the finished job.
+        """Build the replicate artifact from what the plugin measured.
 
         Parameters
         ----------
         ctx : MDAReplicateJobContext
             Context for the replicate that just ran.
-        completed_jobs : Sequence[MDAJobResult]
-            Results of the jobs :meth:`build_mda_jobs` returned.
+        measured : MDAJobResult
+            What :meth:`measure_replicate` returned.
 
         Returns
         -------
@@ -248,7 +264,7 @@ class Analysis:
         """
         from polyzymd.analyses.mda.lifecycle import frame_selection_payload
 
-        results = completed_jobs[0].results
+        results = measured.results
         return ReplicateArtifact(
             analysis_name=self.name,
             condition_label=ctx.condition_label,
@@ -275,7 +291,7 @@ class Analysis:
             warnings=list(ctx.warnings) + list(results.get("warnings", [])),
         )
 
-    def aggregate(self, ctx: Any, results: Sequence[Any]) -> ConditionArtifact:
+    def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> ConditionArtifact:
         """Summarize the replicates of one condition by observable kind.
 
         Parameters
@@ -312,7 +328,7 @@ class Analysis:
             },
         )
 
-    def compare(self, ctx: Any) -> ComparisonArtifact | None:
+    def compare(self, ctx: ComparisonContext) -> ComparisonArtifact | None:
         """Test every observable across conditions with one correction family.
 
         Parameters
@@ -379,7 +395,7 @@ class Analysis:
             },
         )
 
-    def _reusable(self, ctx: Any, replicate: int) -> ReplicateArtifact | None:
+    def _reusable(self, ctx: ReplicateContext, replicate: int) -> ReplicateArtifact | None:
         """Load the cached replicate artifact when its identity block matches."""
         path = ctx.result_path or self.replicate_result_path(ctx.output_dir)
         if ctx.recompute or not Path(path).exists():
@@ -402,7 +418,7 @@ class Analysis:
             return None
         return artifact
 
-    def _current_inputs(self, ctx: Any, replicate: int) -> list[dict[str, Any]]:
+    def _current_inputs(self, ctx: ReplicateContext, replicate: int) -> list[dict[str, Any]]:
         """File identity of the topology and trajectories now on disk."""
         from polyzymd.analyses.mda.lifecycle import (
             _build_universe_provider,
@@ -432,6 +448,7 @@ class Analysis:
             "polyzymd_version": __version__,
             "plugin": self.name,
             "git_commit": _git_commit(),
+            "git_dirty": _git_dirty(),
             "plugin_code_hash": _code_hash(self.plugin),
             "framework_code_hash": _framework_code_hash(type(self.plugin).__module__),
             "settings_fingerprint": self.aggregate_settings_fingerprint(settings),
@@ -691,10 +708,15 @@ def _framework_code_hash(plugin_module: str) -> str:
     """Hash the framework and shared code a plugin's answer depends on.
 
     ``plugin_code_hash`` covers the plugin module alone, so a fix in
-    ``shared/alignment.py`` or in the reduction rules of ``contract.py`` would
-    leave every cached artifact looking current. This hashes the source of the
-    contract, the lifecycle, and every ``shared/`` module the plugin reaches,
-    so any change to code that can change a number invalidates the replicate.
+    ``shared/alignment.py``, in the frame selection, or in the reduction rules
+    of ``contract.py`` would leave every cached artifact looking current. This
+    hashes the source of the contract, the lifecycle, and every module under
+    ``analyses/shared/`` and ``analyses/mda/`` the plugin reaches, so any change
+    to code that can change a number invalidates the replicate.
+
+    Plotting is excluded. ``contract_plots.py`` and ``shared/plotting.py`` draw
+    the figure and nothing else, and a change to a figure must not throw away
+    a campaign's cached replicates.
 
     Parameters
     ----------
@@ -705,26 +727,35 @@ def _framework_code_hash(plugin_module: str) -> str:
     -------
     str
         First 16 hex characters of a SHA-256 over the sorted module sources.
-        ``"unknown"`` for a module whose source cannot be read, which keeps a
-        frozen or generated plugin working rather than crashing it.
+
+    Raises
+    ------
+    PluginContractError
+        If the source of a module in the walk cannot be read. A hash that
+        silently skipped it would compare equal to one taken before the module
+        changed, which is the failure this whole block exists to prevent.
     """
-    names = sorted(set(_FRAMEWORK_MODULES) | _shared_imports(plugin_module))
+    names = sorted(set(_FRAMEWORK_MODULES) | _hashed_imports(plugin_module))
     digest = hashlib.sha256()
     for name in names:
         source = _module_source(name)
         if source is None:
-            return "unknown"
+            raise PluginContractError(
+                f"cannot read the source of {name}, so the cache identity of "
+                f"{plugin_module} cannot be computed. Run from a source checkout or an "
+                "installed package that ships its .py files, not a zipped or frozen build."
+            )
         digest.update(name.encode("utf-8"))
         digest.update(source.encode("utf-8"))
     return digest.hexdigest()[:16]
 
 
-def _shared_imports(module_name: str) -> set[str]:
-    """Every ``analyses.shared`` module reachable from one module's imports.
+def _hashed_imports(module_name: str) -> set[str]:
+    """Every hashed module reachable from one module's imports.
 
-    The walk is transitive, because ``shared/alignment.py`` importing
-    ``shared/loader.py`` means the loader can change the plugin's answer too. It
-    stays inside ``polyzymd.analyses.shared`` and follows nothing else, so the
+    The walk is transitive inside the hashed prefixes, because
+    ``shared/alignment.py`` importing ``shared/loader.py`` means the loader can
+    change the plugin's answer too. It follows nothing outside them, so the
     closure is a handful of modules rather than the whole dependency tree. A
     ``from module import name`` line names a function rather than a module, and
     those are dropped because they carry no source of their own.
@@ -741,9 +772,11 @@ def _shared_imports(module_name: str) -> set[str]:
         if source is None:
             continue
         for imported in _imported_names(source, name):
-            if not imported.startswith("polyzymd.analyses.shared"):
+            if not imported.startswith(_HASHED_PREFIXES):
                 continue
-            if imported in seen or _module_source(imported) is None:
+            if imported in seen or imported in _FIGURE_MODULES:
+                continue
+            if _module_source(imported) is None:
                 continue
             seen.add(imported)
             queue.append(imported)
@@ -790,9 +823,29 @@ def _git_commit() -> str | None:
     at the exact tree that produced the number even when the version string did
     not move between two development builds.
     """
+    output = _git("rev-parse", "HEAD")
+    return output or None
+
+
+@lru_cache(maxsize=1)
+def _git_dirty() -> bool | None:
+    """Whether that checkout had uncommitted changes, or ``None`` for an install.
+
+    A commit alone does not identify the tree a number came from, because a
+    working copy can differ from it. This says so, and like the commit it is
+    provenance rather than a cache key; the code hashes already cover an edit
+    that can change a number.
+    """
+    if _git_commit() is None:
+        return None
+    return bool(_git("status", "--porcelain"))
+
+
+def _git(*args: str) -> str | None:
+    """Run one git command in the source tree, or return ``None`` without git."""
     try:
         completed = subprocess.run(
-            ["git", "-C", str(Path(__file__).resolve().parent), "rev-parse", "HEAD"],
+            ["git", "-C", str(Path(__file__).resolve().parent), *args],
             capture_output=True,
             text=True,
             timeout=5,
@@ -800,8 +853,7 @@ def _git_commit() -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    commit = completed.stdout.strip()
-    return commit if completed.returncode == 0 and commit else None
+    return completed.stdout.strip() if completed.returncode == 0 else None
 
 
 def _unpack(result: Any) -> tuple[list[Observable], dict[str, Any]]:

@@ -135,7 +135,7 @@ class AnalysisConfig(BaseModel):
 
 See `polyzymd.analyses.contract` for the contract,
 `analysis-module.md` for detailed patterns, and
-`docs/source/contributor_guide/extending_analyses.md` for the contributor
+`docs/source/contributor_guide/analysis_plugins/index.md` for the contributor
 tutorial.
 
 ### Adding comparison statistics or formatters
