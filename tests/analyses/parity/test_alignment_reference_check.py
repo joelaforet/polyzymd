@@ -2,8 +2,18 @@
 
 The numbers in ``alignment_reference_check.json`` were recorded on one control
 replicate of the LipA campaign after the 2026-09-12 fix to the "centroid" and
-"frame" reference modes. The test skips when that trajectory is not on the
-machine, which is the normal case in continuous integration.
+"frame" reference modes.
+
+Parity tests read trajectories that are not in the repository, so they are off
+unless you ask for them. Set ``POLYZYMD_REAL_DATA=1`` to run them, and
+``POLYZYMD_REALDATA_ROOT`` to point at the replicate directory if it is not
+where the JSON file records it. Both have to be satisfied or the test skips,
+which is the normal case in continuous integration.
+
+This test loads one replicate at its full length because ``align_trajectory``
+calls ``AlignTraj(in_memory=True)``, which moves the whole trajectory into
+memory rather than just the analyzed window. On the recorded dataset that peaks
+near 2.5 GB. The behaviour predates this module and is not changed here.
 """
 
 from __future__ import annotations
@@ -21,9 +31,14 @@ ROOT = Path(os.environ.get("POLYZYMD_REALDATA_ROOT", CHECK["dataset"]["root"]))
 TOPOLOGY = ROOT / CHECK["dataset"]["topology"]
 TRAJECTORY = ROOT / CHECK["dataset"]["trajectory"]
 
+REAL_DATA_ENABLED = os.environ.get("POLYZYMD_REAL_DATA") == "1"
+
 pytestmark = pytest.mark.skipif(
-    not (TOPOLOGY.exists() and TRAJECTORY.exists()),
-    reason=f"real trajectory not available under {ROOT}",
+    not (REAL_DATA_ENABLED and TOPOLOGY.exists() and TRAJECTORY.exists()),
+    reason=(
+        "parity tests need POLYZYMD_REAL_DATA=1 and a real trajectory under "
+        f"{ROOT} (override with POLYZYMD_REALDATA_ROOT)"
+    ),
 )
 
 

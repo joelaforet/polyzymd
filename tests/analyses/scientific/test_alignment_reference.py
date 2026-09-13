@@ -23,10 +23,18 @@ N_FRAMES = 10
 
 
 def _reference_coordinates() -> np.ndarray:
-    """Build ten frames that differ by a known rotation plus a small distortion."""
+    """Build ten frames that rotate, translate, and drift steadily out of shape.
+
+    The drift is monotone in the frame index, so the structure closest to the
+    aligned mean is one of the middle frames rather than either end. That
+    matters for the centroid test: the unfixed code aligned to the frame the
+    Universe was left on, which is the first frame for a fresh Universe and the
+    last frame after the centroid search has walked the trajectory.
+    """
 
     rng = np.random.default_rng(7)
     base = rng.normal(size=(N_ATOMS, 3)) * 5.0
+    drift = rng.normal(size=(N_ATOMS, 3))
     coordinates = np.empty((N_FRAMES, N_ATOMS, 3), dtype=np.float32)
     for index in range(N_FRAMES):
         angle = 0.3 * index
@@ -35,7 +43,7 @@ def _reference_coordinates() -> np.ndarray:
             [[cos_a, -sin_a, 0.0], [sin_a, cos_a, 0.0], [0.0, 0.0, 1.0]],
             dtype=np.float64,
         )
-        distorted = base + rng.normal(size=(N_ATOMS, 3)) * 0.05
+        distorted = base + drift * (index - (N_FRAMES - 1) / 2.0) * 0.2
         coordinates[index] = (distorted @ rotation.T) + np.array([index * 1.0, 0.0, 0.0])
     return coordinates
 
@@ -128,6 +136,7 @@ def test_centroid_mode_aligns_to_the_frame_it_selected() -> None:
     aligned = _stacked_positions(universe)
 
     assert returned == centroid_index
+    assert centroid_index not in {0, N_FRAMES - 1}
     assert _rmsd(aligned[centroid_index], original[centroid_index]) == pytest.approx(0.0, abs=1e-4)
 
 

@@ -50,7 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because MDAnalysis superposes each frame onto the reference, but a `centroid`
   RMSD run with a frame stride can now pick a different reference frame.  The
   RMSF profile version and the RMSD settings cache tag are bumped so cached
-  artifacts are recomputed rather than reused.
+  artifacts are recomputed rather than reused, `RMSDAnalysis` overrides
+  `aggregate_settings_fingerprint` so the tag the framework stamps on a
+  replicate is the tag aggregation checks for, and the contract identity block
+  gained a `shared_versions` entry so a fix in a shared module invalidates
+  cached results that `plugin_code_hash` alone would leave looking current.
+  The unused `AlignmentConfig.to_dict` and the unused
+  `polyzymd.analyses.shared.centroid.find_reference_frame` are deleted.
 
 - **Hydrogen bonds counted C-H donors and carbon acceptors.**  The plugin
   passed the union of the configured groups to MDAnalysis as both `donors_sel`

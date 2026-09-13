@@ -42,5 +42,6 @@
       "max_rmsf": 2.63197
     }
   },
-  "tolerance": 0.0005
+  "tolerance": 0.0005,
+  "how_to_run": "Set POLYZYMD_REAL_DATA=1 to enable the parity tests, and POLYZYMD_REALDATA_ROOT to override dataset.root, then run pytest tests/analyses/parity. The check loads the whole trajectory into memory because align_trajectory uses AlignTraj(in_memory=True), which peaks near 2.5 GB on this dataset."
 }

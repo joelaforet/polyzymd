@@ -37,9 +37,7 @@ RMSF is computed as fluctuation around the mean positions of the aligned
 analyzed trajectory. Those modes should not be read as direct deviation from a
 centroid frame or a selected trajectory frame. See
 [reference structure selection](analysis_reference_selection.md) for the
-mode-by-mode interpretation. RMSF profiles written before 2026-09-12 with
-`reference_mode` `centroid` or `frame` were aligned to an arbitrary frame rather
-than the requested one and should be recomputed.
+mode-by-mode interpretation.
 
 Low RMSF often indicates a relatively rigid region, such as a buried core or
 structured secondary element. High RMSF often indicates a flexible region, such
