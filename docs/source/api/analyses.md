@@ -104,7 +104,7 @@ shared-utility autodoc blocks.
 |-------------|----------------|-------------------------|------------------|
 | `contacts` | `polyzymd.analyses.contacts` | Observable artifacts, an NPZ sidecar and the contact event table | Observable contract |
 | `distances` | `polyzymd.analyses.distances` | Observables, one distance and one contact fraction per pair | Observable contract |
-| `hydrogen_bonds` | `polyzymd.analyses.hydrogen_bonds` | Hydrogen-bond event artifacts | Custom comparison |
+| `hydrogen_bonds` | `polyzymd.analyses.hydrogen_bonds` | Observable artifacts, an NPZ sidecar and the raw event table | Observable contract |
 | `rmsd` | `polyzymd.analyses.rmsd` | One `mean_of_timeseries` observable per run | Observable contract |
 | `rg` | `polyzymd.analyses.rg` | Observables, one module | Observable contract |
 | `rmsf` | `polyzymd.analyses.rmsf` | `rmsf` profile and `rmsf_mean` observables | Observable contract |

@@ -820,3 +820,131 @@ def test_a_plugin_hint_reaches_the_generated_class() -> None:
             return [_series([1.0, 2.0])]
 
     assert contract_analysis(Expensive).execution_cost_hint == "high"
+class _SidecarPlugin:
+    """Contract plugin that returns an extra array beside its observables."""
+
+    name = "sidecar_probe"
+    Settings = RgSettings
+    references: tuple[str, ...] = ()
+
+    def compute(self, universe: Any, frames: Any, settings: Any) -> Any:
+        """Report one observable and one raw table of three rows."""
+        del universe, frames, settings
+        return (
+            [Observable(name="x", kind="mean_of_timeseries", unit="A", values=[1.0, 2.0])],
+            {"events": np.arange(6.0).reshape(3, 2)},
+        )
+
+
+def test_runner_writes_the_extra_sidecars_a_plugin_returns(
+    tmp_path: Path, run_contract_analysis: Any
+) -> None:
+    """A (observables, extra_sidecars) return writes one NPZ per mapping entry."""
+    analysis = contract_analysis(_SidecarPlugin)
+
+    run_contract_analysis(analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+
+    replicate_dir = tmp_path / "analysis" / "A" / "sidecar_probe" / "run_1"
+    assert (replicate_dir / "observables.npz").exists()
+    with np.load(replicate_dir / "sidecars" / "events.npz") as handle:
+        np.testing.assert_array_equal(handle["events"], np.arange(6.0).reshape(3, 2))
+
+
+def test_runner_still_accepts_a_plain_sequence_of_observables(
+    tmp_path: Path, run_contract_analysis: Any
+) -> None:
+    """A plugin that returns only observables writes no extra sidecar directory."""
+    run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+
+    assert not (tmp_path / "analysis" / "A" / "rg" / "run_1" / "sidecars").exists()
+
+
+class _AnnotatedPlugin:
+    """Contract plugin that annotates its observables and marks one untested."""
+
+    name = "annotated_probe"
+    Settings = RgSettings
+    references: tuple[str, ...] = ()
+
+    def compute(self, universe: Any, frames: Any, settings: Any) -> Any:
+        """Report one measured observable and one that is a function of it."""
+        del universe, frames, settings
+        return [
+            Observable(
+                name="measured",
+                kind="mean_of_timeseries",
+                unit="A",
+                values=[1.0, 3.0],
+                metadata={"pbc_policy": "none", "source": "probe"},
+            ),
+            Observable(
+                name="doubled",
+                kind="mean_of_timeseries",
+                unit="A",
+                values=[2.0, 6.0],
+                tested=False,
+            ),
+        ]
+
+
+def test_an_untested_observable_is_aggregated_but_never_compared() -> None:
+    """tested=False keeps an observable out of the tests and out of the family."""
+    conditions = {}
+    for label, offset in (("control", 0.0), ("treated", 5.0)):
+        conditions[label] = aggregate_observables(
+            [
+                [
+                    _series([value + offset], name="measured"),
+                    Observable(
+                        name="doubled",
+                        kind="mean_of_timeseries",
+                        unit="A",
+                        values=[2 * (value + offset)],
+                        tested=False,
+                    ),
+                ]
+                for value in (1.0, 2.0, 3.0)
+            ]
+        )
+
+    by_name = {aggregate.name: aggregate for aggregate in conditions["control"]}
+    assert by_name["doubled"].mean == pytest.approx(4.0)
+    assert by_name["doubled"].tested is False
+
+    comparisons = compare_observables(conditions, control_label="control")
+
+    assert [comparison.name for comparison in comparisons] == ["measured"]
+
+
+def test_observable_metadata_reaches_the_replicate_and_the_aggregate(
+    tmp_path: Path, run_contract_analysis: Any
+) -> None:
+    """metadata survives the reduction, the written artifact and the aggregation."""
+    import json
+
+    analysis = contract_analysis(_AnnotatedPlugin)
+
+    aggregate = run_contract_analysis(analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+
+    written = json.loads(
+        (tmp_path / "analysis" / "A" / "annotated_probe" / "run_1" / "result.json").read_text()
+    )
+    estimates = {item["name"]: item for item in written["payload"]["observables"]}
+    assert estimates["measured"]["metadata"] == {"pbc_policy": "none", "source": "probe"}
+    assert estimates["doubled"]["metadata"] == {}
+    assert estimates["doubled"]["tested"] is False
+
+    aggregates = {
+        ObservableAggregate.model_validate(payload).name: ObservableAggregate.model_validate(
+            payload
+        )
+        for payload in aggregate.payload["observables"]
+    }
+    assert aggregates["measured"].metadata == {"pbc_policy": "none", "source": "probe"}
+    assert aggregates["doubled"].tested is False
+
+
+def test_an_observable_named_after_an_aggregate_field_is_rejected() -> None:
+    """A name an aggregate already uses would be ambiguous on the way back out."""
+    with pytest.raises(ValueError, match="collides with a field"):
+        Observable(name="coverage", kind="fraction", unit=None, values=[0.5])

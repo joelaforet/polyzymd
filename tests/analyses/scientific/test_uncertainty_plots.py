@@ -261,7 +261,7 @@ class TestEveryPluginFigureIsAudited:
                 "a test in this session replaced it"
             )
 
-    @pytest.mark.parametrize("analysis_name", PLUGINS_WITH_PLOT_SETTINGS + ("hydrogen_bonds",))
+    @pytest.mark.parametrize("analysis_name", PLUGINS_WITH_PLOT_SETTINGS)
     def test_plotter_module_annotates_every_uncertainty_figure(
         self, analysis_name: str, tmp_path: "Path"
     ) -> None:

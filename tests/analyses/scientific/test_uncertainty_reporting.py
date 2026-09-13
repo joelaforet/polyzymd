@@ -39,7 +39,6 @@ T_FACTOR_N5 = 2.7764451051977934
 PLUGIN_NAMES = (
     "rmsd",
     "rmsf",
-    "hydrogen_bonds",
 )
 
 
@@ -409,13 +408,6 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
 
     if analysis_name == "rmsd":
         return {"run_1.mean_rmsd": metric_summary_payload("run_1.mean_rmsd", [1.0], unit="A")}
-
-    if analysis_name == "hydrogen_bonds":
-        return {
-            "mean_hbonds_all": metric_summary_payload(
-                "mean_hbonds_all", [3.5], unit="hydrogen bonds per frame"
-            )
-        }
 
     raise AssertionError(f"no single-replicate builder for {analysis_name!r}")
 

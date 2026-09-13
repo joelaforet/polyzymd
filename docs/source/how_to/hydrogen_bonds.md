@@ -1,15 +1,13 @@
 # How-To: Analyze Hydrogen Bonds Across Conditions
 
-This guide shows you how to configure, run, and interpret the `hydrogen_bonds`
-analysis plugin. By the end, you will have a working hydrogen-bond comparison
-across simulation conditions, with grouped summaries, composition breakdowns,
-and publication-ready figures.
+This guide shows how to configure and run the `hydrogen_bonds` plugin and how
+to read what it writes. For the full settings table and the artifact layout, see
+{doc}`../reference/analysis_hydrogen_bonds_reference`.
 
 :::{admonition} Environment Setup
 :class: tip
 
-All analysis commands below assume you have activated the PolyzyMD analysis
-pixi environment:
+All commands below assume the PolyzyMD analysis pixi environment:
 
 ```bash
 pixi shell -e analysis
@@ -18,37 +16,29 @@ pixi shell -e analysis
 Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
-## When to Use This Plugin
+## When to use this plugin
 
-Use `hydrogen_bonds` when you need to answer questions like:
+Use `hydrogen_bonds` to answer questions like:
 
-- Does the polymer form more H-bonds with the protein than the substrate does?
-- Are protein internal H-bonds disrupted by polymer conjugation?
-- Which specific residue pairs form the most persistent H-bonds with the
-  polymer?
-- How is the total H-bond budget distributed across protein, substrate, and
-  polymer?
+- Does the polymer form more hydrogen bonds with the protein than the substrate
+  does?
+- Are protein internal hydrogen bonds disrupted by polymer conjugation?
+- Which residue pairs hold the most persistent hydrogen bonds with the polymer?
 
-The plugin wraps MDAnalysis `HydrogenBondAnalysis` with a flexible
-**groups + summaries** model: you define named atom groups, then specify
-which pairs or self-interactions to summarize. This lets you answer multiple
-questions in a single analysis run.
+The plugin wraps MDAnalysis `HydrogenBondAnalysis` in a groups and summaries
+model: name the atom groups, then say which pairs or self-interactions to
+report. One detection pass answers every summary.
 
-## Before You Start
+## Before you start
 
-You need:
+You need completed trajectories for at least two conditions, a
+`comparison.yaml` defining them (see {doc}`analysis_compare_conditions`), and a
+topology with explicit hydrogens and element metadata. A coarse-grained or
+hydrogen-free topology cannot be analyzed.
 
-- A working analysis pixi environment (`pixi install -e analysis`)
-- Completed simulation trajectories for at least two conditions
-- A `comparison.yaml` defining your conditions (see
-  {doc}`analysis_compare_conditions`)
-- Familiarity with the PolyzyMD chain convention (A=protein, B=substrate,
-  C=polymer)
+## Quick start
 
-## Quick Start
-
-Add a `hydrogen_bonds` section to the `plugins:` block in your
-`comparison.yaml`:
+Add a `hydrogen_bonds` section to the `plugins:` block:
 
 ```yaml
 plugins:
@@ -61,57 +51,21 @@ plugins:
         between: [protein_all, polymer_all]
 ```
 
-Run the analysis:
+Then run it:
 
 ```bash
 pixi run -e analysis polyzymd compare run hydrogen_bonds
 ```
 
-That is all you need for a minimal protein–polymer H-bond comparison. The
-sections below explain every setting and show more advanced configurations.
+## Choose the geometric criteria
 
-## Configuration Reference
+`distance_cutoff` (3.0 angstrom by default) is measured between the heavy-atom
+donor and the acceptor, not the hydrogen. `angle_cutoff` (150 degrees by
+default) is measured at the hydrogen, D-H...A. Both defaults follow Smith et al.
+2019. Counts depend on the cutoffs, so compare only conditions analyzed with the
+same pair.
 
-All settings live under `plugins: hydrogen_bonds:` in `comparison.yaml`. Every
-field has a sensible default, so you only need to specify what you want to
-change.
-
-### Geometric Criteria
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `distance_cutoff` | float | `3.0` | Donor–acceptor distance cutoff in Å |
-| `angle_cutoff` | float | `150` | D–H···A angle cutoff in degrees |
-
-These match the standard MDAnalysis `HydrogenBondAnalysis` defaults. The
-distance is measured between the heavy-atom donor and the acceptor (not the
-hydrogen). The angle is measured at the hydrogen: D–H···A.
-
-:::{admonition} Topology and hydrogen caveats
-:class: important
-
-Your topology must contain explicit hydrogen atoms; systems without hydrogens
-or with coarse-grained beads will undercount or return no H-bonds.
-
-PolyzyMD passes your configured group union intersected with the electronegative
-elements in `donor_acceptor_elements` to MDAnalysis as both the donor and the
-acceptor selection, so the effective selection is
-`(<group union>) and element N O` by default. Donors and acceptors are therefore
-nitrogen and oxygen only.
-
-PolyzyMD prefers `(<group union>) and (element H)` for hydrogen selection. For
-GRO-like topologies with missing MDAnalysis `elements`, PolyzyMD tries to infer
-elements safely from atom types or atom names. If elements remain unavailable,
-`hydrogen_bonds` raises `SelectionError` rather than counting every atom as a
-donor and an acceptor, and it raises the same error when the donor and acceptor
-selection matches no atoms. Use `hydrogens_selection` only for unusual
-explicit-hydrogen names.
-
-Element spellings come from the topology, so a topology that writes `CL` is
-matched even though the canonical symbol is `Cl`.
-:::
-
-### Donor and acceptor elements
+## Choose the donor and acceptor elements
 
 ```yaml
 plugins:
@@ -121,15 +75,14 @@ plugins:
 
 The default is `["N", "O"]`. Carbon is excluded because a C-H donor or a carbon
 acceptor is not a hydrogen bond under the IUPAC definition, and including carbon
-inflates counts by an amount that depends on polymer chemistry. Add `"S"` when
-you want cysteine and methionine sulfur to donate and accept, which is the usual
-extension for enzymes with reactive thiols. Hydrogen cannot appear in this list;
-hydrogens are selected separately through `hydrogens_selection`.
+inflates counts by an amount that depends on the polymer chemistry. Add `"S"`
+when cysteine and methionine sulfur should donate and accept. Hydrogen is
+rejected, because hydrogens are chosen separately and listing `"H"` here would
+make every one of them a donor and an acceptor. Symbols are capitalized for you
+and an unknown one is rejected when the config is read. Changing this changes
+the settings fingerprint, so cached replicates are recomputed.
 
-Changing this setting changes the settings fingerprint, so cached results are
-recomputed on the next run.
-
-### Groups
+## Name the groups
 
 ```yaml
 groups:
@@ -138,29 +91,28 @@ groups:
   polymer_all: "chainid C"
 ```
 
-Each entry maps a **name** (used in summaries) to an **MDAnalysis selection
-string**. Groups are resolved once at the start of the analysis. You can use
-any valid MDAnalysis selection syntax including `protein`, `chainid`,
-`resname`, `resid`, boolean operators, and parentheses.
+Each entry maps a name used in summaries to an MDAnalysis selection string. A
+group that matches no atoms raises `SelectionError`; set
+`allow_empty_groups: true` to report its summaries as zero instead, which is
+what a control condition without polymer needs.
 
-:::{admonition} Group overlaps
-:class: warning
+Groups may overlap. A bond in the overlap is counted by every summary whose
+filter it passes, so overlapping groups double count on purpose. The plugin
+warns when it sees an overlap, naming the two groups and how many atoms they
+share.
 
-If two groups share atoms (e.g., `"protein"` and
-`"protein and resid 106"`), the plugin logs a warning and H-bonds in the
-overlap region may be counted in multiple summaries. For clean composition
-accounting, use disjoint groups.
-:::
+Group membership is resolved once at the start of the window and then held
+fixed, so keep coordinate-dependent selections such as `around` and `sphzone`
+out of `groups` unless you want membership frozen at the first analyzed frame.
+`update_selections` re-evaluates only MDAnalysis's own donor, hydrogen and
+acceptor selections.
 
-### Summaries
+## Define the summaries
 
-Summaries define **what to measure**. Each summary has a unique name and
-exactly one mode:
-
-- **`between: [group_a, group_b]`** — Count H-bonds where one partner is in
-  group A and the other in group B (inter-group).
-- **`within: group_name`** — Count H-bonds where both partners are in the
-  same group (intra-group).
+Each summary has a unique name and exactly one mode. `between: [a, b]` counts
+bonds with one partner in group A and the other in group B, in either
+direction. `within: a` counts bonds with both partners in group A. Bonds inside
+one residue are always dropped.
 
 ```yaml
 summaries:
@@ -170,90 +122,9 @@ summaries:
     within: protein_all
 ```
 
-Each summary produces an independent metric (`mean_hbonds_<name>`) in the
-comparison output. You can define as many summaries as you need — the plugin
-runs one global MDAnalysis H-bond search and post-classifies events into
-summaries.
+## Common recipes
 
-### Composition
-
-Composition analysis breaks down the **total** H-bond budget by
-donor→acceptor partition pairs. This is independent of summaries and uses
-its own set of disjoint selections.
-
-```yaml
-composition:
-  partitions:
-    protein: "protein"
-    substrate: "resname pNB"
-    polymer: "chainid C"
-```
-
-The plugin counts every detected H-bond event, classifies donor and acceptor
-atoms into partitions, and reports both absolute counts (mean H-bonds/frame)
-and fractional shares per partition pair (e.g., protein→polymer,
-protein→protein, polymer→substrate).
-
-Composition is opt-in. If `composition` is omitted, no composition results are
-computed.
-
-:::{admonition} Partition disjointness
-:class: important
-
-Composition partitions should be disjoint (no shared atoms). If partitions
-overlap, the plugin raises an error by default. Set
-`allow_overlapping_composition: true` to allow overlap with warnings
-(overlapping atoms are counted in both partitions, so fractions may exceed 1.0).
-:::
-
-### Other Settings
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `update_selections` | bool | `true` | Re-evaluate simple atom-group selections each frame. Coordinate-dependent group selections such as `around`, `sphzone`, and `cyzone` are not supported when this is `true`; use static groups or separate preprocessed groups instead. |
-| `top_n_pairs` | int | `15` | Number of top residue pairs to report per summary |
-| `allow_empty_groups` | bool | `false` | If `false` (default), a group selection that matches no atoms raises `SelectionError` naming the group and the selection. Set `true` to warn and skip the affected summaries instead. |
-| `donor_acceptor_elements` | list of string | `["N", "O"]` | Elements allowed to act as donors and acceptors. Add `"S"` to include sulfur. |
-| `allow_overlapping_composition` | bool | `false` | If `false`, overlapping composition partitions raise an error. Set `true` to allow overlap with warnings. |
-| `hydrogens_selection` | string or null | `null` | Advanced explicit-hydrogen selection override for unusual atom names. The default uses element metadata, with GRO-safe element inference when needed. |
-| `timestep_ps` | float or null | `null` | Manual frame spacing in ps for time-axis plots. If null, read from trajectory metadata. |
-
-If you want composition partitions to mirror group selections, define them
-explicitly in YAML with the same keys/selections.
-
-:::{admonition} Technical Detail
-:class: note
-
-`update_selections: true` makes MDAnalysis re-evaluate simple atom-group
-selections every frame. This is appropriate for structural selections such as
-`protein`, `chainid`, `resname`, and `resid`.
-
-Coordinate-dependent group selections such as `around`, `sphzone`, and `cyzone`
-are rejected by source validation when `update_selections: true` because the
-plugin resolves group membership for donor/acceptor post-classification from
-initial frame index sets. Use static groups, or create separate preprocessed
-groups before running the analysis.
-
-However, the plugin resolves group membership used for donor/acceptor
-pair-classification once at the start from the initial frame index sets. This
-means pair-tracking classification does not change if atoms move between groups
-later in the trajectory. This behavior is deliberate for performance and for
-consistent summary definitions across frames.
-:::
-
-:::{admonition} When to set update_selections to false
-:class: note
-
-If all your groups use structural selections (`chainid`, `resname`, `resid`,
-`protein`), setting `update_selections: false` is safe and faster. Keep
-coordinate-dependent selections out of `groups` when `update_selections: true`;
-use static groups or separate preprocessed groups for distance-based
-membership.
-:::
-
-## Common Recipes
-
-### Protein ↔ polymer H-bonds (minimal)
+### Protein and polymer only
 
 ```yaml
 plugins:
@@ -266,17 +137,16 @@ plugins:
         between: [protein_all, polymer_all]
 ```
 
-### Standard 4-summary configuration with composition
+### The four standard partitions
 
-This is the recommended starting point for a typical enzyme–polymer–substrate
-system. It covers the four most common interactions and adds a composition
-breakdown.
+The usual starting point for an enzyme, polymer and substrate system:
 
 ```yaml
 plugins:
   hydrogen_bonds:
     distance_cutoff: 3.0
     angle_cutoff: 150
+    allow_empty_groups: true
     groups:
       protein_all: "protein"
       substrate: "resname pNB"
@@ -290,28 +160,20 @@ plugins:
         within: protein_all
       polymer_internal:
         within: polymer_all
-    composition:
-      partitions:
-        protein: "protein"
-        substrate: "resname pNB"
-        polymer: "chainid C"
 ```
 
-### Monomer-resolved polymer analysis
+### Monomer-resolved polymer
 
-If your polymer contains distinct monomer types (e.g., SBMA and EGMA), you can
-define separate groups to compare their H-bonding behavior:
+Separate groups per monomer type compare their hydrogen bonding:
 
 ```yaml
 plugins:
   hydrogen_bonds:
     groups:
       protein_all: "protein"
-      substrate: "resname pNB"
       polymer_all: "chainid C"
       polymer_sbm: "chainid C and resname SBM"
       polymer_egm: "chainid C and resname EGM"
-      active_site: "protein and (resid 106 or resid 225 or resid 188)"
     summaries:
       protein_polymer:
         between: [protein_all, polymer_all]
@@ -319,44 +181,15 @@ plugins:
         between: [protein_all, polymer_sbm]
       protein_egm:
         between: [protein_all, polymer_egm]
-      active_site_polymer:
-        between: [active_site, polymer_all]
-      protein_internal:
-        within: protein_all
-      polymer_internal:
-        within: polymer_all
-    composition:
-      partitions:
-        protein: "protein"
-        substrate: "resname pNB"
-        polymer_sbm: "chainid C and resname SBM"
-        polymer_egm: "chainid C and resname EGM"
 ```
 
-### Protein ↔ substrate only
-
-For systems without a polymer (or for a control condition comparison):
+### Active site only
 
 ```yaml
 plugins:
   hydrogen_bonds:
     groups:
-      protein_all: "protein"
-      substrate: "resname pNB"
-    summaries:
-      protein_substrate:
-        between: [protein_all, substrate]
-```
-
-### Active-site focused analysis
-
-To focus on H-bonds near the catalytic site:
-
-```yaml
-plugins:
-  hydrogen_bonds:
-    groups:
-      active_site: "protein and (resid 106 or resid 225 or resid 188)"
+      active_site: "protein and resid 106 225 188"
       polymer_all: "chainid C"
       substrate: "resname pNB"
     summaries:
@@ -366,20 +199,33 @@ plugins:
         between: [active_site, substrate]
 ```
 
-## Running the Analysis
+### Catalytic triad geometry
 
-### Local execution
+A group per triad atom set reports whether the catalytic hydrogen bonds hold:
+
+```yaml
+plugins:
+  hydrogen_bonds:
+    groups:
+      cat_ser: "protein and resid 76 and (name OG or element H)"
+      cat_his: "protein and resid 155 and (name ND1 NE2 or element H)"
+      cat_asp: "protein and resid 132 and name OD1 OD2"
+    summaries:
+      ser_his:
+        between: [cat_ser, cat_his]
+      asp_his:
+        between: [cat_asp, cat_his]
+```
+
+## Run the analysis
+
+Locally:
 
 ```bash
 pixi run -e analysis polyzymd compare run hydrogen_bonds
 ```
 
-This runs the full pipeline: the per-replicate compute stage for every
-replicate, `aggregate` for every condition, then `compare` and `plot`.
-
-### HPC execution
-
-For long trajectories or many replicates, submit as a SLURM job:
+On SLURM, for long trajectories or many replicates:
 
 ```bash
 pixi run -e analysis polyzymd compare submit hydrogen_bonds \
@@ -389,162 +235,55 @@ pixi run -e analysis polyzymd compare submit hydrogen_bonds \
     --time 02:00:00
 ```
 
-:::{admonition} Performance note
-:class: note
+The plugin declares `execution_cost_hint = "high"` and a default resource hint
+of 8 GB and two hours. Detection iterates donor and acceptor pairs every frame,
+so a system of 50k atoms and a few thousand frames needs about that. See
+{doc}`hpc_execution` for the full submission guide.
 
-The hydrogen bonds plugin is marked with `execution_cost_hint = "high"`.
-H-bond detection iterates over donor–acceptor pairs across all selected atoms
-every frame. For large systems (50k+ atoms) with many frames, allocate at
-least 8 GB memory and 1–2 hours per replicate.
-:::
+## Read the output
 
-See {doc}`hpc_execution` for the full HPC submission guide.
+Each summary reports two observables. `hbonds_<summary>` is a
+`mean_of_timeseries` in counts, one value per frame, and it is the quantity the
+cross-condition tests use. `pair_occupancy_<summary>` is a `profile` of the
+`top_n_pairs` most persistent residue pairs, indexed by rank, with the pair
+named in the observable's `metadata["pair_labels"]` as `TYR138(A)-SBM152(C)`.
+Ranking inside a replicate biases the low ranks upward, so read the profile as
+the shape of the occupancy spectrum rather than as an estimate for one pair. If
+a particular pair matters, give it its own summary and the framework will test
+it properly.
 
-## Understanding the Output
+Every mean, standard error and interval in the condition and comparison
+artifacts is computed across replicates, never across frames. The per-frame
+series survives in `observables.npz` beside the replicate result.
 
-### Per-summary metrics
+The raw detection output is kept in
+`sidecars/hydrogen_bond_events.npz`: one row per bond per frame, with the frame
+index, the donor, hydrogen and acceptor atom indices, the distance and the
+angle. Load it to ask questions the summaries do not cover, such as which donor
+partitions carry the total budget.
 
-Each summary produces these fields in the aggregated result:
+## Scientific considerations
 
-| Field | Description |
-|-------|-------------|
-| `mean_hbonds_per_frame` | Average number of H-bonds per frame, averaged across replicates |
-| `sem_hbonds_per_frame` | Standard error of the mean across replicates |
-| `per_replicate_mean_hbonds` | Per-replicate mean values (for statistical tests) |
-| `mean_unique_pairs_per_frame` | Mean number of unique donor-residue/acceptor-residue pairs per frame |
-| `sem_unique_pairs_per_frame` | Standard error across replicates for the unique-pairs metric |
-| `mean_fraction_with_any` | Fraction of frames that had at least one H-bond |
-
-The primary comparison metric is `mean_hbonds_per_frame` per summary. In the
-comparison output, this appears as `mean_hbonds_<summary_name>` (e.g.,
-`mean_hbonds_protein_polymer`).
-
-### Residue pairs
-
-Each summary reports the top residue pairs ranked by **occupancy** (fraction
-of frames where the pair has at least one H-bond). Two views are provided:
-
-- **Directed pairs** — Donor→Acceptor direction is preserved. Useful for
-  understanding H-bond directionality (which residue donates).
-- **Undirected pairs** — Both directions are merged into one pair. Useful for
-  identifying which residue *pairs* interact most frequently regardless of
-  direction.
-
-Each pair reports `mean_occupancy`, `sem_occupancy`, `mean_events_per_frame`,
-and per-replicate occupancy values.
-
-### Composition entries
-
-When composition is configured, the result includes per-partition-pair entries:
-
-| Field | Description |
-|-------|-------------|
-| `donor_partition → acceptor_partition` | The partition pair (e.g., protein→polymer) |
-| `mean_hbonds_per_frame` | Absolute count for this pair |
-| `mean_fraction_of_total` | This pair's share of all detected H-bonds |
-
-Composition fractions help normalize for differences in donor/acceptor
-availability across conditions. If a polymer condition has more total H-bonds
-but the protein→protein fraction stays constant, the polymer is adding new
-interactions rather than disrupting existing ones.
-
-### Statistical comparison
-
-The default comparison pipeline produces:
-
-- **Pairwise t-tests** between all condition pairs for each summary metric,
-  with Benjamini–Hochberg FDR correction
-- **Cohen's d** effect sizes for each pairwise comparison
-- **ANOVA** (when ≥3 conditions) as an omnibus test
-- **Rankings** of conditions by each metric
-
-The `higher_is_better` flag is set to `None` for H-bond counts (neither
-direction is universally better), and direction labels use "fewer H-bonds" /
-"similar" / "more H-bonds".
-
-## Interpreting the Plots
-
-The plugin generates up to five plot types. All plots use the shared PolyzyMD
-theming system for consistent publication-quality output.
-
-### Summary comparison bar chart
-
-**File:** `hbond_summary_comparison.png`
-
-Faceted grouped bars with one subplot per summary and one bar per condition.
-Each summary gets its own y-axis scale, improving readability when summaries
-have very different magnitudes. Error bars show SEM across replicates.
-
-### Time series
-
-**File:** `hbond_timeseries_<summary>.png` (one per summary)
-
-Per-frame H-bond counts over time in physical units (ns). The mean across
-replicates is shown as a solid line with a ±1 SD shaded band (single-replicate
-runs show the trace only). Useful for detecting equilibration issues (early drift) or transient events
-(sudden spikes indicating a binding/unbinding event).
-
-### Top residue pairs occupancy
-
-**File:** `hbond_top_pairs_<summary>.png` (one per summary)
-
-Horizontal grouped bar chart showing top undirected residue pairs by mean
-occupancy. To focus on cross-condition comparison, only pairs present in at
-least two conditions are shown.
-
-### Composition absolute bars
-
-**File:** `hbond_composition_absolute.png`
-
-Stacked bar chart showing mean H-bonds/frame broken down by partition pair
-(e.g., protein→protein, protein→polymer, polymer→polymer). Each condition
-gets one stacked bar. Reveals how the total H-bond budget is distributed.
-
-### Composition fractional bars
-
-**File:** `hbond_composition_fraction.png`
-
-Same as above but normalized to fractions. The y-axis auto-scales: for disjoint
-partitions it ranges 0–1, but when `allow_overlapping_composition: true` is set
-and partitions overlap, stacked fractions may exceed 1.0. Useful for comparing
-the *relative* H-bond distribution even when total counts differ between
-conditions.
-
-## Scientific Considerations
-
-:::{admonition} Interpreting H-bond counts
+:::{admonition} Interpreting hydrogen-bond counts
 :class: warning
 
-Keep these caveats in mind when interpreting results:
+1. Geometric criteria, not energetics. A bond by this definition need not be a
+   thermodynamically significant interaction.
 
-1. **Geometric criteria, not energetics.** H-bond counts reflect MDAnalysis
-   geometric criteria (distance and angle cutoffs), not interaction energies.
-   A "hydrogen bond" by this definition may not correspond to a thermodynamically
-   significant interaction.
+2. System size matters. A condition with twice the polymer has more donors and
+   acceptors available, so compare per-frame counts only between systems whose
+   composition you have accounted for.
 
-2. **System size matters.** Cross-condition comparisons of raw H-bond counts
-   should account for differences in system size (number of donors/acceptors).
-   The composition fractional view helps normalize for this.
+3. Residue-pair rankings are noisy. Individual pair occupancies vary between
+   replicates, which is why the profile is indexed by rank and reported with a
+   per-rank standard error across replicates. Read the top few ranks and check
+   them against what you know about the structure.
 
-3. **Composition fractions normalize availability.** If condition A has 200
-   polymer atoms and condition B has 400, condition B will likely show more
-   protein–polymer H-bonds in absolute terms. Composition fractions reveal
-   whether the *proportion* also changes.
-
-4. **Residue-pair rankings are noisy.** Individual residue-pair occupancies
-   can vary substantially across replicates. Focus on the top 3–5 pairs and
-   cross-reference with structural knowledge. The `top_n_pairs` setting
-   controls how many pairs are reported (default: 15).
-
-5. **Statistical correction.** Pairwise comparisons use FDR-corrected
-   (Benjamini–Hochberg) p-values. When comparing many summaries across many
-   conditions, check adjusted p-values rather than raw values.
+4. Statistical correction. Pairwise tests are Benjamini-Hochberg corrected over
+   the whole run. Read the adjusted p-value, not the raw one.
 :::
 
-## Full Example: comparison.yaml
-
-Here is a complete `comparison.yaml` for a CALB enzyme study with three
-polymer conditions:
+## Full example
 
 ```yaml
 name: "calb_hbond_study"
@@ -571,6 +310,7 @@ plugins:
   hydrogen_bonds:
     distance_cutoff: 3.0
     angle_cutoff: 150
+    allow_empty_groups: true
     groups:
       protein_all: "protein"
       substrate: "resname pNB"
@@ -584,33 +324,12 @@ plugins:
         within: protein_all
       polymer_internal:
         within: polymer_all
-    composition:
-      partitions:
-        protein: "protein"
-        substrate: "resname pNB"
-        polymer: "chainid C"
-
-plot_settings:
-  format: "png"
-  dpi: 300
-  style: "compact"
 ```
 
-## CLI name
+## See also
 
-Run the plugin with its canonical CLI name:
-
-- `hydrogen_bonds`
-
-```bash
-polyzymd compare run hydrogen_bonds
-```
-
-## See Also
-
-- {doc}`analysis_compare_conditions` — Setting up `comparison.yaml`
-- {doc}`../reference/analysis_comparison_reference` — Plugin listing and
-  statistical terms
-- {doc}`hpc_execution` — Submitting analysis jobs to SLURM
-- {doc}`../explanation/analysis_statistics_best_practices` — Autocorrelation and uncertainty
-- {doc}`../contributor_guide/extending_analyses` — Writing your own analysis plugin
+- {doc}`../reference/analysis_hydrogen_bonds_reference` (settings and outputs)
+- {doc}`analysis_compare_conditions` (setting up `comparison.yaml`)
+- {doc}`hpc_execution` (submitting analysis jobs to SLURM)
+- {doc}`../explanation/analysis_statistics_best_practices` (autocorrelation and
+  uncertainty)

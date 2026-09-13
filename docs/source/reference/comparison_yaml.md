@@ -292,18 +292,14 @@ Each entry in `runs`:
 | `summaries` | list or mapping | one default summary (`protein_polymer` between `protein` and `polymer`) | Named H-bond summaries (see below) |
 | `distance_cutoff` | float | `3.0` | H-bond distance cutoff in Angstroms |
 | `angle_cutoff` | float | `150` | H-bond angle cutoff in degrees |
-| `update_selections` | bool | `true` | Update atom selections every frame |
+| `update_selections` | bool | `true` | Re-evaluate MDAnalysis's donor, hydrogen and acceptor selections each frame; group membership is always fixed at the start of the window |
 | `top_n_pairs` | int | `15` | Number of top residue pairs to report |
 | `allow_empty_groups` | bool | `false` | Empty group selections: `false` = raise `SelectionError` naming the group and selection; `true` = warn and skip the summaries that use the group |
-| `donor_acceptor_elements` | list of string | `["N", "O"]` | Elements allowed to act as donors and acceptors; add `"S"` for sulfur |
-| `allow_overlapping_composition` | bool | `false` | Whether overlapping composition partitions are allowed |
-| `composition` | mapping | `null` | Composition analysis settings |
-| `hydrogens_selection` | string | `null` | Advanced explicit-hydrogen selection override for unusual atom names |
-| `timestep_ps` | float | `null` | Override trajectory timestep in picoseconds for time-axis plots |
-
-Time-axis plots assume uniformly saved frames. PolyzyMD converts frame index to
-time as `frame_index * timestep_ps`; variable-timestep concatenated
-trajectories are not supported.
+| `donor_acceptor_elements` | list of string | `["N", "O"]` | Elements allowed to act as donors and acceptors; add `"S"` for sulfur. Capitalized and de-duplicated; `"H"` and unknown symbols are rejected |
+| `hydrogens_selection` | string | `null` | Override for the hydrogen selection; `element H` by default |
+| `composition` | mapping | `null` | Deprecated since v1.3 and ignored; query the event sidecar instead |
+| `allow_overlapping_composition` | bool | `false` | Deprecated since v1.3 and ignored, with `composition` |
+| `timestep_ps` | float | `null` | Deprecated since v1.3 and ignored; the framework resolves the window |
 
 Each summary entry in `summaries` has:
 
@@ -318,19 +314,13 @@ For mapping-form input, keys are treated as `name` values.
 Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` and requires explicit
 hydrogens and element metadata. Donors and acceptors are
 `(<group union>) and element <donor_acceptor_elements>` and hydrogens are
-`(<group union>) and (element H)`. For GRO-like topologies without MDAnalysis
-`elements`, PolyzyMD tries safe element inference from atom types or atom names;
-if elements remain unavailable the plugin raises `SelectionError` instead of
-counting every atom as a donor and an acceptor. Element spellings are taken from
-the topology, so a topology that writes `CL` is matched even though the
-canonical symbol is `Cl`. Set `hydrogens_selection` only for unusual
-explicit-hydrogen naming schemes.
-
-`composition` sub-fields:
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `partitions` | mapping | — | Named partitions: `{name: "MDAnalysis selection"}` |
+`(<group union>) and (element H)`. The trajectory loader infers elements for
+GRO-like topologies that carry only atom types or atom names; a topology where
+elements remain unavailable raises `SelectionError` instead of
+counting every atom as a donor and an acceptor.
+Element spellings are taken from the topology, so a topology that writes `CL` is
+matched even though the canonical symbol is `Cl`. Set `hydrogens_selection` only
+for unusual explicit-hydrogen naming schemes.
 
 ---
 

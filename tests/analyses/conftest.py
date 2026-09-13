@@ -16,12 +16,9 @@ from typing import Any, Callable, Sequence
 
 import pytest
 
-_PLOTTER_MODULES = ("polyzymd.analyses.contract_plots",) + tuple(
-    f"polyzymd.analyses.{name}._plotters"
-    for name in (
-        "hydrogen_bonds",
-    )
-)
+#: Every plugin is on the observable contract, so the framework draws every
+#: figure and there is one module left to audit.
+_PLOTTER_MODULES = ("polyzymd.analyses.contract_plots",)
 
 
 def figure_draws_uncertainty(fig: Any) -> bool:

@@ -92,7 +92,7 @@ Stable analysis plugins:
 | `catalytic_triad` | Yes (observable contract) | `simultaneous_contact_fraction` | Active-site geometry | FDR-corrected t-tests over replicate values |
 | `secondary_structure` | Yes | `ss_helix` and `ss_strand` (`ss_coil` and `ss_unassigned` reported, not tested) | Secondary structure content | FDR-corrected pairwise t-tests over replicates |
 | `sasa` | Yes (observable contract) | `sasa_<label>` in A^2 | Target and context selections per measured context | Student or Welch t-test per observable, one Benjamini-Hochberg family |
-| `hydrogen_bonds` | Custom loader with default-style scalar statistics | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA per configured summary |
+| `hydrogen_bonds` | Yes (observable contract) | `hbonds_<summary>` in counts per frame | Named groups and the summaries that pair them | Student or Welch t-test per observable, one Benjamini-Hochberg family |
 
 ## Path Rules
 
