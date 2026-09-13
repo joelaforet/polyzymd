@@ -224,6 +224,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Contacts is an observable-contract plugin.**  The twelve-module contacts
+  package is one module that measures contacts and leaves aggregation,
+  uncertainty, comparison and formatting to the framework.  It reports
+  `contact_count` and `coverage` per frame, `contact_fraction` and
+  `mean_residence_time` per residue, and `residence_time_distribution` over
+  bins in ns; the contact events stay as an NPZ sidecar holding the protein
+  residue, the polymer chain and the first and last frame of each event.  The
+  cutoff, the selections and the bonded-fragment chain identity are unchanged,
+  and the per-frame count, the per-frame coverage, the per-residue fractions
+  and the residence-time histogram reproduce the old detector exactly on real
+  trajectories.  `coverage` now means the share of the protein in contact per
+  frame rather than the share touched at any point in the window; the old
+  `mean_contact_fraction` is its mean over frames.  Hydrogens still count
+  toward the cutoff, with a new `heavy_atoms_only` setting for the literature
+  convention.  `grouping`, `compute_residence_times`, `protein_groups`,
+  `protein_partitions`, `fdr_alpha`, `min_effect_size` and `top_residues` are
+  ignored with a deprecation warning and rejected in v1.4; the test, the
+  post-hoc method and the alpha come from the comparison file for the whole
+  run.  `analyses/shared/groupings` and `analyses/shared/selectors` went with
+  the old package, which was their last caller.
+
 - **The periodic box is computed first, from the protein and substrate alone.**
   `SolventBuilder.compute_box_vectors()` derives the cell from the solute
   bounding box plus `2 * (polymers.packing.padding + solvent.box.padding)`

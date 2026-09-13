@@ -234,17 +234,18 @@ Each entry in `pairs`:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `polymer_selection` | string | `"chainid C"` | MDAnalysis selection for polymer atoms |
-| `protein_selection` | string | `"chainid A"` | MDAnalysis selection for protein atoms |
-| `cutoff` | float | `4.5` | Contact distance cutoff in Angstroms |
-| `grouping` | string | `"aa_class"` | Residue grouping: `"aa_class"`, `"secondary_structure"`, or `"none"` |
-| `compute_residence_times` | bool | `true` | Whether to compute aggregate residence-time summaries and plots. When `false`, per-replicate contact events are still stored and the canonical artifact identity changes. |
-| `protein_groups` | mapping | `null` | Custom residue groups: `{group_name: [resid, ...]}` |
-| `protein_partitions` | mapping | `null` | Mutually exclusive partitions for contact-fraction and residence-time plots: `{partition_name: [group_name, ...]}` |
-| `polymer_types` | list of string | `null` | Explicit polymer type labels. If `null`, types are auto-detected from topology. |
-| `fdr_alpha` | float | `0.05` | Per-plugin FDR threshold |
-| `min_effect_size` | float | `0.5` | Minimum Cohen's d for practical significance |
-| `top_residues` | int | `10` | Max residues shown per condition in formatted output |
+| `protein_selection` | `str` | `"chainid A"` | MDAnalysis selection for protein atoms |
+| `polymer_selection` | `str` | `"chainid C"` | MDAnalysis selection for polymer atoms |
+| `cutoff` | `float` | `4.5` | Contact distance cutoff in Å |
+| `polymer_types` | `list[str] \| null` | `null` | Restrict the polymer selection to these residue names |
+| `heavy_atoms_only` | `bool` | `false` | Exclude hydrogens from both selections before the cutoff is applied |
+| `allow_single_fragment_fallback` | `bool` | `false` | Put every polymer residue in chain 0 when the topology has no bonds, instead of raising `TopologyBondsMissingError` |
+| `residence_time_edges_ns` | `list[float]` | `[0.0, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48]` | Bin edges of the residence-time distribution in ns |
+
+`grouping`, `compute_residence_times`, `protein_groups`, `protein_partitions`,
+`fdr_alpha`, `min_effect_size` and `top_residues` are ignored with a
+`DeprecationWarning` and rejected in v1.4. See
+{doc}`analysis_contacts_reference`.
 
 ### `plugins.rmsd`
 

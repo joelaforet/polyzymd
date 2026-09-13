@@ -186,12 +186,10 @@ plugins:
 :::{admonition} Statistical settings for pairwise comparisons
 :class: tip
 
-Plugins that perform cross-condition statistical tests support per-plugin
-settings in the `plugins:` block. For example, contacts supports `fdr_alpha`,
-`min_effect_size`, and `top_residues`. See the
-[Comparison Reference](../reference/analysis_comparison_reference.md#per-plugin-statistical-settings)
-for the full settings table. For post-hoc method details (BH t-tests, Tukey
-HSD, Cohen's d, and significance markers), see the
+The test, the post-hoc method and the alpha are set once for the whole run, in
+the comparison file's own `ttest_method`, `posthoc_method` and `fdr_alpha`. For
+post-hoc method details (BH t-tests, Tukey HSD, Cohen's d, and significance
+markers), see the
 [Post-Hoc Testing Reference](../reference/posthoc_testing.md).
 :::
 

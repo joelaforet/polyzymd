@@ -66,46 +66,6 @@ The multiple-comparison family is defined once for the whole package:
 
 Full field tables are in {doc}`posthoc_testing`.
 
-## Per-Plugin Statistical Settings
-
-Some plugins support per-plugin statistical settings configured under the
-`plugins:` block in `comparison.yaml`. These control false discovery rate
-correction, effect-size filtering, and output truncation for cross-condition
-comparisons.
-
-### Canonical YAML Example
-
-```yaml
-plugins:
-  contacts:
-    cutoff: 4.5
-    fdr_alpha: 0.05
-    min_effect_size: 0.5
-    top_residues: 10
-```
-
-### Settings Support Matrix
-
-| Setting | contacts | Default |
-|---------|----------|---------|
-| `fdr_alpha` | ✓ | 0.05 |
-| `min_effect_size` | ✓ | 0.5 |
-| `top_residues` | ✓ | 10 |
-
-### Setting Descriptions
-
-- **`fdr_alpha`** — Significance threshold for pairwise comparisons. When
-  `posthoc_method` is `"ttest_bh"`, this controls the Benjamini-Hochberg false
-  discovery rate. When `posthoc_method` is `"tukey_hsd"`, this is the
-  family-wise alpha threshold. Also used as the ANOVA significance threshold.
-  Lower values are more conservative.
-- **`min_effect_size`** — Minimum Cohen's d required for practical
-  significance. Pairs that meet or exceed this threshold are highlighted with
-  "†" in formatted output; all pairs are shown regardless.
-- **`top_residues`** — Maximum number of contacted residues shown per
-  condition, ranked by aggregated `contact_fraction_mean`. Affects both saved
-  JSON and CLI output.
-
 ## Stable Plugin Keys
 
 Stable analysis plugins:
@@ -127,7 +87,7 @@ Stable analysis plugins:
 | `rmsd` | No (custom) | `mean_rmsd` | Backbone stability over time | FDR-corrected per-run pairwise t-tests + omnibus ANOVA |
 | `rg` | No (custom) | `mean_rg` | Protein compactness | FDR-corrected per-run pairwise t-tests + omnibus ANOVA |
 | `rmsf` | Yes | `mean_rmsf` | Per-residue flexibility | FDR-corrected pairwise t-tests + omnibus ANOVA |
-| `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests + omnibus ANOVA |
+| `contacts` | Yes | Contact count + coverage | Per-residue contact profile and contact events | Observable contract, one BH family per run |
 | `distances` | No (custom) | Multiple distance metrics | Named distance pairs | FDR-corrected per-pair t-tests + omnibus ANOVA |
 | `catalytic_triad` | Yes | `simultaneous_contact_fraction` | Active-site geometry | FDR-corrected pairwise t-tests + omnibus ANOVA |
 | `secondary_structure` | Yes | `helix_fraction` | Secondary structure content | FDR-corrected pairwise t-tests + omnibus ANOVA |
