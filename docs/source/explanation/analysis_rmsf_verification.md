@@ -18,10 +18,12 @@ class, but it cannot support two features PolyzyMD requires:
    non-uniform. MDAnalysis's `RMSF` class only accepts uniform
    `start/stop/step` slicing.
 
-2. **External reference positions.** In `external` reference mode,
-   RMSF is computed as deviations from a crystal structure's atomic
-   positions rather than the trajectory's own average. MDAnalysis's
-   `RMSF` class always uses the trajectory average internally.
+2. **External reference positions.** In `external` reference mode PolyzyMD
+   also reports the per-residue deviation from a crystal structure's atomic
+   positions. MDAnalysis's `RMSF` class always uses the trajectory average
+   internally. That deviation is not a fluctuation, so it is reported under
+   its own name, `rmsd_about_reference_per_residue`, beside the ordinary
+   `rmsf` profile.
 
 The core computation is mathematically identical across all
 implementations:
@@ -32,18 +34,12 @@ $$
 
 ## Implementation boundary
 
-The supported contributor interface is the public `RMSFAnalysis` plugin and the
-general PolyzyMD analysis lifecycle documented in the contributor guide. The RMSF
-plugin package contains private implementation files that are useful provenance
-for maintainers, but they are not stable extension points and should not be
-imported by contributor plugins.
-
-Conceptually, the RMSF workflow is part of the MDAnalysis job/artifact lifecycle:
-it constructs trajectory-native jobs, computes an internal RMSD time series so
-the correlation time can be recorded as a diagnostic, accumulates over every
-frame in the production window, and writes canonical replicate and condition
-artifacts. The numerical RMSF kernel remains a
-plain NumPy calculation inside that lifecycle.
+The supported interface is the `rmsf` settings model and the observables it
+reports. `RMSF.compute` aligns the trajectory, accumulates a running mean and
+sum of squares over every frame in the production window, and returns the
+per-residue profiles. Everything after that, persistence, aggregation,
+uncertainty, comparison and formatting, belongs to the framework and is shared
+with every other contract analysis.
 
 ## Benchmark Methodology
 
@@ -118,7 +114,7 @@ native MDAnalysis `RMSF` or GROMACS.
 | PolyzyMD vs GROMACS | 0.99999998 | 0.000249 | 0.000616 |
 | MDAnalysis vs GROMACS | 0.99999998 | 0.000249 | 0.000616 |
 
-### External Mode (independent check)
+### External mode, now `rmsd_about_reference_per_residue` (independent check)
 
 | Comparison | Pearson *r* | Mean \|delta\| (Angstrom) | Max \|delta\| (Angstrom) |
 |---|---|---|---|
@@ -144,6 +140,17 @@ kernel while adding features PolyzyMD requires, especially non-uniform explicit
 frame selections and external-reference handling. They are not a universal guarantee
 for every topology, atom selection, periodic-boundary treatment, reference
 mapping, or trajectory format.
+
+## Parity after the observable-contract port
+
+When the plugin was rewritten against the observable contract, the per-residue
+profile of the previous implementation was frozen on real data and checked
+against the new one. The window is frames 500 to 600 of the LipA 363 K control
+run, the selection is `protein and name CA and resid 4:174`, and the reference
+modes are centroid, frame and average. The two implementations agree exactly,
+difference 0.0 at every residue in all three modes, because they make the same
+MDAnalysis calls. The frozen values and the check live in
+`tests/analyses/parity/`.
 
 ## Benchmark availability
 

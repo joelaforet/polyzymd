@@ -126,7 +126,7 @@ Stable analysis plugins:
 |--------|-----------------|----------------|-------------|-------------------|
 | `rmsd` | No (custom) | `rmsd_<run>_ref_<mode>` | Backbone stability over time | Observable contract: per-run t-test on replicate means, one Benjamini-Hochberg family |
 | `rg` | No (custom) | `mean_rg` | Protein compactness | FDR-corrected per-run pairwise t-tests + omnibus ANOVA |
-| `rmsf` | Yes | `mean_rmsf` | Per-residue flexibility | FDR-corrected pairwise t-tests + omnibus ANOVA |
+| `rmsf` | Observable contract | `rmsf_mean` | Per-residue flexibility | t-test on replicate values, one Benjamini-Hochberg family across the whole run |
 | `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests + omnibus ANOVA |
 | `distances` | No (custom) | Multiple distance metrics | Named distance pairs | FDR-corrected per-pair t-tests + omnibus ANOVA |
 | `catalytic_triad` | Yes | `simultaneous_contact_fraction` | Active-site geometry | FDR-corrected pairwise t-tests + omnibus ANOVA |

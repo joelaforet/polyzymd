@@ -5,7 +5,7 @@ A plugin under this contract is a settings model plus one function::
     def compute(universe, frames, settings) -> Sequence[Observable]
 
 Everything after that is framework work. This module owns the data model
-(:class:`Observable`), the per-replicate reduction (:func:`reduce_observable`),
+(:class:`Observable`), the per-replicate reduction (:func:`reduce_replicate`),
 the condition-level aggregation (:func:`aggregate_observables`) and the
 cross-condition tests (:func:`compare_observables`). The reduction and the
 uncertainty depend only on ``Observable.kind``, so two plugins that declare the
@@ -79,6 +79,15 @@ ObservableKind = Literal[
     "profile",
 ]
 
+#: Scalar summary a ``profile`` can declare so the framework can test it.
+ProfileReduction = Literal["mean_over_index", "sum_over_index"]
+
+#: Name suffix and NumPy operation of each reduction.
+_REDUCTIONS: dict[str, tuple[str, Any]] = {
+    "mean_over_index": ("_mean", np.mean),
+    "sum_over_index": ("_total", np.sum),
+}
+
 CI_METHOD: str = "student_t"
 DEFAULT_COVERAGE: float = 0.95
 
@@ -124,6 +133,21 @@ class Observable(BaseModel):
         periodic boundary policy or whether the topology carried bonds. The
         framework copies it onto the replicate estimate and writes it into the
         replicate artifact. It takes no part in the statistics.
+    n_frames : int or None, optional
+        Number of frames the values were computed from. Only a ``profile``
+        needs it, because its values are indexed by residue or bin rather than
+        by frame; for every other kind the frame count is ``len(values)``.
+    reduce : ProfileReduction or None, optional
+        Scalar summary of a ``profile``, reported beside it so the framework
+        can put an interval on it and test it across conditions. Profiles
+        themselves are not tested pairwise. ``"mean_over_index"`` is reported
+        as ``"<name>_mean"`` and ``"sum_over_index"`` as ``"<name>_total"``.
+        Rejected for every other kind.
+    reduced_kind : ObservableKind or None, optional
+        Kind of that scalar, ``"mean_of_timeseries"`` by default. State it when
+        the scalar is genuinely something else: the mean over residues of a
+        fluctuation profile is a ``"fluctuation"``, the mean over residues of
+        an occupancy profile is a ``"fraction"``. ``"profile"`` is rejected.
     """
 
     name: str = Field(min_length=1)
@@ -135,6 +159,9 @@ class Observable(BaseModel):
     higher_is_better: bool | None = None
     tested: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
+    n_frames: int | None = Field(default=None, gt=0)
+    reduce: ProfileReduction | None = None
+    reduced_kind: ObservableKind | None = None
 
     model_config = ConfigDict(frozen=True)
 
@@ -161,11 +188,18 @@ class Observable(BaseModel):
             )
         if self.kind == "fraction" and (array.min() < 0.0 or array.max() > 1.0):
             raise ValueError(f"observable {self.name!r} is a fraction outside [0, 1]")
+        if self.reduced_kind == "profile":
+            raise ValueError(f"observable {self.name!r} cannot reduce a profile to a profile")
         if self.kind == "profile":
             if self.index is None or len(self.index) != array.size:
                 raise ValueError(f"profile observable {self.name!r} needs one index per value")
-        elif self.index is not None or self.index_label is not None:
+            return self
+        if self.index is not None or self.index_label is not None:
             raise ValueError(f"observable {self.name!r} has an index but kind is not 'profile'")
+        if self.reduce is not None or self.reduced_kind is not None:
+            raise ValueError(
+                f"observable {self.name!r} declares a reduction but kind is not 'profile'"
+            )
         return self
 
 
@@ -253,6 +287,13 @@ class AnalysisProtocol(Protocol):
         Citations for the method, in the NumPy ``References`` style used by the
         rest of the package. Required; use an empty tuple only for an analysis
         that implements no published method.
+
+    Notes
+    -----
+    A plugin whose answer depends on a file the framework does not load, such
+    as an external reference structure named in its settings, may also define
+    ``identity_files(settings) -> Sequence[Path]``. The runner records those
+    files in the identity block, so replacing one recomputes the replicate.
     """
 
     name: ClassVar[str]
@@ -338,7 +379,7 @@ def reduce_observable(observable: Observable | ObservableEstimate) -> Observable
         "higher_is_better": observable.higher_is_better,
         "tested": observable.tested,
         "metadata": dict(observable.metadata),
-        "n_frames": int(values.size),
+        "n_frames": int(observable.n_frames or values.size),
     }
     if observable.kind == "profile":
         return ObservableEstimate(
@@ -357,6 +398,51 @@ def reduce_observable(observable: Observable | ObservableEstimate) -> Observable
         n_eff=None if g is None else n_effective(int(values.size), g),
         **common,
     )
+
+
+def reduce_replicate(
+    observables: Sequence[Observable | ObservableEstimate],
+) -> list[ObservableEstimate]:
+    """Reduce one replicate's observables to the values that enter the sample.
+
+    A ``profile`` that declares a ``reduce`` contributes a second estimate
+    named after the operation, ``"<name>_mean"`` or ``"<name>_total"``, holding
+    that replicate's profile reduced over its index. Its kind is the
+    observable's ``reduced_kind``, ``"mean_of_timeseries"`` by default, and it
+    carries no correlation diagnostics because the values it came from are
+    indexed by residue or bin rather than by time.
+
+    Parameters
+    ----------
+    observables : sequence of Observable or ObservableEstimate
+        One replicate's observables, or estimates read back from an artifact.
+
+    Returns
+    -------
+    list[ObservableEstimate]
+        Estimates in the order the plugin reported them, each declared scalar
+        following its profile.
+    """
+    estimates: list[ObservableEstimate] = []
+    for observable in observables:
+        estimate = reduce_observable(observable)
+        estimates.append(estimate)
+        reduction = getattr(observable, "reduce", None)
+        if reduction is not None:
+            suffix, operation = _REDUCTIONS[reduction]
+            estimates.append(
+                estimate.model_copy(
+                    update={
+                        "name": f"{estimate.name}{suffix}",
+                        "kind": observable.reduced_kind or "mean_of_timeseries",
+                        "value": float(operation(estimate.profile or [])),
+                        "profile": None,
+                        "index": None,
+                        "index_label": None,
+                    }
+                )
+            )
+    return estimates
 
 
 def aggregate_observables(
@@ -397,8 +483,7 @@ def aggregate_observables(
     by_name: dict[str, list[ObservableEstimate]] = {}
     for replicate in replicates:
         seen = set()
-        for observable in replicate:
-            estimate = reduce_observable(observable)
+        for estimate in reduce_replicate(replicate):
             if estimate.name in seen:
                 raise PluginContractError(f"observable {estimate.name!r} reported twice")
             seen.add(estimate.name)

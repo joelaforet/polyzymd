@@ -278,23 +278,6 @@ per-plugin plot settings. Its figures come from the framework, keyed on the
 observable kind, and follow the global settings above.
 ```
 
-### RMSF example
-
-```yaml
-plot_settings:
-  style: "compact"
-  rmsf:
-    show_error: true
-    highlight_residues: [77, 133, 156]
-    figsize_profile: [14, 4]
-    figsize_comparison: [8, 6]
-```
-
-What changes:
-
-- `show_error` turns error shading/bars on or off
-- `highlight_residues` adds vertical markers at selected residue IDs
-- `figsize_*` controls profile and comparison figure sizes
 
 ### Contacts example
 

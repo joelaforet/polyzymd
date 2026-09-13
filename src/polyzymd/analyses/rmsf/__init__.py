@@ -1,308 +1,273 @@
-"""RMSF analysis plugin backed by MDAnalysis-compatible profile jobs."""
+"""Per-residue root mean square fluctuation, written against the observable contract.
+
+The plugin reports one ``profile`` observable, ``rmsf``, holding the fluctuation
+of every selected residue about the mean structure of the aligned production
+window. Every frame in the window is used. The mean over residues is reported as
+the scalar ``rmsf_mean`` through the profile's ``mean_over_index`` reduction, and
+that scalar is what the framework tests across conditions.
+
+In ``external`` reference mode the trajectory is superposed on a structure that
+is not drawn from the simulation, so a second profile,
+``rmsd_about_reference_per_residue``, reports the per-residue deviation from that
+structure. The two answer different questions: ``rmsf`` measures spread about the
+trajectory's own mean, the second measures distance from the external model. The
+pre-port plugin stored the second under the name of the first.
+
+References
+----------
+Michaud-Agrawal, N., Denning, E. J., Woolf, T. B. & Beckstein, O. (2011).
+MDAnalysis: a toolkit for the analysis of molecular dynamics simulations.
+*Journal of Computational Chemistry*, 32(10), 2319-2327. doi:10.1002/jcc.21787
+
+Kuzmanic, A. & Zagrovic, B. (2010). Determination of ensemble-average pairwise
+root mean-square deviation from experimental B-factors. *Biophysical Journal*,
+98(5), 861-871. doi:10.1016/j.bpj.2009.11.011
+
+Grossfield, A., Patrone, P. N., Roe, D. R., Schultz, A. J., Siderius, D. W. &
+Zuckerman, D. M. (2018). Best practices for quantifying the uncertainty in
+molecular simulations. *Living Journal of Computational Molecular Science*,
+1(1), 5067. doi:10.33011/livecoms.1.1.5067
+"""
 
 from __future__ import annotations
 
-import hashlib
-import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Sequence
+from typing import Any, ClassVar, Literal, Sequence
 
-from pydantic import BaseModel, Field, field_validator
+import numpy as np
+from pydantic import BaseModel, Field, model_validator
 
-from polyzymd.analyses._framework.cache_identity import settings_fingerprint
-from polyzymd.analyses.base import (
-    AggregateContext,
-    Analysis,
-    BasePlotSettings,
-    ComparisonContext,
-    MetricValue,
-    PlotContext,
-)
-from polyzymd.analyses.mda import (
-    ArtifactStore,
-    ComparisonArtifact,
-    ConditionArtifact,
-    ReplicateArtifact,
-)
-from polyzymd.analyses.rmsf._mda import (
-    MEAN_RMSF_METRIC,
-    RMSF_METRIC_METADATA,
-    RMSF_PROFILE_VERSION,
-    RMSFArtifactCollector,
-    aggregate_rmsf_artifacts,
-    build_rmsf_jobs,
-    external_reference_file_identity,
-)
-from polyzymd.analyses.rmsf._plot_settings import RMSFPlotSettings
-from polyzymd.analyses.rmsf._plotters import _plot_rmsf_comparison, _plot_rmsf_profile
+from polyzymd.analyses.contract import Observable, iter_frames
+from polyzymd.analyses.contract_runner import contract_analysis
+from polyzymd.analyses.exceptions import PluginContractError, ReplicateError, SelectionError
+from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
 
-if TYPE_CHECKING:
-    from polyzymd.analyses.mda import MDACollectorContext, MDAReplicateJobContext
+ReferenceMode = Literal["centroid", "average", "frame", "external"]
 
 
 class RMSFSettings(BaseModel):
-    """Settings for RMSF profile analysis.
-
-    RMSF is computed as a per-residue fluctuation profile over the selected
-    atoms after reference-based alignment.
-    """
+    """Settings for the per-residue RMSF analysis."""
 
     selection: str = Field(
         default="protein and name CA",
-        description="MDAnalysis selection string for RMSF calculation",
-    )
-    reference_mode: str = Field(
-        default="centroid",
-        description="Reference structure mode: centroid, average, frame, or external",
-    )
-    reference_frame: int | None = Field(
-        default=None,
-        description="Frame number if reference_mode is 'frame' (1-indexed)",
-    )
-    reference_file: str | None = Field(
-        default=None,
-        description="Path to external PDB file if reference_mode is 'external'",
+        description="MDAnalysis selection whose residues carry the profile",
     )
     alignment_selection: str = Field(
         default="protein and name CA",
-        description="MDAnalysis selection for trajectory alignment",
+        description="MDAnalysis selection superposed before the fluctuation is measured",
     )
     centroid_selection: str = Field(
         default="protein",
-        description="MDAnalysis selection for centroid finding",
+        description="MDAnalysis selection used to pick the representative frame in centroid mode",
+    )
+    reference_mode: ReferenceMode = Field(
+        default="centroid",
+        description="Alignment reference: centroid, average, frame or external",
+    )
+    reference_frame: int | None = Field(
+        default=None,
+        description="One-indexed frame used when reference_mode is 'frame'",
+    )
+    reference_file: str | None = Field(
+        default=None,
+        description="Structure file used when reference_mode is 'external'",
     )
 
-    @field_validator("reference_mode", mode="after")
-    @classmethod
-    def validate_reference_mode(cls, value: str) -> str:
-        """Validate the reference mode setting."""
+    @model_validator(mode="after")
+    def _check_reference(self) -> RMSFSettings:
+        """Reject a reference mode whose input is missing."""
+        if self.reference_mode == "frame" and self.reference_frame is None:
+            raise ValueError("reference_frame is required when reference_mode is 'frame'")
+        if self.reference_mode == "external" and self.reference_file is None:
+            raise ValueError("reference_file is required when reference_mode is 'external'")
+        return self
 
-        valid = {"centroid", "average", "frame", "external"}
-        if value not in valid:
-            raise ValueError(f"reference_mode must be one of {valid}, got {value!r}")
-        return value
 
-
-class RMSFAnalysis(Analysis):
-    """Per-residue RMSF analysis using canonical MDA artifacts."""
+class RMSF:
+    """Per-residue fluctuation about the mean structure of the aligned window."""
 
     name: ClassVar[str] = "rmsf"
-    Settings: ClassVar[type] = RMSFSettings
-    PlotSettingsModel: ClassVar[type[BasePlotSettings]] = RMSFPlotSettings
-    AggregatedResultClass: ClassVar[type | None] = None
-    ReplicateResultClass: ClassVar[type | None] = None
-    dependencies: ClassVar[tuple[str, ...]] = ()
-    min_replicates: ClassVar[int] = 1
+    Settings: ClassVar[type[BaseModel]] = RMSFSettings
+    references: ClassVar[tuple[str, ...]] = (
+        "Michaud-Agrawal et al. 2011, J Comput Chem 32:2319, doi:10.1002/jcc.21787",
+        "Kuzmanic and Zagrovic 2010, Biophys J 98:861, doi:10.1016/j.bpj.2009.11.011",
+        "Grossfield et al. 2018, LiveCoMS 1:5067, doi:10.33011/livecoms.1.1.5067",
+    )
 
     @staticmethod
-    def _make_settings_cache_tag(settings: BaseModel | Any) -> str:
-        """Return a short settings fingerprint for RMSF artifacts.
+    def identity_files(settings: RMSFSettings) -> Sequence[Path]:
+        """External reference structure, whose contents change the answer."""
+        if settings.reference_mode != "external" or settings.reference_file is None:
+            return ()
+        return (Path(settings.reference_file).expanduser(),)
+
+    def compute(self, universe: Any, frames: Any, settings: RMSFSettings) -> Sequence[Observable]:
+        """Measure the per-residue fluctuation of one replicate.
 
         Parameters
         ----------
-        settings : BaseModel or Any
-            RMSF settings object.
+        universe : MDAnalysis.Universe
+            Universe loaded by the framework. Alignment rewrites its
+            coordinates in memory.
+        frames : FrameSelection
+            Production window resolved by the framework.
+        settings : RMSFSettings
+            Selections and alignment reference.
 
         Returns
         -------
-        str
-            Stable short fingerprint of the settings and the RMSF profile
-            version.
-        """
+        Sequence[Observable]
+            The ``rmsf`` profile in angstrom, plus
+            ``rmsd_about_reference_per_residue`` in external mode.
 
-        if isinstance(settings, RMSFSettings):
-            normalized = settings
-        elif isinstance(settings, BaseModel):
-            normalized = RMSFSettings.model_validate(settings.model_dump(mode="json"))
-        else:
-            normalized = RMSFSettings(
-                selection=settings.selection,
+        Raises
+        ------
+        SelectionError
+            If the RMSF selection matches no atoms, or an external reference is
+            missing or does not match the selected atoms.
+        PluginContractError
+            If an explicit frame list is given in a reference mode that builds
+            its reference from a contiguous slice.
+        ReplicateError
+            If the production window holds no frames.
+        """
+        atoms = universe.select_atoms(settings.selection)
+        if len(atoms) == 0:
+            raise SelectionError(f"rmsf: selection {settings.selection!r} matched no atoms")
+        reference_file = _reference_file(settings)
+        start, stop, step = _window(universe, frames, settings)
+        align_trajectory(
+            universe,
+            AlignmentConfig(
+                enabled=True,
                 reference_mode=settings.reference_mode,
                 reference_frame=settings.reference_frame,
-                reference_file=settings.reference_file,
-                alignment_selection=settings.alignment_selection,
+                selection=settings.alignment_selection,
                 centroid_selection=settings.centroid_selection,
-            )
-        if normalized.reference_mode != "external":
-            base = settings_fingerprint(normalized)
-        else:
-            payload = normalized.model_dump(mode="json")
-            payload["reference_file_identity"] = external_reference_file_identity(
-                normalized.reference_file
-            )
-            serialized = json.dumps(payload, sort_keys=True)
-            base = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:8]
-        # The profile version is folded in so that a change in how frames are
-        # chosen changes the cache identity, which settings alone would not.
-        combined = f"{RMSF_PROFILE_VERSION}:{base}"
-        return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:8]
-
-    def aggregate_settings_fingerprint(self, settings: BaseModel | None) -> str | None:
-        """Return the RMSF artifact settings fingerprint."""
-
-        if settings is None:
-            return None
-        return self._make_settings_cache_tag(settings)
-
-    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> Sequence[Any] | None:
-        """Build the RMSF MDAnalysis-compatible profile job."""
-
-        return build_rmsf_jobs(ctx, ctx.settings)
-
-    def build_mda_collector(self, ctx: MDACollectorContext) -> Any:
-        """Build the RMSF artifact collector."""
-
-        del ctx
-        return RMSFArtifactCollector()
-
-    def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
-        """Aggregate RMSF replicate artifacts across one condition.
-
-        Parameters
-        ----------
-        ctx : AggregateContext
-            Framework-provided aggregation context.
-        results : sequence of Any
-            Per-replicate canonical RMSF artifacts.
-
-        Returns
-        -------
-        ConditionArtifact
-            Aggregated condition artifact.
-        """
-
-        if not results:
-            raise ValueError(
-                f"RMSF aggregation for condition '{ctx.condition.label}' requires at least one "
-                "replicate artifact. No replicate inputs were provided."
-            )
-        if not all(isinstance(result, ReplicateArtifact) for result in results):
-            raise TypeError(
-                "RMSF aggregation expects MDAnalysis ReplicateArtifact inputs. Incompatible "
-                "replicate inputs were found for the MDAnalysis artifact lifecycle; "
-                "recompute the condition or clear stale caches before aggregating."
-            )
-        return aggregate_rmsf_artifacts(
-            condition_label=ctx.condition.label,
-            replicates=ctx.replicates,
-            settings=ctx.settings,
-            equilibration=ctx.equilibration,
-            output_dir=ctx.output_dir,
-            artifacts=results,
-            settings_fingerprint=self._make_settings_cache_tag(ctx.settings),
+                reference_file=reference_file,
+            ),
+            start_frame=start,
+            stop_frame=stop,
+            step_frame=step,
         )
+        reference = _reference_positions(atoms, settings, reference_file)
 
-    def extract_metrics(self, summary: Any) -> dict[str, MetricValue]:
-        """Extract mean RMSF from a canonical condition artifact.
+        n_frames = 0
+        mean = np.zeros((len(atoms), 3), dtype=np.float64)
+        sum_squares = np.zeros((len(atoms), 3), dtype=np.float64)
+        about_reference = np.zeros(len(atoms), dtype=np.float64)
+        for _ in iter_frames(universe, frames):
+            positions = atoms.positions.astype(np.float64)
+            n_frames += 1
+            delta = positions - mean
+            mean += delta / float(n_frames)
+            sum_squares += delta * (positions - mean)
+            if reference is not None:
+                about_reference += np.sum((positions - reference) ** 2, axis=1)
+        if n_frames == 0:
+            raise ReplicateError("rmsf: the production window holds no frames")
 
-        Parameters
-        ----------
-        summary : Any
-            Canonical RMSF condition artifact.
-
-        Returns
-        -------
-        dict[str, MetricValue]
-            Mean RMSF metric for the scalar comparison path.
-        """
-
-        if not isinstance(summary, ConditionArtifact):
-            raise TypeError(
-                "RMSF metric extraction requires a canonical ConditionArtifact input. "
-                "Recompute the condition or clear stale caches before comparing."
+        observables = [
+            _profile(
+                atoms,
+                "rmsf",
+                np.sqrt(np.sum(sum_squares / n_frames, axis=1)),
+                n_frames,
+                reduced_kind="fluctuation",
             )
-        payload = summary.payload
-        return {
-            MEAN_RMSF_METRIC: MetricValue.from_replicate_values(
-                MEAN_RMSF_METRIC,
-                [float(value) for value in payload["per_replicate_mean_rmsf"]],
-                unit=str(RMSF_METRIC_METADATA["unit"]),
-                higher_is_better=False,
-                direction_labels=("stabilizing", "unchanged", "destabilizing"),
-            )
-        }
-
-    def compare(self, ctx: ComparisonContext) -> Any:
-        """Compare RMSF condition artifacts."""
-
-        for label, summary in ctx.aggregated_results.items():
-            if summary is not None and not isinstance(summary, ConditionArtifact):
-                raise TypeError(
-                    f"RMSF comparison for condition '{label}' requires canonical MDAnalysis "
-                    "ConditionArtifact inputs. Incompatible aggregate inputs were found; "
-                    "recompute the condition or clear stale caches before comparing."
+        ]
+        if reference is not None:
+            observables.append(
+                _profile(
+                    atoms,
+                    "rmsd_about_reference_per_residue",
+                    np.sqrt(about_reference / n_frames),
+                    n_frames,
                 )
-        return super().compare(ctx)
-
-    def format(self, result: Any, output_format: str = "text") -> str:
-        """Format RMSF comparison output for CLI display."""
-
-        from polyzymd.analyses.stats import format_scalar_comparison_artifact_payload
-
-        if isinstance(result, ComparisonArtifact):
-            if output_format == "json":
-                return result.model_dump_json(indent=2)
-            return format_scalar_comparison_artifact_payload(
-                result.payload,
-                title="RMSF Comparison",
-                metric_label="Mean RMSF",
-                metric_unit="A",
-                metric_key=MEAN_RMSF_METRIC,
-                output_format=output_format,
-                higher_is_better=False,
             )
+        return observables
 
-        return super().format(result, output_format)
 
-    def plot(self, ctx: PlotContext) -> list[Path]:
-        """Generate RMSF plots from cached artifacts and sidecars only."""
+def _profile(
+    atoms: Any,
+    name: str,
+    per_atom: np.ndarray,
+    n_frames: int,
+    *,
+    reduced_kind: str | None = None,
+) -> Observable:
+    """Average per-atom values inside each residue and label them by residue ID."""
+    _, inverse = np.unique(np.asarray(atoms.resindices), return_inverse=True)
+    per_residue = np.bincount(inverse, weights=per_atom) / np.bincount(inverse)
+    return Observable(
+        name=name,
+        kind="profile",
+        unit="A",
+        values=per_residue,
+        index=np.asarray(atoms.residues.resids, dtype=np.float64),
+        higher_is_better=False,
+        n_frames=n_frames,
+        reduce="mean_over_index",
+        reduced_kind=reduced_kind,
+    )
 
-        data, labels = self._build_plot_data(ctx)
-        if not labels:
-            return []
 
-        condition_by_label = {condition.label: condition for condition in ctx.conditions}
-        for label in labels:
-            cond_data = data.get(label)
-            condition = condition_by_label.get(label)
-            if cond_data is None or condition is None:
-                continue
-            agg_dir = Path(cond_data["aggregated_dir"])
-            artifact = self._load_aggregated_result(agg_dir)
-            if artifact is None:
-                continue
-            artifact = self.validate_aggregated_result(
-                artifact,
-                condition=condition,
-                settings=ctx.settings,
-                equilibration=ctx.equilibration,
-                source=self.aggregate_result_path(agg_dir),
-                expected_replicates=condition.replicates,
-                allow_replicate_subset=True,
+def _window(universe: Any, frames: Any, settings: RMSFSettings) -> tuple[int, int, int]:
+    """Contiguous frame bounds the alignment reference is built from.
+
+    Raises
+    ------
+    PluginContractError
+        If the framework passed an explicit frame list in a reference mode that
+        builds its reference from a contiguous slice.
+    """
+    if frames.frames is not None:
+        if settings.reference_mode in {"centroid", "average"}:
+            raise PluginContractError(
+                f"rmsf: reference_mode={settings.reference_mode!r} builds its reference from a "
+                "contiguous trajectory slice, so it cannot be used with an explicit frame list. "
+                "Use reference_mode 'frame' or 'external', or a start/stop/step window."
             )
-            cond_data["condition_artifact"] = artifact
-            cond_data["condition_payload"] = artifact.payload
+        selected = np.asarray(list(frames.frames))
+        if selected.dtype == bool:
+            selected = np.flatnonzero(selected)
+        return int(selected.min()), int(selected.max()) + 1, 1
+    stop = len(universe.trajectory) if frames.stop is None else int(frames.stop)
+    return int(frames.start or 0), stop, int(frames.step or 1)
 
-        ctx.output_dir.mkdir(parents=True, exist_ok=True)
-        plots: list[Path] = []
-        plots.extend(_plot_rmsf_comparison(data, labels, ctx.output_dir, ctx.plot_settings))
-        plots.extend(_plot_rmsf_profile(data, labels, ctx.output_dir, ctx.plot_settings))
-        return plots
 
-    def _deserialize_result(self, path: Path) -> Any:
-        """Load only canonical RMSF condition artifacts for aggregate results."""
-
-        if path.exists():
-            try:
-                loaded = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                raise ValueError(
-                    f"RMSF aggregate at {path} is not a valid canonical artifact. Recompute "
-                    "the condition or clear stale caches before comparing."
-                ) from exc
-            if isinstance(loaded, dict) and loaded.get("artifact_type") == "condition":
-                return ArtifactStore(path.parent).read_condition_result(path.name)
-        raise ValueError(
-            f"RMSF aggregate at {path} is not a canonical MDAnalysis condition artifact. "
-            "Recompute the condition or clear stale caches."
+def _reference_file(settings: RMSFSettings) -> Path | None:
+    """Resolved external reference path, checked before the trajectory is touched."""
+    if settings.reference_mode != "external" or settings.reference_file is None:
+        return None
+    path = Path(settings.reference_file).expanduser()
+    if not path.exists():
+        raise SelectionError(
+            f"rmsf: reference_file {path} does not exist; reference_mode is 'external', so "
+            "the analysis needs the structure it measures deviation from"
         )
+    return path
+
+
+def _reference_positions(
+    atoms: Any, settings: RMSFSettings, reference_file: Path | None
+) -> np.ndarray | None:
+    """Positions of the external reference structure, or None in the other modes."""
+    if reference_file is None:
+        return None
+    import MDAnalysis as mda
+
+    reference = mda.Universe(str(reference_file))
+    selected = reference.select_atoms(settings.selection)
+    if len(selected) != len(atoms) or list(selected.residues.resids) != list(atoms.residues.resids):
+        raise SelectionError(
+            f"rmsf: external reference {reference_file} gives "
+            f"{len(selected)} atoms over {len(selected.residues)} residues for selection "
+            f"{settings.selection!r}, the trajectory gives {len(atoms)} over "
+            f"{len(atoms.residues)}; use a reference with the same selected atoms in the "
+            "same order"
+        )
+    return selected.positions.astype(np.float64)
+
+
+RMSFAnalysis = contract_analysis(RMSF)

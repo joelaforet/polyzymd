@@ -63,6 +63,14 @@ class of a set of fractions that sums to one, declare it `tested=False`. It is
 still aggregated and reported with its uncertainty, but it stays out of the
 pairwise tests and out of the Benjamini-Hochberg family, so it cannot weaken the
 adjusted p-values of the quantities that carry independent information.
+A profile is not tested pairwise, so give it a comparable scalar with
+`reduce="mean_over_index"` or `"sum_over_index"`, reported as `<name>_mean` or
+`<name>_total`. Add `reduced_kind="fluctuation"` or `"fraction"` when that
+scalar is one, and set `n_frames` on the profile so the scalar counts frames
+rather than indices. If your answer depends on a file the framework does not
+load, such as a reference structure your settings name, add
+`identity_files(settings) -> Sequence[Path]` so replacing that file recomputes
+the replicate.
 
 Every observable states a `unit`, and the scaffold placeholder `"TODO"` is
 rejected, so the generated tests fail until you replace it. A `profile` also

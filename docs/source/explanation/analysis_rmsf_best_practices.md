@@ -72,47 +72,27 @@ Fluctuation observables need more data, not less.
 Conceptually, PolyzyMD:
 
 1. aligns the trajectory to the chosen reference;
-2. computes RMSF from every frame in the production window;
-3. estimates correlation from a trajectory-level timeseries and records the
-   correlation time and effective sample count as diagnostics;
-4. puts the uncertainty on RMSF on the standard error across replicates.
+2. computes the fluctuation of every selected residue from every frame in the
+   production window;
+3. puts the uncertainty on the standard error across replicates.
 
-Example diagnostic output may look like this:
+There is no correlation-time diagnostic on the profile itself. The values of a
+profile are indexed by residue, not by time, so an autocorrelation over them
+would measure nothing. Whether one replicate carries enough independent
+information is judged from the trajectory-level diagnostics of a time-series
+observable such as RMSD, and from how far the replicates disagree.
 
-```text
-Correlation time: 15394 ps (15.4 ns)
-Statistical inefficiency: 308.9
-Independent samples: 6.5 (from 2000 frames)
-```
+## Interpreting a wide interval
 
-This does not mean the trajectory is invalid, and it does not mean 1994 frames
-were thrown away. All 2000 frames went into the profile. It means the RMSF
-estimate has less independent information than the raw frame count suggests,
-and that the replicate SEM is the number to quote.
-
-## Interpreting reliability warnings
-
-PolyzyMD warns when the effective number of independent samples is small, for
-example:
-
-```text
-WARNING: Low statistical reliability: only 6.5 independent samples
-(recommended >= 10). Correlation time τ = 15394 ps is comparable to
-or longer than the trajectory sampling window. Consider:
-(1) extending simulation time,
-(2) using multiple independent trajectories, or
-(3) interpreting results with caution.
-See Grossfield et al. (2018) LiveCoMS 1:5067.
-```
-
-Treat this as a sampling and uncertainty warning. It does not by itself prove
-that a simulation is broken, but it should make you ask whether the conclusion
-depends on poorly converged fluctuations.
+The interval printed beside the mean is a Student t 95 percent interval on the
+mean over replicates, so with three replicates it is about 4.3 times the
+standard error. A wide interval means the replicates disagree, which is a
+sampling statement rather than a broken simulation. It should make you ask
+whether the conclusion depends on poorly converged fluctuations.
 
 Useful follow-up questions include:
 
 - Do independent replicates show similar RMSF patterns?
-- Are replicate means stable, or does one replicate dominate the conclusion?
 - Is the trajectory stationary after the equilibration period, or do RMSD/RMSF
   summaries drift over time?
 - Is the claimed effect large compared with replicate-to-replicate variation?

@@ -406,9 +406,9 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
         Metric summaries keyed by metric name.
     """
     if analysis_name == "rmsf":
-        from polyzymd.analyses.rmsf._mda import MEAN_RMSF_METRIC
-
-        return {MEAN_RMSF_METRIC: metric_summary_payload(MEAN_RMSF_METRIC, [1.5], unit="A")}
+        # rmsf is a contract plugin; its one-replicate nulls come from
+        # aggregate_observables and are covered in tests/analyses/test_contract.py.
+        return {"rmsf_mean": metric_summary_payload("rmsf_mean", [1.5], unit="A")}
 
     if analysis_name == "catalytic_triad":
         from polyzymd.analyses.catalytic_triad._mda import _condition_metrics as triad_metrics

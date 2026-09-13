@@ -37,6 +37,14 @@ exist. A distribution is expressed today as a `profile` over histogram bins. A
 dedicated kind returns when a plugin needs a real shape statistic, with the test
 that goes with it.
 
+A `profile` may declare `reduce` as `"mean_over_index"` or `"sum_over_index"`,
+which reports a second observable named for the operation, `<name>_mean` or
+`<name>_total`, holding the profile reduced over its index. Its kind is the
+observable's `reduced_kind`, `mean_of_timeseries` unless the plugin says
+otherwise, so a profile of fluctuations declares `reduced_kind="fluctuation"`
+and a profile of occupancies declares `"fraction"`. That scalar is what the
+pairwise test uses, because profiles are not tested pairwise.
+
 A fluctuation over one frame has no estimate, and aggregation raises
 `PluginContractError` when fewer than two replicates remain estimable. A pair
 where either side has one replicate carries `testable=False` and the note
@@ -70,9 +78,12 @@ a per-plugin result model.
 The runner writes a `provenance.identity` block the plugin cannot omit or get
 wrong: `polyzymd_version`, `plugin`, `plugin_code_hash` (SHA-256 of the plugin
 module source, so a fix in a module-level helper invalidates the cache too),
-`settings_fingerprint`, `config_hash`, `equilibration` and `inputs`, the
-topology and trajectory `FileIdentity` records the universe provider already
-computes. The per-frame series goes to an `observables.npz` sidecar beside
+`settings_fingerprint`, `config_hash`, `equilibration`, `inputs`, the topology
+and trajectory `FileIdentity` records the universe provider already computes,
+and `settings_files`, the `FileIdentity` of every path a plugin declares
+through the optional `identity_files(settings)` hook. That hook exists because
+a plugin can depend on a file the framework never loads, such as an external
+reference structure, and replacing its contents must recompute the replicate. The per-frame series goes to an `observables.npz` sidecar beside
 `result.json`, hashed and validated by the store, which is what later makes
 generic time-series and shape plots possible without re-running the trajectory.
 
