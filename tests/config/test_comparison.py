@@ -456,9 +456,10 @@ class TestUnknownAnalysisDiagnostics:
     ) -> None:
         """A campaign file keeps loading after a plugin is ported to the contract.
 
-        A contract analysis has no PlotSettingsModel because the framework draws
-        its figures from the observable kind, so the block does nothing. It must
-        not fail validation for the whole campaign; it warns and is ignored.
+        A contract analysis takes the framework's own plot settings, so the
+        keys the plugin's plotters used to read are dropped. The block must not
+        fail validation for the whole campaign; it loads and names what it
+        ignored.
         """
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
@@ -489,10 +490,8 @@ class TestUnknownAnalysisDiagnostics:
     def test_plot_settings_block_survives_without_a_plugins_entry(self, tmp_path: Path) -> None:
         """An existing campaign file keeps loading after a plugin is ported.
 
-        A plugin on the observable contract has no plot settings model, because
-        the framework draws its figures from the observable kind. The block is
-        accepted and reported as doing nothing rather than failing the whole
-        config.
+        The plugin's own plot options are gone, so the block is accepted, its
+        unknown keys are reported and the framework defaults apply.
         """
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
@@ -503,7 +502,10 @@ class TestUnknownAnalysisDiagnostics:
                         {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
                     ],
                     "plugins": {},
-                    "plot_settings": {"rg": {"show_per_replicate": False}},
+                    "plot_settings": {
+                        "rg": {"show_per_replicate": False},
+                        "contacts": {"generate_contact_fraction_profile": True},
+                    },
                 }
             )
         )
@@ -513,6 +515,7 @@ class TestUnknownAnalysisDiagnostics:
 
         assert config.name == "contract-plot-test"
         assert config.plot_settings.rg.show_replicates is True
+        assert not hasattr(config.plot_settings.contacts, "generate_contact_fraction_profile")
 
 
 class TestPluginSettingsCanonicalNames:

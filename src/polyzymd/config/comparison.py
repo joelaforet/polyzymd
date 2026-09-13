@@ -619,7 +619,10 @@ class PlotSettings(BaseModel):
                 # A plugin ported to the observable contract has no plot
                 # settings of its own; the framework draws its figures from the
                 # observable kind. Keep the block so an existing comparison
-                # file still loads, and say that it does nothing.
+                # file still loads, and say that it does nothing. The warning
+                # is a UserWarning because Python hides deprecation warnings
+                # outside __main__, and a silently ignored block is how a
+                # campaign loses its figures without being told.
                 message = (
                     f"plot_settings block '{key}' is ignored: {key} is an observable-contract "
                     "analysis and its figures come from the framework. Remove the block."

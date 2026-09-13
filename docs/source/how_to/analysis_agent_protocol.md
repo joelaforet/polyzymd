@@ -116,10 +116,10 @@ pixi run -e analysis polyzymd compare run rmsf -f comparison.yaml --format agent
 - `no test recorded` means the plugin stored a raw p value but no
   multiplicity-corrected one, so the line describes a difference without
   deciding it. Distances is the analysis that does this today.
-- A plugin that stores only means and standard errors, such as contacts, gets
-  its condition intervals rebuilt from the standard error and the replicate
-  count; `ci_method` then reads `student_t_from_sem` and no interval is given
-  on a difference.
+- A plugin that stores only means and standard errors gets its condition
+  intervals rebuilt from the standard error and the replicate count;
+  `ci_method` then reads `student_t_from_sem` and no interval is given on a
+  difference.
 - Every `warning:` line is part of the answer. A warning that a condition has
   two replicates changes how wide the interval really is.
 

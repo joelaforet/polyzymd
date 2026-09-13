@@ -134,98 +134,8 @@ def _rmsd_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContex
     return RMSDAnalysis(), _context(tmp_path, settings, aggregated, ttest_method)
 
 
-def _contacts_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]:
-    from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
-    from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
-
-    settings = ContactsSettings()
-
-    def artifact(
-        label: str, values: tuple[float, ...], trace: tuple[float, ...]
-    ) -> ConditionArtifact:
-        # The first residue carries the variance contrast. The second one
-        # contributes a negligible amount of contact but drops out in one
-        # replicate, so coverage is not degenerate.
-        per_residue = [
-            [value / 100.0 for value in values],
-            list(trace),
-        ]
-        rows = [
-            {
-                "protein_resid": index + 1,
-                "protein_resname": "ALA",
-                "protein_chain_id": "A",
-                "protein_group": "nonpolar",
-                "contact_fraction_mean": float(np.mean(fractions)),
-                "contact_fraction_per_replicate": list(fractions),
-            }
-            for index, fractions in enumerate(per_residue)
-        ]
-        coverage = [
-            sum(1 for fractions in per_residue if fractions[index] > 0.0) / len(per_residue)
-            for index in range(3)
-        ]
-        contact = [
-            float(np.mean([fractions[index] for fractions in per_residue])) for index in range(3)
-        ]
-        return ConditionArtifact(
-            analysis_name="contacts",
-            condition_label=label,
-            replicates=[1, 2, 3],
-            payload={
-                "metrics": {
-                    "coverage": {
-                        "name": "coverage",
-                        "values": coverage,
-                        "mean": float(np.mean(coverage)),
-                        "sem": float(np.std(coverage, ddof=1) / np.sqrt(3)),
-                        "std": float(np.std(coverage, ddof=1)),
-                        "n": 3,
-                    },
-                    "mean_contact_fraction": {
-                        "name": "mean_contact_fraction",
-                        "values": contact,
-                        "mean": float(np.mean(contact)),
-                        "sem": float(np.std(contact, ddof=1) / np.sqrt(3)),
-                        "std": float(np.std(contact, ddof=1)),
-                        "n": 3,
-                    },
-                },
-                "replicate_metrics": {
-                    str(replicate): {
-                        "coverage": coverage[index],
-                        "mean_contact_fraction": contact[index],
-                    }
-                    for index, replicate in enumerate((1, 2, 3))
-                },
-                "n_replicates": 3,
-                "n_residues": len(rows),
-                "total_frames_per_replicate": [1000, 1000, 1000],
-                "criteria_cutoff": float(settings.cutoff),
-                "residue_stats": rows,
-                "residence_time_by_polymer_type": {},
-            },
-            metadata={
-                "contacts_detection_fingerprint": contacts_detection_fingerprint(settings),
-                "compute_residence_times": bool(settings.compute_residence_times),
-                "equilibration": "10ns",
-            },
-            provenance={
-                "source": "hypothesis_testing_consistency",
-                "frame_selection": {"equilibration": "10ns"},
-            },
-        )
-
-    aggregated = {
-        "Control": artifact("Control", LOW_VARIANCE, (1e-6, 0.0, 1e-6)),
-        "Treated": artifact("Treated", HIGH_VARIANCE, (0.0, 1e-6, 1e-6)),
-    }
-    return ContactsAnalysis(), _context(tmp_path, settings, aggregated, ttest_method)
-
-
 CASES = {
     "rmsd": _rmsd_case,
-    "contacts": _contacts_case,
 }
 
 
@@ -235,12 +145,6 @@ def _pairwise_p_values(plugin: str, result: Any) -> list[tuple[float, float | No
     if plugin == "rmsd":
         for comparison in result.payload["comparisons"]:
             pairs.append((comparison["p_value"], comparison["p_adjusted"]))
-    elif plugin == "contacts":
-        for comparison in result.pairwise_comparisons:
-            for aggregate in comparison.aggregate_comparisons:
-                if aggregate.metric != "mean_contact_fraction":
-                    continue
-                pairs.append((aggregate.p_value, aggregate.p_value_adjusted))
     else:
         for comparison in result.pairwise_comparisons:
             pairs.append((comparison.p_value, comparison.p_value_adjusted))
@@ -289,33 +193,6 @@ def test_single_comparison_leaves_p_value_unchanged(plugin: str, tmp_path: Path)
     assert len(pairs) == 1
     raw_p, adjusted_p = pairs[0]
     assert adjusted_p == pytest.approx(raw_p)
-
-
-@pytest.mark.parametrize("plugin", sorted(set(CASES) - {"rmsd"}))
-def test_direction_labels_require_significance(plugin: str, tmp_path: Path) -> None:
-    """Direction labels must not claim a change that the test did not find.
-
-    The ported plugins are left out because the contract reports a signed delta
-    and a significance flag rather than a direction word.
-    """
-    from polyzymd.analyses.shared.inferential_statistics import NO_SIGNIFICANT_CHANGE
-
-    analysis, ctx = CASES[plugin](tmp_path, "welch")
-    result = analysis.compare(ctx)
-
-    if plugin == "contacts":
-        checked = [
-            (aggregate.significant, aggregate.direction)
-            for comparison in result.pairwise_comparisons
-            for aggregate in comparison.aggregate_comparisons
-        ]
-    else:
-        checked = [(c.significant, c.direction) for c in result.pairwise_comparisons]
-
-    assert checked
-    for significant, direction in checked:
-        if not significant:
-            assert direction == NO_SIGNIFICANT_CHANGE
 
 
 def test_hedges_g_corrects_cohens_d_downward() -> None:

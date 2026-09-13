@@ -164,12 +164,6 @@ The contacts formatter uses multi-level markers (`**`, `***`). The default
 scalar formatter uses a single `*` for any significant result.
 ```
 
-Some plugins also use:
-
-| Marker | Meaning |
-|--------|---------|
-| `†` (dagger) | Cohen's d meets the `min_effect_size` threshold (practical significance). Currently used by the contacts plugin. |
-
 ---
 
 ## Edge Cases

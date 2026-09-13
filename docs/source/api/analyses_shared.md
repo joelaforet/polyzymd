@@ -6,7 +6,7 @@ analysis plugins; framework internals and plugin-private helpers are documented
 with their owning packages.
 
 The package root re-exports common helpers for convenience. Import specialized
-selectors, grouping classes, and module-specific helpers from their submodules.
+and module-specific helpers from their submodules.
 
 ## Trajectory loading and windows
 
@@ -80,56 +80,13 @@ grouped bars, and matrix annotations.
    :no-index:
 ```
 
-## Selections, selectors, and grouping
+## Selections and amino acid classification
 
-Selection helpers extend MDAnalysis selections. Selector and grouping packages
-provide reusable abstractions for selecting molecules or classifying residues in
-plugin settings and analysis code.
+Selection helpers extend MDAnalysis selections. The amino acid table classifies
+residues for plugin settings and analysis code.
 
 ```{eval-rst}
 .. automodule:: polyzymd.analyses.shared.selections
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
-.. automodule:: polyzymd.analyses.shared.selectors
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
-.. automodule:: polyzymd.analyses.shared.selectors.base
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
-.. automodule:: polyzymd.analyses.shared.selectors.protein
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
-.. automodule:: polyzymd.analyses.shared.selectors.polymer
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
-.. automodule:: polyzymd.analyses.shared.selectors.solvent
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
-.. automodule:: polyzymd.analyses.shared.groupings
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
-.. automodule:: polyzymd.analyses.shared.groupings.base
    :members:
    :undoc-members:
    :show-inheritance:

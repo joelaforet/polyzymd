@@ -164,14 +164,14 @@ def test_rg_fragment_mode_fallback_is_opt_in() -> None:
 def test_identify_polymer_chains_without_bonds_raises_typed_error() -> None:
     """Contacts chain identity must refuse a topology with no bonds."""
 
-    from polyzymd.analyses.contacts._events import identify_polymer_chains
+    from polyzymd.analyses.contacts import ContactsSettings, _polymer_chains
     from polyzymd.analyses.exceptions import TopologyBondsMissingError
 
     universe = _two_chain_universe()
     universe.del_TopologyAttr("bonds")
 
     with pytest.raises(TopologyBondsMissingError) as excinfo:
-        identify_polymer_chains(universe.atoms)
+        _polymer_chains(universe.atoms, ContactsSettings())
 
     assert "6 atoms" in str(excinfo.value)
 
@@ -179,14 +179,11 @@ def test_identify_polymer_chains_without_bonds_raises_typed_error() -> None:
 def test_identify_polymer_chains_uses_fragments_when_bonds_exist() -> None:
     """Chain identity should assign one chain index per bonded fragment."""
 
-    from polyzymd.analyses.contacts._events import identify_polymer_chains
+    from polyzymd.analyses.contacts import ContactsSettings, _polymer_chains
 
     universe = _two_chain_universe()
 
-    chain_indices, warnings = identify_polymer_chains(universe.atoms)
-
-    assert chain_indices.tolist() == [0, 1]
-    assert warnings == []
+    assert _polymer_chains(universe.atoms, ContactsSettings()).tolist() == [0, 1]
 
 
 def _partially_bonded_universe() -> Any:
@@ -260,13 +257,13 @@ def test_partially_bonded_topology_is_detected_as_unbonded_selection() -> None:
 def test_partially_bonded_topology_rejects_polymer_chain_identity() -> None:
     """Contacts chain identity fails on a polymer selection with no bonds."""
 
-    from polyzymd.analyses.contacts._events import identify_polymer_chains
+    from polyzymd.analyses.contacts import ContactsSettings, _polymer_chains
     from polyzymd.analyses.exceptions import TopologyBondsMissingError
 
     universe = _partially_bonded_universe()
 
     with pytest.raises(TopologyBondsMissingError):
-        identify_polymer_chains(universe.select_atoms("resname SBM"))
+        _polymer_chains(universe.select_atoms("resname SBM"), ContactsSettings())
 
 
 def test_partially_bonded_topology_allows_the_bonded_selection() -> None:

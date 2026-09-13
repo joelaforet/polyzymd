@@ -99,7 +99,10 @@ class Observable(BaseModel):
     Parameters
     ----------
     name : str
-        Identifier unique within the plugin, for example ``"protein_rg"``.
+        Identifier unique within the plugin, for example ``"protein_rg"``. It
+        may not be the name of a field of
+        :class:`ObservableAggregate`, because an aggregate holds both and a
+        reader could not tell which ``coverage`` a key meant.
     kind : ObservableKind
         How the framework reduces and compares the values. See the module
         docstring of :mod:`polyzymd.analyses.contract` for the five kinds.
@@ -178,7 +181,13 @@ class Observable(BaseModel):
 
     @model_validator(mode="after")
     def _check_shape(self) -> Observable:
-        """Reject empty, non-finite, or mis-indexed observables."""
+        """Reject empty, non-finite, mis-indexed, or ambiguously named observables."""
+        if self.name in _AGGREGATE_FIELDS:
+            raise ValueError(
+                f"observable name {self.name!r} collides with a field of "
+                "ObservableAggregate, which reports both under one key. Qualify it, "
+                f"for example {self.name + '_per_frame'!r}"
+            )
         array = np.asarray(self.values, dtype=np.float64)
         if array.size == 0:
             raise ValueError(f"observable {self.name!r} has no values")
@@ -246,6 +255,10 @@ class ObservableAggregate(BaseModel):
     n_eff_min: float | None = None
     higher_is_better: bool | None = None
     tested: bool = True
+
+
+#: Field names an observable may not take, because an aggregate carries both.
+_AGGREGATE_FIELDS: frozenset[str] = frozenset(ObservableAggregate.model_fields)
 
 
 class ObservableComparison(BaseModel):

@@ -14,7 +14,6 @@ from polyzymd.analyses.base import (
     MetricValue,
     PairwiseResult,
 )
-from polyzymd.analyses.contacts._comparison_results import AggregateComparisonResult
 from polyzymd.analyses.shared.inferential_statistics import percent_change
 from polyzymd.analyses.stats import (
     format_pct,
@@ -101,32 +100,6 @@ def test_pairwise_result_inf_round_trip_json() -> None:
 
     payload = result.model_dump_json()
     loaded = PairwiseResult.model_validate_json(payload)
-
-    assert math.isinf(loaded.percent_change)
-    assert loaded.percent_change > 0
-
-
-def test_contacts_aggregate_inf_round_trip_json() -> None:
-    """Contacts aggregate model should preserve infinite percent_change in JSON."""
-    comparison = AggregateComparisonResult(
-        metric="coverage",
-        condition_a="Control",
-        condition_b="Treatment",
-        condition_a_mean=0.0,
-        condition_a_sem=0.0,
-        condition_b_mean=1.0,
-        condition_b_sem=0.1,
-        t_statistic=1.0,
-        p_value=0.01,
-        cohens_d=1.5,
-        effect_size_interpretation="large",
-        significant=True,
-        percent_change=math.inf,
-        direction="increased",
-    )
-
-    payload = comparison.model_dump_json()
-    loaded = AggregateComparisonResult.model_validate_json(payload)
 
     assert math.isinf(loaded.percent_change)
     assert loaded.percent_change > 0

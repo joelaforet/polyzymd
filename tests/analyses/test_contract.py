@@ -81,6 +81,31 @@ def test_fraction_outside_the_unit_interval_is_rejected() -> None:
         _series([0.0, 1.5], kind="fraction")
 
 
+def test_an_observable_named_like_an_aggregate_field_is_rejected() -> None:
+    """A name an aggregate already uses would be ambiguous in the payload."""
+    with pytest.raises(ValueError, match="collides with a field of ObservableAggregate"):
+        Observable(name="coverage", kind="fraction", values=[0.4, 0.6])
+    with pytest.raises(ValueError, match="collides with a field of ObservableAggregate"):
+        Observable(name="mean", kind="mean_of_timeseries", unit="A", values=[1.0])
+
+    assert Observable(name="coverage_per_frame", kind="fraction", values=[0.4]).name
+
+
+def test_an_untested_observable_is_aggregated_but_not_compared() -> None:
+    """tested=False keeps a derived quantity out of the correction family."""
+
+    def condition(base: float) -> list[ObservableAggregate]:
+        derived = Observable(name="derived", kind="fraction", values=[0.5], tested=False)
+        return aggregate_observables(
+            [[_series([base, base + 1.0], name="measured"), derived] for _ in range(3)]
+        )
+
+    aggregates = {"control": condition(1.0), "treated": condition(3.0)}
+
+    assert {aggregate.name for aggregate in aggregates["control"]} == {"measured", "derived"}
+    assert [comparison.name for comparison in compare_observables(aggregates)] == ["measured"]
+
+
 def test_the_scaffold_unit_placeholder_is_rejected() -> None:
     """An author must replace the placeholder unit with a real one."""
     with pytest.raises(ValueError, match="has not stated its unit"):
@@ -748,3 +773,50 @@ def test_welch_widens_the_p_value_and_the_family_of_one_leaves_it_alone() -> Non
     assert welch.p_value > student.p_value
     assert welch.correction == "benjamini_hochberg"
     assert welch.p_adjusted == pytest.approx(welch.p_value)
+def test_a_plugin_can_return_an_extra_sidecar_array(
+    tmp_path: Path, run_contract_analysis: Any
+) -> None:
+    """compute() may return (observables, extra_sidecars) for a raw table.
+
+    Contacts and hydrogen bonds produce an event list that is neither a
+    per-frame series nor a profile, so the runner writes each extra array as
+    its own NPZ beside the observables rather than forcing it into a kind.
+    """
+
+    class WithEvents:
+        name = "with_events"
+        Settings = RgSettings
+        references = ()
+
+        def compute(self, universe: Any, frames: Any, settings: Any) -> Any:
+            del universe, frames, settings
+            return [_series([1.0, 2.0, 3.0], name="probe")], {
+                "events": np.asarray([[1, 2], [3, 4]], dtype=np.int64)
+            }
+
+    analysis_cls = contract_analysis(WithEvents)
+    aggregate = run_contract_analysis(
+        analysis_cls, RG_SETTINGS, _universes_from(1.0), root=tmp_path
+    )
+
+    assert isinstance(aggregate, ConditionArtifact)
+    sidecar = tmp_path / "analysis" / "A" / "with_events" / "run_1" / "sidecars" / "events.npz"
+    assert sidecar.exists()
+    with np.load(sidecar) as data:
+        assert data["events"].tolist() == [[1, 2], [3, 4]]
+
+
+def test_a_plugin_hint_reaches_the_generated_class() -> None:
+    """An execution cost hint on the plugin is copied onto the analysis class."""
+
+    class Expensive:
+        name = "expensive"
+        Settings = RgSettings
+        references = ()
+        execution_cost_hint = "high"
+
+        def compute(self, universe: Any, frames: Any, settings: Any) -> Any:
+            del universe, frames, settings
+            return [_series([1.0, 2.0])]
+
+    assert contract_analysis(Expensive).execution_cost_hint == "high"

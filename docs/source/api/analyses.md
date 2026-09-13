@@ -102,7 +102,7 @@ shared-utility autodoc blocks.
 
 | Plugin name | Public package | Primary output contract | Comparison style |
 |-------------|----------------|-------------------------|------------------|
-| `contacts` | `polyzymd.analyses.contacts` | Contact-event artifacts and sidecars | Custom comparison |
+| `contacts` | `polyzymd.analyses.contacts` | Observable artifacts, an NPZ sidecar and the contact event table | Observable contract |
 | `distances` | `polyzymd.analyses.distances` | Observables, one distance and one contact fraction per pair | Observable contract |
 | `hydrogen_bonds` | `polyzymd.analyses.hydrogen_bonds` | Hydrogen-bond event artifacts | Custom comparison |
 | `rmsd` | `polyzymd.analyses.rmsd` | One `mean_of_timeseries` observable per run | Observable contract |

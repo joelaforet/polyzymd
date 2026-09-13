@@ -135,18 +135,18 @@ ignored, and raise a `DeprecationWarning`.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `polymer_selection` | `str` | `"chainid C"` | MDAnalysis selection for polymer atoms |
 | `protein_selection` | `str` | `"chainid A"` | MDAnalysis selection for protein atoms |
-| `cutoff` | `float` | `4.5` | Contact cutoff distance in Å |
-| `polymer_types` | `list[str] \| null` | `null` | Optional polymer residue-name filter |
-| `grouping` | `str` | `"aa_class"` | Grouping mode: `aa_class`, `secondary_structure`, or `none` |
-| `compute_residence_times` | `bool` | `true` | Compute aggregate residence-time summaries and plots; per-replicate contact events remain stored when disabled |
+| `polymer_selection` | `str` | `"chainid C"` | MDAnalysis selection for polymer atoms |
+| `cutoff` | `float` | `4.5` | Contact distance cutoff in Å |
+| `polymer_types` | `list[str] \| null` | `null` | Restrict the polymer selection to these residue names |
+| `heavy_atoms_only` | `bool` | `false` | Exclude hydrogens from both selections before the cutoff is applied |
 | `allow_single_fragment_fallback` | `bool` | `false` | Put every polymer residue in chain 0 when the topology has no bonds, instead of raising `TopologyBondsMissingError` |
-| `protein_groups` | `dict[str, list[int]] \| null` | `null` | Custom residue groups, e.g. `{name: [resid, ...]}` |
-| `protein_partitions` | `dict[str, list[str]] \| null` | `null` | Partition definitions over custom `protein_groups` |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
-| `min_effect_size` | `float` | `0.5` | Minimum Cohen's d highlighted in output |
-| `top_residues` | `int` | `10` | Number of top-contact residues shown in summaries |
+| `residence_time_edges_ns` | `list[float]` | `[0.0, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48]` | Bin edges of the residence-time distribution in ns |
+
+`grouping`, `compute_residence_times`, `protein_groups`, `protein_partitions`,
+`fdr_alpha`, `min_effect_size` and `top_residues` are ignored with a
+`DeprecationWarning` and rejected in v1.4. See
+{doc}`analysis_contacts_reference`.
 
 ## `secondary_structure`
 

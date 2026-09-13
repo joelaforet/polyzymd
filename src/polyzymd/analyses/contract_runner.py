@@ -20,7 +20,7 @@ import inspect
 import logging
 from abc import abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Mapping, Sequence
 
 from pydantic import BaseModel
 
@@ -110,22 +110,29 @@ class ContractAnalysis(Analysis):
         -------
         Sequence[MDAAnalysisJob]
             One job whose results hold the reduced observables and a reference
-            to the NPZ sidecar with the full per-frame series.
+            to the NPZ sidecar with the full per-frame series, plus one sidecar
+            per extra array the plugin returned.
         """
 
         def run(universe: Any, **frame_kwargs: Any) -> dict[str, Any]:
             del frame_kwargs
-            observables = _validated(
+            observables, extras = _unpack(
                 self.plugin.compute(universe, ctx.frame_selection, ctx.settings)
             )
             estimates = reduce_replicate(observables)
-            sidecar = ctx.artifact_store.write_npz_sidecar(
-                "observables.npz",
-                **{observable.name: observable.values for observable in observables},
-            )
+            sidecars = [
+                ctx.artifact_store.write_npz_sidecar(
+                    "observables.npz",
+                    **{observable.name: observable.values for observable in observables},
+                )
+            ]
+            sidecars += [
+                ctx.artifact_store.write_npz_sidecar(f"sidecars/{stem}.npz", **{stem: array})
+                for stem, array in extras.items()
+            ]
             return {
                 "observables": [estimate.model_dump(mode="json") for estimate in estimates],
-                "sidecars": [sidecar.model_dump(mode="json")],
+                "sidecars": [sidecar.model_dump(mode="json") for sidecar in sidecars],
                 "warnings": _measurement_warnings(observables),
             }
 
@@ -445,6 +452,21 @@ def contract_analysis(plugin: Any) -> type[ContractAnalysis]:
         if getattr(instance, hint, None) is not None:
             attributes[hint] = getattr(instance, hint)
     return type(f"{_class_prefix(name)}ContractAnalysis", (ContractAnalysis,), attributes)
+
+
+def _unpack(result: Any) -> tuple[list[Observable], dict[str, Any]]:
+    """Split what ``compute()`` returned into observables and extra sidecars.
+
+    A plugin that only reports observables returns a sequence of them. A plugin
+    that also produces a raw table, such as the contact event list, returns a
+    ``(observables, extra_sidecars)`` pair instead, where the mapping takes one
+    array per sidecar file stem. Each entry is written as
+    ``sidecars/<stem>.npz`` holding that array under the key ``<stem>``.
+    """
+    extras: Mapping[str, Any] = {}
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], Mapping):
+        result, extras = result
+    return _validated(result), dict(extras)
 
 
 def _validated(observables: Any) -> list[Observable]:

@@ -39,7 +39,6 @@ T_FACTOR_N5 = 2.7764451051977934
 PLUGIN_NAMES = (
     "rmsd",
     "rmsf",
-    "contacts",
     "hydrogen_bonds",
 )
 
@@ -407,8 +406,6 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
         # aggregate_observables and are covered in tests/analyses/test_contract.py.
         return {"rmsf_mean": metric_summary_payload("rmsf_mean", [1.5], unit="A")}
 
-    if analysis_name == "contacts":
-        return {"coverage": metric_summary_payload("coverage", [0.4], unit="fraction")}
 
     if analysis_name == "rmsd":
         return {"run_1.mean_rmsd": metric_summary_payload("run_1.mean_rmsd", [1.0], unit="A")}

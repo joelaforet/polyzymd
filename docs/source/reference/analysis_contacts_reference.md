@@ -1,284 +1,160 @@
 # Contacts Plugin Reference
 
+This page is lookup documentation for the `contacts` analysis plugin: settings,
+the observables it reports, and the files it writes.
+
 For a task-oriented setup and run workflow, see
 {doc}`../how_to/analysis_contacts_quickstart`.
 
-## Configuration Reference
+## Plugin key
 
-Contacts plugin settings live under `plugins.contacts` in `comparison.yaml`.
+Top-level comparison YAML key: `plugins.contacts`.
 
-### Core analysis fields (`ContactsSettings`)
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `polymer_selection` | `str` | `"chainid C"` | MDAnalysis selection for polymer atoms |
-| `protein_selection` | `str` | `"chainid A"` | MDAnalysis selection for protein atoms |
-| `cutoff` | `float` | `4.5` | Contact distance cutoff in Angstroms |
-| `polymer_types` | `list[str] \| None` | `null` | Optional polymer residue-name filter |
-| `grouping` | `str` | `"aa_class"` | Protein grouping mode: `aa_class`, `secondary_structure`, or `none` |
-| `compute_residence_times` | `bool` | `true` | Compute aggregate residence-time summaries and plots |
-| `allow_single_fragment_fallback` | `bool` | `false` | Put every polymer residue in chain 0 when the topology has no bonds, instead of raising `TopologyBondsMissingError` |
-
-Set `compute_residence_times: false` to skip aggregate residence-time summaries
-and residence-time plotters. Per-replicate contact events remain stored because
-they are the compressed representation used for contact fractions and
-contacts-derived analyses. The setting is validated through the canonical
-contacts detection fingerprint recorded in replicate and condition artifacts.
-
-### Partition fields
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `protein_groups` | `dict[str, list[int]] \| None` | `null` | Custom residue groups, e.g. `{active_site: [77, 133]}` |
-| `protein_partitions` | `dict[str, list[str]] \| None` | `null` | Named partitions of `protein_groups` for contact-fraction and residence-time plots |
-
-### Comparison output fields
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `fdr_alpha` | `float` | `0.05` | FDR alpha for Benjamini-Hochberg correction |
-| `min_effect_size` | `float` | `0.5` | Minimum Cohen's d to flag/highlight |
-| `top_residues` | `int` | `10` | Number of top residues shown in console output |
-
-### Polymer chain identity requires topology bonds
-
-Polymer chains are bonded fragments, so contacts resolves chain identity from
-`AtomGroup.fragments`. The check is made against the polymer selection itself,
-not the topology as a whole, because a topology can carry bonds for the protein
-and none for the polymer. When the selected atoms have no bonds, the plugin
-raises
-`polyzymd.analyses.exceptions.TopologyBondsMissingError`, naming the topology
-file and its atom count. The two fixes named in the message are to load a
-topology that carries bonds, such as the OpenMM system XML read through ParmEd,
-or to guess bonds for the protein and polymer selection by loading that subset
-with `MDAnalysis.Universe(..., guess_bonds=True)`.
-
-```{versionchanged} 1.3.0
-Before 1.3.0 a bond-free topology produced a warning and put every polymer
-residue in chain 0, which silently distorted per-chain and residence-time
-statistics. Set `allow_single_fragment_fallback: true` to keep that behaviour.
+```yaml
+plugins:
+  contacts:
+    protein_selection: "protein"
+    polymer_selection: "resname SBM EGM"
+    cutoff: 4.5
 ```
 
-The bond source is recorded per replicate in universe provenance as
-`topology_has_bonds` and `bond_source`; see {doc}`analysis_plugin_settings`.
+## Settings
 
-### Validation notes
+### `plugins.contacts`
 
-- `grouping` must be one of `aa_class`, `secondary_structure`, or `none`
-- `fdr_alpha` must be between 0 and 1
-- If `protein_partitions` is provided, `protein_groups` must also be provided
-- Partition group names must exist in `protein_groups`
-- Residues cannot overlap across groups within the same partition
+| Field | Type | Default | Constraints | Description |
+|-------|------|---------|-------------|-------------|
+| `protein_selection` | string | `"chainid A"` | must match at least one atom | MDAnalysis selection for protein atoms. |
+| `polymer_selection` | string | `"chainid C"` | must match at least one atom | MDAnalysis selection for polymer atoms. |
+| `cutoff` | float | `4.5` | `> 0` | Contact distance cutoff in angstrom. |
+| `polymer_types` | list of string or null | `null` | | Restrict the polymer selection to these residue names. |
+| `heavy_atoms_only` | bool | `false` | | Exclude hydrogens from both selections before the cutoff is applied. |
+| `allow_single_fragment_fallback` | bool | `false` | | Put every polymer residue in chain 0 when the topology has no bonds, instead of raising `TopologyBondsMissingError`. |
+| `residence_time_edges_ns` | list of float | `[0.0, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48]` | at least two edges, increasing | Bin edges of the residence-time distribution in ns. |
 
-## Output Files
+### Retired settings
 
-Contacts results are written under each condition's analysis directory.
+These were accepted before v1.3. They are ignored with a `DeprecationWarning`
+so an existing comparison file still loads, and they are rejected in v1.4:
+`grouping`, `compute_residence_times`, `protein_groups`, `protein_partitions`,
+`fdr_alpha`, `min_effect_size`, `top_residues`, `compute_binding_preference`,
+`surface_exposure_threshold`, `enzyme_pdb_for_sasa`, `include_default_aa_groups`,
+`polymer_type_selections`, `polymer_chain`, `enrichment_normalization`.
 
-```text
-<projects_directory>/
-└── analysis/
-    └── <condition>/
-        └── contacts/
-            ├── run_1/
-            │   ├── result.json
-            │   └── sidecars/
-            │       └── contact_events.npz
-            ├── run_2/
-            │   └── ...
-            ├── run_3/
-            │   └── ...
-            ├── aggregated/
-            │   ├── result.json
-            │   └── sidecars/
-            │       └── contact_profiles.npz
-```
+The correction family and its alpha now come from the comparison file's own
+`fdr_alpha`, which applies to every plugin in the run. Per-group and
+per-partition summaries were a plotting concern; the per-residue profile carries
+the same information at full resolution.
 
-Legacy standalone JSON filenames from pre-artifact contacts runs are no longer
-loaded by the v1.3 contacts workflow. Recompute contacts to produce canonical
-artifact-store outputs.
+## What counts as a contact
 
-### Per-replicate JSON structure (`ReplicateArtifact`)
+A protein residue and a polymer residue are in contact in one frame when at
+least one atom of the first is within `cutoff` of at least one atom of the
+second. Distances use the minimum image convention with the box of that frame,
+through the MDAnalysis `capped_distance` grid search.
 
-Representative structure:
+Hydrogens count toward the cutoff by default, which is what this plugin has
+always done and what the frozen parity reference reproduces. The literature
+convention for a 4.5 A criterion is heavy atoms only; `heavy_atoms_only: true`
+selects it and lowers every contact count. Hydrogens are excluded by element
+where the topology has elements, and by a name test on a topology that does
+not, which the run warns about.
 
-```python
-{
-    "analysis_name": "contacts",
-    "replicate": 1,
-    "payload": {
-        "metrics": {"coverage": 0.74, "mean_contact_fraction": 0.18},
-        "event_sidecar": "sidecars/contact_events.npz",
-        "n_contact_events": 1240,
-        "n_frames_used": 9000
-    },
-    "sidecars": [{"path": "sidecars/contact_events.npz", "metadata": {"kind": "contact_events"}}],
-    "metadata": {
-        "contacts_detection_fingerprint": "...",
-        "equilibration": "10ns"
-    }
-}
-```
+A selection matching no atoms raises `SelectionError` rather than reporting
+zero contacts. A window holding no frames raises `ReplicateError`.
 
-### Aggregated JSON structure (`ConditionArtifact`)
+## Polymer chain identity requires topology bonds
 
-Representative structure:
+Chain identity comes from bonded fragments. A topology whose polymer atoms
+carry no bonds raises `TopologyBondsMissingError`, because assigning every
+polymer residue to chain 0 would distort the per-chain event stream without
+failing. Set `allow_single_fragment_fallback: true` to opt in to the pre-1.3
+behaviour; the run then emits a warning naming the topology.
 
-```python
-{
-    "analysis_name": "contacts",
-    "condition_label": "PEGylated",
-    "replicates": [1, 2, 3],
-    "payload": {
-        "metrics": {
-            "coverage": {"values": [0.73, 0.75, 0.74], "mean": 0.74, "sem": 0.01},
-            "mean_contact_fraction": {"values": [0.17, 0.19, 0.18], "mean": 0.18, "sem": 0.01}
-        },
-        "residue_stats": [
-            {
-                "protein_resid": 77,
-                "protein_group": "polar",
-                "contact_fraction_mean": 0.211,
-                "contact_fraction_per_replicate": [0.201, 0.232, 0.200]
-            }
-        ],
-        "profile_sidecar": "sidecars/contact_profiles.npz",
-        "residence_time_by_polymer_type": {
-            "SBM": {"mean_ns": 9.60, "sem_ns": 0.53}
-        }
-    },
-    "metadata": {
-        "contacts_detection_fingerprint": "...",
-        "compute_residence_times": true,
-        "equilibration": "10ns"
-    }
-}
-```
+## Observables
 
-## Plot Types
+| Name | Kind | Unit | Description |
+|------|------|------|-------------|
+| `contact_count` | `mean_of_timeseries` | `count` | Number of distinct protein-polymer residue pairs in contact, one value per frame. |
+| `coverage_per_frame` | `fraction` | `fraction` | Share of protein residues in contact with any polymer residue, one value per frame. |
+| `coverage_any_frame` | `fraction` | `fraction` | Share of protein residues in contact at any point in the window, one value per replicate. It is a function of `contact_fraction`, so it is reported with its interval but declared `tested=False` and kept out of the pairwise tests and the correction family. |
+| `contact_fraction` | `profile` | `fraction` | Share of frames each protein residue is in contact, indexed by residue ID. |
+| `residence_time_distribution` | `profile` | `fraction` | Share of contact events whose duration falls in each bin, indexed by the lower bin edge in ns. |
+| `mean_residence_time` | `profile` | `ns` | Mean duration of the contact events of each protein residue, indexed by residue ID. Zero for a residue with no events. |
 
-Contacts plots are generated through the comparison plotting workflow
-(`polyzymd compare plot-all ...`) and controlled by `plot_settings.contacts`.
+Before v1.3 the plugin reported two replicate metrics, and neither name means
+what the port reports under it. `mean_contact_fraction` is the mean of
+`coverage_per_frame` over frames, the same number to floating-point noise. The
+old `coverage` is `coverage_any_frame`.
 
-### Plot outputs
+An event runs from the first frame a residue pair is within the cutoff to the
+last consecutive frame it stays within it. Durations are whole numbers of
+frames, so the time axis of the window has to be evenly spaced; an uneven one
+raises `ReplicateError`. An event already running when the window opens is
+measured from the window's first frame and one still running when it closes is
+measured to its last, so both are shortened, and neither is marked. An event
+longer than the top bin edge is counted in the top bin; how many were is in
+`metadata["residence_time_overflow_events"]`, so widen
+`residence_time_edges_ns` when that count is not small.
 
-| Output stem | Description | Gate setting |
-|-------------|-------------|--------------|
-| `contact_fraction_profile` | Per-residue contact-fraction profile across conditions | `generate_contact_fraction_profile` |
-| `contact_fraction_profile_<polymer_type>` | Per-residue profile split by polymer type (when multiple polymer types exist) | `generate_contact_fraction_profile` |
-| `residence_time_profile` | Per-residue mean residence-time profile (ns) | `generate_residence_time_profile` |
-| `residence_time_profile_<polymer_type>` | Per-residue residence-time profile by polymer type | `generate_residence_time_profile` |
-| `cf_by_aa_class_bars` | Contact-fraction grouped bars by amino-acid class | `generate_cf_by_aa_class_bars` |
-| `cf_by_partition_<partition>_bars` | Contact-fraction grouped bars by user-defined partition | `generate_cf_by_partition_bars` |
-| `rt_by_aa_class_bars` | Residence-time grouped bars by amino-acid class | `generate_rt_by_aa_class_bars` |
-| `rt_by_partition_<partition>_bars` | Residence-time grouped bars by user-defined partition | `generate_rt_by_partition_bars` |
+Every observable carries the cutoff, the PBC policy, `heavy_atoms_only`, the
+bond source of the chain identity, the number of polymer chains, the
+residence-time overflow count and any retired settings the run ignored in
+`metadata`, at replicate level and at condition level.
 
-### Contacts plot settings
+## Canonical output paths
 
-| Field | Default | Description |
-|-------|---------|-------------|
-| `generate_contact_fraction_profile` | `true` | Enable per-residue contact-fraction profiles |
-| `generate_residence_time_profile` | `true` | Enable per-residue residence-time profiles |
-| `generate_cf_by_aa_class_bars` | `true` | Enable contact-fraction AA-class bars |
-| `generate_cf_by_partition_bars` | `true` | Enable contact-fraction partition bars |
-| `generate_rt_by_aa_class_bars` | `true` | Enable residence-time AA-class bars |
-| `generate_rt_by_partition_bars` | `true` | Enable residence-time partition bars |
-| `highlight_residues` | `[]` | Residues marked with vertical lines on profile plots |
-| `contact_fraction_profile_threshold` | `null` | Optional threshold line on contact-fraction profile |
+| Level | Path | Contents |
+|-------|------|----------|
+| Per replicate | `analysis/<condition>/contacts/run_<replicate>/result.json` | `ReplicateArtifact` whose `payload.observables` holds one reduced estimate per observable. |
+| Per replicate sidecar | `analysis/<condition>/contacts/run_<replicate>/observables.npz` | Full per-frame series and per-index vectors, one array per observable name. |
+| Per replicate sidecar | `analysis/<condition>/contacts/run_<replicate>/sidecars/contact_events.npz` | The event table under the key `contact_events`. |
+| Per condition | `analysis/<condition>/contacts/aggregated/result.json` | `ConditionArtifact` whose `payload.observables` holds one aggregate per observable. |
+| Cross condition | `comparison/contacts/result.json` | `ComparisonArtifact` with the per-condition aggregates and the pairwise tests. |
 
-Figure-size and error-display fields are also available per plot type (for
-example `figsize_contact_fraction_profile` and
-`show_contact_fraction_profile_error`).
+### The event table
 
-For global plotting keys (`style`, `dpi`, output format), see
-{doc}`analysis_comparison_reference` and {doc}`comparison_yaml`.
+`contact_events.npz` holds one integer array of shape `(n_events, 4)`. The
+columns are the protein residue ID, the polymer chain index, the first frame of
+the event and its last frame, both as trajectory frame numbers.
 
-## Common CLI Options
+## Artifact fields
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-f, --file` | `comparison.yaml` | Path to comparison config |
-| `--eq-time` | `0ns` | Equilibration time to skip |
-| `--recompute` | off | Ignore cache and recompute |
-| `--format` | `table` | Output format (`table` or `json`) |
-| `-o, --output` | (none) | Write formatted output to file |
-| `-q, --quiet` | off | Suppress INFO logs |
-| `--debug` | off | Enable DEBUG logging |
+A replicate estimate carries `name`, `kind`, `unit`, `n_frames`, the reduced
+`value` for a time-series kind or the `profile` and `index` for a profile, and
+the correlation diagnostics `statistical_inefficiency` and `n_eff`. The
+diagnostics are reported, never used to shrink an error bar.
 
-Typical run command:
+A condition aggregate carries `replicate_values`, `mean`, `sem`, `ci95_low`,
+`ci95_high`, `ci_method`, the interval's own `coverage` field and `n_replicates`
+for a time-series kind,
+and `profile_mean`, `profile_sem` and `index` for a profile. Every statistic is
+computed across replicates, never across frames.
 
-```bash
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
-```
+A comparison entry carries `control`, `condition`, `delta`, `percent_change`,
+`test`, `p_value`, `p_adjusted`, `correction`, `cohens_d`, `significant`,
+`testable` and `note`. Profiles are aggregated but not tested pairwise.
 
-## Troubleshooting
+## Units
 
-### "No polymer atoms selected"
+| Quantity | Unit |
+|----------|------|
+| `cutoff` | angstrom |
+| `contact_count` | count of residue pairs |
+| `coverage_per_frame`, `coverage_any_frame`, `contact_fraction` | fraction |
+| `residence_time_edges_ns`, `mean_residence_time` | ns |
 
-**Cause:** `polymer_selection` does not match any atoms.
+## References
 
-**Fix:**
+- Michaud-Agrawal, N., Denning, E. J., Woolf, T. B. & Beckstein, O. (2011).
+  MDAnalysis: a toolkit for the analysis of molecular dynamics simulations.
+  *Journal of Computational Chemistry*, 32(10), 2319-2327. doi:10.1002/jcc.21787
+- Grossfield, A. et al. (2018). Best practices for quantifying the uncertainty
+  in molecular simulations. *Living Journal of Computational Molecular Science*,
+  1(1), 5067. doi:10.33011/livecoms.1.1.5067
 
-- Verify chain and residue naming in your topology
-- Start with `polymer_selection: "chainid C"` and narrow incrementally
-- Run with `--debug` to inspect selection behavior
+## See also
 
-### "Selection matched no atoms" (protein or polymer)
-
-**Cause:** Selection syntax is valid but does not match this topology.
-
-**Fix:**
-
-- Check residue numbering and atom/residue naming
-- Validate that your topology and trajectory belong together
-
-### "contacts polymer chain detection needs topology bonds"
-
-The selected polymer atoms have no bonds between them. This happens when the
-topology carries no bonds at all, which is what MDAnalysis produces for a PDB
-holding atom serials above 99999 because OpenMM writes those in hexadecimal, and
-it also happens when only the standard residues have usable CONECT records and
-the polymer has none.
-
-Load a topology that carries bonds, such as the OpenMM system XML read through
-ParmEd, or guess bonds for the protein and polymer selection with
-`MDAnalysis.Universe(..., guess_bonds=True)`. If one polymer chain really is the
-right model for your system, set `allow_single_fragment_fallback: true` and
-remember that per-chain statistics then describe the whole polymer selection.
-
-### Missing replicate data / replicate skipped
-
-**Message:** `Skipping replicate N: trajectory data not found`.
-
-**Cause:** Missing files or incomplete simulation output for that replicate.
-
-**Fix:**
-
-- Confirm replicate output paths in the condition config
-- Re-run after simulation completion
-- Analysis continues with available replicates
-
-### "protein_partitions requires protein_groups to be defined"
-
-**Cause:** Partition references were configured without group definitions.
-
-**Fix:** Add `protein_groups` and reference those names in
-`protein_partitions`.
-
-### Unexpected cache reuse after changing settings
-
-**Cause:** Cached files from prior runs are still present.
-
-**Fix:**
-
-- Re-run with `--recompute`
-- Or clear the relevant `analysis/<condition>/contacts/` directory
-
-### Slow runtime
-
-**Cause:** Large trajectories and large selections.
-
-**Fix:**
-
-- Increase `--eq-time` to skip equilibration frames
-- Restrict `polymer_selection` and/or `protein_selection`
-- Use cached results for repeated report generation
+- {doc}`../how_to/analysis_contacts_quickstart` (task recipes and commands)
+- {doc}`comparison_yaml` (comparison file schema)
+- {doc}`analysis_comparison_reference` (shared comparison behavior)

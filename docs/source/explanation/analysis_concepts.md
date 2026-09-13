@@ -373,6 +373,23 @@ interrupted segment's frame count is not recorded, so the last one in a chain
 may be partial. The alternative, dropping it, would put a hole in the middle of
 the time line, which is worse.
 
+## Reading two numbers that measure the same thing differently
+
+A plugin often reports several scalars about one phenomenon, and they answer
+different questions. Contacts is the clearest case. A higher `contact_count`
+than the control means more protein-polymer residue pairs are in contact at any
+moment; a higher `coverage_per_frame` means those contacts are spread over more
+of the protein rather than concentrated. A formulation can raise the count and
+leave coverage flat by binding one patch harder, so the pair has to be read
+together. The `contact_fraction` profile then names the patch, and
+`residence_time_distribution` says whether the contacts are many brief touches
+or a few long ones, which no scalar can distinguish.
+
+This is why the framework tests every observable a plugin declares rather than
+one headline metric per plugin, and why a plugin marks an observable that is a
+function of the others `tested=False`: reporting it is useful, testing it would
+enlarge the correction family without adding information.
+
 ## See also
 
 - {doc}`../tutorials/first_analysis` — Hands-on tutorial for running your
