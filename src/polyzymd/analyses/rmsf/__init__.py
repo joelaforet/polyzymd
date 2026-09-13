@@ -37,8 +37,7 @@ from typing import Any, ClassVar, Literal, Sequence
 import numpy as np
 from pydantic import BaseModel, Field, model_validator
 
-from polyzymd.analyses.contract import Observable, iter_frames
-from polyzymd.analyses.contract_runner import contract_analysis
+from polyzymd.analyses.contract import Observable, contract_analysis, iter_frames
 from polyzymd.analyses.exceptions import PluginContractError, ReplicateError, SelectionError
 from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
 

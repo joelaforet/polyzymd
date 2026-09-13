@@ -95,6 +95,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The second analysis lifecycle.**  `Analysis` is now the concrete lifecycle
+  every plugin runs, built by `polyzymd.analyses.contract.contract_analysis()`,
+  so the adapter module `polyzymd.analyses.contract_runner` is gone and its
+  `ContractAnalysis` class with it.  Import `contract_analysis` from
+  `polyzymd.analyses.contract` alongside `Observable` and `iter_frames`.
+  Deleted with it: the collector seam (`polyzymd.analyses.mda.plugin` in full,
+  including `MDACollectorContext`, `MDAArtifactCollector`,
+  `StrictJSONMDAResultCollector` and `strict_json_payload`;
+  `frame_selection_payload` moved to `polyzymd.analyses.mda.lifecycle`), the
+  metric-dictionary aggregator (`polyzymd.analyses.mda.aggregation` in full,
+  including `AggregatedMetric`, `MDAAggregationContext`, `MDAAggregationError`,
+  `ReplicateMetricPolicy`, `ExplicitReplicateMetricPolicy`,
+  `aggregate_replicate_artifacts`, `aggregate_replicate_artifacts_from_disk`
+  and `validate_autocorrelation_estimator_version`, whose job the
+  `shared_versions` block of the replicate identity now does),
+  `polyzymd.analyses._framework.contract.validate_analysis_subclass` and the
+  `__init_subclass__` police that called it,
+  `polyzymd.analyses._framework.results_base`, and the `Analysis` hooks
+  `build_mda_collector()`, `build_mda_metric_policy()`,
+  `_run_compute_stage_via_mda_jobs()`, `_mda_universe_provider_factory()`,
+  `_mda_artifact_store_factory()` and `_trajectory_loader_factory()`.  A test
+  that swapped a universe source through those factories now patches
+  `polyzymd.analyses.mda.lifecycle.UniverseProvider` and
+  `build_trajectory_loader` instead.  `Analysis.min_replicates` defaults to 1.
+
 - **The metric-dictionary comparison engine.**  Every plugin reports
   observables now, so the code that compared dictionaries of scalars has no
   caller.  Deleted: `polyzymd.analyses._framework.compare.default_compare`,

@@ -43,6 +43,7 @@ doi:10.1093/biomet/34.1-2.28
 
 from __future__ import annotations
 
+import inspect
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -338,6 +339,66 @@ class AnalysisProtocol(Protocol):
         Sequence[Observable]
             One observable per reported quantity.
         """
+
+
+def contract_analysis(plugin: Any) -> type["Analysis"]:
+    """Build the ``Analysis`` subclass that runs a contract plugin.
+
+    Parameters
+    ----------
+    plugin : AnalysisProtocol
+        Plugin class or instance with ``name``, ``Settings`` and ``compute``.
+        An optional ``execution_cost_hint`` or ``slurm_resource_hint`` on the
+        plugin is copied onto the generated class, so an expensive analysis can
+        still tell the orchestrator what it needs.
+
+    Returns
+    -------
+    type[Analysis]
+        Concrete analysis class for plugin discovery. Assign it to a
+        module-level name so ``polyzymd.analyses.discovery`` finds it.
+
+    Raises
+    ------
+    PluginContractError
+        If the plugin does not satisfy
+        :class:`~polyzymd.analyses.contract.AnalysisProtocol`, or if
+        ``Settings`` is not a pydantic model.
+    """
+    from polyzymd.analyses.base import Analysis, _class_prefix
+    from polyzymd.analyses.contract_plots import ContractPlotSettings
+
+    instance = plugin() if isinstance(plugin, type) else plugin
+    if not isinstance(instance, AnalysisProtocol):
+        missing = sorted(
+            attribute
+            for attribute in ("name", "Settings", "compute", "references")
+            if not hasattr(instance, attribute)
+        )
+        raise PluginContractError(
+            f"{type(instance).__name__} does not satisfy AnalysisProtocol; it is missing "
+            f"{missing}. A plugin declares name, Settings, references and compute()."
+        )
+    name = instance.name
+    settings_cls = instance.Settings
+    if not isinstance(name, str) or not name.strip():
+        raise PluginContractError(f"{type(instance).__name__} must define name as a string")
+    if not (isinstance(settings_cls, type) and issubclass(settings_cls, BaseModel)):
+        raise PluginContractError(f"{name}.Settings must be a pydantic BaseModel subclass")
+    if not callable(instance.compute):
+        raise PluginContractError(f"{name} must define compute(universe, frames, settings)")
+    attributes: dict[str, Any] = {
+        "name": name,
+        "Settings": settings_cls,
+        "PlotSettingsModel": getattr(instance, "PlotSettings", ContractPlotSettings),
+        "plugin": instance,
+        "references": tuple(getattr(instance, "references", ())),
+        "__doc__": inspect.getdoc(instance) or f"Contract analysis {name}.",
+    }
+    for hint in ("execution_cost_hint", "slurm_resource_hint"):
+        if getattr(instance, hint, None) is not None:
+            attributes[hint] = getattr(instance, hint)
+    return type(f"{_class_prefix(name)}Analysis", (Analysis,), attributes)
 
 
 def iter_frames(universe: Any, frames: FrameSelection) -> Iterator[Any]:

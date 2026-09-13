@@ -14,8 +14,7 @@ from typing import Any, ClassVar, Sequence
 
 from pydantic import BaseModel, Field
 
-from polyzymd.analyses.contract import Observable, iter_frames
-from polyzymd.analyses.contract_runner import contract_analysis
+from polyzymd.analyses.contract import Observable, contract_analysis, iter_frames
 
 
 class {{ spec.class_name }}Settings(BaseModel):

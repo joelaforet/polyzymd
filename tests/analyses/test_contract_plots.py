@@ -9,9 +9,13 @@ import pytest
 from pydantic import BaseModel
 
 from polyzymd.analyses import contract_plots
-from polyzymd.analyses.contract import Observable, ObservableAggregate, iter_frames
+from polyzymd.analyses.contract import (
+    Observable,
+    ObservableAggregate,
+    contract_analysis,
+    iter_frames,
+)
 from polyzymd.analyses.contract_plots import ContractPlotSettings
-from polyzymd.analyses.contract_runner import contract_analysis
 from tests.analyses.conftest import make_simulation_config, make_synthetic_universe
 
 matplotlib = pytest.importorskip("matplotlib")
@@ -481,7 +485,7 @@ def test_rg_writes_its_figures_through_run_comparison(
     from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
     from polyzymd.analyses.rg import RgAnalysis, RgSettings
     from polyzymd.config.comparison import PlotSettings
-    from tests.analyses.conftest import _stubbed
+    from tests.analyses.conftest import _stub_universe_source, _stubbed
 
     settings = RgSettings(runs=[{"label": "protein", "selection": "all"}])
     monkeypatch.setattr(
@@ -506,11 +510,12 @@ def test_rg_writes_its_figures_through_run_comparison(
         plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
     )
     config.model_copy = lambda deep=True: config
-    stubbed = _stubbed(
-        RgAnalysis,
+    _stub_universe_source(
+        monkeypatch,
         lambda replicate: make_synthetic_universe(scale=1.0 + 0.5 * replicate, n_frames=8),
         (),
     )
+    stubbed = _stubbed(RgAnalysis)
 
     result = AnalysisLifecycle(stubbed(), settings_resolver=lambda _a, _c: settings).run_comparison(
         config

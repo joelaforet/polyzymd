@@ -10,8 +10,7 @@ import pytest
 from pydantic import BaseModel
 
 from polyzymd.analyses.base import Condition
-from polyzymd.analyses.contract import Observable, reduce_replicate
-from polyzymd.analyses.contract_runner import contract_analysis
+from polyzymd.analyses.contract import Observable, contract_analysis, reduce_replicate
 from polyzymd.analyses.exceptions import ProtocolError
 from polyzymd.analyses.mda import ReplicateArtifact
 from polyzymd.analyses.protocols import (

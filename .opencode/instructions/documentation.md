@@ -220,8 +220,9 @@ Use MyST roles for cross-referencing:
 | `AggregateContext` | `analyses/base.py` | Context for aggregate |
 | `ComparisonContext` | `analyses/base.py` | Context for compare |
 | `PlotContext` | `analyses/base.py` | Context for plot |
-| `MetricValue` | `analyses/base.py` | Scalar metric descriptor |
-| `ComparisonResult` | `analyses/base.py` | Universal comparison result |
+| `Observable` | `analyses/contract.py` | One measured quantity from one replicate |
+| `contract_analysis()` | `analyses/contract.py` | Builds the `Analysis` subclass for a plugin |
+| `ComparisonArtifact` | `analyses/mda/artifacts.py` | Cross-condition comparison output |
 | `get_analysis()` | `analyses/discovery.py` | Plugin lookup |
 | `list_analyses()` | `analyses/discovery.py` | Plugin enumeration |
 | `run_comparison()` | `analyses/orchestrator.py` | Run one analysis |

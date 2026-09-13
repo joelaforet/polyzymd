@@ -11,7 +11,7 @@ reads back exactly what `model_dump_json()` wrote.
 |---|---|---|
 | `analysis` | `str` | Canonical analysis name, for example `rg`. |
 | `protocol_version` | `str` | The plugin's `Analysis.protocol_version`. With `analysis` it identifies the code that defined the metric. Every plugin starts at `"1"` and bumps it when the meaning, unit or estimator of a reported metric changes. |
-| `metric` | `str` | Primary metric key: the first key the plugin's `extract_metrics()` returns. |
+| `metric` | `str` | Primary metric key: the name of the plugin's first reported observable. |
 | `unit` | `str \| None` | Unit of `metric`, for example `A` or `%`. `None` marks a dimensionless metric, and also a plugin that declares no unit. |
 | `run` | `str \| None` | Selected run or pair label, for a plugin that measures the same metric on several selections (rg on `Protein` and `Polymer Oligomers`, sasa on four contexts, distances on each atom pair). `None` when the plugin reports one run. |
 | `all_metrics` | `list[str]` | Every metric key the plugin reported, `metric` first. Only `metric` is summarised in `conditions` and `pairwise`. |

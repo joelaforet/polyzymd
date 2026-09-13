@@ -27,8 +27,7 @@ from typing import Any, ClassVar, Sequence
 
 from pydantic import BaseModel
 
-from polyzymd.analyses.contract import Observable, iter_frames
-from polyzymd.analyses.contract_runner import contract_analysis
+from polyzymd.analyses.contract import Observable, contract_analysis, iter_frames
 
 
 class SolventShellSettings(BaseModel):
@@ -148,7 +147,7 @@ pixi run -e analysis polyzymd compare run solvent_shell -f comparison.yaml
 A plugin imports from three places and nowhere else.
 
 - `polyzymd.analyses.contract` for `Observable` and `iter_frames`.
-- `polyzymd.analyses.contract_runner` for `contract_analysis`.
+- `polyzymd.analyses.base` for `contract_analysis`.
 - `polyzymd.analyses.shared` for a helper that already exists, such as
   alignment, topology checks or amino acid classification.
 

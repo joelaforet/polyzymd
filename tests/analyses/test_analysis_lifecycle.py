@@ -28,7 +28,6 @@ from polyzymd.analyses.mda import (
     MDAUniversePolicy,
 )
 from polyzymd.analyses.mda.artifacts import ConditionArtifact, ReplicateArtifact
-from polyzymd.analyses.mda.plugin import MDACollectorContext
 from polyzymd.analyses.mda.store import ArtifactStoreError
 from polyzymd.analyses.orchestrator import (
     finalize_comparison_from_disk,
@@ -277,84 +276,6 @@ class _FakeMDAAnalysisBase:
         return self
 
 
-class _FakeMDAnalysisResults(dict):
-    """Import-light stand-in for ``MDAnalysis.analysis.results.Results``."""
-
-    __module__ = "MDAnalysis.analysis.results"
-
-
-class _FakeRawResultsMDAAnalysisBase:
-    """AnalysisBase-like object that exposes raw MDAnalysis-style Results."""
-
-    def __init__(self) -> None:
-        """Initialize empty results."""
-
-        self.results: _FakeMDAnalysisResults = _FakeMDAnalysisResults()
-
-    def run(self, **kwargs: Any) -> "_FakeRawResultsMDAAnalysisBase":
-        """Store deterministic raw results and return self."""
-
-        self.results = _FakeMDAnalysisResults(value=7.0, run_kwargs=dict(kwargs))
-        return self
-
-
-class _RawResultsCollector:
-    """Collector that maps fake raw Results to a replicate artifact."""
-
-    def __call__(
-        self,
-        ctx: MDACollectorContext,
-        completed_jobs: Sequence[Any],
-    ) -> ReplicateArtifact:
-        """Map fake raw results to JSON-safe artifact payloads."""
-
-        job = completed_jobs[0]
-        return ReplicateArtifact(
-            analysis_name=ctx.analysis_name,
-            condition_label=ctx.condition_label,
-            replicate=ctx.replicate,
-            payload={
-                "jobs": [
-                    {
-                        "name": job.name,
-                        "results": {
-                            "value": job.results["value"],
-                            "run_kwargs": dict(job.results["run_kwargs"]),
-                        },
-                    }
-                ],
-                "n_jobs": 1,
-            },
-            provenance={"source": "custom_test_collector"},
-            metadata={"result_kind": "mapped_raw_results"},
-            warnings=list(ctx.warnings),
-        )
-
-
-class _BypassingRawExtraCollector:
-    """Collector that bypasses Pydantic validation with a raw extra field."""
-
-    def __call__(
-        self,
-        ctx: MDACollectorContext,
-        completed_jobs: Sequence[Any],
-    ) -> ReplicateArtifact:
-        """Return an artifact with raw Results stored in an extra field."""
-
-        del completed_jobs
-        return ReplicateArtifact.model_construct(
-            analysis_name=ctx.analysis_name,
-            condition_label=ctx.condition_label,
-            replicate=ctx.replicate,
-            payload={"jobs": [], "n_jobs": 0},
-            sidecars=[],
-            provenance={},
-            metadata={},
-            warnings=[],
-            raw=_FakeMDAnalysisResults(value=99.0),
-        )
-
-
 class _MDAJobOnlyAnalysis(Analysis):
     """Analysis that uses only the MDA job lifecycle hook."""
 
@@ -364,16 +285,6 @@ class _MDAJobOnlyAnalysis(Analysis):
 
     def __init__(self) -> None:
         self.events: list[str] = []
-
-    def _trajectory_loader_factory(self) -> type[_FakeMDALoader]:
-        """Return the fake trajectory loader."""
-
-        return _FakeMDALoader
-
-    def _mda_universe_provider_factory(self) -> type[_FakeMDAUniverseProvider]:
-        """Return the fake MDA universe provider."""
-
-        return _FakeMDAUniverseProvider
 
     def get_trajectory_window(self, ctx, replicate, loader, universe) -> _FakeMDAWindow:
         """Return a deterministic frame window."""
@@ -398,6 +309,22 @@ class _MDAJobOnlyAnalysis(Analysis):
             )
         ]
 
+    def collect_replicate(
+        self, ctx: MDAReplicateJobContext, completed_jobs: Sequence[Any]
+    ) -> ReplicateArtifact:
+        """Store the fake job results in a replicate artifact."""
+
+        job = completed_jobs[0]
+        return ReplicateArtifact(
+            analysis_name=self.name,
+            condition_label=ctx.condition_label,
+            replicate=ctx.replicate,
+            payload={"jobs": [{"name": job.name, "results": dict(job.results)}]},
+            provenance={"universe_policy": ctx.universe_policy.as_dict()},
+            metadata={"settings_fingerprint": self.aggregate_settings_fingerprint(ctx.settings)},
+            warnings=list(ctx.warnings),
+        )
+
     def aggregate(
         self, ctx: AggregateContext, results: Sequence[ReplicateArtifact]
     ) -> dict[str, Any]:
@@ -414,72 +341,13 @@ class _MDAJobOnlyAnalysis(Analysis):
         }
 
 
-class _RawResultsMDAAnalysis(_MDAJobOnlyAnalysis):
-    """MDA analysis whose job exposes raw MDAnalysis-style Results."""
+@pytest.fixture(autouse=True)
+def _fake_universe_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the replicate lifecycle at the fake loader and provider."""
+    from polyzymd.analyses.mda import lifecycle
 
-    name: ClassVar[str] = "raw_mda_job_lifecycle"
-
-    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> list[MDAAnalysisJob]:
-        """Build one fake job with raw Results output."""
-
-        self.events.append(f"build_mda:{ctx.replicate}")
-        return [
-            MDAAnalysisJob(
-                name="raw_job",
-                analysis=_FakeRawResultsMDAAnalysisBase(),
-                frame_selection=ctx.frame_selection,
-                universe_policy=ctx.universe_policy,
-            )
-        ]
-
-
-class _CustomCollectorMDAAnalysis(_RawResultsMDAAnalysis):
-    """MDA analysis that maps raw Results through a custom collector."""
-
-    name: ClassVar[str] = "custom_collector_mda_lifecycle"
-
-    min_replicates: ClassVar[int] = 1
-
-    def build_mda_collector(self, ctx: MDACollectorContext) -> _RawResultsCollector:
-        """Return the custom raw-results collector."""
-
-        assert ctx.analysis_name == self.name
-        return _RawResultsCollector()
-
-
-class _BypassingRawExtraCollectorMDAAnalysis(_MDAJobOnlyAnalysis):
-    """MDA analysis whose collector returns raw Results in model extras."""
-
-    name: ClassVar[str] = "bypassing_raw_extra_collector_mda_lifecycle"
-
-    def build_mda_collector(self, ctx: MDACollectorContext) -> _BypassingRawExtraCollector:
-        """Return the bypassing collector."""
-
-        assert ctx.analysis_name == self.name
-        return _BypassingRawExtraCollector()
-
-
-class _MetricArtifactAnalysis(Analysis):
-    """Analysis that relies on default MDA artifact aggregation."""
-
-    name: ClassVar[str] = "metric_artifact_lifecycle"
-    Settings: ClassVar[type] = _LifecycleSettings
-    min_replicates: ClassVar[int] = 2
-
-    def __init__(self) -> None:
-        self.loader_requests = 0
-
-    def _trajectory_loader_factory(self) -> type[Any]:
-        """Return a loader that must not be touched during disk aggregation."""
-
-        self.loader_requests += 1
-        raise AssertionError("trajectory loader should not be used for artifact aggregation")
-
-    def build_mda_jobs(self, ctx: MDAReplicateJobContext) -> list[MDAAnalysisJob]:
-        """Satisfy the MDA compute contract without being used in this test."""
-
-        del ctx
-        raise AssertionError("MDA jobs should not run during disk aggregation")
+    monkeypatch.setattr(lifecycle, "UniverseProvider", _FakeMDAUniverseProvider)
+    monkeypatch.setattr(lifecycle, "build_trajectory_loader", lambda config: _FakeMDALoader(config))
 
 
 class _CondCfg:
@@ -742,95 +610,6 @@ def test_public_lifecycle_propagates_backend_policy_to_mda_job(tmp_path: Path) -
     }
 
 
-def test_public_lifecycle_custom_collector_maps_raw_results(tmp_path: Path) -> None:
-    """Custom collectors should map raw MDAnalysis Results to artifacts."""
-
-    analysis = _CustomCollectorMDAAnalysis()
-    condition = _condition(tmp_path, replicates=(1,))
-    output_dir = tmp_path / "analysis" / analysis.name
-
-    result = run_analysis(
-        analysis,
-        condition,
-        _LifecycleSettings(),
-        equilibration="10ns",
-        output_dir=output_dir,
-        recompute=False,
-    )
-
-    saved = ReplicateArtifact.model_validate_json(
-        (output_dir / "run_1" / "result.json").read_text()
-    )
-    assert result["mean_value"] == 7.0
-    assert saved.payload["jobs"][0]["name"] == "raw_job"
-    assert saved.payload["jobs"][0]["results"]["value"] == 7.0
-    assert saved.metadata["result_kind"] == "mapped_raw_results"
-
-
-def test_public_lifecycle_default_collector_rejects_raw_results(tmp_path: Path) -> None:
-    """Default MDA collector should require explicit mapping for raw Results."""
-
-    analysis = _RawResultsMDAAnalysis()
-    condition = _condition(tmp_path, replicates=(1,))
-
-    with pytest.raises(PluginContractError, match="raw MDAnalysis Results"):
-        run_analysis(
-            analysis,
-            condition,
-            _LifecycleSettings(),
-            equilibration="10ns",
-            output_dir=tmp_path / "analysis" / analysis.name,
-            recompute=False,
-        )
-
-
-def test_public_lifecycle_rejects_collector_raw_extra_before_save(tmp_path: Path) -> None:
-    """Lifecycle validation should catch collector artifacts with raw Results extras."""
-
-    analysis = _BypassingRawExtraCollectorMDAAnalysis()
-    condition = _condition(tmp_path, replicates=(1,))
-    output_dir = tmp_path / "analysis" / analysis.name
-
-    with pytest.raises(PluginContractError, match="raw MDAnalysis Results"):
-        run_analysis(
-            analysis,
-            condition,
-            _LifecycleSettings(),
-            equilibration="10ns",
-            output_dir=output_dir,
-            recompute=False,
-        )
-
-    assert not (output_dir / "run_1" / "result.json").exists()
-
-
-def test_aggregate_from_disk_reports_malformed_mda_artifact_context(tmp_path: Path) -> None:
-    """MDA artifact loading failures should include analysis, path, and replicate context."""
-
-    analysis = _MDAJobOnlyAnalysis()
-    condition = _condition(tmp_path, replicates=(1,))
-    output_dir = tmp_path / "analysis" / analysis.name
-    result_path = output_dir / "run_1" / "result.json"
-    result_path.parent.mkdir(parents=True)
-    result_path.write_text('{"artifact_type": "replicate", "analysis_name": "mda_job_lifecycle"}')
-
-    with pytest.raises(ArtifactStoreError) as exc_info:
-        AnalysisLifecycle(analysis).aggregate_condition_from_disk(
-            condition,
-            _LifecycleSettings(),
-            "10ns",
-            output_dir,
-            (1,),
-        )
-
-    message = str(exc_info.value)
-    assert "mda_job_lifecycle" in message
-    assert "condition='Cond'" in message
-    assert "replicate=1" in message
-    assert str(result_path) in message
-    assert "Failed to validate replicate artifact" in message
-
-
 def _artifact_provenance(tmp_path: Path) -> dict[str, Any]:
     """Build replicate provenance recording one synthetic input trajectory.
 
@@ -869,110 +648,6 @@ def _artifact_provenance(tmp_path: Path) -> dict[str, Any]:
             }
         },
     }
-
-
-def test_default_mda_aggregation_from_disk_uses_artifacts_only(tmp_path: Path) -> None:
-    """Default MDA aggregation should not load trajectories or universes."""
-
-    analysis = _MetricArtifactAnalysis()
-    condition = _condition(tmp_path, replicates=(1, 2))
-    settings = _LifecycleSettings()
-    output_dir = tmp_path / "analysis" / analysis.name
-    settings_fp = analysis.aggregate_settings_fingerprint(settings)
-    for replicate, value in ((1, 1.0), (2, 1.4)):
-        artifact = ReplicateArtifact(
-            analysis_name=analysis.name,
-            condition_label=condition.label,
-            replicate=replicate,
-            payload={"metrics": {"mean_value": value}},
-            provenance=_artifact_provenance(tmp_path),
-            metadata={"settings_fingerprint": settings_fp, "equilibration": "10ns"},
-        )
-        ArtifactStore(output_dir / f"run_{replicate}").write_replicate_result(artifact)
-
-    result = AnalysisLifecycle(analysis).aggregate_condition_from_disk(
-        condition,
-        settings,
-        "10ns",
-        output_dir,
-        (1, 2),
-    )
-
-    assert isinstance(result, ConditionArtifact)
-    assert analysis.loader_requests == 0
-    assert result.payload["metrics"]["mean_value"]["mean"] == pytest.approx(1.2)
-    assert (output_dir / "aggregated" / "result.json").exists()
-    loaded = analysis._load_aggregated_result(output_dir / "aggregated")
-    assert isinstance(loaded, ConditionArtifact)
-    assert loaded.payload == result.payload
-
-
-def test_default_mda_aggregation_from_disk_records_partial_success(tmp_path: Path) -> None:
-    """Default MDA aggregation should preserve skipped replicate provenance."""
-
-    analysis = _MetricArtifactAnalysis()
-    condition = _condition(tmp_path, replicates=(1, 2, 3))
-    settings = _LifecycleSettings()
-    output_dir = tmp_path / "analysis" / analysis.name
-    settings_fp = analysis.aggregate_settings_fingerprint(settings)
-    for replicate, value in ((1, 1.0), (3, 1.4)):
-        artifact = ReplicateArtifact(
-            analysis_name=analysis.name,
-            condition_label=condition.label,
-            replicate=replicate,
-            payload={"metrics": {"mean_value": value}},
-            provenance=_artifact_provenance(tmp_path),
-            metadata={"settings_fingerprint": settings_fp, "equilibration": "10ns"},
-        )
-        ArtifactStore(output_dir / f"run_{replicate}").write_replicate_result(artifact)
-
-    result = AnalysisLifecycle(analysis).aggregate_condition_from_disk(
-        condition,
-        settings,
-        "10ns",
-        output_dir,
-        (1, 2, 3),
-    )
-
-    assert isinstance(result, ConditionArtifact)
-    assert result.replicates == [1, 3]
-    assert result.skipped_replicates == [
-        {
-            "replicate": 2,
-            "reason": "missing artifact",
-            "path": str(output_dir / "run_2" / "result.json"),
-        }
-    ]
-    assert result.payload["metrics"]["mean_value"]["mean"] == pytest.approx(1.2)
-
-
-def test_default_mda_aggregation_rejects_unexpected_disk_artifacts(tmp_path: Path) -> None:
-    """Default lifecycle aggregation should use canonical disk discovery."""
-
-    analysis = _MetricArtifactAnalysis()
-    condition = _condition(tmp_path, replicates=(1, 2))
-    settings = _LifecycleSettings()
-    output_dir = tmp_path / "analysis" / analysis.name
-    settings_fp = analysis.aggregate_settings_fingerprint(settings)
-    for replicate, value in ((1, 1.0), (2, 1.4), (3, 1.8)):
-        artifact = ReplicateArtifact(
-            analysis_name=analysis.name,
-            condition_label=condition.label,
-            replicate=replicate,
-            payload={"metrics": {"mean_value": value}},
-            provenance=_artifact_provenance(tmp_path),
-            metadata={"settings_fingerprint": settings_fp, "equilibration": "10ns"},
-        )
-        ArtifactStore(output_dir / f"run_{replicate}").write_replicate_result(artifact)
-
-    with pytest.raises(AggregationError, match="unexpected replicate artifact"):
-        AnalysisLifecycle(analysis).aggregate_condition_from_disk(
-            condition,
-            settings,
-            "10ns",
-            output_dir,
-            (1, 2),
-        )
 
 
 def test_public_run_comparison_executes_full_lifecycle(

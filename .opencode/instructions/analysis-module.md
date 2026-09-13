@@ -2,48 +2,43 @@
 
 ## The real tree
 
-Verified against `src/polyzymd/analyses/` on 2026-09-11. Every file named here
+Verified against `src/polyzymd/analyses/` on 2026-09-13. Every file named here
 exists. If you add or delete a module, update this list in the same commit.
 
 ```
 src/polyzymd/analyses/
-├── base.py              # Public import surface for plugin authors
+├── contract.py          # Observable, the five kinds, aggregation, testing,
+│                        # and contract_analysis(), which builds the Analysis
+├── base.py              # The Analysis lifecycle and the framework contexts
+├── contract_plots.py    # One figure per observable kind
 ├── discovery.py         # pkgutil auto-discovery of plugins
 ├── orchestrator.py      # Engine: compute, aggregate, compare, plot
-├── stats.py             # default_scalar_comparison, format_scalar_comparison
+├── protocols.py         # analyze() and ProtocolReport, the agent surface
+├── stats.py             # interpret_direction, format_pct
 ├── exceptions.py        # Typed analysis errors
-├── _framework/          # aggregate_validation, cache_identity, compare,
-│                        # comparison_models, contexts, contract, io,
-│                        # lifecycle, results_base
-├── mda/                 # aggregation, artifacts, base, comparison,
-│                        # frame_selection, job, lifecycle, pair_distance,
-│                        # plugin, store, universe
+├── _framework/          # aggregate_validation, cache_identity,
+│                        # comparison_models, contexts, io, lifecycle
+├── mda/                 # artifacts, base, frame_selection, job, lifecycle,
+│                        # pair_distance, store, universe
 ├── shared/              # aa_classification, alignment, autocorrelation,
-│                        # centroid, convergence, diagnostics,
-│                        # inferential_statistics, loader, multi_run_comparison,
-│                        # multi_run_formatting, paths, plotting, selections,
-│                        # statistics, window, groupings/, selectors/
-├── catalytic_triad/     # __init__, _mda, _plot_settings, _plotters
-├── contacts/            # __init__, _aggregator, _comparison,
-│                        # _comparison_results, _events, _filters, _formatters,
-│                        # _identity, _lifecycle, _mda, _plot_settings, _plotters
-├── distances/           # __init__, _comparison_results, _formatters, _mda,
-│                        # _plot_settings, _plotters
-├── hydrogen_bonds/      # __init__, _mda, _models, _plotters
-├── rg/                  # __init__, _comparison_results, _formatters, _mda,
-│                        # _plot_settings, _plotters
-├── rmsd/                # __init__, _comparison_results, _formatters, _mda,
-│                        # _plot_settings, _plotters
-├── rmsf/                # __init__, _mda, _plot_settings, _plotters
-├── sasa/                # __init__, _artifacts, _comparison_results,
-│                        # _formatters, _mda, _plot_settings, _plotters
-└── secondary_structure/ # __init__, _mda, _plot_settings, _plotters
+│                        # centroid, diagnostics, inferential_statistics,
+│                        # loader, paths, plotting, selections, statistics,
+│                        # topology, window
+├── catalytic_triad.py
+├── contacts/__init__.py
+├── distances.py
+├── hydrogen_bonds.py
+├── rg.py
+├── rmsd.py
+├── rmsf/__init__.py
+├── sasa.py
+└── secondary_structure.py
 ```
 
-There is no `_results.py`, `_cache.py`, `_paths.py` or `_plotting.py` in any
-plugin package. Result models live in `_models.py` (hydrogen bonds), in
-`_comparison_results.py`, or in the plugin `__init__.py`. Cache and path
-handling belong to the framework artifact layer, not to plugins.
+Every plugin is one module. There is no plugin package holding `_mda.py`,
+`_plotters.py`, `_models.py`, `_formatters.py`, `_comparison.py` or
+`_events.py`. Result models, persistence, statistics and figures belong to the
+framework, not to a plugin.
 
 ## Loading trajectories
 
@@ -53,68 +48,62 @@ segment lineage, and builds the MDAnalysis universe.
 
 `polyzymd.analyses.mda.universe.UniverseProvider` wraps `TrajectoryLoader`. It
 takes a `SimulationConfig`, instantiates the loader lazily, and adds input
-provenance (`UniverseProvenance`) to each load. Plugins and framework code use
-`UniverseProvider`. Nothing else should build a `Universe` directly, and no
-plugin should construct file paths by hand.
+provenance (`UniverseProvenance`) to each load. The replicate lifecycle uses
+`UniverseProvider`. Nothing else builds a `Universe` directly, and no plugin
+constructs file paths by hand.
 
 ## Public import surface
 
-Import from `polyzymd.analyses.base`. It re-exports `Analysis`, the four
-lifecycle contexts, `MetricValue`, the comparison models, `PluginContractError`
-and `SlurmResourceHint`. Do not import `_framework/` modules from a plugin.
+A plugin imports from `polyzymd.analyses.contract` (`Observable`,
+`iter_frames`, `contract_analysis`) and from `polyzymd.analyses.shared` for a
+helper that already exists. `polyzymd.analyses.base` holds `Analysis` and the
+four framework contexts, which a plugin receives rather than constructs. Do not
+import `polyzymd.analyses._framework` from a plugin.
 
 ## Adding a plugin
 
-1. Run `polyzymd new-analysis <name>` to scaffold the package and its tests, or
-   write the package by hand under `src/polyzymd/analyses/`.
-2. Define a `Settings` class as a Pydantic v2 `BaseModel`.
-3. Subclass `Analysis` and set `name` and `Settings` as `ClassVar`s.
-4. With `has_compute_stage=True`, implement `build_mda_jobs()` and, when the
-   plugin needs one, `build_mda_collector()`. Put `AnalysisBase` subclasses in
-   `_mda.py`.
-5. Set `has_compute_stage=False` for a compare-only plugin. Setting
-   `has_aggregate_stage=True` with `has_compute_stage=False` raises
-   `PluginContractError`.
-6. Implement `aggregate()` only when `has_aggregate_stage=True`.
-7. Discovery is automatic through `pkgutil`. There is no registry to edit.
+1. Run `polyzymd new-analysis <name>`. It writes one module and one test file.
+2. Define `Settings` as a pydantic v2 `BaseModel`.
+3. Define a plugin class with `name`, `Settings`, `references` and
+   `compute(universe, frames, settings)` returning a sequence of `Observable`.
+4. End the module with `NameAnalysis = contract_analysis(Name)`. Discovery
+   finds that class; there is no registry to edit.
+5. Never aggregate across replicates, run a test, write a file or import
+   matplotlib inside `compute()`. The framework does all of it from `kind`.
 
-## Lifecycle hooks and contexts
+## The five observable kinds
 
-| Hook | When | Context | Returns |
-|------|------|---------|---------|
-| `build_mda_jobs()` plus `build_mda_collector()` | `has_compute_stage=True` | `ReplicateContext` | `ReplicateArtifact` through the collector |
-| `aggregate()` | `has_aggregate_stage=True` | `AggregateContext` | Pydantic model or dict |
-| `compare()` | Once per analysis | `ComparisonContext` | Pydantic model, or `None` |
-| `plot()` | Once per analysis | `PlotContext` | `list[Path]` |
-| `extract_metrics()` | Default compare path | `ComparisonContext` | `dict[str, MetricValue]` |
-| `filter_conditions()` | Optional | conditions | filtered conditions |
-| `format()` | Optional | comparison result | CLI text |
+| kind | values are | replicate value | reported as |
+|---|---|---|---|
+| `mean_of_timeseries` | one number per frame | mean | mean, SEM, 95 percent CI across replicates |
+| `fluctuation` | one number per frame | sample standard deviation | the same, on the fluctuation |
+| `fraction` | 0 or 1 per frame | occupancy | the same, on the fraction |
+| `profile` | one number per index | the whole vector | per-index mean and SEM |
 
-Contexts carry what a plugin needs. Never load a config inside a plugin.
-`PlotContext.plot_settings` is always a valid `PlotSettings`, so do not guard
-against `None`. A hook that returns a type outside the contract raises
-`PluginContractError`.
+A `profile` gets a comparable scalar through `reduce="mean_over_index"` or
+`"sum_over_index"`. An observable that is a function of others the plugin
+reports is declared `tested=False`, which keeps it out of the pairwise tests and
+out of the Benjamini-Hochberg family.
 
-## Two comparison paths
+## One lifecycle
 
-The simple path implements `extract_metrics()` and lets `stats.py` run the
-t-tests, the ANOVA, the Benjamini-Hochberg correction and the ranking. The
-custom path overrides `compare()` and returns its own saveable model. rmsf,
-catalytic_triad and secondary_structure take the simple path. rmsf and
-secondary_structure do define `compare()`, but only as a type guard that raises
-`TypeError` when an aggregated result is not a `ConditionArtifact` before
-delegating to `super().compare(ctx)`. That is still the simple path. Do not copy
-it as a template for a custom comparison. rmsd, rg, sasa,
-distances, contacts and hydrogen_bonds take the custom path.
+`Analysis` is concrete. `contract_analysis()` builds one subclass per plugin,
+differing only in `name`, `Settings` and `plugin`. The lifecycle writes the
+replicate artifact with a framework-written identity block, reuses a replicate
+whose identity still matches, aggregates by kind, compares under one
+Benjamini-Hochberg family, plots per kind, and formats the result. There are no
+`extract_metrics()`, `build_mda_collector()` or `compare()` hooks to override,
+and no second comparison path.
 
 ## Results and plotting
 
-Persist replicate, condition and comparison artifacts through `ArtifactStore`.
-Large arrays and event tables go in validated sidecars that the artifact
-payload refers to. Do not invent a plugin-specific cache filename scheme.
+Replicate, condition and comparison artifacts persist through `ArtifactStore`.
+The per-frame series of every observable goes to an NPZ sidecar; a plugin that
+also produces a raw table returns it as an extra sidecar from `compute()`. Do
+not invent a plugin-specific cache filename scheme.
 
-`plot()` reads cached artifacts and sidecars. It must not reload a trajectory
-or rerun an analysis.
+`plot()` reads cached artifacts and sidecars. It must not reload a trajectory or
+rerun an analysis.
 
 ## Statistical contract
 

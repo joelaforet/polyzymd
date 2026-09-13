@@ -19,11 +19,11 @@ from polyzymd.analyses.contract import (
     ObservableAggregate,
     aggregate_observables,
     compare_observables,
+    contract_analysis,
     reduce_observable,
     reduce_replicate,
     warn_unknown_settings,
 )
-from polyzymd.analyses.contract_runner import contract_analysis
 from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.mda.artifacts import ComparisonArtifact, ConditionArtifact
 from polyzymd.analyses.rg import Rg, RgAnalysis, RgSettings
@@ -477,13 +477,13 @@ def test_runner_recomputes_when_a_shared_version_is_bumped(
     ``plugin_code_hash`` only covers the plugin module, so a fix in a shared
     module has to announce itself through its version constant.
     """
-    from polyzymd.analyses import contract_runner
+    from polyzymd.analyses import base as analyses_base
 
     run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
     marker = tmp_path / "analysis" / "A" / "rg" / "run_1" / "observables.npz"
     stamp = marker.stat().st_mtime_ns
 
-    monkeypatch.setattr(contract_runner, "ALIGNMENT_VERSION", "99")
+    monkeypatch.setattr(analyses_base, "ALIGNMENT_VERSION", "99")
     run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
 
     assert marker.stat().st_mtime_ns != stamp
@@ -493,7 +493,7 @@ def test_shared_versions_are_recorded_in_the_identity_block(
     tmp_path: Path, run_contract_analysis: Any
 ) -> None:
     """The identity block names the shared modules a cached result depends on."""
-    from polyzymd.analyses.contract_runner import _shared_versions
+    from polyzymd.analyses.base import _shared_versions
 
     aggregate = run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
 
@@ -578,7 +578,7 @@ def test_runner_recomputes_when_the_plugin_source_changes(
     the superseded one produced, without a hand-maintained version key in the
     plugin.
     """
-    import polyzymd.analyses.contract_runner as runner
+    import polyzymd.analyses.base as runner
 
     run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
     marker = tmp_path / "analysis" / "A" / "rg" / "run_1" / "observables.npz"

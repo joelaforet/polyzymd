@@ -42,7 +42,7 @@ Adding a new analysis
 Write one module under ``src/polyzymd/analyses/`` holding a settings model, a
 ``compute()`` that returns :class:`~polyzymd.analyses.contract.Observable`
 objects, and one call to
-:func:`~polyzymd.analyses.contract_runner.contract_analysis`. The framework
+:func:`~polyzymd.analyses.contract.contract_analysis`. The framework
 discovers it by walking the package, so there is no registry to edit. Run
 ``polyzymd new-analysis <name>`` to generate it.
 

@@ -19,18 +19,18 @@ Here is what each stage does:
 |-------|-------|------------------|
 | **replicate stage** | One replicate of one condition | `ReplicateArtifact` at `analysis/<condition_label>/<plugin_name>/run_<N>/result.json` |
 | **aggregate** | All replicates of one condition | `ConditionArtifact` at `analysis/<condition_label>/<plugin_name>/aggregated/result.json` |
-| **compare** | All conditions together | `ComparisonArtifact` or active custom comparison result at `comparison/<plugin_name>/result.json` |
+| **compare** | All conditions together | `ComparisonArtifact` at `comparison/<plugin_name>/result.json` |
 | **plot** | All conditions together | Figures saved in the configured format, with `png` as the default and `pdf` or `svg` also supported |
 
 Each artifact stores a validated payload plus metadata, provenance, warnings,
 and references to sidecar files when an analysis needs large tables or arrays
 outside the main JSON document.
 
-Trajectory-native plugins generally create `MDAAnalysisJob` objects for their
-per-replicate computation. The corresponding collectors translate completed
-jobs into `ReplicateArtifact` objects. PolyzyMD then owns the surrounding
-workflow: condition aggregation, cross-condition comparison, artifact storage,
-and plot orchestration.
+A plugin supplies one function, `compute(universe, frames, settings)`, which
+measures one replicate and returns `Observable` objects. Everything around it
+belongs to the framework: writing the replicate artifact, reusing one whose
+identity still matches, aggregating across replicates, testing across
+conditions, storing artifacts, and drawing figures.
 
 Plots are deliberately downstream of this artifact layer. They read cached
 artifacts and sidecars only; they do not reload trajectories or rerun the
@@ -130,14 +130,14 @@ The pipeline processes data in this order:
 2. **Per-condition**: `aggregate` runs once per condition, combining replicate
    artifacts into a `ConditionArtifact`. That's 2 aggregate calls.
 3. **Cross-condition**: `compare` runs once, looking at all conditions together
-   and writing a `ComparisonArtifact` or an active custom comparison result.
-   `plot` then reads those cached outputs and any referenced sidecars.
+   and writing a `ComparisonArtifact`. `plot` then reads those cached outputs
+   and any referenced sidecars.
 
 ## Plugins — the analysis modules
 
-PolyzyMD ships with 9 analysis plugins. Each plugin is a self-contained
-module that knows how to compute one type of measurement, aggregate it, compare
-across conditions, and generate plots.
+PolyzyMD ships with nine analysis plugins. Each is one module that knows how to
+measure one kind of quantity from one replicate. Aggregation, comparison and
+plotting are the same code for all nine.
 
 The available plugins are:
 
@@ -312,9 +312,9 @@ The three output directories map directly to the pipeline stages:
   a directory with `ReplicateArtifact` files in `run_1/`, `run_2/`, ... and a
   `ConditionArtifact` in `aggregated/result.json`.
 - **`comparison/`** holds the compare output. One `result.json` per plugin
-  stores a `ComparisonArtifact` or an active custom comparison result. Default
-  scalar comparisons include framework-generated tests and rankings; custom
-  comparison outputs may use plugin-specific summaries.
+  stores a `ComparisonArtifact`, holding each condition's aggregates and one
+  test per observable, each naming its test, its correction and its adjusted
+  p-value.
 - **`figures/`** holds the plot output. One subdirectory per plugin with PNG
   files by default, or another configured format such as PDF or SVG. Plots are
   generated from cached artifacts and sidecars only.

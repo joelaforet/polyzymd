@@ -16,12 +16,8 @@ import math
 
 import pytest
 
+from polyzymd.analyses.contract import ObservableEstimate, aggregate_observables
 from polyzymd.analyses.exceptions import AnalysisError, StatisticsError
-from polyzymd.analyses.mda.aggregation import (
-    AggregatedMetric,
-    MDAAggregationContext,
-    aggregate_replicate_artifacts,
-)
 from polyzymd.analyses.mda.artifacts import ConditionArtifact, ReplicateArtifact
 from polyzymd.analyses.shared.statistics import (
     compute_sem,
@@ -125,25 +121,6 @@ class TestMeanSemCI:
             mean_sem_ci([])
 
 
-class TestAggregatedMetricDeclaresUnitsAndIntervals:
-    """The condition-level metric model must expose unit and interval fields."""
-
-    @pytest.mark.parametrize("field", ["unit", "ci95_low", "ci95_high", "ci_method"])
-    def test_aggregated_metric_exposes_field(self, field: str) -> None:
-        """AggregatedMetric carries the same fields in its JSON payload."""
-
-        metric = AggregatedMetric(
-            name="mean_rmsd",
-            values=[1.0, 1.2, 1.1],
-            mean=1.1,
-            sem=0.1,
-            std=0.1,
-            n=3,
-            unit="A",
-        )
-        assert field in metric.model_dump()
-
-
 class TestUncertaintyBlock:
     """Every aggregated payload must say what its uncertainties are."""
 
@@ -174,59 +151,42 @@ class TestUncertaintyBlock:
 
         assert artifact.payload["uncertainty"] == uncertainty_block(3)
 
-    def test_generic_aggregation_declares_uncertainty_and_interval(self) -> None:
-        """The shared aggregation path fills both the block and the interval."""
+    def test_contract_aggregation_declares_uncertainty_and_interval(self) -> None:
+        """The shared aggregation path fills the interval and names its method."""
 
-        artifacts = [
-            ReplicateArtifact(
-                analysis_name="demo",
-                condition_label="Control",
-                replicate=replicate,
-                payload={"metrics": {"mean_value": value}},
-                provenance={"frame_selection": _frame_selection()},
-            )
-            for replicate, value in zip((1, 2, 3), (2.0, 2.2, 2.4), strict=True)
+        replicates = [
+            [
+                ObservableEstimate(
+                    name="mean_value", kind="mean_of_timeseries", unit="A", value=v, n_frames=10
+                )
+            ]
+            for v in (2.0, 2.2, 2.4)
         ]
-        ctx = MDAAggregationContext(
-            analysis_name="demo",
-            condition_label="Control",
-            expected_replicates=(1, 2, 3),
-            metric_units={"mean_value": "A"},
-        )
 
-        condition = aggregate_replicate_artifacts(artifacts, ctx)
+        aggregate = aggregate_observables(replicates)[0]
 
-        assert condition.payload["uncertainty"] == uncertainty_block(3)
-        metric = condition.payload["metrics"]["mean_value"]
-        assert metric["unit"] == "A"
-        assert metric["ci_method"] == "student_t"
-        assert metric["ci95_high"] == pytest.approx(2.2 + T_FACTOR_N3 * metric["sem"])
+        assert aggregate.n_replicates == 3
+        assert aggregate.unit == "A"
+        assert aggregate.ci_method == "student_t"
+        assert aggregate.mean == pytest.approx(2.2)
+        assert aggregate.ci95_high == pytest.approx(2.2 + T_FACTOR_N3 * aggregate.sem)
 
     def test_single_replicate_aggregate_writes_null_not_zero(self) -> None:
         """A one-replicate condition must not claim zero uncertainty."""
 
-        artifacts = [
-            ReplicateArtifact(
-                analysis_name="demo",
-                condition_label="Solo",
-                replicate=1,
-                payload={"metrics": {"mean_value": 2.0}},
-                provenance={"frame_selection": _frame_selection()},
-            )
+        replicates = [
+            [
+                ObservableEstimate(
+                    name="mean_value", kind="mean_of_timeseries", unit="A", value=2.0, n_frames=10
+                )
+            ]
         ]
-        ctx = MDAAggregationContext(
-            analysis_name="demo",
-            condition_label="Solo",
-            expected_replicates=(1,),
-        )
 
-        condition = aggregate_replicate_artifacts(artifacts, ctx)
+        aggregate = aggregate_observables(replicates)[0]
 
-        metric = condition.payload["metrics"]["mean_value"]
-        assert metric["sem"] is None
-        assert metric["std"] is None
-        assert metric["ci95_low"] is None
-        assert metric["ci95_high"] is None
+        assert aggregate.sem is None
+        assert aggregate.ci95_low is None
+        assert aggregate.ci95_high is None
 
     def test_replicate_count_falls_back_to_the_payload(self) -> None:
         """When the envelope lists no replicates, n comes from the payload."""

@@ -49,8 +49,7 @@ import numpy as np
 from pydantic import BaseModel, Field, model_validator
 
 from polyzymd.analyses.base import SlurmResourceHint
-from polyzymd.analyses.contract import Observable, iter_frames
-from polyzymd.analyses.contract_runner import contract_analysis
+from polyzymd.analyses.contract import Observable, contract_analysis, iter_frames
 from polyzymd.analyses.exceptions import ReplicateError, SelectionError
 from polyzymd.analyses.shared.aa_classification import get_max_asa
 

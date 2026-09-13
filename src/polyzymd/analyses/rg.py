@@ -33,8 +33,7 @@ from typing import Any, ClassVar, Literal, Sequence
 import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from polyzymd.analyses.contract import Observable, iter_frames
-from polyzymd.analyses.contract_runner import contract_analysis
+from polyzymd.analyses.contract import Observable, contract_analysis, iter_frames
 from polyzymd.analyses.exceptions import ReplicateError, SelectionError
 from polyzymd.analyses.shared.topology import require_topology_bonds, topology_bond_source
 

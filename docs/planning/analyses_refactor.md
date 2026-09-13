@@ -164,19 +164,21 @@ first, so do not fan them out.
   - Owner:
   - Status: not started
 
-- [ ] Collapse the `MDA*Context` classes into the four framework contexts and
+- [x] Collapse the `MDA*Context` classes into the four framework contexts and
       delete the `ConditionSummary` and `ComparisonResult` family in favour of
       the artifact envelope.
-  - Branch: `analyses/context-collapse`
+  - Branch: `analyses/remove-legacy-framework`
   - Owner:
-  - Status: not started
+  - Status: done. `MDACollectorContext` is gone with `mda/plugin.py`;
+    `MDAReplicateJobContext` is the one context a plugin's replicate run sees.
 
-- [ ] Remove the `__module__` rewriting and the removed-hook police, give
+- [x] Remove the `__module__` rewriting and the removed-hook police, give
       `Analysis` real abstract methods or make it a Protocol, and replace
       `SimulationConfig` in contexts with a `TrajectorySource` protocol.
-  - Branch: `analyses/plugin-protocol`
+  - Branch: `analyses/remove-legacy-framework`
   - Owner:
-  - Status: not started
+  - Status: done. `_framework/contract.py` and `__init_subclass__` are deleted;
+    `AnalysisProtocol` in `contract.py` is what a plugin satisfies.
 
 - [ ] Add the `polyzymd.analyses` entry-point group so out-of-tree plugins load
       without living in the package.

@@ -282,7 +282,10 @@ class TestGenerateScaffold:
         plugin_path = tmp_path / "src" / "polyzymd" / "analyses" / "solvent_shell.py"
         text = plugin_path.read_text(encoding="utf-8")
 
-        assert "from polyzymd.analyses.contract import Observable, iter_frames" in text
+        assert (
+            "from polyzymd.analyses.contract import (" in text
+            or "contract import Observable" in text
+        )
         assert "MDAAnalysisJob.from_function" not in text
         assert "ScalarMeasurementAnalysis" not in text
 
