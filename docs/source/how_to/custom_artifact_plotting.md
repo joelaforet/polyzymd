@@ -4,7 +4,7 @@ Want to use the PolyzyMD artifacts to make your own plots? Use this guide when
 you already have cached analysis artifacts and sidecars and want to make your
 own matplotlib plots from those existing results. The example loads cached
 hydrogen-bond aggregate artifacts and combines the `ser_his` and `asp_his`
-summaries on one graph without rerunning the analysis.
+observables on one graph without rerunning the analysis.
 
 This workflow is intended for JupyterLab, Jupyter Notebook, VS Code notebooks,
 or an IPython session.
@@ -37,7 +37,7 @@ the intent of the figure clear.
 ## Custom hydrogen-bond occupancy plot
 
 This notebook loads existing PolyzyMD hydrogen-bond aggregate artifacts and
-plots the `ser_his` and `asp_his` summaries together. It does not rerun the
+plots the `ser_his` and `asp_his` observables together. It does not rerun the
 hydrogen-bond analysis.
 ````
 
@@ -53,7 +53,7 @@ import pandas as pd
 from polyzymd.analyses.mda import ArtifactStore
 ```
 
-## Set the project paths and summaries
+## Set the project paths and observables
 
 Edit `project_dir`, `conditions`, and `condition_dirs` to match the directory
 that contains your `comparison.yaml` and `analysis/` tree. The condition labels
@@ -84,7 +84,7 @@ condition_dirs = {
     # Edit these to match directories under analysis/
 }
 
-summary_names = ["ser_his", "asp_his"]
+observable_names = ["hbonds_ser_his", "hbonds_asp_his"]
 ```
 
 If you are unsure how labels map to directories, list the available analysis
@@ -96,9 +96,9 @@ for path in sorted((project_dir / "analysis").iterdir()):
         print(path.name)
 ```
 
-This example is useful when the built-in hydrogen-bond plot for
-`within: catalytic_triad` includes an unwanted Ser-Asp component. Loading the
-named summaries directly lets you plot only Ser-His and Asp-His occupancy.
+This example is useful when a `within: catalytic_triad` summary includes an
+unwanted Ser-Asp component. Loading the named observables directly lets you plot
+only the Ser-His and Asp-His counts.
 
 ## Validate that expected artifacts exist
 
@@ -136,10 +136,10 @@ for condition, artifact_path in artifact_paths.items():
             f"got {artifact.analysis_name!r}"
         )
 
-    summaries = artifact.payload.get("summaries")
-    if not isinstance(summaries, list):
+    observables = artifact.payload.get("observables")
+    if not isinstance(observables, list):
         raise TypeError(
-            f"Expected artifact.payload['summaries'] to be a list for {condition!r}"
+            f"Expected artifact.payload['observables'] to be a list for {condition!r}"
         )
 
     condition_artifacts[condition] = artifact
@@ -147,57 +147,48 @@ for condition, artifact_path in artifact_paths.items():
 
 ## Extract a tidy DataFrame
 
-This cell extracts one row per condition and summary. The occupancy fields mean:
+This cell extracts one row per condition and observable. A condition aggregate
+carries, for every observable:
 
-- `mean_fraction_with_any`: mean across replicates of the fraction of analyzed
-  frames with at least one H-bond matching that summary.
-- `sem_fraction_with_any`: SEM across replicates.
-- `per_replicate_fraction_with_any`: one occupancy value per replicate.
+- `mean`: mean across replicates of that replicate's mean bonds per frame.
+- `sem`: standard error across replicates.
+- `replicate_values`: one value per replicate, the value the tests use.
 
-For this example, `ser_his` is the fraction of frames with at least one Ser-His
-H-bond, and `asp_his` is the fraction of frames with at least one Asp-His
-H-bond.
+For this example, `hbonds_ser_his` is the number of Ser-His hydrogen bonds per
+frame and `hbonds_asp_his` the number of Asp-His bonds per frame.
 
 ```{note}
-Artifact payload shapes are plugin- and version-specific. This example uses the
-current hydrogen-bond artifact summary fields. Inspect `artifact.payload` and
-the plugin documentation for your PolyzyMD version before adapting the field
-names.
+Every contract plugin writes this same payload shape, so the cell below works
+unchanged for `sasa`, `rmsf` and the others. Profiles carry `profile_mean` and
+`profile_sem` instead of `mean` and `sem`; skip them by testing `kind`.
 ```
 
 ```python
 rows = []
 
 for condition, artifact in condition_artifacts.items():
-    summaries_by_name = {
-        summary["name"]: summary
-        for summary in artifact.payload["summaries"]
-        if isinstance(summary, dict) and "name" in summary
+    by_name = {
+        observable["name"]: observable
+        for observable in artifact.payload["observables"]
+        if isinstance(observable, dict) and "name" in observable
     }
 
-    missing_summaries = [
-        summary_name
-        for summary_name in summary_names
-        if summary_name not in summaries_by_name
-    ]
-    if missing_summaries:
-        available = sorted(summaries_by_name)
+    missing = [name for name in observable_names if name not in by_name]
+    if missing:
         raise KeyError(
-            f"Missing summaries for {condition!r}: {missing_summaries}. "
-            f"Available summaries: {available}"
+            f"Missing observables for {condition!r}: {missing}. "
+            f"Available observables: {sorted(by_name)}"
         )
 
-    for summary_name in summary_names:
-        summary = summaries_by_name[summary_name]
-        replicate_values = summary["per_replicate_fraction_with_any"]
-
+    for name in observable_names:
+        observable = by_name[name]
         rows.append(
             {
                 "condition": condition,
-                "summary": summary_name,
-                "mean_fraction_with_any": summary["mean_fraction_with_any"],
-                "sem_fraction_with_any": summary["sem_fraction_with_any"],
-                "per_replicate_fraction_with_any": replicate_values,
+                "observable": name,
+                "mean": observable["mean"],
+                "sem": observable["sem"],
+                "replicate_values": observable["replicate_values"],
             }
         )
 
@@ -207,18 +198,18 @@ df
 
 ## Plot grouped bars with SEM and replicate dots
 
-The bars show mean occupancy, error bars show SEM across replicates, and black
-dots show per-replicate occupancy values.
+The bars show the mean across replicates, error bars show the SEM across
+replicates, and black dots show the per-replicate values.
 
 ```python
 fig, ax = plt.subplots(figsize=(10, 5))
 
 x = np.arange(len(conditions))
-width = 0.8 / len(summary_names)
-colors = dict(zip(summary_names, plt.get_cmap("tab10").colors))
+width = 0.8 / len(observable_names)
+colors = dict(zip(observable_names, plt.get_cmap("tab10").colors))
 
-for idx, summary_name in enumerate(summary_names):
-    offset = (idx - (len(summary_names) - 1) / 2) * width
+for idx, name in enumerate(observable_names):
+    offset = (idx - (len(observable_names) - 1) / 2) * width
     bar_x = x + offset
 
     means = []
@@ -226,10 +217,10 @@ for idx, summary_name in enumerate(summary_names):
     replicate_series = []
 
     for condition in conditions:
-        row = df[(df["condition"] == condition) & (df["summary"] == summary_name)].iloc[0]
-        means.append(row["mean_fraction_with_any"])
-        sems.append(row["sem_fraction_with_any"])
-        replicate_series.append(row["per_replicate_fraction_with_any"])
+        row = df[(df["condition"] == condition) & (df["observable"] == name)].iloc[0]
+        means.append(row["mean"])
+        sems.append(row["sem"])
+        replicate_series.append(row["replicate_values"])
 
     ax.bar(
         bar_x,
@@ -237,8 +228,8 @@ for idx, summary_name in enumerate(summary_names):
         width=width,
         yerr=sems,
         capsize=4,
-        label=summary_name,
-        color=colors[summary_name],
+        label=name,
+        color=colors[name],
         edgecolor="black",
         linewidth=0.6,
         alpha=0.85,
@@ -258,10 +249,10 @@ for idx, summary_name in enumerate(summary_names):
 
 ax.set_xticks(x)
 ax.set_xticklabels(conditions, rotation=35, ha="right")
-ax.set_ylabel("Fraction of analyzed frames with ≥1 H-bond")
-ax.set_title("Catalytic triad hydrogen-bond occupancy")
+ax.set_ylabel("Hydrogen bonds per frame")
+ax.set_title("Catalytic triad hydrogen bonds")
 ax.set_ylim(bottom=0)
-ax.legend(title="Summary")
+ax.legend(title="Observable")
 ax.grid(axis="y", alpha=0.25)
 fig.tight_layout()
 ```
@@ -276,7 +267,7 @@ tree, which PolyzyMD owns.
 output_dir = project_dir / "figures" / "custom"
 output_dir.mkdir(parents=True, exist_ok=True)
 
-figure_path = output_dir / "hbond_ser_his_asp_his_occupancy.png"
+figure_path = output_dir / "hbond_ser_his_asp_his.png"
 fig.savefig(figure_path, dpi=300, bbox_inches="tight")
 figure_path
 ```
@@ -287,8 +278,9 @@ figure_path
   display labels from `comparison.yaml`.
 - Change artifact directory names by editing `condition_dirs` to match the
   directories under `analysis/`.
-- Change which hydrogen-bond summaries appear by editing `summary_names`.
-- Summary names must match the names configured in `comparison.yaml`.
+- Change which hydrogen-bond summaries appear by editing `observable_names`.
+  An observable is named `hbonds_<summary>`, so the summary part must match a
+  summary configured in `comparison.yaml`.
 - If artifacts live on an HPC filesystem, copy the small JSON artifact files to
   local storage before opening the notebook to improve responsiveness.
 - Use the same `ArtifactStore(...).read_condition_result("result.json")` pattern
@@ -326,14 +318,14 @@ for path in sorted((project_dir / "analysis").iterdir()):
         print(path.name)
 ```
 
-### `KeyError` for a summary name
+### `KeyError` for an observable name
 
-Print the available summary names from each artifact and compare them with the
-`summaries` section of `comparison.yaml`.
+Print the available observable names from each artifact and compare them with
+the `summaries` section of `comparison.yaml`.
 
 ```python
 for condition, artifact in condition_artifacts.items():
-    available = [summary.get("name") for summary in artifact.payload["summaries"]]
+    available = [item.get("name") for item in artifact.payload["observables"]]
     print(condition, available)
 ```
 

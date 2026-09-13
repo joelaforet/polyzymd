@@ -224,6 +224,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`hydrogen_bonds` runs on the observable contract.**  The 4,097-line package
+  is now one 484-line module.  Each configured summary reports
+  `hbonds_<summary>`, a `mean_of_timeseries` of bonds per frame in counts, and
+  `pair_occupancy_<summary>`, a `profile` of the most persistent residue pairs
+  indexed by rank and named in the observable labels.  The framework owns
+  persistence, aggregation, uncertainty, testing and formatting, so every mean
+  and interval is now computed across replicates rather than across frames.
+  Counts per frame match the previous implementation exactly on real data.  The
+  raw MDAnalysis event table is still written, as
+  `sidecars/hydrogen_bond_events.npz`.  `groups`, `summaries`,
+  `distance_cutoff`, `angle_cutoff`, `donor_acceptor_elements`,
+  `update_selections`, `allow_empty_groups`, `top_n_pairs` and
+  `hydrogens_selection` keep their meaning, so existing comparison files run
+  unchanged.  `composition`, `allow_overlapping_composition` and `timestep_ps`
+  are accepted with a warning and ignored; a partition breakdown is
+  a query over the event sidecar, and the framework resolves the time axis.
+
 - **The periodic box is computed first, from the protein and substrate alone.**
   `SolventBuilder.compute_box_vectors()` derives the cell from the solute
   bounding box plus `2 * (polymers.packing.padding + solvent.box.padding)`

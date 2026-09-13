@@ -529,7 +529,7 @@ Current plugin resource hints:
 
 - `sasa`: `8G`, `02:00:00`
 - `secondary_structure`: `16G`
-- `hydrogen_bonds`: `16G`
+- `hydrogen_bonds`: `8G`, `02:00:00`
 
 This means large plugins get safer defaults, while explicit CLI requests still
 override plugin hints.
