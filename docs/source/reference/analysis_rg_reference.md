@@ -22,7 +22,7 @@ observable.
 | `fragment_weighting` | `str` | `"equal"` | How the per-frame mean over fragments weights each fragment, `"equal"` or `"mass"`. Only valid in fragment mode |
 | `save_fragment_distribution` | `bool` | `true` | Report the distribution of fragment values. Fragment mode only |
 | `histogram_bins` | `int` | `50` | Number of bins in that distribution, at least 2 |
-| `histogram_range` | `[float, float]` or unset | `[0.0, 50.0]` | Lowest and highest fragment Rg the distribution covers, in Å |
+| `histogram_range` | `[float, float]` | *required when `save_fragment_distribution` is true* | Lowest and highest fragment Rg the distribution covers, in Å |
 | `allow_single_fragment_fallback` | `bool` | `false` | Measure the whole selection as one fragment when the topology has no bonds, instead of raising `TopologyBondsMissingError` |
 
 ```yaml
@@ -38,7 +38,14 @@ plugins:
         fragment_weighting: "equal"
         save_fragment_distribution: true
         histogram_bins: 50
+        histogram_range: [6.0, 10.0]
 ```
+
+A comparison file written before the port has every key above except
+`histogram_range`, and it must be added to each fragments run that keeps
+`save_fragment_distribution: true`. Pick a range that brackets the fragment
+radii of gyration you expect, or set `save_fragment_distribution: false` if you
+do not want the distribution.
 
 ## Observables
 
@@ -59,9 +66,15 @@ replicate artifact.
 
 The distribution uses fixed bin edges from `histogram_range`, not edges derived
 from the data, because every replicate of a condition must report the same
-profile index and a replicate cannot see its neighbours. A fragment value
-outside the range raises rather than being dropped from the density; widen
-`histogram_range` when that happens.
+profile index and a replicate cannot see its neighbours. That is why the range
+is required rather than defaulted: a default wide enough to be safe would put
+the whole distribution into a handful of bins without saying so. A fragment
+value outside the range raises rather than being dropped from the density;
+widen `histogram_range` when that happens.
+
+The framework averages a profile across replicates and reports a per-index mean
+and SEM, but it runs no pairwise test on one, so `rg_<label>_fragments` and
+`rg_<label>_distribution` appear in the aggregate and not in the comparison.
 
 ## Fragment mode requires topology bonds
 
@@ -152,8 +165,9 @@ block any more.
 
 | Message | Cause | Fix |
 |---|---|---|
-| `selection ... matched no atoms` | A run selection matches nothing | Check the selection against the topology. The run is no longer skipped with a warning |
+| `selection ... matched no atoms` | A run selection matches nothing | Check the selection against the topology. It raises `SelectionError`; the run is no longer skipped with a warning |
 | `in fragment mode needs topology bonds` | Fragment mode on an unbonded selection | Load a bonded topology, guess bonds, or opt into the fallback |
+| `sets save_fragment_distribution but no histogram_range` | A fragments run keeps the distribution without saying which range it covers | Add `histogram_range`, or set `save_fragment_distribution: false` |
 | `outside histogram_range` | A fragment Rg falls outside the distribution range | Widen `histogram_range` |
 | `run labels must be unique after slugging` | Two labels slug to the same observable name | Rename one run |
 | `asked for mass weighting but the topology gives fragment masses` | Zero or non-finite masses | Load a topology with masses |

@@ -3,6 +3,7 @@
  "polyzymd_commit": "6156c87e21e8b76f40c81378de9a5ccd9a142dcd",
  "mdanalysis_version": "2.10.0",
  "topology": "/home/joelaforet/Shirts-Lab-Linux/polyzymd-realdata/LipA_ResorufinButyrate_SBMA-EGMA_A50_B50_1000ns_363K_run1/solvated_system.pdb",
+ "topology_md5": "345da22890196fbc61169e9a42f31e41",
  "trajectory": "/home/joelaforet/Shirts-Lab-Linux/polyzymd-realdata/LipA_ResorufinButyrate_SBMA-EGMA_A50_B50_1000ns_363K_run1/production_0/production_0_trajectory.dcd",
  "frames": {
   "start": 500,
@@ -1168,7 +1169,11 @@
      7.2090534049346395
     ]
    ],
-   "note": "fragment_rg_mean is the mean over all 100 frames of the per-frame per-fragment values; the first 20 frames of that matrix are kept here for spot checks."
+   "note": "fragment_rg_mean is the mean over all 100 frames of the per-frame per-fragment values; the first 20 frames of that matrix are kept here for spot checks.",
+   "histogram_range": [
+    6.0,
+    10.0
+   ]
   }
  }
 }

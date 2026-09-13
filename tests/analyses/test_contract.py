@@ -334,6 +334,43 @@ def test_runner_compares_two_conditions(tmp_path: Path, run_contract_analysis: A
     assert "mean 2 A" in report
 
 
+def test_a_pre_port_aggregate_is_named_as_a_stale_cache(
+    tmp_path: Path, run_contract_analysis: Any
+) -> None:
+    """A ported plugin keeps its name on disk, so old aggregates are still there.
+
+    Reading one as a contract aggregate used to raise a bare KeyError naming
+    nothing. It now says which condition is stale and what to do about it.
+    """
+    from polyzymd.analyses.exceptions import StaleCacheError
+
+    aggregate = run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+    legacy = aggregate.model_copy(update={"payload": {"runs": [{"run_label": "protein"}]}})
+
+    with pytest.raises(StaleCacheError, match="observable contract"):
+        RgAnalysis().compare(
+            ComparisonContext(
+                name="project",
+                conditions=[
+                    Condition(
+                        label=label,
+                        config_path=tmp_path / f"{label}.yaml",
+                        replicates=(1, 2, 3),
+                        sim_config=make_simulation_config(label),
+                    )
+                    for label in ("A", "B")
+                ],
+                excluded_conditions=[],
+                control_label="A",
+                analysis_dirs={},
+                results_dir=tmp_path / "results",
+                equilibration="0ns",
+                settings=RG_SETTINGS,
+                aggregated_results={"A": legacy, "B": legacy},
+            )
+        )
+
+
 def test_contract_scaffold_renders_and_imports(tmp_path: Path) -> None:
     """The contract scaffold produces an importable plugin and a test file."""
     from polyzymd.cli.scaffold import generate_scaffold

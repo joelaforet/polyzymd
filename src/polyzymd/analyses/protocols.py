@@ -739,6 +739,7 @@ def _read_observables(payload: Mapping[str, Any], analysis_name: str) -> _Read:
         delta = _optional_float(row.get("delta"))
         testable = bool(row.get("testable", True))
         significant = bool(row.get("significant")) and testable
+        change = _optional_float(row.get("percent_change"))
         read.rows.append(
             (
                 str(row.get("name") or read.metric),
@@ -751,7 +752,7 @@ def _read_observables(payload: Mapping[str, Any], analysis_name: str) -> _Read:
                     test=read.test,
                     correction=read.correction,
                     cohens_d=_optional_float(row.get("cohens_d")),
-                    direction=_direction(delta, significant),
+                    direction=_direction(change, delta, significant),
                     significant=significant,
                     testable=testable,
                 ),
@@ -767,13 +768,22 @@ def _limits(aggregate: Mapping[str, Any]) -> tuple[float, float] | None:
     return None if low is None or high is None else (low, high)
 
 
-def _direction(delta: float | None, significant: bool) -> str:
-    """Name the direction of a change the test actually found."""
-    from polyzymd.analyses.shared.inferential_statistics import NO_SIGNIFICANT_CHANGE
+def _direction(percent_change: float | None, delta: float | None, significant: bool) -> str:
+    """Name the direction of a change the corrected test actually found.
 
-    if not significant or delta is None or delta == 0.0:
+    The words come from :func:`polyzymd.analyses.stats.interpret_direction`, the
+    same call the plugins that still own their comparison make, so the public
+    ``direction`` field has one vocabulary whichever path filled it.
+    """
+    from polyzymd.analyses.shared.inferential_statistics import NO_SIGNIFICANT_CHANGE
+    from polyzymd.analyses.stats import interpret_direction
+
+    if not significant:
         return NO_SIGNIFICANT_CHANGE
-    return "higher" if delta > 0 else "lower"
+    change = percent_change
+    if change is None:
+        change = 0.0 if not delta else math.copysign(float("inf"), delta)
+    return interpret_direction(change)
 
 
 def _group_key(source: Mapping[str, Any]) -> str:

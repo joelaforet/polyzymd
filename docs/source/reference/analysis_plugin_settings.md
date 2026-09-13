@@ -241,7 +241,7 @@ plugin raises `SelectionError` unless `allow_empty_groups` is true. Set
 | `fragment_weighting` | `"equal" \| "mass"` | `"equal"` | Weighting of the per-frame mean over fragments (fragment mode) |
 | `save_fragment_distribution` | `bool` | `true` | Report the fragment distribution as a profile over bins |
 | `histogram_bins` | `int` | `50` | Bins in the fragment distribution |
-| `histogram_range` | `[float, float] \| null` | `null`, meaning 0 to 50 A | Range the fragment distribution covers |
+| `histogram_range` | `[float, float]` | required when `save_fragment_distribution` is true | Range the fragment distribution covers, in A |
 | `allow_single_fragment_fallback` | `bool` | `false` | Measure the whole selection as one fragment when the topology has no bonds, instead of raising `TopologyBondsMissingError` |
 
 ## `rmsd`

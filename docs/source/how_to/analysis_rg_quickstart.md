@@ -182,7 +182,13 @@ plugins:
         selection: "resname SBM or resname EGM or resname EGP"
         calculation_mode: "fragments"
         fragment_weighting: "equal"
+        histogram_range: [6.0, 10.0]
 ```
+
+`histogram_range` is required whenever a fragments run keeps
+`save_fragment_distribution: true`, which is the default. The bins must be the
+same in every replicate of a condition and a replicate cannot work them out
+from its own data, so state the range the fragment radii of gyration fall in.
 
 Fragment mode needs a topology that carries bonds, because fragments are
 connected components of the bond graph. If the selected atoms have no bonds, the

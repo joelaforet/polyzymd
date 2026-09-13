@@ -1,12 +1,13 @@
-"""Radius of gyration of a selection or of its bonded fragments.
+"""Radius of gyration of a selection or of the molecules it touches.
 
 Written against the observable contract. Each configured run reports the mass
 weighted radius of gyration that MDAnalysis computes for an ``AtomGroup``. In
 ``selection`` mode that is one number per frame for the whole group. In
-``fragments`` mode the group is split into bonded fragments, every fragment is
-measured on every frame, and the run reports three things: the per-frame mean
-over fragments, the per-fragment mean over the window, and the distribution of
-the fragment values.
+``fragments`` mode the group is split with ``AtomGroup.fragments``, which
+returns the whole connected molecule behind every selected atom rather than
+only the selected part of it, every fragment is measured on every frame, and
+the run reports three things: the per-frame mean over fragments, the
+per-fragment mean over the window, and the distribution of the fragment values.
 
 Coordinates are used exactly as loaded. No unwrap, centering or make-whole
 transformation is applied, so a molecule split across a periodic boundary
@@ -26,6 +27,7 @@ MDAnalysis: a toolkit for the analysis of molecular dynamics simulations.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal, Sequence
 
 import numpy as np
@@ -33,14 +35,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.analyses.contract import Observable, iter_frames
 from polyzymd.analyses.contract_runner import contract_analysis
-from polyzymd.analyses.exceptions import ReplicateError
+from polyzymd.analyses.exceptions import ReplicateError, SelectionError
 from polyzymd.analyses.shared.topology import require_topology_bonds, topology_bond_source
-
-#: Bin edges of the fragment distribution when ``histogram_range`` is unset, in
-#: angstrom. The edges cannot come from the data: every replicate of a condition
-#: must report the same profile index, and a replicate does not see its
-#: neighbours. A value outside the range raises rather than being dropped.
-DEFAULT_HISTOGRAM_RANGE = (0.0, 50.0)
 
 
 class RgRunSettings(BaseModel):
@@ -50,7 +46,7 @@ class RgRunSettings(BaseModel):
     selection: str = Field(min_length=1, description="MDAnalysis selection string")
     calculation_mode: Literal["selection", "fragments"] = Field(
         default="selection",
-        description="Measure the whole group, or each bonded fragment of it",
+        description="Measure the whole group, or each molecule it touches",
     )
     fragment_weighting: Literal["equal", "mass"] = Field(
         default="equal",
@@ -67,7 +63,7 @@ class RgRunSettings(BaseModel):
         default=None,
         description=(
             "Lowest and highest fragment radius of gyration the distribution covers, in "
-            f"angstrom. Defaults to {DEFAULT_HISTOGRAM_RANGE}."
+            "angstrom. Required when save_fragment_distribution is true"
         ),
     )
     allow_single_fragment_fallback: bool = Field(
@@ -80,10 +76,26 @@ class RgRunSettings(BaseModel):
 
     @model_validator(mode="after")
     def _check_fragment_options(self) -> RgRunSettings:
-        """Reject fragment-only options on a selection-mode run."""
+        """Reject fragment options that do nothing, and demand the bin range.
+
+        The bin edges cannot come from the data. Every replicate of a condition
+        must report the same profile index and a replicate does not see its
+        neighbours, so the range is a setting rather than a default that would
+        silently put the whole distribution into a handful of bins.
+        """
         if self.calculation_mode == "selection" and self.fragment_weighting != "equal":
             raise ValueError("fragment_weighting applies only when calculation_mode is 'fragments'")
-        low, high = self.histogram_range or DEFAULT_HISTOGRAM_RANGE
+        if self.calculation_mode != "fragments" or not self.save_fragment_distribution:
+            return self
+        if self.histogram_range is None:
+            raise ValueError(
+                f"run {self.label!r} sets save_fragment_distribution but no histogram_range. "
+                "The distribution needs bin edges that every replicate shares, and a "
+                "replicate cannot derive them from its own data, so state the range the "
+                "fragment radii of gyration fall in, for example histogram_range: [6.0, 10.0]. "
+                "Set save_fragment_distribution: false if you do not want the distribution."
+            )
+        low, high = self.histogram_range
         if not low < high:
             raise ValueError(f"histogram_range {(low, high)} is empty or reversed")
         return self
@@ -102,6 +114,34 @@ class RgSettings(BaseModel):
         if len(set(slugs)) != len(slugs):
             raise ValueError(f"run labels must be unique after slugging, got {slugs}")
         return value
+
+
+@dataclass
+class _Measured:
+    """One run resolved against a universe, with what it collected per frame."""
+
+    run: RgRunSettings
+    groups: Sequence[Any]
+    metadata: dict[str, Any]
+    weights: np.ndarray | None
+    series: list[float] = field(default_factory=list)
+    fragments: list[np.ndarray] = field(default_factory=list)
+
+    @property
+    def slug(self) -> str:
+        """Observable name stem of this run."""
+        return _slug(self.run.label)
+
+    def measure(self) -> None:
+        """Measure the current frame of the universe."""
+        if self.run.calculation_mode == "selection":
+            self.series.append(float(self.groups[0].radius_of_gyration()))
+            return
+        values = np.asarray(
+            [fragment.radius_of_gyration() for fragment in self.groups], dtype=np.float64
+        )
+        self.fragments.append(values)
+        self.series.append(float(np.average(values, weights=self.weights)))
 
 
 class Rg:
@@ -135,9 +175,11 @@ class Rg:
 
         Raises
         ------
+        SelectionError
+            If a selection matches no atoms.
         ReplicateError
-            If a selection matches no atoms, or if a fragment value falls
-            outside ``histogram_range``.
+            If a fragment value falls outside ``histogram_range``, or if mass
+            weighting was asked for and the topology has no usable masses.
         TopologyBondsMissingError
             If a fragments run measures a selection whose topology has no
             usable bonds and ``allow_single_fragment_fallback`` is off.
@@ -148,84 +190,63 @@ class Rg:
             "topology_has_bonds": has_bonds,
             "bond_source": bond_source,
         }
-        resolved = [self._group(universe, run) for run in settings.runs]
-        groups = [(run, group) for run, (group, _) in zip(settings.runs, resolved, strict=True)]
-        metadata = [
-            base if fallback is None else {**base, "fragment_fallback": fallback}
-            for _, fallback in resolved
-        ]
-        weights = [_weights(run, group) for run, group in groups]
-        series: list[list[float]] = [[] for _ in groups]
-        fragment_frames: list[list[Any]] = [[] for _ in groups]
+        measured = [self._resolve(universe, run, base) for run in settings.runs]
         for _ in iter_frames(universe, frames):
-            for position, (run, group) in enumerate(groups):
-                if run.calculation_mode == "selection":
-                    series[position].append(float(group[0].radius_of_gyration()))
-                    continue
-                values = np.asarray(
-                    [fragment.radius_of_gyration() for fragment in group], dtype=np.float64
-                )
-                fragment_frames[position].append(values)
-                series[position].append(float(np.average(values, weights=weights[position])))
+            for item in measured:
+                item.measure()
 
         observables: list[Observable] = []
-        for position, (run, _) in enumerate(groups):
-            slug = _slug(run.label)
+        for item in measured:
             observables.append(
                 Observable(
-                    name=f"rg_{slug}",
+                    name=f"rg_{item.slug}",
                     kind="mean_of_timeseries",
                     unit="A",
-                    values=series[position],
-                    metadata=metadata[position],
+                    values=item.series,
+                    metadata=item.metadata,
                 )
             )
-            if run.calculation_mode == "fragments":
-                observables.extend(
-                    _fragment_observables(
-                        run, slug, np.asarray(fragment_frames[position]), metadata[position]
-                    )
-                )
+            if item.run.calculation_mode == "fragments":
+                observables.extend(_fragment_observables(item))
         return observables
 
     @staticmethod
-    def _group(universe: Any, run: RgRunSettings) -> tuple[Sequence[Any], str | None]:
-        """Resolve a run to the groups it measures, and any bond fallback used."""
+    def _resolve(universe: Any, run: RgRunSettings, base: dict[str, Any]) -> _Measured:
+        """Resolve one run against a universe before any frame is read."""
         atoms = universe.select_atoms(run.selection)
         if len(atoms) == 0:
-            raise ReplicateError(
+            raise SelectionError(
                 f"rg run {run.label!r} selection {run.selection!r} matched no atoms"
             )
         if run.calculation_mode == "selection":
-            return [atoms], None
-        return require_topology_bonds(
+            return _Measured(run=run, groups=[atoms], metadata=base, weights=None)
+        groups, fallback = require_topology_bonds(
             atoms,
             context=f"Rg run {run.label!r} in fragment mode",
             topology_path=getattr(universe, "filename", None),
             allow_fallback=run.allow_single_fragment_fallback,
         )
+        metadata = base if fallback is None else {**base, "fragment_fallback": fallback}
+        return _Measured(run=run, groups=groups, metadata=metadata, weights=_weights(run, groups))
 
 
-def _fragment_observables(
-    run: RgRunSettings, slug: str, matrix: np.ndarray, metadata: dict[str, Any]
-) -> list[Observable]:
-    """Build the per-fragment profile and the distribution of one fragments run.
-
-    ``matrix`` holds one row per frame and one column per fragment.
-    """
+def _fragment_observables(item: _Measured) -> list[Observable]:
+    """Build the per-fragment profile and the distribution of one fragments run."""
+    matrix = np.asarray(item.fragments)
+    run = item.run
     observables = [
         Observable(
-            name=f"rg_{slug}_fragments",
+            name=f"rg_{item.slug}_fragments",
             kind="profile",
             unit="A",
             values=matrix.mean(axis=0),
             index=np.arange(matrix.shape[1]),
-            metadata=metadata,
+            metadata=item.metadata,
         )
     ]
     if not run.save_fragment_distribution:
         return observables
-    low, high = run.histogram_range or DEFAULT_HISTOGRAM_RANGE
+    low, high = run.histogram_range
     if matrix.min() < low or matrix.max() > high:
         raise ReplicateError(
             f"rg run {run.label!r} has fragment values from {matrix.min():.3g} to "
@@ -235,12 +256,12 @@ def _fragment_observables(
     density, _ = np.histogram(matrix.ravel(), bins=edges, density=True)
     observables.append(
         Observable(
-            name=f"rg_{slug}_distribution",
+            name=f"rg_{item.slug}_distribution",
             kind="profile",
             unit="1/A",
             values=density,
             index=0.5 * (edges[:-1] + edges[1:]),
-            metadata=metadata,
+            metadata=item.metadata,
         )
     )
     return observables

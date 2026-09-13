@@ -204,7 +204,7 @@ class TestUncertaintyBlock:
         """Condition artifacts from any plugin carry the uncertainty block.
 
         Every plugin builds its aggregate through ``ConditionArtifact``, so
-        pinning the envelope pins all nine.
+        pinning the envelope pins every plugin named in ``PLUGIN_NAMES``.
         """
 
         artifact = ConditionArtifact.build(

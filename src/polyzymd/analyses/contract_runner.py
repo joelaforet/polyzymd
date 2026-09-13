@@ -33,7 +33,7 @@ from polyzymd.analyses.contract import (
     compare_observables,
     reduce_observable,
 )
-from polyzymd.analyses.exceptions import PluginContractError
+from polyzymd.analyses.exceptions import PluginContractError, StaleCacheError
 from polyzymd.analyses.mda.artifacts import (
     ArtifactSidecarRef,
     ComparisonArtifact,
@@ -221,7 +221,7 @@ class ContractAnalysis(Analysis):
                 continue
             by_condition[condition.label] = [
                 ObservableAggregate.model_validate(payload)
-                for payload in artifact.payload["observables"]
+                for payload in _observables_of(artifact, self.name, condition.label)
             ]
         if len(by_condition) < 2:
             return None
@@ -408,6 +408,25 @@ def _validated(observables: Any) -> list[Observable]:
             f"compute() must return at least one Observable, got {invalid or 'an empty sequence'}"
         )
     return list(observables)
+
+
+def _observables_of(artifact: Any, analysis_name: str, condition_label: str) -> list[Any]:
+    """Read the observables of a condition aggregate, or say the cache predates the port.
+
+    A plugin ported to the contract keeps its name on disk, so a campaign tree
+    still holds aggregates written by the version before the port. Those have a
+    per-plugin payload with no ``observables`` key, and reading one as a
+    contract aggregate would fail with a ``KeyError`` naming nothing.
+    """
+    payload = getattr(artifact, "payload", None) or {}
+    if "observables" in payload:
+        return list(payload["observables"])
+    path = getattr(artifact, "source_path", None) or f"the aggregate of {condition_label!r}"
+    raise StaleCacheError(
+        f"{analysis_name}: {path} was written before {analysis_name} moved to the observable "
+        "contract, so it holds no observables. Rerun the analysis with --recompute to "
+        "replace it."
+    )
 
 
 def _estimates(result: Any) -> list[ObservableEstimate]:

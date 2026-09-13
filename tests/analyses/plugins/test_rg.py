@@ -7,13 +7,18 @@ exactly s about their centre of mass.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
 import pytest
 
 from polyzymd.analyses.contract import ObservableAggregate
-from polyzymd.analyses.exceptions import ReplicateError, TopologyBondsMissingError
+from polyzymd.analyses.exceptions import (
+    ReplicateError,
+    SelectionError,
+    TopologyBondsMissingError,
+)
 from polyzymd.analyses.rg import Rg, RgAnalysis, RgRunSettings, RgSettings
 from tests.analyses.conftest import CROSS, make_synthetic_universe
 
@@ -91,7 +96,12 @@ def test_fragments_mode_reports_the_profile_and_its_mean() -> None:
     """Two bonded crosses of scale 1 and 2 give a profile of [1, 2] and a mean of 1.5."""
     observables = _compute(
         _bonded_universe(),
-        RgRunSettings(label="polymer", selection="all", calculation_mode="fragments"),
+        RgRunSettings(
+            label="polymer",
+            selection="all",
+            calculation_mode="fragments",
+            histogram_range=(0.0, 5.0),
+        ),
     )
 
     profile = observables["rg_polymer_fragments"]
@@ -109,6 +119,7 @@ def test_mass_weighting_leans_on_the_heavier_fragment() -> None:
             selection="all",
             calculation_mode="fragments",
             fragment_weighting="mass",
+            save_fragment_distribution=False,
         ),
     )
 
@@ -148,7 +159,12 @@ def test_a_fragment_outside_the_histogram_range_raises() -> None:
 
 def test_fragment_mode_without_bonds_raises() -> None:
     """A topology with no bonds makes fragment mode meaningless, so it fails."""
-    run = RgRunSettings(label="polymer", selection="all", calculation_mode="fragments")
+    run = RgRunSettings(
+        label="polymer",
+        selection="all",
+        calculation_mode="fragments",
+        save_fragment_distribution=False,
+    )
 
     with pytest.raises(TopologyBondsMissingError):
         _compute(make_synthetic_universe(), run)
@@ -175,7 +191,7 @@ def test_an_empty_selection_raises_instead_of_reporting_zero() -> None:
     """An empty selection is a configuration error, not a radius of gyration of 0."""
     run = RgRunSettings(label="protein", selection="index 99")
 
-    with pytest.raises(ReplicateError, match="matched no atoms"):
+    with pytest.raises(SelectionError, match="matched no atoms"):
         _compute(make_synthetic_universe(), run)
 
 
@@ -196,25 +212,58 @@ def test_two_labels_that_slug_the_same_are_rejected() -> None:
         )
 
 
-def test_the_campaign_settings_still_validate() -> None:
-    """The rg block of the LipA comparison file parses with no edits."""
-    settings = RgSettings.model_validate(
-        {
-            "runs": [
-                {"label": "Protein", "selection": "protein", "calculation_mode": "selection"},
-                {
-                    "label": "Polymer Oligomers",
-                    "selection": "resname SBM EGM",
-                    "calculation_mode": "fragments",
-                    "fragment_weighting": "equal",
-                    "save_fragment_distribution": True,
-                    "histogram_bins": 50,
-                },
-            ]
-        }
-    )
+CAMPAIGN_RUNS = [
+    {"label": "Protein", "selection": "protein", "calculation_mode": "selection"},
+    {
+        "label": "Polymer Oligomers",
+        "selection": "resname SBM EGM",
+        "calculation_mode": "fragments",
+        "fragment_weighting": "equal",
+        "save_fragment_distribution": True,
+        "histogram_bins": 50,
+    },
+]
+
+
+def test_the_campaign_settings_need_only_the_bin_range_added() -> None:
+    """Every other key of the LipA comparison file still parses as it stands."""
+    runs = [dict(run) for run in CAMPAIGN_RUNS]
+    runs[1]["histogram_range"] = [6.0, 10.0]
+
+    settings = RgSettings.model_validate({"runs": runs})
 
     assert [run.label for run in settings.runs] == ["Protein", "Polymer Oligomers"]
+    assert settings.runs[1].histogram_range == (6.0, 10.0)
+
+
+def test_a_distribution_without_a_range_is_rejected_by_name() -> None:
+    """The bins cannot be guessed, so the error says which setting is missing and why."""
+    with pytest.raises(ValueError, match="histogram_range") as excinfo:
+        RgSettings.model_validate({"runs": [dict(run) for run in CAMPAIGN_RUNS]})
+
+    message = str(excinfo.value)
+    assert "save_fragment_distribution" in message
+    assert "every replicate" in message
+
+
+def test_the_metadata_reaches_the_written_replicate_artifact(
+    tmp_path: Path, run_contract_analysis: Callable[..., Any]
+) -> None:
+    """The framework carries per-observable provenance onto disk, not just in memory."""
+    from polyzymd.analyses.mda import ArtifactStore
+
+    run_contract_analysis(
+        RgAnalysis,
+        RgSettings(runs=[RgRunSettings(label="Protein", selection="all")]),
+        make_synthetic_universe(),
+        root=tmp_path,
+    )
+
+    artifact = ArtifactStore(tmp_path / "analysis" / "A" / "rg" / "run_1").read_replicate_result()
+    metadata = artifact.payload["observables"][0]["metadata"]
+    assert metadata["pbc_policy"] == "as_loaded"
+    assert metadata["topology_has_bonds"] is False
+    assert metadata["bond_source"] == "none"
 
 
 def test_the_lifecycle_aggregates_three_replicates(

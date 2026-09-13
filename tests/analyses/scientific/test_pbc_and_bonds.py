@@ -81,6 +81,7 @@ def _fragment_run(**overrides: Any) -> Any:
         "label": "polymer",
         "selection": "all",
         "calculation_mode": "fragments",
+        "save_fragment_distribution": False,
     }
     fields.update(overrides)
     return RgRunSettings(**fields)

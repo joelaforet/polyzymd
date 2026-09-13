@@ -8,6 +8,7 @@ frames, so the values must agree to within floating point noise.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -56,11 +57,21 @@ def observables(reference: dict[str, Any]) -> dict[str, Any]:
                 fragment_weighting="equal",
                 save_fragment_distribution=True,
                 histogram_bins=50,
+                histogram_range=(6.0, 10.0),
             ),
         ]
     )
     frames = FrameSelection(start=window["start"], stop=window["stop"], step=window["step"])
     return {item.name: item for item in Rg().compute(universe, frames, settings)}
+
+
+def test_the_reference_was_frozen_from_this_topology(reference: dict[str, Any]) -> None:
+    """The frozen numbers mean nothing if the file under them has changed."""
+    topology = Path(reference["topology"])
+    if not topology.exists():
+        pytest.skip(f"real topology not present at {topology}")
+
+    assert hashlib.md5(topology.read_bytes()).hexdigest() == reference["topology_md5"]
 
 
 def test_selection_mode_matches_the_old_per_frame_series(
@@ -151,6 +162,8 @@ def test_distribution_is_a_profile_over_fixed_bins(observables: dict[str, Any]) 
     assert len(distribution.values) == 50 and len(distribution.index) == 50
     width = distribution.index[1] - distribution.index[0]
     assert sum(distribution.values) * width == pytest.approx(1.0)
+    occupied = sum(1 for value in distribution.values if value > 0.0)
+    assert occupied > 25, "the configured range must spread the fragments over the bins"
 
 
 def test_fragments_mode_on_a_protein_without_conect_records_raises() -> None:
@@ -159,7 +172,14 @@ def test_fragments_mode_on_a_protein_without_conect_records_raises() -> None:
 
     universe = _universe(CONTROL_TOPOLOGY, CONTROL_TRAJECTORY)
     settings = RgSettings(
-        runs=[RgRunSettings(label="Protein", selection="protein", calculation_mode="fragments")]
+        runs=[
+            RgRunSettings(
+                label="Protein",
+                selection="protein",
+                calculation_mode="fragments",
+                save_fragment_distribution=False,
+            )
+        ]
     )
     with pytest.raises(TopologyBondsMissingError):
         Rg().compute(universe, FrameSelection(start=0, stop=2, step=1), settings)
