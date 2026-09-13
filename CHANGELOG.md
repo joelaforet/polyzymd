@@ -108,6 +108,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The two comparison shapes `ProtocolReport` used to read.**  Every plugin
+  writes the comparison artifact of the observable contract, so the reader for
+  the framework scalar result and for a plugin's own grouped or nested result
+  is gone, along with the private helpers behind it (`_condition`,
+  `_group_summaries`, `_iter_rows`, `_row`, `_metric_keys`, `_lookup`,
+  `_group_key`, `_units` and `_tests`).  A comparison on disk written before a
+  plugin moved to the contract now raises `ProtocolError` naming the
+  `--recompute` that replaces it, instead of being read with a shape guess.  The
+  nine stored campaign artifacts under `tests/data/comparison_artifacts/` went
+  with the readers they covered; the report is now tested against artifacts
+  generated through the real comparison stage, one per plugin.
+
 - **The second analysis lifecycle.**  `Analysis` is now the concrete lifecycle
   every plugin runs, built by `polyzymd.analyses.contract.contract_analysis()`,
   so the adapter module `polyzymd.analyses.contract_runner` is gone and its

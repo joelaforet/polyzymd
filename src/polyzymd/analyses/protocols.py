@@ -5,13 +5,10 @@ builds a comparison in memory, runs the existing plugin pipeline and returns a
 :class:`ProtocolReport` in which every number states what it is. Every field is
 described in ``docs/source/reference/analysis_protocol_report.md``.
 
-Plugins store their statistics in three shapes: the MDAnalysis comparison
-artifact, the framework scalar ``ComparisonResult``, and a plugin's own
-``BaseComparisonResult``, which may group rows by run label or pair label and
-may nest them one level deeper. :func:`_read` maps all three onto the report
-models themselves, so the rest of the module has one shape to render. A result
-grouped by run reports one group at a time, named in ``run``, the rest listed
-in ``all_runs``.
+Every plugin stores its statistics in one shape, the comparison artifact of the
+observable contract. :func:`_read` maps it onto the report models, one group per
+observable. The report renders one group at a time, named in ``run``, with the
+rest listed in ``all_runs``.
 
 The replicate is the sampling unit throughout: every mean, interval and test
 uses replicates, never frames, as its sample.
@@ -502,114 +499,6 @@ def _dump(obj: Any) -> dict[str, Any]:
     return dict(obj.model_dump()) if hasattr(obj, "model_dump") else dict(obj or {})
 
 
-def _metric_keys(summary: Mapping[str, Any]) -> list[str]:
-    """Name every metric in a condition mapping by pairing a mean key with its sem."""
-    names = []
-    for key in summary:
-        if key.endswith("_mean") and f"{key[:-5]}_sem" in summary:
-            names.append(key[:-5])
-        elif f"{key}_sem" in summary:
-            names.append(key)
-    return names
-
-
-def _lookup(summary: Mapping[str, Any], metric: str, suffix: str) -> Any:
-    """Read one statistic of a metric, accepting the key spellings plugins use."""
-    for key in (f"{metric}_{suffix}", f"{suffix}_{metric}"):
-        if key in summary:
-            return summary[key]
-    return None
-
-
-def _condition(
-    label: str, values: Sequence[float], summary: Mapping[str, Any], metric: str
-) -> ConditionReport:
-    """Summarise one condition from replicate values, or from a stored mean and sem."""
-    from polyzymd.analyses.shared.statistics import (
-        CI_METHOD_STUDENT_T,
-        mean_sem_ci,
-        student_t_coverage_factor,
-    )
-
-    if values:
-        stats = mean_sem_ci(values)
-        limits = None if stats.ci_low is None else (stats.ci_low, stats.ci_high)
-        return ConditionReport(
-            label=label,
-            n_replicates=len(values),
-            mean=stats.mean,
-            sem=stats.sem,
-            ci95=limits,
-            ci_method=stats.ci_method,
-            replicate_values=list(values),
-        )
-
-    mean = _float(summary[metric] if metric in summary else _lookup(summary, metric, "mean"))
-    sem = _optional_float(_lookup(summary, metric, "sem"))
-    n = int(summary.get("n_replicates", 0) or 0)
-    factor = student_t_coverage_factor(n) if sem is not None and n > 1 else None
-    limits = None if factor is None else (mean - factor * sem, mean + factor * sem)
-    return ConditionReport(
-        label=label,
-        n_replicates=n,
-        mean=mean,
-        sem=sem,
-        ci95=limits,
-        ci_method=f"{CI_METHOD_STUDENT_T}_from_sem" if limits else None,
-    )
-
-
-def _group_summaries(summary: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    """Return a condition's per-run or per-pair summaries, empty when it has none."""
-    for key, value in summary.items():
-        if key.endswith("_summaries") and isinstance(value, list) and value:
-            entries = [_dump(entry) for entry in value]
-            if "label" in entries[0] and "per_replicate_means" in entries[0]:
-                return entries
-    return []
-
-
-def _iter_rows(source: Mapping[str, Any]) -> Iterator[dict[str, Any]]:
-    """Yield every pairwise row, flattening the one level some plugins nest."""
-    for row in source.get("pairwise_comparisons") or []:
-        row = _dump(row)
-        nested = row.get("aggregate_comparisons")
-        if isinstance(nested, list) and nested:
-            yield from (_dump(inner) for inner in nested)
-        else:
-            yield row
-
-
-def _row(raw: Mapping[str, Any], stem: str, test: str, correction: str) -> PairwiseReport:
-    """Build one comparison, trying the plain field name then the prefixed one.
-
-    ``delta`` is NaN when the row stores no condition means; :func:`_complete`
-    fills it from the condition summaries.
-    """
-
-    def get(name: str) -> Any:
-        return raw.get(name, raw.get(f"{stem}_{name}"))
-
-    mean_a = _optional_float(raw.get("condition_a_mean"))
-    mean_b = _optional_float(raw.get("condition_b_mean"))
-    testable = get("testable")
-    testable = True if testable is None else bool(testable)
-    return PairwiseReport(
-        a=str(raw.get("condition_a", "")),
-        b=str(raw.get("condition_b", "")),
-        delta=float("nan") if mean_a is None or mean_b is None else mean_b - mean_a,
-        p=_optional_float(get("p_value")),
-        p_adjusted=_optional_float(get("p_value_adjusted")),
-        test=test,
-        correction=correction,
-        cohens_d=_negate(_optional_float(get("cohens_d"))),
-        hedges_g=_negate(_optional_float(get("hedges_g"))),
-        direction=str(get("direction") or "unchanged"),
-        significant=bool(get("significant")) and testable,
-        testable=testable,
-    )
-
-
 def _complete(
     row: PairwiseReport, by_label: Mapping[str, ConditionReport], test: str
 ) -> PairwiseReport:
@@ -625,68 +514,21 @@ def _complete(
 
 
 def _read(comparison: Any, analysis_name: str) -> _Read:
-    """Map any comparison result shape onto groups, condition summaries and rows."""
-    raw = getattr(comparison, "payload", None)
+    """Map a comparison artifact onto groups, condition summaries and rows."""
+    payload = getattr(comparison, "payload", None)
     if (
-        isinstance(raw, Mapping)
-        and "comparisons" in raw
-        and isinstance(raw.get("conditions"), Mapping)
+        isinstance(payload, Mapping)
+        and "comparisons" in payload
+        and isinstance(payload.get("conditions"), Mapping)
     ):
-        return _read_observables(raw, analysis_name)
-    payload = dict(raw) if isinstance(raw, Mapping) and "condition_summaries" in raw else None
-    body = _dump(comparison)
-    source = payload or body
-    key = "condition_summaries" if payload else "conditions"
-    summaries = [_dump(item) for item in source.get(key) or []]
-    if not summaries:
-        raise ProtocolError(
-            f"{analysis_name}: the comparison reported no conditions.",
-            hint="Check that each condition has aggregated replicate results on disk.",
-        )
-
-    metric = str(body.get("metric") or "")
-    stem = metric[5:] if metric.startswith("mean_") else metric
-    read = _Read(metric=metric or analysis_name)
-    read.test, read.correction = _tests(payload, body)
-
-    if _group_summaries(summaries[0]):
-        read.grouped_by_run = True
-        for summary in summaries:
-            label = str(summary.get("label", ""))
-            for entry in _group_summaries(summary):
-                group = str(entry.get("label", ""))
-                if group not in read.groups:
-                    read.groups.append(group)
-                values = [_float(value) for value in entry.get("per_replicate_means") or []]
-                read.series.append((group, _condition(label, values, entry, metric)))
-    else:
-        for summary in summaries:
-            label = str(summary.get("label", ""))
-            names = _metric_keys(summary)
-            if not names and summary.get("replicate_values"):
-                # BaseConditionSummary declares one metric, named at the top
-                # level, with its values on the condition itself.
-                names = [read.metric]
-            for name in names:
-                if name not in read.groups:
-                    read.groups.append(name)
-                key = "replicate_values" if name == read.metric else f"{name}_replicate_values"
-                values = [_float(value) for value in summary.get(key) or []]
-                read.series.append((name, _condition(label, values, summary, name)))
-        if not read.groups:
-            raise ProtocolError(
-                f"{analysis_name}: no condition reported a usable metric.",
-                hint="Run 'polyzymd compare run --format json' to inspect the raw result.",
-            )
-        read.metric = read.groups[0]
-
-    label_key = _group_key(source)
-    for entry in _iter_rows(source):
-        group = str(entry.get("metric") or entry.get(label_key) or read.groups[0])
-        read.rows.append((group, _row(entry, stem, read.test, read.correction)))
-
-    read.units = _units(source, summaries, read.groups)
-    return read
+        return _read_observables(payload, analysis_name)
+    raise ProtocolError(
+        f"{analysis_name}: the comparison is not an observable-contract artifact.",
+        hint=(
+            "It was written before the plugin moved to the observable contract. "
+            "Rerun the analysis with --recompute to replace it."
+        ),
+    )
 
 
 def _read_observables(payload: Mapping[str, Any], analysis_name: str) -> _Read:
@@ -807,46 +649,6 @@ def _direction(percent_change: float | None, delta: float | None, significant: b
     if change is None:
         change = 0.0 if not delta else math.copysign(float("inf"), delta)
     return interpret_direction(change)
-
-
-def _group_key(source: Mapping[str, Any]) -> str:
-    """Name the row field carrying the run or pair label, if there is one."""
-    for row in source.get("pairwise_comparisons") or []:
-        for key in _dump(row):
-            if key.endswith("_label"):
-                return key
-    return "metric"
-
-
-def _units(
-    source: Mapping[str, Any], summaries: Sequence[Mapping[str, Any]], groups: Sequence[str]
-) -> dict[str, str | None]:
-    """Collect each group's unit from the metric metadata and the conditions."""
-    units: dict[str, str | None] = dict.fromkeys(groups)
-    metadata = source.get("metric_metadata") or {}
-    if isinstance(metadata, Mapping):
-        for name, entry in metadata.items():
-            if isinstance(entry, Mapping) and entry.get("unit"):
-                units[str(name)] = str(entry["unit"])
-    for summary in summaries:
-        for group in list(units):
-            value = _lookup(summary, group, "unit")
-            if value:
-                units[group] = str(value)
-    return units
-
-
-def _tests(payload: Mapping[str, Any] | None, body: Mapping[str, Any]) -> tuple[str, str]:
-    """Name the two-sample test and the multiplicity correction the plugin used."""
-    parameters = (payload or {}).get("statistical_parameters") or {}
-    ttest = parameters.get("ttest_method") or body.get("ttest_method") or "student"
-    posthoc = parameters.get("posthoc_method") or body.get("posthoc_method") or "ttest_bh"
-    if posthoc == "tukey_hsd":
-        return "tukey_hsd", "tukey_hsd"
-    return (
-        "welch_t" if ttest == "welch" else "student_t",
-        "BH" if posthoc == "ttest_bh" else str(posthoc),
-    )
 
 
 def _select_group(read: _Read, run: str | None, analysis_name: str) -> str:
