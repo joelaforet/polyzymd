@@ -236,3 +236,20 @@ The LipA 363 K campaign (`/projects/jola3134/Enzyme_Immobilization/polyzymd_sims
 Joe asked for the plugin ports to start before the eleven pull requests above are reviewed. The branch `analyses_ported` merges PRs 102 to 112 as they stand and is the base for every port; conflicts with the eventual merges into `analyses_refactor` are dealt with afterwards. Each port is one branch `analyses/port-<plugin>` and one pull request against `analyses_ported`. A port reimplements the plugin on the Observable contract following `rg_contract` and the `--style contract` scaffold, freezes reference values from the old implementation on real LipA data (two runs copied to local storage; frames 500 to 600), proves parity to the frozen values, deletes the old package outright, and then deletes whatever that leaves unreferenced. The prerequisite `analyses/contract-plots` supplies figures keyed on kind so the ports can delete their `_plotters.py` modules.
 
 Order: wave 1 is contract plots plus rmsf, secondary structure, rmsd and sasa; wave 2 is rg (promoting `rg2`), distances and catalytic triad, which share the pair-distance machinery; wave 3 is hydrogen bonds and contacts, the two with event-level outputs; wave 4 removes the legacy framework (`_framework/compare.py`, most of `comparison_models.py`, `mda/plugin.py`, `mda/comparison.py`, `_framework/contract.py`, the multi-run comparison and formatting helpers, the bespoke parts of `stats.py`, the `MDA*Context` classes, the `__module__` rewriting in `base.py`, the non-contract scaffold templates) and collapses `protocols.py` to one result shape. Target after wave 4: the module under 20,000 lines, from 51,982 at the start.
+
+### Port phase pull requests (against `analyses_ported`)
+
+| PR | Branch | Plugin or item | Source net | Parity on real data |
+|---|---|---|---|---|
+| 113 | `analyses/contract-plots` | figures keyed on kind | +460 | not applicable |
+| 114 | `analyses/fix-alignment-reference` | `AlignTraj` reference frame bug, shared versions in identity | -62 | RMSF centroid and frame modes now differ (0.8437 vs 0.8434 Å) |
+| 115 | `analyses/port-secondary-structure` | secondary_structure, 1,790 to 210 lines | -1,551 | exact |
+| 116 | `analyses/port-rmsd` | rmsd, 3,131 to 304 lines; convergence module deleted | -3,025 | exact (average), float32 noise after dropping the alignment pass (frame, centroid, external) |
+| 117 | `analyses/port-sasa` | sasa, 4,538 to 338 lines | -4,157 | exact, four contexts |
+| 118 | `analyses/port-rmsf` | rmsf, 2,195 to 273 lines | -1,797 | exact, three modes |
+| 119 | `analyses/port-distances` | distances and catalytic_triad, 5,892 to 326 lines | -6,025 | exact, five pairs |
+| 120 | `analyses/port-rg` | rg, 3,987 to 288 lines | -3,555 | exact, protein and 38 fragments |
+| pending | `analyses/port-hydrogen-bonds` | hydrogen_bonds, 4,097 to 430 lines | -3,596 | exact, seven partitions; corrected protein-polymer count 7.07 per frame against 132.9 |
+| pending | `analyses/port-contacts` | contacts, 6,203 to 420 lines; shared/groupings and shared/selectors deleted | -7,378 | exact |
+
+Sum of the ports so far: about 30,700 source lines removed against about 1,900 added, before the legacy framework removal.
