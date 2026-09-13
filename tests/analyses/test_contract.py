@@ -358,3 +358,52 @@ def test_contract_scaffold_renders_and_imports(tmp_path: Path) -> None:
             types.SimpleNamespace(start=0, stop=3, step=1, frames=None),
             module.ProbeContractSettings(),
         )
+
+
+def test_a_plugin_can_return_an_extra_sidecar_array(
+    tmp_path: Path, run_contract_analysis: Any
+) -> None:
+    """compute() may return (observables, extra_sidecars) for a raw table.
+
+    Contacts and hydrogen bonds produce an event list that is neither a
+    per-frame series nor a profile, so the runner writes each extra array as
+    its own NPZ beside the observables rather than forcing it into a kind.
+    """
+
+    class WithEvents:
+        name = "with_events"
+        Settings = RgSettings
+        references = ()
+
+        def compute(self, universe: Any, frames: Any, settings: Any) -> Any:
+            del universe, frames, settings
+            return [_series([1.0, 2.0, 3.0], name="probe")], {
+                "events": np.asarray([[1, 2], [3, 4]], dtype=np.int64)
+            }
+
+    analysis_cls = contract_analysis(WithEvents)
+    aggregate = run_contract_analysis(
+        analysis_cls, RG_SETTINGS, _universes_from(1.0), root=tmp_path
+    )
+
+    assert isinstance(aggregate, ConditionArtifact)
+    sidecar = tmp_path / "analysis" / "A" / "with_events" / "run_1" / "sidecars" / "events.npz"
+    assert sidecar.exists()
+    with np.load(sidecar) as data:
+        assert data["events"].tolist() == [[1, 2], [3, 4]]
+
+
+def test_a_plugin_hint_reaches_the_generated_class() -> None:
+    """An execution cost hint on the plugin is copied onto the analysis class."""
+
+    class Expensive:
+        name = "expensive"
+        Settings = RgSettings
+        references = ()
+        execution_cost_hint = "high"
+
+        def compute(self, universe: Any, frames: Any, settings: Any) -> Any:
+            del universe, frames, settings
+            return [_series([1.0, 2.0])]
+
+    assert contract_analysis(Expensive).execution_cost_hint == "high"
