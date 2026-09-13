@@ -39,8 +39,6 @@ T_FACTOR_N3 = 4.302652729749462
 PLUGINS_WITH_PLOT_SETTINGS = (
     "rg",
     "contacts",
-    "distances",
-    "catalytic_triad",
 )
 
 

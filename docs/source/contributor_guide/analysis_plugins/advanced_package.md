@@ -36,11 +36,12 @@ change.
 
 ## Use built-in packages as examples, not import targets
 
-Built-in plugins such as `rmsf`, `distances`, `contacts`, `sasa`, `rg`,
-`hydrogen_bonds`, and `catalytic_triad` show real package shapes. `rmsd` and
-`secondary_structure` are no longer among them, because they are written
-against the observable contract and are one module each. Their private helper
-modules are useful examples of organization:
+Built-in plugins such as `contacts` and `hydrogen_bonds` show real package
+shapes. A new analysis should start from the observable contract instead, as
+`rmsd`, `rmsf`, `rg`, `sasa`, `distances`, `catalytic_triad` and
+`secondary_structure` now do; a package is only worth its weight when the
+analysis genuinely needs one. Their private helper modules are useful examples
+of organization:
 
 - `_mda.py` for trajectory-native job and collector helpers;
 - `_plotters.py` for artifact-only plotting helpers;

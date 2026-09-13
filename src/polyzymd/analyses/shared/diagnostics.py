@@ -285,6 +285,20 @@ def validate_equilibration_time(
     return (True, None)
 
 
+def _chain_identities(atoms: "AtomGroup") -> set[str] | None:
+    """Chain IDs of a selection, segment IDs as a fallback, None when it has neither."""
+    from MDAnalysis.exceptions import NoDataError
+
+    try:
+        return {str(atom.chainID) for atom in atoms}
+    except (AttributeError, NoDataError):
+        pass
+    try:
+        return {str(segid) for segid in atoms.segments.segids}
+    except (AttributeError, NoDataError):
+        return None
+
+
 def warn_if_multi_chain_selection(
     atoms: "AtomGroup",
     selection: str,
@@ -340,12 +354,14 @@ def warn_if_multi_chain_selection(
     if len(atoms) == 0:
         return False
 
-    # Get unique chain IDs
-    try:
-        chain_ids = {atom.chainID for atom in atoms}
-    except AttributeError:
-        # Fallback to segment IDs if chainID not available
-        chain_ids = set(atoms.segments.segids)
+    chain_ids = _chain_identities(atoms)
+    if chain_ids is None:
+        LOGGER.debug(
+            "Selection '%s' cannot be checked for multiple chains: the topology carries "
+            "neither chain IDs nor segment IDs.",
+            selection,
+        )
+        return False
 
     if len(chain_ids) > 1:
         # Get residue names to help user understand what was selected

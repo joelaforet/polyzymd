@@ -128,8 +128,8 @@ Stable analysis plugins:
 | `rg` | No (custom) | `mean_rg` | Protein compactness | FDR-corrected per-run pairwise t-tests + omnibus ANOVA |
 | `rmsf` | Observable contract | `rmsf_mean` | Per-residue flexibility | t-test on replicate values, one Benjamini-Hochberg family across the whole run |
 | `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests + omnibus ANOVA |
-| `distances` | No (custom) | Multiple distance metrics | Named distance pairs | FDR-corrected per-pair t-tests + omnibus ANOVA |
-| `catalytic_triad` | Yes | `simultaneous_contact_fraction` | Active-site geometry | FDR-corrected pairwise t-tests + omnibus ANOVA |
+| `distances` | Yes (observable contract) | One distance and one contact fraction per pair | Named distance pairs | FDR-corrected t-tests over replicate values |
+| `catalytic_triad` | Yes (observable contract) | `simultaneous_contact_fraction` | Active-site geometry | FDR-corrected t-tests over replicate values |
 | `secondary_structure` | Yes | `ss_helix` and `ss_strand` (`ss_coil` and `ss_unassigned` reported, not tested) | Secondary structure content | FDR-corrected pairwise t-tests over replicates |
 | `sasa` | Yes (observable contract) | `sasa_<label>` in A^2 | Target and context selections per measured context | Student or Welch t-test per observable, one Benjamini-Hochberg family |
 | `hydrogen_bonds` | Custom loader with default-style scalar statistics | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA per configured summary |

@@ -103,13 +103,13 @@ shared-utility autodoc blocks.
 | Plugin name | Public package | Primary output contract | Comparison style |
 |-------------|----------------|-------------------------|------------------|
 | `contacts` | `polyzymd.analyses.contacts` | Contact-event artifacts and sidecars | Custom comparison |
-| `distances` | `polyzymd.analyses.distances` | Pair-distance artifacts | Custom comparison |
+| `distances` | `polyzymd.analyses.distances` | Observables, one distance and one contact fraction per pair | Observable contract |
 | `hydrogen_bonds` | `polyzymd.analyses.hydrogen_bonds` | Hydrogen-bond event artifacts | Custom comparison |
 | `rmsd` | `polyzymd.analyses.rmsd` | One `mean_of_timeseries` observable per run | Observable contract |
 | `rg` | `polyzymd.analyses.rg` | Per-run radius-of-gyration artifacts | Custom multi-run comparison |
 | `rmsf` | `polyzymd.analyses.rmsf` | `rmsf` profile and `rmsf_mean` observables | Observable contract |
 | `sasa` | `polyzymd.analyses.sasa` | Observable artifacts and an NPZ sidecar | Observable contract |
-| `catalytic_triad` | `polyzymd.analyses.catalytic_triad` | Pair-distance-derived artifacts | Default scalar comparison |
+| `catalytic_triad` | `polyzymd.analyses.catalytic_triad` | Observables, per pair plus the simultaneous contact fraction | Observable contract |
 | `secondary_structure` | `polyzymd.analyses.secondary_structure` | Four DSSP fractions and two occupancy profiles | Observable contract |
 
 Built-in plugin packages expose their public `Analysis` subclass and supported

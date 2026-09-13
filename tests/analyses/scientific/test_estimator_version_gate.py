@@ -11,27 +11,10 @@ from __future__ import annotations
 
 import pytest
 
-from polyzymd.analyses.catalytic_triad import CatalyticTriadSettings, TriadPairSettings
-from polyzymd.analyses.distances import DistancesSettings
 from polyzymd.analyses.mda import MDAAggregationError, ReplicateArtifact
 from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 
 FINGERPRINT = "fingerprint"
-
-
-def _triad_settings() -> CatalyticTriadSettings:
-    """Return minimal catalytic-triad settings."""
-
-    return CatalyticTriadSettings(
-        name="triad",
-        pairs=[
-            TriadPairSettings(
-                label="A-B",
-                selection_a="resid 1 and name OD1",
-                selection_b="resid 2 and name ND1",
-            )
-        ],
-    )
 
 
 def _replicate_artifact(analysis_name: str, *, estimator_version: str | None) -> ReplicateArtifact:
@@ -62,20 +45,10 @@ def _validator_call(analysis_name: str, artifact: ReplicateArtifact, tmp_path):
         from polyzymd.analyses.rg._mda import _validate_and_order_artifacts as validate
 
         return validate(run_labels=["default"], analysis_dir=tmp_path, **common)
-    if analysis_name == "distances":
-        from polyzymd.analyses.distances._mda import _validate_and_order_artifacts as validate
-
-        return validate(settings=DistancesSettings(), analysis_dir=tmp_path, **common)
-    if analysis_name == "catalytic_triad":
-        from polyzymd.analyses.catalytic_triad._mda import (
-            _validate_and_order_artifacts as validate,
-        )
-
-        return validate(settings=_triad_settings(), analysis_dir=tmp_path, **common)
     raise AssertionError(f"unhandled analysis {analysis_name}")
 
 
-PLUGINS = ["rg", "distances", "catalytic_triad"]
+PLUGINS = ["rg"]
 
 
 @pytest.mark.parametrize("analysis_name", PLUGINS)

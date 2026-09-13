@@ -127,11 +127,13 @@ Equilibration: 100ns
 
 Comparison result: comparison/catalytic_triad/result.json
 
-Condition         Simultaneous Contact   SEM
-------------------------------------------------
-No Polymer        49.9%                  27.3%
-With Polymer      87.3%                   2.2%
+No Polymer  simultaneous_contact_fraction  fraction  mean 0.499  sem 0.273  ci95 0.32 to 0.68  n 3
+With Polymer  simultaneous_contact_fraction  fraction  mean 0.873  sem 0.022  ci95 0.78 to 0.97  n 3
+No Polymer vs With Polymer  simultaneous_contact_fraction  delta +0.374  p_adj 0.04  test student_t  correction benjamini_hochberg  significant
 ```
+
+Contact fractions are fractions in `[0, 1]`. Multiply by 100 yourself if a
+figure or a table wants percent.
 
 Replicates and conditions always come from `comparison.yaml`.
 ````
@@ -154,13 +156,14 @@ pipeline_result = run_comparison(
     equilibration="100ns",
 )
 
-result = pipeline_result["comparison"]
-print(f"Ranking (best triad first): {result.ranking}")
+from polyzymd.analyses.contract import ObservableAggregate
 
-for condition in result.conditions:
-    contact_pct = condition.mean_simultaneous_contact * 100
-    sem_pct = condition.sem_simultaneous_contact * 100
-    print(f"{condition.label}: {contact_pct:.1f} ± {sem_pct:.1f}%")
+result = pipeline_result["comparison"]
+for label, payloads in result.payload["conditions"].items():
+    for payload in payloads:
+        aggregate = ObservableAggregate.model_validate(payload)
+        if aggregate.name == "simultaneous_contact_fraction":
+            print(f"{label}: {aggregate.mean:.3f} +/- {aggregate.sem:.3f} ({aggregate.unit})")
 ```
 ````
 
@@ -199,17 +202,18 @@ polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
 ```
 
 The comparison includes:
-- Ranking by simultaneous contact fraction (higher is better)
-- Pairwise tests with p-values and effect sizes
-- Percent change relative to control
+- Every observable per condition, with its mean over replicates, its SEM, its
+  95 percent interval and its replicate count
+- A test of every observable against the control, with Cohen's d, the percent
+  change and a Benjamini-Hochberg adjusted p-value over the whole run
 
 For broader comparison workflow guidance, see
 {doc}`analysis_compare_conditions`.
 
 ## Reference and Troubleshooting
 
-For full field tables, output file structures, JSON schemas, plot descriptions,
-CLI option lookup, and troubleshooting fixes, see
+For the full settings tables, the observables the plugin reports, the output
+file layout, CLI options and troubleshooting fixes, see
 {doc}`../reference/analysis_triad_reference`.
 
 For statistical interpretation and best practices, see

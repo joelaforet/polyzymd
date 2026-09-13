@@ -21,9 +21,7 @@ _PLOTTER_MODULES = ("polyzymd.analyses.contract_plots",) + tuple(
     for name in (
         "rg",
         "contacts",
-        "distances",
         "hydrogen_bonds",
-        "catalytic_triad",
     )
 )
 

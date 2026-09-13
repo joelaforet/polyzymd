@@ -43,6 +43,7 @@ doi:10.1093/biomet/34.1-2.28
 
 from __future__ import annotations
 
+import warnings
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -132,7 +133,9 @@ class Observable(BaseModel):
         JSON-compatible facts about how the value was measured, for example the
         periodic boundary policy or whether the topology carried bonds. The
         framework copies it onto the replicate estimate and writes it into the
-        replicate artifact. It takes no part in the statistics.
+        replicate artifact. It takes no part in the statistics. Strings under
+        the ``"warnings"`` key are also copied onto the replicate artifact's
+        warning list.
     n_frames : int or None, optional
         Number of frames the values were computed from. Only a ``profile``
         needs it, because its values are indexed by residue or bin rather than
@@ -646,6 +649,42 @@ def compare_observables(
                 )
             )
     return _adjust(comparisons, fdr_alpha=fdr_alpha, use_tukey=use_tukey)
+
+
+def warn_unknown_settings(
+    settings: BaseModel, *, deprecated: Mapping[str, str] | None = None
+) -> None:
+    """Warn about settings keys the model does not define.
+
+    A settings model that accepts extra keys keeps an old comparison file
+    loading, but it also swallows a typo such as ``thresold``. Call this from a
+    model validator so every extra key is named out loud: a key listed in
+    ``deprecated`` gets its own message and a ``DeprecationWarning``, anything
+    else gets a ``UserWarning`` saying it is unknown and ignored.
+
+    Parameters
+    ----------
+    settings : BaseModel
+        Model instance to inspect, parsed with ``extra="allow"``.
+    deprecated : Mapping[str, str] or None, optional
+        Keys that are accepted on purpose for one release, mapped to the
+        sentence explaining what replaced them.
+    """
+    known = deprecated or {}
+    for key in sorted(settings.model_extra or {}):
+        if key in known:
+            warnings.warn(
+                f"{type(settings).__name__}: '{key}' is deprecated and ignored. {known[key]}",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+        else:
+            warnings.warn(
+                f"{type(settings).__name__}: '{key}' is not a setting of this analysis and is "
+                "ignored. Check the spelling against the plugin reference page.",
+                UserWarning,
+                stacklevel=3,
+            )
 
 
 def _adjust(

@@ -1,43 +1,22 @@
-"""Special selection syntax for distance calculations.
+"""Extended selection syntax for pair-distance endpoints.
 
-This module provides parsing of extended selection syntax for defining
-atom positions in distance calculations. It supports:
+A pair endpoint is one point, and this module says which point a selection
+string means. Three forms are understood:
 
-1. Standard MDAnalysis selections: "resid 133 and name OD1"
-2. Midpoint of multiple atoms: "midpoint(resid 133 and name OD1 OD2)"
-3. Center of mass of a group: "com(resid 50-75)"
+1. A standard MDAnalysis selection of one atom, ``"resid 77 and name OG"``.
+2. The midpoint of several atoms, ``"midpoint(resid 133 and name OD1 OD2)"``,
+   which is how a carboxyl group is usually treated.
+3. The centre of mass of a group, ``"com(resid 50-75)"``, which is how a
+   domain such as a lipase lid is usually treated.
 
-Examples
---------
->>> from polyzymd.analyses.shared.selections import parse_selection_string, get_position
->>>
->>> # Standard selection - single atom
->>> ag = parse_selection(universe, "resid 77 and name OG")
->>> pos = get_position(ag)  # Returns position of single atom
->>>
->>> # Midpoint of Asp carboxyl oxygens
->>> ag = parse_selection(universe, "midpoint(resid 133 and name OD1 OD2)")
->>> pos = get_position(ag)  # Returns midpoint of OD1 and OD2
->>>
->>> # Center of mass of lid domain
->>> ag = parse_selection(universe, "com(resid 50-75)")
->>> pos = get_position(ag)  # Returns COM of residues 50-75
-
-Notes
------
-The `midpoint()` syntax is particularly useful for catalytic residues where
-the functional position is between two atoms (e.g., Asp carboxyl oxygens,
-Glu carboxyl oxygens).
-
-The `com()` syntax is useful for domain motions where you want to track
-the center of mass of a group of residues (e.g., lid opening in lipases).
+:func:`parse_selection_string` splits the wrapper from the selection and
+:func:`get_position` reduces the selected atoms to one position.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-import sys
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -47,24 +26,8 @@ from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from MDAnalysis.core.groups import AtomGroup
-    from MDAnalysis.core.universe import Universe
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _expected_selection_exceptions() -> tuple[type[Exception], ...]:
-    """Return exception types that represent expected selection failures.
-
-    MDAnalysis exception classes are inspected only when already loaded so
-    selection helpers remain importable without the analysis stack installed.
-    """
-
-    exceptions: list[type[Exception]] = [ValueError, AttributeError]
-    mda_exceptions = sys.modules.get("MDAnalysis.exceptions")
-    selection_error = getattr(mda_exceptions, "SelectionError", None)
-    if isinstance(selection_error, type) and issubclass(selection_error, Exception):
-        exceptions.append(selection_error)
-    return tuple(exceptions)
 
 
 # =============================================================================
@@ -216,38 +179,6 @@ def parse_selection_string(selection: str) -> ParsedSelection:
     )
 
 
-def select_atoms(universe: "Universe", selection: str) -> "AtomGroup":
-    """Select atoms from universe using potentially special syntax.
-
-    Parameters
-    ----------
-    universe : Universe
-        MDAnalysis Universe
-    selection : str
-        Selection string (standard or special syntax)
-
-    Returns
-    -------
-    AtomGroup
-        Selected atoms
-
-    Raises
-    ------
-    ValueError
-        If selection matches no atoms, with diagnostic info
-    """
-    from polyzymd.analyses.shared.diagnostics import get_selection_diagnostics
-
-    parsed = parse_selection_string(selection)
-    atoms = universe.select_atoms(parsed.selection)
-
-    if len(atoms) == 0:
-        diag = get_selection_diagnostics(universe, selection)
-        raise ValueError(f"Selection '{selection}' matched no atoms.\n\n{diag}")
-
-    return atoms
-
-
 def get_position(
     atoms: "AtomGroup",
     mode: SelectionMode = SelectionMode.SINGLE,
@@ -293,153 +224,3 @@ def get_position(
 
     else:
         raise ValueError(f"Unknown selection mode: {mode}")
-
-
-def get_position_from_selection(
-    universe: "Universe",
-    selection: str,
-) -> NDArray[np.float64]:
-    """Get position from selection string in one step.
-
-    This is a convenience function that combines parsing, selection,
-    and position calculation.
-
-    Parameters
-    ----------
-    universe : Universe
-        MDAnalysis Universe
-    selection : str
-        Selection string (standard or special syntax)
-
-    Returns
-    -------
-    NDArray[np.float64]
-        3D position vector [x, y, z]
-
-    Examples
-    --------
-    >>> # Single atom
-    >>> pos = get_position_from_selection(u, "resid 77 and name OG")
-    >>>
-    >>> # Midpoint of Asp carboxyl
-    >>> pos = get_position_from_selection(u, "midpoint(resid 133 and name OD1 OD2)")
-    """
-    from polyzymd.analyses.shared.diagnostics import get_selection_diagnostics
-
-    parsed = parse_selection_string(selection)
-    atoms = universe.select_atoms(parsed.selection)
-
-    if len(atoms) == 0:
-        diag = get_selection_diagnostics(universe, selection)
-        raise ValueError(f"Selection '{selection}' matched no atoms.\n\n{diag}")
-
-    return get_position(atoms, parsed.mode)
-
-
-def validate_selection(universe: "Universe", selection: str) -> dict:
-    """Validate a selection string and return diagnostic info.
-
-    Parameters
-    ----------
-    universe : Universe
-        MDAnalysis Universe
-    selection : str
-        Selection string to validate
-
-    Returns
-    -------
-    dict
-        Diagnostic information:
-        - valid: bool
-        - n_atoms: int
-        - mode: str
-        - atoms: list of atom info dicts
-        - error: str (if invalid)
-        - diagnostics: str (detailed diagnostics if invalid)
-    """
-    from polyzymd.analyses.shared.diagnostics import get_selection_diagnostics
-
-    try:
-        parsed = parse_selection_string(selection)
-        atoms = universe.select_atoms(parsed.selection)
-
-        if len(atoms) == 0:
-            diag = get_selection_diagnostics(universe, selection)
-            return {
-                "valid": False,
-                "error": f"Selection matched no atoms: {parsed.selection}",
-                "diagnostics": diag,
-                "mode": parsed.mode.value,
-                "n_atoms": 0,
-            }
-
-        atom_info = []
-        for atom in atoms[:10]:  # Limit to first 10
-            atom_info.append(
-                {
-                    "name": atom.name,
-                    "resname": atom.resname,
-                    "resid": atom.resid,
-                    "index": atom.index,
-                }
-            )
-
-        return {
-            "valid": True,
-            "n_atoms": len(atoms),
-            "mode": parsed.mode.value,
-            "atoms": atom_info,
-            "truncated": len(atoms) > 10,
-        }
-
-    except _expected_selection_exceptions() as exc:
-        return {
-            "valid": False,
-            "error": str(exc),
-            "n_atoms": 0,
-        }
-
-
-def format_selection_for_label(selection: str) -> str:
-    """Convert selection string to a short label for filenames/display.
-
-    Parameters
-    ----------
-    selection : str
-        Selection string (standard or special syntax)
-
-    Returns
-    -------
-    str
-        Short label (e.g., "Asp133_mid" or "Ser77_OG")
-
-    Examples
-    --------
-    >>> format_selection_for_label("midpoint(resid 133 and name OD1 OD2)")
-    "res133_mid"
-    >>> format_selection_for_label("resid 77 and name OG")
-    "res77_OG"
-    """
-    parsed = parse_selection_string(selection)
-
-    # Extract resid
-    resid_match = re.search(r"resid\s+(\d+)", parsed.selection, re.IGNORECASE)
-    resid_str = f"res{resid_match.group(1)}" if resid_match else ""
-
-    # Extract atom name(s)
-    name_match = re.search(r"name\s+(\w+(?:\s+\w+)*)", parsed.selection, re.IGNORECASE)
-    if name_match:
-        names = name_match.group(1).split()
-        if len(names) == 1:
-            name_str = names[0].upper()
-        else:
-            name_str = "mid" if parsed.mode == SelectionMode.MIDPOINT else "cog"
-    else:
-        name_str = "com" if parsed.mode == SelectionMode.COM else "grp"
-
-    if resid_str and name_str:
-        return f"{resid_str}_{name_str}"
-    elif resid_str:
-        return resid_str
-    else:
-        return name_str or "sel"

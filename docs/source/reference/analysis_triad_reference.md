@@ -1,16 +1,14 @@
-# Catalytic Triad Plugin Reference
+# Catalytic triad plugin reference
 
 For a step-by-step workflow, see
 {doc}`../how_to/analysis_triad_quickstart`.
 
-## Configuration Reference
-
-Top-level plugin key in `comparison.yaml`:
+## Settings
 
 ```yaml
 plugins:
   catalytic_triad:
-    name: "LipA_catalytic_triad"
+    name: "LipA Catalytic Triad"
     description: "Ser-His-Asp catalytic triad"
     threshold: 3.5
     pairs:
@@ -22,44 +20,66 @@ plugins:
         selection_b: "protein and resid 77 and name OG"
 ```
 
-### `CatalyticTriadSettings` fields
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `pairs` | `list[PairSelection]` | *required* | Pairs to monitor, at least one |
+| `threshold` | `float` | `3.5` | Contact cutoff in angstrom, applied to every pair |
+| `name` | `str` | `"catalytic_triad"` | Name of the active site |
+| `description` | `str \| null` | `null` | What the active site is |
+
+Each entry in `pairs`:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `name` | `str` | `"catalytic_triad"` | Triad identifier saved in output files |
-| `description` | `str \| null` | `null` | Optional human-readable triad description |
-| `threshold` | `float` | `3.5` | Contact cutoff in angstroms for each pair |
-| `pairs` | `list[TriadPair]` | *required* | Pair definitions used to compute distances and contacts |
+| `label` | `str` | *required* | Name the pair is reported under |
+| `selection_a` | `str` | *required* | First endpoint selection |
+| `selection_b` | `str` | *required* | Second endpoint selection |
 
-### `TriadPair` fields
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `label` | `str` | *required* | Pair label used in tables and JSON |
-| `selection_a` | `str` | *required* | First MDAnalysis selection |
-| `selection_b` | `str` | *required* | Second MDAnalysis selection |
-
-### Selection syntax
-
-| Syntax | Description | Example |
-|--------|-------------|---------|
-| Standard | MDAnalysis atom selection | `protein and resid 77 and name OG` |
-| `midpoint()` | Geometric midpoint of selected atoms | `midpoint(protein and resid 133 and name OD1 OD2)` |
-| `com()` | Center of mass of selected atoms | `com(protein and resid 133 and name OD1 OD2)` |
+An endpoint is one point, so a multi-atom selection must be wrapped in
+`midpoint(...)` or `com(...)`. The syntax is the same as for
+{doc}`analysis_distances_reference`.
 
 ```{important}
 Use chain-aware selections. Residue IDs restart per chain in PolyzyMD systems,
-so bare `resid X` selections can match non-protein atoms. Prefer
-`protein and resid X` for catalytic residues.
+so a bare `resid X` can match non-protein atoms. Prefer `protein and resid X`.
 ```
 
-### Coordinates and periodic boundaries
+## Observables
 
-Triad distances are measured on the coordinates as the trajectory stores them,
-with the minimum image convention applied against the box of each frame
-(`use_pbc` is always on for this plugin, and the box comes from
-`Timestep.dimensions`). The `pbc_policy` chosen at load time, the trajectory
-variant, and the bond source are recorded in provenance; see
+A triad of *n* pairs produces `2n + 1` observables.
+
+| Observable | Kind | Unit | Meaning |
+|------------|------|------|---------|
+| `<label>` | `mean_of_timeseries` | `A` | Distance for that pair, per frame |
+| `<label> within <threshold> A` | `fraction` | `fraction` | Frames in which that pair is strictly within the cutoff |
+| `simultaneous_contact_fraction` | `fraction` | `fraction` | Frames in which every pair is within the cutoff at once |
+
+The charge-relay system only works when every link is short at the same time, so
+the simultaneous fraction is the conjunction of the per-pair indicators and not
+the average of the per-pair fractions. It is stored as a fraction in `[0, 1]`; a
+report that wants a percentage multiplies at display time. A pair counts as
+within the cutoff when its distance is strictly less than it, and every fraction
+records that as `threshold_operator: strict_less_than` in its metadata, beside
+the name of the active site and the selections it was measured from.
+
+The framework reduces each replicate to one number per observable, reports the
+mean over replicates with its SEM and a Student t interval, and tests conditions
+against the control on replicate-level values. The per-frame series of every
+observable is kept in the replicate's `observables.npz` sidecar.
+
+The pair distances and the simultaneous fraction are tested; the per-pair
+contact fractions are not. A per-pair fraction is a monotone function of the
+same series as that pair's mean distance, so it would add no information to the
+Benjamini-Hochberg family that every test in the run shares, while the
+simultaneous fraction says something no single pair does. The untested
+observables still carry their mean, SEM and interval.
+
+## Periodic boundaries
+
+Distances are measured on the coordinates as the trajectory stores them, with
+the minimum image convention applied against the box of each frame, read from
+`Timestep.dimensions`. The `pbc_policy` chosen at load time, the trajectory
+variant and the bond source are recorded in provenance; see
 {doc}`analysis_plugin_settings`.
 
 ```{versionchanged} 1.3.0
@@ -67,20 +87,19 @@ The triad no longer aligns the trajectory before measuring. Distances are
 invariant under rigid-body motion, so alignment changed nothing that was
 correct, while the in-memory alignment rotated coordinates without rotating the
 box vectors, which corrupted minimum-image distances for pairs separated by more
-than half a box length. Reported frame times now come from the trajectory files
-rather than the in-memory reader that alignment installed. For the reasoning,
-see {doc}`../explanation/analysis_concepts`.
-
-`pair_distance_version` moves from `"1"` to `"2"` in the same release, and
-aggregation rejects any replicate artifact still carrying version 1 with the
-usual stale-cache message. Recompute affected replicates.
+than half a box length. For the reasoning, see
+{doc}`../explanation/analysis_concepts`.
 ```
 
-## Output Files
+```{versionchanged} 1.3.0
+The plugin is written against the observable contract. Contact fractions are
+stored as fractions rather than percentages, the payload holds observables
+rather than the former `metrics` and `pair_results` records, the KDE panel is
+replaced by the shared contract figures, and a `plot_settings.catalytic_triad`
+block is accepted for one release and ignored.
+```
 
-Triad outputs are written as canonical v1.3 artifacts under each condition plus
-a comparison result. JSON files use framework-owned artifact envelopes instead
-of exposing plugin-private result model classes as public schemas.
+## Output files
 
 ```text
 comparison_workspace/
@@ -89,190 +108,66 @@ comparison_workspace/
 │       └── catalytic_triad/
 │           ├── run_1/
 │           │   ├── result.json
-│           │   └── sidecars/
-│           │       └── triad_distances.npz
+│           │   └── observables.npz
 │           ├── run_2/
-│           │   └── ...
 │           ├── run_3/
-│           │   └── ...
-│           └── aggregated/
-│               ├── result.json
-│               └── sidecars/
-│                   └── triad_distance_profiles.npz
+│           └── aggregated/result.json
 └── comparison/
-    └── catalytic_triad/
-        └── result.json
+    └── catalytic_triad/result.json
 ```
-
-The canonical paths are:
 
 | Level | Artifact | Path |
 |-------|----------|------|
 | Per replicate | `ReplicateArtifact` | `analysis/<condition>/catalytic_triad/run_<replicate>/result.json` |
 | Per condition | `ConditionArtifact` | `analysis/<condition>/catalytic_triad/aggregated/result.json` |
-| Cross condition | Comparison result | `comparison/catalytic_triad/result.json` |
-| Large arrays | NPZ sidecars | `analysis/<condition>/catalytic_triad/**/sidecars/*.npz` |
+| Cross condition | `ComparisonArtifact` | `comparison/catalytic_triad/result.json` |
+| Per-frame series | NPZ sidecar | `analysis/<condition>/catalytic_triad/run_<replicate>/observables.npz` |
 
-### Artifact envelope fields
-
-| Field | Description |
-|-------|-------------|
-| `payload` | Triad contact metrics, pair summaries, and relative sidecar paths |
-| `metadata` | Triad settings, cutoff threshold, equilibration labels, and units |
-| `provenance` | Input topology/trajectory identity and workflow details |
-| `sidecars` | Validated references to `sidecars/*.npz` arrays with hashes and sizes |
-
-Use the public artifact API to load saved triad artifacts:
+Read saved artifacts through the public store:
 
 ```python
 from pathlib import Path
 
+from polyzymd.analyses.contract import ObservableAggregate
 from polyzymd.analyses.mda import ArtifactStore
 
-replicate = ArtifactStore(Path("analysis/PEGylated/catalytic_triad/run_1"))
 condition = ArtifactStore(Path("analysis/PEGylated/catalytic_triad/aggregated"))
-print(replicate.read_replicate_result().payload["metrics"])
-print(condition.read_condition_result().payload["metrics"])
+for payload in condition.read_condition_result().payload["observables"]:
+    aggregate = ObservableAggregate.model_validate(payload)
+    print(aggregate.name, aggregate.mean, aggregate.sem, aggregate.unit)
 ```
 
-### Per-replicate JSON structure (`ReplicateArtifact`)
-
-Representative structure:
-
-```python
-{
-    "schema_version": "1",
-    "artifact_type": "replicate",
-    "analysis_name": "catalytic_triad",
-    "condition_label": "PEGylated",
-    "replicate": 1,
-    "payload": {
-        "metrics": {"simultaneous_contact_fraction": 0.741},
-        "pair_results": [
-            {"pair_label": "Asp133-His156", "mean_distance": 2.91, "fraction_below_threshold": 0.932},
-            {"pair_label": "His156-Ser77", "mean_distance": 4.07, "fraction_below_threshold": 0.551}
-        ],
-        "distance_sidecar": "sidecars/triad_distances.npz",
-        "summary": {"n_frames_used": 2000, "n_frames_total": 3000}
-    },
-    "metadata": {"triad_name": "LipA_catalytic_triad", "threshold": 3.5, "equilibration": "100ns"},
-    "provenance": {"trajectory_files": ["..."]},
-    "sidecars": [
-        {"path": "sidecars/triad_distances.npz", "metadata": {"kind": "distance_timeseries"}}
-    ]
-}
-```
-
-### Aggregated JSON structure (`ConditionArtifact`)
-
-Representative structure:
-
-```python
-{
-    "schema_version": "1",
-    "artifact_type": "condition",
-    "analysis_name": "catalytic_triad",
-    "condition_label": "PEGylated",
-    "replicates": [1, 2, 3],
-    "payload": {
-        "metrics": {
-            "simultaneous_contact_fraction": {
-                "values": [0.741, 0.512, 0.245],
-                "mean": 0.499,
-                "sem": 0.273
-            }
-        },
-        "pair_results": [
-            {"pair_label": "Asp133-His156", "overall_mean": 3.09, "overall_sem": 0.21},
-            {"pair_label": "His156-Ser77", "overall_mean": 4.03, "overall_sem": 1.07}
-        ],
-        "distance_profile_sidecar": "sidecars/triad_distance_profiles.npz"
-    },
-    "metadata": {"triad_name": "LipA_catalytic_triad", "threshold": 3.5, "equilibration": "100ns"},
-    "provenance": {"source_replicates": [1, 2, 3]},
-    "sidecars": [
-        {"path": "sidecars/triad_distance_profiles.npz", "metadata": {"kind": "distance_profiles"}}
-    ]
-}
-```
-
-## Plot Types
-
-Catalytic triad plots are generated by `polyzymd compare plot-all`.
-
-| Plot output | Description |
-|-------------|-------------|
-| `triad_kde_panel.png` | Multi-row KDE of per-pair distance distributions across conditions |
-| `triad_threshold_bars.png` | Grouped bar chart of the fraction below threshold for each pair |
-
-Optional historical plotting helpers in the code can generate 2D KDE figures,
-but the current plugin `plot()` lifecycle emits the KDE panel and threshold bar
-figures listed above.
-
-Use top-level `plot_settings` in `comparison.yaml` to tune sizes, styles,
-and output resolution for triad plots.
-
-## Common CLI Options
+## Commands
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-f, --file` | `comparison.yaml` | Path to comparison config |
 | `--eq-time` | from YAML defaults | Equilibration time to skip |
-| `--recompute` | off | Ignore cached results and recompute |
-| `--format` | `table` | Output format: `table` or `json` |
-| `-q, --quiet` | off | Suppress INFO logging |
-| `--debug` | off | Enable DEBUG logging |
-
-Use either plugin name:
+| `--recompute` | off | Ignore cached replicates and measure again |
+| `--format` | `table` | Output format, `table` or `json` |
 
 ```bash
-polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
-polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
+polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 200ns
 ```
 
 ## Troubleshooting
 
-### "No catalytic_triad section found"
+### "selection ... matched no atoms"
 
-**Cause:** `plugins.catalytic_triad` is missing from `comparison.yaml`
+The residue ID or atom name does not match the loaded topology. Check the
+numbering, check the atom names (`OD1`/`OD2`, `ND1`/`NE2`, `OG`), and prefer
+chain-aware selections such as `protein and resid 132`.
 
-**Fix:** Add a complete `catalytic_triad` block with `name`, `threshold`, and
-at least one pair in `pairs`
+### "selection ... matched N atoms, and a pair endpoint is one point"
 
-### "Selection ... returned 0 atoms"
+Wrap the selection in `midpoint(...)` or `com(...)`.
 
-**Cause:** Residue ID or atom name does not match the loaded topology
+### Distances above 10 angstrom
 
-**Fix:**
-- Verify residue numbering in the topology used for analysis
-- Verify atom names (`OD1`/`OD2`, `ND1`/`NE2`, `OG`)
-- Use chain-aware selections like `protein and resid ...`
+Usually a wrong selection or mismatched residue numbering. Confirm the residues
+in a viewer before reading the result as a disrupted triad.
 
-### Very high distances (> 10 Å)
+### A simultaneous contact fraction near zero
 
-**Cause:** Usually incorrect selections or mismatched residue numbering
-
-**Fix:** Validate selections in VMD or PyMOL and confirm the exact residues
-
-### Very low simultaneous contact (< 10%)
-
-**Cause:** Could be a genuine disrupted triad or a too-strict threshold
-
-**Fix:**
-- Inspect pair-level fractions to identify the limiting pair
-- Re-check selections
-- If scientifically justified, test a slightly larger threshold (for example 4.0 Å)
-
-### "Low statistical reliability" warning
-
-**Cause:** Long autocorrelation time relative to trajectory length
-
-**Fix:** Informational warning only. Prefer more replicates and/or longer
-simulations for tighter uncertainty
-
-### "Skipping replicate N: trajectory data not found"
-
-**Cause:** Replicate output is missing or path mapping is incorrect
-
-**Fix:** Analysis continues with available data. Verify simulation completion and
-project paths if this is unexpected
+Read the per-pair fractions first: one limiting pair distinguishes a genuinely
+disrupted relay from a cutoff that is too strict for this system.

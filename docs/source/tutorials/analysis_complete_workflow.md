@@ -228,8 +228,8 @@ polymer_stabilization_study/
     │   ├── rmsf_comparison.png
     │   └── rmsf_profile.png
     ├── catalytic_triad/
-    │   ├── triad_kde_panel.png
-    │   └── triad_threshold_bars.png
+    │   ├── catalytic_triad_<observable>_comparison.png
+    │   └── catalytic_triad_<observable>_timeseries.png
     └── ...
 ```
 

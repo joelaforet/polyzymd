@@ -126,6 +126,7 @@ class ContractAnalysis(Analysis):
             return {
                 "observables": [estimate.model_dump(mode="json") for estimate in estimates],
                 "sidecars": [sidecar.model_dump(mode="json")],
+                "warnings": _measurement_warnings(observables),
             }
 
         return [
@@ -175,7 +176,7 @@ class ContractAnalysis(Analysis):
                     "result_kind": "observables",
                     "settings_fingerprint": collector_ctx.settings_fingerprint,
                 },
-                warnings=list(collector_ctx.warnings),
+                warnings=list(collector_ctx.warnings) + list(results.get("warnings", [])),
             )
 
         return collect
@@ -456,6 +457,22 @@ def _validated(observables: Any) -> list[Observable]:
             f"compute() must return at least one Observable, got {invalid or 'an empty sequence'}"
         )
     return list(observables)
+
+
+def _measurement_warnings(observables: Sequence[Observable]) -> list[str]:
+    """Messages a plugin put under the ``warnings`` key of an observable's metadata.
+
+    This is how a plugin says something about the measurement itself, such as a
+    selection that spans several chains, and has it reach the replicate
+    artifact rather than only the log. Duplicates are dropped, because a plugin
+    usually stamps the same note on every observable it measured.
+    """
+    messages: list[str] = []
+    for observable in observables:
+        for message in observable.metadata.get("warnings", []) or []:
+            if str(message) not in messages:
+                messages.append(str(message))
+    return messages
 
 
 def _estimates(result: Any) -> list[ObservableEstimate]:
