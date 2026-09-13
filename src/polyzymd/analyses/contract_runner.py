@@ -45,6 +45,8 @@ from polyzymd.analyses.mda.artifacts import (
 from polyzymd.analyses.mda.job import MDAAnalysisJob
 from polyzymd.analyses.mda.plugin import frame_selection_payload
 from polyzymd.analyses.mda.store import ArtifactStore
+from polyzymd.analyses.shared.alignment import ALIGNMENT_VERSION
+from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 
 if TYPE_CHECKING:
     from polyzymd.analyses.base import PlotContext
@@ -59,7 +61,24 @@ _CACHE_KEYS = (
     "config_hash",
     "equilibration",
     "inputs",
+    "shared_versions",
 )
+
+
+def _shared_versions() -> dict[str, str]:
+    """Return the versions of the shared machinery a plugin computes through.
+
+    ``plugin_code_hash`` covers the plugin module alone, so a fix in a shared
+    module such as ``shared/alignment.py`` would leave every cached artifact
+    looking current. Shared code that can change a number carries a version
+    constant, and those constants are recorded here. Bump a constant whenever
+    its module starts producing different values for the same settings.
+    """
+
+    return {
+        "alignment": ALIGNMENT_VERSION,
+        "autocorrelation": AUTOCORRELATION_ESTIMATOR_VERSION,
+    }
 
 
 class ContractAnalysis(Analysis):
@@ -363,6 +382,7 @@ class ContractAnalysis(Analysis):
             "config_hash": compute_config_hash(sim_config),
             "equilibration": equilibration,
             "inputs": inputs,
+            "shared_versions": _shared_versions(),
         }
 
 

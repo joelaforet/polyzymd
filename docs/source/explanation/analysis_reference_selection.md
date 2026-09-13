@@ -50,10 +50,12 @@ configure every option.
 ## Centroid mode: sampled-frame alignment, trajectory-mean RMSF
 
 The default centroid mode chooses a **real sampled frame** that is closest to an
-aligned mean or cluster center for alignment/reference generation. In PolyzyMD's
-current RMSF implementation, centroid mode uses k-means clustering with `k=1`
-over the centroid selection and then selects the sampled frame nearest that
-center.
+aligned mean for alignment/reference generation. PolyzyMD aligns every frame in
+the analyzed window onto the first of them, takes the mean of those aligned
+coordinates, and selects the sampled frame with the smallest RMSD to that mean.
+The trajectory is then superposed onto that frame. When the analyzed window uses
+a frame stride, the search walks the same strided frames, so the chosen frame is
+one the analysis actually visits.
 
 This is useful because the alignment reference is an actual conformation from
 the trajectory, not a synthetic average structure. After alignment, however,
@@ -62,11 +64,11 @@ trajectory mean positions. Residues with larger RMSF values are residues with
 larger fluctuations around that aligned mean, not necessarily residues with the
 largest direct deviation from the centroid frame.
 
-The caveat is that `k=1` should not be interpreted as "the most populated
-conformational state." In a multimodal trajectory, a single cluster center can
-fall between basins or be biased by transitions. The selected frame is closest
-to the global center under the chosen alignment and atom selection; it may not
-represent the dominant basin.
+The caveat is that the centroid frame should not be read as "the most populated
+conformational state." In a multimodal trajectory, the mean structure can fall
+between basins or be biased by transitions. The selected frame is closest to the
+global mean under the chosen alignment and atom selection; it may not represent
+the dominant basin.
 
 ## Average mode: average-structure alignment, trajectory-mean RMSF
 
@@ -92,7 +94,8 @@ Frame mode uses one specified frame from the trajectory for alignment/reference
 generation. In the current non-external RMSF path, it does **not** compute RMSF
 as direct deviation from that frame's coordinates. After alignment, PolyzyMD
 computes standard RMSF around the mean positions of the aligned analyzed
-trajectory.
+trajectory. The `reference_frame` setting is 1-indexed and names the frame the
+superposition uses.
 
 That can still be scientifically useful when the selected frame has independent
 meaning, such as a catalytically competent active-site geometry, a ligand-bound

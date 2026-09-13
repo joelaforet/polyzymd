@@ -77,10 +77,22 @@ def _context(
     )
 
 
+def _settings_fingerprint_for(settings: Any) -> str:
+    """Return the cache tag the plugin that owns these settings would write."""
+
+    from polyzymd.analyses.rmsd import RMSDSettings
+
+    if isinstance(settings, RMSDSettings):
+        from polyzymd.analyses.rmsd import RMSDAnalysis
+
+        return RMSDAnalysis._make_settings_cache_tag(settings)
+    return settings_fingerprint(settings)
+
+
 def _base_metadata(settings: Any) -> dict[str, Any]:
     """Return artifact metadata accepted by the aggregate validators."""
     return {
-        "settings_fingerprint": settings_fingerprint(settings),
+        "settings_fingerprint": _settings_fingerprint_for(settings),
         "config_hash": "hash",
         "polyzymd_version": "test",
         "equilibration_time": 10.0,

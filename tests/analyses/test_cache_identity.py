@@ -159,3 +159,72 @@ class TestSettingsFingerprintValidation:
         with pytest.warns(UserWarning, match="rejecting cache"):
             valid = validate_settings_fingerprint(None, settings)
         assert valid is False
+
+
+class TestPluginFingerprintAgreement:
+    """A plugin's own cache tag must match what the framework stamps on artifacts."""
+
+    @staticmethod
+    def _analyses_with_a_private_cache_tag() -> list[tuple[str, object]]:
+        """Return registered analyses that compute their own settings cache tag."""
+
+        from polyzymd.analyses.discovery import get_analysis, list_analyses
+
+        found = []
+        for name in list_analyses():
+            analysis = get_analysis(name)()
+            if hasattr(analysis, "_make_settings_cache_tag"):
+                found.append((name, analysis))
+        return found
+
+    def test_private_cache_tag_matches_aggregate_fingerprint(self):
+        """Every plugin that folds extra identity in must also override the hook.
+
+        ``_stamp_replicate_identity`` writes ``aggregate_settings_fingerprint``
+        onto a replicate artifact, while aggregation compares against the
+        plugin's own tag. A plugin that folds a version into one and not the
+        other rejects every artifact it just wrote.
+        """
+
+        checked = 0
+        for name, analysis in self._analyses_with_a_private_cache_tag():
+            settings = analysis.Settings()
+            assert analysis.aggregate_settings_fingerprint(
+                settings
+            ) == analysis._make_settings_cache_tag(
+                settings
+            ), f"{name}: aggregate_settings_fingerprint and _make_settings_cache_tag disagree"
+            checked += 1
+        assert checked > 0
+
+    def test_stamped_rmsd_artifact_passes_aggregation(self, tmp_path: Path):
+        """An RMSD artifact stamped by the lifecycle is accepted by aggregation."""
+
+        from polyzymd.analyses._framework.lifecycle import _stamp_replicate_identity
+        from polyzymd.analyses.mda import ReplicateArtifact
+        from polyzymd.analyses.rmsd import RMSDAnalysis, RMSDSettings
+        from polyzymd.analyses.rmsd._mda import _validate_and_order_artifacts
+        from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
+
+        del tmp_path
+        analysis = RMSDAnalysis()
+        settings = RMSDSettings()
+        artifact = ReplicateArtifact(
+            analysis_name="rmsd",
+            condition_label="Control",
+            replicate=1,
+            payload={"runs": [{"label": run.label} for run in settings.runs]},
+            metadata={
+                "autocorrelation_estimator_version": AUTOCORRELATION_ESTIMATOR_VERSION,
+            },
+        )
+        _stamp_replicate_identity(artifact, analysis, settings, "10ns")
+
+        ordered = _validate_and_order_artifacts(
+            condition_label="Control",
+            expected_replicates=[1],
+            run_labels=[run.label for run in settings.runs],
+            settings_fingerprint=analysis._make_settings_cache_tag(settings),
+            artifacts=[artifact],
+        )
+        assert [a.replicate for a in ordered] == [1]

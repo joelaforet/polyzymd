@@ -115,6 +115,7 @@ def find_centroid_frame(
     selection: str = "protein",
     start_frame: int = 0,
     stop_frame: int | None = None,
+    step_frame: int = 1,
     verbose: bool = True,
 ) -> int:
     """Find a representative aligned frame.
@@ -142,6 +143,9 @@ def find_centroid_frame(
         Use this to skip equilibration frames.
     stop_frame : int, optional
         Last frame to include (exclusive). Default is None (all frames).
+    step_frame : int, optional
+        Stride over the frame range. Default is 1. Pass the stride the caller
+        will analyse so the representative frame is drawn from the same frames.
     verbose : bool, optional
         If True, log progress messages. Default is True.
 
@@ -155,7 +159,9 @@ def find_centroid_frame(
     -----
     The algorithm aligns all candidate frames to a common reference frame,
     computes the aligned mean structure, then selects the frame with minimum
-    RMSD to that mean.
+    RMSD to that mean. The alignment is a single Kabsch pass onto the first
+    frame of the range rather than an iterative fit onto the running mean, so
+    the choice is approximate when the trajectory drifts far from that frame.
 
     Using all protein atoms (default) rather than just CA atoms captures
     the full conformational state including side chain rotamers.
@@ -171,9 +177,6 @@ def find_centroid_frame(
     >>> # Use only backbone atoms
     >>> centroid_idx = find_centroid_frame(u, selection="protein and backbone")
 
-    See Also
-    --------
-    find_reference_frame : High-level function supporting multiple methods
     """
     # Select atoms for representative-frame calculation
     atoms = universe.select_atoms(selection)
@@ -198,18 +201,24 @@ def find_centroid_frame(
         raise ValueError(f"start_frame={start_frame} is out of range [0, {n_frames_total})")
     if stop_frame <= start_frame:
         raise ValueError(f"stop_frame={stop_frame} must be greater than start_frame={start_frame}")
+    if step_frame < 1:
+        raise ValueError(f"step_frame={step_frame} must be at least 1")
 
-    n_frames = stop_frame - start_frame
+    frame_indices = range(start_frame, stop_frame, step_frame)
+    n_frames = len(frame_indices)
 
     if verbose:
-        LOGGER.info(f"Analyzing frames {start_frame} to {stop_frame - 1} ({n_frames} frames)")
+        LOGGER.info(
+            f"Analyzing frames {start_frame} to {stop_frame - 1} "
+            f"every {step_frame} ({n_frames} frames)"
+        )
 
     # Collect coordinates for all frames in range
     if verbose:
         LOGGER.info("Collecting coordinates...")
 
     coordinates = np.empty((n_frames, len(atoms), 3), dtype=np.float64)
-    for i, _ in enumerate(universe.trajectory[start_frame:stop_frame]):
+    for i, _ in enumerate(universe.trajectory[start_frame:stop_frame:step_frame]):
         coordinates[i] = atoms.positions
 
     if verbose:
@@ -218,7 +227,7 @@ def find_centroid_frame(
     relative_idx, rmsd_to_mean = _find_frame_closest_to_aligned_mean(coordinates)
 
     # Convert to absolute frame index
-    representative_frame_idx = relative_idx + start_frame
+    representative_frame_idx = frame_indices[relative_idx]
 
     if verbose:
         LOGGER.info(
@@ -227,125 +236,6 @@ def find_centroid_frame(
         )
 
     return representative_frame_idx
-
-
-def find_reference_frame(
-    universe: "Universe",
-    mode: ReferenceMode = "centroid",
-    selection: str = "protein",
-    start_frame: int = 0,
-    stop_frame: int | None = None,
-    specific_frame: int | None = None,
-    verbose: bool = True,
-) -> int | None:
-    """Find a reference frame for trajectory alignment.
-
-    This is the high-level interface for selecting a reference structure
-    for RMSF calculations. It supports multiple methods for choosing the
-    reference, each appropriate for different scientific questions.
-
-    Parameters
-    ----------
-    universe : MDAnalysis.Universe
-        Universe containing the trajectory.
-    mode : {"centroid", "average", "frame", "external"}, optional
-        Method for selecting the reference. Default is "centroid".
-
-        - "centroid": Representative aligned frame mode.
-          Returns the frame index closest to the aligned mean structure.
-        - "average": Use average structure as reference.
-          Returns None (caller should use AverageStructure).
-        - "frame": Use a specific frame specified by `specific_frame`.
-          Returns the specified frame index (converted to 0-indexed).
-        - "external": Use an external PDB file as reference.
-          Returns None (alignment handled by align_trajectory).
-
-    selection : str, optional
-        MDAnalysis selection string for atoms to use. Default is "protein".
-        Only used for "centroid" mode.
-    start_frame : int, optional
-        First frame for analysis (0-indexed). Default is 0.
-    stop_frame : int, optional
-        Last frame for analysis (exclusive). Default is None.
-    specific_frame : int, optional
-        Frame index to use when mode="frame" (1-indexed, PyMOL convention).
-        Required when mode="frame".
-    verbose : bool, optional
-        Log progress messages. Default is True.
-
-    Returns
-    -------
-    int or None
-        Frame index (0-indexed) to use as reference, or None if mode="average"
-        (indicating the caller should compute an average structure).
-
-    Raises
-    ------
-    ValueError
-        If mode="frame" but specific_frame is not provided.
-        If specific_frame is out of range.
-
-    Examples
-    --------
-    >>> # Find a representative aligned frame (equilibrium conformation)
-    >>> ref_frame = find_reference_frame(u, mode="centroid", start_frame=100)
-
-    >>> # Use average structure
-    >>> ref_frame = find_reference_frame(u, mode="average")
-    >>> # ref_frame is None, use AverageStructure instead
-
-    >>> # Use a specific frame (e.g., catalytically competent state)
-    >>> ref_frame = find_reference_frame(u, mode="frame", specific_frame=500)
-
-    See Also
-    --------
-    find_centroid_frame : Low-level representative frame selection
-    """
-    if mode == "centroid":
-        return find_centroid_frame(
-            universe,
-            selection=selection,
-            start_frame=start_frame,
-            stop_frame=stop_frame,
-            verbose=verbose,
-        )
-
-    elif mode == "average":
-        if verbose:
-            LOGGER.info("Using average structure as reference (will be computed during alignment)")
-        return None  # Caller should use AverageStructure
-
-    elif mode == "frame":
-        if specific_frame is None:
-            raise ValueError("specific_frame is required when mode='frame'")
-
-        # Convert from 1-indexed (PyMOL) to 0-indexed
-        frame_idx = specific_frame - 1
-
-        # Validate
-        n_frames = len(universe.trajectory)
-        if frame_idx < 0 or frame_idx >= n_frames:
-            raise ValueError(
-                f"specific_frame={specific_frame} (1-indexed) is out of range. "
-                f"Valid range: 1 to {n_frames}"
-            )
-
-        if verbose:
-            LOGGER.info(f"Using user-specified frame {specific_frame} (0-indexed: {frame_idx})")
-
-        return frame_idx
-
-    elif mode == "external":
-        # External PDB reference — no trajectory frame to return.
-        # Alignment to external PDB is handled by align_trajectory() in alignment.py.
-        if verbose:
-            LOGGER.info("Using external PDB as reference (alignment handled by align_trajectory)")
-        return None
-
-    else:
-        raise ValueError(
-            f"Unknown mode: {mode}. Must be 'centroid', 'average', 'frame', or 'external'"
-        )
 
 
 def get_reference_mode_description(mode: ReferenceMode) -> str:

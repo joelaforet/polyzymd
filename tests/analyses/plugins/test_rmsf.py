@@ -33,6 +33,7 @@ from polyzymd.analyses.rmsf import RMSFAnalysis, RMSFSettings
 from polyzymd.analyses.rmsf._mda import (
     MEAN_RMSF_METRIC,
     RMSF_METRIC_METADATA,
+    RMSF_PROFILE_VERSION,
     RMSFArtifactCollector,
     aggregate_rmsf_artifacts,
     external_reference_file_identity,
@@ -359,7 +360,7 @@ class TestRMSFMDAJobs:
         assert len(jobs) == 1
         assert jobs[0].name == "rmsf_profile"
         assert jobs[0].frame_selection.frames == tuple(range(20))
-        assert jobs[0].universe_policy.metadata["rmsf_profile_version"] == "2"
+        assert jobs[0].universe_policy.metadata["rmsf_profile_version"] == RMSF_PROFILE_VERSION
 
     def test_build_mda_jobs_preserves_noncontiguous_explicit_frames(
         self, condition: Condition
