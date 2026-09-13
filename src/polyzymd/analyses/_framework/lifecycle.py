@@ -74,142 +74,17 @@ FinalizeRun = Callable[..., dict[str, Any]]
 ExecutionSummary = Callable[["Analysis", list[Condition], BaseModel, str], None]
 
 
-class AnalysisLifecycleAdapter:
-    """Delegate lifecycle operations to an ``Analysis`` instance.
-
-    Parameters
-    ----------
-    analysis : Analysis
-        Analysis plugin instance whose hooks should be called.
-    """
-
-    def __init__(self, analysis: Analysis) -> None:
-        self.analysis = analysis
-
-    def filter_conditions(
-        self,
-        conditions: Sequence[Condition],
-        *,
-        settings: BaseModel,
-    ) -> list[Condition]:
-        """Delegate condition filtering to the analysis plugin.
-
-        Parameters
-        ----------
-        conditions : sequence of Condition
-            Conditions from the comparison configuration.
-        settings : BaseModel
-            Resolved analysis settings.
-
-        Returns
-        -------
-        list[Condition]
-            Conditions accepted by the plugin.
-        """
-
-        return self.analysis.filter_conditions(conditions, settings=settings)
-
-    def run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Delegate per-replicate compute to the internal analysis dispatcher.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            One-indexed replicate ID.
-
-        Returns
-        -------
-        Any
-            Plugin result for the replicate.
-        """
-
-        return self.analysis._run_compute_stage(ctx, replicate)
-
-    def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
-        """Delegate aggregation to ``Analysis.aggregate``.
-
-        Parameters
-        ----------
-        ctx : AggregateContext
-            Framework-provided aggregate context.
-        results : sequence of Any
-            Successful replicate results.
-
-        Returns
-        -------
-        Any
-            Aggregated plugin result.
-        """
-
-        return self.analysis.aggregate(ctx, results)
-
-    def compare(self, ctx: ComparisonContext) -> Any:
-        """Delegate comparison to ``Analysis.compare``.
-
-        Parameters
-        ----------
-        ctx : ComparisonContext
-            Framework-provided comparison context.
-
-        Returns
-        -------
-        Any
-            Comparison result, or ``None`` when no result is produced.
-        """
-
-        return self.analysis.compare(ctx)
-
-    def plot(self, ctx: PlotContext) -> list[Path]:
-        """Delegate plotting to ``Analysis.plot``.
-
-        Parameters
-        ----------
-        ctx : PlotContext
-            Framework-provided plot context.
-
-        Returns
-        -------
-        list[Path]
-            Generated plot paths.
-        """
-
-        return self.analysis.plot(ctx)
-
-    def format(self, result: Any, fmt: str = "text") -> str:
-        """Delegate CLI formatting to ``Analysis.format``.
-
-        Parameters
-        ----------
-        result : Any
-            Comparison result to format.
-        fmt : str, optional
-            Output format, by default ``"text"``.
-
-        Returns
-        -------
-        str
-            Formatted comparison output.
-        """
-
-        return self.analysis.format(result, fmt)
-
-
 class AnalysisLifecycle:
     """Template Method engine for one-analysis lifecycle execution.
 
     The orchestrator remains the public API and multi-analysis scheduling owner.
     This private engine owns the order for a single analysis and delegates
-    plugin-specific work through ``AnalysisLifecycleAdapter``.
+    plugin-specific work by calling the analysis hooks directly.
 
     Parameters
     ----------
     analysis : Analysis
         Analysis plugin instance.
-    adapter : AnalysisLifecycleAdapter | None, optional
-        Adapter used for lifecycle delegation. When omitted, a lifecycle adapter
-        is created for ``analysis``.
     settings_resolver : callable | None, optional
         Function that resolves plugin settings from a comparison config.
     prepare_comparison_run : callable | None, optional
@@ -226,7 +101,6 @@ class AnalysisLifecycle:
         self,
         analysis: Analysis,
         *,
-        adapter: AnalysisLifecycleAdapter | None = None,
         settings_resolver: SettingsResolver | None = None,
         prepare_comparison_run: PrepareRun | None = None,
         run_analysis: RunCondition | None = None,
@@ -234,7 +108,6 @@ class AnalysisLifecycle:
         execution_summary: ExecutionSummary | None = None,
     ) -> None:
         self.analysis = analysis
-        self.adapter = adapter or AnalysisLifecycleAdapter(analysis)
         self._settings_resolver = settings_resolver or _resolve_settings
         self._prepare_comparison_run = prepare_comparison_run
         self._run_analysis = run_analysis
@@ -341,7 +214,7 @@ class AnalysisLifecycle:
             backend_policy=backend_policy or _default_mda_backend_policy(),
         )
         try:
-            result = self.adapter.run_compute_stage(ctx, replicate)
+            result = self.analysis._run_compute_stage(ctx, replicate)
         except (FileNotFoundError, OSError):
             raise
         except ReplicateSkippedError:
@@ -901,7 +774,7 @@ class AnalysisLifecycle:
         )
 
         try:
-            comparison_result = self.adapter.compare(comp_ctx)
+            comparison_result = self.analysis.compare(comp_ctx)
         except PluginContractError:
             raise
         except Exception as e:
@@ -936,7 +809,7 @@ class AnalysisLifecycle:
             equilibration=resolved_equilibration,
         )
         try:
-            plots = self.adapter.plot(plot_ctx)
+            plots = self.analysis.plot(plot_ctx)
         except PluginContractError:
             raise
         except Exception as e:
@@ -1156,7 +1029,7 @@ class AnalysisLifecycle:
         )
 
         try:
-            paths = self.adapter.plot(plot_ctx)
+            paths = self.analysis.plot(plot_ctx)
             _check_plot_result(paths, self.analysis.name)
             return paths, []
         except PluginContractError:
@@ -1251,7 +1124,7 @@ class AnalysisLifecycle:
         condition_by_label: dict[str, Condition] = {
             condition.label: condition for condition in all_conditions
         }
-        valid_conditions = self.adapter.filter_conditions(all_conditions, settings=settings)
+        valid_conditions = self.analysis.filter_conditions(all_conditions, settings=settings)
 
         foreign_labels = [
             condition.label
@@ -1343,7 +1216,7 @@ class AnalysisLifecycle:
             result_path=agg_result_path,
         )
         try:
-            aggregated = self.adapter.aggregate(agg_ctx, results)
+            aggregated = self.analysis.aggregate(agg_ctx, results)
         except (FileNotFoundError, OSError):
             raise
         except PluginContractError:

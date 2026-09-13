@@ -108,6 +108,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Public names with no caller.**  The grep pass recorded in
+  `docs/planning/legacy_removal_inventory.md` found these reachable from
+  nothing but their own tests, and they are deleted:
+  `polyzymd.analyses._framework.lifecycle.AnalysisLifecycleAdapter`, a class
+  whose six methods each forwarded one call to the analysis;
+  `polyzymd.analyses._framework.cache_identity.compute_cache_identity`,
+  `extract_settings_fingerprint_from_path` and `validate_settings_fingerprint`;
+  `polyzymd.analyses.shared.plotting.has_replicate_uncertainty`,
+  `suppress_singleton_errors` and `scatter_stacked_segment_replicates`;
+  `polyzymd.analyses.shared.statistics.metric_summary_payload`; and
+  `polyzymd.analyses.protocols.get_analysis_class`.
+
 - **The two comparison shapes `ProtocolReport` used to read.**  Every plugin
   writes the comparison artifact of the observable contract, so the reader for
   the framework scalar result and for a plugin's own grouped or nested result

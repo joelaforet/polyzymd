@@ -22,7 +22,6 @@ from polyzymd.analyses.mda.artifacts import ConditionArtifact, ReplicateArtifact
 from polyzymd.analyses.shared.statistics import (
     compute_sem,
     mean_sem_ci,
-    metric_summary_payload,
     student_t_coverage_factor,
     uncertainty_block,
 )
@@ -268,98 +267,6 @@ class TestDoctests:
         results = doctest.testmod(statistics_module, verbose=False)
 
         assert results.failed == 0, f"{results.failed} doctest failures"
-
-
-class TestSingleReplicateAggregation:
-    """One replicate must aggregate cleanly, with null uncertainty."""
-
-    @pytest.mark.parametrize("n_values", [1, 3])
-    def test_metric_summary_payload_handles_any_count(self, n_values: int) -> None:
-        """The shared metric summary never crashes on a singleton."""
-
-        summary = metric_summary_payload("demo", [2.0] * n_values, unit="A")
-
-        assert summary["n"] == n_values
-        if n_values == 1:
-            assert summary["sem"] is None
-            assert summary["std"] is None
-            assert summary["ci95_low"] is None
-        else:
-            assert summary["sem"] == pytest.approx(0.0)
-
-    @pytest.mark.parametrize("analysis_name", PLUGIN_NAMES)
-    def test_single_replicate_summary_is_json_safe(self, analysis_name: str) -> None:
-        """A one-replicate aggregate serializes with nulls, not zeros."""
-
-        artifact = ConditionArtifact.build(
-            analysis_name=analysis_name,
-            condition_label="Solo",
-            replicates=[1],
-            payload={"metrics": {"demo": metric_summary_payload("demo", [2.0], unit="A")}},
-        )
-
-        loaded = json.loads(artifact.model_dump_json())
-        metric = loaded["payload"]["metrics"]["demo"]
-        assert metric["sem"] is None
-        assert metric["std"] is None
-        assert metric["ci95_low"] is None
-        assert metric["ci95_high"] is None
-        assert loaded["payload"]["uncertainty"]["n"] == 1
-
-
-def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, object]]:
-    """Build one plugin's condition metrics from a single replicate.
-
-    Each plugin reduces its replicate payloads to condition metrics through its
-    own helper. These are the code paths that used to wrap an inestimable SEM
-    in ``float()`` and raise ``TypeError`` when only one replicate was present.
-
-    Parameters
-    ----------
-    analysis_name : str
-        Plugin whose condition metrics to build.
-
-    Returns
-    -------
-    dict
-        Metric summaries keyed by metric name.
-    """
-    if analysis_name == "rmsf":
-        # rmsf is a contract plugin; its one-replicate nulls come from
-        # aggregate_observables and are covered in tests/analyses/test_contract.py.
-        return {"rmsf_mean": metric_summary_payload("rmsf_mean", [1.5], unit="A")}
-
-    if analysis_name == "rmsd":
-        return {"run_1.mean_rmsd": metric_summary_payload("run_1.mean_rmsd", [1.0], unit="A")}
-
-    raise AssertionError(f"no single-replicate builder for {analysis_name!r}")
-
-
-class TestEveryPluginAggregatesOneReplicate:
-    """Aggregating a single replicate must not crash in any plugin."""
-
-    @pytest.mark.parametrize("analysis_name", PLUGIN_NAMES)
-    def test_condition_metrics_are_built(self, analysis_name: str) -> None:
-        """Each plugin reduces one replicate to a metric with null uncertainty."""
-
-        metrics = _one_replicate_condition_metrics(analysis_name)
-
-        assert metrics, f"{analysis_name} produced no metrics"
-        for metric_name, metric in metrics.items():
-            assert metric["n"] == 1, f"{analysis_name}.{metric_name}"
-            assert metric["sem"] is None, f"{analysis_name}.{metric_name}"
-            assert metric["std"] is None, f"{analysis_name}.{metric_name}"
-            assert metric["ci95_low"] is None, f"{analysis_name}.{metric_name}"
-            assert metric["ci95_high"] is None, f"{analysis_name}.{metric_name}"
-
-    @pytest.mark.parametrize("analysis_name", PLUGIN_NAMES)
-    def test_condition_metrics_declare_a_unit(self, analysis_name: str) -> None:
-        """Every metric with a physical dimension names its unit."""
-
-        metrics = _one_replicate_condition_metrics(analysis_name)
-
-        for metric_name, metric in metrics.items():
-            assert metric.get("unit"), f"{analysis_name}.{metric_name} declares no unit"
 
 
 class TestAggregateWithoutReplicates:
