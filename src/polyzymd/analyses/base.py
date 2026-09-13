@@ -14,10 +14,14 @@ according to its kind, and formats the result.
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import importlib
 import inspect
 import json
 import logging
+import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Mapping, Sequence
 
@@ -90,8 +94,6 @@ from polyzymd.analyses.mda.artifacts import (
 from polyzymd.analyses.mda.job import MDAAnalysisJob
 from polyzymd.analyses.mda.store import ArtifactStore
 from polyzymd.analyses.mda.universe import FileIdentity
-from polyzymd.analyses.shared.alignment import ALIGNMENT_VERSION
-from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 
 if TYPE_CHECKING:
     from polyzymd.analyses.mda.lifecycle import MDAReplicateJobContext
@@ -99,15 +101,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger("polyzymd.analyses")
 
 #: Identity fields that must match before a cached replicate is reused.
+#:
+#: ``git_commit`` is recorded but deliberately not compared. The code hashes
+#: already change whenever code that can change a number changes, and comparing
+#: the commit would throw away every cached replicate on a documentation commit
+#: in a development checkout.
 _CACHE_KEYS = (
     "polyzymd_version",
     "plugin_code_hash",
+    "framework_code_hash",
     "settings_fingerprint",
     "config_hash",
     "equilibration",
     "inputs",
-    "shared_versions",
     "settings_files",
+)
+
+#: Framework modules every plugin computes through, whatever it imports.
+_FRAMEWORK_MODULES = (
+    "polyzymd.analyses.contract",
+    "polyzymd.analyses.base",
 )
 
 __all__ = [
@@ -418,12 +431,13 @@ class Analysis:
         return {
             "polyzymd_version": __version__,
             "plugin": self.name,
+            "git_commit": _git_commit(),
             "plugin_code_hash": _code_hash(self.plugin),
+            "framework_code_hash": _framework_code_hash(type(self.plugin).__module__),
             "settings_fingerprint": self.aggregate_settings_fingerprint(settings),
             "config_hash": compute_config_hash(sim_config),
             "equilibration": equilibration,
             "inputs": inputs,
-            "shared_versions": _shared_versions(),
             "settings_files": _settings_file_identity(self.plugin, settings),
         }
 
@@ -672,20 +686,122 @@ class Analysis:
         return f"<{type(self).__name__}(name={self.name!r})>"
 
 
-def _shared_versions() -> dict[str, str]:
-    """Return the versions of the shared machinery a plugin computes through.
+@lru_cache(maxsize=None)
+def _framework_code_hash(plugin_module: str) -> str:
+    """Hash the framework and shared code a plugin's answer depends on.
 
-    ``plugin_code_hash`` covers the plugin module alone, so a fix in a shared
-    module such as ``shared/alignment.py`` would leave every cached artifact
-    looking current. Shared code that can change a number carries a version
-    constant, and those constants are recorded here. Bump a constant whenever
-    its module starts producing different values for the same settings.
+    ``plugin_code_hash`` covers the plugin module alone, so a fix in
+    ``shared/alignment.py`` or in the reduction rules of ``contract.py`` would
+    leave every cached artifact looking current. This hashes the source of the
+    contract, the lifecycle, and every ``shared/`` module the plugin reaches,
+    so any change to code that can change a number invalidates the replicate.
+
+    Parameters
+    ----------
+    plugin_module : str
+        Dotted name of the module the plugin class is defined in.
+
+    Returns
+    -------
+    str
+        First 16 hex characters of a SHA-256 over the sorted module sources.
+        ``"unknown"`` for a module whose source cannot be read, which keeps a
+        frozen or generated plugin working rather than crashing it.
     """
+    names = sorted(set(_FRAMEWORK_MODULES) | _shared_imports(plugin_module))
+    digest = hashlib.sha256()
+    for name in names:
+        source = _module_source(name)
+        if source is None:
+            return "unknown"
+        digest.update(name.encode("utf-8"))
+        digest.update(source.encode("utf-8"))
+    return digest.hexdigest()[:16]
 
-    return {
-        "alignment": ALIGNMENT_VERSION,
-        "autocorrelation": AUTOCORRELATION_ESTIMATOR_VERSION,
-    }
+
+def _shared_imports(module_name: str) -> set[str]:
+    """Every ``analyses.shared`` module reachable from one module's imports.
+
+    The walk is transitive, because ``shared/alignment.py`` importing
+    ``shared/loader.py`` means the loader can change the plugin's answer too. It
+    stays inside ``polyzymd.analyses.shared`` and follows nothing else, so the
+    closure is a handful of modules rather than the whole dependency tree. A
+    ``from module import name`` line names a function rather than a module, and
+    those are dropped because they carry no source of their own.
+    """
+    seen: set[str] = set()
+    queue = [module_name, *_FRAMEWORK_MODULES]
+    visited: set[str] = set()
+    while queue:
+        name = queue.pop()
+        if name in visited:
+            continue
+        visited.add(name)
+        source = _module_source(name)
+        if source is None:
+            continue
+        for imported in _imported_names(source, name):
+            if not imported.startswith("polyzymd.analyses.shared"):
+                continue
+            if imported in seen or _module_source(imported) is None:
+                continue
+            seen.add(imported)
+            queue.append(imported)
+    return seen
+
+
+def _imported_names(source: str, module_name: str) -> set[str]:
+    """Dotted module names a source file imports, relative imports resolved."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    package = module_name.rsplit(".", 1)[0]
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level:
+                base = f"{package}.{base}" if base else package
+            names.add(base)
+            names.update(f"{base}.{alias.name}" for alias in node.names)
+    return {name for name in names if name}
+
+
+def _module_source(module_name: str) -> str | None:
+    """Source of an importable module, or ``None`` when it has none on disk."""
+    try:
+        module = importlib.import_module(module_name)
+    except Exception:
+        return None
+    try:
+        return inspect.getsource(module)
+    except (OSError, TypeError):
+        return None
+
+
+@lru_cache(maxsize=1)
+def _git_commit() -> str | None:
+    """Commit of the checkout PolyzyMD runs from, or ``None`` for an install.
+
+    It is provenance, not a cache key. A reader of a stored artifact can point
+    at the exact tree that produced the number even when the version string did
+    not move between two development builds.
+    """
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(Path(__file__).resolve().parent), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    commit = completed.stdout.strip()
+    return commit if completed.returncode == 0 and commit else None
 
 
 def _unpack(result: Any) -> tuple[list[Observable], dict[str, Any]]:

@@ -331,14 +331,29 @@ apart.
 
 Reuse is therefore conditional rather than automatic. A cached result is reused
 only when every input file it names still has the recorded size and
-modification time, when the set of trajectory files has not changed, and when
-the settings and equilibration window are the ones it was computed under. Size
-and modification time are weaker than a content hash, but they are cheap on a
-multi-gigabyte trajectory and they catch the case that actually happens, which
-is a file that grew. A result that cannot prove any of this, including one
-written before the framework recorded a cache key, is recomputed rather than
-trusted; where the command that found it cannot recompute, it stops and says
-which file changed.
+modification time, when the set of trajectory files has not changed, when the
+settings and equilibration window are the ones it was computed under, and when
+the code has not changed. Size and modification time are weaker than a content
+hash, but they are cheap on a multi-gigabyte trajectory and they catch the case
+that actually happens, which is a file that grew.
+
+The code is covered by two hashes. `plugin_code_hash` is a digest of the plugin
+module, so editing what a plugin measures recomputes it. `framework_code_hash`
+is a digest of `contract.py`, `base.py`, and every module under
+`analyses/shared/` the plugin reaches through its imports, so a fix to
+alignment, to the correlation-time estimator or to the reduction rules
+recomputes every plugin that depends on it. Neither hash needs a version
+constant to be bumped by hand, which is the failure this replaces: a shared
+module could change its answer while every cached artifact still looked current.
+
+The identity block also records the PolyzyMD version and, in a development
+checkout, the commit. The commit is provenance rather than a cache key, because
+comparing it would throw away every cached replicate whenever anything in the
+repository was committed, including documentation.
+
+A result that cannot prove any of this, including one written before the
+framework recorded a cache key, is recomputed rather than trusted; where the
+command that found it cannot recompute, it stops and says which file changed.
 
 ## Why a solvent-accessible surface area depends on how it was batched
 

@@ -98,15 +98,6 @@ MIN_RECOMMENDED_N_INDEPENDENT = 10
 # value near lag zero cannot truncate the sum. Same default as pymbar.
 DEFAULT_MINTIME = 3
 
-# Identifies which correlation estimator produced a stored number. Version "1"
-# was the trapezoid integration that counted lag zero twice and floored tau at
-# one timestep; version "2" is the pymbar-style sum below. Plugins stamp this on
-# every replicate artifact whose sem_* field divides by an effective sample
-# count, and refuse to aggregate artifacts that disagree, because the two
-# versions give sem values that differ by a factor of about the square root of
-# three for a fast observable. Bump it whenever the estimator changes a number.
-AUTOCORRELATION_ESTIMATOR_VERSION = "2"
-
 _WITHDRAWN_METHODS = ("first_zero", "exponential_fit")
 
 

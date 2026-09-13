@@ -469,13 +469,14 @@ def test_runner_reuses_a_replicate_whose_identity_matches(
     assert marker.stat().st_mtime_ns == stamp
 
 
-def test_runner_recomputes_when_a_shared_version_is_bumped(
+def test_runner_recomputes_when_shared_code_changes(
     tmp_path: Path, run_contract_analysis: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Bumping a shared-module version invalidates every cached replicate.
+    """A change in shared code invalidates every cached replicate.
 
-    ``plugin_code_hash`` only covers the plugin module, so a fix in a shared
-    module has to announce itself through its version constant.
+    ``plugin_code_hash`` only covers the plugin module, so a fix in
+    ``shared/alignment.py`` or in the reduction rules of ``contract.py`` has to
+    reach the identity block through the framework hash.
     """
     from polyzymd.analyses import base as analyses_base
 
@@ -483,21 +484,36 @@ def test_runner_recomputes_when_a_shared_version_is_bumped(
     marker = tmp_path / "analysis" / "A" / "rg" / "run_1" / "observables.npz"
     stamp = marker.stat().st_mtime_ns
 
-    monkeypatch.setattr(analyses_base, "ALIGNMENT_VERSION", "99")
+    monkeypatch.setattr(analyses_base, "_framework_code_hash", lambda module: "deadbeefdeadbeef")
     run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
 
     assert marker.stat().st_mtime_ns != stamp
 
 
-def test_shared_versions_are_recorded_in_the_identity_block(
+def test_the_framework_hash_covers_the_shared_modules_a_plugin_imports() -> None:
+    """Editing a shared module the plugin reaches changes the framework hash."""
+    from polyzymd.analyses.base import _framework_code_hash, _shared_imports
+
+    reached = _shared_imports("polyzymd.analyses.rg")
+
+    assert "polyzymd.analyses.shared.topology" in reached
+    assert "polyzymd.analyses.shared.statistics" in reached
+    assert _framework_code_hash("polyzymd.analyses.rg") != "unknown"
+
+
+def test_the_identity_block_records_the_build_it_came_from(
     tmp_path: Path, run_contract_analysis: Any
 ) -> None:
-    """The identity block names the shared modules a cached result depends on."""
-    from polyzymd.analyses.base import _shared_versions
+    """The identity block names the version, the code hashes and the commit."""
+    from polyzymd import __version__
+    from polyzymd.analyses.base import _framework_code_hash
 
     aggregate = run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
 
-    assert aggregate.provenance["identity"]["shared_versions"] == _shared_versions()
+    identity = aggregate.provenance["identity"]
+    assert identity["polyzymd_version"] == __version__
+    assert identity["framework_code_hash"] == _framework_code_hash("polyzymd.analyses.rg")
+    assert "git_commit" in identity
 
 
 def test_runner_recomputes_when_an_input_file_changes(

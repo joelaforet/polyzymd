@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A cached replicate now notices a change in shared code.**  The identity
+  block records `framework_code_hash`, a digest of `contract.py`, `base.py` and
+  every module under `analyses/shared/` the plugin reaches through its imports,
+  so a fix to alignment, to the correlation-time estimator or to the reduction
+  rules recomputes every plugin that depends on it.  It replaces
+  `shared_versions`, which listed two constants a maintainer had to remember to
+  bump, and with it the constants `ALIGNMENT_VERSION` and
+  `AUTOCORRELATION_ESTIMATOR_VERSION` are gone.  The block also records
+  `git_commit` in a development checkout; that field is provenance and is not
+  compared, because comparing it would discard every cached replicate on a
+  documentation commit.  Existing replicate caches do not carry the new field
+  and are recomputed once.
+
 - **A one-condition run reports its numbers again.**  A contract comparison over
   a single condition used to return nothing, so `polyzymd analyze` with one
   `-c` raised "the comparison produced no result".  It now writes a comparison

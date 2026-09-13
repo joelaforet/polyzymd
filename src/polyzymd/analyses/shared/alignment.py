@@ -68,11 +68,6 @@ LOGGER = logging.getLogger(__name__)
 # Type alias for reference modes (re-export from centroid for consistency)
 ReferenceMode = Literal["centroid", "average", "frame", "external"]
 
-# Bumped when the aligned coordinates change for the same settings. Plugins fold
-# this into their cache identity so artifacts written before the 2026-09-12 fix
-# to the "centroid" and "frame" reference modes are recomputed rather than reused.
-ALIGNMENT_VERSION = "2"
-
 
 class AlignmentConfig(BaseModel):
     """Configuration for trajectory alignment.
