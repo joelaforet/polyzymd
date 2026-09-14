@@ -58,6 +58,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The unused `AlignmentConfig.to_dict` and the unused
   `polyzymd.analyses.shared.centroid.find_reference_frame` are deleted.
 
+
+
+- **The correlation estimator every analysis plugin called was wrong.**
+  `estimate_correlation_time(method="integration")` trapezoid-integrated the
+  normalised autocorrelation function from lag zero, so applying
+  `g = 1 + 2*tau/dt` counted the lag-zero term twice, and it then floored tau
+  at one timestep.  White noise came back with `g = 3.00` instead of `1.00`,
+  and correlated series came back about `+2` too high, which inflated every
+  `sem_rmsd`, `sem_rg`, `sem_sasa`, `sem_distance` and `n_independent_frames`
+  written to an artifact.  The estimator now sums
+  `g = 1 + 2*sum C(t)*(1 - t/N)` over positive lags with the first
+  non-positive cutoff, following Chodera et al. (2007) as implemented in
+  pymbar, and derives `tau = (g - 1)/2 * dt`.  The estimator is now pymbar's own
+  `timeseries.statistical_inefficiency`, so pymbar (>= 4.0, from PyPI) is a new
+  dependency of PolyzyMD.  White noise with N = 20000 now
+  gives `g = 1.04`, AR(1) with phi = 0.5 gives `3.02` against an analytic
+  `3.00`, and phi = 0.9 gives `19.8` against an analytic `19.0`.
+
+- **RMSF is computed from every production frame.**  RMSF previously fed the
+  accumulator only autocorrelation-spaced frames, which discarded at least
+  half the production window and usually far more.  Thinning does not remove
+  the finite-sample bias of a fluctuation, it only raises the variance of the
+  profile, so all frames now reach the accumulator.  The correlation time and
+  effective sample count stay as recorded diagnostics and the uncertainty on
+  RMSF is still the standard error across replicates.  The
+  `statistical_policy` `frame_strategy` value changes from
+  `subsample_by_autocorrelation_when_estimated` to `all_production_frames`.
+
 - **Hydrogen bonds counted C-H donors and carbon acceptors.**  The plugin
   passed the union of the configured groups to MDAnalysis as both `donors_sel`
   and `acceptors_sel`.  MDAnalysis treats any selected heavy atom within 1.2 A
@@ -104,6 +132,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   RMSF is still the standard error across replicates.  The
   `statistical_policy` `frame_strategy` value changes from
   `subsample_by_autocorrelation_when_estimated` to `all_production_frames`.
+
+- **The hard-kill guard no longer trusts a truncated `restart_state.xml`.**
+  `run-segment` kept a segment whenever `restart_state.xml` existed, so a
+  zero-byte file left by a power loss sent the restart down the
+  binary-checkpoint path instead of retiring the segment and retrying from
+  the previous good state.  The guard now requires the file to be complete.
 
 - **Recovery skips truncated state or system XML.**  A hard kill could leave
   `interrupted_system.xml` at zero bytes; recovery paired it with the intact
