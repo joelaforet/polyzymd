@@ -32,6 +32,7 @@ from polyzymd.analyses.mda import (
 from polyzymd.analyses.rmsf import RMSFAnalysis, RMSFSettings
 from polyzymd.analyses.rmsf._mda import (
     MEAN_RMSF_METRIC,
+    RMSF_METRIC_METADATA,
     RMSFArtifactCollector,
     aggregate_rmsf_artifacts,
     external_reference_file_identity,
@@ -288,6 +289,54 @@ class TestRMSFDiscoveryAndSettings:
 class TestRMSFMDAJobs:
     """Tests for RMSF MDA job construction and validation."""
 
+    def test_build_mda_jobs_keeps_every_production_frame(self, condition: Condition) -> None:
+        """RMSF must accumulate all window frames, not a decorrelated subset."""
+
+        n_frames = 400
+        rng = np.random.default_rng(7)
+        noise = rng.standard_normal(n_frames)
+        correlated = np.empty(n_frames, dtype=np.float64)
+        correlated[0] = noise[0]
+        for index in range(1, n_frames):
+            correlated[index] = 0.95 * correlated[index - 1] + noise[index]
+
+        analysis = RMSFAnalysis()
+        ctx = SimpleNamespace(
+            universe=FakeUniverse(n_frames=n_frames),
+            settings=RMSFSettings(reference_mode="average"),
+            frame_selection=_frame_selection(n_frames),
+            replicate_context=SimpleNamespace(condition=condition),
+            replicate=1,
+            universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=1),
+        )
+        with (
+            patch("polyzymd.analyses.rmsf._mda.align_trajectory", return_value=None),
+            patch("polyzymd.analyses.rmsf._mda.RMSFProfileAnalysis", FakeProfileAnalysis),
+            patch(
+                "polyzymd.analyses.rmsf._mda.compute_rmsd_timeseries",
+                return_value=correlated,
+            ),
+        ):
+            jobs = analysis.build_mda_jobs(ctx)
+
+        assert jobs is not None
+        metadata = jobs[0].universe_policy.metadata["autocorrelation_metadata"]
+        assert metadata["autocorrelation_analyzed"] is True
+        assert metadata["correlation_time"] > 0.0
+        assert metadata["statistical_inefficiency"] > 1.0
+        assert metadata["n_frames_window"] == n_frames
+        # Correlation is only a diagnostic: every frame still reaches the accumulator.
+        assert jobs[0].frame_selection.frames == tuple(range(n_frames))
+        assert metadata["selected_frames"] == list(range(n_frames))
+
+    def test_rmsf_statistical_policy_records_all_frame_strategy(self) -> None:
+        """The recorded policy must say every production frame is used."""
+
+        policy = RMSF_METRIC_METADATA["statistical_policy"]
+
+        assert policy["frame_strategy"] == "all_production_frames"
+        assert policy["uncertainty_level"] == "biological_replicate_sem"
+
     def test_build_mda_jobs_returns_profile_job(self, condition: Condition) -> None:
         """build_mda_jobs should produce one explicit-frame MDA job."""
 
@@ -310,7 +359,7 @@ class TestRMSFMDAJobs:
         assert len(jobs) == 1
         assert jobs[0].name == "rmsf_profile"
         assert jobs[0].frame_selection.frames == tuple(range(20))
-        assert jobs[0].universe_policy.metadata["rmsf_profile_version"] == "1"
+        assert jobs[0].universe_policy.metadata["rmsf_profile_version"] == "2"
 
     def test_build_mda_jobs_preserves_noncontiguous_explicit_frames(
         self, condition: Condition
