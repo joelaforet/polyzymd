@@ -36,3 +36,7 @@ class PlotError(AnalysisError):
 
 class DependencyError(AnalysisError):
     """Raised when declared analysis dependencies are invalid or missing."""
+
+
+class SelectionError(AnalysisError):
+    """Raised when an analysis selection is empty or cannot be resolved."""
