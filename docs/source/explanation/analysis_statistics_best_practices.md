@@ -237,6 +237,81 @@ thresholds, and marks discoveries only up to the largest rank that satisfies the
 threshold. Adjusted p-values and CLI significance markers are based on this
 correction rather than on raw p-values alone.
 
+### Why the family is one analysis run
+
+A correction only means something if you can say what it corrected over. The
+package draws the boundary at one analysis run: every pairwise test that run
+produced, across all of its metrics and all of its condition pairs, is one
+Benjamini-Hochberg family.
+
+That boundary matches how the results are read. When you run `polyzymd compare
+run rmsd` over four conditions with two named runs, you look at the whole table
+at once and pick out the rows that stand out. The number of chances you gave
+yourself to find something is the size of that table, not the size of one
+column. Correcting each metric separately would let the error rate grow with
+the number of metrics you happened to configure, which is a property of the
+YAML file rather than of the science.
+
+Drawing the family wider would be worse in a different way. Pooling across
+separate runs, or across analyses, would make the significance of an RMSD
+comparison depend on whether somebody also ran SASA that afternoon. A
+comparison should not change its verdict because of an unrelated command.
+
+### Why the ANOVA is reported uncorrected
+
+The one-way ANOVA answers a different question from the pairwise tests: it asks
+whether any condition differs at all, without naming a pair. Putting it in the
+same family would mix a statement about the whole design with statements about
+individual contrasts, and adjusting it against them has no interpretation.
+
+PolyzyMD therefore reports the ANOVA p-value raw, labels it omnibus, and gates
+nothing on it. In particular the pairwise tests run whether or not the ANOVA
+reaches significance. The classical protected-LSD reasoning, in which a
+significant omnibus test licenses the pairwise ones, is a family-wise argument
+and does not transfer to false discovery rate control. Treat the ANOVA as a
+summary of whether the conditions look separable at all, not as a gate.
+
+### Why Welch is the sensible default at three replicates
+
+With three replicates per condition, the variance of each condition is
+estimated from two degrees of freedom. That estimate is extremely noisy, so a
+test that assumes the two conditions share a variance is assuming something you
+cannot check: a variance-ratio test at this sample size has almost no power to
+reject equality, and passing it is not evidence of it.
+
+The assumption also fails for physical reasons in the comparisons this package
+is built for. A protein with no polymer and the same protein in a crowded
+polymer environment are not expected to fluctuate by the same amount. The
+conditions that change the mean usually change the spread as well.
+
+Welch's t-test drops the shared-variance assumption. With equal group sizes it
+gives the same t statistic as Student's test but fewer degrees of freedom, so
+it is the more cautious of the two: when the variances really do differ, the
+Student p-value is too small. The cost when the variances happen to be equal is
+a small loss of power; the cost of the Student test when they are not is a
+false positive rate above the nominal alpha.
+
+`ttest_method` still defaults to `"student"` for backwards compatibility with
+existing comparison projects. Set `ttest_method: "welch"` in the `defaults:`
+block of `comparison.yaml` for any comparison where the conditions could
+plausibly differ in their spread, which is most of them.
+
+### Effect sizes at small replicate counts
+
+Cohen's d is biased upward at small samples. Hedges' correction removes most of
+that bias by multiplying d by `J = 1 - 3 / (4 * (n1 + n2) - 9)`, which is about
+0.80 for three replicates per condition. PolyzyMD reports both `cohens_d` and
+`hedges_g`; quote the latter.
+
+The Cohen adjectives ("small", "medium", "large") are withheld below ten
+combined replicates. At six replicates the standard error of the effect size is
+of order one, so the boundary between "medium" and "large" is noise. The
+numbers are still reported; only the label is suppressed.
+
+For the same reason, a direction label such as "stabilizing" or "increased" is
+attached only when the corrected test is significant. A direction read off a
+one percent shift in two means is a description of the noise, not a finding.
+
 ### Tukey HSD as an alternative
 
 When `posthoc_method` is `"tukey_hsd"`, PolyzyMD uses Tukey's Honestly
@@ -297,6 +372,20 @@ Useful background includes:
 
 > **Flyvbjerg, H., & Petersen, H. G.** (1989). "Error estimates on averages
 > of correlated data." *Journal of Chemical Physics*, 91(1), 461-466.
+
+> **Welch, B. L.** (1947). "The generalization of 'Student's' problem when
+> several different population variances are involved." *Biometrika*, 34(1-2),
+> 28-35. [DOI: 10.1093/biomet/34.1-2.28](https://doi.org/10.1093/biomet/34.1-2.28)
+
+> **Hedges, L. V.** (1981). "Distribution theory for Glass's estimator of
+> effect size and related estimators." *Journal of Educational Statistics*,
+> 6(2), 107-128.
+> [DOI: 10.3102/10769986006002107](https://doi.org/10.3102/10769986006002107)
+
+> **Benjamini, Y., & Hochberg, Y.** (1995). "Controlling the false discovery
+> rate: a practical and powerful approach to multiple testing." *Journal of the
+> Royal Statistical Society B*, 57(1), 289-300.
+
 > [DOI: 10.1063/1.457480](https://doi.org/10.1063/1.457480). Block averaging is
 > an alternative route to the statistical inefficiency. PolyzyMD does not
 > implement it.

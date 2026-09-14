@@ -57,7 +57,8 @@ class SASARunPairwiseComparison(BaseModel):
     p_value: float | None = None
     p_value_adjusted: float | None = None
     cohens_d: float | None = None
-    effect_interpretation: str
+    hedges_g: float | None = None
+    effect_interpretation: str | None = None
     direction: str
     significant: bool
     percent_change: float
@@ -66,11 +67,16 @@ class SASARunPairwiseComparison(BaseModel):
 
 
 class SASARunANOVA(BaseModel):
-    """ANOVA result for a single SASA run."""
+    """ANOVA result for a single SASA run.
+
+    The ANOVA is an omnibus test outside the pairwise Benjamini-Hochberg
+    family, so ``p_value_adjusted`` is always ``None``.
+    """
 
     run_label: str
     f_statistic: float | None = None
     p_value: float | None = None
+    p_value_adjusted: float | None = None
     significant: bool
     testable: bool = True
     note: str | None = None
