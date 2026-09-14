@@ -86,9 +86,7 @@ Chodera, J. D., Swope, W. C., Pitera, J. W., Seok, C., and Dill, K. A. (2007).
     Computation 3:26. doi:10.1021/ct0502864
 ```
 
-The full list of what to cite is in section 10 of
-`docs/planning/analyses_audit_2026-09-11.md`, and the rendered page is
-`docs/source/explanation/references.md`. Do not cite a method the code does not
+The list of what to cite is `docs/source/explanation/references.md`. Do not cite a method the code does not
 implement. A citation for block averaging or bootstrapping belongs in the code
 only once that code exists.
 

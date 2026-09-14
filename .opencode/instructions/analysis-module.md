@@ -122,5 +122,4 @@ The replicate is the sampling unit for every cross-condition test and every
 condition-level uncertainty. Equilibration is one global value applied
 uniformly, and no diagnostic is allowed to select data. Every metric carries a
 unit and a stated uncertainty. Invoke the `livecoms-check` skill in
-`.claude/skills/` before committing analysis code, and follow
-`docs/planning/analyses_refactor.md` for the order of the outstanding work.
+`.claude/skills/` before committing analysis code.
