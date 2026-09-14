@@ -183,6 +183,16 @@ plugins:
         fragment_weighting: "equal"
 ```
 
+Fragment mode needs a topology that carries bonds, because fragments are
+connected components of the bond graph. If the selected atoms have no bonds, the
+run fails with `TopologyBondsMissingError` instead of quietly measuring the
+whole selection as one fragment. This is common for solvated systems above
+99999 atoms, where MDAnalysis skips the CONECT records that OpenMM writes in
+hexadecimal. Load a topology that carries bonds, or guess bonds for the protein
+and polymer selection. If whole-selection Rg is genuinely what you want, set
+`allow_single_fragment_fallback: true` on the run and say so when you report the
+number.
+
 Fragment mode details, weighting behavior, and related output fields are
 documented in {doc}`../reference/analysis_rg_reference`.
 
