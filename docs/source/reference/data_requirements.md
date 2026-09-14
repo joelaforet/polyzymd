@@ -41,7 +41,8 @@ scratch or in the projects directory) grows to:
 
 ```
 {scratch_dir}/{naming_template}/       # One directory per replicate
-├── solvated_system.pdb                # Topology (created by polyzymd build)
+├── solvated_system.pdb                # Viewer topology: names and coordinates (polyzymd build)
+├── system.prmtop                      # Analysis topology: every atom and bond (polyzymd build)
 ├── system.xml                         # OpenMM System with restraints (polyzymd build)
 ├── build_manifest.json                # Hashes, config hash, versions, PACKMOL seeds
 ├── progress.json                      # Stage/segment records with runtime provenance
@@ -83,7 +84,7 @@ never retired: the next job resumes from that portable state.
 
 | File | Key contents |
 |------|--------------|
-| `build_manifest.json` | SHA-256 of `solvated_system.pdb` and `system.xml`, the config hash, `openmm_version`, `polyzymd_version`, and `provenance` (see below). `polyzymd submit --skip-build` refuses bundles whose config hash no longer matches `config.yaml` |
+| `build_manifest.json` | SHA-256 of `solvated_system.pdb`, `system.xml` and `system.prmtop` when written, the config hash, `openmm_version`, `polyzymd_version`, and `provenance` (see below). `polyzymd submit --skip-build` refuses bundles whose config hash no longer matches `config.yaml` |
 | `progress.json` | One record per equilibration stage and production segment with `polyzymd_version`, `openmm_version`, `pixi_environment` (null in files written by older versions). Rebuilt from a filesystem scan after a chain is cancelled and resubmitted; the segment provenance is then recovered from each `production_N_parameters.json` rather than lost. Published atomically (unique temporary file, fsync, rename) so a second writer cannot corrupt it |
 | `production_N/production_N_parameters.json` | Simulation parameters plus a top-level `provenance` block (`polyzymd_version`, `openmm_version`, `pixi_environment`, `hostname`, `slurm_job_id`) |
 | `minimization/phase.json` | Phase status, state path, `frozen_atoms` (the number of solute **heavy** atoms held fixed), `frozen_rmsd_angstrom` (0.0 when the solute was frozen), and `hydrogen_max_displacement_angstrom` (how far the furthest solute hydrogen moved onto its force-field constraint length; `null` for unfrozen minimization and for records written by older versions) |
@@ -193,9 +194,30 @@ locate each replicate's working directory.
 
 ### Topology and trajectory layout
 
-Current OpenMM runs write `solvated_system.pdb` in the replicate working
-directory and production trajectories as indexed daisy-chain segments:
+Current OpenMM runs write two topologies in the replicate working directory
+and production trajectories as indexed daisy-chain segments:
 `production_N/production_N_trajectory.dcd`.
+
+- `system.prmtop` is the analysis topology. It is built from the OpenMM
+  topology and System together, so it carries every atom, residue, element,
+  mass, charge and bond, including constrained bonds, with no column widths
+  and no atom limit. Analyses load it when it is present.
+- `solvated_system.pdb` is the viewer topology, for PyMOL or VMD with the DCD
+  segments. Above 99,999 atoms OpenMM writes its serials in hex and MDAnalysis
+  cannot read its CONECT records, and OpenMM writes CONECT records only for
+  non-standard residues in any case, so it is a fallback for analysis, not the
+  intended input.
+
+Runs built before `system.prmtop` existed get one from their PDB and
+`system.xml` with `polyzymd analysis-topology RUN_DIR...`. OpenMM's own PDB
+reader accepts the hex serials it writes, so this works for any size.
+
+GROMACS runs have the same split. `prod.tpr`, the compiled run input that
+grompp writes before production, plays the role of `system.prmtop`: every
+atom, bond, mass and charge, no atom limit, read natively by MDAnalysis.
+Analyses prefer it over `solvated_system.pdb` and over any `.gro`, which
+carries no bonds at all. No extra step is needed; the run directory keeps
+`prod.tpr` after production.
 
 When multiple daisy-chain segments exist (e.g., `production_0/`,
 `production_1/`, `production_2/`), they are automatically stitched together in
@@ -317,7 +339,7 @@ paths in `comparison.yaml`.
   showing the expected path.
 
 - **Incomplete replicate directories.** Every replicate directory must contain
-  at least a topology file (`solvated_system.pdb`) and one or more production
+  at least a topology file (`system.prmtop` or `solvated_system.pdb`) and one or more production
   trajectory files. Partially completed simulations that crashed before writing
   a trajectory will cause load failures.
 

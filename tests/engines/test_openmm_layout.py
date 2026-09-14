@@ -199,3 +199,32 @@ class TestOpenMMTrajectorySearch:
         layout = engine.resolve_trajectory_layout(tmp_path, replicate=1)
         assert layout.trajectory_format == "dcd"
         assert layout.topology_format == "pdb"
+
+
+class TestOpenMMAnalysisTopology:
+    """system.prmtop is the analysis topology when the build wrote it."""
+
+    def test_prefers_prmtop_over_pdb(self, tmp_path: Path) -> None:
+        """The bond-complete file wins and the layout names its format."""
+        (tmp_path / "solvated_system.pdb").write_text("ATOM")
+        (tmp_path / "system.prmtop").write_text("%VERSION")
+        prod0 = tmp_path / "production_0"
+        prod0.mkdir()
+        (prod0 / "production_0_trajectory.dcd").write_bytes(b"x")
+
+        layout = _make_engine().resolve_trajectory_layout(tmp_path, 1)
+
+        assert layout.topology_path == tmp_path / "system.prmtop"
+        assert layout.topology_format == "prmtop"
+
+    def test_pdb_alone_keeps_pdb_format(self, tmp_path: Path) -> None:
+        """Runs built before system.prmtop existed still resolve the PDB."""
+        (tmp_path / "solvated_system.pdb").write_text("ATOM")
+        prod0 = tmp_path / "production_0"
+        prod0.mkdir()
+        (prod0 / "production_0_trajectory.dcd").write_bytes(b"x")
+
+        layout = _make_engine().resolve_trajectory_layout(tmp_path, 1)
+
+        assert layout.topology_path == tmp_path / "solvated_system.pdb"
+        assert layout.topology_format == "pdb"
