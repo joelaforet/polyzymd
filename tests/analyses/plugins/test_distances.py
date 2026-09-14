@@ -279,6 +279,9 @@ def _make_distance_artifacts(tmp_path, condition_label, settings, n_reps: int = 
     from polyzymd.analyses._framework.cache_identity import settings_fingerprint
     from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact, pair_distance_version
 
+    from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
+    from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
+
     analysis_dir = tmp_path
     artifacts = []
     thresholds = settings.get_pair_thresholds()
@@ -351,6 +354,8 @@ def _make_distance_artifacts(tmp_path, condition_label, settings, n_reps: int = 
             metadata={
                 "settings_fingerprint": settings_fingerprint(settings),
                 "pair_distance_version": pair_distance_version(),
+
+                "autocorrelation_estimator_version": AUTOCORRELATION_ESTIMATOR_VERSION,
                 "config_hash": "hash123",
                 "polyzymd_version": "1.0.0-test",
                 "equilibration_time": 100.0,

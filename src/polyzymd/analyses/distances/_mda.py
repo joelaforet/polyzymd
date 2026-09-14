@@ -26,8 +26,10 @@ from polyzymd.analyses.mda import (
     ReplicateArtifact,
     build_pair_distance_analysis,
     pair_distance_version,
+    validate_autocorrelation_estimator_version,
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
+from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 from polyzymd.analyses.shared.loader import parse_time_string
 
 if TYPE_CHECKING:
@@ -62,7 +64,7 @@ class DistancePairPayload:
     sem_distance: float | None
     correlation_time: float | None
     correlation_time_unit: str | None
-    n_independent_frames: int | None
+    n_independent_frames: float | None
     statistical_inefficiency: float | None
     autocorrelation_warning: str | None
     threshold: float | None
@@ -316,6 +318,7 @@ class DistanceArtifactCollector:
             },
             metadata={
                 "result_kind": "distances_mda_replicate",
+                "autocorrelation_estimator_version": AUTOCORRELATION_ESTIMATOR_VERSION,
                 "settings_fingerprint": ctx.settings_fingerprint,
                 "config_hash": config_hash,
                 "polyzymd_version": get_polyzymd_version(),
@@ -452,7 +455,7 @@ def _summarize_distance_series(
     sem_distance: float | None = None
     correlation_time: float | None = None
     correlation_time_unit: str | None = None
-    n_independent_frames: int | None = None
+    n_independent_frames: float | None = None
     statistical_inefficiency: float | None = None
     autocorrelation_warning: str | None = None
     if len(distances) >= 20:
@@ -664,6 +667,8 @@ def _validate_and_order_artifacts(
                 f"{artifact_version!r}, expected {expected_version!r}. Recompute this replicate "
                 "or clear stale caches before aggregating."
             )
+
+        validate_autocorrelation_estimator_version(artifact, analysis_label="Distances")
         _validate_pair_payloads(
             artifact,
             expected_pairs,

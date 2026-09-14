@@ -40,6 +40,7 @@ from polyzymd.analyses.rg._plotters import (
     plot_rg_distributions,
     plot_rg_timeseries,
 )
+from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 from polyzymd.config.comparison import PlotSettings
 from tests._support.analysis_testkit import (
     make_aggregate_context,
@@ -421,6 +422,7 @@ def _replicate_artifact(
         metadata={
             "result_kind": "rg_mda_replicate",
             "settings_fingerprint": settings_fingerprint(settings),
+            "autocorrelation_estimator_version": AUTOCORRELATION_ESTIMATOR_VERSION,
             "config_hash": "hash123",
             "polyzymd_version": "test",
             "equilibration_time": 0.0,

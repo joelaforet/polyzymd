@@ -146,7 +146,7 @@ Per-replicate result structure (representative):
             "threshold": 3.5,
             "fraction_below_threshold": 0.624,
             "correlation_time": 245.3,
-            "n_independent_frames": 34,
+            "n_independent_frames": 34.6,
             "histogram_edges": [...],
             "histogram_counts": [...],
             "kde_x": [...],

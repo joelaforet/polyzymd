@@ -30,8 +30,10 @@ from polyzymd.analyses.mda import (
     ReplicateArtifact,
     build_pair_distance_analysis,
     pair_distance_version,
+    validate_autocorrelation_estimator_version,
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
+from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 from polyzymd.analyses.shared.loader import parse_time_string
 
 if TYPE_CHECKING:
@@ -212,6 +214,7 @@ class TriadArtifactCollector:
             },
             metadata={
                 "result_kind": "catalytic_triad_mda_replicate",
+                "autocorrelation_estimator_version": AUTOCORRELATION_ESTIMATOR_VERSION,
                 "settings_fingerprint": ctx.settings_fingerprint,
                 "config_hash": config_hash,
                 "polyzymd_version": get_polyzymd_version(),
@@ -377,6 +380,8 @@ def _validate_and_order_artifacts(
                 f"pair_distance_version {artifact_version!r}, expected {expected_version!r}. "
                 "Recompute this replicate or clear stale caches before aggregating."
             )
+
+        validate_autocorrelation_estimator_version(artifact, analysis_label="Catalytic-triad")
         _validate_pair_payloads(artifact, settings)
         store = ArtifactStore(analysis_dir / f"run_{artifact.replicate}")
         store.validate_sidecar(_triad_distance_sidecar(artifact))
@@ -617,7 +622,7 @@ def _simultaneous_contact_statistics(
             "n_independent": None,
             "warning": str(exc),
         }
-    n_independent = int(tau_result.n_independent)
+    n_independent = float(tau_result.n_independent)
     sem = (
         float(np.sqrt(fraction * (1.0 - fraction) / float(n_independent)))
         if n_independent > 0

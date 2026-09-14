@@ -23,8 +23,10 @@ from polyzymd.analyses.mda import (
     MDAJobResult,
     MDAUniversePolicy,
     ReplicateArtifact,
+    validate_autocorrelation_estimator_version,
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
+from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.statistics import compute_sem
 from polyzymd.analyses.shared.topology import require_topology_bonds
@@ -68,7 +70,7 @@ class RgRunPayload:
     sem_rg: float | None
     correlation_time: float | None
     correlation_time_unit: str | None
-    n_independent_frames: int | None
+    n_independent_frames: float | None
     statistical_inefficiency: float | None
     autocorrelation_warning: str | None
     fragment_rg_values: NDArray[np.float64] | None = None
@@ -399,6 +401,7 @@ class RgArtifactCollector:
             },
             metadata={
                 "result_kind": "rg_mda_replicate",
+                "autocorrelation_estimator_version": AUTOCORRELATION_ESTIMATOR_VERSION,
                 "settings_fingerprint": ctx.settings_fingerprint,
                 "config_hash": config_hash,
                 "polyzymd_version": get_polyzymd_version(),
@@ -761,7 +764,7 @@ def _payload_from_analysis(
     sem_rg: float | None = None
     correlation_time: float | None = None
     correlation_time_unit: str | None = None
-    n_independent_frames: int | None = None
+    n_independent_frames: float | None = None
     statistical_inefficiency: float | None = None
     autocorrelation_warning: str | None = None
     if len(rg_values) >= 20:
@@ -1080,6 +1083,7 @@ def _validate_and_order_artifacts(
                 f"Rg artifact replicate {artifact.replicate} has settings fingerprint "
                 f"{stored_fingerprint}, expected {settings_fingerprint}"
             )
+        validate_autocorrelation_estimator_version(artifact, analysis_label="Rg")
         observed = {_run_payload_label(payload) for payload in artifact.payload.get("runs", [])}
         skipped = {
             _skipped_payload_label(payload) for payload in artifact.payload.get("skipped_runs", [])
