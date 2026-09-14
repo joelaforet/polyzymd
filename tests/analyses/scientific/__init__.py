@@ -1,1 +1,1 @@
-"""Known-answer scientific tests for polyzymd.analyses."""
+"""Known-answer scientific tests for the analyses package."""
