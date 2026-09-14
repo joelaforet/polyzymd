@@ -305,7 +305,7 @@ class TestReportFields:
         # The report orients the effect size like delta, so both are positive
         # when the second condition is larger.
         assert pair.cohens_d > 0.0
-        assert pair.hedges_g is None
+        assert pair.hedges_g is not None and 0.0 < pair.hedges_g < pair.cohens_d
         assert pair.testable is True
 
         assert report.provenance.polyzymd_version
