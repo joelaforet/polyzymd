@@ -68,19 +68,15 @@ def build_triad_jobs(
     list of MDAAnalysisJob
         Single pair-distance job whose pair x frame matrix is reduced by the
         triad collector.
+
+    Notes
+    -----
+    Coordinates are read as the trajectory stores them, and no alignment runs
+    first. Triad distances are invariant under rigid-body motion, and rotating
+    the coordinates in memory while keeping the original box vectors would
+    corrupt the minimum-image convention.
     """
 
-    from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
-
-    alignment = AlignmentConfig()
-    if alignment.enabled:
-        align_trajectory(
-            ctx.universe,
-            alignment,
-            start_frame=ctx.frame_selection.start,
-            stop_frame=ctx.frame_selection.stop,
-            step_frame=ctx.frame_selection.step,
-        )
     resolved_pairs = resolve_distance_pairs(
         universe=ctx.universe,
         pairs=settings.get_pair_selections(),
@@ -91,7 +87,11 @@ def build_triad_jobs(
         **ctx.universe_policy.metadata,
         "triad_settings": settings.model_dump(mode="json"),
         "pair_distance_version": pair_distance_version(),
-        "pbc_policy": {"use_pbc": True, "box_source": "timestep.dimensions"},
+        "pbc_policy": {
+            "use_pbc": True,
+            "box_source": "timestep.dimensions",
+            "alignment_applied": False,
+        },
         "composite_reducer": {
             "metric": SIMULTANEOUS_CONTACT_METRIC,
             "threshold_operator": "strict_less_than",
@@ -201,7 +201,11 @@ class TriadArtifactCollector:
                 "universe_policy": strict_json_payload(
                     ctx.universe_policy.as_dict(), analysis_name=ctx.analysis_name
                 ),
-                "pbc_policy": {"use_pbc": True, "box_source": "timestep.dimensions"},
+                "pbc_policy": {
+                    "use_pbc": True,
+                    "box_source": "timestep.dimensions",
+                    "alignment_applied": False,
+                },
                 "composite_reducer": {
                     "metric": SIMULTANEOUS_CONTACT_METRIC,
                     "threshold": float(settings.threshold),
@@ -349,6 +353,7 @@ def _validate_and_order_artifacts(
     """Validate triad artifact identity, settings, pairs, and sidecars."""
 
     expected = [int(rep) for rep in expected_replicates]
+    expected_version = pair_distance_version()
     by_replicate: dict[int, ReplicateArtifact] = {}
     for artifact in artifacts:
         if artifact.analysis_name != "catalytic_triad":
@@ -368,6 +373,14 @@ def _validate_and_order_artifacts(
                 f"fingerprint {artifact.metadata.get('settings_fingerprint')}, expected "
                 f"{settings_fingerprint}. Recompute the condition or clear stale caches."
             )
+        artifact_version = artifact.metadata.get("pair_distance_version")
+        if artifact_version != expected_version:
+            raise ValueError(
+                f"Catalytic-triad artifact replicate {artifact.replicate} has "
+                f"pair_distance_version {artifact_version!r}, expected {expected_version!r}. "
+                "Recompute this replicate or clear stale caches before aggregating."
+            )
+
         validate_autocorrelation_estimator_version(artifact, analysis_label="Catalytic-triad")
         _validate_pair_payloads(artifact, settings)
         store = ArtifactStore(analysis_dir / f"run_{artifact.replicate}")

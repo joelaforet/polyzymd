@@ -196,16 +196,21 @@ selection_a: "protein and resid 77 and name OG"
 selection_a: "pdbindex 2740"
 ```
 
-## Use PBC and Alignment Defaults
+## Keep PBC on
 
-Distance analysis uses PBC-aware distances (`use_pbc: true`) and trajectory
-alignment (`align_trajectory: true`) by default.
+Distance analysis applies the minimum image convention by default
+(`use_pbc: true`), using the box stored in each frame. Leave it on unless you
+know your trajectory is already unwrapped, because it is what keeps a pair from
+being measured the long way around the box.
 
-These defaults reduce artifacts from periodic wrapping and global rigid-body
-motion, so measured distances reflect local geometry.
+Distances are not aligned. `align_trajectory` now defaults to `false`, is
+ignored, and setting it raises a `DeprecationWarning`. A distance does not
+change when the whole system is rotated or translated, so alignment could only
+cost time, and the in-memory alignment PolyzyMD used to run rotated the
+coordinates without rotating the box, which broke the minimum image convention
+for long pairs.
 
-If you need to override either behavior, see
-{doc}`../reference/analysis_distances_reference`.
+To override PBC, see {doc}`../reference/analysis_distances_reference`.
 
 ## Compare Distances Across Conditions
 

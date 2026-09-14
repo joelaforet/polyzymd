@@ -183,29 +183,51 @@ def build_atom_to_residue_map(atoms: Any, residues: Any) -> NDArray[np.int64]:
     return atom_to_residue
 
 
-def identify_polymer_chains(query_atoms: Any) -> tuple[NDArray[np.int64], list[str]]:
+def identify_polymer_chains(
+    query_atoms: Any,
+    *,
+    allow_single_fragment_fallback: bool = False,
+) -> tuple[NDArray[np.int64], list[str]]:
     """Assign selected polymer residues to chain indices using fragments.
 
     Parameters
     ----------
     query_atoms : Any
         MDAnalysis atom group containing polymer atoms.
+    allow_single_fragment_fallback : bool, optional
+        Treat the whole selection as one chain when the topology has no bonds,
+        by default False. The default raises
+        :class:`~polyzymd.analyses.exceptions.TopologyBondsMissingError`,
+        because assigning every polymer residue to chain 0 distorts per-chain
+        and residence-time statistics without failing.
 
     Returns
     -------
     tuple of ndarray and list of str
         Polymer residue chain indices aligned to ``query_atoms.residues`` and
         warning messages emitted while resolving fragments.
+
+    Raises
+    ------
+    TopologyBondsMissingError
+        If the selected atoms have no bonds and the fallback is not enabled.
     """
+
+    from polyzymd.analyses.shared.topology import require_topology_bonds
 
     query_residues = query_atoms.residues
     chain_indices = np.zeros(len(query_residues), dtype=np.int64)
     warnings: list[str] = []
-    fragments = fragments_or_single(
-        query_atoms.atoms,
+    atoms = query_atoms.atoms
+    fragments, fallback_reason = require_topology_bonds(
+        atoms,
         context="contacts polymer chain detection",
-        warnings=warnings,
+        topology_path=getattr(getattr(atoms, "universe", None), "filename", None),
+        allow_fallback=allow_single_fragment_fallback,
     )
+    if fallback_reason is not None:
+        LOGGER.warning("%s", fallback_reason)
+        warnings.append(fallback_reason)
     residue_lookup = {
         unique_residue_key(residue): idx for idx, residue in enumerate(query_residues)
     }
@@ -215,27 +237,6 @@ def identify_polymer_chains(query_atoms: Any) -> tuple[NDArray[np.int64], list[s
             if query_idx is not None:
                 chain_indices[query_idx] = chain_idx
     return chain_indices, warnings
-
-
-def fragments_or_single(
-    atom_group: Any, *, context: str, warnings: list[str] | None = None
-) -> list[Any]:
-    """Return MDAnalysis fragments with a no-bond topology fallback."""
-
-    from MDAnalysis.exceptions import NoDataError
-
-    try:
-        fragments = atom_group.fragments
-    except NoDataError:
-        message = (
-            f"{context}: topology has no bond information; treating the selected polymer as "
-            "one fragment"
-        )
-        LOGGER.warning("%s", message)
-        if warnings is not None:
-            warnings.append(message)
-        return [atom_group]
-    return list(fragments) if fragments else [atom_group]
 
 
 def _residue_index(residue: Any) -> int:

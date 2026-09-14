@@ -12,10 +12,10 @@ All fields for `plugins.distances`:
 | `threshold` | `float` | `3.5` | Global default threshold in Angstroms |
 | `pairs` | `list[DistancePair]` | *required* | One or more named distance pairs |
 | `use_pbc` | `bool` | `true` | Apply periodic boundary conditions using minimum-image distance |
-| `align_trajectory` | `bool` | `true` | Align trajectory before distance calculation |
-| `alignment_selection` | `str` | `"protein and name CA"` | MDAnalysis selection used for alignment |
-| `alignment_mode` | `str` | `"centroid"` | Alignment reference mode: `centroid` or `frame` |
-| `alignment_frame` | `int \| None` | `null` | Reference frame index when `alignment_mode: frame` |
+| `align_trajectory` | `bool` | `false` | Deprecated and ignored since 1.3.0. Setting it to `true` raises a `DeprecationWarning` |
+| `alignment_selection` | `str` | `"protein and name CA"` | Deprecated and ignored since 1.3.0 |
+| `alignment_mode` | `str` | `"centroid"` | Deprecated and ignored since 1.3.0. Accepted values are still validated as `centroid`, `average`, or `frame` |
+| `alignment_frame` | `int \| None` | `null` | Deprecated and ignored since 1.3.0 |
 
 Each entry in `pairs`:
 
@@ -63,16 +63,34 @@ prefer `protein and resid ...` to avoid accidental multi-chain matches.
 ### PBC and alignment behavior
 
 - `use_pbc: true` computes minimum-image distances for wrapped trajectories
-- `align_trajectory: true` removes global rotation/translation before analysis
 - Orthorhombic boxes are fully supported for PBC correction
 - Triclinic boxes trigger a warning and fall back to Euclidean distance
+- The box used for the minimum-image calculation is the one stored in the
+  frame being measured, read from `Timestep.dimensions`
 
-Alignment reference options:
+```{versionchanged} 1.3.0
+Distances are no longer aligned before measurement. `align_trajectory` and the
+`alignment_*` fields are still accepted so existing `comparison.yaml` files keep
+loading, but they no longer change any number, and requesting alignment raises a
+`DeprecationWarning`. A distance is invariant under rigid-body motion, so
+alignment could never improve it, while aligning in memory rotated the
+coordinates without rotating the box vectors and so corrupted minimum-image
+distances for pairs separated by more than half a box length. For the reasoning,
+see {doc}`../explanation/analysis_concepts`.
 
-| Mode | Description | Best fit |
-|------|-------------|----------|
-| `centroid` | Align to most populated conformation | General default |
-| `frame` | Align to a specific frame index | Reproducible fixed-reference comparisons |
+`pair_distance_version` moves from `"1"` to `"2"` in the same release, and
+aggregation rejects any replicate artifact still carrying version 1 with the
+usual stale-cache message. Recompute affected replicates rather than mixing the
+two conventions.
+```
+
+Removing the alignment step also removes the in-memory reader it installed, so
+reported frame times now come from the trajectory files themselves and match
+the times reported by contacts, Rg, and the other file-backed plugins.
+
+The measured coordinates follow the `pbc_policy` applied at load time. See
+{doc}`analysis_plugin_settings` for that option and for the provenance fields
+that record it.
 
 ### Cache invalidation by settings
 
@@ -230,7 +248,9 @@ polyzymd compare run-all -f comparison.yaml --eq-time 10ns
 **Fix:**
 - Ensure `use_pbc: true`
 - Check logs for triclinic fallback warnings
-- Compare with aligned trajectories to reduce rigid-body artifacts
+- Check whether a measured group can straddle a periodic boundary. Centers of
+  mass of a split molecule are meaningless, and only a whole-molecule
+  trajectory or a `make_whole` load fixes that
 
 ### "Low statistical reliability" warning
 

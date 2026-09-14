@@ -1019,6 +1019,7 @@ class AnalysisLifecycle:
         analysis_dirs: dict[str, Path] = {}
         aggregated_results: dict[str, Any] = {}
         failed_conditions: list[Condition] = []
+        condition_failures: list[tuple[str, Exception]] = []
 
         for cond in valid_conditions:
             cond_dir = analysis_root / sanitize_label(cond.label) / self.analysis.name
@@ -1049,11 +1050,12 @@ class AnalysisLifecycle:
             except (AnalysisError, ValueError, FileNotFoundError, OSError) as e:
                 logger.error(f"  {cond.label}: {type(e).__name__} — {e}")
                 failed_conditions.append(cond)
+                condition_failures.append((cond.label, e))
 
         valid_conditions = [c for c in valid_conditions if c not in failed_conditions]
 
         if len(valid_conditions) < 1:
-            raise ValueError(f"{self.analysis.name}: no conditions succeeded analysis.")
+            raise ValueError(_no_conditions_message(self.analysis.name, condition_failures))
 
         results_dir = analysis_root.parent / "comparison" / self.analysis.name
         control_label = config.control
@@ -1722,6 +1724,25 @@ def _remove_stale_path(path: Path) -> None:
         path.unlink()
     elif path.is_dir():
         shutil.rmtree(path)
+
+
+def _no_conditions_message(
+    analysis_name: str, failures: Sequence[tuple[str, BaseException]]
+) -> str:
+    """Quote the shared cause when every condition failed the same way.
+
+    Typed analysis errors carry their own remedy text, so a user sees what to do
+    instead of only the summary line.
+    """
+
+    base = f"{analysis_name}: no conditions succeeded analysis."
+    if not failures:
+        return base
+    error_classes = {type(error) for _, error in failures}
+    if len(error_classes) > 1:
+        return base
+    label, error = failures[0]
+    return f"{base} Every condition failed with {type(error).__name__}. {label}: {error}"
 
 
 def _format_failure_reasons(failure_reasons: Sequence[str], *, limit: int = 3) -> str:

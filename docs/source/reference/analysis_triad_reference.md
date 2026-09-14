@@ -53,6 +53,29 @@ so bare `resid X` selections can match non-protein atoms. Prefer
 `protein and resid X` for catalytic residues.
 ```
 
+### Coordinates and periodic boundaries
+
+Triad distances are measured on the coordinates as the trajectory stores them,
+with the minimum image convention applied against the box of each frame
+(`use_pbc` is always on for this plugin, and the box comes from
+`Timestep.dimensions`). The `pbc_policy` chosen at load time, the trajectory
+variant, and the bond source are recorded in provenance; see
+{doc}`analysis_plugin_settings`.
+
+```{versionchanged} 1.3.0
+The triad no longer aligns the trajectory before measuring. Distances are
+invariant under rigid-body motion, so alignment changed nothing that was
+correct, while the in-memory alignment rotated coordinates without rotating the
+box vectors, which corrupted minimum-image distances for pairs separated by more
+than half a box length. Reported frame times now come from the trajectory files
+rather than the in-memory reader that alignment installed. For the reasoning,
+see {doc}`../explanation/analysis_concepts`.
+
+`pair_distance_version` moves from `"1"` to `"2"` in the same release, and
+aggregation rejects any replicate artifact still carrying version 1 with the
+usual stale-cache message. Recompute affected replicates.
+```
+
 ## Output Files
 
 Triad outputs are written as canonical v1.3 artifacts under each condition plus

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol
 
@@ -18,6 +19,11 @@ class _TrajectoryLoaderLike(Protocol):
 
     def load_universe(self, replicate: int, cache: bool = True) -> Universe:
         """Load a universe for a replicate.
+
+        Loaders that support periodic boundary policies also accept a
+        ``pbc_policy`` keyword. The provider passes it only when a policy other
+        than ``"as_is"`` is requested, so loaders without the keyword keep
+        working.
 
         Parameters
         ----------
@@ -54,6 +60,23 @@ GRO_CHAIN_ID_WARNING_TEMPLATE = (
     "Chain-based selections (chainid A/B/C) used by analysis plugins may be unreliable. "
     "Prefer a PDB topology when available."
 )
+
+
+def trajectory_variant(paths: "Sequence[Path]") -> str | None:
+    """Name which GROMACS trajectory variant the engine picked, if any.
+
+    The engine prefers the whole-molecule centered file when the run wrote one,
+    and that changes what the coordinates mean, so the choice belongs in
+    provenance rather than only in a filename.
+    """
+    names = [Path(path).name.lower() for path in paths]
+    if not names:
+        return None
+    if any("centered" in name for name in names):
+        return "centered"
+    if any("nojump" in name for name in names):
+        return "nojump"
+    return "raw"
 
 
 @dataclass(frozen=True)
@@ -110,7 +133,24 @@ class FileIdentity:
 
 @dataclass(frozen=True)
 class UniverseProvenance:
-    """Provenance for one replicate universe loaded from PolyzyMD outputs."""
+    """Provenance for one replicate universe loaded from PolyzyMD outputs.
+
+    Attributes
+    ----------
+    pbc_policy : str
+        Periodic boundary policy applied on load, ``"as_is"`` or
+        ``"make_whole"``.
+    topology_has_bonds : bool or None
+        Whether the loaded topology carries bonds. ``None`` before a universe
+        has been loaded.
+    bond_source : str
+        Where the bonds came from: ``"conect"``, ``"guessed"``, or ``"none"``.
+    trajectory_variant : str or None
+        Which trajectory the engine chose. GROMACS writes post-processed
+        trajectories, so this is ``"centered"`` for ``prod_centered.xtc``,
+        ``"nojump"`` for ``prod_nojump.xtc``, and ``"raw"`` otherwise. OpenMM
+        segments are always ``"raw"``.
+    """
 
     replicate: int
     working_directory: Path
@@ -123,6 +163,10 @@ class UniverseProvenance:
     warnings: tuple[str, ...] = field(default_factory=tuple)
     excluded_segments: tuple[int, ...] = field(default_factory=tuple)
     segment_status: tuple[tuple[int, str], ...] = field(default_factory=tuple)
+    pbc_policy: str = "as_is"
+    topology_has_bonds: bool | None = None
+    bond_source: str = "none"
+    trajectory_variant: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Serialize provenance to JSON-compatible primitive values.
@@ -144,6 +188,10 @@ class UniverseProvenance:
             "warnings": list(self.warnings),
             "excluded_segments": list(self.excluded_segments),
             "segment_status": {str(index): status for index, status in self.segment_status},
+            "pbc_policy": self.pbc_policy,
+            "topology_has_bonds": self.topology_has_bonds,
+            "bond_source": self.bond_source,
+            "trajectory_variant": self.trajectory_variant,
         }
 
 
@@ -156,6 +204,7 @@ class UniverseProvider:
     require_complete: bool = True
     loader: _TrajectoryLoaderLike | None = None
     loader_factory: LoaderFactory | None = None
+    pbc_policy: str = "as_is"
     _provenance_cache: dict[int, UniverseProvenance] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
@@ -182,7 +231,13 @@ class UniverseProvider:
         """
         return cls(config=config, **kwargs)
 
-    def load_universe(self, replicate: int, *, cache: bool = True) -> Universe:
+    def load_universe(
+        self,
+        replicate: int,
+        *,
+        cache: bool = True,
+        pbc_policy: str | None = None,
+    ) -> Universe:
         """Load an MDAnalysis universe for a replicate through the existing loader.
 
         Parameters
@@ -192,14 +247,48 @@ class UniverseProvider:
         cache : bool, optional
             Whether the underlying loader may reuse its universe cache, by
             default True.
+        pbc_policy : str or None, optional
+            Periodic boundary policy for this call, overriding the provider
+            setting. ``"as_is"`` (the default) leaves coordinates untouched;
+            ``"make_whole"`` unwraps the protein and polymer selection and
+            requires a topology with bonds.
 
         Returns
         -------
         Universe
             Loaded MDAnalysis universe from the underlying trajectory loader.
         """
+        policy = self.pbc_policy if pbc_policy is None else str(pbc_policy)
         self.provenance_for(replicate, refresh=not cache)
-        return self._get_loader().load_universe(replicate, cache=cache, **self._segment_kwargs())
+        universe = self._get_loader().load_universe(
+            replicate,
+            cache=cache,
+            **self._segment_kwargs(),
+            **self._pbc_kwargs(policy),
+        )
+        self._record_universe_facts(replicate, universe, policy)
+        return universe
+
+    def _pbc_kwargs(self, policy: str) -> dict[str, Any]:
+        """Forward the policy only when it differs from the loader default."""
+
+        return {} if policy == "as_is" else {"pbc_policy": policy}
+
+    def _record_universe_facts(self, replicate: int, universe: Any, policy: str) -> None:
+        """Add what loading established to the cached provenance."""
+
+        from polyzymd.analyses.shared.topology import topology_bond_source
+
+        provenance = self._provenance_cache.get(replicate)
+        if provenance is None:
+            return
+        has_bonds, bond_source = topology_bond_source(universe)
+        self._provenance_cache[replicate] = replace(
+            provenance,
+            pbc_policy=policy,
+            topology_has_bonds=has_bonds,
+            bond_source=bond_source,
+        )
 
     def provenance_for(self, replicate: int, *, refresh: bool = False) -> UniverseProvenance:
         """Return provenance for a replicate, computing it when needed.
@@ -209,19 +298,32 @@ class UniverseProvider:
         replicate : int
             Replicate index to inspect.
         refresh : bool, optional
-            Recompute provenance even when cached, by default False.
+            Recompute provenance even when cached, by default False. Facts
+            established by loading the universe, such as the bond source, are
+            carried across a refresh because rediscovering the input files does
+            not re-examine the topology.
 
         Returns
         -------
         UniverseProvenance
             Input file identity and loader metadata for the replicate.
         """
-        if not refresh and replicate in self._provenance_cache:
-            return self._provenance_cache[replicate]
+        previous = self._provenance_cache.get(replicate)
+        if not refresh and previous is not None:
+            return previous
 
         loader = self._get_loader()
         info = loader.get_trajectory_info(replicate, **self._segment_kwargs())
         provenance = self._build_provenance(info=info, loader=loader)
+        if previous is not None and previous.topology_has_bonds is not None:
+            # Discovery metadata can be refreshed without reloading the
+            # universe, so keep what the last load established about it.
+            provenance = replace(
+                provenance,
+                pbc_policy=previous.pbc_policy,
+                topology_has_bonds=previous.topology_has_bonds,
+                bond_source=previous.bond_source,
+            )
         self._provenance_cache[replicate] = provenance
         return provenance
 
@@ -333,6 +435,8 @@ class UniverseProvider:
             warnings=tuple(warnings),
             excluded_segments=tuple(getattr(info, "excluded_segments", ()) or ()),
             segment_status=tuple(sorted((getattr(info, "segment_status", None) or {}).items())),
+            pbc_policy=self.pbc_policy,
+            trajectory_variant=trajectory_variant(info.trajectory_files),
         )
 
     def _config_engine(self) -> str | None:
