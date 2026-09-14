@@ -56,7 +56,7 @@ or removing toctree entries. This is documented in
 **Symptom:** Various incomplete features and inconsistencies in the analysis
 module.
 
-**Details:** See `analysis-module.md` for the full roadmap. Key items:
+**Details:** The refactor roadmap is kept by the maintainer outside the repository. Key items:
 - Standardize analyzer inheritance
 - Unify result formats
 - Add comprehensive tests
