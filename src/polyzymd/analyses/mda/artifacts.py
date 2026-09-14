@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -336,11 +336,20 @@ class ArtifactManifest(BaseModel):
 
 
 class ArtifactEnvelope(BaseModel):
-    """Extensible JSON envelope for MDAnalysis extension-layer artifacts."""
+    """Extensible JSON envelope for MDAnalysis extension-layer artifacts.
+
+    ``polyzymd_version`` and ``mdanalysis_version`` record the software that
+    produced the numbers. The framework fills them in for every plugin, so a
+    cached artifact can be checked against the running versions without the
+    manifest that nothing writes. They are ``None`` on artifacts written before
+    the fields existed.
+    """
 
     schema_version: str = Field(default=MDA_ARTIFACT_SCHEMA_VERSION)
     artifact_type: str = "artifact"
     analysis_name: str
+    polyzymd_version: str | None = None
+    mdanalysis_version: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     sidecars: list[ArtifactSidecarRef] = Field(default_factory=list)
     provenance: dict[str, Any] = Field(default_factory=dict)
@@ -485,3 +494,40 @@ class ComparisonArtifact(ArtifactEnvelope):
     conditions: list[str] = Field(default_factory=list)
     control_label: str | None = None
     effective_control: str | None = None
+
+
+_EnvelopeT = TypeVar("_EnvelopeT", bound="ArtifactEnvelope")
+
+
+def stamp_software_versions(artifact: _EnvelopeT) -> _EnvelopeT:
+    """Record the running software versions on an artifact envelope.
+
+    Versions already set by a plugin are left alone, and objects without the
+    version fields, such as a plain result model or a manifest from an older
+    release, are returned untouched.
+
+    Parameters
+    ----------
+    artifact : ArtifactEnvelope
+        Artifact about to be persisted.
+
+    Returns
+    -------
+    ArtifactEnvelope
+        The same artifact, with the version fields filled in.
+    """
+
+    if not hasattr(artifact, "polyzymd_version") or not hasattr(artifact, "mdanalysis_version"):
+        return artifact
+    if artifact.polyzymd_version is None:
+        from polyzymd import __version__
+
+        artifact.polyzymd_version = __version__
+    if artifact.mdanalysis_version is None:
+        try:
+            import MDAnalysis
+        except ImportError:
+            pass
+        else:
+            artifact.mdanalysis_version = getattr(MDAnalysis, "__version__", None)
+    return artifact

@@ -1029,6 +1029,12 @@ Options:
   --list                 List available comparison types and exit
 ```
 
+Without `--recompute`, a cached `run_<replicate>/result.json` is reused only
+when the trajectory files it records still have the same size and modification
+time and the settings fingerprint matches; otherwise that replicate is
+recomputed. See the cache reuse section of the comparison reference for the
+rules that apply to the other commands.
+
 #### Example
 
 ```bash
