@@ -34,6 +34,10 @@ PyMOL> load solvated_system.pdb
 PyMOL> load_traj trajectory.dcd, solvated_system
 ```
 
+The PDB is the right file for a viewer. For analysis, PolyzyMD now reads
+`system.prmtop`, which carries every bond, so the fragment and chain checks
+described below run on the real topology rather than on guessed bonds.
+
 Instead of a nice solvated enzyme system, we saw:
 
 - **Bonds spanning the entire simulation box** - hundreds of angstroms long
