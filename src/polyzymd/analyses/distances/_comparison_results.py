@@ -138,10 +138,15 @@ class DistancePairwiseComparison(BaseModel):
         T-test statistic for mean distance.
     distance_p_value : float
         Two-tailed p-value for distance comparison.
+    distance_p_value_adjusted : float, optional
+        Benjamini-Hochberg adjusted p-value within this run's pairwise family.
     distance_cohens_d : float
         Effect size for distance (negative = condition_b has lower distance).
-    distance_effect_interpretation : str
-        "negligible", "small", "medium", or "large".
+    distance_hedges_g : float, optional
+        Cohen's d after the Hedges (1981) small-sample correction.
+    distance_effect_interpretation : str, optional
+        "negligible", "small", "medium" or "large". ``None`` when the
+        combined sample is too small for the adjective to mean anything.
     distance_direction : str
         "closer" (lower distance), "farther" (higher distance), or "unchanged".
     distance_significant : bool
@@ -154,8 +159,12 @@ class DistancePairwiseComparison(BaseModel):
         T-test statistic for fraction below threshold.
     fraction_p_value : float, optional
         P-value for fraction comparison.
+    fraction_p_value_adjusted : float, optional
+        Benjamini-Hochberg adjusted p-value within the same family.
     fraction_cohens_d : float, optional
         Effect size for fraction.
+    fraction_hedges_g : float, optional
+        Hedges-corrected effect size for fraction.
     fraction_effect_interpretation : str, optional
         Effect size interpretation.
     fraction_direction : str, optional
@@ -175,8 +184,10 @@ class DistancePairwiseComparison(BaseModel):
     # Distance metric
     distance_t_statistic: float
     distance_p_value: float
+    distance_p_value_adjusted: float | None = None
     distance_cohens_d: float
-    distance_effect_interpretation: str
+    distance_hedges_g: float | None = None
+    distance_effect_interpretation: str | None = None
     distance_direction: str
     distance_significant: bool
     distance_percent_change: float
@@ -186,7 +197,9 @@ class DistancePairwiseComparison(BaseModel):
     # Fraction metric (optional)
     fraction_t_statistic: float | None = None
     fraction_p_value: float | None = None
+    fraction_p_value_adjusted: float | None = None
     fraction_cohens_d: float | None = None
+    fraction_hedges_g: float | None = None
     fraction_effect_interpretation: str | None = None
     fraction_direction: str | None = None
     fraction_significant: bool | None = None
@@ -205,25 +218,32 @@ class DistancePairANOVA(BaseModel):
     distance_f_statistic : float
         F-statistic for mean distance.
     distance_p_value : float
-        P-value for distance ANOVA.
+        Raw p-value for the distance ANOVA.
+    distance_p_value_adjusted : None
+        Always ``None``. The ANOVA is an omnibus test outside the pairwise
+        Benjamini-Hochberg family, so it is never adjusted.
     distance_significant : bool
-        Whether p < 0.05.
+        Whether the raw p-value is at or below ``fdr_alpha``.
     fraction_f_statistic : float, optional
         F-statistic for fraction below threshold.
     fraction_p_value : float, optional
-        P-value for fraction ANOVA.
+        Raw p-value for the fraction ANOVA.
+    fraction_p_value_adjusted : None
+        Always ``None``, for the same reason.
     fraction_significant : bool, optional
-        Whether fraction p < 0.05.
+        Whether the raw fraction p-value is at or below ``fdr_alpha``.
     """
 
     pair_label: str
     distance_f_statistic: float
     distance_p_value: float
+    distance_p_value_adjusted: float | None = None
     distance_significant: bool
     distance_testable: bool = True
     distance_note: str | None = None
     fraction_f_statistic: float | None = None
     fraction_p_value: float | None = None
+    fraction_p_value_adjusted: float | None = None
     fraction_significant: bool | None = None
     fraction_testable: bool | None = None
     fraction_note: str | None = None
@@ -251,6 +271,9 @@ class DistanceComparisonResult(
         Labels for each pair.
     control_label : str, optional
         Label of the control condition.
+    fdr_alpha : float, optional
+        False discovery rate used for the pairwise family and as the plain
+        alpha for the omnibus ANOVA.
     conditions : list[DistanceConditionSummary]
         Summary for each condition.
     pairwise_comparisons : list[DistancePairwiseComparison]
@@ -281,6 +304,7 @@ class DistanceComparisonResult(
     n_pairs: int
     pair_labels: list[str]
     control_label: str | None = None
+    fdr_alpha: float | None = None
     conditions: list[DistanceConditionSummary]
     pairwise_comparisons: list[DistancePairwiseComparison]
     # Override base anova field — distances uses per-pair ANOVA instead
