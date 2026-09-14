@@ -108,6 +108,61 @@ def validate_aggregated_result(
     return coerced
 
 
+def validate_aggregate_not_outdated(
+    result: Any,
+    *,
+    analysis_name: str,
+    source: str | Path | None,
+    expected_replicates: Sequence[int] | None = None,
+) -> None:
+    """Reject an aggregate that is older than the replicate results it covers.
+
+    An aggregate summarises the ``run_N/result.json`` files beside it. If one
+    of those files was written after the aggregate, the aggregate describes a
+    replicate result that no longer exists.
+
+    Call this only for an aggregate that was just read from ``source``. An
+    aggregate that is about to be written there is newer than every replicate
+    result by construction, even though the file still on disk is not.
+
+    Parameters
+    ----------
+    result : Any
+        Coerced aggregate result.
+    expected_replicates : sequence of int or None
+        Replicate IDs requested by the caller, used when the aggregate records
+        none itself.
+    analysis_name : str
+        Analysis name used in diagnostics.
+    source : str or Path or None
+        Path the aggregate was loaded from. The check is skipped for aggregates
+        that were not loaded from a file.
+    """
+
+    if not isinstance(source, Path) or not source.is_file():
+        return
+    replicates = _replicates_from_result(result)
+    if replicates is None:
+        replicates = tuple(expected_replicates) if expected_replicates is not None else ()
+    aggregate_mtime_ns = source.stat().st_mtime_ns
+    condition_dir = source.parent.parent
+    newer: list[str] = []
+    for replicate in replicates:
+        replicate_path = condition_dir / f"run_{int(replicate)}" / source.name
+        if not replicate_path.is_file():
+            continue
+        if replicate_path.stat().st_mtime_ns > aggregate_mtime_ns:
+            newer.append(str(replicate_path))
+    if newer:
+        raise _validation_error(
+            analysis_name,
+            source,
+            "aggregate is older than the replicate result(s) it summarizes ("
+            + ", ".join(newer)
+            + "); rerun with --recompute to rebuild it",
+        )
+
+
 def _coerce_aggregate_result(analysis: Any, result: Any, *, source: str | Path | None) -> Any:
     """Coerce dict aggregate payloads through a plugin result model."""
 
@@ -139,9 +194,9 @@ def _validate_config_hash(
     if stored_hash in _UNKNOWN_VALUES or condition is None:
         return
 
-    from polyzymd.analyses._framework.cache_identity import validate_config_hash
+    from polyzymd.analyses._framework.cache_identity import compute_config_hash
 
-    if not validate_config_hash(str(stored_hash), condition.sim_config):
+    if str(stored_hash) != compute_config_hash(condition.sim_config):
         raise _validation_error(
             analysis_name,
             source,
