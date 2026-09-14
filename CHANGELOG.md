@@ -33,6 +33,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The correlation estimator every analysis plugin called was wrong.**
+  `estimate_correlation_time(method="integration")` trapezoid-integrated the
+  normalised autocorrelation function from lag zero, so applying
+  `g = 1 + 2*tau/dt` counted the lag-zero term twice, and it then floored tau
+  at one timestep.  White noise came back with `g = 3.00` instead of `1.00`,
+  and correlated series came back about `+2` too high, which inflated every
+  `sem_rmsd`, `sem_rg`, `sem_sasa`, `sem_distance` and `n_independent_frames`
+  written to an artifact.  The estimator now sums
+  `g = 1 + 2*sum C(t)*(1 - t/N)` over positive lags with the first
+  non-positive cutoff, following Chodera et al. (2007) as implemented in
+  pymbar, and derives `tau = (g - 1)/2 * dt`.  The estimator is now pymbar's own
+  `timeseries.statistical_inefficiency`, so pymbar (>= 4.0, from PyPI) is a new
+  dependency of PolyzyMD.  White noise with N = 20000 now
+  gives `g = 1.04`, AR(1) with phi = 0.5 gives `3.02` against an analytic
+  `3.00`, and phi = 0.9 gives `19.8` against an analytic `19.0`.
+
+- **RMSF is computed from every production frame.**  RMSF previously fed the
+  accumulator only autocorrelation-spaced frames, which discarded at least
+  half the production window and usually far more.  Thinning does not remove
+  the finite-sample bias of a fluctuation, it only raises the variance of the
+  profile, so all frames now reach the accumulator.  The correlation time and
+  effective sample count stay as recorded diagnostics and the uncertainty on
+  RMSF is still the standard error across replicates.  The
+  `statistical_policy` `frame_strategy` value changes from
+  `subsample_by_autocorrelation_when_estimated` to `all_production_frames`.
+
+- **Hydrogen bonds counted C-H donors and carbon acceptors.**  The plugin
+  passed the union of the configured groups to MDAnalysis as both `donors_sel`
+  and `acceptors_sel`.  MDAnalysis treats any selected heavy atom within 1.2 A
+  of a selected hydrogen as a donor, so every carbon bearing a hydrogen donated
+  and every selected atom accepted, and C-H...O and N-H...C contacts were
+  counted as hydrogen bonds.  Because the share of those geometries depends on
+  polymer chemistry, the error differed between conditions rather than
+  offsetting them equally.  Donors and acceptors are now the group union
+  intersected with the new `donor_acceptor_elements` setting, which defaults to
+  `["N", "O"]` and accepts further elements such as `"S"`.  Element spellings
+  are read from the topology, so a topology that writes `CL` is matched.  The
+  effective donor, acceptor, and hydrogen selection strings are recorded in
+  artifact provenance and metadata.  Results cached before this change are
+  invalidated by the settings fingerprint and are recomputed.
+
+- **Hydrogen bonds no longer report zero for a selection that matches
+  nothing.**  `allow_empty_groups` now defaults to `false`, so an empty group
+  selection raises `SelectionError` naming the group and its selection instead
+  of producing a zero-hydrogen-bond summary, and a donor and acceptor selection
+  that matches no atoms raises the same error.  A topology without element
+  metadata raises rather than falling back to a selection that admits every
+  atom.  Set `allow_empty_groups: true` to keep the previous warn-and-skip
+  behaviour.
+
+- **The hard-kill guard no longer trusts a truncated `restart_state.xml`.**
+  `run-segment` kept a segment whenever `restart_state.xml` existed, so a
+  zero-byte file left by a power loss sent the restart down the
+  binary-checkpoint path instead of retiring the segment and retrying from
+  the previous good state.  The guard now requires the file to be complete.
+
 - **Recovery skips truncated state or system XML.**  A hard kill could leave
   `interrupted_system.xml` at zero bytes; recovery paired it with the intact
   `interrupted_state.xml` and the next segment died in OpenMM with
@@ -249,6 +305,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `polyzymd.utils.version.runtime_provenance()` / `record_provenance()`;
   `get_polyzymd_version()` moved there and is re-exported from
   `analyses/_framework/results_base.py`.
+
+### Changed
+
+- **`n_independent_frames` is now a real number, not a truncated integer.**
+  It is `N/g`, so a replicate with 9000 frames and `g = 260.4` reports
+  `34.6` rather than `34`.
+
+- **The `first_zero` and `exponential_fit` correlation-time methods were
+  withdrawn.**  Neither estimates the integrated correlation time; on an
+  AR(1) series with phi = 0.9 they were off by factors of five and two.
+  `estimate_correlation_time(..., method=...)` accepts only `"integration"`
+  and raises `ValueError` for the withdrawn names.  `get_independent_indices`
+  and the `CorrelationTimeMethod` enum were removed with them.
+
+- **Stale analysis artifacts are refused instead of silently averaged.**
+  Replicate artifacts from RMSD, Rg, SASA, distances and catalytic-triad now
+  carry `autocorrelation_estimator_version`, and RMSF artifacts carry
+  `rmsf_profile_version` `"2"`.  Aggregation raises `MDAAggregationError` when
+  a replicate is missing the key or records an older value, because the
+  settings fingerprint does not change when the estimator does.  The RMSF
+  profile version is also folded into the RMSF settings fingerprint, so RMSF
+  caches from before this change are invalidated.
 
 ## [1.3.0] - 2026-04-09 — Analysis Plugin System & OCP Compliance
 
