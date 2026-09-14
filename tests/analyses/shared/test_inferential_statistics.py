@@ -269,12 +269,14 @@ def test_independent_ttest_n1_returns_nan() -> None:
 
 
 def test_cohens_d_n1_returns_undefined() -> None:
-    """Cohen's d with n=1 should return NaN with undefined interpretation."""
+    """Cohen's d with n=1 should return NaN with no interpretation."""
     from polyzymd.analyses.shared.inferential_statistics import cohens_d
 
     result = cohens_d([1.0], [2.0, 3.0])
     assert math.isnan(result.cohens_d)
-    assert result.interpretation == "undefined"
+    assert math.isnan(result.hedges_g)
+    assert result.interpretation is None
+    assert result.direction == "undetermined"
 
 
 def test_cohens_d_zero_variance_equal_means() -> None:

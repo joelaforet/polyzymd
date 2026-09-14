@@ -304,8 +304,8 @@ def test_build_condition_pairs_rejects_invalid_control_missing_policy() -> None:
         )
 
 
-def test_apply_fdr_correction_updates_pairwise_and_anova() -> None:
-    """apply_fdr_correction should write adjusted p-values and significance."""
+def test_apply_fdr_correction_updates_pairwise_and_leaves_anova_raw() -> None:
+    """Pairwise tests are corrected as one family; ANOVA stays an omnibus test."""
     pairwise = [
         SimpleNamespace(p_value=0.01, p_value_adjusted=None, significant=False),
         SimpleNamespace(p_value=0.04, p_value_adjusted=None, significant=False),
@@ -321,8 +321,8 @@ def test_apply_fdr_correction_updates_pairwise_and_anova() -> None:
     assert pairwise[1].p_value_adjusted == 0.04
     assert pairwise[0].significant is True
     assert pairwise[1].significant is True
-    assert anova[0].p_value_adjusted == 0.04
-    assert anova[1].p_value_adjusted == 0.20
+    assert anova[0].p_value_adjusted is None
+    assert anova[1].p_value_adjusted is None
     assert anova[0].significant is True
     assert anova[1].significant is False
 

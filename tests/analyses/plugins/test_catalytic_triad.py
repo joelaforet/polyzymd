@@ -484,7 +484,11 @@ class TestTriadAggregationAndComparison:
         assert metadata["unit"] == "%"
         assert metadata["higher_is_better"] is True
         assert metadata["direction_labels"] == ["worsening", "unchanged", "improving"]
-        assert comparison.payload["pairwise_comparisons"][0]["direction"] == "improving"
+        # The direction label is only assigned when the corrected test is
+        # significant; this fixture is not, so it reads as no change.
+        pairwise = comparison.payload["pairwise_comparisons"][0]
+        assert pairwise["significant"] is False
+        assert pairwise["direction"] == "no significant change"
 
     def test_format_accepts_comparison_artifact(
         self,

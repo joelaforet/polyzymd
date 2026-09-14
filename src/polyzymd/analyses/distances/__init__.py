@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -635,6 +636,7 @@ class DistancesAnalysis(Analysis):
                             summary.label,
                             control_pair,
                             treatment_pair,
+                            ttest_method=ctx.ttest_method,
                         )
                         comparisons.append(comp)
                 else:
@@ -648,6 +650,7 @@ class DistancesAnalysis(Analysis):
                                 summary_b.label,
                                 pair_a,
                                 pair_b,
+                                ttest_method=ctx.ttest_method,
                             )
                             comparisons.append(comp)
 
@@ -696,6 +699,9 @@ class DistancesAnalysis(Analysis):
                     )
                 )
 
+        fdr_alpha = getattr(ctx, "fdr_alpha", 0.05)
+        self._correct_comparison_family(comparisons, anova_by_pair, fdr_alpha)
+
         # Build result
         result = DistanceComparisonResult(
             metric="mean_distance",
@@ -703,6 +709,7 @@ class DistancesAnalysis(Analysis):
             n_pairs=len(settings.pairs),
             pair_labels=pair_labels,
             control_label=effective_control,
+            fdr_alpha=fdr_alpha,
             conditions=summaries,
             pairwise_comparisons=comparisons,
             anova_by_pair=anova_by_pair,
@@ -786,12 +793,90 @@ class DistancesAnalysis(Analysis):
     # === Private helpers ===
 
     @staticmethod
+    def _correct_comparison_family(
+        comparisons: list[Any],
+        anova_by_pair: list[Any] | None,
+        fdr_alpha: float,
+    ) -> None:
+        """Correct every distance test in this run as one family.
+
+        The family holds the mean-distance test and the
+        fraction-below-threshold test of every condition pair, for every
+        distance pair. ANOVA results are omnibus tests and stay
+        uncorrected; their significance is the raw p-value against
+        *fdr_alpha*.
+
+        Parameters
+        ----------
+        comparisons : list[Any]
+            Pairwise comparison results, mutated in place.
+        anova_by_pair : list[Any] or None
+            Per-pair ANOVA results, mutated in place.
+        fdr_alpha : float
+            False discovery rate for the pairwise family.
+        """
+        from polyzymd.analyses.shared.inferential_statistics import (
+            apply_family_correction,
+            enforce_direction_significance,
+        )
+
+        tests: list[tuple[Any, str]] = []
+        for comparison in comparisons:
+            tests.append((comparison, "distance"))
+            if comparison.fraction_p_value is not None:
+                tests.append((comparison, "fraction"))
+
+        def _get_p_value(test: tuple[Any, str]) -> float | None:
+            comparison, prefix = test
+            if not getattr(comparison, f"{prefix}_testable", False):
+                return None
+            return getattr(comparison, f"{prefix}_p_value")
+
+        def _set_corrected(test: tuple[Any, str], bh_result: Any) -> None:
+            comparison, prefix = test
+            setattr(comparison, f"{prefix}_p_value_adjusted", bh_result.adjusted_p_value)
+            setattr(comparison, f"{prefix}_significant", bh_result.significant)
+
+        apply_family_correction(
+            tests,
+            fdr_alpha=fdr_alpha,
+            get_p_value=_get_p_value,
+            set_corrected=_set_corrected,
+        )
+        enforce_direction_significance(
+            comparisons,
+            fields=(
+                ("distance_direction", "distance_significant"),
+                ("fraction_direction", "fraction_significant"),
+            ),
+        )
+
+        for anova in anova_by_pair or []:
+            for prefix in ("distance", "fraction"):
+                setattr(anova, f"{prefix}_p_value_adjusted", None)
+                testable = getattr(anova, f"{prefix}_testable", None)
+                if testable is None:
+                    continue
+                p_value = getattr(anova, f"{prefix}_p_value", None)
+                setattr(
+                    anova,
+                    f"{prefix}_significant",
+                    bool(
+                        testable
+                        and p_value is not None
+                        and not math.isnan(p_value)
+                        and p_value <= fdr_alpha
+                    ),
+                )
+
+    @staticmethod
     def _compare_pair(
         pair_label: str,
         cond_a_label: str,
         cond_b_label: str,
         pair_a: Any,
         pair_b: Any,
+        ttest_method: str = "student",
     ) -> Any:
         """Compare two conditions statistically for a single distance pair.
 
@@ -807,6 +892,9 @@ class DistancesAnalysis(Analysis):
             Pair data from condition A.
         pair_b : DistancePairSummary
             Pair data from condition B.
+        ttest_method : str, optional
+            Variance assumption for the t-test, ``"student"`` or
+            ``"welch"``, by default ``"student"``.
 
         Returns
         -------
@@ -826,7 +914,7 @@ class DistancesAnalysis(Analysis):
         values_b = pair_b.per_replicate_means
         distance_testable = len(values_a) >= 2 and len(values_b) >= 2
 
-        ttest_dist = independent_ttest(values_a, values_b)
+        ttest_dist = independent_ttest(values_a, values_b, method=ttest_method)
         effect_dist = cohens_d(values_a, values_b)
         pct_dist = percent_change(pair_a.mean_distance, pair_b.mean_distance)
 
@@ -841,6 +929,7 @@ class DistancesAnalysis(Analysis):
         fraction_t = None
         fraction_p = None
         fraction_d = None
+        fraction_g = None
         fraction_interp = None
         fraction_dir = None
         fraction_sig = None
@@ -853,7 +942,7 @@ class DistancesAnalysis(Analysis):
             frac_b = pair_b.per_replicate_fractions
             fraction_testable = len(frac_a) >= 2 and len(frac_b) >= 2
 
-            ttest_frac = independent_ttest(frac_a, frac_b)
+            ttest_frac = independent_ttest(frac_a, frac_b, method=ttest_method)
             effect_frac = cohens_d(frac_a, frac_b)
             pct_frac = percent_change(
                 pair_a.fraction_below_threshold or 0,
@@ -863,6 +952,7 @@ class DistancesAnalysis(Analysis):
             fraction_t = ttest_frac.t_statistic
             fraction_p = ttest_frac.p_value
             fraction_d = effect_frac.cohens_d
+            fraction_g = effect_frac.hedges_g
             fraction_interp = effect_frac.interpretation
             fraction_sig = ttest_frac.significant if fraction_testable else False
             fraction_note = None if fraction_testable else NOT_TESTABLE_SINGLETON_NOTE
@@ -883,6 +973,7 @@ class DistancesAnalysis(Analysis):
             distance_t_statistic=ttest_dist.t_statistic,
             distance_p_value=ttest_dist.p_value,
             distance_cohens_d=effect_dist.cohens_d,
+            distance_hedges_g=effect_dist.hedges_g,
             distance_effect_interpretation=effect_dist.interpretation,
             distance_direction=direction_dist,
             distance_significant=ttest_dist.significant if distance_testable else False,
@@ -892,6 +983,7 @@ class DistancesAnalysis(Analysis):
             fraction_t_statistic=fraction_t,
             fraction_p_value=fraction_p,
             fraction_cohens_d=fraction_d,
+            fraction_hedges_g=fraction_g,
             fraction_effect_interpretation=fraction_interp,
             fraction_direction=fraction_dir,
             fraction_significant=fraction_sig,
