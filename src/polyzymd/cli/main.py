@@ -3900,16 +3900,12 @@ def new_analysis(
 
 def _register_optional_command_groups() -> None:
     """Register optional command groups when deps are importable."""
+    from polyzymd.cli.analysis_topology import analysis_topology_command
     from polyzymd.cli.analyze import analyze_command
     from polyzymd.cli.compare import compare
 
     cli.add_command(compare)
     cli.add_command(analyze_command)
-
-    from polyzymd.cli.analysis_topology import analysis_topology_command
-    from polyzymd.cli.compare import compare
-
-    cli.add_command(compare)
     cli.add_command(analysis_topology_command)
 
 
