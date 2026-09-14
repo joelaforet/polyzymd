@@ -236,6 +236,10 @@ PolyzyMD may also generate convenience defaults:
 - `prod.mdp` - Production parameters
 - `run_*_gromacs.sh` - Convenience shell script
 
+Once production has run, the directory also holds `prod.tpr`, the compiled
+run input. Analyses read it in preference to the PDB or GRO, because it
+carries every atom, bond, mass and charge and has no atom limit.
+
 The `.mdp` files and run script are not required to continue outside PolyzyMD;
 you may replace them with your own GROMACS workflow. Use
 `polyzymd run --engine gromacs` when you want PolyzyMD to perform the full local

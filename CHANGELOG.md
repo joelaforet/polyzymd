@@ -20,7 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   records, and it carries CONECT records for non-standard residues only.  A
   new `polyzymd analysis-topology RUN_DIR...` writes the file for existing
   runs from the two files they already have.  The build manifest records its
-  hash when it is written.
+  hash when it is written.  GROMACS runs get the same treatment with the file
+  they already have: analyses prefer `prod.tpr`, the compiled run input, over
+  the PDB and the GRO.
 
 - **`polyzymd status --format agent|json`.**  `status` accepts repeated `-c`
   and `--all DIR`, makes one `squeue` call, and prints one line per replicate

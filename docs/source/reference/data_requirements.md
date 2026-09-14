@@ -212,6 +212,13 @@ Runs built before `system.prmtop` existed get one from their PDB and
 `system.xml` with `polyzymd analysis-topology RUN_DIR...`. OpenMM's own PDB
 reader accepts the hex serials it writes, so this works for any size.
 
+GROMACS runs have the same split. `prod.tpr`, the compiled run input that
+grompp writes before production, plays the role of `system.prmtop`: every
+atom, bond, mass and charge, no atom limit, read natively by MDAnalysis.
+Analyses prefer it over `solvated_system.pdb` and over any `.gro`, which
+carries no bonds at all. No extra step is needed; the run directory keeps
+`prod.tpr` after production.
+
 When multiple daisy-chain segments exist (e.g., `production_0/`,
 `production_1/`, `production_2/`), they are automatically stitched together in
 segment-index order using the MDAnalysis `ChainReader`. The resulting
