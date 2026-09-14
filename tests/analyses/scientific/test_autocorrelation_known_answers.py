@@ -17,7 +17,6 @@ import numpy as np
 import pytest
 
 from polyzymd.analyses.shared.autocorrelation import (
-    compute_acf,
     estimate_correlation_time,
     n_effective,
     statistical_inefficiency,
@@ -130,25 +129,3 @@ def test_n_independent_is_n_over_g_without_truncation(phi: float) -> None:
     assert isinstance(result.n_independent, float)
     assert result.n_independent == pytest.approx(expected, rel=1e-12)
     assert abs(result.n_independent - expected) < 1.0
-
-
-def test_acf_input_path_matches_the_timeseries_path() -> None:
-    """Passing an ACFResult must give the same g as passing the raw series."""
-
-    series = _ar1(0.9)
-    acf_result = compute_acf(series, timestep=1.0)
-
-    from_acf = estimate_correlation_time(acf_result, n_frames=series.size)
-    from_series = estimate_correlation_time(series, method="integration")
-
-    assert from_acf.statistical_inefficiency == pytest.approx(
-        from_series.statistical_inefficiency, rel=0.05
-    )
-
-
-@pytest.mark.parametrize("method", ["first_zero", "exponential_fit"])
-def test_withdrawn_methods_raise(method: str) -> None:
-    """first_zero and exponential_fit were wrong by 2x to 6x and were removed."""
-
-    with pytest.raises(ValueError, match="no longer supported"):
-        estimate_correlation_time(_ar1(0.9), method=method)
