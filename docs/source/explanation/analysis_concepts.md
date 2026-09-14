@@ -326,21 +326,19 @@ compute stage skips replicates that already have canonical artifacts on disk.
 ## Why an unfinished segment is not read
 
 A production segment that is still being written has a trajectory file that
-ends wherever the last flush landed. Reading it gives a window that is short
-for a reason nothing in the result records: the number that comes out is a real
-average over fewer nanoseconds than the run directory appears to contain, and
-nobody can tell afterwards which it was. The failure does not announce itself,
-because a short window still produces a plausible number and the provenance
-describes the run rather than the subset that was actually read.
+ends at the last flush. If the loader reads it, the analysis window is shorter
+than the run directory suggests, and the result records nothing about the
+difference. The mean is a real average over fewer nanoseconds, the provenance
+describes the whole run, and no later check can separate the two cases.
 
-The engine therefore consults the status it already writes for each segment and
-refuses to read one marked as running or failed, recording which segments it
-left out. Segments marked interrupted are a different case and are kept, since
-the continuation chain resumes from an interrupted segment's saved state, so
-its frames are part of the same time line. That choice has a cost: an
-interrupted segment's frame count is not recorded, so the last one in a chain
-may be partial. The alternative, dropping it, would put a hole in the middle of
-the time line, which is worse.
+The OpenMM engine already writes a status for each segment in `progress.json`.
+The loader now reads that status and skips segments marked `running` or
+`failed`, and it lists the skipped indices in the provenance. Segments marked
+`interrupted` are kept, because the continuation chain restarts from an
+interrupted segment's saved state and its frames belong to the same time line.
+The frame count of an interrupted segment is not recorded, so the last segment
+of a chain may be partial. Dropping it instead would leave a gap between the
+segments that were kept, and the lineage check would refuse the trajectory.
 
 ## See also
 
