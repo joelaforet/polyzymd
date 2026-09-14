@@ -445,10 +445,12 @@ of a generated SLURM script header. -->
 # Build integrity and recovery
 
 For prebuilt OpenMM campaigns, wait for `polyzymd build` to finish before
-submitting simulation jobs. A successful build contains these three files in
-each replicate directory:
+submitting simulation jobs. A successful build contains these files in each
+replicate directory:
 
 - `solvated_system.pdb`
+- `system.prmtop` (the analysis topology; absent only if ParmEd could not
+  convert the system, in which case the build log says so)
 - `system.xml`
 - `build_manifest.json`
 
