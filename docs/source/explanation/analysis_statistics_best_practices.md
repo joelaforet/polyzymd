@@ -416,9 +416,7 @@ The statistical inefficiency estimator follows:
 > *The Journal of Chemical Physics*, 129(12), 124105.
 > [DOI: 10.1063/1.2978177](https://doi.org/10.1063/1.2978177)
 
-PolyzyMD's implementation follows the algorithm of pymbar's MIT-licensed
-`timeseries` module, which accompanies that paper, without taking pymbar as a
-dependency.
+PolyzyMD calls pymbar's `timeseries.statistical_inefficiency` for this estimate rather than carrying its own copy of the algorithm, so pymbar is a dependency of the analysis environment.
 
 Useful background includes:
 

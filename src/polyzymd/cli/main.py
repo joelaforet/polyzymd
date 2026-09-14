@@ -1993,7 +1993,14 @@ def _run_segment_locked(
             interrupted_marker = last_seg_dir / "INTERRUPTED"
             restart_state = last_seg_dir / "restart_state.xml"
             if last_seg_dir.exists() and not interrupted_marker.exists():
-                if restart_state.exists():
+                from polyzymd.simulation.continuation import xml_looks_complete
+
+                # A restart_state.xml only proves recoverability if it was
+                # fully written.  A power loss mid-write leaves a 0-byte or
+                # truncated file; treating that as recoverable sends the
+                # restart down the binary-checkpoint path, which may itself
+                # be damaged (observed 2026-09-13: segfault on reload).
+                if restart_state.exists() and xml_looks_complete(restart_state, "State"):
                     colored_echo(
                         f"Segment {last_seg.index} has no INTERRUPTED marker but "
                         f"left {restart_state.name} — it is recoverable, keeping "
@@ -2002,10 +2009,15 @@ def _run_segment_locked(
                         level=logging.WARNING,
                     )
                 else:
+                    reason = (
+                        f"{restart_state.name} is empty or truncated"
+                        if restart_state.exists()
+                        else "no restart_state.xml"
+                    )
                     retired = _retire_hardkilled_segment(last_seg_dir)
                     colored_echo(
                         f"Segment {last_seg.index} was hard-killed (no INTERRUPTED "
-                        f"marker, no restart_state.xml — only a stale checkpoint). "
+                        f"marker, {reason} — only a stale checkpoint). "
                         f"Moved to {retired.name} and retrying from the previous "
                         f"good state; delete it once you no longer need the data.",
                         phase="simulation",
