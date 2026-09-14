@@ -442,10 +442,14 @@ class GromacsEngine(SimulationEngine):
 
         Topology search order:
 
-        1. ``solvated_system.pdb`` (preferred system topology with chain IDs)
-        2. ``<prefix>.pdb`` (from system name)
-        3. ``<prefix>.gro``
-        4. Any ``*.gro`` (sorted, first match)
+        1. ``prod.tpr``, the compiled run input, which carries every atom,
+           bond, mass and charge with no atom limit and is what analyses
+           should read
+        2. ``solvated_system.pdb`` (viewer topology with chain IDs; its
+           CONECT records are unreadable above 99,999 atoms)
+        3. ``<prefix>.pdb`` (from system name)
+        4. ``<prefix>.gro``
+        5. Any ``*.gro`` (sorted, first match); a GRO file carries no bonds
 
         Trajectory search order:
 
@@ -497,8 +501,13 @@ class GromacsEngine(SimulationEngine):
         topology_format = "pdb"
 
         prefix = self._generate_prefix()
+        production_tpr = working_dir / "prod.tpr"
+        if production_tpr.exists():
+            topology_path = production_tpr
+            topology_format = "tpr"
+
         solvated_system_pdb = working_dir / "solvated_system.pdb"
-        if solvated_system_pdb.exists():
+        if topology_path is None and solvated_system_pdb.exists():
             topology_path = solvated_system_pdb
 
         if topology_path is None and prefix:
