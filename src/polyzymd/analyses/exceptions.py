@@ -62,6 +62,8 @@ class StatisticsError(AnalysisError, ValueError):
     An invalid sample or an unsupported option is a typed failure, not a
     silently degraded zero. It also subclasses ``ValueError`` so that callers
     written before the typed error existed keep working.
+    """
+
 
 class StaleCacheError(AnalysisError):
     """Raised when a cached result no longer matches the inputs it records.
