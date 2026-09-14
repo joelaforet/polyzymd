@@ -270,8 +270,26 @@ The three output directories map directly to the pipeline stages:
   files by default, or another configured format such as PDF or SVG. Plots are
   generated from cached artifacts and sidecars only.
 
-Results are cached: if you rerun the pipeline without changing settings, the
-compute stage skips replicates that already have canonical artifacts on disk.
+## Why a cached result is checked against its inputs
+
+A replicate that gained three segments since its result was computed will keep
+reporting the old window for as long as the cache is reused, so a figure
+regenerated a week later still describes last week's data. The failure is quiet
+in the same way an unfinished segment is quiet: the cached number is a real
+average over the frames that were read, and the provenance describes the run
+rather than the subset, so nothing in the output says the two have drifted
+apart.
+
+Reuse is therefore conditional rather than automatic. A cached result is reused
+only when every input file it names still has the recorded size and
+modification time, when the set of trajectory files has not changed, and when
+the settings and equilibration window are the ones it was computed under. Size
+and modification time are weaker than a content hash, but they are cheap on a
+multi-gigabyte trajectory and they catch the case that actually happens, which
+is a file that grew. A result that cannot prove any of this, including one
+written before the framework recorded a cache key, is recomputed rather than
+trusted; where the command that found it cannot recompute, it stops and says
+which file changed.
 
 ## Why an unfinished segment is not read
 

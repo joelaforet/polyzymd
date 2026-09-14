@@ -7,6 +7,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
+from polyzymd.analyses._framework.aggregate_validation import validate_aggregate_not_outdated
+
 if TYPE_CHECKING:
     from polyzymd.analyses._framework.contexts import PlotContext
 
@@ -44,7 +46,13 @@ def load_aggregated_result(analysis: Any, aggregated_dir: Path) -> Any:
     """
     canonical = analysis.aggregate_result_path(aggregated_dir)
     if canonical.exists():
-        return analysis._deserialize_result(canonical)
+        result = analysis._deserialize_result(canonical)
+        validate_aggregate_not_outdated(
+            result,
+            analysis_name=getattr(analysis, "name", type(analysis).__name__),
+            source=canonical,
+        )
+        return result
     return None
 
 
