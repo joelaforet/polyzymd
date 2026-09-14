@@ -86,6 +86,7 @@ pages for caveats tied to particular metrics.
 
 Statistics best practices for MD analysis <analysis_statistics_best_practices>
 Establishing convergence in MD simulations <convergence_detection>
+Methods and references <references>
 ```
 
 ### Metric and plugin caveats
