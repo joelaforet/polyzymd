@@ -3,6 +3,33 @@
 This module provides configuration models, per-replicate hydrogen-bond
 computation using MDAnalysis, aggregation across replicates, scalar metric
 extraction for the default comparison pipeline, and plotting integration.
+
+Donors and acceptors are restricted to the electronegative elements listed in
+``HydrogenBondSettings.donor_acceptor_elements`` (nitrogen and oxygen by
+default), which follows the IUPAC definition of a hydrogen bond.
+
+References
+----------
+Arunan, E., Desiraju, G. R., Klein, R. A., Sadlej, J., Scheiner, S., Alkorta,
+    I., Clary, D. C., Crabtree, R. H., Dannenberg, J. J., Hobza, P.,
+    Kjaergaard, H. G., Legon, A. C., Mennucci, B., & Nesbitt, D. J. (2011).
+    Definition of the hydrogen bond (IUPAC Recommendations 2011). Pure and
+    Applied Chemistry, 83(8), 1637-1641. doi:10.1351/PAC-REC-10-01-02
+Smith, P., Ziolek, R. M., Gazzarrini, E., Owen, D. M., & Lorenz, C. D. (2019).
+    On the interaction of hyaluronic acid with synovial fluid lipid membranes.
+    Physical Chemistry Chemical Physics, 21(19), 9845-9857.
+    doi:10.1039/C9CP01532A
+Jeffrey, G. A., & Saenger, W. (1991). Hydrogen Bonding in Biological
+    Structures. Springer-Verlag, Berlin.
+Michaud-Agrawal, N., Denning, E. J., Woolf, T. B., & Beckstein, O. (2011).
+    MDAnalysis: a toolkit for the analysis of molecular dynamics simulations.
+    Journal of Computational Chemistry, 32(10), 2319-2327.
+    doi:10.1002/jcc.21787
+Gowers, R. J., Linke, M., Barnoud, J., Reddy, T. J. E., Melo, M. N., Seyler,
+    S. L., Domanski, J., Dotson, D. L., Buchoux, S., Kenney, I. M., &
+    Beckstein, O. (2016). MDAnalysis: a Python package for the rapid analysis
+    of molecular dynamics simulations. Proceedings of the 15th Python in
+    Science Conference, 98-105. doi:10.25080/Majora-629e541a-00e
 """
 
 from __future__ import annotations
@@ -52,7 +79,7 @@ from polyzymd.analyses.mda import (
     ConditionArtifact,
     ReplicateArtifact,
 )
-from polyzymd.analyses.shared.loader import TrajectoryLoader
+from polyzymd.analyses.shared.loader import TrajectoryLoader, _canonical_element_symbol
 from polyzymd.analyses.shared.statistics import compute_sem
 
 if TYPE_CHECKING:
@@ -331,8 +358,12 @@ class HydrogenBondSettings(BaseModel):
     top_n_pairs : int
         Number of top residue pairs to report.
     allow_empty_groups : bool
-        If True (default), warn and skip summaries that use empty groups.
-        Set to False to raise when a group selection matches no atoms.
+        If False (default), raise when a group selection matches no atoms.
+        Set to True to warn and skip summaries that use empty groups.
+    donor_acceptor_elements : tuple[str, ...]
+        Elements allowed to act as hydrogen-bond donors and acceptors,
+        ``("N", "O")`` by default. Carbon is excluded because a C-H donor or a
+        carbon acceptor does not meet the IUPAC definition of a hydrogen bond.
     allow_overlapping_composition : bool
         If False, raise when composition partitions overlap.
     composition : HydrogenBondCompositionSettings | None
@@ -366,11 +397,19 @@ class HydrogenBondSettings(BaseModel):
         description="Number of top residue pairs to report",
     )
     allow_empty_groups: bool = Field(
-        default=True,
+        default=False,
         description=(
-            "If True (default), warn and skip summaries using empty groups. "
-            "Set to False to raise ValueError when a group selection matches no atoms "
-            "(strict mode)."
+            "If False (default), raise SelectionError when a group selection matches no "
+            "atoms. Set to True to warn and skip summaries that use empty groups."
+        ),
+    )
+    donor_acceptor_elements: tuple[str, ...] = Field(
+        default=("N", "O"),
+        description=(
+            "Elements allowed to act as hydrogen-bond donors and acceptors. Carbon is "
+            "excluded by default because C-H donors and carbon acceptors fall outside "
+            "the IUPAC hydrogen-bond definition. Add 'S' to include thiols and "
+            "methionine sulfur."
         ),
     )
     allow_overlapping_composition: bool = Field(
@@ -450,6 +489,49 @@ class HydrogenBondSettings(BaseModel):
         new_data = dict(data)
         new_data["summaries"] = normalized
         return new_data
+
+    @field_validator("donor_acceptor_elements")
+    @classmethod
+    def validate_donor_acceptor_elements(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """Validate the donor and acceptor element symbols.
+
+        Parameters
+        ----------
+        value : tuple[str, ...]
+            Element symbols supplied by the user.
+
+        Returns
+        -------
+        tuple[str, ...]
+            Canonical element symbols with duplicates removed, in the given
+            order. The spelling used against a topology is resolved later from
+            the element strings the topology actually carries.
+
+        Raises
+        ------
+        ValueError
+            Raised when the tuple is empty, when a symbol is not a known
+            element, or when hydrogen is listed.
+        """
+
+        if not value:
+            raise ValueError("donor_acceptor_elements must list at least one element")
+
+        normalized: list[str] = []
+        for symbol in value:
+            canonical = _canonical_element_symbol(symbol)
+            if canonical is None:
+                raise ValueError(
+                    f"donor_acceptor_elements entry {symbol!r} is not a known element symbol"
+                )
+            if canonical == "H":
+                raise ValueError(
+                    "donor_acceptor_elements must not contain 'H'; hydrogens are selected "
+                    "separately through hydrogens_selection"
+                )
+            if canonical not in normalized:
+                normalized.append(canonical)
+        return tuple(normalized)
 
     @field_validator("hydrogens_selection")
     @classmethod

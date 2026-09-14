@@ -1,1 +1,1 @@
-"""Known-answer tests for the scientific behaviour of the analyses package."""
+"""Known-answer scientific tests for the analyses package."""
