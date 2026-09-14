@@ -231,3 +231,6 @@ graphify-out/
 
 # Agent local preferences (personal, not shared)
 CLAUDE.local.md
+
+# Working notes for the analyses refactor stay out of the source tree.
+docs/planning/
