@@ -430,6 +430,7 @@ Useful background includes:
 > an alternative route to the statistical inefficiency. PolyzyMD does not
 > implement it.
 
+
 > **Welch, B. L.** (1947). "The generalization of 'Student's' problem when
 > several different population variances are involved." *Biometrika*, 34(1-2),
 > 28-35. [DOI: 10.1093/biomet/34.1-2.28](https://doi.org/10.1093/biomet/34.1-2.28)
@@ -451,3 +452,7 @@ Useful background includes:
 The coverage factors above follow the section of Grossfield et al. (2018) on
 turning a standard uncertainty into a confidence interval, which in turn
 follows the GUM.
+
+> [DOI: 10.1063/1.457480](https://doi.org/10.1063/1.457480). Block averaging is
+> an alternative route to the statistical inefficiency. PolyzyMD does not
+> implement it.
