@@ -56,6 +56,31 @@ Make sure each condition already has:
 The comparison pipeline can reuse cached analysis data when it exists, but it
 can also compute missing per-condition results during `polyzymd compare run`.
 
+## Analyze a campaign that is still running
+
+Analyses leave out any OpenMM production segment that `progress.json` records
+as running or failed, because its trajectory file ends wherever the last flush
+landed. A warning names the segments that were dropped.
+
+- If the warning says the window ends before the excluded segments, the results
+  describe the completed part of the run. Wait for the run to finish and rerun
+  with `--recompute` when you want the full window.
+- If it says the exclusion left a gap, an excluded segment sits between two
+  that were kept and the lineage check will refuse the replicate. Wait for the
+  run to finish, or load it deliberately with `require_complete=False`:
+
+  ```python
+  from polyzymd.analyses.shared.loader import TrajectoryLoader
+  u = TrajectoryLoader(config).load_universe(replicate=1, require_complete=False)
+  ```
+
+  The incomplete segments are then read as they stand and listed in
+  `incomplete_segments` on the layout.
+
+On GROMACS there is no per-segment status to consult, so a production XTC that
+is still being written is read as-is. Check that the job has finished before
+analyzing a live GROMACS run.
+
 ## Step 1: Create a Comparison Workspace
 
 ```bash
