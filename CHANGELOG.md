@@ -100,6 +100,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   multiple-comparison family, so a dependent quantity can no longer inflate the
   adjusted p-values of the quantities that carry independent information.
 
+- **`system.prmtop`, a bond-complete analysis topology.**  `polyzymd build`
+  now writes `system.prmtop` beside `solvated_system.pdb` and `system.xml`,
+  built from the OpenMM topology and System together with ParmEd.  It carries
+  every atom, residue, element, mass, charge and bond, including constrained
+  bonds, with no column widths and no atom limit, and MDAnalysis reads it with
+  bonds taken from the file.  The analysis loader prefers it when present and
+  falls back to the PDB for older runs.  The PDB stays for viewers: above
+  99,999 atoms OpenMM writes hex serials that MDAnalysis cannot read in CONECT
+  records, and it carries CONECT records for non-standard residues only.  A
+  new `polyzymd analysis-topology RUN_DIR...` writes the file for existing
+  runs from the two files they already have.  The build manifest records its
+  hash when it is written.  GROMACS runs get the same treatment with the file
+  they already have: analyses prefer `prod.tpr`, the compiled run input, over
+  the PDB and the GRO.
+
 - **`polyzymd status --format agent|json`.**  `status` accepts repeated `-c`
   and `--all DIR`, makes one `squeue` call, and prints one line per replicate
   with a fixed verdict (`COMPLETED`, `RUNNING`, `QUEUED`, `DEAD`,

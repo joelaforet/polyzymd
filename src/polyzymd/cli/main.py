@@ -3906,6 +3906,12 @@ def _register_optional_command_groups() -> None:
     cli.add_command(compare)
     cli.add_command(analyze_command)
 
+    from polyzymd.cli.analysis_topology import analysis_topology_command
+    from polyzymd.cli.compare import compare
+
+    cli.add_command(compare)
+    cli.add_command(analysis_topology_command)
+
 
 # =============================================================================
 # Hidden: GROMACS progress update (called by GROMACS SLURM scripts)
