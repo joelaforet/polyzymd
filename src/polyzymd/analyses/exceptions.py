@@ -64,6 +64,46 @@ class StatisticsError(AnalysisError, ValueError):
     written before the typed error existed keep working.
     """
 
+class TopologyBondsMissingError(AnalysisError):
+    """Raised when an analysis needs topology bonds and the topology has none.
+
+    MDAnalysis refuses to parse CONECT records when a PDB file contains atom
+    serials above 99999, which OpenMM writes in hexadecimal, so solvated
+    systems above that size routinely load without any bonds. Fragment-based
+    observables have no meaning in that state, so they raise this error instead
+    of treating the whole selection as one fragment.
+    """
+
+    def __init__(
+        self,
+        *,
+        context: str,
+        n_atoms: int,
+        topology: object | None = None,
+        detail: str | None = None,
+    ) -> None:
+        """Build a bond-requirement error naming the topology and the fixes.
+
+        ``context`` says what needed the bonds, ``n_atoms`` is the size of the
+        selection that has none, and ``detail`` is appended to the message.
+        """
+        self.context = context
+        self.n_atoms = int(n_atoms)
+        self.topology = str(topology) if topology is not None else None
+        message = (
+            f"{context} needs topology bonds, but the topology "
+            f"{self.topology or '(path unknown)'} provides none it can use for the "
+            f"{self.n_atoms} atoms it measures. MDAnalysis skips CONECT records when a "
+            "PDB holds atom serials above 99999, which OpenMM writes in hexadecimal, so "
+            "solvated systems above that size load without bonds, sometimes for only "
+            "part of the system. There are two fixes. Load a topology that carries "
+            "bonds, such as the OpenMM system XML read through ParmEd, or guess bonds "
+            "for the protein and polymer selection by loading that subset with "
+            "MDAnalysis.Universe(..., guess_bonds=True)."
+        )
+        if detail:
+            message = f"{message} {detail}"
+        super().__init__(message)
 
 class StaleCacheError(AnalysisError):
     """Raised when a cached result no longer matches the inputs it records.

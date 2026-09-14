@@ -15,6 +15,7 @@ All fields for `RgRunSettings`:
 | `fragment_weighting` | `str` | `"equal"` | `"equal"` (arithmetic mean) or `"mass"` (mass-weighted mean). Only valid when `calculation_mode="fragments"` |
 | `save_fragment_distribution` | `bool` | `true` | Save per-fragment Rg values in NPZ sidecar for distribution analysis |
 | `histogram_bins` | `int` | `50` | Number of bins for fragment/reduced distribution histograms (minimum 2) |
+| `allow_single_fragment_fallback` | `bool` | `false` | In fragment mode, measure the whole selection as one fragment when the topology has no bonds, instead of raising `TopologyBondsMissingError` |
 
 Top-level `RgSettings` contains a single field:
 
@@ -69,6 +70,44 @@ plugins:
 | `calculation_mode: "fragments"` | Per-fragment Rg with reduction |
 | `fragment_weighting: "equal"` | Arithmetic mean over fragments |
 | `fragment_weighting: "mass"` | Mass-weighted mean over fragments |
+
+### Fragment mode requires topology bonds
+
+Fragments are connected components of the bond graph, so fragment mode needs the
+selected atoms to be bonded. The check is made against the selection, not the
+topology as a whole, because a topology can carry bonds for the protein and none
+for the polymer; in that case `AtomGroup.fragments` raises nothing and returns
+one singleton fragment per atom, every fragment Rg is 0, and the run would look
+successful. When the selected atoms have no bonds, the plugin raises
+`polyzymd.analyses.exceptions.TopologyBondsMissingError`, naming the topology
+file, its atom count, and the two fixes. The fixes are to load a topology that
+carries bonds, such as the OpenMM system XML read through ParmEd, or to guess
+bonds for the protein and polymer selection by loading that subset with
+`MDAnalysis.Universe(..., guess_bonds=True)`.
+
+MDAnalysis skips CONECT records when a PDB holds atom serials above 99999,
+which OpenMM writes in hexadecimal, so a solvated system above that size loads
+without bonds even though the PDB contains CONECT lines.
+
+```{versionchanged} 1.3.0
+Before 1.3.0 a bond-free topology produced a warning and fragment mode measured
+the whole selection as one fragment, which quietly turned per-chain Rg into
+whole-selection Rg. Set `allow_single_fragment_fallback: true` to keep that
+behaviour; the artifact then records `fallback_used: true` in
+`fragment_topology`.
+```
+
+### Coordinates and periodic boundaries
+
+Rg is computed on the coordinates as they are loaded. A molecule split across a
+periodic boundary reports an Rg of roughly half a box length rather than its
+real size, so check whether your trajectory stores whole molecules. The GROMACS
+engine prefers a whole-molecule trajectory when the run wrote one; OpenMM writes
+wrapped coordinates. The policy in force, the bond source, and the trajectory
+variant are recorded in universe provenance, and the `make_whole` load policy is
+available to code that calls the loader directly. See
+{doc}`analysis_plugin_settings`, which also notes that the policy is not yet a
+`comparison.yaml` key.
 
 ### How fragment mode reduction works
 
@@ -298,6 +337,18 @@ If unexpected:
 - Confirm residue numbering and atom naming in your topology
 - Check selection syntax directly against your system
 - Re-run with `--debug` for detailed diagnostics
+
+### "in fragment mode needs topology bonds"
+
+Cause: `calculation_mode: fragments` with a topology that carries no bonds.
+
+Fix:
+- Load a topology that carries bonds, such as the OpenMM system XML read
+  through ParmEd
+- Or guess bonds for the protein and polymer selection with
+  `MDAnalysis.Universe(..., guess_bonds=True)`
+- Or set `allow_single_fragment_fallback: true` if whole-selection Rg is what
+  you want, and say so when reporting the number
 
 ### "At least one Rg run must be defined"
 

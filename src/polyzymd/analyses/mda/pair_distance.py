@@ -144,6 +144,7 @@ def build_pair_distance_analysis(
     universe: Any,
     pairs: Sequence[PairDistanceSpec],
     use_pbc: bool,
+    initial_warnings: Sequence[str] = (),
 ) -> Any:
     """Build a lazy custom ``AnalysisBase`` for pair-distance matrices.
 
@@ -155,6 +156,9 @@ def build_pair_distance_analysis(
         Resolved pair specifications.
     use_pbc : bool
         Whether to request minimum-image distances from MDAnalysis.
+    initial_warnings : sequence of str, optional
+        Messages recorded on the results before iteration, so a caller's
+        warning reaches the replicate artifact.
 
     Returns
     -------
@@ -175,14 +179,14 @@ def build_pair_distance_analysis(
         def __init__(self) -> None:
             self._pairs = list(pairs)
             self._use_pbc = bool(use_pbc)
-            self._warnings: list[str] = []
+            self._warnings: list[str] = [str(message) for message in initial_warnings]
             super().__init__(universe.trajectory)
 
         def _prepare(self) -> None:
             """Initialize matrix rows before trajectory iteration."""
 
             self.results.distance_matrix = [[] for _ in self._pairs]
-            self.results.warnings = []
+            self.results.warnings = list(self._warnings)
 
         def _single_frame(self) -> None:
             """Measure all pair distances for the current frame."""
@@ -248,10 +252,15 @@ def build_pair_distance_analysis(
 def pair_distance_version() -> str:
     """Return the pair-distance primitive schema version.
 
+    Version 2 is the first version measured without a preceding in-memory
+    alignment. Artifacts written by version 1 hold distances that were computed
+    from rotated coordinates against an unrotated box, so aggregation rejects
+    them rather than mixing the two.
+
     Returns
     -------
     str
         Version string for provenance records.
     """
 
-    return "1"
+    return "2"

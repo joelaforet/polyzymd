@@ -80,12 +80,15 @@ class _FakeAtomGroup:
         *,
         masses: float = 1.0,
         fragments: list[_FakeAtomGroup] | None = None,
+        n_bonds: int = 1,
     ) -> None:
         self.universe = universe
         self.values = list(values)
         self._mass = float(masses)
         self._fragments = fragments
         self.indices = np.arange(len(values) or 1, dtype=np.int64)
+        # Fragment mode checks that the selection itself is bonded.
+        self.bonds = [None] * int(n_bonds)
 
     def __len__(self) -> int:
         """Return a nonzero atom count when values exist."""
