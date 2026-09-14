@@ -110,7 +110,7 @@ def format_pairwise_line(
     direction: str,
     p_value: float,
     effect_size: float,
-    effect_label: str,
+    effect_label: str | None,
     percent_change: float,
     significant: bool,
     prefix: str = "Pairwise",
@@ -122,7 +122,7 @@ def format_pairwise_line(
     return (
         f"{prefix}: {condition_b} vs {condition_a} — "
         f"Δ={format_pct(percent_change)}, p={p_value:.3f} {sig_marker}, "
-        f"d={effect_size:.2f} ({effect_label}), {direction}"
+        f"d={effect_size:.2f} ({effect_label or 'effect size not labelled'}), {direction}"
     )
 
 

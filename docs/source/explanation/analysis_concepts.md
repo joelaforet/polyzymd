@@ -214,14 +214,18 @@ comparison paths:
   but they may not produce the same tests, tables, or rankings as the default
   scalar path.
 
-For plugins using the default scalar comparison path, PolyzyMD computes:
+Every comparison plugin computes:
 
 - **Pairwise t-tests** between each pair of conditions, with
-  Benjamini–Hochberg FDR correction to account for multiple comparisons.
-- **Effect sizes** (Cohen's d) for each pair, so you can see not just whether
-  a difference is significant but how large it is.
-- **ANOVA** when there are three or more conditions, as an omnibus test before
-  the pairwise comparisons.
+  Benjamini–Hochberg FDR correction over one family per analysis run. The
+  family holds every pairwise test that run produced, across all of its
+  metrics and all of its condition pairs.
+- **Effect sizes** (Cohen's d and Hedges' g) for each pair, so you can see not
+  just whether a difference is significant but how large it is.
+- **ANOVA** when there are three or more conditions. It is reported as an
+  omnibus statement about whether any condition differs at all. It is not
+  adjusted, and the pairwise tests run whether or not it reaches significance,
+  so it gates nothing.
 - **Rankings** of conditions according to each metric's directionality. These
   rankings are screening aids for follow-up interpretation, not biological truth
   by themselves.
