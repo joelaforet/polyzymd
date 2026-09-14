@@ -1,4 +1,12 @@
-"""MDAnalysis-native hydrogen-bond jobs and artifact helpers."""
+"""MDAnalysis-native hydrogen-bond jobs and artifact helpers.
+
+``HydrogenBondAnalysis`` counts a donor-hydrogen-acceptor triplet whenever the
+donor-acceptor distance and the D-H...A angle pass their cutoffs, so the donor
+and acceptor selections decide what counts as a hydrogen bond. PolyzyMD passes
+the group union intersected with the configured electronegative elements, which
+keeps C-H donors and carbon acceptors out of the count. See
+:mod:`polyzymd.analyses.hydrogen_bonds` for the references behind that choice.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +23,7 @@ from numpy.typing import NDArray
 
 from polyzymd.analyses._framework.cache_identity import compute_config_hash
 from polyzymd.analyses._framework.results_base import get_polyzymd_version
+from polyzymd.analyses.exceptions import SelectionError
 from polyzymd.analyses.hydrogen_bonds._models import (
     CompositionEntry,
     DirectedResiduePairResult,
@@ -33,7 +42,7 @@ from polyzymd.analyses.mda import (
     ReplicateArtifact,
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
-from polyzymd.analyses.shared.loader import parse_time_string
+from polyzymd.analyses.shared.loader import _canonical_element_symbol, parse_time_string
 
 if TYPE_CHECKING:
     from polyzymd.analyses.hydrogen_bonds import (
@@ -62,6 +71,9 @@ class HydrogenBondMDAPlan:
     """Selection and summary state prepared for one hydrogen-bond replicate."""
 
     selection_string: str
+    donors_selection_string: str
+    acceptors_selection_string: str
+    donor_acceptor_elements: tuple[str, ...]
     hydrogens_selection_string: str
     hydrogens_selection_source: str
     frame_indices: list[int]
@@ -158,9 +170,9 @@ class HydrogenBondMDAAnalysis:
 
         hbonds = HydrogenBondAnalysis(
             universe=self.universe,
-            donors_sel=self.plan.selection_string,
+            donors_sel=self.plan.donors_selection_string,
             hydrogens_sel=self.plan.hydrogens_selection_string,
-            acceptors_sel=self.plan.selection_string,
+            acceptors_sel=self.plan.acceptors_selection_string,
             d_a_cutoff=self.settings.distance_cutoff,
             d_h_a_angle_cutoff=self.settings.angle_cutoff,
             update_selections=self.settings.update_selections,
@@ -205,6 +217,7 @@ def build_hydrogen_bond_jobs(ctx: MDAReplicateJobContext) -> list[MDAAnalysisJob
             "angle_cutoff": settings.angle_cutoff,
             "update_selections": settings.update_selections,
             "allow_empty_groups": settings.allow_empty_groups,
+            "donor_acceptor_elements": list(settings.donor_acceptor_elements),
             "hydrogens_selection": settings.hydrogens_selection,
             "dynamic_selection_policy": dynamic_selection_policy_payload(settings),
         },
@@ -302,6 +315,12 @@ class HydrogenBondArtifactCollector:
                         analysis.universe, "_polyzymd_element_enrichment", None
                     ),
                 },
+                "donor_acceptor_selection_policy": {
+                    "donors_selection": analysis.plan.donors_selection_string,
+                    "acceptors_selection": analysis.plan.acceptors_selection_string,
+                    "hydrogens_selection": analysis.plan.hydrogens_selection_string,
+                    "elements": list(analysis.plan.donor_acceptor_elements),
+                },
             },
             metadata={
                 "result_kind": "hydrogen_bonds_mda_replicate",
@@ -312,6 +331,8 @@ class HydrogenBondArtifactCollector:
                 "equilibration_time": eq_value,
                 "equilibration_unit": eq_unit,
                 "selection_string": analysis.plan.selection_string,
+                "donors_selection_string": analysis.plan.donors_selection_string,
+                "acceptors_selection_string": analysis.plan.acceptors_selection_string,
                 "hydrogens_selection_string": analysis.plan.hydrogens_selection_string,
                 "hydrogens_selection_source": analysis.plan.hydrogens_selection_source,
                 "timestep_ps": analysis.plan.timestep_ps,
@@ -440,6 +461,9 @@ def aggregate_hydrogen_bond_artifacts(
             "hydrogens_selection_policy": ordered_artifacts[0].provenance.get(
                 "hydrogens_selection_policy"
             ),
+            "donor_acceptor_selection_policy": ordered_artifacts[0].provenance.get(
+                "donor_acceptor_selection_policy"
+            ),
         },
         metadata={
             "result_kind": "hydrogen_bonds_mda_condition",
@@ -449,6 +473,10 @@ def aggregate_hydrogen_bond_artifacts(
             "equilibration_time": condition_model.equilibration_time,
             "equilibration_unit": condition_model.equilibration_unit,
             "selection_string": condition_model.selection_string,
+            "donors_selection_string": ordered_artifacts[0].metadata.get("donors_selection_string"),
+            "acceptors_selection_string": ordered_artifacts[0].metadata.get(
+                "acceptors_selection_string"
+            ),
             "hydrogens_selection_string": ordered_artifacts[0].metadata.get(
                 "hydrogens_selection_string"
             ),
@@ -825,10 +853,10 @@ def _prepare_hydrogen_bond_plan(
             warnings.append(message)
         atom_group = universe.select_atoms(selection_str, updating=settings.update_selections)
         if len(atom_group) == 0 and not settings.allow_empty_groups:
-            raise ValueError(
-                f"Group '{group_name}' selection '{selection_str}' matched no atoms in "
-                "the universe. Fix the selection or set allow_empty_groups: true to "
-                "warn and skip."
+            raise SelectionError(
+                f"hydrogen_bonds group '{group_name}' selection '{selection_str}' matched "
+                "no atoms in the universe. Fix the selection or set "
+                "allow_empty_groups: true to warn and skip the affected summaries."
             )
         resolved_groups[group_name] = atom_group
 
@@ -850,6 +878,8 @@ def _prepare_hydrogen_bond_plan(
             summary_results_by_name[summary_spec.name] = summary_result
 
     union_sel = _build_union_selection(active_summary_specs, settings, resolved_groups)
+    donors_selection_string = ""
+    acceptors_selection_string = ""
     hydrogens_selection_string = ""
     hydrogens_selection_source = "none"
     if not union_sel:
@@ -862,21 +892,53 @@ def _prepare_hydrogen_bond_plan(
                 _build_zero_summary(summary_spec, n_frames=n_frames),
             )
     else:
-        (
-            hydrogens_selection_string,
-            hydrogens_selection_source,
-            hydrogens_selection_warning,
-        ) = _resolve_hydrogens_selection(
+        donors_selection_string, element_warning = _build_donor_acceptor_selection(
             universe=universe,
             settings=settings,
             group_union_selection=union_sel,
         )
-        if hydrogens_selection_warning is not None:
-            LOGGER.warning(hydrogens_selection_warning)
-            warnings.append(hydrogens_selection_warning)
+        acceptors_selection_string = donors_selection_string
+        if element_warning is not None:
+            LOGGER.warning(element_warning)
+            warnings.append(element_warning)
+
+        # Donors and acceptors share one selection, so one emptiness check covers both.
+        n_donor_atoms = len(universe.select_atoms(donors_selection_string, updating=False))
+        if n_donor_atoms == 0:
+            message = (
+                f"hydrogen_bonds donor and acceptor selection '{donors_selection_string}' "
+                "matched no atoms in the universe. Widen the groups, or set "
+                "hydrogen_bonds.donor_acceptor_elements to elements the selected groups "
+                "contain, or set allow_empty_groups: true to warn and skip the summaries."
+            )
+            if not settings.allow_empty_groups:
+                raise SelectionError(message)
+            LOGGER.warning(message)
+            warnings.append(message)
+            union_sel = ""
+            donors_selection_string = ""
+            acceptors_selection_string = ""
+            active_summary_specs = []
+            for summary_spec in settings.summaries:
+                summary_results_by_name.setdefault(
+                    summary_spec.name,
+                    _build_zero_summary(summary_spec, n_frames=n_frames),
+                )
+        else:
+            (
+                hydrogens_selection_string,
+                hydrogens_selection_source,
+            ) = _resolve_hydrogens_selection(
+                universe=universe,
+                settings=settings,
+                group_union_selection=union_sel,
+            )
 
     return HydrogenBondMDAPlan(
         selection_string=union_sel,
+        donors_selection_string=donors_selection_string,
+        acceptors_selection_string=acceptors_selection_string,
+        donor_acceptor_elements=tuple(settings.donor_acceptor_elements),
         hydrogens_selection_string=hydrogens_selection_string,
         hydrogens_selection_source=hydrogens_selection_source,
         frame_indices=frame_indices,
@@ -910,7 +972,9 @@ def _universe_has_element_metadata(universe: Any) -> bool:
         n_atoms = len(universe.atoms)
     except (AttributeError, TypeError):
         return False
-    return len(elements) == n_atoms
+    if len(elements) != n_atoms:
+        return False
+    return all(str(element).strip() for element in elements)
 
 
 def _resolve_hydrogens_selection(
@@ -918,7 +982,7 @@ def _resolve_hydrogens_selection(
     universe: Any,
     settings: HydrogenBondSettings,
     group_union_selection: str,
-) -> tuple[str, str, str | None]:
+) -> tuple[str, str]:
     """Resolve the hydrogen selection used by MDAnalysis H-bond detection.
 
     Parameters
@@ -932,25 +996,142 @@ def _resolve_hydrogens_selection(
 
     Returns
     -------
-    tuple[str, str, str or None]
-        Selection string, source label, and optional warning.
+    tuple[str, str]
+        Selection string and source label.
+
+    Raises
+    ------
+    SelectionError
+        Raised when no hydrogen selection override is given and the universe
+        carries no element metadata.
     """
 
     if settings.hydrogens_selection is not None:
-        return f"({group_union_selection}) and ({settings.hydrogens_selection})", "user", None
+        return f"({group_union_selection}) and ({settings.hydrogens_selection})", "user"
 
-    if _universe_has_element_metadata(universe):
-        return f"({group_union_selection}) and (element H)", "element", None
+    if not _universe_has_element_metadata(universe):
+        raise SelectionError(_missing_element_metadata_message(universe, settings))
+    return f"({group_union_selection}) and (element H)", "element"
+
+
+def _missing_element_metadata_message(universe: Any, settings: HydrogenBondSettings) -> str:
+    """Build the error text used when a universe carries no element metadata."""
 
     enrichment = getattr(universe, "_polyzymd_element_enrichment", None)
     enrichment_text = f" Element enrichment metadata: {enrichment}." if enrichment else ""
-    warning = (
-        "hydrogen_bonds could not read element metadata; falling back to hydrogen atom-name "
-        "patterns 'name H* or name [123]H*'. Explicit hydrogens are required. For unusual "
-        "hydrogen naming, set hydrogen_bonds.hydrogens_selection."
+    return (
+        "hydrogen_bonds could not read element metadata, so donors and acceptors cannot "
+        f"be restricted to {' '.join(settings.donor_acceptor_elements)}. Load a topology "
+        "that carries elements (for example a PDB written by PolyzyMD) instead of one "
+        "that only carries atom names."
         f"{enrichment_text}"
     )
-    return f"({group_union_selection}) and (name H* or name [123]H*)", "name_fallback", warning
+
+
+def _resolve_element_spellings(
+    universe: Any,
+    elements: Sequence[str],
+) -> tuple[list[str], list[str]]:
+    """Map canonical element symbols onto the spellings a universe uses.
+
+    MDAnalysis matches ``element`` selections literally, so a topology that
+    writes ``CL`` is not matched by ``element Cl``. The configured canonical
+    symbols are therefore resolved against the element strings the universe
+    actually carries.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe or compatible test double.
+    elements : Sequence[str]
+        Canonical element symbols from the settings.
+
+    Returns
+    -------
+    tuple[list[str], list[str]]
+        Spellings found in the universe, and the canonical symbols the universe
+        does not carry.
+    """
+
+    spellings_by_symbol: dict[str, list[str]] = {}
+    for raw_element in universe.atoms.elements:
+        token = str(raw_element).strip()
+        canonical = _canonical_element_symbol(token)
+        if canonical is None:
+            continue
+        found = spellings_by_symbol.setdefault(canonical, [])
+        if token not in found:
+            found.append(token)
+
+    spellings: list[str] = []
+    missing: list[str] = []
+    for symbol in elements:
+        found = spellings_by_symbol.get(symbol)
+        if not found:
+            missing.append(symbol)
+            continue
+        spellings.extend(found)
+    return spellings, missing
+
+
+def _build_donor_acceptor_selection(
+    *,
+    universe: Any,
+    settings: HydrogenBondSettings,
+    group_union_selection: str,
+) -> tuple[str, str | None]:
+    """Build the donor and acceptor selection used by MDAnalysis H-bond detection.
+
+    MDAnalysis treats every atom of ``donors_sel`` that sits within the
+    donor-hydrogen cutoff of a selected hydrogen as a donor, and every atom of
+    ``acceptors_sel`` as an acceptor. Passing the raw group union therefore
+    admits C-H donors and carbon acceptors, so the union is intersected with the
+    configured electronegative elements.
+
+    Parameters
+    ----------
+    universe : Any
+        MDAnalysis universe or compatible test double.
+    settings : HydrogenBondSettings
+        User-facing hydrogen-bond settings.
+    group_union_selection : str
+        Union of all active summary groups.
+
+    Returns
+    -------
+    tuple[str, str or None]
+        Selection string restricted to ``settings.donor_acceptor_elements``,
+        and a warning naming the configured elements the universe does not
+        carry.
+
+    Raises
+    ------
+    SelectionError
+        Raised when the universe carries no usable element metadata, because
+        widening the selection back to every atom would silently reintroduce
+        carbon donors and acceptors. Also raised when the universe carries none
+        of the configured elements.
+    """
+
+    if not _universe_has_element_metadata(universe):
+        raise SelectionError(_missing_element_metadata_message(universe, settings))
+
+    spellings, missing = _resolve_element_spellings(universe, settings.donor_acceptor_elements)
+    if not spellings:
+        raise SelectionError(
+            "hydrogen_bonds found none of the configured donor and acceptor elements "
+            f"{' '.join(settings.donor_acceptor_elements)} in the universe. Set "
+            "hydrogen_bonds.donor_acceptor_elements to elements the topology contains."
+        )
+
+    warning = None
+    if missing:
+        warning = (
+            "hydrogen_bonds: the universe carries no "
+            f"{' '.join(missing)} atoms, so those donor and acceptor elements contribute "
+            "nothing to this analysis."
+        )
+    return f"({group_union_selection}) and element {' '.join(spellings)}", warning
 
 
 def _warn_on_group_overlap(resolved_groups: dict[str, Any]) -> None:
@@ -1278,6 +1459,8 @@ def _write_event_sidecar(
             "shape": [int(dim) for dim in events.shape],
             "n_events": int(events.shape[0]),
             "selection_string": plan.selection_string,
+            "donors_selection_string": plan.donors_selection_string,
+            "acceptors_selection_string": plan.acceptors_selection_string,
             "hydrogens_selection_string": plan.hydrogens_selection_string,
             "hydrogens_selection_source": plan.hydrogens_selection_source,
             "distance_cutoff": settings.distance_cutoff,
