@@ -59,6 +59,7 @@ class DependencyError(AnalysisError):
 class SelectionError(AnalysisError):
     """Raised when an analysis selection is empty or cannot be resolved."""
 
+
 class StaleCacheError(AnalysisError):
     """Raised when a cached result no longer matches the inputs it records.
 
@@ -121,6 +122,3 @@ class StatisticsError(AnalysisError, ValueError):
 
 class ProtocolError(AnalysisError):
     """Raised when an agent-facing protocol run cannot be set up or reported."""
-
-class SelectionError(AnalysisError):
-    """Raised when an analysis selection is empty or cannot be resolved."""
