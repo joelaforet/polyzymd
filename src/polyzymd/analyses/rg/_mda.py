@@ -30,6 +30,9 @@ from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_V
 from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.statistics import compute_sem, metric_summary_payload
 
+from polyzymd.analyses.shared.statistics import compute_sem
+from polyzymd.analyses.shared.topology import require_topology_bonds
+
 if TYPE_CHECKING:
     from polyzymd.analyses.mda import ArtifactSidecarRef, MDAReplicateJobContext
     from polyzymd.analyses.rg import RgRunSettings, RgSettings
@@ -194,8 +197,6 @@ def build_rg_analysis(
 
     from MDAnalysis.analysis.base import AnalysisBase
 
-    fragment_errors = _fragment_resolution_errors()
-
     class RgMDAAnalysis(AnalysisBase):
         """Collect selection or fragment Rg values over one trajectory."""
 
@@ -246,30 +247,17 @@ def build_rg_analysis(
                 fragment_weighting=self._run.fragment_weighting,
                 save_fragment_distribution=self._run.save_fragment_distribution,
             )
-            try:
-                fragments = list(self._atom_group.fragments)
-            except (
-                fragment_errors
-            ) as exc:  # pragma: no cover - depends on MDAnalysis topology internals
-                message = (
-                    f"Run '{self._run.label}' could not resolve MDAnalysis fragments "
-                    f"({type(exc).__name__}: {exc}); using the full selection as one fragment"
-                )
-                LOGGER.warning(message)
-                self._warnings.append(message)
-                fragments = []
+            fragments, fallback_reason = require_topology_bonds(
+                self._atom_group,
+                context=f"Rg run '{self._run.label}' in fragment mode",
+                topology_path=getattr(universe, "filename", None),
+                allow_fallback=self._run.allow_single_fragment_fallback,
+            )
+            if fallback_reason is not None:
+                LOGGER.warning(fallback_reason)
+                self._warnings.append(fallback_reason)
                 fragment_topology["fallback_used"] = True
-                fragment_topology["fallback_reason"] = message
-            if not fragments:
-                message = (
-                    f"Run '{self._run.label}' has no topology fragments; using the full "
-                    "selection as one fragment"
-                )
-                LOGGER.warning(message)
-                self._warnings.append(message)
-                fragments = [self._atom_group]
-                fragment_topology["fallback_used"] = True
-                fragment_topology.setdefault("fallback_reason", message)
+                fragment_topology["fallback_reason"] = fallback_reason
             if len(fragments) == 1:
                 message = (
                     f"Run '{self._run.label}' selection produced one fragment; fragment mode "
@@ -585,24 +573,6 @@ def fragment_topology_payload(
         "save_fragment_distribution": bool(save_fragment_distribution),
         "warning": RG_FRAGMENT_POLICY_WARNING,
     }
-
-
-def _fragment_resolution_errors() -> tuple[type[BaseException], ...]:
-    """Return expected exception classes for missing MDAnalysis fragment topology.
-
-    Returns
-    -------
-    tuple[type[BaseException], ...]
-        Exception classes that represent absent or unusable fragment topology.
-    """
-
-    errors: list[type[BaseException]] = [AttributeError, ValueError, TypeError, LookupError]
-    try:
-        from MDAnalysis.exceptions import NoDataError
-    except ImportError:
-        return tuple(errors)
-    errors.append(NoDataError)
-    return tuple(errors)
 
 
 def mdanalysis_version() -> str:

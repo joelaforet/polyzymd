@@ -38,6 +38,9 @@ LOGGER = logging.getLogger(__name__)
 _WARNED_GRO_TOPOLOGY_PATHS: set[Path] = set()
 _WARNED_ELEMENT_ENRICHMENT_KEYS: set[str] = set()
 
+PBC_POLICIES: tuple[str, ...] = ("as_is", "make_whole")
+MAKE_WHOLE_SELECTION = "not (water or resname NA CL K MG ZN SOD CLA POT NA+ CL-)"
+
 _ELEMENT_SYMBOLS = frozenset(
     {
         "H",
@@ -893,6 +896,56 @@ def _segment_completeness_warning(layout: "TrajectoryLayout") -> str | None:
     return None
 
 
+def apply_pbc_policy(
+    universe: "Universe",
+    pbc_policy: str = "as_is",
+    *,
+    topology: Path | str | None = None,
+    selection: str = MAKE_WHOLE_SELECTION,
+) -> str:
+    """Apply the requested periodic boundary policy to a loaded universe.
+
+    ``"as_is"`` leaves coordinates exactly as the trajectory stores them, which
+    is what every PolyzyMD analysis did before this option existed.
+    ``"make_whole"`` registers an MDAnalysis ``unwrap`` transformation on
+    ``selection``, everything that is not water or a monatomic ion by default,
+    so molecules split across a periodic boundary are rejoined before any
+    measurement reads them. Unwrapping walks the bond graph, so it raises
+    ``TopologyBondsMissingError`` when those atoms have no bonds. ``topology``
+    is named in that message. Returns the policy that was applied, and raises
+    ``ValueError`` for an unknown one.
+    """
+
+    from polyzymd.analyses.shared.topology import require_topology_bonds
+
+    policy = str(pbc_policy)
+    if policy not in PBC_POLICIES:
+        raise ValueError(f"pbc_policy must be one of {PBC_POLICIES}, got {pbc_policy!r}")
+    if policy == "as_is":
+        return policy
+
+    from MDAnalysis import transformations
+
+    atoms = universe.select_atoms(selection)
+    if len(atoms) == 0:
+        atoms = universe.atoms
+    # Unwrapping walks the bond graph of these atoms, so the bonds that matter
+    # are the ones inside this selection, not the ones anywhere in the topology.
+    require_topology_bonds(
+        atoms,
+        context="pbc_policy='make_whole'",
+        topology_path=topology,
+    )
+    universe.trajectory.add_transformations(transformations.unwrap(atoms))
+    LOGGER.info(
+        "Applied pbc_policy='make_whole' to %d of %d atoms (selection %r)",
+        len(atoms),
+        len(universe.atoms),
+        selection,
+    )
+    return policy
+
+
 @dataclass
 class TrajectoryInfo:
     """Information about discovered trajectory files.
@@ -1008,7 +1061,7 @@ class TrajectoryLoader:
         self.config = config
         self._engine_override = engine_override
         self._engine: SimulationEngine | None = None
-        self._universe_cache: dict[tuple[int, bool], "Universe"] = {}
+        self._universe_cache: dict[tuple[int, str, bool], "Universe"] = {}
 
     # ------------------------------------------------------------------
     # Engine delegation helpers
@@ -1262,6 +1315,7 @@ class TrajectoryLoader:
         *,
         verify_lineage: bool = True,
         require_complete: bool = True,
+        pbc_policy: str = "as_is",
     ) -> "Universe":
         """Load MDAnalysis Universe for a replicate.
 
@@ -1279,6 +1333,10 @@ class TrajectoryLoader:
             If True (default), leave out production segments the engine records
             as still running or failed. Set it to False to read a campaign that
             is still in flight, knowing the last segment ends mid-write.
+        pbc_policy : str, optional
+            Periodic boundary policy, ``"as_is"`` (default) or
+            ``"make_whole"``. See :func:`apply_pbc_policy`. The default keeps
+            the historical behaviour of reading coordinates exactly as stored.
 
         Returns
         -------
@@ -1290,6 +1348,8 @@ class TrajectoryLoader:
         TrajectoryLineageError
             If ``verify_lineage`` is set and the segments overlap, run
             backwards, or leave gaps.
+        TopologyBondsMissingError
+            If ``pbc_policy="make_whole"`` and the topology has no bonds.
 
         Notes
         -----
@@ -1299,7 +1359,7 @@ class TrajectoryLoader:
         _require_mdanalysis()
         import MDAnalysis as mda
 
-        cache_key = (replicate, require_complete)
+        cache_key = (replicate, str(pbc_policy), require_complete)
         if cache and cache_key in self._universe_cache:
             return self._universe_cache[cache_key]
 
@@ -1331,6 +1391,7 @@ class TrajectoryLoader:
                 [str(f) for f in info.trajectory_files],
             )
         enrich_universe_elements(u, topology_key=info.topology_file)
+        apply_pbc_policy(u, pbc_policy, topology=info.topology_file)
         u.trajectory = _wrap_timestamp_preserving_trajectory(u.trajectory)
 
         if cache:

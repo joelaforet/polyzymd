@@ -187,14 +187,18 @@ class DistancesSettings(BaseModel):
     use_pbc : bool
         Use PBC-aware minimum image distances (default ``True``).
     align_trajectory : bool
-        Align trajectory before distance calculation (default ``True``).
+        Deprecated since 1.3.0, ignored, and now defaulting to ``False``.
+        Distances are invariant under
+        rigid-body motion, and the in-memory alignment rotated coordinates
+        without rotating the box, which corrupted minimum-image distances for
+        long pairs. Leaving this at ``True`` raises a ``DeprecationWarning``.
     alignment_selection : str
-        MDAnalysis selection for trajectory alignment.
+        Deprecated since 1.3.0 and ignored.
     alignment_mode : str
-        Reference mode for alignment: ``"centroid"``, ``"average"``, or
-        ``"frame"``.
+        Deprecated since 1.3.0 and ignored. Still validated as ``"centroid"``,
+        ``"average"``, or ``"frame"``.
     alignment_frame : int | None
-        Reference frame (1-indexed) when ``alignment_mode="frame"``.
+        Deprecated since 1.3.0 and ignored.
     """
 
     threshold: float | None = Field(
@@ -210,20 +214,20 @@ class DistancesSettings(BaseModel):
         description="Use PBC-aware minimum image distances",
     )
     align_trajectory: bool = Field(
-        default=True,
-        description="Align trajectory before distance calculation",
+        default=False,
+        description="Deprecated and ignored; distances are measured without alignment",
     )
     alignment_selection: str = Field(
         default="protein and name CA",
-        description="MDAnalysis selection for trajectory alignment",
+        description="Deprecated and ignored",
     )
     alignment_mode: str = Field(
         default="centroid",
-        description="Reference mode: centroid, average, or frame",
+        description="Deprecated and ignored; still validated as centroid, average, or frame",
     )
     alignment_frame: int | None = Field(
         default=None,
-        description="Reference frame (1-indexed) when alignment_mode='frame'",
+        description="Deprecated and ignored; reference frame when alignment_mode='frame'",
     )
 
     @field_validator("pairs", mode="after")
@@ -265,23 +269,6 @@ class DistancesSettings(BaseModel):
     def get_pair_thresholds(self) -> list[float | None]:
         """Get per-pair thresholds, falling back to the global threshold."""
         return [p.threshold if p.threshold is not None else self.threshold for p in self.pairs]
-
-    def get_alignment_config(self) -> Any:
-        """Build an ``AlignmentConfig`` from these settings.
-
-        Returns
-        -------
-        AlignmentConfig
-            Configuration for trajectory alignment.
-        """
-        from polyzymd.analyses.shared.alignment import AlignmentConfig
-
-        return AlignmentConfig(
-            enabled=self.align_trajectory,
-            reference_mode=self.alignment_mode,
-            reference_frame=self.alignment_frame,
-            selection=self.alignment_selection,
-        )
 
 
 # ---------------------------------------------------------------------------

@@ -303,6 +303,34 @@ class TestTriadAggregationAndComparison:
         with pytest.raises(TypeError, match="recompute the condition"):
             triad_analysis.aggregate(ctx, [object()])
 
+    def test_aggregate_rejects_stale_pair_distance_version(
+        self,
+        triad_analysis: CatalyticTriadAnalysis,
+        condition: Condition,
+        tmp_path: Path,
+        default_settings: CatalyticTriadSettings,
+    ) -> None:
+        """Artifacts written before alignment was removed are refused."""
+
+        artifact = _replicate_artifact(
+            tmp_path,
+            condition,
+            default_settings,
+            np.asarray([[3.0, 3.8, 3.1, 3.2], [3.1, 3.0, 3.7, 3.2]]),
+            replicate=1,
+        )
+        artifact.metadata["pair_distance_version"] = "1"
+        ctx = AggregateContext(
+            condition=condition,
+            replicates=(1,),
+            output_dir=tmp_path / "aggregated",
+            equilibration="10ns",
+            settings=default_settings,
+        )
+
+        with pytest.raises(ValueError, match="clear stale caches"):
+            triad_analysis.aggregate(ctx, [artifact])
+
     def test_aggregate_returns_condition_artifact_payload(
         self,
         triad_analysis: CatalyticTriadAnalysis,

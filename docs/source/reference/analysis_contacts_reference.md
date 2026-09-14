@@ -17,6 +17,7 @@ Contacts plugin settings live under `plugins.contacts` in `comparison.yaml`.
 | `polymer_types` | `list[str] \| None` | `null` | Optional polymer residue-name filter |
 | `grouping` | `str` | `"aa_class"` | Protein grouping mode: `aa_class`, `secondary_structure`, or `none` |
 | `compute_residence_times` | `bool` | `true` | Compute aggregate residence-time summaries and plots |
+| `allow_single_fragment_fallback` | `bool` | `false` | Put every polymer residue in chain 0 when the topology has no bonds, instead of raising `TopologyBondsMissingError` |
 
 Set `compute_residence_times: false` to skip aggregate residence-time summaries
 and residence-time plotters. Per-replicate contact events remain stored because
@@ -38,6 +39,28 @@ contacts detection fingerprint recorded in replicate and condition artifacts.
 | `fdr_alpha` | `float` | `0.05` | FDR alpha for Benjamini-Hochberg correction |
 | `min_effect_size` | `float` | `0.5` | Minimum Cohen's d to flag/highlight |
 | `top_residues` | `int` | `10` | Number of top residues shown in console output |
+
+### Polymer chain identity requires topology bonds
+
+Polymer chains are bonded fragments, so contacts resolves chain identity from
+`AtomGroup.fragments`. The check is made against the polymer selection itself,
+not the topology as a whole, because a topology can carry bonds for the protein
+and none for the polymer. When the selected atoms have no bonds, the plugin
+raises
+`polyzymd.analyses.exceptions.TopologyBondsMissingError`, naming the topology
+file and its atom count. The two fixes named in the message are to load a
+topology that carries bonds, such as the OpenMM system XML read through ParmEd,
+or to guess bonds for the protein and polymer selection by loading that subset
+with `MDAnalysis.Universe(..., guess_bonds=True)`.
+
+```{versionchanged} 1.3.0
+Before 1.3.0 a bond-free topology produced a warning and put every polymer
+residue in chain 0, which silently distorted per-chain and residence-time
+statistics. Set `allow_single_fragment_fallback: true` to keep that behaviour.
+```
+
+The bond source is recorded per replicate in universe provenance as
+`topology_has_bonds` and `bond_source`; see {doc}`analysis_plugin_settings`.
 
 ### Validation notes
 
@@ -207,6 +230,20 @@ polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
 
 - Check residue numbering and atom/residue naming
 - Validate that your topology and trajectory belong together
+
+### "contacts polymer chain detection needs topology bonds"
+
+The selected polymer atoms have no bonds between them. This happens when the
+topology carries no bonds at all, which is what MDAnalysis produces for a PDB
+holding atom serials above 99999 because OpenMM writes those in hexadecimal, and
+it also happens when only the standard residues have usable CONECT records and
+the polymer has none.
+
+Load a topology that carries bonds, such as the OpenMM system XML read through
+ParmEd, or guess bonds for the protein and polymer selection with
+`MDAnalysis.Universe(..., guess_bonds=True)`. If one polymer chain really is the
+right model for your system, set `allow_single_fragment_fallback: true` and
+remember that per-chain statistics then describe the whole polymer selection.
 
 ### Missing replicate data / replicate skipped
 
