@@ -19,6 +19,7 @@ def test_public_facade_reexports_primitives() -> None:
         ReplicateMetricPolicy,
         aggregate_replicate_artifacts,
         aggregate_replicate_artifacts_from_disk,
+        validate_autocorrelation_estimator_version,
     )
     from polyzymd.analyses.mda.artifacts import (
         MDA_ARTIFACT_SCHEMA_VERSION,
@@ -77,6 +78,9 @@ def test_public_facade_reexports_primitives() -> None:
     assert mda.ReplicateMetricPolicy is ReplicateMetricPolicy
     assert mda.aggregate_replicate_artifacts is aggregate_replicate_artifacts
     assert mda.aggregate_replicate_artifacts_from_disk is aggregate_replicate_artifacts_from_disk
+    assert (
+        mda.validate_autocorrelation_estimator_version is validate_autocorrelation_estimator_version
+    )
     assert mda.ArtifactEnvelope is ArtifactEnvelope
     assert mda.ArtifactManifest is ArtifactManifest
     assert mda.ArtifactSidecarRef is ArtifactSidecarRef
@@ -120,6 +124,7 @@ def test_public_facade_reexports_primitives() -> None:
         "ReplicateMetricPolicy",
         "aggregate_replicate_artifacts",
         "aggregate_replicate_artifacts_from_disk",
+        "validate_autocorrelation_estimator_version",
         "ArtifactEnvelope",
         "ArtifactManifest",
         "ArtifactSidecarRef",
