@@ -13,11 +13,10 @@ MDAnalysis provides a built-in
 [`RMSF`](https://docs.mdanalysis.org/stable/documentation_pages/analysis/rms.html#MDAnalysis.analysis.rms.RMSF)
 class, but it cannot support two features PolyzyMD requires:
 
-1. **Autocorrelation-based frame subsampling.** PolyzyMD selects approximately
-   decorrelated frames using an autocorrelation-based heuristic
-   (following [Grossfield et al., 2018](https://doi.org/10.33011/livecoms.1.1.5067)),
-   producing arbitrary non-uniform frame indices. MDAnalysis's `RMSF`
-   class only accepts uniform `start/stop/step` slicing.
+1. **Explicit frame selections.** PolyzyMD passes the production window as an
+   explicit list of frame indices, which a user-supplied selection may make
+   non-uniform. MDAnalysis's `RMSF` class only accepts uniform
+   `start/stop/step` slicing.
 
 2. **External reference positions.** In `external` reference mode,
    RMSF is computed as deviations from a crystal structure's atomic
@@ -40,9 +39,10 @@ for maintainers, but they are not stable extension points and should not be
 imported by contributor plugins.
 
 Conceptually, the RMSF workflow is part of the MDAnalysis job/artifact lifecycle:
-it constructs trajectory-native jobs, computes an internal RMSD time series for
-autocorrelation analysis, applies the selected frame policy, and writes
-canonical replicate and condition artifacts. The numerical RMSF kernel remains a
+it constructs trajectory-native jobs, computes an internal RMSD time series so
+the correlation time can be recorded as a diagnostic, accumulates over every
+frame in the production window, and writes canonical replicate and condition
+artifacts. The numerical RMSF kernel remains a
 plain NumPy calculation inside that lifecycle.
 
 ## Benchmark Methodology
@@ -140,8 +140,8 @@ noise, not a systematic bias.
 **Conclusion:** The custom RMSF implementation is validated for the benchmarked
 LipA C-alpha selection, aligned workflow, and tested reference modes within the
 tolerances shown above. These results support the design choice to keep a custom
-kernel while adding features PolyzyMD requires, especially non-uniform frame
-subsampling and external-reference handling. They are not a universal guarantee
+kernel while adding features PolyzyMD requires, especially non-uniform explicit
+frame selections and external-reference handling. They are not a universal guarantee
 for every topology, atom selection, periodic-boundary treatment, reference
 mapping, or trajectory format.
 

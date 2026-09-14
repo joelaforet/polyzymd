@@ -13,10 +13,50 @@ from pydantic import BaseModel, Field
 from polyzymd.analyses.mda.artifacts import ConditionArtifact, ReplicateArtifact
 from polyzymd.analyses.mda.base import MDAnalysisExtensionError
 from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
+from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 
 
 class MDAAggregationError(MDAnalysisExtensionError):
     """Error raised when MDAnalysis replicate artifacts cannot be aggregated."""
+
+
+def validate_autocorrelation_estimator_version(
+    artifact: ReplicateArtifact,
+    *,
+    analysis_label: str,
+) -> None:
+    """Refuse a replicate artifact written by a different correlation estimator.
+
+    Plugins that divide a within-replicate standard deviation by an effective
+    sample count stamp `autocorrelation_estimator_version` on every replicate
+    artifact. The stored sem values are only comparable across replicates when
+    the same estimator produced them, and the settings fingerprint does not
+    change when the estimator does, so the check has to happen here.
+
+    Parameters
+    ----------
+    artifact : ReplicateArtifact
+        Replicate artifact being aggregated.
+    analysis_label : str
+        Human-readable analysis name used in the error message.
+
+    Raises
+    ------
+    MDAAggregationError
+        If the artifact carries no estimator version, or one that differs from
+        the estimator this build uses.
+    """
+
+    stored = artifact.metadata.get("autocorrelation_estimator_version")
+    if stored == AUTOCORRELATION_ESTIMATOR_VERSION:
+        return
+    described = "no autocorrelation estimator version" if stored is None else f"version {stored!r}"
+    raise MDAAggregationError(
+        f"{analysis_label} replicate {artifact.replicate} records {described}, expected "
+        f"{AUTOCORRELATION_ESTIMATOR_VERSION!r}. The correlation estimator changed, so the "
+        "stored within-replicate sem values are not comparable. Recompute the condition or "
+        "clear stale caches before aggregating."
+    )
 
 
 class AggregatedMetric(BaseModel):

@@ -26,6 +26,7 @@ from polyzymd.analyses.mda import (
 )
 from polyzymd.analyses.rmsf._mda import (
     MEAN_RMSF_METRIC,
+    RMSF_PROFILE_VERSION,
     RMSFArtifactCollector,
     aggregate_rmsf_artifacts,
     build_rmsf_jobs,
@@ -104,7 +105,8 @@ class RMSFAnalysis(Analysis):
         Returns
         -------
         str
-            Stable short settings fingerprint.
+            Stable short fingerprint of the settings and the RMSF profile
+            version.
         """
 
         if isinstance(settings, RMSFSettings):
@@ -121,13 +123,18 @@ class RMSFAnalysis(Analysis):
                 centroid_selection=settings.centroid_selection,
             )
         if normalized.reference_mode != "external":
-            return settings_fingerprint(normalized)
-        payload = normalized.model_dump(mode="json")
-        payload["reference_file_identity"] = external_reference_file_identity(
-            normalized.reference_file
-        )
-        serialized = json.dumps(payload, sort_keys=True)
-        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:8]
+            base = settings_fingerprint(normalized)
+        else:
+            payload = normalized.model_dump(mode="json")
+            payload["reference_file_identity"] = external_reference_file_identity(
+                normalized.reference_file
+            )
+            serialized = json.dumps(payload, sort_keys=True)
+            base = hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:8]
+        # The profile version is folded in so that a change in how frames are
+        # chosen changes the cache identity, which settings alone would not.
+        combined = f"{RMSF_PROFILE_VERSION}:{base}"
+        return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:8]
 
     def aggregate_settings_fingerprint(self, settings: BaseModel | None) -> str | None:
         """Return the RMSF artifact settings fingerprint."""
