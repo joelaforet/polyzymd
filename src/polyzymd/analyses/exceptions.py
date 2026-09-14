@@ -79,5 +79,13 @@ class TopologyBondsMissingError(AnalysisError):
             message = f"{message} {detail}"
         super().__init__(message)
 
+class StaleCacheError(AnalysisError):
+    """Raised when a cached result no longer matches the inputs it records.
+
+    The message names the input files that changed and points at
+    ``--recompute``, which is the only way forward when the command that hit
+    the stale cache cannot recompute the result itself.
+    """
+
 class SelectionError(AnalysisError):
     """Raised when an analysis selection is empty or cannot be resolved."""

@@ -290,20 +290,22 @@ def test_load_canonical_plot_artifacts_reads_configured_artifacts_only(tmp_path)
     run_99 = analysis_dir / "run_99"
     run_99.mkdir(parents=True)
 
-    ArtifactStore(aggregated_dir).write_condition_result(
-        ConditionArtifact(
-            analysis_name="rmsd",
-            condition_label="condition",
-            replicates=[1],
-            payload={"metric": 1.0},
-        )
-    )
+    # Replicates are written before the aggregate that summarizes them, the
+    # order the pipeline uses; an aggregate older than its replicates is stale.
     ArtifactStore(run_1).write_replicate_result(
         ReplicateArtifact(
             analysis_name="rmsd",
             condition_label="condition",
             replicate=1,
             payload={"metric": 1.1},
+        )
+    )
+    ArtifactStore(aggregated_dir).write_condition_result(
+        ConditionArtifact(
+            analysis_name="rmsd",
+            condition_label="condition",
+            replicates=[1],
+            payload={"metric": 1.0},
         )
     )
     (run_99 / "result.json").write_text('{"artifact_type": "replicate"}', encoding="utf-8")

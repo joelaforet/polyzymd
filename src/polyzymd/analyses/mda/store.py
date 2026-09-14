@@ -8,12 +8,14 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from polyzymd.analyses._framework.aggregate_validation import validate_aggregate_not_outdated
 from polyzymd.analyses.mda.artifacts import (
     ArtifactManifest,
     ArtifactSidecarRef,
     ComparisonArtifact,
     ConditionArtifact,
     ReplicateArtifact,
+    stamp_software_versions,
     validate_artifact_relative_path,
 )
 from polyzymd.analyses.mda.base import MDAnalysisExtensionError
@@ -125,11 +127,20 @@ class ArtifactStore:
 
         resolved_path = self._resolve_relative_path(path)
         try:
-            return ConditionArtifact.model_validate_json(resolved_path.read_text())
+            artifact = ConditionArtifact.model_validate_json(resolved_path.read_text())
         except (OSError, ValidationError) as exc:
             raise ArtifactStoreError(
                 f"Failed to validate condition artifact {resolved_path}: {exc}"
             ) from exc
+        # Every canonical aggregate read funnels through here, including the
+        # plugin ``_load_aggregated_result`` overrides that bypass the framework
+        # loader, so this is where the staleness check cannot be routed around.
+        validate_aggregate_not_outdated(
+            artifact,
+            analysis_name=artifact.analysis_name,
+            source=resolved_path,
+        )
+        return artifact
 
     def write_comparison_result(
         self,
@@ -405,8 +416,16 @@ class ArtifactStore:
         -------
         Path
             Absolute output path.
+
+        Notes
+        -----
+        Every artifact the framework persists goes through here, so this is
+        where the running software versions are recorded. Stamping at the
+        collector instead left comparison artifacts and direct compute returns
+        with null versions.
         """
 
+        stamp_software_versions(model)
         resolved_path = self._resolve_relative_path(path)
         resolved_path.parent.mkdir(parents=True, exist_ok=True)
         try:
