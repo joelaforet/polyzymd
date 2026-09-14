@@ -53,8 +53,12 @@ Make sure each condition already has:
 - finished trajectories for the replicates you want to compare
 - any shared inputs needed by the plugin you plan to run
 
-The comparison pipeline can reuse cached analysis data when it exists, but it
-can also compute missing per-condition results during `polyzymd compare run`.
+`polyzymd compare run` reuses a cached per-replicate result when the trajectory
+files it was computed from are unchanged, and computes the replicates that have
+no usable cache. If a trajectory grew since the cache was written, that
+replicate is recomputed. `polyzymd compare finalize` and `plot-all` only read
+caches, so they stop with an error when a cached result no longer matches its
+inputs; rerun `polyzymd compare run --recompute` in that case.
 
 ## Analyze a campaign that is still running
 
