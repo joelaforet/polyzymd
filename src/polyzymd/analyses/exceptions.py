@@ -44,6 +44,13 @@ class StatisticsError(AnalysisError, ValueError):
     An invalid sample or an unsupported option is a typed failure, not a
     silently degraded zero. It also subclasses ``ValueError`` so that callers
     written before the typed error existed keep working.
+
+class StaleCacheError(AnalysisError):
+    """Raised when a cached result no longer matches the inputs it records.
+
+    The message names the input files that changed and points at
+    ``--recompute``, which is the only way forward when the command that hit
+    the stale cache cannot recompute the result itself.
     """
 
 class SelectionError(AnalysisError):

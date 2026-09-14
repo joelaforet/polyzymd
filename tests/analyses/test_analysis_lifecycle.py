@@ -831,6 +831,46 @@ def test_aggregate_from_disk_reports_malformed_mda_artifact_context(tmp_path: Pa
     assert "Failed to validate replicate artifact" in message
 
 
+def _artifact_provenance(tmp_path: Path) -> dict[str, Any]:
+    """Build replicate provenance recording one synthetic input trajectory.
+
+    Every shipped plugin records the identity of the files it read, and
+    aggregation from disk refuses an artifact that does not, so test artifacts
+    carry the same block.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Directory the synthetic trajectory is written to.
+
+    Returns
+    -------
+    dict[str, Any]
+        Provenance with a frame selection and one recorded input file.
+    """
+
+    trajectory = tmp_path / "prod.dcd"
+    if not trajectory.exists():
+        trajectory.write_bytes(b"DCD")
+    stat = trajectory.stat()
+    return {
+        "frame_selection": {"start": 0, "stop": 4, "step": 1},
+        "universe_policy": {
+            "provenance": {
+                "topology": None,
+                "trajectories": [
+                    {
+                        "path": str(trajectory),
+                        "format": "dcd",
+                        "size_bytes": stat.st_size,
+                        "mtime_ns": stat.st_mtime_ns,
+                    }
+                ],
+            }
+        },
+    }
+
+
 def test_default_mda_aggregation_from_disk_uses_artifacts_only(tmp_path: Path) -> None:
     """Default MDA aggregation should not load trajectories or universes."""
 
@@ -845,8 +885,8 @@ def test_default_mda_aggregation_from_disk_uses_artifacts_only(tmp_path: Path) -
             condition_label=condition.label,
             replicate=replicate,
             payload={"metrics": {"mean_value": value}},
-            provenance={"frame_selection": {"start": 0, "stop": 4, "step": 1}},
-            metadata={"settings_fingerprint": settings_fp},
+            provenance=_artifact_provenance(tmp_path),
+            metadata={"settings_fingerprint": settings_fp, "equilibration": "10ns"},
         )
         ArtifactStore(output_dir / f"run_{replicate}").write_replicate_result(artifact)
 
@@ -881,8 +921,8 @@ def test_default_mda_aggregation_from_disk_records_partial_success(tmp_path: Pat
             condition_label=condition.label,
             replicate=replicate,
             payload={"metrics": {"mean_value": value}},
-            provenance={"frame_selection": {"start": 0, "stop": 4, "step": 1}},
-            metadata={"settings_fingerprint": settings_fp},
+            provenance=_artifact_provenance(tmp_path),
+            metadata={"settings_fingerprint": settings_fp, "equilibration": "10ns"},
         )
         ArtifactStore(output_dir / f"run_{replicate}").write_replicate_result(artifact)
 
@@ -920,8 +960,8 @@ def test_default_mda_aggregation_rejects_unexpected_disk_artifacts(tmp_path: Pat
             condition_label=condition.label,
             replicate=replicate,
             payload={"metrics": {"mean_value": value}},
-            provenance={"frame_selection": {"start": 0, "stop": 4, "step": 1}},
-            metadata={"settings_fingerprint": settings_fp},
+            provenance=_artifact_provenance(tmp_path),
+            metadata={"settings_fingerprint": settings_fp, "equilibration": "10ns"},
         )
         ArtifactStore(output_dir / f"run_{replicate}").write_replicate_result(artifact)
 

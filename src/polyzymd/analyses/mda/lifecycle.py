@@ -83,6 +83,12 @@ class MDAReplicateJobContext:
         return self.replicate_context.backend_policy
 
 
+def build_trajectory_loader(analysis: Any, sim_config: Any) -> Any:
+    """Create the trajectory loader an analysis uses for one condition."""
+
+    return analysis._trajectory_loader_factory()(sim_config)
+
+
 def build_mda_replicate_job_context(
     analysis: Any, ctx: ReplicateContext, replicate: int
 ) -> MDAReplicateJobContext:
@@ -104,7 +110,7 @@ def build_mda_replicate_job_context(
         universe policy, and artifact store.
     """
 
-    loader = analysis._trajectory_loader_factory()(ctx.sim_config)
+    loader = build_trajectory_loader(analysis, ctx.sim_config)
     provider = _build_universe_provider(analysis, ctx, loader)
     universe = provider.load_universe(replicate)
     window = analysis.get_trajectory_window(ctx, replicate, loader, universe)

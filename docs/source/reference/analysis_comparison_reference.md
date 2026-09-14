@@ -208,6 +208,58 @@ comparison/sasa/result.json
 comparison/hydrogen_bonds/result.json
 ```
 
+## Cache reuse and input freshness
+
+Every per-replicate, per-condition, and comparison artifact records the files
+it was computed from. The record lives at
+`provenance.universe_policy.provenance` and holds the path, size in bytes, and
+modification time in nanoseconds of the topology and of each trajectory
+segment. The framework also stamps a cache key on every replicate artifact it
+writes, under `metadata`:
+
+| `metadata` key | Meaning |
+|---|---|
+| `settings_fingerprint` | 8 hex characters of the canonical settings JSON |
+| `equilibration` | the equilibration window the frame selection used |
+
+The software versions are top-level fields on the artifact envelope, not
+metadata keys, and the framework records them on every artifact it writes,
+including condition and comparison artifacts:
+
+| Envelope field | Meaning |
+|---|---|
+| `polyzymd_version` | the PolyzyMD version that wrote the artifact |
+| `mdanalysis_version` | the MDAnalysis version that wrote the artifact |
+
+`polyzymd compare run` reuses a cached `run_<replicate>/result.json` only when
+all of the following hold. Anything else recomputes that replicate.
+
+- Every recorded input file still has the recorded size and modification time.
+- The set of trajectory files the engine resolves now is the same set the
+  result recorded, so a segment that has appeared or completed since counts as
+  a change even though no recorded file was touched.
+- The stored `settings_fingerprint` and `equilibration` match the running
+  command. A result that records neither, including any artifact written before
+  this key existed, is treated as stale rather than reused. The first run after
+  upgrading therefore recomputes replicates whose artifacts predate the key.
+
+The other commands behave as follows:
+
+- `--recompute` skips every check and recomputes.
+- `polyzymd compare finalize`, `plot-all`, and the worker commands have no
+  compute stage. When a replicate result they load was computed from files that
+  have since changed, or records a different cache key, they raise
+  `StaleCacheError`, name the file, and ask for `--recompute`. These commands
+  read artifacts only and never open a trajectory, so they check the identity
+  the artifact recorded rather than re-resolving the engine layout; the check
+  for segments that appeared since a result was written runs in `compare run`,
+  which resolves the layout anyway.
+- An aggregate read from `aggregated/result.json` is refused when any
+  `run_<replicate>/result.json` beside it was written later. The check applies
+  only to an aggregate read from disk, not to one being written.
+- A cache written by a different PolyzyMD version is used with a warning, not
+  refused, since a version difference alone does not invalidate a number.
+
 ## Incomplete production segments
 
 The OpenMM engine reads the status recorded for each production segment in
