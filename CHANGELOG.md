@@ -168,6 +168,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `statistical_policy` `frame_strategy` value changes from
   `subsample_by_autocorrelation_when_estimated` to `all_production_frames`.
 
+- **The hard-kill guard no longer trusts a truncated `restart_state.xml`.**
+  `run-segment` kept a segment whenever `restart_state.xml` existed, so a
+  zero-byte file left by a power loss sent the restart down the
+  binary-checkpoint path instead of retiring the segment and retrying from
+  the previous good state.  The guard now requires the file to be complete.
+
 - **Recovery skips truncated state or system XML.**  A hard kill could leave
   `interrupted_system.xml` at zero bytes; recovery paired it with the intact
   `interrupted_state.xml` and the next segment died in OpenMM with

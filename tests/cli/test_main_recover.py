@@ -1774,6 +1774,23 @@ class TestRunSegmentHardKillGuard:
         assert continuation.called
         assert not initial.called
 
+    def test_segment_with_truncated_restart_state_is_retired(self, tmp_path):
+        """A 0-byte restart_state.xml (power loss mid-write) is not recoverable."""
+        working_dir = tmp_path / "run_1"
+        seg_dir = _write_hard_killed_segment(working_dir)
+        (seg_dir / "restart_state.xml").write_bytes(b"")
+
+        result, initial, continuation = self._invoke(tmp_path, working_dir)
+
+        assert result.exit_code == 0, result.output
+        assert not seg_dir.exists()
+        retired = list(working_dir.glob("production_0.hardkilled-*"))
+        assert len(retired) == 1
+        assert (retired[0] / "restart_state.xml").exists()
+        assert "empty or truncated" in result.output
+        assert initial.called
+        assert not continuation.called
+
 
 class TestRunSegmentLockRelease:
     """The replicate lock is released however run-segment ends."""
