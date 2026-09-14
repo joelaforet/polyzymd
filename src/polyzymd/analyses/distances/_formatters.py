@@ -25,6 +25,34 @@ from polyzymd.analyses.shared.multi_run_formatting import (
 from polyzymd.analyses.stats import format_pct, interpret_direction
 
 
+def _format_adjusted_p(
+    adjusted_p: float | None,
+    testable: bool | None,
+    marker: str,
+) -> str:
+    """Render an adjusted p-value cell.
+
+    Parameters
+    ----------
+    adjusted_p : float or None
+        Benjamini-Hochberg adjusted p-value.
+    testable : bool or None
+        Whether the underlying test could run.
+    marker : str
+        Significance marker appended to the number.
+
+    Returns
+    -------
+    str
+        The formatted cell.
+    """
+    if not testable:
+        return "not testable"
+    if adjusted_p is None:
+        return "n/a"
+    return f"{adjusted_p:.4f}{marker}"
+
+
 def format_distances_console_table(
     result: DistanceComparisonResult,
     show_pairwise: bool = True,
@@ -164,21 +192,21 @@ def format_distances_console_table(
             lines.append("-" * 90)
 
             header = (
-                f"{'Comparison':<30} {'% Change':<10} {'p-value':<12} "
-                f"{'Cohen d':<10} {'Effect':<12} {'Direction':<10}"
+                f"{'Comparison':<30} {'% Change':<10} {'p-value':<12} {'p-adj':<12} "
+                f"{'Cohen d':<10} {'Effect':<12} {'Direction':<22}"
             )
             lines.append(header)
-            lines.append("-" * 90)
+            lines.append("-" * 110)
 
             for comp in pair_comparisons:
                 comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
 
-                # Format p-value with significance marker
+                # The significance marker follows the adjusted p-value, so it
+                # sits on the number it was derived from.
                 sig_marker = "*" if comp.distance_significant else ""
-                p_str = (
-                    f"{comp.distance_p_value:.4f}{sig_marker}"
-                    if comp.distance_testable
-                    else "not testable"
+                p_str = f"{comp.distance_p_value:.4f}" if comp.distance_testable else "not testable"
+                p_adj_str = _format_adjusted_p(
+                    comp.distance_p_value_adjusted, comp.distance_testable, sig_marker
                 )
 
                 # Format percent change
@@ -188,9 +216,9 @@ def format_distances_console_table(
                 d_str = f"{comp.distance_cohens_d:.2f}" if comp.distance_testable else "n/a"
 
                 lines.append(
-                    f"{comparison_name:<30} {pct_str:<10} {p_str:<12} "
-                    f"{d_str:<10} {comp.distance_effect_interpretation:<12} "
-                    f"{comp.distance_direction:<10}"
+                    f"{comparison_name:<30} {pct_str:<10} {p_str:<12} {p_adj_str:<12} "
+                    f"{d_str:<10} {comp.distance_effect_interpretation or 'n/a':<12} "
+                    f"{comp.distance_direction:<22}"
                 )
 
             lines.append("-" * 90)
@@ -204,33 +232,34 @@ def format_distances_console_table(
                 lines.append("-" * 90)
 
                 header = (
-                    f"{'Comparison':<30} {'% Change':<10} {'p-value':<12} "
-                    f"{'Cohen d':<10} {'Effect':<12} {'Direction':<12}"
+                    f"{'Comparison':<30} {'% Change':<10} {'p-value':<12} {'p-adj':<12} "
+                    f"{'Cohen d':<10} {'Effect':<12} {'Direction':<22}"
                 )
                 lines.append(header)
-                lines.append("-" * 90)
+                lines.append("-" * 110)
 
                 for comp in pair_comparisons:
                     comparison_name = f"{comp.condition_b} vs {comp.condition_a}"
                     sig_marker = "*" if comp.fraction_significant else ""
                     p_str = (
-                        f"{comp.fraction_p_value:.4f}{sig_marker}"
-                        if comp.fraction_testable
-                        else "not testable"
+                        f"{comp.fraction_p_value:.4f}" if comp.fraction_testable else "not testable"
+                    )
+                    p_adj_str = _format_adjusted_p(
+                        comp.fraction_p_value_adjusted, comp.fraction_testable, sig_marker
                     )
                     pct_str = format_pct(comp.fraction_percent_change)
                     d_str = f"{comp.fraction_cohens_d:.2f}" if comp.fraction_testable else "n/a"
 
                     lines.append(
-                        f"{comparison_name:<30} {pct_str:<10} {p_str:<12} "
-                        f"{d_str:<10} {comp.fraction_effect_interpretation:<12} "
-                        f"{comp.fraction_direction:<12}"
+                        f"{comparison_name:<30} {pct_str:<10} {p_str:<12} {p_adj_str:<12} "
+                        f"{d_str:<10} {comp.fraction_effect_interpretation or 'n/a':<12} "
+                        f"{comp.fraction_direction or 'n/a':<22}"
                     )
 
                 lines.append("-" * 90)
 
         lines.append("")
-        lines.append("* p < 0.05")
+        lines.append("* BH-adjusted p at or below the configured alpha")
         if any(
             not comp.distance_testable or comp.fraction_testable is False
             for comp in result.pairwise_comparisons
@@ -292,14 +321,15 @@ def format_distances_console_table(
 
             pct_diff = percent_change(control_pair.mean_distance, best_pair.mean_distance)
             direction = interpret_direction(pct_diff, ("closer", "unchanged", "farther"))
-            if direction == "unchanged":
+            comp = result.get_pair_comparison(pair_label, best)
+            if comp is not None and not comp.distance_significant:
+                lines.append("  -> no significant change relative to control")
+            elif direction == "unchanged":
                 lines.append("  -> unchanged relative to control")
             else:
                 magnitude = format_pct(pct_diff).lstrip("+-")
                 lines.append(f"  -> {magnitude} {direction} than control")
 
-            # Check significance
-            comp = result.get_pair_comparison(pair_label, best)
             if comp and comp.distance_significant:
                 lines.append(
                     f"  -> Significant (p={comp.distance_p_value:.4f}, "
@@ -434,10 +464,12 @@ def format_distances_markdown(
             lines.append("#### Distance Metric")
             lines.append("")
             lines.append(
-                "| Comparison | % Change | p-value | Cohen's d | Effect | Direction | Sig |"
+                "| Comparison | % Change | p-value | p-adj | Cohen's d | Effect | "
+                "Direction | Sig |"
             )
             lines.append(
-                "|------------|----------|---------|-----------|--------|-----------|-----|"
+                "|------------|----------|---------|-------|-----------|--------|"
+                "-----------|-----|"
             )
 
             for comp in pair_comparisons:
@@ -446,11 +478,15 @@ def format_distances_markdown(
                 p_value = (
                     f"{comp.distance_p_value:.4f}" if comp.distance_testable else "not testable"
                 )
+                p_adj = _format_adjusted_p(
+                    comp.distance_p_value_adjusted, comp.distance_testable, ""
+                )
                 d_value = f"{comp.distance_cohens_d:.2f}" if comp.distance_testable else "n/a"
                 lines.append(
                     f"| {comparison_name} | {format_pct(comp.distance_percent_change)} | "
-                    f"{p_value} | {d_value} | "
-                    f"{comp.distance_effect_interpretation} | {comp.distance_direction} | {sig} |"
+                    f"{p_value} | {p_adj} | {d_value} | "
+                    f"{comp.distance_effect_interpretation or 'n/a'} | "
+                    f"{comp.distance_direction} | {sig} |"
                 )
 
             lines.append("")
@@ -463,10 +499,12 @@ def format_distances_markdown(
                 lines.append("#### Fraction Below Threshold")
                 lines.append("")
                 lines.append(
-                    "| Comparison | % Change | p-value | Cohen's d | Effect | Direction | Sig |"
+                    "| Comparison | % Change | p-value | p-adj | Cohen's d | Effect | "
+                    "Direction | Sig |"
                 )
                 lines.append(
-                    "|------------|----------|---------|-----------|--------|-----------|-----|"
+                    "|------------|----------|---------|-------|-----------|--------|"
+                    "-----------|-----|"
                 )
 
                 for comp in pair_comparisons:
@@ -475,17 +513,20 @@ def format_distances_markdown(
                     p_value = (
                         f"{comp.fraction_p_value:.4f}" if comp.fraction_testable else "not testable"
                     )
+                    p_adj = _format_adjusted_p(
+                        comp.fraction_p_value_adjusted, comp.fraction_testable, ""
+                    )
                     d_value = f"{comp.fraction_cohens_d:.2f}" if comp.fraction_testable else "n/a"
                     lines.append(
                         f"| {comparison_name} | {format_pct(comp.fraction_percent_change)} | "
-                        f"{p_value} | {d_value} | "
-                        f"{comp.fraction_effect_interpretation} | {comp.fraction_direction} | "
-                        f"{sig} |"
+                        f"{p_value} | {p_adj} | {d_value} | "
+                        f"{comp.fraction_effect_interpretation or 'n/a'} | "
+                        f"{comp.fraction_direction} | {sig} |"
                     )
 
                 lines.append("")
 
-        lines.append("*p < 0.05")
+        lines.append("*BH-adjusted p at or below the configured alpha")
         if any(
             not comp.distance_testable or comp.fraction_testable is False
             for comp in result.pairwise_comparisons
@@ -550,13 +591,15 @@ def format_distances_markdown(
 
             pct_diff = percent_change(control_pair.mean_distance, best_pair.mean_distance)
             direction = interpret_direction(pct_diff, ("closer", "unchanged", "farther"))
-            if direction == "unchanged":
+            comp = result.get_pair_comparison(pair_label, best)
+            if comp is not None and not comp.distance_significant:
+                lines.append("   - no significant change relative to control")
+            elif direction == "unchanged":
                 lines.append("   - unchanged relative to control")
             else:
                 magnitude = format_pct(pct_diff).lstrip("+-")
                 lines.append(f"   - {magnitude} {direction} than control")
 
-            comp = result.get_pair_comparison(pair_label, best)
             if comp and comp.distance_significant:
                 lines.append(f"   - Statistically significant (p={comp.distance_p_value:.4f})")
 

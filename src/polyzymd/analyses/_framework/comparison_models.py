@@ -89,7 +89,16 @@ class ConditionSummary(BaseModel):
 
 
 class PairwiseResult(BaseModel):
-    """Statistical comparison between two conditions for one metric."""
+    """Statistical comparison between two conditions for one metric.
+
+    ``p_value`` is the raw two-tailed p-value and ``p_value_adjusted`` its
+    Benjamini-Hochberg value within the run's pairwise family.
+    ``hedges_g`` is Cohen's d after the Hedges (1981) small-sample
+    correction. ``effect_size_interpretation`` is ``None`` when the
+    combined sample is too small for a Cohen adjective to mean anything.
+    ``direction`` reads "no significant change" unless ``significant`` is
+    true.
+    """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
 
@@ -101,7 +110,8 @@ class PairwiseResult(BaseModel):
     p_value_adjusted: float | None
     posthoc_method: str = "ttest_bh"
     cohens_d: float
-    effect_size_interpretation: str
+    hedges_g: float | None = None
+    effect_size_interpretation: str | None = None
     direction: str
     significant: bool
     percent_change: float
@@ -110,11 +120,17 @@ class PairwiseResult(BaseModel):
 
 
 class ANOVAResult(BaseModel):
-    """One-way ANOVA result for one metric."""
+    """One-way ANOVA result for one metric.
+
+    The ANOVA is an omnibus test outside the pairwise Benjamini-Hochberg
+    family, so ``p_value_adjusted`` is always ``None`` and ``significant``
+    compares the raw ``p_value`` with alpha.
+    """
 
     metric: str = "default"
     f_statistic: float
     p_value: float
+    p_value_adjusted: float | None = None
     significant: bool
     testable: bool = True
     note: str | None = None
