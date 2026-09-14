@@ -47,7 +47,16 @@ logger = logging.getLogger(__name__)
 
 
 class RgRunSettings(BaseModel):
-    """Settings for a single Rg run."""
+    """Settings for a single Rg run.
+
+    Attributes
+    ----------
+    allow_single_fragment_fallback : bool
+        Opt in to the pre-1.3 behaviour where a topology without bonds made
+        fragment mode measure the whole selection as one fragment. The default
+        raises :class:`~polyzymd.analyses.exceptions.TopologyBondsMissingError`
+        instead, because that fallback silently changes what Rg means.
+    """
 
     label: str = Field(..., description="Human-readable run label")
     selection: str = Field(..., description="MDAnalysis selection for Rg calculation")
@@ -66,6 +75,14 @@ class RgRunSettings(BaseModel):
     histogram_bins: int = Field(
         default=50,
         description="Number of histogram bins for fragment Rg distribution summaries.",
+    )
+    allow_single_fragment_fallback: bool = Field(
+        default=False,
+        description=(
+            "Treat the whole selection as one fragment when the topology has no bonds, "
+            "instead of raising TopologyBondsMissingError. Only used when "
+            "calculation_mode='fragments'."
+        ),
     )
 
     @field_validator("histogram_bins")
