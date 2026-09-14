@@ -145,7 +145,8 @@ DSSP requires complete residues; do not use CA-only selections such as
 | `angle_cutoff` | `float` | `150.0` | D-H...A angle cutoff (degrees) |
 | `update_selections` | `bool` | `true` | Re-evaluate selections each frame |
 | `top_n_pairs` | `int` | `15` | Number of top residue pairs reported |
-| `allow_empty_groups` | `bool` | `true` | Warn/skip empty groups instead of raising |
+| `allow_empty_groups` | `bool` | `false` | Raise `SelectionError` on an empty group; set `true` to warn and skip instead |
+| `donor_acceptor_elements` | `tuple[str, ...]` | `["N", "O"]` | Elements allowed to act as donors and acceptors |
 | `allow_overlapping_composition` | `bool` | `false` | Allow overlapping composition partitions (otherwise raise) |
 | `composition` | `HydrogenBondCompositionSettings \| null` | `null` | Optional partitioning for composition analysis |
 | `hydrogens_selection` | `str \| null` | `null` | Advanced explicit-hydrogen selection override for unusual atom names |
@@ -166,11 +167,13 @@ not supported.
 Exactly one of `between` or `within` must be set for each summary.
 
 Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` and requires explicit
-hydrogens. PolyzyMD prefers `(<group union>) and (element H)` and infers missing
-elements for GRO-like topologies when atom types or atom names are conservative
-enough. If elements remain unavailable, the plugin falls back to
-`(<group union>) and (name H* or name [123]H*)`. Set `hydrogens_selection` only
-for unusual explicit-hydrogen naming schemes.
+hydrogens and element metadata. Donors and acceptors are
+`(<group union>) and element <donor_acceptor_elements>` and hydrogens are
+`(<group union>) and (element H)`. PolyzyMD infers missing elements for GRO-like
+topologies when atom types or atom names are conservative enough. If elements
+remain unavailable, or if the donor and acceptor selection matches no atoms, the
+plugin raises `SelectionError` unless `allow_empty_groups` is true. Set
+`hydrogens_selection` only for unusual explicit-hydrogen naming schemes.
 
 `HydrogenBondCompositionSettings`:
 
