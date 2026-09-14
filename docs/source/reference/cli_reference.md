@@ -207,9 +207,11 @@ polyzymd build -c config.yaml -r 1 --format gromacs
 ### Output Files (OpenMM)
 
 The build command creates:
-- `solvated_system.pdb` - Complete system with water and ions
+- `solvated_system.pdb` - Complete system with water and ions, for viewers
+- `system.prmtop` - Analysis topology with every atom, element, charge and
+  bond; MDAnalysis reads it directly and it has no atom limit
 - `system.xml` - OpenMM serialized system with restraints
-- `build_manifest.json` - SHA-256 hashes of the two files above, the config
+- `build_manifest.json` - SHA-256 hashes of the files above, the config
   hash, OpenMM and PolyzyMD versions, and the PACKMOL seeds under `provenance`
 
 PACKMOL is seeded with the replicate number, so replicates start from
@@ -240,6 +242,35 @@ you may replace them with your own GROMACS workflow. Use
 build-and-run workflow.
 
 ---
+
+## polyzymd analysis-topology
+
+Write `system.prmtop` for runs built before PolyzyMD wrote it, from the
+`solvated_system.pdb` and `system.xml` already in each run directory.
+
+```bash
+polyzymd analysis-topology RUN_DIR...
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--overwrite` | Rewrite `system.prmtop` where it already exists |
+
+### Example
+
+```bash
+polyzymd analysis-topology /scratch/campaign/*/run_*
+```
+
+### Notes
+
+- New builds write the file themselves; this command is for existing runs.
+- The PDB is read with OpenMM's own reader, which accepts the hex serials it
+  writes above 99,999 atoms, so systems of any size convert.
+- A PDB and a `system.xml` with different particle counts are refused.
+- Exit code 1 if any directory could not be converted; the others are still written.
 
 ## polyzymd run
 
