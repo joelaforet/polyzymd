@@ -24,7 +24,8 @@ Before starting, make sure you have:
 - Completed production trajectories for at least three conditions (DCD format
   in PolyzyMD's standard directory layout)
 - One `config.yaml` per condition
-- A topology such as `solvated_system.pdb` already produced during the build
+- The topology written by the build: `system.prmtop`, or `solvated_system.pdb`
+  for older runs (see {doc}`../reference/data_requirements`)
 - PolyzyMD installed in a pixi environment (see {doc}`../get_started/installation`)
 
 If you have not run a single-condition analysis yet, complete
