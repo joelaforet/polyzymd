@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any, ClassVar
@@ -13,6 +14,16 @@ from polyzymd.simulation.progress import (
     calculate_report_interval,
     load_progress,
 )
+
+LOGGER = logging.getLogger(__name__)
+
+# A segment in one of these states has no finished trajectory: ``running`` is
+# still being appended to and ``failed`` stopped at an arbitrary step. Reading
+# either one gives a trajectory that is short for a reason the analysis cannot
+# see. ``interrupted`` is excluded from this set on purpose, because the
+# continuation chain resumes from an interrupted segment's saved state, so its
+# frames are part of the time line.
+_INCOMPLETE_STATUSES = frozenset({SegmentStatus.RUNNING, SegmentStatus.FAILED})
 
 
 class OpenMMEngine(SimulationEngine):
@@ -165,10 +176,23 @@ class OpenMMEngine(SimulationEngine):
             replicate=replicate,
         )
 
-    def resolve_trajectory_layout(self, working_dir: Path, replicate: int) -> TrajectoryLayout:
+    def resolve_trajectory_layout(
+        self,
+        working_dir: Path,
+        replicate: int,
+        *,
+        require_complete: bool = True,
+    ) -> TrajectoryLayout:
         """Resolve OpenMM trajectory and topology paths.
 
-        Uses the canonical OpenMM output layout rooted at ``working_dir``.
+        Uses the canonical OpenMM output layout rooted at ``working_dir``. The
+        status recorded for each segment in ``progress.json`` decides whether
+        the segment is read. A segment marked ``running`` or ``failed`` is
+        still being written or was abandoned mid-write, so its DCD ends at an
+        arbitrary frame; including it would silently shorten the analysis
+        window. Such segments are left out unless ``require_complete`` is
+        False, and either way the status of every segment is reported on the
+        layout.
 
         Parameters
         ----------
@@ -176,6 +200,8 @@ class OpenMMEngine(SimulationEngine):
             Replicate working directory.
         replicate : int
             Replicate index (unused, kept for interface parity).
+        require_complete : bool, optional
+            Leave out segments recorded as running or failed, by default True.
 
         Returns
         -------
@@ -185,13 +211,18 @@ class OpenMMEngine(SimulationEngine):
         _ = replicate
 
         topology_path = self._find_openmm_topology(working_dir)
-        trajectory_paths = self._find_openmm_trajectories(working_dir)
+        trajectory_paths, segment_status, skipped = self._find_openmm_trajectories(
+            working_dir, require_complete=require_complete
+        )
 
         return TrajectoryLayout(
             topology_path=topology_path,
             trajectory_paths=trajectory_paths,
             trajectory_format="dcd",
             topology_format="pdb",
+            segment_status=segment_status,
+            excluded_segments=skipped if require_complete else [],
+            incomplete_segments=[] if require_complete else skipped,
         )
 
     @staticmethod
@@ -226,18 +257,25 @@ class OpenMMEngine(SimulationEngine):
         return None
 
     @staticmethod
-    def _find_openmm_trajectories(working_dir: Path) -> list[Path]:
+    def _find_openmm_trajectories(
+        working_dir: Path,
+        *,
+        require_complete: bool = True,
+    ) -> tuple[list[Path], dict[int, str], list[int]]:
         """Find trajectory DCD files using the canonical OpenMM search order.
 
         Parameters
         ----------
         working_dir : Path
             Replicate working directory.
+        require_complete : bool, optional
+            Leave out segments recorded as running or failed, by default True.
 
         Returns
         -------
-        list[Path]
-            Ordered list of trajectory files.
+        tuple
+            Ordered trajectory files, the status recorded for each segment
+            index, and the indices of the segments that are not complete.
         """
         prod_re = re.compile(r"production_(\d+)$")
         segment_dirs = {
@@ -250,15 +288,16 @@ class OpenMMEngine(SimulationEngine):
             max_index = max(segment_dirs)
             trajectory_paths = []
             progress = load_progress(working_dir)
-            zero_frame_segments = (
-                {
-                    segment.index
-                    for segment in progress.segments
-                    if segment.status == SegmentStatus.COMPLETED and segment.samples_written == 0
-                }
-                if progress is not None
-                else set()
-            )
+            segments = progress.segments if progress is not None else []
+            segment_status = {segment.index: segment.status.value for segment in segments}
+            zero_frame_segments = {
+                segment.index
+                for segment in segments
+                if segment.status == SegmentStatus.COMPLETED and segment.samples_written == 0
+            }
+            incomplete_segments = [
+                segment.index for segment in segments if segment.status in _INCOMPLETE_STATUSES
+            ]
             for index in range(max_index + 1):
                 segment_dir = working_dir / f"production_{index}"
                 file_path = segment_dir / f"production_{index}_trajectory.dcd"
@@ -268,12 +307,29 @@ class OpenMMEngine(SimulationEngine):
                     not file_path.is_file() or file_path.stat().st_size == 0
                 ):
                     continue
+                if require_complete and index in incomplete_segments:
+                    LOGGER.warning(
+                        "Excluding OpenMM production segment %d from analysis: "
+                        "progress.json records it as %s, so %s may be mid-write. "
+                        "Pass require_complete=False to read it anyway.",
+                        index,
+                        segment_status.get(index, "incomplete"),
+                        file_path,
+                    )
+                    continue
                 if not file_path.is_file():
                     raise ValueError(f"Missing OpenMM trajectory segment: {file_path}")
                 if file_path.stat().st_size == 0:
                     raise ValueError(f"Empty OpenMM trajectory segment: {file_path}")
                 trajectory_paths.append(file_path)
-            return trajectory_paths
+            included = {
+                int(path.parent.name.removeprefix("production_")) for path in trajectory_paths
+            }
+            if require_complete:
+                reported = [index for index in incomplete_segments if index not in included]
+            else:
+                reported = [index for index in incomplete_segments if index in included]
+            return trajectory_paths, segment_status, reported
 
         # Keep exact read-only support for expensive JRL 2025 LipA pre-PolyzyMD data
         single_production = working_dir / "production" / "production_trajectory.dcd"
@@ -282,8 +338,8 @@ class OpenMMEngine(SimulationEngine):
                 raise ValueError(f"OpenMM trajectory path is not a file: {single_production}")
             if single_production.stat().st_size == 0:
                 raise ValueError(f"Empty OpenMM trajectory: {single_production}")
-            return [single_production]
+            return [single_production], {}, []
 
         # Broad recursive globs are intentionally disallowed so old datasets
         # must match approved legacy names instead of accidental local files
-        return []
+        return [], {}, []
