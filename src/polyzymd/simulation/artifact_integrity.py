@@ -13,8 +13,12 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from polyzymd.simulation.analysis_topology import ANALYSIS_TOPOLOGY_NAME, write_analysis_topology
+
 MANIFEST_NAME = "build_manifest.json"
 _BUILD_ARTIFACTS = ("solvated_system.pdb", "system.xml")
+# Written when ParmEd can convert the system; its absence is not an error.
+_OPTIONAL_ARTIFACTS = (ANALYSIS_TOPOLOGY_NAME,)
 
 
 class ArtifactIntegrityError(RuntimeError):
@@ -76,6 +80,9 @@ def publish_build_bundle(
         with pdb_path.open("w") as stream:
             PDBFile.writeFile(topology, positions, stream, keepIds=True)
         system_path.write_text(XmlSerializer.serialize(system))
+        written = list(_BUILD_ARTIFACTS)
+        if write_analysis_topology(topology, system, positions, staging / ANALYSIS_TOPOLOGY_NAME):
+            written.append(ANALYSIS_TOPOLOGY_NAME)
 
         manifest = {
             "schema_version": 1,
@@ -90,24 +97,24 @@ def publish_build_bundle(
                     "path": str((working_dir / name).resolve()),
                     "sha256": _file_hash(staging / name),
                 }
-                for name in _BUILD_ARTIFACTS
+                for name in written
             },
         }
         previous = {
             name: (working_dir / name).read_bytes()
-            for name in (*_BUILD_ARTIFACTS, MANIFEST_NAME)
+            for name in (*_BUILD_ARTIFACTS, *_OPTIONAL_ARTIFACTS, MANIFEST_NAME)
             if (working_dir / name).exists()
         }
         try:
             # The manifest is the final commit marker for the new pair.
-            for name in _BUILD_ARTIFACTS:
+            for name in written:
                 os.replace(staging / name, working_dir / name)
             _atomic_write(
                 working_dir / MANIFEST_NAME,
                 (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
             )
         except Exception:
-            for name in (*_BUILD_ARTIFACTS, MANIFEST_NAME):
+            for name in (*_BUILD_ARTIFACTS, *_OPTIONAL_ARTIFACTS, MANIFEST_NAME):
                 path = working_dir / name
                 if name in previous:
                     _atomic_write(path, previous[name])
@@ -148,7 +155,16 @@ def validate_build_bundle(working_dir: Path, config: Any, *, allow_legacy: bool 
                 f"Configuration does not match {manifest_path}: expected {expected_config}, "
                 f"got {config_hash(config)}"
             )
-        for name, path in paths.items():
+        checked = dict(paths)
+        for name in _OPTIONAL_ARTIFACTS:
+            if name in artifacts:
+                checked[name] = working_dir / name
+        for name, path in checked.items():
+            if name in _OPTIONAL_ARTIFACTS and not path.is_file():
+                raise ArtifactIntegrityError(
+                    f"Manifest lists {name} but {path} is missing; rerun the build or "
+                    "polyzymd analysis-topology"
+                )
             recorded_path = artifacts.get(name, {}).get("path")
             if recorded_path != str(path.resolve()):
                 raise ArtifactIntegrityError(

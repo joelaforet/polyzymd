@@ -164,3 +164,19 @@ class TestGromacsTrajectorySearch:
         engine = _make_engine()
         layout = engine.resolve_trajectory_layout(tmp_path, replicate=1)
         assert layout.trajectory_format == "xtc"
+
+
+class TestGromacsAnalysisTopology:
+    """prod.tpr is the analysis topology when production has run."""
+
+    def test_prefers_prod_tpr(self, tmp_path: Path) -> None:
+        """The compiled run input wins over the PDB and the GRO."""
+        (tmp_path / "prod.tpr").write_bytes(b"tpr")
+        (tmp_path / "solvated_system.pdb").write_text("ATOM")
+        (tmp_path / "system.gro").write_text("GRO")
+        (tmp_path / "prod.xtc").write_bytes(b"x")
+
+        layout = _make_engine().resolve_trajectory_layout(tmp_path, 1)
+
+        assert layout.topology_path.name == "prod.tpr"
+        assert layout.topology_format == "tpr"
