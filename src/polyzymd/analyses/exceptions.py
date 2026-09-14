@@ -78,3 +78,6 @@ class TopologyBondsMissingError(AnalysisError):
         if detail:
             message = f"{message} {detail}"
         super().__init__(message)
+
+class SelectionError(AnalysisError):
+    """Raised when an analysis selection is empty or cannot be resolved."""
