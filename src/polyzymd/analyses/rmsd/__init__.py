@@ -29,10 +29,11 @@ from polyzymd.analyses.rmsd._mda import (
     build_rmsd_jobs,
 )
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
-from polyzymd.analyses.shared.multi_run_comparison import (
-    apply_fdr_correction,
-    build_condition_pairs,
+from polyzymd.analyses.shared.inferential_statistics import (
+    apply_family_correction,
+    enforce_direction_significance,
 )
+from polyzymd.analyses.shared.multi_run_comparison import build_condition_pairs
 from polyzymd.analyses.shared.plotting import load_canonical_plot_artifacts
 
 if TYPE_CHECKING:
@@ -614,6 +615,7 @@ class RMSDAnalysis(Analysis):
                             condition_b=condition_b,
                             run_a=summaries_by_label[condition_a].get_run(run_label),
                             run_b=summaries_by_label[condition_b].get_run(run_label),
+                            ttest_method=ctx.ttest_method,
                         )
                     )
 
@@ -648,7 +650,12 @@ class RMSDAnalysis(Analysis):
                 )
 
         fdr_alpha = getattr(ctx, "fdr_alpha", 0.05)
-        self._apply_fdr_correction(pairwise_comparisons, anova_by_run, fdr_alpha)
+        apply_family_correction(
+            pairwise_comparisons,
+            fdr_alpha=fdr_alpha,
+            anova_results=anova_by_run,
+        )
+        enforce_direction_significance(pairwise_comparisons)
 
         return RMSDComparisonResult(
             metric="mean_rmsd",
@@ -733,8 +740,27 @@ class RMSDAnalysis(Analysis):
         condition_b: str,
         run_a: Any,
         run_b: Any,
+        ttest_method: str = "student",
     ) -> Any:
-        """Compare a single RMSD run between two conditions."""
+        """Compare a single RMSD run between two conditions.
+
+        Parameters
+        ----------
+        run_label : str
+            Label of the run being compared.
+        condition_a, condition_b : str
+            Condition labels.
+        run_a, run_b : Any
+            Run summaries for each condition.
+        ttest_method : str, optional
+            Variance assumption for the t-test, ``"student"`` or
+            ``"welch"``, by default ``"student"``.
+
+        Returns
+        -------
+        RMSDRunPairwiseComparison
+            Pairwise statistics for this run.
+        """
         from polyzymd.analyses.rmsd._comparison_results import RMSDRunPairwiseComparison
         from polyzymd.analyses.shared.inferential_statistics import (
             cohens_d,
@@ -758,7 +784,6 @@ class RMSDAnalysis(Analysis):
                 run_label=run_label,
                 condition_a=condition_a,
                 condition_b=condition_b,
-                effect_interpretation="not_testable",
                 direction=direction,
                 significant=False,
                 percent_change=pct_change,
@@ -766,7 +791,7 @@ class RMSDAnalysis(Analysis):
                 note="Insufficient replicates (n < 2) for inferential statistics",
             )
 
-        t_result = independent_ttest(run_a_values, run_b_values)
+        t_result = independent_ttest(run_a_values, run_b_values, method=ttest_method)
         d_result = cohens_d(run_a_values, run_b_values)
 
         return RMSDRunPairwiseComparison(
@@ -776,44 +801,11 @@ class RMSDAnalysis(Analysis):
             t_statistic=t_result.t_statistic,
             p_value=t_result.p_value,
             cohens_d=d_result.cohens_d,
+            hedges_g=d_result.hedges_g,
             effect_interpretation=d_result.interpretation,
             direction=direction,
             significant=t_result.significant,
             percent_change=pct_change,
-        )
-
-    @staticmethod
-    def _apply_fdr_correction(
-        pairwise: list[Any],
-        anova_by_run: list[Any] | None,
-        fdr_alpha: float,
-    ) -> None:
-        """Apply Benjamini-Hochberg FDR correction to pairwise and ANOVA p-values.
-
-        Treats all pairwise comparisons as one family and ANOVA tests as
-        a separate family.
-
-        Parameters
-        ----------
-        pairwise : list
-            Pairwise comparison results (mutated in place).
-        anova_by_run : list or None
-            ANOVA results (mutated in place).
-        fdr_alpha : float
-            FDR significance threshold.
-        """
-
-        def _set_corrected(result: Any, bh_result: Any) -> None:
-            if hasattr(result, "p_value_adjusted"):
-                result.p_value_adjusted = bh_result.adjusted_p_value
-            result.significant = bh_result.significant
-
-        apply_fdr_correction(
-            pairwise,
-            anova_by_run,
-            fdr_alpha,
-            get_p_value=lambda result: result.p_value if result.testable else None,
-            set_corrected=lambda result, bh: _set_corrected(result, bh),
         )
 
     @staticmethod

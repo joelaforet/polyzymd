@@ -79,7 +79,8 @@ class AggregateComparisonResult(BaseModel):
     p_value: float
     p_value_adjusted: float | None = None
     cohens_d: float
-    effect_size_interpretation: str
+    hedges_g: float | None = None
+    effect_size_interpretation: str | None = None
     significant: bool
     meets_effect_size_threshold: bool = True
     percent_change: float
@@ -171,11 +172,12 @@ class ContactsANOVASummary(BaseModel):
     f_statistic : float
         F-statistic from ANOVA
     p_value : float
-        P-value for the test
-    p_value_adjusted : float | None
-        BH-adjusted p-value
+        Raw p-value for the omnibus test
+    p_value_adjusted : None
+        Always ``None``. The ANOVA is an omnibus test outside the pairwise
+        Benjamini-Hochberg family, so it is never adjusted.
     significant : bool
-        Whether p < 0.05
+        Whether the raw p-value is at or below ``fdr_alpha``
     """
 
     metric: str

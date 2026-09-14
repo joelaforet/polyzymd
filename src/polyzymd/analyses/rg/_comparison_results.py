@@ -148,7 +148,8 @@ class RgRunPairwiseComparison(BaseModel):
     p_value: float | None = None
     p_value_adjusted: float | None = None
     cohens_d: float | None = None
-    effect_interpretation: str
+    hedges_g: float | None = None
+    effect_interpretation: str | None = None
     direction: str
     significant: bool
     percent_change: float
@@ -166,9 +167,12 @@ class RgRunANOVA(BaseModel):
     f_statistic : float | None
         F-statistic for mean Rg.
     p_value : float | None
-        P-value for ANOVA.
+        Raw p-value for the ANOVA.
+    p_value_adjusted : None
+        Always ``None``. The ANOVA is an omnibus test outside the pairwise
+        Benjamini-Hochberg family, so it is never adjusted.
     significant : bool
-        Whether p < 0.05.
+        Whether the raw p-value is at or below ``fdr_alpha``.
     testable : bool
         Whether inferential statistics were computed.
     note : str | None
@@ -178,6 +182,7 @@ class RgRunANOVA(BaseModel):
     run_label: str
     f_statistic: float | None = None
     p_value: float | None = None
+    p_value_adjusted: float | None = None
     significant: bool
     testable: bool = True
     note: str | None = None

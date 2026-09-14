@@ -1,23 +1,27 @@
 """Multi-replicate aggregation for contact analysis.
 
-This module provides functions for aggregating canonical contact artifacts
-across multiple replicates with proper statistical treatment:
+This module combines canonical contact artifacts from several replicates
+of one condition. It computes, for each metric:
 
-- Mean +/- SEM across replicates
-- Autocorrelation-corrected uncertainties via statistical inefficiency
-- Per-residue and per-group aggregation
-- Coverage statistics
-- Residence time aggregation
+- the mean across replicates
+- the standard error of that mean across replicates, ``s / sqrt(n)`` with
+  the sample standard deviation ``s`` (``ddof=1``) and ``n`` the number of
+  replicates
+- per-residue and per-group summaries
+- coverage statistics
+- residence time summaries
 
-Key design decisions:
-- Follow LiveCoMS best practices for uncertainty quantification
-- Preserve per-replicate data for detailed analysis
-- Warn if N_eff < 10 per LiveCoMS recommendations
+The replicate is the sampling unit here. No correction for
+within-replicate autocorrelation is applied and none is needed, because
+the values being averaged are per-replicate scalars rather than frames.
+Statistical inefficiency does not appear in this module.
 
 References
 ----------
-- Chodera et al. (2007) J. Chem. Theory Comput. 3:26 (statistical inefficiency)
-- Grossfield et al. (2018) LiveCoMS 1:5067 (uncertainty quantification)
+Grossfield, A. et al. (2018). Best practices for quantification of
+    uncertainty and sampling quality in molecular simulations.
+    *Living Journal of Computational Molecular Science*, 1(1), 5067.
+    doi:10.33011/livecoms.1.1.5067
 """
 
 from __future__ import annotations
