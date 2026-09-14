@@ -100,7 +100,6 @@ scipy = ">=1.13,<1.14"
 [feature.analysis.dependencies]
 mdanalysis   = ">=2.8"
 mdtraj       = ">=1.10"
-pymbar       = ">=4.0"
 scikit-learn = ">=1.4"
 pandas       = ">=2.2"
 matplotlib   = ">=3.8"
