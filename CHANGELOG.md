@@ -43,7 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   written to an artifact.  The estimator now sums
   `g = 1 + 2*sum C(t)*(1 - t/N)` over positive lags with the first
   non-positive cutoff, following Chodera et al. (2007) as implemented in
-  pymbar, and derives `tau = (g - 1)/2 * dt`.  White noise with N = 20000 now
+  pymbar, and derives `tau = (g - 1)/2 * dt`.  The estimator is now pymbar's own
+  `timeseries.statistical_inefficiency`, so pymbar (>= 4.2) is a new dependency of
+  the analysis environment.  White noise with N = 20000 now
   gives `g = 1.04`, AR(1) with phi = 0.5 gives `3.02` against an analytic
   `3.00`, and phi = 0.9 gives `19.8` against an analytic `19.0`.
 
