@@ -177,7 +177,7 @@ def format_contacts_console_table(
                 lines.append(
                     f"{comparison_name:<30} {metric:<15} {pct_str:<10} "
                     f"{p_str:<12} {p_adj_str:<12} {d_str:<10} "
-                    f"{agg.effect_size_interpretation:<12} {effect_marker:<2}"
+                    f"{agg.effect_size_interpretation or 'n/a':<12} {effect_marker:<2}"
                 )
             # Add separator between comparisons if more than one
             if len(result.pairwise_comparisons) > 1:
@@ -402,7 +402,7 @@ def format_contacts_markdown(
                 lines.append(
                     f"| {comparison_name} | {metric} | {format_pct(agg.percent_change)} | "
                     f"{p_value} | {p_adj_str} | {d_value} | "
-                    f"{agg.effect_size_interpretation} | {effect_marker} | {sig} |"
+                    f"{agg.effect_size_interpretation or 'n/a'} | {effect_marker} | {sig} |"
                 )
 
         lines.append("")
@@ -483,7 +483,7 @@ def format_contacts_markdown(
                         f"{finding_num}. {comp.condition_b} shows **{format_pct(agg.percent_change)}** "
                         f"{agg.metric.replace('_', ' ')} vs {comp.condition_a} "
                         f"(p_adj={p_for_display:.4f}, d={agg.cohens_d:.2f} "
-                        f"[{agg.effect_size_interpretation}])"
+                        f"[{agg.effect_size_interpretation or 'n/a'}])"
                     )
                     finding_num += 1
 

@@ -651,7 +651,9 @@ class TestContactsCompareWiring:
         assert all(entry.p_value_adjusted >= 0.0 for entry in all_pairwise)
 
         assert len(result.anova) == 2
-        assert all(a.p_value_adjusted is not None for a in result.anova)
+        # The ANOVA is an omnibus test outside the pairwise family, so it is
+        # reported uncorrected.
+        assert all(a.p_value_adjusted is None for a in result.anova)
 
     def test_compare_with_effect_size_threshold(self, tmp_path: Path) -> None:
         """Effect-size threshold should tag both passing and failing comparisons."""
@@ -796,8 +798,8 @@ class TestYAMLToSettingsWiring:
         assert contacts_settings.top_residues == 5
 
 
-def test_contacts_anova_fdr_correction() -> None:
-    """Contacts ANOVA entries should receive BH-adjusted p-values."""
+def test_contacts_anova_is_reported_uncorrected() -> None:
+    """Contacts ANOVA entries stay omnibus: no adjustment, raw p against alpha."""
     anova = [
         ContactsANOVASummary(metric="coverage", f_statistic=6.0, p_value=0.01, significant=True),
         ContactsANOVASummary(
@@ -810,8 +812,8 @@ def test_contacts_anova_fdr_correction() -> None:
 
     apply_fdr_correction([], anova, fdr_alpha=0.05)
 
-    assert anova[0].p_value_adjusted == pytest.approx(0.02)
-    assert anova[1].p_value_adjusted == pytest.approx(0.20)
+    assert anova[0].p_value_adjusted is None
+    assert anova[1].p_value_adjusted is None
     assert anova[0].significant is True
     assert anova[1].significant is False
 
