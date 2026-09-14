@@ -33,6 +33,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Hydrogen bonds counted C-H donors and carbon acceptors.**  The plugin
+  passed the union of the configured groups to MDAnalysis as both `donors_sel`
+  and `acceptors_sel`.  MDAnalysis treats any selected heavy atom within 1.2 A
+  of a selected hydrogen as a donor, so every carbon bearing a hydrogen donated
+  and every selected atom accepted, and C-H...O and N-H...C contacts were
+  counted as hydrogen bonds.  Because the share of those geometries depends on
+  polymer chemistry, the error differed between conditions rather than
+  offsetting them equally.  Donors and acceptors are now the group union
+  intersected with the new `donor_acceptor_elements` setting, which defaults to
+  `["N", "O"]` and accepts further elements such as `"S"`.  Element spellings
+  are read from the topology, so a topology that writes `CL` is matched.  The
+  effective donor, acceptor, and hydrogen selection strings are recorded in
+  artifact provenance and metadata.  Results cached before this change are
+  invalidated by the settings fingerprint and are recomputed.
+
+- **Hydrogen bonds no longer report zero for a selection that matches
+  nothing.**  `allow_empty_groups` now defaults to `false`, so an empty group
+  selection raises `SelectionError` naming the group and its selection instead
+  of producing a zero-hydrogen-bond summary, and a donor and acceptor selection
+  that matches no atoms raises the same error.  A topology without element
+  metadata raises rather than falling back to a selection that admits every
+  atom.  Set `allow_empty_groups: true` to keep the previous warn-and-skip
+  behaviour.
+
+- **The hard-kill guard no longer trusts a truncated `restart_state.xml`.**
+  `run-segment` kept a segment whenever `restart_state.xml` existed, so a
+  zero-byte file left by a power loss sent the restart down the
+  binary-checkpoint path instead of retiring the segment and retrying from
+  the previous good state.  The guard now requires the file to be complete.
+
 - **Recovery skips truncated state or system XML.**  A hard kill could leave
   `interrupted_system.xml` at zero bytes; recovery paired it with the intact
   `interrupted_state.xml` and the next segment died in OpenMM with

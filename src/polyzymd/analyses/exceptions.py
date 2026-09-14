@@ -45,3 +45,6 @@ class StaleCacheError(AnalysisError):
     ``--recompute``, which is the only way forward when the command that hit
     the stale cache cannot recompute the result itself.
     """
+
+class SelectionError(AnalysisError):
+    """Raised when an analysis selection is empty or cannot be resolved."""
