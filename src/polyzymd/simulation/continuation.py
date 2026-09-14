@@ -99,7 +99,7 @@ def quantity_from_dict(qdict: Dict[str, Any]) -> Quantity:
         return value * getattr(u, unit_str)
 
 
-def _xml_looks_complete(path: Path, root_tag: str) -> bool:
+def xml_looks_complete(path: Path, root_tag: str) -> bool:
     """Cheaply check that an OpenMM XML file was fully written.
 
     A hard kill (preemption, OOM) can leave ``interrupted_system.xml`` or
@@ -301,20 +301,20 @@ class ContinuationManager:
         for state, system in candidates:
             if not state.exists():
                 continue
-            if not _xml_looks_complete(state, "State"):
+            if not xml_looks_complete(state, "State"):
                 LOGGER.warning(
                     f"Skipping {state.name}: file is empty or truncated "
                     f"(interrupted mid-write); trying the next portable state"
                 )
                 continue
-            if system.exists() and _xml_looks_complete(system, "System"):
+            if system.exists() and xml_looks_complete(system, "System"):
                 return state, system
             if system.exists():
                 LOGGER.warning(
                     f"{system.name} is empty or truncated (interrupted mid-write); "
                     f"pairing {state.name} with {default_system.name} instead"
                 )
-            if _xml_looks_complete(default_system, "System"):
+            if xml_looks_complete(default_system, "System"):
                 return state, default_system
             LOGGER.warning(f"No intact system XML for {state.name}; trying the next portable state")
         return None
