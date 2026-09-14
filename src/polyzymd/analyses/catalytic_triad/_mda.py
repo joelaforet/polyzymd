@@ -380,6 +380,8 @@ def _validate_and_order_artifacts(
                 f"pair_distance_version {artifact_version!r}, expected {expected_version!r}. "
                 "Recompute this replicate or clear stale caches before aggregating."
             )
+
+        validate_autocorrelation_estimator_version(artifact, analysis_label="Catalytic-triad")
         _validate_pair_payloads(artifact, settings)
         store = ArtifactStore(analysis_dir / f"run_{artifact.replicate}")
         store.validate_sidecar(_triad_distance_sidecar(artifact))

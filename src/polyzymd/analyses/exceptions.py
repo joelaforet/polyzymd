@@ -110,6 +110,9 @@ class TopologyBondsMissingError(AnalysisError):
             message = f"{message} {detail}"
         super().__init__(message)
 
+class StaleCacheError(AnalysisError):
+    """Raised when a cached result no longer matches the inputs it records.
+
 
 class StatisticsError(AnalysisError, ValueError):
     """Raised when a statistical estimator is given an input it cannot use.
