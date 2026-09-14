@@ -26,6 +26,13 @@ LOGGER = logging.getLogger(__name__)
 _INCOMPLETE_STATUSES = frozenset({SegmentStatus.RUNNING, SegmentStatus.FAILED})
 
 
+def _topology_format(path: Path | None) -> str:
+    """Return the layout format name for a topology path."""
+    if path is not None and path.suffix.lower() == ".prmtop":
+        return "prmtop"
+    return "pdb"
+
+
 class OpenMMEngine(SimulationEngine):
     """Thin adapter for the OpenMM execution path."""
 
@@ -219,7 +226,7 @@ class OpenMMEngine(SimulationEngine):
             topology_path=topology_path,
             trajectory_paths=trajectory_paths,
             trajectory_format="dcd",
-            topology_format="pdb",
+            topology_format=_topology_format(topology_path),
             segment_status=segment_status,
             excluded_segments=skipped if require_complete else [],
             incomplete_segments=[] if require_complete else skipped,
@@ -227,7 +234,13 @@ class OpenMMEngine(SimulationEngine):
 
     @staticmethod
     def _find_openmm_topology(working_dir: Path) -> Path | None:
-        """Find topology PDB using the canonical OpenMM search order.
+        """Find the topology using the canonical OpenMM search order.
+
+        ``system.prmtop`` is preferred when the build wrote it, because it
+        carries every bond and has no atom limit. ``solvated_system.pdb`` is
+        the fallback for runs built before it existed; above 99,999 atoms its
+        CONECT records are unreadable, so run ``polyzymd analysis-topology``
+        on such a run first.
 
         Parameters
         ----------
@@ -237,8 +250,12 @@ class OpenMMEngine(SimulationEngine):
         Returns
         -------
         Path or None
-            Path to ``solvated_system.pdb``, or None if not found.
+            Topology path, or None if not found.
         """
+        candidate = working_dir / "system.prmtop"
+        if candidate.exists():
+            return candidate
+
         candidate = working_dir / "solvated_system.pdb"
         if candidate.exists():
             return candidate
