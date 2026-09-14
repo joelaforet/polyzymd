@@ -45,3 +45,6 @@ class StatisticsError(AnalysisError, ValueError):
     silently degraded zero. It also subclasses ``ValueError`` so that callers
     written before the typed error existed keep working.
     """
+
+class SelectionError(AnalysisError):
+    """Raised when an analysis selection is empty or cannot be resolved."""
