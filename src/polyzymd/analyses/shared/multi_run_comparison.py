@@ -126,90 +126,112 @@ def apply_fdr_correction(
     get_p_value: Callable[[Any], float | None] | None = None,
     set_corrected: Callable[[Any, Any], None] | None = None,
 ) -> None:
-    """Apply Benjamini-Hochberg FDR correction across statistical result families.
+    """Correct a run-wise comparison using the package-wide family policy.
+
+    This is a thin wrapper over
+    :func:`polyzymd.analyses.shared.inferential_statistics.apply_family_correction`,
+    which owns the definition of the correction family. All pairwise tests
+    form one Benjamini-Hochberg family; ANOVA results are reported as
+    uncorrected omnibus tests.
 
     Parameters
     ----------
     pairwise_results : list[Any]
-        Pairwise comparison result objects.
+        Pairwise comparison result objects, mutated in place.
     anova_by_run : dict[Any, Any] | list[Any] | None, optional
-        ANOVA result objects, as either list-like or dict-like container.
+        Omnibus ANOVA result objects, as either list-like or dict-like
+        container.
     fdr_alpha : float, optional
-        FDR threshold.
+        FDR threshold for the pairwise family and plain alpha for the
+        omnibus ANOVA.
     get_p_value : Callable[[Any], float | None] | None, optional
         Callback extracting raw p-value from a result object. Defaults to
         reading ``.p_value``.
     set_corrected : Callable[[Any, Any], None] | None, optional
-        Callback applying BH output to each result object. Defaults to setting
-        ``.p_value_adjusted`` (when available) and ``.significant``.
+        Callback applying BH output to each result object. Defaults to
+        setting ``.p_value_adjusted`` (when available) and ``.significant``.
     """
-    from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
+    from polyzymd.analyses.shared.inferential_statistics import apply_family_correction
 
-    def _default_get_p_value(result: Any) -> float | None:
-        if hasattr(result, "testable") and not result.testable:
-            return None
-        return getattr(result, "p_value", None)
+    anova_items = _coerce_result_sequence(anova_by_run)
+    if set_corrected is None:
+        _validate_default_setter_targets(pairwise_results, "pairwise_results")
+    _validate_anova_targets(anova_items)
 
-    def _default_set_corrected(result: Any, bh_result: Any) -> None:
-        if hasattr(result, "p_value_adjusted"):
-            result.p_value_adjusted = bh_result.adjusted_p_value
-        result.significant = bh_result.significant
+    apply_family_correction(
+        pairwise_results,
+        fdr_alpha=fdr_alpha,
+        get_p_value=get_p_value,
+        set_corrected=set_corrected,
+        anova_results=anova_items,
+    )
 
-    def _validate_default_setter_targets(results: Sequence[Any], label: str) -> None:
-        for idx, result in enumerate(results):
-            if not hasattr(result, "significant"):
-                result_type = type(result).__name__
+
+def _validate_default_setter_targets(results: Sequence[Any], label: str) -> None:
+    """Check that the default setter can write to every result object.
+
+    Parameters
+    ----------
+    results : Sequence[Any]
+        Result objects the default setter will mutate.
+    label : str
+        Name of the container, used in the error message.
+
+    Raises
+    ------
+    TypeError
+        Raised when a result lacks a writable ``significant`` or
+        ``p_value_adjusted`` attribute.
+    """
+    for idx, result in enumerate(results):
+        result_type = type(result).__name__
+        for attribute in ("significant", "p_value_adjusted"):
+            if not hasattr(result, attribute):
                 raise TypeError(
                     "apply_fdr_correction() default setter requires results with a "
-                    f"'significant' attribute. {label}[{idx}] has type {result_type}. "
+                    f"{attribute!r} attribute. {label}[{idx}] has type {result_type}. "
                     "Provide set_corrected=... for custom result objects."
                 )
-
-            result_type = type(result).__name__
-            original_significant = result.significant
             try:
-                result.significant = original_significant
+                setattr(result, attribute, getattr(result, attribute))
             except (AttributeError, TypeError) as exc:
                 raise TypeError(
                     "apply_fdr_correction() default setter requires a mutable "
-                    f"'significant' attribute. {label}[{idx}] has type {result_type}. "
+                    f"{attribute!r} attribute. {label}[{idx}] has type {result_type}. "
                     "Provide set_corrected=... for custom result objects."
                 ) from exc
 
-            if hasattr(result, "p_value_adjusted"):
-                original_adjusted = result.p_value_adjusted
-                try:
-                    result.p_value_adjusted = original_adjusted
-                except (AttributeError, TypeError) as exc:
-                    raise TypeError(
-                        "apply_fdr_correction() default setter requires a mutable "
-                        f"'p_value_adjusted' attribute when present. {label}[{idx}] has type "
-                        f"{result_type}. Provide set_corrected=... for custom result objects."
-                    ) from exc
 
-    p_getter = get_p_value or _default_get_p_value
-    corrected_setter = set_corrected or _default_set_corrected
+def _validate_anova_targets(results: Sequence[Any]) -> None:
+    """Check that omnibus ANOVA results can record the policy's verdict.
 
-    if pairwise_results:
-        if set_corrected is None:
-            _validate_default_setter_targets(pairwise_results, "pairwise_results")
-        pairwise_p_values = [p_getter(result) for result in pairwise_results]
-        pairwise_bh = benjamini_hochberg(pairwise_p_values, alpha=fdr_alpha)
-        for result, bh_result in zip(pairwise_results, pairwise_bh, strict=False):
-            corrected_setter(result, bh_result)
+    Parameters
+    ----------
+    results : Sequence[Any]
+        ANOVA result objects.
 
-    anova_items = _coerce_result_sequence(anova_by_run)
-    if anova_items:
-        if set_corrected is None:
-            _validate_default_setter_targets(anova_items, "anova_by_run")
-        anova_p_values = [p_getter(result) for result in anova_items]
-        anova_bh = benjamini_hochberg(anova_p_values, alpha=fdr_alpha)
-        for result, bh_result in zip(anova_items, anova_bh, strict=False):
-            corrected_setter(result, bh_result)
+    Raises
+    ------
+    TypeError
+        Raised when an ANOVA result lacks a writable ``significant`` or
+        ``p_value_adjusted`` attribute.
+    """
+    _validate_default_setter_targets(results, "anova_by_run")
 
 
 def _coerce_result_sequence(results: Mapping[Any, Any] | Sequence[Any] | None) -> list[Any]:
-    """Normalize mapping or sequence result containers to a list."""
+    """Normalize mapping or sequence result containers to a list.
+
+    Parameters
+    ----------
+    results : Mapping[Any, Any] | Sequence[Any] | None
+        Container of result objects.
+
+    Returns
+    -------
+    list[Any]
+        The contained results, in order.
+    """
     if results is None:
         return []
     if isinstance(results, Mapping):

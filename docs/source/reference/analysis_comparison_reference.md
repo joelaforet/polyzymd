@@ -29,11 +29,42 @@ conditions:
 
 defaults:
   equilibration_time: "10ns"
+  ttest_method: "student"    # or "welch"
+  posthoc_method: "ttest_bh" # or "tukey_hsd"
+  fdr_alpha: 0.05
 
 plugins:
   rmsf:
     selection: "protein and name CA"
 ```
+
+## Hypothesis Testing Across Plugins
+
+`ttest_method`, `posthoc_method` and `fdr_alpha` from the `defaults:` block
+reach every plugin's comparison step, including the plugins listed below as
+"custom" in the plugin summary table. Asking for `ttest_method: "welch"` runs
+Welch's unequal-variance t-test in `rmsd`, `rg`, `sasa`, `contacts`,
+`distances` and the default scalar pipeline alike.
+
+The multiple-comparison family is defined once for the whole package:
+
+- **One run, one family.** Every pairwise test the run produced, across all of
+  its metrics and all of its condition pairs, is corrected together with the
+  Benjamini-Hochberg step-up procedure. Each pairwise result carries both
+  `p_value` and `p_value_adjusted`, and `significant` is read from the
+  adjusted value.
+- **ANOVA is omnibus and uncorrected.** Its `p_value` is reported raw, its
+  `p_value_adjusted` is always `null`, and no pairwise test is gated on it.
+  Its `significant` flag compares the raw p-value with `fdr_alpha`.
+- **Effect sizes carry `hedges_g` next to `cohens_d`.** Hedges' g is Cohen's d
+  multiplied by `J = 1 - 3 / (4 * (n1 + n2) - 9)`. The Cohen adjective in
+  `effect_size_interpretation` is `null` when `n1 + n2 < 10`.
+- **Direction labels require significance.** A label such as `"stabilizing"`,
+  `"increased"`, `"closer"` or `"exposure"` is only assigned when the
+  corrected test is significant. Otherwise the field reads
+  `"no significant change"`.
+
+Full field tables are in {doc}`posthoc_testing`.
 
 ## Per-Plugin Statistical Settings
 
@@ -93,14 +124,14 @@ Stable analysis plugins:
 
 | Plugin | Default compare? | Primary metric | Key feature | Statistical method |
 |--------|-----------------|----------------|-------------|-------------------|
-| `rmsd` | No (custom) | `mean_rmsd` | Backbone stability over time | Per-run pairwise t-tests + ANOVA |
-| `rg` | No (custom) | `mean_rg` | Protein compactness | Per-run pairwise t-tests + ANOVA |
-| `rmsf` | Yes | `mean_rmsf` | Per-residue flexibility | FDR-corrected pairwise t-tests + ANOVA |
-| `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests per residue |
-| `distances` | No (custom) | Multiple distance metrics | Named distance pairs | Per-distance t-tests + ANOVA |
-| `catalytic_triad` | Yes | `simultaneous_contact_fraction` | Active-site geometry | FDR-corrected pairwise t-tests + ANOVA |
-| `secondary_structure` | Yes | `helix_fraction` | Secondary structure content | FDR-corrected pairwise t-tests + ANOVA |
-| `sasa` | No (custom) | Per-run mean SASA | Multi-run target/context model | Per-run pairwise t-tests + ANOVA |
+| `rmsd` | No (custom) | `mean_rmsd` | Backbone stability over time | FDR-corrected per-run pairwise t-tests + omnibus ANOVA |
+| `rg` | No (custom) | `mean_rg` | Protein compactness | FDR-corrected per-run pairwise t-tests + omnibus ANOVA |
+| `rmsf` | Yes | `mean_rmsf` | Per-residue flexibility | FDR-corrected pairwise t-tests + omnibus ANOVA |
+| `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests + omnibus ANOVA |
+| `distances` | No (custom) | Multiple distance metrics | Named distance pairs | FDR-corrected per-pair t-tests + omnibus ANOVA |
+| `catalytic_triad` | Yes | `simultaneous_contact_fraction` | Active-site geometry | FDR-corrected pairwise t-tests + omnibus ANOVA |
+| `secondary_structure` | Yes | `helix_fraction` | Secondary structure content | FDR-corrected pairwise t-tests + omnibus ANOVA |
+| `sasa` | No (custom) | Per-run mean SASA | Multi-run target/context model | FDR-corrected per-run pairwise t-tests + omnibus ANOVA |
 | `hydrogen_bonds` | Custom loader with default-style scalar statistics | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA per configured summary |
 
 ## Path Rules
@@ -308,8 +339,12 @@ plateau, which may warrant longer production runs or additional replicates.
 ## Statistical Terms
 
 - `p-value`: significance of the observed difference under the null hypothesis
-- `Cohen's d`: effect size magnitude
-- `ANOVA`: omnibus test across multiple conditions
+- `Cohen's d`: effect size magnitude, the mean difference over the pooled
+  standard deviation
+- `Hedges' g`: Cohen's d after the small-sample bias correction
+  `J = 1 - 3 / (4 * (n1 + n2) - 9)`
+- `ANOVA`: omnibus test across multiple conditions, reported uncorrected and
+  gating nothing
 - `SEM`: standard error of the mean across replicates
 - `Benjamini-Hochberg (BH)`: step-up procedure for controlling the false
   discovery rate across multiple hypothesis tests
