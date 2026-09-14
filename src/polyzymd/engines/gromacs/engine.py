@@ -431,7 +431,13 @@ class GromacsEngine(SimulationEngine):
             timestep_fs=prod.time_step,
         )
 
-    def resolve_trajectory_layout(self, working_dir: Path, replicate: int) -> TrajectoryLayout:
+    def resolve_trajectory_layout(
+        self,
+        working_dir: Path,
+        replicate: int,
+        *,
+        require_complete: bool = True,
+    ) -> TrajectoryLayout:
         """Resolve GROMACS trajectory layout for downstream analyses.
 
         Topology search order:
@@ -454,14 +460,23 @@ class GromacsEngine(SimulationEngine):
             Replicate working directory.
         replicate : int
             Replicate index (unused, kept for interface parity).
+        require_complete : bool, optional
+            Accepted for interface parity and ignored. The GROMACS layout is a
+            single production XTC rather than a chain of segments, and
+            ``progress.json`` records no per-file status for it, so this engine
+            has nothing to exclude. A production XTC that is still being
+            written is therefore still read; check the job state before
+            analyzing a live GROMACS run.
 
         Returns
         -------
         TrajectoryLayout
             Resolved XTC layout with preferred post-processed trajectories
-            and PDB topology preferred over GRO.
+            and PDB topology preferred over GRO. ``segment_status`` and
+            ``excluded_segments`` are always empty.
         """
         _ = replicate
+        _ = require_complete
         logger = logging.getLogger(__name__)
 
         trajectory_paths: list[Path] = []
