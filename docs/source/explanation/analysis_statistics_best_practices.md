@@ -53,21 +53,34 @@ zero. Slow decay means that many saved frames contain overlapping information.
 ### Statistical inefficiency and effective sample size
 
 For a correlated time series, the effective number of independent samples is
-often described using the statistical inefficiency $g$:
+described using the statistical inefficiency $g$:
 
 $$N_{\mathrm{eff}} = \frac{N}{g}$$
 
-For a simple exponentially decaying correlation, a useful approximation is:
+PolyzyMD estimates $g$ by summing the normalised autocorrelation function over
+positive lags,
 
-$$g \approx 1 + \frac{2\tau}{\Delta t}$$
+$$g = 1 + 2 \sum_{t \geq 1} C(t) \left(1 - \frac{t}{N}\right),$$
 
-where $\tau$ is an integrated correlation time and $\Delta t$ is the spacing
-between saved observations. The exact estimate depends on the observable, the
-trajectory length, and how the correlation function is truncated or blocked.
+following Chodera et al. (2007) as implemented in pymbar. The $(1 - t/N)$
+factor accounts for the smaller number of pairs available at long lags, and the
+sum is truncated at the first non-positive $C(t)$ so that noise in the tail does
+not accumulate. Lag zero is excluded from the sum; it is the leading 1.
 
-Spacing frames by about $2\tau$ is therefore best understood as a heuristic for
-selecting approximately independent frames, not as a universal formula for the
-true number of independent samples.
+The integrated correlation time follows from $g$ as
+
+$$\tau = \frac{g - 1}{2} \Delta t,$$
+
+where $\Delta t$ is the spacing between saved observations, which is the same
+relation read the other way round as $g = 1 + 2\tau/\Delta t$. For
+uncorrelated data $g$ approaches 1 and $\tau$ approaches 0, so $N_{\mathrm{eff}}$
+approaches $N$. $N_{\mathrm{eff}}$ is reported as a real number and is not
+rounded down to whole frames.
+
+Spacing frames by about $2\tau$ is a heuristic for selecting approximately
+independent frames. It is not a universal formula for the true number of
+independent samples, and PolyzyMD does not use it to select the frames that
+enter any estimate.
 
 ```{tip}
 A trajectory with 10,000 saved frames may contain far fewer effective samples
@@ -119,21 +132,24 @@ motions that define the fluctuation.
 
 Conservative strategies include:
 
-- estimating fluctuations from approximately independent blocks or subsamples;
 - comparing results across independent replicates;
 - checking whether the estimate changes with trajectory length or block size;
 - reporting caveats when slow motions are undersampled.
 
-Subsampling frames at roughly $2\tau$ spacing can help avoid treating adjacent
-frames as independent, but it does not rescue a trajectory that never visited
-important conformational states.
+Thinning the trajectory to roughly $2\tau$ spacing is not one of them, and
+PolyzyMD does not do it. The finite-sample bias of a variance computed from $N$
+correlated frames with inefficiency $g$ is about the same as the bias of one
+computed from $N/g$ independent frames, so discarding frames leaves the bias
+where it was and only raises the variance of the estimate. RMSF is therefore
+computed from every production frame, with the correlation time recorded beside
+it as a diagnostic and the uncertainty taken from the spread across replicates.
 
 ## How to interpret PolyzyMD analysis results
 
 PolyzyMD's analysis plugins are responsible for choosing statistically
 appropriate handling for the quantities they report. Current plugins may use
-plugin-specific logic for correlation-aware uncertainty, replicate aggregation,
-or conservative subsampling. The details can differ because contact fractions,
+plugin-specific logic for correlation-aware uncertainty and replicate
+aggregation. The details can differ because contact fractions,
 distances, RMSF, secondary structure, and other observables answer different
 scientific questions.
 
@@ -312,11 +328,26 @@ This explanation follows guidance from:
 > *Living Journal of Computational Molecular Science*, 1(1), 5067.
 > [DOI: 10.33011/livecoms.1.1.5067](https://doi.org/10.33011/livecoms.1.1.5067)
 
+The statistical inefficiency estimator follows:
+
+> **Chodera, J. D., Swope, W. C., Pitera, J. W., Seok, C., & Dill, K. A.**
+> (2007). "Use of the Weighted Histogram Analysis Method for the Analysis of
+> Simulated and Parallel Tempering Simulations."
+> *Journal of Chemical Theory and Computation*, 3(1), 26-41.
+> [DOI: 10.1021/ct0502864](https://doi.org/10.1021/ct0502864)
+
+> **Shirts, M. R., & Chodera, J. D.** (2008). "Statistically optimal analysis
+> of samples from multiple equilibrium states."
+> *The Journal of Chemical Physics*, 129(12), 124105.
+> [DOI: 10.1063/1.2978177](https://doi.org/10.1063/1.2978177)
+
+PolyzyMD calls pymbar's `timeseries.statistical_inefficiency` for this estimate rather than carrying its own copy of the algorithm, so pymbar is a dependency of the analysis environment.
+
 Useful background includes:
 
-> **Chodera, J. D., et al.** (2007). "Use of the Weighted Histogram Analysis
-> Method for the Analysis of Simulated and Parallel Tempering Simulations."
-> *Journal of Chemical Theory and Computation*, 3(1), 26-41.
+> **Janke, W.** (2002). "Statistical analysis of simulations: data correlations
+> and error estimation." In *Quantum Simulations of Complex Many-Body Systems*,
+> NIC Series vol. 10, 423-445.
 
 > **Flyvbjerg, H., & Petersen, H. G.** (1989). "Error estimates on averages
 > of correlated data." *Journal of Chemical Physics*, 91(1), 461-466.
@@ -329,3 +360,7 @@ Useful background includes:
 The coverage factors above follow the section of Grossfield et al. (2018) on
 turning a standard uncertainty into a confidence interval, which in turn
 follows the GUM.
+
+> [DOI: 10.1063/1.457480](https://doi.org/10.1063/1.457480). Block averaging is
+> an alternative route to the statistical inefficiency. PolyzyMD does not
+> implement it.
