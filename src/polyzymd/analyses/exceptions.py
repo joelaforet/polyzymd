@@ -7,25 +7,7 @@ handled gracefully by higher-level orchestration.
 
 
 class AnalysisError(Exception):
-    """Base class for analysis lifecycle errors.
-
-    Parameters
-    ----------
-    message : str
-        What went wrong.
-    hint : str, optional
-        One sentence telling the caller how to fix it. Command-line and agent
-        callers print this on its own line, so keep it short and concrete.
-
-    Attributes
-    ----------
-    hint : str or None
-        The fix hint, or ``None`` when the error carries none.
-    """
-
-    def __init__(self, message: str = "", hint: str | None = None) -> None:
-        super().__init__(message)
-        self.hint = hint
+    """Base class for analysis lifecycle errors."""
 
 
 class PluginContractError(AnalysisError):
@@ -54,19 +36,6 @@ class PlotError(AnalysisError):
 
 class DependencyError(AnalysisError):
     """Raised when declared analysis dependencies are invalid or missing."""
-
-
-class SelectionError(AnalysisError):
-    """Raised when an analysis selection is empty or cannot be resolved."""
-
-
-class StaleCacheError(AnalysisError):
-    """Raised when a cached result no longer matches the inputs it records.
-
-    The message names the input files that changed and points at
-    ``--recompute``, which is the only way forward when the command that hit
-    the stale cache cannot recompute the result itself.
-    """
 
 
 class TopologyBondsMissingError(AnalysisError):
@@ -110,8 +79,18 @@ class TopologyBondsMissingError(AnalysisError):
             message = f"{message} {detail}"
         super().__init__(message)
 
+
 class StaleCacheError(AnalysisError):
     """Raised when a cached result no longer matches the inputs it records.
+
+    The message names the input files that changed and points at
+    ``--recompute``, which is the only way forward when the command that hit
+    the stale cache cannot recompute the result itself.
+    """
+
+
+class SelectionError(AnalysisError):
+    """Raised when an analysis selection is empty or cannot be resolved."""
 
 
 class StatisticsError(AnalysisError, ValueError):

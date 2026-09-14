@@ -675,8 +675,6 @@ def _validate_and_order_artifacts(
                 f"{artifact_version!r}, expected {expected_version!r}. Recompute this replicate "
                 "or clear stale caches before aggregating."
             )
-
-        validate_autocorrelation_estimator_version(artifact, analysis_label="Distances")
         _validate_pair_payloads(
             artifact,
             expected_pairs,

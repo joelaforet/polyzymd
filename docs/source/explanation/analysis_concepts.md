@@ -248,30 +248,6 @@ as the trajectory stores them.
   its bond requirement:
   <https://docs.mdanalysis.org/stable/documentation_pages/transformations/wrap.html>
 
-### Why hydrogen bonds exclude carbon
-
-MDAnalysis finds hydrogen bonds from geometry alone: it pairs each hydrogen with
-a nearby heavy atom, then keeps the triplets whose donor-acceptor distance and
-D-H...A angle pass the cutoffs. Which atoms are allowed to be donors and
-acceptors is therefore a scientific choice, not a detail. If that choice is the
-whole selection, every aliphatic and aromatic carbon that carries a hydrogen
-becomes a donor and every atom becomes an acceptor, so C-H...O and N-H...C
-contacts are counted alongside real hydrogen bonds.
-
-The IUPAC definition requires the donor to be more electronegative than
-hydrogen and the acceptor to carry a lone pair or a pi cloud, which carbon
-generally does not (Arunan et al. 2011). PolyzyMD therefore restricts donors and
-acceptors to nitrogen and oxygen by default. The practical reason matters as
-much as the formal one: the share of short C-H...O geometries depends on polymer
-chemistry, so counting them biases one condition relative to another instead of
-shifting every condition by the same amount. Sulfur is a genuine but weaker
-donor and acceptor, so it is available through `donor_acceptor_elements` rather
-than on by default.
-
-Arunan, E., et al. (2011). Definition of the hydrogen bond (IUPAC
-Recommendations 2011). Pure and Applied Chemistry, 83(8), 1637-1641.
-doi:10.1351/PAC-REC-10-01-02
-
 ## Statistical comparison
 
 When you have two or more conditions, the compare stage produces statistical
