@@ -929,8 +929,8 @@ class TestNewAnalysisCLI:
         assert result.exit_code == 0
         assert "src/polyzymd/analyses/<NAME>.py" in result.output
         assert "src/polyzymd/analyses/<NAME>/__init__.py" in result.output
-        assert "only dict canonical" in result.output
-        assert "artifacts are supported" in result.output
+        assert "--style contract creates" in result.output
+        assert "[dict|contract]" in result.output
         assert f"--style {'measure' + 'ment'}" not in result.output
         assert "_runner.py" not in result.output
         assert "Advanced package scaffolds" in result.output

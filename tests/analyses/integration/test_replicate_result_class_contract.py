@@ -13,6 +13,7 @@ MDA_ARTIFACT_PLUGINS = {
     "rmsf",
     "rmsd",
     "rg",
+    "rg2",
     "catalytic_triad",
     "distances",
     "secondary_structure",

@@ -73,6 +73,11 @@ def render_scaffold(spec: ScaffoldSpec, project_root: Path) -> dict[Path, str]:
         return files
 
     test_path = tests_dir / f"test_{spec.name}.py"
+    if spec.uses_contract_layout:
+        return {
+            analyses_root / f"{spec.name}.py": render_template("contract_plugin.py.jinja", spec),
+            test_path: render_template("test_contract_plugin.py.jinja", spec),
+        }
     return {
         analyses_root / f"{spec.name}.py": render_template("simple_mda_plugin.py.jinja", spec),
         test_path: render_template(
