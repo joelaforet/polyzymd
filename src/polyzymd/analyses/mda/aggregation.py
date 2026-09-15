@@ -16,6 +16,10 @@ from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 from polyzymd.analyses.shared.statistics import mean_sem_ci, uncertainty_block
 
+from polyzymd.analyses.shared.statistics import mean_sem_ci, uncertainty_block
+
+from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
+
 
 class MDAAggregationError(MDAnalysisExtensionError):
     """Error raised when MDAnalysis replicate artifacts cannot be aggregated."""
