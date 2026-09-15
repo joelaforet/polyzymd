@@ -372,6 +372,7 @@ def _validate_and_order_artifacts(
                 f"fingerprint {artifact.metadata.get('settings_fingerprint')}, expected "
                 f"{settings_fingerprint}. Recompute the condition or clear stale caches."
             )
+        validate_autocorrelation_estimator_version(artifact, analysis_label="Catalytic-triad")
         artifact_version = artifact.metadata.get("pair_distance_version")
         if artifact_version != expected_version:
             raise ValueError(
@@ -380,7 +381,6 @@ def _validate_and_order_artifacts(
                 "Recompute this replicate or clear stale caches before aggregating."
             )
 
-        validate_autocorrelation_estimator_version(artifact, analysis_label="Catalytic-triad")
         _validate_pair_payloads(artifact, settings)
         store = ArtifactStore(analysis_dir / f"run_{artifact.replicate}")
         store.validate_sidecar(_triad_distance_sidecar(artifact))
