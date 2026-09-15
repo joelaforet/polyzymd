@@ -68,7 +68,6 @@ class StaleCacheError(AnalysisError):
     the stale cache cannot recompute the result itself.
     """
 
-
 class TopologyBondsMissingError(AnalysisError):
     """Raised when an analysis needs topology bonds and the topology has none.
 

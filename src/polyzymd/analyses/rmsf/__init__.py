@@ -27,6 +27,7 @@ from polyzymd.analyses.mda import (
 from polyzymd.analyses.rmsf._mda import (
     MEAN_RMSF_METRIC,
     RMSF_METRIC_METADATA,
+
     RMSF_PROFILE_VERSION,
     RMSFArtifactCollector,
     aggregate_rmsf_artifacts,
