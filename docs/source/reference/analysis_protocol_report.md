@@ -39,7 +39,7 @@ count is stated on the last line.
 | `sem` | `float \| None` | Standard error of that mean across replicates, `s / sqrt(n)` with `ddof = 1`. `None` for one replicate, where it does not exist. |
 | `ci95` | `tuple[float, float] \| None` | Limits of the 95 percent Student t interval on the mean. `None` for one replicate. |
 | `ci_method` | `str \| None` | `student_t` when the interval came from `replicate_values`; `student_t_from_sem` when the plugin stored only a mean and a standard error and the interval was rebuilt as `mean` plus or minus `t(0.975, n - 1)` times `sem`. `None` when no interval exists. |
-| `replicate_values` | `list[float]` | The per-replicate values behind the mean, in replicate order. Empty for a plugin that stores only summary statistics, such as contacts. |
+| `replicate_values` | `list[float]` | The per-replicate values behind the mean, in replicate order. Empty for a plugin that stores only summary statistics. |
 
 ## PairwiseReport
 

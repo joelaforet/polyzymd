@@ -114,11 +114,10 @@ from polyzymd.analyses.shared.loader import TrajectoryLoader
 from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
 ```
 
-For selections, selectors, and molecular group helpers:
+For selections and amino acid classification:
 
 ```python
 from polyzymd.analyses.shared import aa_classification, centroid, selections
-from polyzymd.analyses.shared.selectors import base, polymer, protein, solvent
 ```
 
 For statistics and convergence checks:

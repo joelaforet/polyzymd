@@ -1646,11 +1646,6 @@ def _build_plugin_settings(enzyme_pdb_rel: str | None) -> dict:
             "polymer_selection": "chainid C",
             "protein_selection": "chainid A",
             "cutoff": 4.5,
-            "grouping": "aa_class",
-            "compute_residence_times": True,
-            "protein_groups": {
-                "catalytic_triad": [77, 133, 156],
-            },
         },
     }
 
@@ -1681,9 +1676,6 @@ def _build_plot_settings() -> dict:
             "generate_kde_panel": True,
             "generate_bars": True,
             "figsize_bars": [10, 6],
-        },
-        "contacts": {
-            "figsize": [10, 8],
         },
     }
 

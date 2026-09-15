@@ -75,8 +75,6 @@ plugins:
     polymer_selection: "chainid C"
     protein_selection: "chainid A"
     cutoff: 4.5
-    grouping: "aa_class"
-    compute_residence_times: true
 ```
 
 ### 2) Run contacts
@@ -85,8 +83,8 @@ plugins:
 polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
 ```
 
-Expected output includes per-replicate progress and aggregated summary metrics
-(coverage and mean contact fraction).
+Expected output includes per-replicate progress and one line per observable,
+each naming its unit, its interval and the number of replicates behind it.
 
 ### 3) Run all enabled plugins (optional)
 
@@ -94,125 +92,62 @@ Expected output includes per-replicate progress and aggregated summary metrics
 polyzymd compare run-all -f comparison.yaml --eq-time 10ns
 ```
 
-## Key metrics to check first
+## Key numbers to check first
 
-- **Coverage**: fraction of protein residues contacted at least once
-- **Mean contact fraction**: average per-residue fraction of frames in contact
-- **Residence time (optional)**: average duration of individual contact events
+- `contact_count`: residue pairs in contact per frame
+- `coverage_per_frame`: share of the protein in contact per frame
+- `coverage_any_frame`: share touched at any point in the window
+- `contact_fraction`: which residues, as a profile over residue IDs
+- `residence_time_distribution`: whether contacts are brief or long lived
 
 ## Common tasks
 
-### Enable residence time statistics
-
-Residence times are enabled by default, but it is fine to set this explicitly:
+### Analyse one polymer type only
 
 ```yaml
 plugins:
   contacts:
-    compute_residence_times: true
+    protein_selection: "protein"
+    polymer_selection: "resname SBM EGM"
+    polymer_types: ["SBM"]
 ```
 
-Then run:
+### Use the heavy-atom contact criterion
+
+Hydrogens count toward the cutoff by default. To use the literature convention
+instead, which lowers every contact count:
+
+```yaml
+plugins:
+  contacts:
+    heavy_atoms_only: true
+```
+
+### Change the residence-time bins
+
+The default edges double from one frame of a 40 ps trajectory. Give your own
+when your frames are spaced differently or your contacts are longer lived:
+
+```yaml
+plugins:
+  contacts:
+    residence_time_edges_ns: [0.0, 0.1, 0.5, 1.0, 5.0, 25.0]
+```
+
+Every condition of a comparison has to use the same edges, because the bins are
+the index of a profile and the framework averages profiles element by element.
+
+### Recompute after changing a setting
 
 ```bash
-polyzymd compare run contacts -f comparison.yaml
-```
-
-Set `compute_residence_times: false` when you only need contact fractions or
-downstream contacts-derived analyses. This skips aggregate residence-time
-summaries and residence-time plots, but still stores per-replicate contact
-events. Changing the setting changes the canonical contacts artifact identity,
-so recompute contacts after toggling it.
-
-### Analyze one polymer type only
-
-```yaml
-plugins:
-  contacts:
-    polymer_selection: "chainid C and resname SBM"
-    protein_selection: "chainid A"
-```
-
-For EGMA-only analysis, switch to `resname EGM`.
-
-### Restrict analysis to a protein region
-
-```yaml
-plugins:
-  contacts:
-    polymer_selection: "chainid C"
-    protein_selection: "chainid A and (resname TRP PHE TYR)"
-```
-
-For an active-site slice, use a residue range selection such as:
-
-```yaml
-protein_selection: "chainid A and (resid 75-80 or resid 130-140)"
-```
-
-### Run with reproducible cache behavior
-
-```bash
-# Use cache if present
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
-
-# Ignore cache and recompute
 polyzymd compare run contacts -f comparison.yaml --eq-time 10ns --recompute
 ```
 
-### Use a fuller contacts configuration
-
-If you want one place to set the most common contacts options:
-
-```yaml
-plugins:
-  contacts:
-    polymer_selection: "chainid C"
-    protein_selection: "chainid A"
-    cutoff: 4.5
-    polymer_types: ["SBM", "EGM"]
-    grouping: "aa_class"
-    compute_residence_times: true
-    fdr_alpha: 0.05
-    min_effect_size: 0.5
-    top_residues: 10
-```
-
-This is usually enough for cross-condition comparison without extra tuning.
-
-### Add user-defined protein groups and partitions
-
-Use this when you want plots and summaries for specific regions:
-
-```yaml
-plugins:
-  contacts:
-    protein_groups:
-      active_site: [77, 133, 156]
-      binding_patch: [45, 46, 47, 82, 84]
-      distal_surface: [12, 13, 14, 190, 191, 192]
-    protein_partitions:
-      functional_regions: [active_site, binding_patch, distal_surface]
-```
-
-After running, these partitions are used in partition-level contacts plots.
-
-### Generate contacts plots after running
-
-```bash
-polyzymd compare plot-all -f comparison.yaml
-```
-
-You will get contact-fraction profiles and grouped bar plots for AA classes and
-(if configured) user partitions. Residence-time profiles are generated only
-when `compute_residence_times` is enabled and residence-time data exists.
-
-For the full list of plot outputs and plot settings, see
-{doc}`../reference/analysis_contacts_reference`.
+The framework reuses a replicate only when the polyzymd version, the plugin
+source, the settings, the config and the input files all still match, so the
+flag is rarely needed.
 
 ### Run only contacts in a multi-plugin config
-
-If your `comparison.yaml` enables several plugins, you can run only contacts:
 
 ```bash
 polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
@@ -224,94 +159,43 @@ Later, run all enabled plugins:
 polyzymd compare run-all -f comparison.yaml --eq-time 10ns
 ```
 
-## Quick output checks
-
-After a run, verify these two things first:
-
-1. **Coverage and mean contact fraction** in the aggregated result
-2. **Replicate count used** in aggregation
-
-Minimal check pattern:
-
-```bash
-ls analysis/<condition>/contacts/aggregated/
-```
-
-Then inspect key values programmatically:
+## Read the results from Python
 
 ```python
 import json
 from pathlib import Path
 
-agg = json.loads(Path("analysis/<condition>/contacts/aggregated/result.json").read_text())
-print(f"n_replicates={agg['n_replicates']}")
-print(f"coverage={agg['coverage_mean']:.3f} ± {agg['coverage_sem']:.3f}")
-print(
-    "mean_contact_fraction="
-    f"{agg['mean_contact_fraction']:.3f} ± {agg['mean_contact_fraction_sem']:.3f}"
-)
-```
-
-If residence times were enabled, also check:
-
-```python
-for ptype, stats in agg.get("residence_time_by_polymer_type", {}).items():
-    print(f"{ptype}: mean={stats[0]:.2f} frames, sem={stats[1]:.2f}")
-```
-
-## Programmatic post-processing (JSON)
-
-After CLI execution, load result files directly:
-
-```python
-import json
-from pathlib import Path
-
-replicate_result = json.loads(
-    Path("analysis/<condition>/contacts/run_1/result.json").read_text()
-)
-print(f"Coverage: {replicate_result['coverage_fraction']:.1%}")
-
-aggregated_result = json.loads(
+aggregate = json.loads(
     Path("analysis/<condition>/contacts/aggregated/result.json").read_text()
 )
-print(
-    "Mean contact fraction: "
-    f"{aggregated_result['mean_contact_fraction']:.1%} "
-    f"± {aggregated_result['mean_contact_fraction_sem']:.1%}"
-)
+for observable in aggregate["payload"]["observables"]:
+    if observable["kind"] == "profile":
+        continue
+    print(
+        f"{observable['name']}: {observable['mean']:.3g} {observable['unit']}"
+        f" (n={observable['n_replicates']})"
+    )
 ```
 
-For complete contacts configuration, output, plotting, and troubleshooting
-details, use {doc}`../reference/analysis_contacts_reference`.
+The per-residue profiles and the per-frame series are in
+`run_<replicate>/observables.npz`, and the contact events are in
+`run_<replicate>/sidecars/contact_events.npz` under the key `contact_events`.
 
 ## Compare conditions
-
-Use the same comparison workflow as other stable analyses:
 
 ```bash
 polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
 ```
 
-The plugin compares conditions with dual primary metrics:
-
-- coverage
-- mean contact fraction
-
-For multi-plugin comparison workflow details, see
+Every scalar observable is tested against the control condition on
+replicate-level values, and every test in the run shares one Benjamini-Hochberg
+family. For multi-plugin comparison workflow details, see
 {doc}`analysis_compare_conditions`.
 
 ## Reference and troubleshooting
 
-For complete lookup documentation, including:
-
-- full configuration field tables
-- output directory structure and JSON schemas
-- full plot catalog and `plot_settings.contacts` options
-- common CLI options
-- troubleshooting fixes
-
-see {doc}`../reference/analysis_contacts_reference`.
+For the settings tables, the observables, the output paths and the event table
+layout, see {doc}`../reference/analysis_contacts_reference`.
 
 ## Next steps
 

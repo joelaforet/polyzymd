@@ -310,26 +310,12 @@ What changes:
 - `highlight_residues` adds vertical markers at selected residue IDs
 - `figsize_*` controls profile and comparison figure sizes
 
-### Contacts example
+### Plugins without a plot settings block
 
-```yaml
-plot_settings:
-  style: "compact"
-  contacts:
-    generate_contact_fraction_profile: true
-    generate_residence_time_profile: true
-    generate_cf_by_aa_class_bars: true
-    generate_cf_by_partition_bars: true
-    figsize_contact_fraction_profile: [16, 5]
-    show_contact_fraction_profile_error: true
-    highlight_residues: [77, 133, 156]
-```
-
-What changes:
-
-- `generate_*` flags turn specific plot families on/off
-- `figsize_contact_fraction_profile` sets profile dimensions
-- `show_contact_fraction_profile_error` toggles profile error bands
+`contacts` and the other plugins written against the observable contract take
+no `plot_settings` block. Their figures come from the observable kind, so the
+global settings above are all that apply to them. A block naming one of them is
+ignored with a warning and rejected in v1.4.
 
 ## Re-generating plots after changing settings
 

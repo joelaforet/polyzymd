@@ -451,6 +451,27 @@ class TestUnknownAnalysisDiagnostics:
         assert "discovered analysis type with PlotSettingsModel" in message
         assert "feature/mda-analysis-migration" not in message
 
+    def test_plot_settings_for_a_contract_analysis_is_ignored(self, tmp_path: Path) -> None:
+        """A campaign file keeps loading after its plugin drops its plot settings."""
+        yaml_path = tmp_path / "comparison.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "contract-plot-test",
+                    "conditions": [
+                        {"label": "A", "config": "/fake/a.yaml", "replicates": [1]},
+                    ],
+                    "plugins": {},
+                    "plot_settings": {"contacts": {"generate_contact_fraction_profile": True}},
+                }
+            )
+        )
+
+        with pytest.warns(UserWarning, match="without a PlotSettingsModel"):
+            config = ComparisonConfig.from_yaml(yaml_path)
+
+        assert "contacts" not in (config.plot_settings.model_extra or {})
+
 
 class TestPluginSettingsCanonicalNames:
     """Plugin settings should use canonical analysis names only."""

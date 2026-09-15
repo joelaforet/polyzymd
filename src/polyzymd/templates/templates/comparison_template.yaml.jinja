@@ -121,24 +121,9 @@ plugins:
   #   polymer_selection: "chainID C"
   #   protein_selection: "protein"
   #   cutoff: 4.5
-  #   grouping: "aa_class"  # aa_class, secondary_structure, or none
-  #   compute_residence_times: true
-  #   # Custom protein groups (residue IDs from your enzyme):
-  #   # protein_groups:
-  #   #   catalytic_triad: [77, 133, 156]
-  #   #   lid_helix_5: [141, 142, 143, 144, 145]
-  #   #   lid_helix_10: [281, 282, 283, 284, 285]
-  #   #
-  #   # User-defined partitions for contact-fraction and residence-time plots
-  #   # --------------------------------------------------------------------
-  #   # Groups within a partition MUST be mutually exclusive (no overlapping
-  #   # residues). A rest group is automatically added if the groups do not
-  #   # cover all residues represented in the contact aggregate.
-  #   #
-  #   # protein_partitions:
-  #   #   lid_helices:          # partition name (becomes plot title)
-  #   #     - lid_helix_5       # must be defined in protein_groups above
-  #   #     - lid_helix_10
+  #   # heavy_atoms_only: false  # true excludes hydrogens from the cutoff
+  #   # polymer_types: ["SBM"]   # restrict the polymer to these residue names
+  #   # residence_time_edges_ns: [0.0, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56]
 
   # Hydrogen-bond Analysis
   #
@@ -302,14 +287,6 @@ plot_settings:
   #   show_threshold: true         # threshold line on distributions
   #   use_kde: true                # KDE vs histogram
   #   generate_state_bars: true    # per-pair above/below threshold bars
-
-  # contacts:
-  #   generate_contact_fraction_profile: true
-  #   generate_residence_time_profile: true
-  #   generate_cf_by_aa_class_bars: true
-  #   generate_cf_by_partition_bars: true
-  #   generate_rt_by_aa_class_bars: true
-  #   generate_rt_by_partition_bars: true
 
   # secondary_structure:
   #   generate_timeline: true      # per-condition residue × time SS heatmap
