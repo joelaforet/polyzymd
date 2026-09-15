@@ -363,6 +363,39 @@ class FrameSelection:
             kwargs["step"] = _normalize_scalar_value(self.step)
         return kwargs
 
+    def frame_indices(self, n_frames_total: int) -> list[int]:
+        """Trajectory frame numbers this selection reads, in order.
+
+        A plugin that hands the window straight to an MDAnalysis analysis gets
+        the frame numbers back from it. One that has to label its own results,
+        or that short-circuits before running anything, needs them without
+        touching the trajectory.
+
+        Parameters
+        ----------
+        n_frames_total : int
+            Length of the trajectory, used to close an open-ended window and to
+            clip one that runs past the end.
+
+        Returns
+        -------
+        list[int]
+            Selected frame numbers, taken from the explicit selector when one
+            is set and from the start, stop and step otherwise. A boolean mask
+            selects the frames whose entry is true. A slice window is clipped
+            to the trajectory, so a window past the end is empty rather than
+            naming frames that do not exist.
+        """
+        if self.frames is not None:
+            values = _normalize_frame_selector_values(self.frames)
+            if values and all(isinstance(value, bool) for value in values):
+                return [index for index, flag in enumerate(values) if flag]
+            return [int(value) for value in values]
+        total = int(n_frames_total)
+        start = max(0, min(total, 0 if self.start is None else int(self.start)))
+        stop = max(0, min(total, total if self.stop is None else int(self.stop)))
+        return list(range(start, stop, 1 if self.step is None else int(self.step)))
+
     @classmethod
     def from_trajectory_window(cls, window: TrajectoryWindow) -> FrameSelection:
         """Build a frame selection from a resolved PolyzyMD trajectory window.

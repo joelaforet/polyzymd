@@ -345,7 +345,7 @@ Common next additions to `comparison.yaml` are:
 - `distances` for custom atom-pair distances
 - `catalytic_triad` for active-site geometry
 - `secondary_structure` for helix/strand persistence and content
-- `hydrogen_bonds` for hydrogen-bond occupancy and lifetime summaries
+- `hydrogen_bonds` for hydrogen-bond counts per partition and residue-pair occupancy
 
 For end-to-end examples, see:
 

@@ -175,7 +175,43 @@ def _require_matplotlib(feature_name: str = "plotting") -> None:
         ) from None
 
 
-def _canonical_element_symbol(value: object) -> str | None:
+def element_spellings(universe: object, symbols: Sequence[str]) -> list[str] | None:
+    """Spellings a topology uses for the requested canonical element symbols.
+
+    MDAnalysis matches an ``element`` selection literally, so a topology that
+    writes ``CL`` is not matched by ``element Cl``. This maps canonical symbols
+    onto the tokens the topology actually carries, in the order the symbols
+    were asked for, so a caller can build a selection string from them.
+
+    Parameters
+    ----------
+    universe : object
+        MDAnalysis universe, or any object exposing ``atoms.elements``.
+    symbols : Sequence[str]
+        Canonical element symbols, for example ``("N", "O")``.
+
+    Returns
+    -------
+    list[str] or None
+        Tokens the topology carries for those symbols, empty when it carries
+        none of them, and ``None`` when it has no usable element metadata at
+        all. The two cases need different errors, so they are kept apart.
+    """
+    try:
+        carried = [str(element).strip() for element in universe.atoms.elements]
+    except (AttributeError, TypeError):
+        return None
+    if not carried or not all(carried):
+        return None
+    by_symbol: dict[str, set[str]] = {}
+    for token in set(carried):
+        symbol = canonical_element_symbol(token)
+        if symbol is not None:
+            by_symbol.setdefault(symbol, set()).add(token)
+    return [token for symbol in symbols for token in sorted(by_symbol.get(symbol, set()))]
+
+
+def canonical_element_symbol(value: object) -> str | None:
     """Return a canonical element symbol for an unambiguous token.
 
     Parameters
@@ -219,7 +255,7 @@ def _context_allows_type_element(symbol: str, name: object, resname: object | No
     """
 
     name_token = str(name).strip().upper()
-    name_symbol = _canonical_element_symbol(name_token)
+    name_symbol = canonical_element_symbol(name_token)
     residue = str(resname).strip().upper().rstrip("+-") if resname is not None else ""
     if (
         len(name_token) == 2
@@ -269,7 +305,7 @@ def _infer_elements_from_atom_types(universe: Any) -> tuple[list[str] | None, st
     for index, (atom_type, name, resname) in enumerate(
         zip(atom_types, names, resnames, strict=True)
     ):
-        symbol = _canonical_element_symbol(atom_type)
+        symbol = canonical_element_symbol(atom_type)
         if symbol is None:
             return None, f"atom type {atom_type!r} is not element-like"
         if not _context_allows_type_element(symbol, name, resname):
@@ -314,19 +350,19 @@ def _infer_element_from_atom_name(name: object, resname: object | None = None) -
             return name_element
         return None
     if base_token in {"CL", "BR"}:
-        return _canonical_element_symbol(base_token)
+        return canonical_element_symbol(base_token)
     if (
         len(base_token) == 2
         and base_token == token
         and residue not in _STANDARD_BIOMOLECULAR_RESIDUES
-        and _canonical_element_symbol(base_token)
+        and canonical_element_symbol(base_token)
     ):
         return None
     if (
         has_numeric_suffix
         and len(base_token) == 2
         and residue not in _STANDARD_BIOMOLECULAR_RESIDUES
-        and _canonical_element_symbol(base_token)
+        and canonical_element_symbol(base_token)
     ):
         return None
     if token in _COMMON_ION_ELEMENTS and token != "CA" and not residue:

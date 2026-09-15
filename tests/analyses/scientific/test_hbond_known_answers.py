@@ -1,4 +1,4 @@
-"""Known-answer tests for hydrogen-bond donor and acceptor definitions.
+"""Known-answer tests for the hydrogen-bond plugin.
 
 The reference system holds three isolated donor-hydrogen-acceptor triads that
 share the same geometry (donor-acceptor distance 2.9 A, D-H...A angle 170
@@ -6,7 +6,8 @@ degrees), plus a fourth triad whose C-H carbon carries a bonded nitrogen. Only
 the N-H...O triad is a hydrogen bond under the IUPAC definition; the C-H...O and
 N-H...C triads are contacts that carry no electronegative partner on one side,
 and the fourth triad checks that the nitrogen next to a C-H is not paired with
-that hydrogen.
+that hydrogen. The same system also checks the settings model, the empty-group
+paths and the shape of the occupancy profile.
 
 References
 ----------
@@ -26,9 +27,9 @@ import math
 import numpy as np
 import pytest
 
-from polyzymd.analyses.exceptions import SelectionError
-from polyzymd.analyses.hydrogen_bonds import HydrogenBondSettings
-from polyzymd.analyses.hydrogen_bonds._mda import HydrogenBondMDAAnalysis
+from polyzymd.analyses.exceptions import ReplicateError, SelectionError
+from polyzymd.analyses.hydrogen_bonds import HydrogenBonds, HydrogenBondSettings
+from polyzymd.analyses.mda.frame_selection import FrameSelection
 
 mda = pytest.importorskip("MDAnalysis")
 
@@ -142,154 +143,123 @@ def _build_triad_universe() -> "mda.Universe":
     return universe
 
 
-def _run_plugin_analysis(settings: HydrogenBondSettings) -> tuple[np.ndarray, "mda.Universe"]:
-    """Run the plugin's MDAnalysis hydrogen-bond job on the reference system.
+def _run(settings: HydrogenBondSettings, universe: "mda.Universe | None" = None) -> tuple:
+    """Run the plugin on the reference system.
 
-    Parameters
-    ----------
-    settings : HydrogenBondSettings
-        Plugin settings under test.
-
-    Returns
-    -------
-    tuple[numpy.ndarray, MDAnalysis.Universe]
-        Normalized hydrogen-bond event array and the universe it came from.
+    Returns the observables keyed by name, the raw event table and the universe
+    the events index into.
     """
-
-    universe = _build_triad_universe()
-    analysis = HydrogenBondMDAAnalysis(
-        universe=universe,
-        settings=settings,
-        condition_label="known_answer",
-        replicate=1,
-        raw_timestep_ps=1.0,
+    universe = _build_triad_universe() if universe is None else universe
+    observables, sidecars = HydrogenBonds().compute(
+        universe, FrameSelection(start=0, stop=N_FRAMES, step=1), settings
     )
-    analysis.run(start=0, stop=N_FRAMES, step=1)
-    return np.asarray(analysis.results.hbonds), universe
+    return (
+        {observable.name: observable for observable in observables},
+        sidecars["hydrogen_bond_events"],
+        universe,
+    )
 
 
 def test_only_electronegative_donor_acceptor_pairs_count() -> None:
     """Exactly one N-H...O hydrogen bond is found in each frame."""
-
-    events, universe = _run_plugin_analysis(HydrogenBondSettings())
+    observables, events, universe = _run(HydrogenBondSettings())
 
     assert events.shape[0] == N_FRAMES
-    frames = sorted(int(row[0]) for row in events)
-    assert frames == list(range(N_FRAMES))
-
-    donor_elements = {universe.atoms[int(row[1])].element for row in events}
-    acceptor_elements = {universe.atoms[int(row[3])].element for row in events}
-    assert donor_elements == {"N"}
-    assert acceptor_elements == {"O"}
+    assert sorted(int(row[0]) for row in events) == list(range(N_FRAMES))
+    assert {universe.atoms[int(row[1])].element for row in events} == {"N"}
+    assert {universe.atoms[int(row[3])].element for row in events} == {"O"}
+    counts = observables["hbonds_protein_polymer"]
+    assert counts.unit == "count"
+    assert counts.values == [1.0] * N_FRAMES
 
 
 def test_sulfur_can_be_added_to_donor_acceptor_elements() -> None:
     """Adding an element widens the donor and acceptor sets without changing N-H...O."""
-
-    events, universe = _run_plugin_analysis(
-        HydrogenBondSettings(donor_acceptor_elements=("N", "O", "S"))
-    )
+    _, events, universe = _run(HydrogenBondSettings(donor_acceptor_elements=("N", "O", "S")))
 
     assert events.shape[0] == N_FRAMES
     assert {universe.atoms[int(row[1])].element for row in events} == {"N"}
 
 
-def test_selection_strings_are_recorded_in_the_plan() -> None:
-    """The plan records the donor, acceptor, and hydrogen selections it used."""
+def test_the_pair_profile_ranks_the_one_bonded_pair_first() -> None:
+    """The occupancy profile names the bonded residue pair at rank zero."""
+    observables, _, _ = _run(HydrogenBondSettings(top_n_pairs=3))
 
-    universe = _build_triad_universe()
-    analysis = HydrogenBondMDAAnalysis(
-        universe=universe,
-        settings=HydrogenBondSettings(),
-        condition_label="known_answer",
-        replicate=1,
-        raw_timestep_ps=1.0,
-    )
-    analysis.run(start=0, stop=N_FRAMES, step=1)
-
-    assert analysis.plan is not None
-    assert analysis.plan.donors_selection_string.endswith("element N O")
-    assert analysis.plan.acceptors_selection_string == analysis.plan.donors_selection_string
-    assert analysis.plan.hydrogens_selection_string.endswith("(element H)")
+    profile = observables["pair_occupancy_protein_polymer"]
+    assert profile.index == [0.0, 1.0, 2.0]
+    assert profile.index_label == "occupancy rank"
+    assert profile.values == [1.0, 0.0, 0.0]
+    assert profile.metadata["pair_labels"][0] == "DON1(A)-ACC2(C)"
+    assert profile.metadata["pair_labels"][1:] == ["", ""]
+    assert profile.metadata["n_pairs_observed"] == 1
 
 
 def test_missing_elements_raise_instead_of_widening_the_selection() -> None:
     """A universe without element metadata fails instead of admitting carbon."""
-
     universe = _build_triad_universe()
     universe.del_TopologyAttr("elements")
-    analysis = HydrogenBondMDAAnalysis(
-        universe=universe,
-        settings=HydrogenBondSettings(hydrogens_selection="name H*"),
-        condition_label="known_answer",
-        replicate=1,
-        raw_timestep_ps=1.0,
-    )
 
     with pytest.raises(SelectionError, match="could not read element metadata"):
-        analysis.run(start=0, stop=N_FRAMES, step=1)
+        _run(HydrogenBondSettings(hydrogens_selection="name H*"), universe)
 
 
 def test_donor_acceptor_selection_without_matching_atoms_raises() -> None:
     """Configuring an element the system does not carry is an error, not a zero."""
-
-    universe = _build_triad_universe()
-    analysis = HydrogenBondMDAAnalysis(
-        universe=universe,
-        settings=HydrogenBondSettings(donor_acceptor_elements=("S",)),
-        condition_label="known_answer",
-        replicate=1,
-        raw_timestep_ps=1.0,
-    )
-
     with pytest.raises(SelectionError, match="none of the configured donor and acceptor"):
-        analysis.run(start=0, stop=N_FRAMES, step=1)
+        _run(HydrogenBondSettings(donor_acceptor_elements=("S",)))
 
 
 def test_donor_acceptor_selection_empty_within_groups_raises() -> None:
     """An element present elsewhere but absent from the groups is also an error."""
-
-    universe = _build_triad_universe()
-    analysis = HydrogenBondMDAAnalysis(
-        universe=universe,
-        settings=HydrogenBondSettings(
-            groups={"protein": "resname ACC", "polymer": "resname ACC"},
-            donor_acceptor_elements=("N",),
-        ),
-        condition_label="known_answer",
-        replicate=1,
-        raw_timestep_ps=1.0,
-    )
-
     with pytest.raises(SelectionError, match="matched no atoms"):
-        analysis.run(start=0, stop=N_FRAMES, step=1)
+        _run(
+            HydrogenBondSettings(
+                groups={"protein": "resname ACC", "polymer": "resname ACC"},
+                donor_acceptor_elements=("N",),
+            )
+        )
 
 
 def test_donor_acceptor_selection_empty_is_skippable() -> None:
-    """The permissive setting turns the empty selection into zero summaries."""
-
-    universe = _build_triad_universe()
-    analysis = HydrogenBondMDAAnalysis(
-        universe=universe,
-        settings=HydrogenBondSettings(
+    """The permissive setting turns the empty selection into zero counts."""
+    observables, events, _ = _run(
+        HydrogenBondSettings(
             groups={"protein": "resname ACC", "polymer": "resname ACC"},
             donor_acceptor_elements=("N",),
             allow_empty_groups=True,
-        ),
-        condition_label="known_answer",
-        replicate=1,
-        raw_timestep_ps=1.0,
+        )
     )
-    analysis.run(start=0, stop=N_FRAMES, step=1)
 
-    assert analysis.plan is not None
-    assert analysis.results.hbonds.shape[0] == 0
-    assert any("matched no atoms" in warning for warning in analysis.plan.warnings)
+    assert events.shape == (0, 6)
+    assert observables["hbonds_protein_polymer"].values == [0.0] * N_FRAMES
+
+
+def test_an_empty_group_raises_unless_it_is_allowed() -> None:
+    """A group selection that matches nothing names itself in the error."""
+    with pytest.raises(SelectionError, match=r"groups \['polymer'\] matched no atoms"):
+        _run(HydrogenBondSettings(groups={"protein": "chainid A", "polymer": "chainid Z"}))
+
+
+def test_retired_settings_are_accepted_with_a_warning() -> None:
+    """A comparison file that still sets composition loads and ignores it."""
+    with pytest.warns(UserWarning, match="composition"):
+        settings = HydrogenBondSettings.model_validate(
+            {"composition": {"partitions": {"protein": "protein"}}, "timestep_ps": 40.0}
+        )
+
+    assert not hasattr(settings, "composition")
+
+
+def test_a_summary_naming_an_undefined_group_is_rejected() -> None:
+    """The settings model refuses a summary whose group does not exist."""
+    with pytest.raises(ValueError, match="undefined groups"):
+        HydrogenBondSettings.model_validate(
+            {"groups": {"protein": "protein"}, "summaries": {"x": {"between": ["protein", "gone"]}}}
+        )
 
 
 def test_uppercase_element_spelling_is_matched() -> None:
     """A topology spelling chlorine as CL is matched despite the canonical Cl."""
-
     universe = mda.Universe.empty(
         n_atoms=3,
         n_residues=2,
@@ -305,15 +275,55 @@ def test_uppercase_element_spelling_is_matched() -> None:
     positions = _triad_positions(np.zeros(3)).astype(np.float32)
     universe.load_new(np.repeat(positions[np.newaxis, :, :], N_FRAMES, axis=0), order="fac")
 
-    analysis = HydrogenBondMDAAnalysis(
-        universe=universe,
-        settings=HydrogenBondSettings(donor_acceptor_elements=("N", "Cl")),
-        condition_label="known_answer",
-        replicate=1,
-        raw_timestep_ps=1.0,
-    )
-    analysis.run(start=0, stop=N_FRAMES, step=1)
+    _, events, _ = _run(HydrogenBondSettings(donor_acceptor_elements=("N", "Cl")), universe)
 
-    assert analysis.plan is not None
-    assert analysis.plan.donors_selection_string.endswith("element N CL")
-    assert analysis.results.hbonds.shape[0] == N_FRAMES
+    assert events.shape[0] == N_FRAMES
+
+
+def test_hydrogen_is_rejected_as_a_donor_acceptor_element() -> None:
+    """Listing H would make every hydrogen a donor and multiply the counts."""
+    with pytest.raises(ValueError, match="must not contain 'H'"):
+        HydrogenBondSettings(donor_acceptor_elements=("N", "O", "H"))
+
+
+def test_donor_acceptor_elements_are_canonicalised_and_deduplicated() -> None:
+    """A lowercase or repeated symbol is accepted and normalised, not passed through."""
+    settings = HydrogenBondSettings(donor_acceptor_elements=("n", "O", "N", "cl"))
+
+    assert settings.donor_acceptor_elements == ("N", "O", "Cl")
+
+
+def test_an_unknown_element_symbol_is_rejected_at_settings_time() -> None:
+    """A typo fails when the config is read, not after the trajectory is loaded."""
+    with pytest.raises(ValueError, match="not a known element symbol"):
+        HydrogenBondSettings(donor_acceptor_elements=("N", "Xx"))
+
+
+def test_an_empty_frame_window_raises_replicate_error() -> None:
+    """A window past the end of the trajectory is an error, not an empty series."""
+    universe = _build_triad_universe()
+    window = FrameSelection(start=N_FRAMES + 1, stop=N_FRAMES + 2, step=1)
+
+    assert window.frame_indices(N_FRAMES) == []
+    with pytest.raises(ReplicateError, match="contains no frames"):
+        HydrogenBonds().compute(universe, window, HydrogenBondSettings())
+
+
+def test_the_event_sidecar_carries_its_column_names() -> None:
+    """The raw table is written beside the names of its six columns."""
+    _, sidecars = HydrogenBonds().compute(
+        _build_triad_universe(),
+        FrameSelection(start=0, stop=N_FRAMES, step=1),
+        HydrogenBondSettings(),
+    )
+
+    columns = [str(name) for name in sidecars["hydrogen_bond_event_columns"]]
+    assert columns == [
+        "frame",
+        "donor",
+        "hydrogen",
+        "acceptor",
+        "distance_angstrom",
+        "angle_degree",
+    ]
+    assert sidecars["hydrogen_bond_events"].shape[1] == len(columns)

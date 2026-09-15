@@ -104,7 +104,7 @@ shared-utility autodoc blocks.
 |-------------|----------------|-------------------------|------------------|
 | `contacts` | `polyzymd.analyses.contacts` | Contact-event artifacts and sidecars | Custom comparison |
 | `distances` | `polyzymd.analyses.distances` | Pair-distance artifacts | Custom comparison |
-| `hydrogen_bonds` | `polyzymd.analyses.hydrogen_bonds` | Hydrogen-bond event artifacts | Custom comparison |
+| `hydrogen_bonds` | `polyzymd.analyses.hydrogen_bonds` | Observable artifacts, an NPZ sidecar and the raw event table | Observable contract |
 | `rmsd` | `polyzymd.analyses.rmsd` | Per-run RMSD artifacts | Custom multi-run comparison |
 | `rg` | `polyzymd.analyses.rg` | Per-run radius-of-gyration artifacts | Custom multi-run comparison |
 | `rmsf` | `polyzymd.analyses.rmsf` | Per-residue profile artifacts | Default scalar comparison |

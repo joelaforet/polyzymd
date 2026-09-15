@@ -203,47 +203,38 @@ DSSP requires complete residues; do not use CA-only selections such as
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `groups` | `dict[str, str]` | `{protein: "chainid A", polymer: "chainid C"}` | Named MDAnalysis selections used by summaries |
-| `summaries` | `list[HydrogenBondSummarySettings]` | `[{name: protein_polymer, between: [protein, polymer]}]` | Summary definitions to compute |
-| `distance_cutoff` | `float` | `3.0` | Donor-acceptor cutoff (Å) |
+| `groups` | `dict[str, str]` | `{protein: "chainid A", polymer: "chainid C"}` | Named MDAnalysis selections the summaries read |
+| `summaries` | `list[HydrogenBondSummarySettings]` or mapping | `[{name: protein_polymer, between: [protein, polymer]}]` | Partitions to report; a mapping uses its keys as names |
+| `distance_cutoff` | `float` | `3.0` | Donor-acceptor cutoff (A) |
 | `angle_cutoff` | `float` | `150.0` | D-H...A angle cutoff (degrees) |
-| `update_selections` | `bool` | `true` | Re-evaluate selections each frame |
-| `top_n_pairs` | `int` | `15` | Number of top residue pairs reported |
-| `allow_empty_groups` | `bool` | `false` | Raise `SelectionError` on an empty group; set `true` to warn and skip instead |
-| `donor_acceptor_elements` | `tuple[str, ...]` | `["N", "O"]` | Elements allowed to act as donors and acceptors |
-| `allow_overlapping_composition` | `bool` | `false` | Allow overlapping composition partitions (otherwise raise) |
-| `composition` | `HydrogenBondCompositionSettings \| null` | `null` | Optional partitioning for composition analysis |
-| `hydrogens_selection` | `str \| null` | `null` | Advanced explicit-hydrogen selection override for unusual atom names |
-| `timestep_ps` | `float \| null` | `null` | Optional timestep override (ps) for time-axis plots |
-
-Time-axis plots assume uniformly saved frames. PolyzyMD maps frame index to time
-as `frame_index * timestep_ps`; variable-timestep concatenated trajectories are
-not supported.
+| `donor_acceptor_elements` | `tuple[str, ...]` | `["N", "O"]` | Elements allowed to donate and accept; capitalized and de-duplicated, `H` and unknown symbols rejected |
+| `update_selections` | `bool` | `true` | Re-evaluate MDAnalysis's donor, hydrogen and acceptor selections each frame; group membership is always fixed at the start of the window |
+| `allow_empty_groups` | `bool` | `false` | Raise `SelectionError` on an empty group; set `true` to report its summaries as zero |
+| `top_n_pairs` | `int` | `15` | Residue pairs kept in each occupancy profile |
+| `hydrogens_selection` | `str \| null` | `null` | Override for the hydrogen selection; `element H` by default |
+| `composition` | mapping or `null` | `null` | Deprecated since v1.3 and ignored; query the event sidecar instead |
+| `allow_overlapping_composition` | `bool` | `false` | Deprecated since v1.3 and ignored, with `composition` |
+| `timestep_ps` | `float \| null` | `null` | Deprecated since v1.3 and ignored; the framework resolves the window |
 
 `HydrogenBondSummarySettings` entries in `summaries`:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `name` | `str` | required | Unique summary name |
+| `name` | `str` | required | Unique summary name; a mapping-form summary takes its key |
 | `between` | `tuple[str, str] \| null` | `null` | Cross-group summary mode |
 | `within` | `str \| null` | `null` | Intra-group summary mode |
 
-Exactly one of `between` or `within` must be set for each summary.
+Exactly one of `between` or `within` must be set for each summary, and every
+group a summary names must be defined in `groups`.
 
 Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` and requires explicit
 hydrogens and element metadata. Donors and acceptors are
 `(<group union>) and element <donor_acceptor_elements>` and hydrogens are
-`(<group union>) and (element H)`. PolyzyMD infers missing elements for GRO-like
-topologies when atom types or atom names are conservative enough. If elements
-remain unavailable, or if the donor and acceptor selection matches no atoms, the
-plugin raises `SelectionError` unless `allow_empty_groups` is true. Set
+`(<group union>) and (element H)`. The trajectory loader infers elements for
+GRO-like topologies that carry only atom types or atom names; a topology where
+elements remain unavailable raises `SelectionError` rather than widening the
+selection to every atom. Set
 `hydrogens_selection` only for unusual explicit-hydrogen naming schemes.
-
-`HydrogenBondCompositionSettings`:
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `partitions` | `dict[str, str]` | `{}` | Named composition partitions as MDAnalysis selections |
 
 ## `rg`
 

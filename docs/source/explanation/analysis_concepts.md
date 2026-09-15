@@ -151,7 +151,7 @@ The available plugins are:
 | `catalytic_triad` | Catalytic triad geometry (active-site distances) |
 | `secondary_structure` | Secondary structure content (helix, sheet, coil fractions) |
 | `sasa` | Solvent-accessible surface area |
-| `hydrogen_bonds` | Hydrogen bond occupancy and lifetimes |
+| `hydrogen_bonds` | Hydrogen bond counts per partition and residue-pair occupancy |
 
 Each plugin has a `Settings` model with configurable parameters. Most
 parameters have sensible defaults, so you often just need `plugin_name: {}` in
