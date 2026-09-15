@@ -103,12 +103,14 @@ figures always use the default.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `selection` | `str` | `"protein and name CA"` | MDAnalysis selection used for RMSF calculation |
+| `selection` | `str` | `"protein and name CA"` | MDAnalysis selection whose residues carry the profile |
+| `alignment_selection` | `str` | `"protein and name CA"` | Selection superposed before the fluctuation is measured |
+| `centroid_selection` | `str` | `"protein"` | Selection used to pick the representative frame in centroid mode |
 | `reference_mode` | `str` | `"centroid"` | Reference mode: `centroid`, `average`, `frame`, or `external` |
 | `reference_frame` | `int \| null` | `null` | Frame number used when `reference_mode: frame` (1-indexed) |
-| `reference_file` | `str \| null` | `null` | External PDB path used when `reference_mode: external` |
-| `alignment_selection` | `str` | `"protein and name CA"` | Selection used for trajectory alignment |
-| `centroid_selection` | `str` | `"protein"` | Selection used to find centroid frame |
+| `reference_file` | `str \| null` | `null` | External structure path used when `reference_mode: external` |
+
+`rmsf` has no plot settings model.
 
 ## `catalytic_triad`
 

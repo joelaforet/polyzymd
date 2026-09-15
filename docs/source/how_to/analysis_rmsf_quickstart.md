@@ -54,10 +54,14 @@ RMSF reports per-residue flexibility plus condition-level summary statistics.
 
 | Output | Use |
 |--------|-----|
-| Mean RMSF ± SEM | Compare overall flexibility between conditions |
-| Per-residue RMSF profile | Find flexible loops and rigid core regions |
-| Pairwise statistics | Quantify condition differences |
-| Ranking | Order conditions by stability (lower RMSF first) |
+| `rmsf_mean` with SEM and 95 percent interval across replicates | Compare overall flexibility between conditions |
+| The `rmsf` profile, one value per residue | Find flexible loops and rigid core regions |
+| Pairwise tests on `rmsf_mean` | Quantify condition differences |
+
+In `reference_mode: external` a second profile,
+`rmsd_about_reference_per_residue`, reports the deviation from the reference
+structure. Figures are not produced yet; see
+{doc}`../reference/analysis_rmsf_reference`.
 
 ## Set up `comparison.yaml`
 
@@ -102,9 +106,9 @@ polyzymd compare run-all -f comparison.yaml --eq-time 10ns --plot
 
 By default, `compare run rmsf` produces:
 
-- Condition means with SEM
-- Pairwise tests and effect sizes
-- Ranking (lowest RMSF = most stable)
+- The mean of `rmsf_mean` per condition with its SEM and 95 percent interval
+- Pairwise tests and effect sizes on `rmsf_mean`, adjusted across the run
+- The per-residue `rmsf` profile with a per-residue SEM across replicates
 
 Example:
 
@@ -204,8 +208,9 @@ pipeline_result = run_comparison(
     equilibration="10ns",
 )
 
-result = pipeline_result["comparison"]
-print(result.ranking)
+artifact = pipeline_result["comparison"]
+for comparison in artifact.payload["comparisons"]:
+    print(comparison["name"], comparison["delta"], comparison["p_adjusted"])
 print(pipeline_result["comparison_path"])
 ```
 
@@ -213,7 +218,7 @@ print(pipeline_result["comparison_path"])
 
 - Full settings tables: {doc}`../reference/analysis_rmsf_reference`
 - Output file tree and JSON schemas: {doc}`../reference/analysis_rmsf_reference`
-- Plot types and plot settings: {doc}`../reference/analysis_rmsf_reference`
+- Observables, artifact fields and figures: {doc}`../reference/analysis_rmsf_reference`
 - CLI options and troubleshooting: {doc}`../reference/analysis_rmsf_reference`
 - Statistical interpretation: {doc}`../explanation/analysis_rmsf_best_practices`
 - Reference mode guidance: {doc}`../explanation/analysis_reference_selection`

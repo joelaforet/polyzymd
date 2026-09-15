@@ -107,7 +107,7 @@ shared-utility autodoc blocks.
 | `hydrogen_bonds` | `polyzymd.analyses.hydrogen_bonds` | Hydrogen-bond event artifacts | Custom comparison |
 | `rmsd` | `polyzymd.analyses.rmsd` | Per-run RMSD artifacts | Custom multi-run comparison |
 | `rg` | `polyzymd.analyses.rg` | Per-run radius-of-gyration artifacts | Custom multi-run comparison |
-| `rmsf` | `polyzymd.analyses.rmsf` | Per-residue profile artifacts | Default scalar comparison |
+| `rmsf` | `polyzymd.analyses.rmsf` | `rmsf` profile and `rmsf_mean` observables | Observable contract |
 | `sasa` | `polyzymd.analyses.sasa` | SASA artifacts and sidecars | Custom multi-run comparison |
 | `catalytic_triad` | `polyzymd.analyses.catalytic_triad` | Pair-distance-derived artifacts | Default scalar comparison |
 | `secondary_structure` | `polyzymd.analyses.secondary_structure` | Secondary-structure matrix artifacts | Default scalar comparison |

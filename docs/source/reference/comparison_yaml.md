@@ -466,14 +466,9 @@ then any values under `theme:` override individual fields.
 Per-analysis plot customization keys go under `plot_settings:` at the same
 level as `style`, `dpi`, etc.
 
-**`plot_settings.rmsf`:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `show_error` | `true` | Show SEM fill_between bands |
-| `highlight_residues` | `[]` | Residue IDs for vertical reference lines |
-| `figsize_profile` | `[14, 4]` | Per-residue profile figure size |
-| `figsize_comparison` | `[8, 6]` | Bar comparison figure size |
+`rmsf` has no plot settings. It is an observable-contract analysis, so its
+figures come from the framework; a `plot_settings.rmsf` block is accepted for
+one release with a `DeprecationWarning` and does nothing.
 
 **`plot_settings.catalytic_triad`:**
 

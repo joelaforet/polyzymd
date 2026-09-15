@@ -19,11 +19,12 @@ from polyzymd.analyses.contract import (
     aggregate_observables,
     compare_observables,
     reduce_observable,
+    reduce_replicate,
 )
 from polyzymd.analyses.contract_runner import contract_analysis
 from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.mda.artifacts import ComparisonArtifact, ConditionArtifact
-from polyzymd.analyses.rg_contract import Rg2Analysis, RgSettings
+from polyzymd.analyses.rg_contract import Rg2Analysis, RgContract, RgSettings
 from tests.analyses.conftest import make_simulation_config, make_synthetic_universe
 
 RG_SETTINGS = RgSettings(runs=[{"label": "protein", "selection": "all"}])
@@ -123,6 +124,81 @@ def test_profile_averages_each_index_across_replicates() -> None:
     assert aggregate.ci_method == "student_t"
     assert aggregate.coverage == pytest.approx(0.95)
     assert aggregate.mean is None
+
+
+def _profile(name: str, values: Any, **fields: Any) -> Observable:
+    """Build one profile observable indexed 1..n."""
+    return Observable(
+        name=name,
+        kind="profile",
+        unit="A",
+        values=values,
+        index=list(range(1, len(values) + 1)),
+        **fields,
+    )
+
+
+def test_a_profile_can_declare_a_scalar_mean_over_its_index() -> None:
+    """The declared reduction adds one scalar observable beside the profile."""
+    replicates = [
+        [_profile("rmsf", [1.0, 3.0], reduce="mean_over_index", reduced_kind="fluctuation")],
+        [_profile("rmsf", [3.0, 7.0], reduce="mean_over_index", reduced_kind="fluctuation")],
+    ]
+
+    aggregates = {aggregate.name: aggregate for aggregate in aggregate_observables(replicates)}
+
+    assert sorted(aggregates) == ["rmsf", "rmsf_mean"]
+    assert aggregates["rmsf_mean"].kind == "fluctuation"
+    assert aggregates["rmsf_mean"].unit == "A"
+    assert aggregates["rmsf_mean"].replicate_values == pytest.approx([2.0, 5.0])
+    assert aggregates["rmsf_mean"].mean == pytest.approx(3.5)
+
+
+def test_a_profile_can_declare_a_total_over_its_index() -> None:
+    """A sum is named for the operation and is not called a mean."""
+    replicates = [
+        [_profile("area", [1.0, 3.0], reduce="sum_over_index")],
+        [_profile("area", [2.0, 6.0], reduce="sum_over_index")],
+    ]
+
+    aggregates = {aggregate.name: aggregate for aggregate in aggregate_observables(replicates)}
+
+    assert sorted(aggregates) == ["area", "area_total"]
+    assert aggregates["area_total"].kind == "mean_of_timeseries"
+    assert aggregates["area_total"].replicate_values == pytest.approx([4.0, 8.0])
+
+
+def test_a_declared_scalar_keeps_the_frame_count_and_drops_the_diagnostics() -> None:
+    """The scalar counts the frames the profile came from, not its indices."""
+    profile = _profile(
+        "rmsf",
+        [1.0, 2.0, 3.0, 4.0],
+        n_frames=500,
+        reduce="mean_over_index",
+        reduced_kind="fluctuation",
+    )
+
+    estimates = reduce_replicate([profile])
+
+    assert [estimate.name for estimate in estimates] == ["rmsf", "rmsf_mean"]
+    assert estimates[1].value == pytest.approx(2.5)
+    assert estimates[1].n_frames == 500
+    assert estimates[1].statistical_inefficiency is None
+    assert estimates[1].n_eff is None
+
+
+def test_a_reduction_on_a_non_profile_is_rejected() -> None:
+    """Only a profile has an index to reduce over."""
+    with pytest.raises(ValueError, match="kind is not 'profile'"):
+        Observable(
+            name="x", kind="mean_of_timeseries", unit="A", values=[1.0], reduce="mean_over_index"
+        )
+
+
+def test_a_profile_cannot_reduce_to_a_profile() -> None:
+    """The scalar a profile declares is a scalar."""
+    with pytest.raises(ValueError, match="reduce a profile to a profile"):
+        _profile("x", [1.0], reduce="mean_over_index", reduced_kind="profile")
 
 
 def test_statistical_inefficiency_is_a_diagnostic_not_a_correction() -> None:
@@ -267,6 +343,81 @@ def test_runner_recomputes_when_an_input_file_changes(
     run_contract_analysis(
         Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path, inputs=OTHER_INPUTS
     )
+
+    assert marker.stat().st_mtime_ns != stamp
+
+
+def test_runner_recomputes_when_a_declared_settings_file_changes(
+    tmp_path: Path, run_contract_analysis: Any
+) -> None:
+    """A file the plugin names through identity_files is part of the identity.
+
+    The path does not change, only the contents, which is what happens when a
+    reference structure is regenerated in place.
+    """
+    reference = tmp_path / "reference.pdb"
+    reference.write_text("first", encoding="utf-8")
+
+    class _WithFile(RgContract):
+        name = "rg_with_file"
+
+        @staticmethod
+        def identity_files(settings: Any) -> tuple[Path, ...]:
+            del settings
+            return (reference,)
+
+    analysis_cls = contract_analysis(_WithFile)
+    run_contract_analysis(analysis_cls, RG_SETTINGS, _scaled_universes, root=tmp_path)
+    marker = tmp_path / "analysis" / "A" / "rg_with_file" / "run_1" / "observables.npz"
+    stamp = marker.stat().st_mtime_ns
+
+    run_contract_analysis(analysis_cls, RG_SETTINGS, _scaled_universes, root=tmp_path)
+    assert marker.stat().st_mtime_ns == stamp
+
+    reference.write_text("second, longer contents", encoding="utf-8")
+    run_contract_analysis(analysis_cls, RG_SETTINGS, _scaled_universes, root=tmp_path)
+
+    assert marker.stat().st_mtime_ns != stamp
+
+
+def test_runner_records_a_declared_settings_file_that_is_missing(
+    tmp_path: Path, run_contract_analysis: Any
+) -> None:
+    """A file that is absent is recorded as absent, so creating it invalidates."""
+
+    class _WithMissingFile(RgContract):
+        name = "rg_missing_file"
+
+        @staticmethod
+        def identity_files(settings: Any) -> tuple[Path, ...]:
+            del settings
+            return (tmp_path / "not_here.pdb",)
+
+    aggregate = run_contract_analysis(
+        contract_analysis(_WithMissingFile), RG_SETTINGS, _scaled_universes, root=tmp_path
+    )
+
+    identity = aggregate.provenance["identity"]
+    assert identity["settings_files"] == [{"path": str(tmp_path / "not_here.pdb"), "missing": True}]
+
+
+def test_runner_recomputes_when_the_plugin_source_changes(
+    tmp_path: Path, run_contract_analysis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fix inside the plugin invalidates every replicate it already wrote.
+
+    This is what keeps a corrected estimator from being averaged with numbers
+    the superseded one produced, without a hand-maintained version key in the
+    plugin.
+    """
+    import polyzymd.analyses.contract_runner as runner
+
+    run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+    marker = tmp_path / "analysis" / "A" / "rg2" / "run_1" / "observables.npz"
+    stamp = marker.stat().st_mtime_ns
+
+    monkeypatch.setattr(runner, "_code_hash", lambda plugin: "a different plugin")
+    run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
 
     assert marker.stat().st_mtime_ns != stamp
 

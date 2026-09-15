@@ -31,7 +31,7 @@ from polyzymd.analyses.contract import (
     ObservableEstimate,
     aggregate_observables,
     compare_observables,
-    reduce_observable,
+    reduce_replicate,
 )
 from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.mda.artifacts import (
@@ -43,6 +43,7 @@ from polyzymd.analyses.mda.artifacts import (
 from polyzymd.analyses.mda.job import MDAAnalysisJob
 from polyzymd.analyses.mda.plugin import frame_selection_payload
 from polyzymd.analyses.mda.store import ArtifactStore
+from polyzymd.analyses.mda.universe import FileIdentity
 
 logger = logging.getLogger("polyzymd.analyses")
 
@@ -54,6 +55,7 @@ _CACHE_KEYS = (
     "config_hash",
     "equilibration",
     "inputs",
+    "settings_files",
 )
 
 
@@ -92,7 +94,7 @@ class ContractAnalysis(Analysis):
             observables = _validated(
                 self.plugin.compute(universe, ctx.frame_selection, ctx.settings)
             )
-            estimates = [reduce_observable(observable) for observable in observables]
+            estimates = reduce_replicate(observables)
             sidecar = ctx.artifact_store.write_npz_sidecar(
                 "observables.npz",
                 **{observable.name: observable.values for observable in observables},
@@ -342,6 +344,7 @@ class ContractAnalysis(Analysis):
             "config_hash": compute_config_hash(sim_config),
             "equilibration": equilibration,
             "inputs": inputs,
+            "settings_files": _settings_file_identity(self.plugin, settings),
         }
 
 
@@ -428,6 +431,30 @@ def _first_identity(results: Sequence[Any]) -> dict[str, Any]:
         if identity:
             return identity
     return {}
+
+
+def _settings_file_identity(plugin: Any, settings: BaseModel) -> list[dict[str, Any]]:
+    """File identity of the extra inputs a plugin's settings name.
+
+    A plugin whose answer depends on a file the framework does not load, such
+    as an external reference structure, declares
+    ``identity_files(settings) -> Sequence[Path]``. Those files join the
+    identity block, so replacing one invalidates the cached replicate exactly
+    as extending a trajectory does. A file that is missing is recorded as
+    missing rather than skipped, so it appearing later also invalidates.
+    """
+    declare = getattr(plugin, "identity_files", None)
+    if declare is None:
+        return []
+    entries: list[dict[str, Any]] = []
+    for path in declare(settings):
+        resolved = Path(path).expanduser()
+        entries.append(
+            FileIdentity.from_path(resolved).as_dict()
+            if resolved.exists()
+            else {"path": str(resolved), "missing": True}
+        )
+    return entries
 
 
 def _input_identity(policy: dict[str, Any]) -> list[dict[str, Any]]:
