@@ -7,6 +7,7 @@ and exposes plotting/formatting hooks.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -29,6 +30,7 @@ from polyzymd.analyses.rmsd._mda import (
     build_rmsd_jobs,
 )
 from polyzymd.analyses.rmsd._plot_settings import RMSDPlotSettings
+from polyzymd.analyses.shared.alignment import ALIGNMENT_VERSION
 from polyzymd.analyses.shared.inferential_statistics import (
     apply_family_correction,
     enforce_direction_significance,
@@ -196,18 +198,36 @@ class RMSDAnalysis(Analysis):
 
     @staticmethod
     def _make_settings_cache_tag(settings: BaseModel) -> str:
-        """Build a short cache tag for settings and equilibration.
+        """Build a short cache tag for settings, equilibration, and alignment.
 
         Parameters
         ----------
         settings : BaseModel
             Analysis settings model.
+
         Returns
         -------
         str
-            First 8 hex characters from shared settings fingerprinting.
+            First 8 hex characters of a digest over the settings fingerprint and
+            the alignment version. The alignment version is folded in because a
+            change in how frames are aligned changes the RMSD values without
+            changing any setting.
         """
-        return settings_fingerprint(settings)
+        base = settings_fingerprint(settings)
+        combined = f"{ALIGNMENT_VERSION}:{base}"
+        return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:8]
+
+    def aggregate_settings_fingerprint(self, settings: BaseModel | None) -> str | None:
+        """Return the RMSD artifact settings fingerprint.
+
+        The framework stamps replicate artifacts with this value and the
+        aggregate validators compare against it, so it has to be the same tag
+        that :meth:`_make_settings_cache_tag` produces.
+        """
+
+        if settings is None:
+            return None
+        return self._make_settings_cache_tag(settings)
 
     @classmethod
     def _coerce_and_validate_aggregated_result(

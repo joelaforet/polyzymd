@@ -1,0 +1,47 @@
+{
+  "description": "Per-residue RMSF means on a real control trajectory, recorded after the 2026-09-12 fix to the centroid and frame alignment reference modes. Before the fix both modes aligned to whatever frame the Universe sat on, so they returned the same numbers whatever reference was asked for.",
+  "dataset": {
+    "root": "/home/joelaforet/Shirts-Lab-Linux/polyzymd-realdata/LipA_ResorufinButyrate_noPoly_1000ns_363K_run1",
+    "topology": "solvated_system.pdb",
+    "trajectory": "production_0/production_0_trajectory.dcd",
+    "n_frames_total": 11417,
+    "frame_interval_ps": 40.0,
+    "condition": "LipA_ResorufinButyrate_noPoly_1000ns_363K",
+    "replicate": 1
+  },
+  "settings": {
+    "selection": "protein and name CA and resid 4:174",
+    "alignment_selection": "protein and name CA and resid 4:174",
+    "centroid_selection": "protein and name CA and resid 4:174",
+    "start_frame": 500,
+    "stop_frame": 600,
+    "step_frame": 1,
+    "n_atoms": 171
+  },
+  "unit": "angstrom",
+  "before_fix": {
+    "frame": {
+      "mean_rmsf": 0.84341,
+      "max_rmsf": 2.6468
+    },
+    "centroid": {
+      "mean_rmsf": 0.84341,
+      "max_rmsf": 2.6468
+    }
+  },
+  "after_fix": {
+    "frame": {
+      "reference_frame_1indexed": 501,
+      "resolved_reference_frame_0indexed": 500,
+      "mean_rmsf": 0.84343,
+      "max_rmsf": 2.63953
+    },
+    "centroid": {
+      "resolved_reference_frame_0indexed": 556,
+      "mean_rmsf": 0.84365,
+      "max_rmsf": 2.63197
+    }
+  },
+  "tolerance": 0.0005,
+  "how_to_run": "Set POLYZYMD_REAL_DATA=1 to enable the parity tests, and POLYZYMD_REALDATA_ROOT to override dataset.root, then run pytest tests/analyses/parity. The check loads the whole trajectory into memory because align_trajectory uses AlignTraj(in_memory=True), which peaks near 2.5 GB on this dataset."
+}

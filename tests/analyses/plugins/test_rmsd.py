@@ -69,8 +69,8 @@ def _make_run_settings() -> list[RMSDRunSettings]:
 
 
 def _settings_hash(settings: RMSDSettings) -> str:
-    """Return the shared settings fingerprint used by RMSD caches."""
-    return settings_fingerprint(settings)
+    """Return the cache tag used by RMSD caches."""
+    return RMSDAnalysis._make_settings_cache_tag(settings)
 
 
 def _condition_artifact_summary(artifact: ConditionArtifact) -> SimpleNamespace:

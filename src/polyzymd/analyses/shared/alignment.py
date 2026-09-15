@@ -68,6 +68,11 @@ LOGGER = logging.getLogger(__name__)
 # Type alias for reference modes (re-export from centroid for consistency)
 ReferenceMode = Literal["centroid", "average", "frame", "external"]
 
+# Bumped when the aligned coordinates change for the same settings. Plugins fold
+# this into their cache identity so artifacts written before the 2026-09-12 fix
+# to the "centroid" and "frame" reference modes are recomputed rather than reused.
+ALIGNMENT_VERSION = "2"
+
 
 class AlignmentConfig(BaseModel):
     """Configuration for trajectory alignment.
@@ -166,18 +171,20 @@ class AlignmentConfig(BaseModel):
                 )
         return self
 
-    def to_dict(self) -> dict:
-        """Convert to dictionary for cache key hashing."""
-        d = {
-            "enabled": self.enabled,
-            "reference_mode": self.reference_mode,
-            "reference_frame": self.reference_frame,
-            "selection": self.selection,
-            "centroid_selection": self.centroid_selection,
-        }
-        if self.reference_file is not None:
-            d["reference_file"] = str(self.reference_file)
-        return d
+
+def _single_frame_reference(universe: "Universe", selection: str, frame_index: int) -> "Universe":
+    """Return a one-frame Universe holding ``selection`` as it looks at ``frame_index``.
+
+    ``AlignTraj`` reads its reference coordinates from whatever frame the
+    reference Universe sits on when ``run`` starts, and it moves the mobile
+    Universe into memory on construction. Passing the trajectory itself as its
+    own reference therefore aligns to an arbitrary frame. Copying the reference
+    atoms out first pins the reference to the frame the caller asked for.
+    """
+    import MDAnalysis as mda
+
+    universe.trajectory[frame_index]
+    return mda.Merge(universe.select_atoms(selection))
 
 
 def align_trajectory(
@@ -263,16 +270,16 @@ def align_trajectory(
             selection=config.centroid_selection,
             start_frame=start_frame,
             stop_frame=stop_frame,
+            step_frame=step_frame,
             verbose=False,  # We handle our own logging
         )
         LOGGER.info(f"Found representative aligned frame at {ref_frame_idx} (0-indexed)")
 
-        # Align to centroid frame
+        ref_universe = _single_frame_reference(universe, config.selection, ref_frame_idx)
         aligner = align.AlignTraj(
             universe,
-            universe,
-            select=config.selection,
-            ref_frame=ref_frame_idx,
+            ref_universe,
+            select={"mobile": config.selection, "reference": "all"},
             in_memory=True,
         ).run(start=start_frame, stop=stop_frame, step=step_frame)
         del aligner
@@ -317,11 +324,11 @@ def align_trajectory(
             f"(selection: '{config.selection}')"
         )
 
+        ref_universe = _single_frame_reference(universe, config.selection, ref_frame_idx)
         aligner = align.AlignTraj(
             universe,
-            universe,
-            select=config.selection,
-            ref_frame=ref_frame_idx,
+            ref_universe,
+            select={"mobile": config.selection, "reference": "all"},
             in_memory=True,
         ).run(start=start_frame, stop=stop_frame, step=step_frame)
         del aligner

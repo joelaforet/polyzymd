@@ -256,6 +256,37 @@ def test_runner_reuses_a_replicate_whose_identity_matches(
     assert marker.stat().st_mtime_ns == stamp
 
 
+def test_runner_recomputes_when_a_shared_version_is_bumped(
+    tmp_path: Path, run_contract_analysis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bumping a shared-module version invalidates every cached replicate.
+
+    ``plugin_code_hash`` only covers the plugin module, so a fix in a shared
+    module has to announce itself through its version constant.
+    """
+    from polyzymd.analyses import contract_runner
+
+    run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+    marker = tmp_path / "analysis" / "A" / "rg2" / "run_1" / "observables.npz"
+    stamp = marker.stat().st_mtime_ns
+
+    monkeypatch.setattr(contract_runner, "ALIGNMENT_VERSION", "99")
+    run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+
+    assert marker.stat().st_mtime_ns != stamp
+
+
+def test_shared_versions_are_recorded_in_the_identity_block(
+    tmp_path: Path, run_contract_analysis: Any
+) -> None:
+    """The identity block names the shared modules a cached result depends on."""
+    from polyzymd.analyses.contract_runner import _shared_versions
+
+    aggregate = run_contract_analysis(Rg2Analysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
+
+    assert aggregate.provenance["identity"]["shared_versions"] == _shared_versions()
+
+
 def test_runner_recomputes_when_an_input_file_changes(
     tmp_path: Path, run_contract_analysis: Any
 ) -> None:

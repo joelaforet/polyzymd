@@ -41,7 +41,7 @@ MEAN_RMSF_METRIC = "mean_rmsf"
 # Bumped to "2" when RMSF stopped being computed from autocorrelation-subsampled
 # frames. Profiles written under version 1 used a fraction of the window and are
 # not comparable to profiles written under version 2.
-RMSF_PROFILE_VERSION = "2"
+RMSF_PROFILE_VERSION = "3"
 RMSF_METRIC_METADATA = {
     "label": "Mean RMSF",
     "unit": "A",
@@ -941,9 +941,10 @@ def _validate_and_order_artifacts(
             raise MDAAggregationError(
                 f"RMSF replicate {artifact.replicate} records {described}, expected "
                 f"{RMSF_PROFILE_VERSION!r}. Version 1 profiles were computed from "
-                "autocorrelation-subsampled frames and cannot be averaged with version 2 "
-                "profiles computed from the whole production window. Recompute the condition "
-                "or clear stale caches before aggregating."
+                "autocorrelation-subsampled frames, and versions 1 and 2 were aligned to "
+                "an arbitrary frame when reference_mode was 'centroid' or 'frame'. Older "
+                "profiles cannot be averaged with version 3 profiles. Recompute the "
+                "condition or clear stale caches before aggregating."
             )
         if artifact.metadata.get("selection_string") != settings.selection:
             raise ValueError(f"RMSF replicate {artifact.replicate} selection mismatch")
