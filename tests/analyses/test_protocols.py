@@ -1,0 +1,668 @@
+"""Tests for the agent-facing analysis protocol."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, ClassVar, Sequence
+
+import pytest
+from pydantic import BaseModel
+
+from polyzymd.analyses.base import (
+    Analysis,
+    BaseComparisonResult,
+    BaseConditionSummary,
+    Condition,
+    MetricValue,
+    PairwiseResult,
+)
+from polyzymd.analyses.exceptions import ProtocolError
+from polyzymd.analyses.protocols import (
+    VERDICT_LARGER,
+    VERDICT_NO_DIFFERENCE,
+    VERDICT_NOT_TESTABLE,
+    ConditionReport,
+    PairwiseReport,
+    ProtocolReport,
+    analyze,
+    build_report,
+)
+
+# Replicate values the toy plugin reports, keyed by condition label. Tests set
+# this before calling analyze().
+REPLICATE_VALUES: dict[str, list[float]] = {}
+
+
+class ToyProtocolSettings(BaseModel):
+    """Settings for the toy protocol plugin."""
+
+    scale: float = 1.0
+
+
+class ToyProtocolAnalysis(Analysis):
+    """Plugin whose replicate values the test controls directly."""
+
+    name: ClassVar[str] = "toy_protocol"
+    protocol_version: ClassVar[str] = "1"
+    Settings: ClassVar[type] = ToyProtocolSettings
+    min_replicates: ClassVar[int] = 1
+
+    def build_mda_jobs(self, ctx: Any) -> list[Any]:
+        """Return no MDA jobs; the compute stage is overridden.
+
+        Parameters
+        ----------
+        ctx : Any
+            Unused job context.
+
+        Returns
+        -------
+        list
+            Always empty.
+        """
+        del ctx
+        return []
+
+    def _run_compute_stage(self, ctx: Any, replicate: int) -> dict[str, Any]:
+        """Return the value the test assigned to this replicate.
+
+        Parameters
+        ----------
+        ctx : Any
+            Replicate context.
+        replicate : int
+            One-indexed replicate number.
+
+        Returns
+        -------
+        dict
+            Replicate value and number.
+        """
+        values = REPLICATE_VALUES[ctx.condition.label]
+        return {"value": float(values[replicate - 1]) * ctx.settings.scale, "replicate": replicate}
+
+    def aggregate(self, ctx: Any, results: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        """Collect replicate values for one condition.
+
+        Parameters
+        ----------
+        ctx : Any
+            Aggregate context.
+        results : sequence of dict
+            Per-replicate results.
+
+        Returns
+        -------
+        dict
+            Replicate values and their count.
+        """
+        del ctx
+        values = [float(result["value"]) for result in results]
+        return {"replicate_values": values, "n_replicates": len(values)}
+
+    def extract_metrics(self, summary: dict[str, Any]) -> dict[str, MetricValue]:
+        """Expose one metric in angstrom.
+
+        Parameters
+        ----------
+        summary : dict
+            Aggregated result.
+
+        Returns
+        -------
+        dict
+            Mapping from metric name to metric value.
+        """
+        return {
+            "mean_value": MetricValue.from_replicate_values(
+                "mean_value",
+                summary["replicate_values"],
+                unit="A",
+            )
+        }
+
+    def plot(self, ctx: Any) -> list[Path]:
+        """Write a placeholder figure so the pipeline does not need matplotlib.
+
+        Parameters
+        ----------
+        ctx : Any
+            Plot context.
+
+        Returns
+        -------
+        list of Path
+            The written file.
+        """
+        out = ctx.output_dir / "toy_protocol.txt"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("figure")
+        return [out]
+
+
+class ToyMultiMetricAnalysis(ToyProtocolAnalysis):
+    """Toy plugin that reports two metrics."""
+
+    name: ClassVar[str] = "toy_multi"
+    protocol_version: ClassVar[str] = "2"
+
+    def extract_metrics(self, summary: dict[str, Any]) -> dict[str, MetricValue]:
+        """Expose a primary metric and a secondary one.
+
+        Parameters
+        ----------
+        summary : dict
+            Aggregated result.
+
+        Returns
+        -------
+        dict
+            Two metrics, the primary one first.
+        """
+        values = summary["replicate_values"]
+        return {
+            "mean_value": MetricValue.from_replicate_values("mean_value", values, unit="A"),
+            "doubled_value": MetricValue.from_replicate_values(
+                "doubled_value", values, unit="A", scale=2.0
+            ),
+        }
+
+
+def _install_toy(monkeypatch: pytest.MonkeyPatch, analysis_cls: type = ToyProtocolAnalysis) -> None:
+    """Make the toy plugin discoverable and skip simulation config loading.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Patching fixture.
+    analysis_cls : type, optional
+        Plugin class to register, by default :class:`ToyProtocolAnalysis`.
+    """
+    registry = {analysis_cls.name: analysis_cls}
+
+    def _get_analysis(name: str) -> type:
+        if name in registry:
+            return registry[name]
+        raise KeyError(f"Unknown analysis {name!r}")
+
+    monkeypatch.setattr("polyzymd.analyses.discovery.get_analysis", _get_analysis)
+    monkeypatch.setattr("polyzymd.analyses.discovery.list_all_names", lambda: sorted(registry))
+    monkeypatch.setattr(
+        "polyzymd.analyses.orchestrator.Condition.from_condition_config",
+        lambda cond: Condition(
+            cond.label, Path(cond.config), tuple(cond.replicates), SimpleNamespace()
+        ),
+    )
+
+
+def _write_configs(tmp_path: Path, labels: Sequence[str]) -> list[Path]:
+    """Create one placeholder simulation config per label.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory.
+    labels : sequence of str
+        Condition directory names.
+
+    Returns
+    -------
+    list of Path
+        Config paths in the given order.
+    """
+    paths = []
+    for label in labels:
+        directory = tmp_path / label
+        directory.mkdir(parents=True, exist_ok=True)
+        config = directory / "config.yaml"
+        config.write_text("placeholder: true\n")
+        paths.append(config)
+    return paths
+
+
+def _run(
+    tmp_path: Path,
+    values: dict[str, list[float]],
+    *,
+    name: str = "toy_protocol",
+    equilibration: str = "10ns",
+) -> ProtocolReport:
+    """Run the toy protocol over the given per-condition replicate values.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory used for configs and outputs.
+    values : dict
+        Replicate values keyed by condition label.
+    name : str, optional
+        Analysis name, by default ``"toy_protocol"``.
+    equilibration : str, optional
+        Equilibration window, by default ``"10ns"``.
+
+    Returns
+    -------
+    ProtocolReport
+        The report.
+    """
+    REPLICATE_VALUES.clear()
+    REPLICATE_VALUES.update(values)
+    labels = list(values)
+    configs = _write_configs(tmp_path, labels)
+    replicates = list(range(1, len(next(iter(values.values()))) + 1))
+    return analyze(
+        name,
+        configs,
+        replicates=replicates,
+        equilibration=equilibration,
+        output_dir=tmp_path / "out",
+    )
+
+
+class TestReportFields:
+    """The report states what every number is."""
+
+    def test_two_conditions_report_is_fully_typed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Every documented field is present and carries the declared type."""
+        _install_toy(monkeypatch)
+        report = _run(
+            tmp_path,
+            {"A": [10.0, 10.1, 10.2], "B": [12.0, 12.1, 12.2]},
+        )
+
+        assert isinstance(report, ProtocolReport)
+        assert report.analysis == "toy_protocol"
+        assert report.protocol_version == "1"
+        assert report.metric == "mean_value"
+        assert report.unit == "A"
+        assert report.all_metrics == ["mean_value"]
+        assert report.equilibration == "10ns"
+        assert set(report.frames_per_replicate) == {"A", "B"}
+
+        assert [condition.label for condition in report.conditions] == ["A", "B"]
+        first = report.conditions[0]
+        assert isinstance(first, ConditionReport)
+        assert first.n_replicates == 3
+        assert first.mean == pytest.approx(10.1)
+        assert first.sem is not None and first.sem > 0.0
+        assert first.ci95 is not None and first.ci95[0] < first.mean < first.ci95[1]
+        assert first.ci_method == "student_t"
+        assert first.replicate_values == [10.0, 10.1, 10.2]
+
+        assert len(report.pairwise) == 1
+        pair = report.pairwise[0]
+        assert isinstance(pair, PairwiseReport)
+        assert (pair.a, pair.b) == ("A", "B")
+        assert pair.delta == pytest.approx(2.0)
+        assert pair.delta_ci95 is not None
+        assert pair.p is not None and pair.p_adjusted is not None
+        assert pair.test == "student_t"
+        assert pair.correction == "BH"
+        assert pair.cohens_d is not None
+        # The report orients the effect size like delta, so both are positive
+        # when the second condition is larger.
+        assert pair.cohens_d > 0.0
+        assert pair.hedges_g is not None and 0.0 < pair.hedges_g < pair.cohens_d
+        assert pair.testable is True
+
+        assert report.provenance.polyzymd_version
+        assert set(report.provenance.config_hashes) == {"A", "B"}
+        assert "comparison_result" in report.provenance.output_paths
+        assert report.verdict
+
+    def test_primary_metric_is_the_first_and_the_rest_are_listed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A multi-metric plugin reports its first metric and names the others."""
+        _install_toy(monkeypatch, ToyMultiMetricAnalysis)
+        report = _run(
+            tmp_path,
+            {"A": [10.0, 10.1, 10.2], "B": [12.0, 12.1, 12.2]},
+            name="toy_multi",
+        )
+
+        assert report.metric == "mean_value"
+        assert report.all_metrics == ["mean_value", "doubled_value"]
+        assert report.protocol_version == "2"
+        assert report.conditions[0].mean == pytest.approx(10.1)
+        assert len(report.pairwise) == 1
+
+    def test_json_round_trips_through_the_model(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The JSON form validates back into an equal report."""
+        _install_toy(monkeypatch)
+        report = _run(tmp_path, {"A": [10.0, 10.1, 10.2], "B": [12.0, 12.1, 12.2]})
+
+        restored = ProtocolReport.model_validate_json(report.model_dump_json())
+
+        assert restored == report
+
+
+class TestVerdict:
+    """The verdict answers the question in one sentence."""
+
+    def test_significant_difference_names_direction_and_evidence(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A clear difference is reported as larger, with delta, CI, p and n."""
+        _install_toy(monkeypatch)
+        report = _run(tmp_path, {"A": [10.0, 10.1, 10.2], "B": [12.0, 12.1, 12.2]})
+
+        assert len(report.verdict) == 1
+        sentence = report.verdict[0]
+        assert sentence.startswith(f"B {VERDICT_LARGER} mean_value than A")
+        assert "delta +2" in sentence
+        assert "95% CI" in sentence
+        assert "p_adj" in sentence
+        assert "n 3 vs 3" in sentence
+        assert report.pairwise[0].significant is True
+
+    def test_overlapping_conditions_report_no_significant_difference(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Conditions that overlap get the no-difference sentence."""
+        _install_toy(monkeypatch)
+        report = _run(tmp_path, {"A": [10.0, 11.0, 12.0], "B": [10.2, 11.1, 11.9]})
+
+        sentence = report.verdict[0]
+        assert sentence.startswith(f"{VERDICT_NO_DIFFERENCE} in mean_value between A and B")
+        assert "n 3 vs 3" in sentence
+        assert report.pairwise[0].significant is False
+
+    def test_single_condition_has_no_comparison(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """One config gives an empty pairwise list and a summary verdict."""
+        _install_toy(monkeypatch)
+        report = _run(tmp_path, {"A": [10.0, 10.1, 10.2]})
+
+        assert report.pairwise == []
+        assert len(report.verdict) == 1
+        assert report.verdict[0].startswith("A mean_value 10.1 A (95% CI")
+        assert "n 3" in report.verdict[0]
+
+    def test_single_replicate_is_not_testable_rather_than_not_different(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """One replicate per condition makes the test undefined, and says so."""
+        _install_toy(monkeypatch)
+        report = _run(tmp_path, {"A": [10.0], "B": [12.0]})
+
+        assert report.pairwise[0].testable is False
+        assert report.pairwise[0].significant is False
+        assert report.pairwise[0].delta_ci95 is None
+        assert report.verdict[0].startswith(VERDICT_NOT_TESTABLE)
+        assert any("one replicate" in warning for warning in report.warnings)
+
+
+class TestAgentText:
+    """The agent rendering stays inside its line budget."""
+
+    def test_two_condition_report_fits_in_25_lines(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A two-condition comparison renders compactly and carries the verdict."""
+        _install_toy(monkeypatch)
+        report = _run(tmp_path, {"A": [10.0, 10.1, 10.2], "B": [12.0, 12.1, 12.2]})
+
+        text = report.to_agent_text()
+        lines = text.strip().split("\n")
+
+        assert len(lines) <= 25
+        assert lines[0].startswith("# polyzymd analyze toy_protocol")
+        assert "metric mean_value" in lines[0]
+        assert "unit A" in lines[0]
+        assert "eq 10ns" in lines[0]
+        assert any(line.startswith("A  n 3") for line in lines)
+        assert any(line.startswith("A vs B") for line in lines)
+        assert any(line.startswith("verdict:") for line in lines)
+        assert "|" not in text
+        assert "" not in [line.strip() for line in lines]
+
+    def test_many_conditions_still_fit_the_budget(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A wide comparison drops lines and says how many it dropped."""
+        _install_toy(monkeypatch)
+        values = {f"C{index}": [10.0 + index, 10.1 + index, 10.2 + index] for index in range(12)}
+        report = _run(tmp_path, values)
+
+        lines = report.to_agent_text().strip().split("\n")
+
+        assert len(lines) <= 25
+        assert any("omitted" in line for line in lines)
+
+
+class TestErrors:
+    """Setup failures raise typed errors that say how to fix them."""
+
+    def test_unknown_analysis_lists_the_known_ones(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """An unknown name raises ProtocolError naming the available plugins."""
+        _install_toy(monkeypatch)
+
+        with pytest.raises(ProtocolError) as excinfo:
+            analyze("not_an_analysis", _write_configs(tmp_path, ["A"]))
+
+        assert "Unknown analysis" in str(excinfo.value)
+        assert "toy_protocol" in (excinfo.value.hint or "")
+
+    def test_missing_config_names_the_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A config path that does not exist raises before any computation."""
+        _install_toy(monkeypatch)
+
+        with pytest.raises(ProtocolError) as excinfo:
+            analyze("toy_protocol", [tmp_path / "nope" / "config.yaml"], replicates=[1])
+
+        assert "not found" in str(excinfo.value)
+        assert excinfo.value.hint
+
+    def test_no_configs_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Calling with an empty config list raises a typed error."""
+        _install_toy(monkeypatch)
+
+        with pytest.raises(ProtocolError) as excinfo:
+            analyze("toy_protocol", [])
+
+        assert "No simulation configs" in str(excinfo.value)
+
+    def test_label_count_must_match_config_count(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """One label per config is required when labels are given at all."""
+        _install_toy(monkeypatch)
+        configs = _write_configs(tmp_path, ["A", "B"])
+
+        with pytest.raises(ProtocolError) as excinfo:
+            analyze("toy_protocol", configs, labels=["only_one"], replicates=[1])
+
+        assert "label(s) for" in str(excinfo.value)
+
+
+class TestArtifactShape:
+    """The MDA comparison artifact shape is normalized the same way."""
+
+    def test_condition_artifact_payload_is_read(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A ComparisonArtifact payload yields the same report fields."""
+        from polyzymd.analyses.mda.artifacts import ComparisonArtifact
+        from polyzymd.config.comparison import ComparisonConfig
+
+        _install_toy(monkeypatch)
+        configs = _write_configs(tmp_path, ["A", "B"])
+        config = ComparisonConfig(
+            name="artifact_case",
+            control="A",
+            conditions=[
+                {"label": "A", "config": configs[0], "replicates": [1, 2, 3]},
+                {"label": "B", "config": configs[1], "replicates": [1, 2, 3]},
+            ],
+        )
+        artifact = ComparisonArtifact(
+            analysis_name="toy_protocol",
+            conditions=["A", "B"],
+            payload={
+                "condition_summaries": [
+                    {
+                        "label": "A",
+                        "n_replicates": 3,
+                        "mean_rg_mean": 18.4,
+                        "mean_rg_sem": 0.05,
+                        "mean_rg_replicate_values": [18.4, 18.5, 18.3],
+                        "mean_rg_unit": "A",
+                        "mean_rg_ci95_low": 18.2,
+                        "mean_rg_ci95_high": 18.6,
+                        "mean_rg_ci_method": "student_t",
+                    },
+                    {
+                        "label": "B",
+                        "n_replicates": 3,
+                        "mean_rg_mean": 18.71,
+                        "mean_rg_sem": 0.06,
+                        "mean_rg_replicate_values": [18.7, 18.8, 18.63],
+                        "mean_rg_unit": "A",
+                        "mean_rg_ci95_low": 18.5,
+                        "mean_rg_ci95_high": 18.9,
+                        "mean_rg_ci_method": "student_t",
+                    },
+                ],
+                "pairwise_comparisons": [
+                    {
+                        "condition_a": "A",
+                        "condition_b": "B",
+                        "metric": "mean_rg",
+                        "t_statistic": 5.2,
+                        "p_value": 0.006,
+                        "p_value_adjusted": 0.006,
+                        "cohens_d": 4.2,
+                        "effect_size_interpretation": "large",
+                        "direction": "increased",
+                        "significant": True,
+                        "percent_change": 1.7,
+                        "testable": True,
+                    }
+                ],
+                "statistical_parameters": {
+                    "ttest_method": "welch",
+                    "posthoc_method": "ttest_bh",
+                },
+            },
+        )
+        pipeline_result = {
+            "comparison": artifact,
+            "aggregated": {},
+            "comparison_path": tmp_path / "comparison.json",
+            "plots": [],
+        }
+
+        report = build_report(ToyProtocolAnalysis(), config, pipeline_result)
+
+        assert report.metric == "mean_rg"
+        assert report.unit == "A"
+        assert report.pairwise[0].test == "welch_t"
+        assert report.pairwise[0].correction == "BH"
+        assert report.pairwise[0].delta == pytest.approx(0.31, abs=1e-9)
+        assert report.pairwise[0].delta_ci95 is not None
+        assert report.pairwise[0].cohens_d == pytest.approx(-4.2)
+        assert report.verdict[0].startswith("B larger mean_rg than A")
+
+
+class _CustomSummary(BaseConditionSummary):
+    """Condition summary for a plugin that overrides compare()."""
+
+    @property
+    def primary_metric_value(self) -> float:
+        """Return the mean of the replicate values."""
+        return sum(self.replicate_values) / len(self.replicate_values)
+
+    @property
+    def primary_metric_sem(self) -> float | None:
+        """Return no SEM; the protocol recomputes it from the values."""
+        return None
+
+
+class _CustomComparison(BaseComparisonResult[_CustomSummary, PairwiseResult]):
+    """Comparison result for a plugin that overrides compare()."""
+
+    comparison_type: ClassVar[str] = "custom_toy"
+
+
+class TestCustomComparisonShape:
+    """A plugin's own comparison result is normalized too."""
+
+    def test_custom_result_reports_its_primary_metric(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Replicate values from a custom result give a mean and an interval."""
+        from datetime import datetime
+
+        from polyzymd.config.comparison import ComparisonConfig
+
+        _install_toy(monkeypatch)
+        configs = _write_configs(tmp_path, ["A", "B"])
+        config = ComparisonConfig(
+            name="custom_case",
+            control="A",
+            conditions=[
+                {"label": "A", "config": configs[0], "replicates": [1, 2, 3]},
+                {"label": "B", "config": configs[1], "replicates": [1, 2, 3]},
+            ],
+        )
+        comparison = _CustomComparison(
+            metric="contact_fraction",
+            name="custom_case",
+            control_label="A",
+            conditions=[
+                _CustomSummary(
+                    label="A",
+                    config_path=str(configs[0]),
+                    n_replicates=3,
+                    replicate_values=[0.10, 0.12, 0.11],
+                ),
+                _CustomSummary(
+                    label="B",
+                    config_path=str(configs[1]),
+                    n_replicates=3,
+                    replicate_values=[0.30, 0.32, 0.31],
+                ),
+            ],
+            pairwise_comparisons=[
+                PairwiseResult(
+                    condition_a="A",
+                    condition_b="B",
+                    metric="contact_fraction",
+                    t_statistic=20.0,
+                    p_value=0.0001,
+                    p_value_adjusted=0.0001,
+                    cohens_d=16.0,
+                    effect_size_interpretation="large",
+                    direction="increased",
+                    significant=True,
+                    percent_change=181.8,
+                )
+            ],
+            ranking=["B", "A"],
+            equilibration_time="10ns",
+            created_at=datetime(2026, 1, 1),
+            polyzymd_version="1.3.0",
+        )
+
+        report = build_report(
+            ToyProtocolAnalysis(),
+            config,
+            {"comparison": comparison, "aggregated": {}, "plots": []},
+        )
+
+        assert report.metric == "contact_fraction"
+        assert report.conditions[0].mean == pytest.approx(0.11)
+        assert report.conditions[0].ci95 is not None
+        assert report.pairwise[0].delta == pytest.approx(0.2, abs=1e-9)
+        assert report.verdict[0].startswith("B larger contact_fraction than A")

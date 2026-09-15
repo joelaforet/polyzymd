@@ -882,6 +882,126 @@ pixi run -e build pytest tests/analyses/plugins/test_solvent_shell.py -v
 
 ---
 
+(cli-analyze)=
+## polyzymd analyze
+
+Run one analysis and print a validated result. One `-c` gives a per-condition
+summary; two or more give pairwise comparisons with the first config as the
+control. The command builds the comparison in memory, so no `comparison.yaml`
+has to be written first.
+
+### Usage
+
+```bash
+polyzymd analyze NAME -c config.yaml [-c other/config.yaml ...] [OPTIONS]
+polyzymd analyze NAME -f comparison.yaml [OPTIONS]
+```
+
+List the available analysis names with `polyzymd compare run --list`.
+
+### Options
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `NAME` | Yes | Canonical analysis name, for example `rg`. |
+| `-c, --config PATH` | One of `-c`/`-f` | Simulation `config.yaml`. Repeatable; the first one is the control. |
+| `-f, --file PATH` | One of `-c`/`-f` | Existing `comparison.yaml` to analyze instead of `-c` configs. Cannot be combined with `-c` or `--set`. |
+| `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
+| `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default: the comparison default, `10ns`. |
+| `--label TEXT` | No | Condition label, one per `-c` in the same order. Default: the name of the directory holding the config. |
+| `--run LABEL` | No | Run or pair label to report when the analysis measures one metric on several selections, for example `Protein` or `Polymer Oligomers` for rg. Default: the first one the plugin lists; the rest appear in `all_runs`. |
+| `--set KEY=VALUE` | No | Plugin setting. Repeatable. The value is read as YAML, so `--set n_bins=50` gives an integer; a dotted key nests. |
+| `--format agent\|json` | No | `agent` (default) prints at most 25 lines; `json` prints the full `ProtocolReport`. For a human-readable table of the same comparison, use `polyzymd compare run --format table`. |
+| `-o, --output PATH` | No | Also write the rendered output to this file. |
+| `--output-dir PATH` | No | Directory for `analysis/`, `comparison/` and `figures/`. Default: the current directory. |
+| `--recompute` | No | Recompute replicates instead of reusing cached results. |
+
+### Agent format
+
+`--format agent` is the default and is designed for scripts and LLM agents. It
+prints a header, one line per condition, one line per comparison, any warnings
+and one `verdict:` line per comparison, in at most 25 lines with no borders and
+no colour.
+
+```bash
+polyzymd analyze rg -c noPoly/config.yaml -c SBMA50/config.yaml --eq 10ns
+```
+
+```
+# polyzymd analyze rg  metric mean_rg  unit A  eq 10ns  conditions 2  replicates 3,3  protocol rg/1
+noPoly  n 3  mean 18.42  sem 0.05  ci95 18.2 to 18.64  values 18.4, 18.5, 18.36
+SBMA50  n 3  mean 18.73  sem 0.06  ci95 18.47 to 18.99  values 18.71, 18.8, 18.68
+noPoly vs SBMA50  delta +0.31  ci95 0.02 to 0.6  p 0.041  p_adj 0.041  test student_t  correction BH  d 1.9  significant
+verdict: SBMA50 larger mean_rg than noPoly (delta +0.31 A, 95% CI 0.02 to 0.6, p_adj 0.041, n 3 vs 3)
+```
+
+Line shapes:
+
+| Line | Fields |
+|---|---|
+| header | `# polyzymd analyze <analysis>  metric <key>  unit <unit or none>[  run <label>]  eq <window>  conditions <count>  replicates <n,n,...>  protocol <analysis>/<protocol_version>` |
+| condition | `<label>  n <count>  mean <value>  sem <value>  ci95 <low> to <high>  values <per-replicate values>` |
+| comparison | `<a> vs <b>  delta <signed>  ci95 <low> to <high>  p <value>  p_adj <value>  test <name>  correction <name>  d <value>  significant\|not_significant\|no_test\|not_testable` |
+| warning | `warning: <text>` |
+| verdict | `verdict: <sentence>` |
+
+`na` stands for a number that does not exist, such as the standard error of a
+single replicate. When a report does not fit in 25 lines, condition and
+comparison lines are dropped and the last line says how many.
+
+The verdict vocabulary is fixed so a caller can branch on it:
+
+| Word | Meaning |
+|---|---|
+| `larger` | The second condition differs from the control after correction and the difference is positive |
+| `smaller` | The second condition differs from the control after correction and the difference is negative |
+| `no significant difference` | The test ran and the adjusted p value did not clear alpha |
+| `no test recorded` | The plugin stored no multiplicity-corrected p value, so the comparison describes a difference without deciding it |
+| `changed` | The difference is significant but the two means are equal at the stored precision |
+| `not testable` | A condition has fewer than two replicates, so the test is undefined |
+
+`--format json` prints the full report. Every field is documented in
+{doc}`analysis_protocol_report`.
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | The analysis ran and the report was printed |
+| 2 | A typed analysis error: unknown analysis name, missing config, bad `--replicates` or `--set`, conflicting `-c` and `-f`, or a pipeline failure. The message is printed on one line prefixed `error:` and the fix on the next prefixed `fix:`, both on stderr |
+
+### Example
+
+```bash
+# Single condition
+polyzymd analyze rg -c enzyme_water/config.yaml --eq 10ns
+
+# Comparison with explicit labels and replicates
+polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml \
+  --label "no polymer" --label "50% SBMA" --replicates 1-3
+
+# Full JSON record saved to a file
+polyzymd analyze sasa -c A/config.yaml -c B/config.yaml \
+  --format json -o sasa_report.json
+
+# An existing comparison project
+polyzymd analyze rmsf -f comparison.yaml
+
+# Report the polymer selection instead of the protein
+polyzymd analyze rg -c A/config.yaml -c B/config.yaml --run "Polymer Oligomers"
+```
+
+### Notes
+
+- Run through `pixi run -e analysis`; the default pixi environment has no
+  `polyzymd`.
+- The replicate is the sampling unit. Every interval and every test uses the
+  replicate count as its sample size.
+- The run writes and reuses the same cached artifacts as
+  `polyzymd compare run`, so the two commands share results.
+
+---
+
 ## polyzymd compare
 
 Compare analysis results across multiple simulation conditions with statistical testing.
@@ -937,7 +1057,7 @@ Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
   --eq-time TEXT          Override equilibration time (e.g. '10ns', '5000ps')
   --recompute            Force recompute even if cached results exist
-  --format TEXT           Output format: table, markdown, json [default: table]
+  --format TEXT           Output format: table, markdown, json, agent [default: table]
   -o, --output PATH      Save formatted output to file
   -q, --quiet            Suppress INFO messages
   --debug                Enable DEBUG logging
@@ -962,9 +1082,22 @@ polyzymd compare run rmsf --eq-time 20ns
 # Run contacts comparison with markdown output
 polyzymd compare run contacts --format markdown -o report.md
 
+# Print the compact agent report instead of the plugin's table
+polyzymd compare run rg --format agent
+
 # List all available analysis types
 polyzymd compare run --list
 ```
+
+`--format agent` renders the finished comparison through the same
+`ProtocolReport` renderer as {ref}`polyzymd analyze <cli-analyze>`: a header,
+one line per condition, one line per comparison, any warnings and one
+`verdict:` line per comparison, in at most 25 lines. Use it when a script or an
+agent has to read the result; use `--format json` when it needs the full
+comparison artifact, which carries more per-plugin detail than the report does.
+The line shapes and the verdict vocabulary are documented under
+{ref}`polyzymd analyze <cli-analyze>`, and the report fields in
+{doc}`analysis_protocol_report`.
 
 ### polyzymd compare validate
 
@@ -1285,6 +1418,7 @@ output:
 |------|---------|
 | 0 | Success |
 | 1 | Error (validation failure, build failure, etc.) |
+| 2 | Typed analysis error from {ref}`polyzymd analyze <cli-analyze>`; the message and the fix are printed on stderr, one line each |
 | 99 | Graceful shutdown — simulation was interrupted but interrupted state was saved (see {doc}`../how_to/hpc_slurm`) |
 
 ---
@@ -1296,3 +1430,5 @@ output:
 - {doc}`../how_to/hpc_slurm` - HPC and SLURM guide
 - {doc}`../how_to/analysis_rmsf_quickstart` - RMSF analysis tutorial
 - {doc}`../how_to/analysis_compare_conditions` - Comparing simulation conditions
+- {doc}`../how_to/analysis_agent_protocol` - Getting a validated number with one command
+- {doc}`analysis_protocol_report` - The `ProtocolReport` schema
