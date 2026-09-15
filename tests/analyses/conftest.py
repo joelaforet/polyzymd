@@ -19,7 +19,6 @@ import pytest
 _PLOTTER_MODULES = tuple(
     f"polyzymd.analyses.{name}._plotters"
     for name in (
-        "rmsd",
         "rmsf",
         "rg",
         "sasa",
