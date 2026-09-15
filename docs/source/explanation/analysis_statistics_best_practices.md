@@ -430,6 +430,14 @@ Useful background includes:
 > an alternative route to the statistical inefficiency. PolyzyMD does not
 > implement it.
 
+> **Joint Committee for Guides in Metrology** (2008). "JCGM 100: Evaluation of
+> measurement data - Guide to the expression of uncertainty in measurement
+> (GUM)." BIPM.
+> [PDF](https://www.bipm.org/utils/common/documents/jcgm/JCGM_100_2008_E.pdf)
+
+The coverage factors above follow the section of Grossfield et al. (2018) on
+turning a standard uncertainty into a confidence interval, which in turn
+follows the GUM.
 
 > **Welch, B. L.** (1947). "The generalization of 'Student's' problem when
 > several different population variances are involved." *Biometrika*, 34(1-2),
