@@ -1,7 +1,7 @@
 # Rg Analysis: Quick Start
 
-Compute Radius of Gyration timeseries to track structural compactness for
-protein and polymer selections with autocorrelation-aware uncertainty.
+Compute radius of gyration timeseries to track structural compactness for
+protein and polymer selections, with uncertainty taken across replicates.
 
 ```{versionadded} 1.3.0
 The Rg analysis plugin was added in PolyzyMD 1.3.0.
@@ -55,15 +55,16 @@ ls $(polyzymd info -c config.yaml --scratch-dir)/production_*/
 
 ## What Rg Analysis Provides
 
-The Rg plugin computes per-run compactness statistics and comparison outputs:
+The Rg plugin reports one observable per run, and the framework turns it into
+condition-level statistics:
 
 | Feature | Description |
 |---------|-------------|
-| **Mean Rg** | Average radius of gyration (Å) for the selected atom group |
-| **SEM** | Autocorrelation-corrected standard error |
-| **Median / Min / Max / Final Rg** | Robust center, range, and endpoint diagnostics |
-| **Timeseries** | Full per-frame Rg stored in NPZ sidecars |
-| **Multi-run support** | Multiple named selections in one plugin section |
+| Mean Rg | Mean over replicates of each replicate's mean radius of gyration (Å) |
+| SEM and 95 percent interval | Taken across replicates, with the replicate as the sampling unit |
+| Timeseries | Full per-frame Rg stored in the `observables.npz` sidecar |
+| Fragment profile | In fragment mode, the mean Rg of each bonded fragment and their distribution |
+| Multi-run support | Multiple named selections in one plugin section |
 
 ```{tip}
 Rg complements RMSD and RMSF:
@@ -181,7 +182,13 @@ plugins:
         selection: "resname SBM or resname EGM or resname EGP"
         calculation_mode: "fragments"
         fragment_weighting: "equal"
+        histogram_range: [6.0, 10.0]
 ```
+
+`histogram_range` is required whenever a fragments run keeps
+`save_fragment_distribution: true`, which is the default. The bins must be the
+same in every replicate of a condition and a replicate cannot work them out
+from its own data, so state the range the fragment radii of gyration fall in.
 
 Fragment mode needs a topology that carries bonds, because fragments are
 connected components of the bond graph. If the selected atoms have no bonds, the
@@ -204,27 +211,17 @@ Run condition comparisons with the standard compare command:
 polyzymd compare run rg -f comparison.yaml --eq-time 10ns
 ```
 
-Per run, PolyzyMD reports:
-
-- Ranking by mean Rg (lower means more compact)
-- Pairwise tests with p-values and effect sizes
-- Direction labels (`compaction`, `expansion`, `unchanged`)
-- ANOVA when 3+ conditions are present
+Per observable, PolyzyMD reports the mean and 95 percent interval of each
+condition and a test of every condition against the control, with one
+Benjamini-Hochberg family over the whole run.
 
 Example output:
 
 ```text
-Rg Comparison — Whole Protein
-===============================
-Ranking: With Polymer > No Polymer (lower Rg = more compact)
-
-No Polymer:   18.256 ± 0.044 Å
-With Polymer: 17.812 ± 0.038 Å
-
-With Polymer vs No Polymer:
-  Change: -2.4% (compaction)
-  p-value: 0.0123 *
-  Cohen's d: 1.87 (large)
+# rg  eq 10ns
+No Polymer    rg_whole_protein  mean_of_timeseries  mean 18.26 A  sem 0.044  ci95 18.07 to 18.45  n 3
+With Polymer  rg_whole_protein  mean_of_timeseries  mean 17.81 A  sem 0.038  ci95 17.65 to 17.98  n 3
+No Polymer vs With Polymer  rg_whole_protein  delta -0.444  p_adj 0.0123  test student_t  correction benjamini_hochberg  significant
 ```
 
 For full comparison workflow context, see {doc}`analysis_compare_conditions`.
@@ -235,11 +232,10 @@ For complete lookup material, see {doc}`../reference/analysis_rg_reference`,
 including:
 
 - Full `RgRunSettings` and `RgSettings` field tables
-- Output directory layout and JSON/NPZ structures
-- Plot type details and `plot_settings.rg` options
-- CLI option lookup
-- Troubleshooting cases and fixes
-- Rg vs RMSD and Rg vs RMSF comparison tables
+- The observables each run reports, with kinds and units
+- Output directory layout and artifact payloads
+- Error messages and their fixes
+- Rg against RMSD and RMSF
 
 For interpretation guidance, see
 {doc}`../explanation/analysis_rg_best_practices` and

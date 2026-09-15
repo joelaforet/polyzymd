@@ -249,18 +249,19 @@ plugin raises `SelectionError` unless `allow_empty_groups` is true. Set
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `runs` | `list[RgRunSettings]` | `[]` (must be non-empty) | Named Rg runs to compute |
+| `runs` | `list[RgRunSettings]` | required, at least one | Named Rg runs to compute |
 
 `RgRunSettings` entries in `runs`:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `label` | `str` | required | Human-readable run label |
+| `label` | `str` | required | Run label, slugged into the observable name |
 | `selection` | `str` | required | MDAnalysis selection for Rg calculation |
-| `calculation_mode` | `"selection" \| "fragments"` | `"selection"` | Whole-selection vs fragment-reduced Rg mode |
-| `fragment_weighting` | `"equal" \| "mass"` | `"equal"` | Fragment reduction weighting (fragment mode) |
-| `save_fragment_distribution` | `bool` | `true` | Save per-fragment distribution sidecar outputs |
-| `histogram_bins` | `int` | `50` | Histogram bins for fragment distribution summaries |
+| `calculation_mode` | `"selection" \| "fragments"` | `"selection"` | Whole-selection vs per-fragment Rg mode |
+| `fragment_weighting` | `"equal" \| "mass"` | `"equal"` | Weighting of the per-frame mean over fragments (fragment mode) |
+| `save_fragment_distribution` | `bool` | `true` | Report the fragment distribution as a profile over bins |
+| `histogram_bins` | `int` | `50` | Bins in the fragment distribution |
+| `histogram_range` | `[float, float]` | required when `save_fragment_distribution` is true | Range the fragment distribution covers, in A |
 | `allow_single_fragment_fallback` | `bool` | `false` | Measure the whole selection as one fragment when the topology has no bonds, instead of raising `TopologyBondsMissingError` |
 
 ## `rmsd`

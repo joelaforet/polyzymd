@@ -39,7 +39,6 @@ T_FACTOR_N5 = 2.7764451051977934
 PLUGIN_NAMES = (
     "rmsd",
     "rmsf",
-    "rg",
     "sasa",
     "contacts",
     "distances",
@@ -205,7 +204,7 @@ class TestUncertaintyBlock:
         """Condition artifacts from any plugin carry the uncertainty block.
 
         Every plugin builds its aggregate through ``ConditionArtifact``, so
-        pinning the envelope pins all nine.
+        pinning the envelope pins every plugin named in ``PLUGIN_NAMES``.
         """
 
         artifact = ConditionArtifact.build(
@@ -442,23 +441,6 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
                     "per_replicate_means": [4.0],
                     "overall_mean": 4.0,
                     "overall_sem": None,
-                }
-            ],
-            [1],
-        )
-        return metrics
-
-    if analysis_name == "rg":
-        from polyzymd.analyses.rg._mda import _condition_metrics as rg_metrics
-
-        metrics, _replicate_metrics = rg_metrics(
-            [
-                {
-                    "run_label": "run_1",
-                    "per_replicate_means": [12.0],
-                    "overall_mean": 12.0,
-                    "overall_sem": None,
-                    "replicates": [1],
                 }
             ],
             [1],

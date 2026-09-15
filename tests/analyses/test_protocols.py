@@ -28,6 +28,7 @@ from polyzymd.analyses.protocols import (
     analyze,
     build_report,
 )
+from polyzymd.analyses.stats import interpret_direction
 
 # Replicate values the toy plugin reports, keyed by condition label. Tests set
 # this before calling analyze().
@@ -573,6 +574,191 @@ class TestArtifactShape:
         assert report.pairwise[0].delta_ci95 is not None
         assert report.pairwise[0].cohens_d == pytest.approx(-4.2)
         assert report.verdict[0].startswith("B larger mean_rg than A")
+
+    @staticmethod
+    def _observable_payload(*, significant: bool, p_adjusted: float) -> dict[str, Any]:
+        """Contract comparison payload for two conditions and one observable."""
+
+        def aggregate(mean: float, values: list[float]) -> dict[str, Any]:
+            return {
+                "name": "rg_protein",
+                "kind": "mean_of_timeseries",
+                "unit": "A",
+                "n_replicates": 3,
+                "replicate_values": values,
+                "mean": mean,
+                "sem": 0.05,
+                "ci95_low": mean - 0.13,
+                "ci95_high": mean + 0.13,
+                "ci_method": "student_t",
+            }
+
+        return {
+            "conditions": {
+                "A": [
+                    aggregate(18.4, [18.4, 18.5, 18.3]),
+                    {
+                        "name": "rg_protein_fragments",
+                        "kind": "profile",
+                        "unit": "A",
+                        "n_replicates": 3,
+                        "profile_mean": [1.0, 2.0],
+                        "index": [0.0, 1.0],
+                    },
+                ],
+                "B": [aggregate(18.71, [18.7, 18.8, 18.63])],
+            },
+            "comparisons": [
+                {
+                    "name": "rg_protein",
+                    "kind": "mean_of_timeseries",
+                    "unit": "A",
+                    "control": "A",
+                    "condition": "B",
+                    "n_control": 3,
+                    "n_condition": 3,
+                    "delta": 0.31,
+                    "percent_change": 1.7,
+                    "test": "welch_t",
+                    "p_value": 0.006,
+                    "p_adjusted": p_adjusted,
+                    "correction": "benjamini_hochberg",
+                    "cohens_d": 4.2,
+                    "significant": significant,
+                    "testable": True,
+                }
+            ],
+        }
+
+    def _report(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        payload: dict[str, Any],
+    ) -> Any:
+        """Build a report from one comparison payload, whichever shape it has."""
+        from polyzymd.analyses.mda.artifacts import ComparisonArtifact
+        from polyzymd.config.comparison import ComparisonConfig
+
+        _install_toy(monkeypatch)
+        configs = _write_configs(tmp_path, ["A", "B"])
+        config = ComparisonConfig(
+            name="payload_case",
+            control="A",
+            conditions=[
+                {"label": "A", "config": configs[0], "replicates": [1, 2, 3]},
+                {"label": "B", "config": configs[1], "replicates": [1, 2, 3]},
+            ],
+        )
+        artifact = ComparisonArtifact(
+            analysis_name="toy_protocol", conditions=["A", "B"], payload=payload
+        )
+        return build_report(
+            ToyProtocolAnalysis(),
+            config,
+            {
+                "comparison": artifact,
+                "aggregated": {},
+                "comparison_path": tmp_path / "comparison.json",
+                "plots": [],
+            },
+        )
+
+    def test_observable_contract_payload_is_read(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A contract plugin's comparison payload reports its observables."""
+        report = self._report(
+            monkeypatch,
+            tmp_path,
+            self._observable_payload(significant=True, p_adjusted=0.006),
+        )
+
+        assert report.run == "rg_protein"
+        assert report.all_runs == ["rg_protein"]
+        assert report.unit == "A"
+        assert [condition.label for condition in report.conditions] == ["A", "B"]
+        assert report.pairwise[0].test == "welch_t"
+        assert report.pairwise[0].delta == pytest.approx(0.31)
+        assert report.pairwise[0].direction == "increased"
+        assert report.pairwise[0].significant is True
+
+    def test_observable_contract_claims_no_direction_without_significance(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The same difference with a p value above alpha names no direction."""
+        from polyzymd.analyses.shared.inferential_statistics import NO_SIGNIFICANT_CHANGE
+
+        report = self._report(
+            monkeypatch,
+            tmp_path,
+            self._observable_payload(significant=False, p_adjusted=0.42),
+        )
+
+        assert report.pairwise[0].delta == pytest.approx(0.31)
+        assert report.pairwise[0].significant is False
+        assert report.pairwise[0].direction == NO_SIGNIFICANT_CHANGE
+
+    def test_both_payload_shapes_use_one_direction_vocabulary(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The same rise reads the same whether a plugin or the framework tested it.
+
+        ``direction`` is a public field of the report, so a plugin that still
+        owns its comparison and one on the observable contract must not offer
+        an agent two words for the same finding.
+        """
+        legacy = self._report(monkeypatch, tmp_path / "legacy", _LEGACY_PAYLOAD)
+        contract = self._report(
+            monkeypatch,
+            tmp_path / "contract",
+            self._observable_payload(significant=True, p_adjusted=0.006),
+        )
+
+        assert legacy.pairwise[0].direction == contract.pairwise[0].direction
+
+
+_LEGACY_PAYLOAD: dict[str, Any] = {
+    "condition_summaries": [
+        {
+            "label": "A",
+            "n_replicates": 3,
+            "mean_rg_mean": 18.4,
+            "mean_rg_sem": 0.05,
+            "mean_rg_replicate_values": [18.4, 18.5, 18.3],
+            "mean_rg_unit": "A",
+            "mean_rg_ci95_low": 18.27,
+            "mean_rg_ci95_high": 18.53,
+            "mean_rg_ci_method": "student_t",
+        },
+        {
+            "label": "B",
+            "n_replicates": 3,
+            "mean_rg_mean": 18.71,
+            "mean_rg_sem": 0.05,
+            "mean_rg_replicate_values": [18.7, 18.8, 18.63],
+            "mean_rg_unit": "A",
+            "mean_rg_ci95_low": 18.58,
+            "mean_rg_ci95_high": 18.84,
+            "mean_rg_ci_method": "student_t",
+        },
+    ],
+    "pairwise_comparisons": [
+        {
+            "condition_a": "A",
+            "condition_b": "B",
+            "metric": "mean_rg",
+            "p_value": 0.006,
+            "p_value_adjusted": 0.006,
+            "cohens_d": 4.2,
+            "direction": interpret_direction(1.7),
+            "significant": True,
+            "percent_change": 1.7,
+            "testable": True,
+        }
+    ],
+    "statistical_parameters": {"ttest_method": "welch", "posthoc_method": "ttest_bh"},
+}
 
 
 class _CustomSummary(BaseConditionSummary):
