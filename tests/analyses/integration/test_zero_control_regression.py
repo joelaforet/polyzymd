@@ -30,7 +30,6 @@ from polyzymd.analyses.distances._formatters import (
 from polyzymd.analyses.rg import RgAnalysis
 from polyzymd.analyses.rg._comparison_results import RgRunPairwiseComparison
 from polyzymd.analyses.rmsd._comparison_results import RMSDRunPairwiseComparison
-from polyzymd.analyses.sasa._comparison_results import SASARunPairwiseComparison
 from polyzymd.analyses.shared.inferential_statistics import percent_change
 from polyzymd.analyses.stats import (
     format_pct,
@@ -161,28 +160,6 @@ def test_rmsd_pairwise_inf_round_trip_json() -> None:
 
     payload = comparison.model_dump_json()
     loaded = RMSDRunPairwiseComparison.model_validate_json(payload)
-
-    assert math.isinf(loaded.percent_change)
-    assert loaded.percent_change > 0
-
-
-def test_sasa_pairwise_inf_round_trip_json() -> None:
-    """SASA pairwise model should preserve infinite percent_change across JSON round-trip."""
-    comparison = SASARunPairwiseComparison(
-        run_label="surface",
-        condition_a="Control",
-        condition_b="Treatment",
-        t_statistic=1.0,
-        p_value=0.01,
-        cohens_d=1.5,
-        effect_interpretation="large",
-        direction="increased",
-        significant=True,
-        percent_change=math.inf,
-    )
-
-    payload = comparison.model_dump_json()
-    loaded = SASARunPairwiseComparison.model_validate_json(payload)
 
     assert math.isinf(loaded.percent_change)
     assert loaded.percent_change > 0

@@ -139,9 +139,9 @@ You should see these outputs:
 
 ```text
 analysis/<condition>/sasa/run_<replicate>/result.json
+analysis/<condition>/sasa/run_<replicate>/observables.npz
 analysis/<condition>/sasa/aggregated/result.json
 comparison/sasa/result.json
-figures/sasa/
 ```
 
 The comparison file is the first place to check after a successful run:
@@ -152,53 +152,57 @@ import json
 from pathlib import Path
 
 result = json.loads(Path("comparison/sasa/result.json").read_text())
-print(result["run_labels"])
-for condition in result["conditions"]:
-    print(condition["label"])
-    for run in condition["run_summaries"]:
-        print(f"  {run['label']}: {run['mean_sasa']:.1f} ± {run['sem_sasa']:.1f} A^2")
+for label, observables in result["payload"]["conditions"].items():
+    print(label)
+    for observable in observables:
+        if observable["kind"] == "mean_of_timeseries":
+            print(
+                f"  {observable['name']}: {observable['mean']:.1f}"
+                f" +/- {observable['sem']:.1f} {observable['unit']}"
+                f" (n={observable['n_replicates']} replicates)"
+            )
 PY
 ```
 
-Success looks like one summary for each condition and one entry for each SASA
-run label.
+Success looks like one aggregate for each condition and one `sasa_<label>`
+entry for each configured run. Each line states its unit and how many
+replicates the mean and the standard error come from.
 
 ## Step 5: Interpret the shielding signal
 
-Start with the `protein_isolated` run. It asks whether the protein itself has a
+Start with the `sasa_protein_isolated` observable. It asks whether the protein itself has a
 similar accessible surface across conditions before polymer blocking is counted.
 Large differences here can mean the protein compactness or conformation differs
 between conditions.
 
-Then inspect `protein_with_polymer`. In polymer conditions, a lower mean SASA
+Then inspect `sasa_protein_with_polymer`. In polymer conditions, a lower mean SASA
 relative to the no-polymer control is the main shielding signal.
 
 The strongest evidence for polymer shielding is:
 
-1. `protein_isolated` remains similar across conditions, and
-2. `protein_with_polymer` decreases in polymer-conjugated conditions.
+1. `sasa_protein_isolated` stays similar across conditions, and
+2. `sasa_protein_with_polymer` decreases in polymer-conjugated conditions.
 
 You can also compare the two runs within a polymer condition:
 
 ```text
-shielded area = protein_isolated mean - protein_with_polymer mean
+shielded area = sasa_protein_isolated mean - sasa_protein_with_polymer mean
 ```
 
 A larger positive difference indicates that more protein surface is blocked by
 the polymer context.
 
-## Step 6: Use the plots
+## Step 6: Read the per-residue profile
 
-Open the SASA plots in the configured plot output directory, usually
-`figures/sasa/`. The most useful first checks are:
+Each run also reports `relative_sasa_<label>`, the mean area of every target
+residue divided by the maximum accessible area of its residue type, taken from
+Tien et al. 2013. It says where on the protein the shielding happens rather
+than how much of it there is. The aggregated artifact holds `profile_mean`,
+`profile_sem` and the residue IDs in `index`.
 
-- `sasa_comparison_protein_with_polymer.png` — mean SASA by condition, with
-  replicate scatter points.
-- `sasa_normalized_comparison_protein_with_polymer.png` — percent change for
-  each non-control condition relative to the configured control.
-
-Negative normalized values indicate lower SASA than the control, which is
-consistent with shielding for this tutorial's `protein_with_polymer` run.
+Figures are drawn from the observable kind in the contract runner, which is
+still being written, so a `sasa` run today writes artifacts and the text report
+but no figures.
 
 ## What you have now
 
@@ -206,13 +210,12 @@ You have completed a guided SASA shielding analysis and can now answer:
 
 - Did the polymer reduce protein solvent-accessible surface area?
 - Was the reduction specific to the polymer-aware context?
-- Which plots should you inspect first for replicate consistency and effect
-  direction?
+- Which residues lost the most accessible surface?
 
 ## Next steps
 
 - Use {doc}`../how_to/analysis_sasa_quickstart` for active-site,
-  monomer-specific, stride, and quick-command recipes.
-- Use {doc}`../reference/analysis_sasa_reference` for settings, canonical
-  artifact paths, plot filenames, and programmatic artifact loading.
+  monomer-specific, and quick-command recipes.
+- Use {doc}`../reference/analysis_sasa_reference` for settings, the
+  observables, and the canonical artifact paths.
 - Use {doc}`../how_to/hpc_execution` when the SASA workload needs SLURM.

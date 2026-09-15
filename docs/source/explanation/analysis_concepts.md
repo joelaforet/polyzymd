@@ -340,6 +340,20 @@ written before the framework recorded a cache key, is recomputed rather than
 trusted; where the command that found it cannot recompute, it stops and says
 which file changed.
 
+## Why a solvent-accessible surface area depends on how it was batched
+
+Some measurements are not a pure function of a frame. `mdtraj.shrake_rupley`,
+which the `sasa` plugin calls, gives the same coordinates slightly different
+areas depending on how many frames are in the array it is handed, so the
+plugin's `chunk_size` shifts every total by about 0.1 percent. That is far below
+the differences the analysis is used to detect, but it is an offset between two
+runs rather than noise that averages away, so it can only be ignored when both
+sides of a comparison were computed the same way. PolyzyMD does not hide this by
+forcing one chunk size, because the setting exists to keep a large system inside
+memory; it records the value in each observable's metadata instead, so a
+comparison assembled from mismatched runs can be recognized rather than
+believed.
+
 ## Why an unfinished segment is not read
 
 A production segment that is still being written has a trajectory file that

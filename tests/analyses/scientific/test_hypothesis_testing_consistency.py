@@ -181,45 +181,6 @@ def _rg_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]
     return RgAnalysis(), _context(tmp_path, settings, aggregated, ttest_method)
 
 
-def _sasa_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]:
-    from polyzymd.analyses.sasa import SASAAnalysis, SASARunSettings, SASASettings
-
-    settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
-
-    def artifact(label: str, values: tuple[float, ...]) -> ConditionArtifact:
-        return ConditionArtifact(
-            analysis_name="sasa",
-            condition_label=label,
-            replicates=[1, 2, 3],
-            payload={
-                "run_results": [
-                    {
-                        "run_label": "protein",
-                        "target_selection": "chainid A",
-                        "context_selection": "chainid A",
-                        "replicates": [1, 2, 3],
-                        "n_replicates": 3,
-                        "overall_mean": float(np.mean(values)),
-                        "overall_sem": 0.05,
-                        "per_replicate_means": list(values),
-                        "zero_atom_selection": False,
-                    }
-                ],
-                "metrics": {},
-                "replicate_metrics": {},
-                "n_replicates": 3,
-            },
-            metadata=_base_metadata(settings),
-            provenance={"frame_selection": {"equilibration": "10ns"}},
-        )
-
-    aggregated = {
-        "Control": artifact("Control", LOW_VARIANCE),
-        "Treated": artifact("Treated", HIGH_VARIANCE),
-    }
-    return SASAAnalysis(), _context(tmp_path, settings, aggregated, ttest_method)
-
-
 def _distances_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]:
     from polyzymd.analyses.distances import (
         DistancePairSettings,
@@ -366,7 +327,6 @@ def _contacts_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonCo
 CASES = {
     "rmsd": _rmsd_case,
     "rg": _rg_case,
-    "sasa": _sasa_case,
     "distances": _distances_case,
     "contacts": _contacts_case,
 }
@@ -425,7 +385,7 @@ def test_pairwise_results_carry_adjusted_p_values(plugin: str, tmp_path: Path) -
         assert adjusted_p >= raw_p
 
 
-@pytest.mark.parametrize("plugin", ["distances", "rg", "rmsd", "sasa"])
+@pytest.mark.parametrize("plugin", ["distances", "rg", "rmsd"])
 def test_single_comparison_leaves_p_value_unchanged(plugin: str, tmp_path: Path) -> None:
     """A family of one test must have an adjusted p-value equal to the raw one."""
     analysis, ctx = CASES[plugin](tmp_path, "welch")

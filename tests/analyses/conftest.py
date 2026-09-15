@@ -22,7 +22,6 @@ _PLOTTER_MODULES = tuple(
         "rmsd",
         "rmsf",
         "rg",
-        "sasa",
         "contacts",
         "distances",
         "hydrogen_bonds",
