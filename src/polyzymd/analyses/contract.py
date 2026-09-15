@@ -106,6 +106,15 @@ class Observable(BaseModel):
     higher_is_better : bool or None, optional
         Direction that counts as an improvement, used by formatters. ``None``
         when the quantity has no preferred direction.
+    tested : bool, optional
+        Whether the observable enters the cross-condition tests, by default
+        ``True``. Set it to ``False`` for a quantity that is a function of
+        others the plugin already reports, such as the last class of a set of
+        fractions that sums to one. An untested observable is still reduced,
+        aggregated and reported with its uncertainty; it is only kept out of
+        the pairwise tests and out of the multiple-comparison family, so it
+        cannot inflate the adjusted p-values of the quantities that carry
+        independent information.
     """
 
     name: str = Field(min_length=1)
@@ -114,6 +123,7 @@ class Observable(BaseModel):
     unit: str | None = None
     index: list[float] | None = None
     higher_is_better: bool | None = None
+    tested: bool = True
 
     model_config = ConfigDict(frozen=True)
 
@@ -158,6 +168,7 @@ class ObservableEstimate(BaseModel):
     profile: list[float] | None = None
     index: list[float] | None = None
     higher_is_better: bool | None = None
+    tested: bool = True
     n_frames: int
     statistical_inefficiency: float | None = None
     n_eff: float | None = None
@@ -182,6 +193,7 @@ class ObservableAggregate(BaseModel):
     index: list[float] | None = None
     n_eff_min: float | None = None
     higher_is_better: bool | None = None
+    tested: bool = True
 
 
 class ObservableComparison(BaseModel):
@@ -303,11 +315,12 @@ def reduce_observable(observable: Observable | ObservableEstimate) -> Observable
         return observable
 
     values = np.asarray(observable.values, dtype=np.float64)
-    common = {
+    common: dict[str, Any] = {
         "name": observable.name,
         "kind": observable.kind,
         "unit": observable.unit,
         "higher_is_better": observable.higher_is_better,
+        "tested": observable.tested,
         "n_frames": int(values.size),
     }
     if observable.kind == "profile":
@@ -382,6 +395,7 @@ def aggregate_observables(
             kind=head.kind,
             unit=head.unit,
             higher_is_better=head.higher_is_better,
+            tested=head.tested,
             n_replicates=len(estimates),
             n_eff_min=_min_or_none([est.n_eff for est in estimates]),
         )
@@ -459,9 +473,11 @@ def compare_observables(
     Returns
     -------
     list[ObservableComparison]
-        One entry per observable and non-control condition. Profiles are not
-        tested and are omitted. A pair with fewer than two replicates on either
-        side is reported with ``testable=False`` and a note.
+        One entry per observable and non-control condition. Profiles and
+        observables declared ``tested=False`` are omitted, so they neither get
+        a test nor enlarge the correction family. A pair with fewer than two
+        replicates on either side is reported with ``testable=False`` and a
+        note.
 
     Raises
     ------
@@ -485,7 +501,7 @@ def compare_observables(
 
     comparisons: list[ObservableComparison] = []
     for name, control_agg in samples[control].items():
-        if control_agg.kind == "profile":
+        if control_agg.kind == "profile" or not control_agg.tested:
             continue
         others = [label for label in labels if label != control and name in samples[label]]
         if use_tukey:

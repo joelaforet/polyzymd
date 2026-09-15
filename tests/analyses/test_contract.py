@@ -174,6 +174,52 @@ def test_comparison_uses_one_benjamini_hochberg_family() -> None:
     assert all(c.delta == pytest.approx(4.0, abs=1e-6) for c in high)
 
 
+def test_an_untested_observable_is_reported_but_never_tested() -> None:
+    """tested=False keeps a dependent quantity out of the tests and the family.
+
+    The untested observable is still aggregated with its mean and SEM, it
+    produces no pairwise row, and the adjusted p-values of the tested
+    observables are what they would be if it had never been reported.
+    """
+
+    def condition(values: tuple[float, ...], *, with_dependent: bool) -> list[Any]:
+        replicates = []
+        for value in values:
+            observables = [_series([value], name="a"), _series([value], name="b")]
+            if with_dependent:
+                observables.append(
+                    Observable(
+                        name="dependent",
+                        kind="mean_of_timeseries",
+                        unit="A",
+                        values=[10.0 - value],
+                        tested=False,
+                    )
+                )
+            replicates.append(observables)
+        return aggregate_observables(replicates)
+
+    samples = {"control": (1.0, 1.1, 0.9), "high": (5.0, 5.1, 4.9)}
+    with_dependent = {
+        label: condition(values, with_dependent=True) for label, values in samples.items()
+    }
+    without = {label: condition(values, with_dependent=False) for label, values in samples.items()}
+
+    dependent = next(agg for agg in with_dependent["control"] if agg.name == "dependent")
+    assert dependent.n_replicates == 3
+    assert dependent.mean == pytest.approx(9.0, abs=1e-6)
+    assert dependent.sem == pytest.approx(0.1 / 3**0.5, abs=1e-6)
+    assert dependent.tested is False
+
+    comparisons = compare_observables(with_dependent, control_label="control")
+
+    assert [c.name for c in comparisons] == ["a", "b"]
+    baseline = compare_observables(without, control_label="control")
+    assert [c.p_adjusted for c in comparisons] == pytest.approx(
+        [c.p_adjusted for c in baseline], abs=1e-12
+    )
+
+
 def test_unknown_control_label_is_rejected() -> None:
     """A control that names no compared condition is an error, not a fallback."""
     aggregates = aggregate_observables([[_series([1.0])], [_series([2.0])]])
@@ -212,6 +258,19 @@ def test_a_plugin_that_misses_the_protocol_is_named() -> None:
 
     with pytest.raises(PluginContractError, match=r"Settings.*compute.*references"):
         contract_analysis(Incomplete)
+
+
+def test_a_plugin_keeps_its_slurm_resource_hint() -> None:
+    """A plugin that needs more memory than the default says so on the class."""
+    from polyzymd.analyses.base import SlurmResourceHint
+    from polyzymd.analyses.rg_contract import RgContract
+
+    class Hungry(RgContract):
+        name = "hungry"
+        slurm_resource_hint = SlurmResourceHint(mem="16G")
+
+    assert contract_analysis(Hungry).slurm_resource_hint == SlurmResourceHint(mem="16G")
+    assert contract_analysis(RgContract).slurm_resource_hint is None
 
 
 def test_rg2_satisfies_the_protocol() -> None:

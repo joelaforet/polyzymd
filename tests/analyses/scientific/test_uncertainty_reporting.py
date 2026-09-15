@@ -44,7 +44,6 @@ PLUGIN_NAMES = (
     "contacts",
     "distances",
     "hydrogen_bonds",
-    "secondary_structure",
     "catalytic_triad",
 )
 
@@ -411,15 +410,6 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
         from polyzymd.analyses.rmsf._mda import MEAN_RMSF_METRIC
 
         return {MEAN_RMSF_METRIC: metric_summary_payload(MEAN_RMSF_METRIC, [1.5], unit="A")}
-
-    if analysis_name == "secondary_structure":
-        from polyzymd.analyses.secondary_structure._mda import HELIX_FRACTION_METRIC
-
-        return {
-            HELIX_FRACTION_METRIC: metric_summary_payload(
-                HELIX_FRACTION_METRIC, [0.4], unit="fraction"
-            )
-        }
 
     if analysis_name == "catalytic_triad":
         from polyzymd.analyses.catalytic_triad._mda import _condition_metrics as triad_metrics

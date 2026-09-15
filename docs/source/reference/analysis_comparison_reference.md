@@ -130,7 +130,7 @@ Stable analysis plugins:
 | `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests + omnibus ANOVA |
 | `distances` | No (custom) | Multiple distance metrics | Named distance pairs | FDR-corrected per-pair t-tests + omnibus ANOVA |
 | `catalytic_triad` | Yes | `simultaneous_contact_fraction` | Active-site geometry | FDR-corrected pairwise t-tests + omnibus ANOVA |
-| `secondary_structure` | Yes | `helix_fraction` | Secondary structure content | FDR-corrected pairwise t-tests + omnibus ANOVA |
+| `secondary_structure` | Yes | `ss_helix` and `ss_strand` (`ss_coil` and `ss_unassigned` reported, not tested) | Secondary structure content | FDR-corrected pairwise t-tests over replicates |
 | `sasa` | No (custom) | Per-run mean SASA | Multi-run target/context model | FDR-corrected per-run pairwise t-tests + omnibus ANOVA |
 | `hydrogen_bonds` | Custom loader with default-style scalar statistics | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA per configured summary |
 

@@ -43,7 +43,7 @@ Package Structure
     │   ├── rmsf/         # RMSF plugin package
     │   ├── contacts/     # Contacts plugin package
     │   ├── distances/    # Distance analysis plugin package
-    │   ├── secondary_structure/  # Secondary structure plugin package
+    │   ├── secondary_structure.py  # Secondary structure plugin
     │   └── ...           # Single-file or package plugins for each analysis type
     └── cli/              # Command-line interface
         ├── compare.py    # `polyzymd compare` subcommands
