@@ -11,8 +11,11 @@ from typing import TYPE_CHECKING, Sequence, cast
 from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
 from polyzymd.analyses.shared.plotting import (
     ArtifactPlotData,
+    annotate_uncertainty,
     apply_axis_style,
     apply_legend,
+    band_half_widths,
+    error_bar_half_widths,
     get_condition_colors,
     get_output_path,
     has_replicate_uncertainty,
@@ -20,6 +23,7 @@ from polyzymd.analyses.shared.plotting import (
     order_condition_labels,
     save_figure,
     scatter_replicate_values,
+    shared_count_half_widths,
     suppress_singleton_errors,
 )
 
@@ -158,7 +162,11 @@ def plot_sasa_comparison_bars(
         ax.bar(
             positions,
             means,
-            yerr=suppress_singleton_errors(sems, replicate_values),
+            yerr=error_bar_half_widths(
+                sems,
+                replicate_values,
+                error_bar=plot_settings.error_bar,
+            ),
             color=colors,
             edgecolor=theme.bar_edgecolor,
             linewidth=theme.bar_linewidth,
@@ -184,6 +192,13 @@ def plot_sasa_comparison_bars(
             ylabel="Mean SASA (A^2)",
         )
         fig.tight_layout()
+        annotate_uncertainty(
+            fig,
+            ctx.plot_settings,
+            "sasa",
+            n_replicates=min((len(values) for values in replicate_values if values), default=0),
+            equilibration=getattr(ctx, "equilibration", None),
+        )
 
         output_path = get_output_path(
             ctx.output_dir,
@@ -238,9 +253,10 @@ def plot_sasa_normalized_control_bars(
             ctx.plot_settings,
             control_label=comparison_result.control_label,
         )
-        yerr = suppress_singleton_errors(
-            [sem if sem is not None else 0.0 for sem in sems],
+        yerr = error_bar_half_widths(
+            sems,
             replicate_values,
+            error_bar=plot_settings.error_bar,
         )
 
         fig, ax = plt.subplots(figsize=plot_settings.figsize)  # type: ignore[attr-defined]
@@ -273,6 +289,13 @@ def plot_sasa_normalized_control_bars(
             ylabel=f"% change in mean SASA vs {control_label}",
         )
         fig.tight_layout()
+        annotate_uncertainty(
+            fig,
+            ctx.plot_settings,
+            "sasa",
+            n_replicates=min((len(values) for values in replicate_values if values), default=0),
+            equilibration=getattr(ctx, "equilibration", None),
+        )
 
         output_path = get_output_path(
             ctx.output_dir,
@@ -305,6 +328,7 @@ def plot_sasa_timeseries(
     for run_label in comparison_result.run_labels:
         fig, ax = plt.subplots(figsize=plot_settings.timeseries_figsize)  # type: ignore[attr-defined]
         had_data = False
+        n_replicates_seen = 0
 
         for idx, condition_label in enumerate(condition_labels):
             time_ns, sasa_matrix = plot_data.timeseries.get(condition_label, {}).get(
@@ -316,23 +340,19 @@ def plot_sasa_timeseries(
 
             color = colors[idx] if idx < len(colors) else f"C{idx}"
             mean_sasa = np.mean(sasa_matrix, axis=0)
-            if sasa_matrix.shape[0] > 1:
-                sem_sasa = np.std(sasa_matrix, axis=0, ddof=1) / np.sqrt(
-                    float(sasa_matrix.shape[0])
-                )
-            else:
-                sem_sasa = np.zeros_like(mean_sasa)
+            band_half_width = band_half_widths(sasa_matrix, error_bar=plot_settings.error_bar)
+            n_replicates_seen = max(n_replicates_seen, int(sasa_matrix.shape[0]))
 
             if plot_settings.show_per_replicate:  # type: ignore[attr-defined]
                 for row in sasa_matrix:
                     ax.plot(time_ns, row, color=color, linewidth=0.8, alpha=0.25, zorder=1)
 
             ax.plot(time_ns, mean_sasa, color=color, linewidth=2.0, label=condition_label, zorder=3)
-            if sasa_matrix.shape[0] > 1:
+            if band_half_width is not None:
                 ax.fill_between(
                     time_ns,
-                    mean_sasa - sem_sasa,
-                    mean_sasa + sem_sasa,
+                    mean_sasa - band_half_width,
+                    mean_sasa + band_half_width,
                     color=color,
                     alpha=0.2,
                     zorder=2,
@@ -358,6 +378,14 @@ def plot_sasa_timeseries(
             borderaxespad=0,
         )
         fig.tight_layout(rect=(0.0, 0.0, 0.78, 1.0))
+
+        annotate_uncertainty(
+            fig,
+            ctx.plot_settings,
+            "sasa",
+            n_replicates=n_replicates_seen,
+            equilibration=getattr(ctx, "equilibration", None),
+        )
 
         output_path = get_output_path(
             ctx.output_dir,
@@ -390,6 +418,7 @@ def plot_sasa_residue_profiles(
     for run_label in comparison_result.run_labels:
         fig, ax = plt.subplots(figsize=plot_settings.profile_figsize)  # type: ignore[attr-defined]
         had_data = False
+        n_replicates_seen = 0
 
         for idx, condition_label in enumerate(condition_labels):
             payload = plot_data.condition_payloads.get(condition_label)
@@ -418,8 +447,11 @@ def plot_sasa_residue_profiles(
 
             color = colors[idx] if idx < len(colors) else f"C{idx}"
             ax.plot(residue_ids, means, color=color, linewidth=2.0, label=condition_label)
-            if has_replicate_uncertainty(n_replicates=payload.get("n_replicates")):
-                ax.fill_between(residue_ids, means - sems, means + sems, color=color, alpha=0.2)
+            profile_n = int(payload.get("n_replicates") or 0)
+            if has_replicate_uncertainty(n_replicates=profile_n):
+                band = shared_count_half_widths(sems, profile_n, error_bar=plot_settings.error_bar)
+                ax.fill_between(residue_ids, means - band, means + band, color=color, alpha=0.2)
+                n_replicates_seen = max(n_replicates_seen, profile_n)
             had_data = True
 
         if not had_data:
@@ -441,6 +473,14 @@ def plot_sasa_residue_profiles(
             borderaxespad=0,
         )
         fig.tight_layout(rect=(0.0, 0.0, 0.78, 1.0))
+
+        annotate_uncertainty(
+            fig,
+            ctx.plot_settings,
+            "sasa",
+            n_replicates=n_replicates_seen,
+            equilibration=getattr(ctx, "equilibration", None),
+        )
 
         output_path = get_output_path(
             ctx.output_dir,

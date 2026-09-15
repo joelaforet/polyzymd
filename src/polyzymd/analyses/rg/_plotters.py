@@ -12,14 +12,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from polyzymd.analyses.shared.plotting import (
+    annotate_uncertainty,
     apply_axis_style,
     apply_legend,
+    band_half_widths,
+    error_bar_half_widths,
     get_condition_colors,
     get_output_path,
     order_condition_labels,
+    resolve_error_bar,
     save_figure,
     scatter_replicate_values,
-    suppress_singleton_errors,
+    shared_count_half_widths,
 )
 
 if TYPE_CHECKING:
@@ -66,6 +70,7 @@ def plot_rg_timeseries(ctx: PlotContext, comparison_result: RgComparisonResult) 
     for run_label in comparison_result.run_labels:
         fig, ax = plt.subplots(figsize=plot_settings.timeseries_figsize)
         had_data = False
+        n_replicates_seen = 0
 
         for idx, condition_label in enumerate(condition_labels):
             condition_dir = ctx.analysis_dirs.get(condition_label)
@@ -92,10 +97,8 @@ def plot_rg_timeseries(ctx: PlotContext, comparison_result: RgComparisonResult) 
 
             color = colors[idx] if idx < len(colors) else f"C{idx}"
             mean_rg = np.mean(rg_matrix, axis=0)
-            if rg_matrix.shape[0] > 1:
-                sem_rg = np.std(rg_matrix, axis=0, ddof=1) / np.sqrt(float(rg_matrix.shape[0]))
-            else:
-                sem_rg = np.zeros_like(mean_rg)
+            band_half_width = band_half_widths(rg_matrix, error_bar=plot_settings.error_bar)
+            n_replicates_seen = max(n_replicates_seen, int(rg_matrix.shape[0]))
 
             if plot_settings.show_per_replicate:
                 for rep_trace in rg_matrix:
@@ -116,11 +119,11 @@ def plot_rg_timeseries(ctx: PlotContext, comparison_result: RgComparisonResult) 
                 label=condition_label,
                 zorder=3,
             )
-            if rg_matrix.shape[0] > 1:
+            if band_half_width is not None:
                 ax.fill_between(
                     time_ns,
-                    mean_rg - sem_rg,
-                    mean_rg + sem_rg,
+                    mean_rg - band_half_width,
+                    mean_rg + band_half_width,
                     color=color,
                     alpha=0.2,
                     zorder=2,
@@ -147,6 +150,13 @@ def plot_rg_timeseries(ctx: PlotContext, comparison_result: RgComparisonResult) 
             borderaxespad=0,
         )
         fig.tight_layout(rect=[0, 0, 0.78, 1])
+        annotate_uncertainty(
+            fig,
+            ctx.plot_settings,
+            "rg",
+            n_replicates=n_replicates_seen,
+            equilibration=getattr(ctx, "equilibration", None),
+        )
 
         safe_label = _sanitize_run_label(run_label)
         output_path = get_output_path(
@@ -224,7 +234,11 @@ def plot_rg_comparison_bars(
         ax.bar(
             positions,
             means,
-            yerr=suppress_singleton_errors(sems, replicate_values),
+            yerr=error_bar_half_widths(
+                sems,
+                replicate_values,
+                error_bar=plot_settings.error_bar,
+            ),
             color=colors,
             edgecolor=theme.bar_edgecolor,
             linewidth=theme.bar_linewidth,
@@ -250,6 +264,13 @@ def plot_rg_comparison_bars(
         )
 
         fig.tight_layout()
+        annotate_uncertainty(
+            fig,
+            ctx.plot_settings,
+            "rg",
+            n_replicates=min((len(values) for values in replicate_values if values), default=0),
+            equilibration=getattr(ctx, "equilibration", None),
+        )
 
         safe_label = _sanitize_run_label(run_label)
         output_path = get_output_path(
@@ -282,6 +303,7 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
     import numpy as np
 
     plot_settings = _get_plot_settings(ctx)
+    distribution_error_bar = resolve_error_bar(plot_settings, ctx.plot_settings)
     if not plot_settings.generate_distribution_plots:
         logger.info("Rg distribution plotting disabled by plot settings")
         return []
@@ -321,6 +343,7 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
 
         reduced_panel_data: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, str]] = []
         fragment_panel_data: list[tuple[str, np.ndarray, np.ndarray, np.ndarray, str]] = []
+        n_replicates_seen = 0
 
         for idx, condition_label in enumerate(condition_labels):
             condition_dir = ctx.analysis_dirs.get(condition_label)
@@ -355,6 +378,8 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
                 continue
 
             color = colors[idx] if idx < len(colors) else f"C{idx}"
+            panel_n = int(run_payload.get("n_replicates") or 0)
+            n_replicates_seen = max(n_replicates_seen, panel_n)
 
             reduced_edges = run_payload.get("reduced_histogram_edges")
             reduced_mean = run_payload.get("reduced_histogram_density_mean")
@@ -368,12 +393,15 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
                     and reduced_mean_arr.size == reduced_sem_arr.size
                 ):
                     reduced_centers = (reduced_edges_arr[:-1] + reduced_edges_arr[1:]) / 2.0
+                    reduced_band_arr = shared_count_half_widths(
+                        reduced_sem_arr, panel_n, error_bar=distribution_error_bar
+                    )
                     reduced_panel_data.append(
                         (
                             condition_label,
                             reduced_centers,
                             reduced_mean_arr,
-                            reduced_sem_arr,
+                            reduced_band_arr,
                             color,
                         )
                     )
@@ -397,12 +425,15 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
                         and fragment_mean_arr.size == fragment_sem_arr.size
                     ):
                         fragment_centers = (fragment_edges_arr[:-1] + fragment_edges_arr[1:]) / 2.0
+                        fragment_band_arr = shared_count_half_widths(
+                            fragment_sem_arr, panel_n, error_bar=distribution_error_bar
+                        )
                         fragment_panel_data.append(
                             (
                                 condition_label,
                                 fragment_centers,
                                 fragment_mean_arr,
-                                fragment_sem_arr,
+                                fragment_band_arr,
                                 color,
                             )
                         )
@@ -424,7 +455,7 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
         if is_fragment_mode:
             fig, axes = plt.subplots(1, 2, figsize=plot_settings.distribution_figsize)
             reduced_ax, fragment_ax = axes
-            for condition_label, centers, density_mean, density_sem, color in reduced_panel_data:
+            for condition_label, centers, density_mean, density_band, color in reduced_panel_data:
                 reduced_ax.step(
                     centers,
                     density_mean,
@@ -435,13 +466,13 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
                 )
                 reduced_ax.fill_between(
                     centers,
-                    density_mean - density_sem,
-                    density_mean + density_sem,
+                    density_mean - density_band,
+                    density_mean + density_band,
                     color=color,
                     alpha=0.2,
                 )
 
-            for condition_label, centers, density_mean, density_sem, color in fragment_panel_data:
+            for condition_label, centers, density_mean, density_band, color in fragment_panel_data:
                 fragment_ax.step(
                     centers,
                     density_mean,
@@ -452,8 +483,8 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
                 )
                 fragment_ax.fill_between(
                     centers,
-                    density_mean - density_sem,
-                    density_mean + density_sem,
+                    density_mean - density_band,
+                    density_mean + density_band,
                     color=color,
                     alpha=0.2,
                 )
@@ -483,7 +514,7 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
             fig.tight_layout(rect=[0, 0, 0.78, 1])
         else:
             fig, ax = plt.subplots(figsize=plot_settings.distribution_figsize)
-            for condition_label, centers, density_mean, density_sem, color in reduced_panel_data:
+            for condition_label, centers, density_mean, density_band, color in reduced_panel_data:
                 ax.step(
                     centers,
                     density_mean,
@@ -494,8 +525,8 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
                 )
                 ax.fill_between(
                     centers,
-                    density_mean - density_sem,
-                    density_mean + density_sem,
+                    density_mean - density_band,
+                    density_mean + density_band,
                     color=color,
                     alpha=0.2,
                 )
@@ -515,6 +546,14 @@ def plot_rg_distributions(ctx: PlotContext, comparison_result: RgComparisonResul
                 borderaxespad=0,
             )
             fig.tight_layout(rect=[0, 0, 0.78, 1])
+
+        annotate_uncertainty(
+            fig,
+            ctx.plot_settings,
+            "rg",
+            n_replicates=n_replicates_seen,
+            equilibration=getattr(ctx, "equilibration", None),
+        )
 
         safe_label = _sanitize_run_label(run_label)
         output_path = get_output_path(

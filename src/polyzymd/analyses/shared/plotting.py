@@ -40,6 +40,8 @@ if TYPE_CHECKING:
 
     from polyzymd.config.comparison import PlotSettings, PlotTheme
 
+from polyzymd.analyses.exceptions import StatisticsError
+
 logger = logging.getLogger(__name__)
 
 _UNSET = object()  # sentinel for apply_legend defaults
@@ -1085,6 +1087,8 @@ def grouped_bars(
     *,
     bar_width: float | None = None,
     show_error: bool = True,
+    error_bar: str = "ci95",
+    n_replicates: int | None = None,
     reference_line: float | None = 0.0,
     reference_label: str = "Neutral (0)",
     replicate_values: "Sequence[Sequence[Sequence[float]]] | None" = None,
@@ -1095,6 +1099,12 @@ def grouped_bars(
     Style values (alpha, capsize, edgecolor, linewidth, dot_size, etc.)
     are read from ``plot_settings.theme``.  Callers can override any of
     them via ``**style_overrides`` using the theme field names as keys.
+
+    ``errors`` holds the standard error of each bar. It is converted to the
+    interval named by ``error_bar`` using the per-bar replicate counts from
+    ``replicate_values``, or the shared count in ``n_replicates`` when the
+    per-bar values are not available. Without either, no error bar is drawn, so
+    a figure never shows a raw SEM under a footnote claiming an interval.
 
     Parameters
     ----------
@@ -1172,9 +1182,14 @@ def grouped_bars(
             "linewidth": linewidth,
         }
         if show_error:
-            errors_for_plot = errors
             if replicate_values is not None:
-                errors_for_plot = suppress_singleton_errors(errors, replicate_values[i])
+                errors_for_plot = error_bar_half_widths(
+                    list(errors), replicate_values[i], error_bar=error_bar
+                )
+            else:
+                errors_for_plot = error_bar_half_widths(
+                    list(errors), error_bar=error_bar, n_replicates=n_replicates
+                )
             if errors_for_plot is not None:
                 bar_kwargs["yerr"] = errors_for_plot
         bar_positions = np.asarray(x) + offset
@@ -1310,3 +1325,199 @@ def symmetric_clim(
         return (-pad, pad)
     max_abs = float(max(abs(arr.min()), abs(arr.max())))
     return (-(max_abs + pad), max_abs + pad)
+
+
+# ---------------------------------------------------------------------------
+# Uncertainty intervals on figures
+# ---------------------------------------------------------------------------
+
+
+def error_bar_half_widths(
+    sems: Sequence[float | None],
+    replicate_values: Sequence[Any] | None = None,
+    *,
+    error_bar: str = "ci95",
+    n_replicates: int | None = None,
+) -> list[float] | None:
+    """Return the half width of the error bar to draw on each bar.
+
+    With ``"ci95"`` each standard error is multiplied by the Student t factor
+    for that bar's own replicate count, so the bar spans the 95 percent
+    interval; with ``"sem"`` it is drawn unchanged. ``replicate_values`` gives
+    the per-bar counts, or ``n_replicates`` a count shared by every bar. Bars
+    backed by one replicate get no error bar, and the result is ``None`` when
+    no bar has displayable uncertainty.
+    """
+    from polyzymd.analyses.shared.statistics import student_t_coverage_factor
+
+    if error_bar not in ("ci95", "sem"):
+        raise StatisticsError(f"error_bar must be 'ci95' or 'sem', got {error_bar!r}")
+
+    counts: list[int] = []
+    for index in range(len(sems)):
+        if replicate_values is not None and index < len(replicate_values):
+            counts.append(int(finite_numeric_values(replicate_values[index]).size))
+        else:
+            counts.append(int(n_replicates or 0))
+
+    half_widths: list[float] = []
+    any_uncertainty = False
+    for sem, count in zip(sems, counts, strict=False):
+        if sem is None or count < 2:
+            half_widths.append(0.0)
+            continue
+        factor = 1.0
+        if error_bar == "ci95":
+            factor = student_t_coverage_factor(count) or 1.0
+        half_widths.append(float(sem) * factor)
+        any_uncertainty = True
+
+    return half_widths if any_uncertainty else None
+
+
+def plugin_plot_settings(plot_settings: Any, analysis_name: str) -> Any | None:
+    """Return one plugin's plot settings from the global settings object.
+
+    The global ``PlotSettings`` exposes each discovered analysis as an
+    attribute, default-constructed when the YAML omits its block. A plugin with
+    no ``PlotSettingsModel`` has no such attribute and yields ``None``.
+    """
+    try:
+        return getattr(plot_settings, analysis_name)
+    except AttributeError:
+        return None
+
+
+def resolve_error_bar(*candidates: Any, default: str = "ci95") -> str:
+    """Return the first declared ``error_bar`` setting among *candidates*.
+
+    Plugin plot settings carry ``error_bar``; the global plot settings do not.
+    Pass the plugin's own settings first, usually from
+    :func:`plugin_plot_settings`, so a user's choice is honoured.
+    """
+    for candidate in candidates:
+        value = getattr(candidate, "error_bar", None)
+        if value in ("ci95", "sem"):
+            return str(value)
+    return default
+
+
+def band_half_widths(
+    matrix: Any,
+    *,
+    error_bar: str = "ci95",
+) -> "np.ndarray | None":
+    """Return the half width of a shaded band over per-replicate traces.
+
+    ``matrix`` is shaped ``(n_replicates, n_points)``. The band is centred on
+    the mean across replicates and is ``None`` when fewer than two replicates
+    make it inestimable.
+    """
+    import numpy as np
+
+    from polyzymd.analyses.shared.statistics import student_t_coverage_factor
+
+    if error_bar not in ("ci95", "sem"):
+        raise StatisticsError(f"error_bar must be 'ci95' or 'sem', got {error_bar!r}")
+
+    array = np.asarray(matrix, dtype=float)
+    if array.ndim != 2 or array.shape[0] < 2:
+        return None
+    n = int(array.shape[0])
+    sem = np.std(array, axis=0, ddof=1) / np.sqrt(float(n))
+    if error_bar == "sem":
+        return sem
+    return sem * float(student_t_coverage_factor(n) or 1.0)
+
+
+def shared_count_half_widths(
+    sems: "Sequence[float] | np.ndarray",
+    n_replicates: int,
+    *,
+    error_bar: str = "ci95",
+) -> "np.ndarray":
+    """Return bar or band half widths for a series with one shared replicate count.
+
+    Use it where the per-point replicate values are not available but the count
+    behind every point is the same. Returns zeros when fewer than two
+    replicates make the interval inestimable, so the caller can draw nothing.
+    """
+    import numpy as np
+
+    array = np.asarray(sems, dtype=float)
+    half_widths = error_bar_half_widths(list(array), error_bar=error_bar, n_replicates=n_replicates)
+    if half_widths is None:
+        return np.zeros_like(array)
+    return np.asarray(half_widths, dtype=float)
+
+
+def annotate_uncertainty(
+    fig: "Figure",
+    plot_settings: Any,
+    analysis_name: str,
+    *,
+    replicate_values: "Sequence[Any] | None" = None,
+    n_replicates: int | None = None,
+    equilibration: str | None = None,
+) -> str:
+    """Resolve a plugin's error-bar setting and footnote the figure with it.
+
+    This is the one call every plotter makes after laying out a figure that
+    draws an uncertainty. It reads the plugin's own ``error_bar`` choice,
+    counts the replicates behind the narrowest interval shown, and writes the
+    footnote. Pass ``replicate_values`` when the per-bar values are available,
+    otherwise ``n_replicates``.
+    """
+    if n_replicates is None:
+        n_replicates = min(
+            (
+                int(finite_numeric_values(values).size)
+                for values in replicate_values or []
+                if finite_numeric_values(values).size
+            ),
+            default=0,
+        )
+    return add_uncertainty_footnote(
+        fig,
+        error_bar=resolve_error_bar(
+            plugin_plot_settings(plot_settings, analysis_name), plot_settings
+        ),
+        n_replicates=n_replicates,
+        equilibration=equilibration,
+    )
+
+
+def add_uncertainty_footnote(
+    fig: "Figure",
+    *,
+    error_bar: str = "ci95",
+    n_replicates: int | None = None,
+    equilibration: str | None = None,
+) -> str:
+    """Write the sentence saying what a figure's error bars mean, and return it.
+
+    Grossfield et al. (2018) ask that every figure describe the meaning and
+    basis of its uncertainties. This is that sentence.
+    """
+    what = (
+        "Error bars: 1 SEM (not a 95% interval)"
+        if error_bar == "sem"
+        else "Error bars: 95% CI (Student t)"
+    )
+    across = (
+        f" across n = {n_replicates} replicates"
+        if n_replicates and n_replicates >= 2
+        else " across replicates"
+    )
+    window = f"; production window t >= {equilibration}" if equilibration else ""
+    text = f"{what}{across}{window}. Points are per-replicate values."
+    fig.text(
+        0.01,
+        0.01,
+        text,
+        fontsize=7,
+        color="dimgray",
+        ha="left",
+        va="bottom",
+    )
+    return text
