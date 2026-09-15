@@ -221,23 +221,17 @@ experimental activity or other mechanistic validation.
 
 ## Plot behavior
 
-The current plugin plot lifecycle reads existing artifacts and generates
-high-level comparison figures. The primary outputs are:
+Figures come from the shared contract plot layer, which draws every observable
+the plugin reports: the per-pair distances, their contact fractions, and the
+simultaneous contact fraction, each with the replicate-level uncertainty it was
+aggregated with. The per-pair distance distribution panel the plugin used to
+draw is gone; the per-frame series behind each observable is kept in the
+replicate NPZ sidecar for anyone who wants to draw one.
 
-- `triad_kde_panel.<format>` — per-pair distance distributions across conditions,
-  with the configured threshold shown as a visual reference.
-- `triad_threshold_bars.<format>` — grouped summaries of fractions below threshold,
-  including the simultaneous contact metric and per-pair contact behavior.
-
-The plot file format is configurable through PolyzyMD plot settings. Supported
-formats include `png`, `pdf`, and `svg`; `png` is the default. For example, the
-default filenames are `triad_kde_panel.png` and `triad_threshold_bars.png`, while
-PDF output would use `triad_kde_panel.pdf` and `triad_threshold_bars.pdf`.
-
-Use these plots to understand whether a scalar difference is driven by a broad
-distributional shift, a small subpopulation, or one limiting pair. The plots are
-interpretive aids; they do not replace statistical uncertainty or structural
-validation.
+Read the per-pair figures before the composite one: they say whether a change in
+the simultaneous fraction comes from one limiting pair or from the relay as a
+whole. The plots are interpretive aids; they do not replace statistical
+uncertainty or structural validation.
 
 ## Common interpretation pitfalls
 

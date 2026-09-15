@@ -17,16 +17,6 @@ from polyzymd.analyses.base import (
     PairwiseResult,
 )
 from polyzymd.analyses.contacts._comparison_results import AggregateComparisonResult
-from polyzymd.analyses.distances._comparison_results import (
-    DistanceComparisonResult,
-    DistanceConditionSummary,
-    DistancePairSummary,
-    DistancePairwiseComparison,
-)
-from polyzymd.analyses.distances._formatters import (
-    format_distances_console_table,
-    format_distances_markdown,
-)
 from polyzymd.analyses.rg import RgAnalysis
 from polyzymd.analyses.rg._comparison_results import RgRunPairwiseComparison
 from polyzymd.analyses.rmsd._comparison_results import RMSDRunPairwiseComparison
@@ -186,28 +176,6 @@ def test_sasa_pairwise_inf_round_trip_json() -> None:
 
     assert math.isinf(loaded.percent_change)
     assert loaded.percent_change > 0
-
-
-def test_distances_pairwise_inf_round_trip_json() -> None:
-    """Distances pairwise model should preserve infinite percent_change across JSON round-trip."""
-    comparison = DistancePairwiseComparison(
-        pair_label="Catalytic distance",
-        condition_a="Control",
-        condition_b="Treatment",
-        distance_t_statistic=1.0,
-        distance_p_value=0.01,
-        distance_cohens_d=1.5,
-        distance_effect_interpretation="large",
-        distance_direction="farther",
-        distance_significant=True,
-        distance_percent_change=math.inf,
-    )
-
-    payload = comparison.model_dump_json()
-    loaded = DistancePairwiseComparison.model_validate_json(payload)
-
-    assert math.isinf(loaded.distance_percent_change)
-    assert loaded.distance_percent_change > 0
 
 
 def test_contacts_aggregate_inf_round_trip_json() -> None:
@@ -393,69 +361,3 @@ def test_rg_compare_run_handles_zero_control_infinite_direction() -> None:
     assert math.isinf(comp.percent_change)
     assert comp.percent_change > 0
     assert comp.direction == "expansion"
-
-
-def test_distances_formatter_zero_control_emits_infinity_with_direction() -> None:
-    """Distances formatter should report direction when control distance is zero."""
-    pair_label = "Catalytic distance"
-    control = DistanceConditionSummary(
-        label="Control",
-        config_path="/tmp/control.yaml",
-        n_replicates=3,
-        replicate_values=[],
-        pair_summaries=[
-            DistancePairSummary(
-                label=pair_label,
-                selection_a="chainid A and name CA",
-                selection_b="chainid B and name C1",
-                threshold=3.5,
-                mean_distance=0.0,
-                sem_distance=0.0,
-                fraction_below_threshold=0.0,
-                sem_fraction_below=0.0,
-                per_replicate_means=[0.0, 0.0, 0.0],
-                per_replicate_fractions=[0.0, 0.0, 0.0],
-            )
-        ],
-    )
-    treatment = DistanceConditionSummary(
-        label="Treatment",
-        config_path="/tmp/treatment.yaml",
-        n_replicates=3,
-        replicate_values=[],
-        pair_summaries=[
-            DistancePairSummary(
-                label=pair_label,
-                selection_a="chainid A and name CA",
-                selection_b="chainid B and name C1",
-                threshold=3.5,
-                mean_distance=-1.0,
-                sem_distance=0.1,
-                fraction_below_threshold=1.0,
-                sem_fraction_below=0.0,
-                per_replicate_means=[-1.0, -1.0, -1.0],
-                per_replicate_fractions=[1.0, 1.0, 1.0],
-            )
-        ],
-    )
-    result = DistanceComparisonResult(
-        name="distance-zero-control",
-        n_pairs=1,
-        pair_labels=[pair_label],
-        control_label="Control",
-        conditions=[control, treatment],
-        pairwise_comparisons=[],
-        anova_by_pair=None,
-        ranking_by_pair={pair_label: ["Treatment", "Control"]},
-        fraction_ranking_by_pair={pair_label: ["Treatment", "Control"]},
-        ranking=[],
-        equilibration_time="0ns",
-        created_at=datetime(2026, 1, 1, 0, 0, 0),
-        polyzymd_version="test",
-    )
-
-    console_output = format_distances_console_table(result, show_pairwise=False, show_anova=False)
-    markdown_output = format_distances_markdown(result, show_pairwise=False, show_anova=False)
-
-    assert "closer than control" in console_output
-    assert "closer than control" in markdown_output

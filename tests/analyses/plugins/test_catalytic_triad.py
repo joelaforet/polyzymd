@@ -1,829 +1,169 @@
-"""Tests for the MDAnalysis-native catalytic-triad plugin."""
+"""Tests for the catalytic triad contract plugin."""
 
 from __future__ import annotations
 
-import math
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from typing import Any
 
 import numpy as np
 import pytest
 
-from polyzymd.analyses._framework.cache_identity import settings_fingerprint
-from polyzymd.analyses.base import (
-    AggregateContext,
-    ComparisonContext,
-    Condition,
-    MetricValue,
-    PlotContext,
-    PluginContractError,
-    ReplicateContext,
-)
 from polyzymd.analyses.catalytic_triad import (
+    SIMULTANEOUS_CONTACT,
+    THRESHOLD_OPERATOR,
+    CatalyticTriad,
     CatalyticTriadAnalysis,
     CatalyticTriadSettings,
-    TriadPairSettings,
 )
-from polyzymd.analyses.catalytic_triad._mda import (
-    SIMULTANEOUS_CONTACT_METRIC,
-    TriadArtifactCollector,
+from polyzymd.analyses.contract import ObservableAggregate
+from polyzymd.analyses.mda import FrameSelection
+
+mda = pytest.importorskip("MDAnalysis")
+
+BOX = [40.0, 40.0, 40.0, 90.0, 90.0, 90.0]
+
+SETTINGS = CatalyticTriadSettings(
+    name="LipA Catalytic Triad",
+    threshold=3.5,
+    pairs=[
+        {"label": "Ser-His", "selection_a": "name OG", "selection_b": "name NE2"},
+        {"label": "His-Asp", "selection_a": "name ND1", "selection_b": "name OD2"},
+    ],
 )
-from polyzymd.analyses.distances._mda import DistancePairPayload, DistanceReplicatePayload
-from polyzymd.analyses.mda import (
-    ArtifactStore,
-    ComparisonArtifact,
-    FrameSelection,
-    MDACollectorContext,
-    MDAJobResult,
-    MDAUniversePolicy,
-    ReplicateArtifact,
-)
-from polyzymd.analyses.mda.job import MDABackendPolicy
 
 
-@pytest.fixture
-def triad_analysis() -> CatalyticTriadAnalysis:
-    """Return a fresh catalytic-triad analysis."""
+def _universe(ser_his: list[float], his_asp: list[float]) -> Any:
+    """Four atoms whose two pair distances follow the given per-frame series."""
 
-    return CatalyticTriadAnalysis()
+    from MDAnalysis.coordinates.memory import MemoryReader
+
+    universe = mda.Universe.empty(
+        4,
+        n_residues=3,
+        n_segments=1,
+        atom_resindex=[0, 1, 1, 2],
+        residue_segindex=[0, 0, 0],
+        trajectory=True,
+    )
+    universe.add_TopologyAttr("name", ["OG", "NE2", "ND1", "OD2"])
+    universe.add_TopologyAttr("resname", ["SER", "HIS", "ASP"])
+    universe.add_TopologyAttr("resid", [77, 156, 133])
+    universe.add_TopologyAttr("segid", ["A"])
+    universe.add_TopologyAttr("masses", [16.0, 14.0, 14.0, 16.0])
+    frames = [
+        [[0.0, 0.0, 0.0], [first, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 10.0 + second, 0.0]]
+        for first, second in zip(ser_his, his_asp, strict=True)
+    ]
+    universe.load_new(np.asarray(frames, dtype=np.float32), format=MemoryReader)
+    for timestep in universe.trajectory:
+        timestep.dimensions = BOX
+    return universe
 
 
-@pytest.fixture
-def default_settings() -> CatalyticTriadSettings:
-    """Return default catalytic-triad settings with two pairs."""
+def _frames() -> FrameSelection:
+    """Frame selection covering the whole trajectory."""
 
-    return CatalyticTriadSettings(
-        name="LipA_triad",
-        pairs=[
-            TriadPairSettings(
-                label="Asp133-His156",
-                selection_a="resid 133 and name OD1",
-                selection_b="resid 156 and name ND1",
-            ),
-            TriadPairSettings(
-                label="His156-Ser77",
-                selection_a="resid 156 and name NE2",
-                selection_b="resid 77 and name OG",
-            ),
-        ],
-        threshold=3.5,
-        description="Ser-His-Asp catalytic triad",
+    return FrameSelection(start=0, stop=None, step=1, timestep_ps=1.0)
+
+
+def test_every_pair_reports_a_distance_and_a_contact_fraction() -> None:
+    """Each pair gives a distance in angstrom and a fraction within the cutoff."""
+
+    observables = CatalyticTriad().compute(
+        _universe([3.0, 3.0, 4.0, 4.0], [3.0, 4.0, 3.0, 4.0]), _frames(), SETTINGS
     )
 
+    assert [(obs.name, obs.kind, obs.unit) for obs in observables] == [
+        ("Ser-His", "mean_of_timeseries", "A"),
+        ("Ser-His within 3.5 A", "fraction", "fraction"),
+        ("His-Asp", "mean_of_timeseries", "A"),
+        ("His-Asp within 3.5 A", "fraction", "fraction"),
+        (SIMULTANEOUS_CONTACT, "fraction", "fraction"),
+    ]
+    np.testing.assert_allclose(observables[0].values, [3.0, 3.0, 4.0, 4.0], atol=1e-6)
+    np.testing.assert_allclose(observables[1].values, [1.0, 1.0, 0.0, 0.0])
+    np.testing.assert_allclose(observables[3].values, [1.0, 0.0, 1.0, 0.0])
 
-@pytest.fixture
-def condition() -> Condition:
-    """Return a representative comparison condition."""
 
-    return Condition(
-        label="No Polymer",
-        config_path=Path("/fake/config.yaml"),
-        replicates=(1, 2, 3),
-        sim_config=MagicMock(),
+def test_simultaneous_contact_counts_only_frames_with_every_pair_inside() -> None:
+    """The composite fraction is the AND of the per-pair indicators, not their mean."""
+
+    observables = CatalyticTriad().compute(
+        _universe([3.0, 3.0, 4.0, 4.0], [3.0, 4.0, 3.0, 4.0]), _frames(), SETTINGS
     )
+    simultaneous = next(obs for obs in observables if obs.name == SIMULTANEOUS_CONTACT)
+
+    np.testing.assert_allclose(simultaneous.values, [1.0, 0.0, 0.0, 0.0])
 
 
-def _collector_context(
-    tmp_path: Path,
-    condition: Condition,
-    settings: CatalyticTriadSettings,
-    *,
-    replicate: int = 1,
-) -> MDACollectorContext:
-    """Build an MDA collector context for synthetic triad jobs."""
+def test_fractions_are_stored_as_fractions_over_replicates(run_contract_analysis: Any) -> None:
+    """The aggregate reports a fraction in [0, 1] with unit 'fraction', not a percent."""
 
-    from polyzymd.analyses.base import ReplicateContext
-
-    output_dir = tmp_path / f"run_{replicate}"
-    return MDACollectorContext(
-        analysis_name="catalytic_triad",
-        replicate_context=ReplicateContext(
-            condition=condition,
-            replicate=replicate,
-            sim_config=condition.sim_config,
-            output_dir=output_dir,
-            equilibration="10ns",
-            recompute=True,
-            settings=settings,
-        ),
-        frame_selection=FrameSelection(
-            start=0,
-            stop=4,
-            step=1,
-            n_frames_total=4,
-            timestep_ps=10.0,
-        ),
-        universe_policy=MDAUniversePolicy(condition_label=condition.label, replicate=replicate),
-        artifact_store=ArtifactStore(output_dir),
-        settings_fingerprint=settings_fingerprint(settings),
+    universes = {
+        1: _universe([3.0, 3.0], [3.0, 3.0]),
+        2: _universe([3.0, 4.0], [3.0, 3.0]),
+        3: _universe([4.0, 4.0], [3.0, 3.0]),
+    }
+    artifact = run_contract_analysis(
+        CatalyticTriadAnalysis, SETTINGS, lambda replicate: universes[replicate]
     )
+    aggregates = {
+        payload["name"]: ObservableAggregate.model_validate(payload)
+        for payload in artifact.payload["observables"]
+    }
+
+    simultaneous = aggregates[SIMULTANEOUS_CONTACT]
+    assert simultaneous.unit == "fraction"
+    assert simultaneous.replicate_values == pytest.approx([1.0, 0.5, 0.0])
+    assert simultaneous.mean == pytest.approx(0.5)
+    assert aggregates["Ser-His"].unit == "A"
 
 
-def _completed_pair_distance_job(distance_matrix: np.ndarray) -> MDAJobResult:
-    """Return a completed job with pair-distance analysis results."""
+def test_a_pair_exactly_at_the_cutoff_is_not_in_contact() -> None:
+    """The cutoff comparison is strictly less than, in both places it is used."""
 
-    results = SimpleNamespace(
-        distance_matrix=np.asarray(distance_matrix, dtype=np.float64),
-        frames=np.arange(distance_matrix.shape[1], dtype=np.int64),
-        times_ps=np.arange(distance_matrix.shape[1], dtype=np.float64) * 10.0,
-        warnings=[],
-    )
-    analysis = SimpleNamespace(results=results, frames=results.frames, times=results.times_ps)
-    return MDAJobResult(
-        name="triad_pair_distances",
-        analysis=analysis,
-        results=results,
-        run_kwargs={},
-        frame_selection=FrameSelection(start=0, stop=distance_matrix.shape[1], step=1),
-        backend_policy=MDABackendPolicy(),
-        universe_policy=MDAUniversePolicy(condition_label="No Polymer", replicate=1),
-    )
+    universe = _universe([3.4, 3.5, 3.5], [3.4, 3.4, 3.5])
+
+    observables = CatalyticTriad().compute(universe, _frames(), SETTINGS)
+    by_name = {observable.name: observable for observable in observables}
+
+    np.testing.assert_allclose(by_name["Ser-His within 3.5 A"].values, [1.0, 0.0, 0.0])
+    np.testing.assert_allclose(by_name["His-Asp within 3.5 A"].values, [1.0, 1.0, 0.0])
+    np.testing.assert_allclose(by_name[SIMULTANEOUS_CONTACT].values, [1.0, 0.0, 0.0])
+    assert by_name[SIMULTANEOUS_CONTACT].metadata["threshold_operator"] == THRESHOLD_OPERATOR
 
 
-def _replicate_artifact(
-    tmp_path: Path,
-    condition: Condition,
-    settings: CatalyticTriadSettings,
-    distance_matrix: np.ndarray,
-    *,
-    replicate: int,
-) -> ReplicateArtifact:
-    """Collect and persist one synthetic triad replicate artifact."""
+def test_the_composite_fraction_is_tested_and_the_per_pair_ones_are_not() -> None:
+    """Each pair fraction repeats its own distance; the composite one does not."""
 
-    ctx = _collector_context(tmp_path, condition, settings, replicate=replicate)
-    artifact = TriadArtifactCollector()(ctx, [_completed_pair_distance_job(distance_matrix)])
-    ArtifactStore(ctx.output_dir).write_replicate_result(artifact)
-    return artifact
+    observables = CatalyticTriad().compute(_universe([3.0, 3.0], [3.0, 3.0]), _frames(), SETTINGS)
+    tested = {observable.name: observable.tested for observable in observables}
+
+    assert tested == {
+        "Ser-His": True,
+        "Ser-His within 3.5 A": False,
+        "His-Asp": True,
+        "His-Asp within 3.5 A": False,
+        SIMULTANEOUS_CONTACT: True,
+    }
 
 
-class TestTriadDiscoveryAndSettings:
-    """Tests for discovery, class variables, and settings."""
+def test_observables_carry_the_active_site_identity() -> None:
+    """The name and description of the site travel with every observable."""
 
-    def test_discovery_finds_catalytic_triad(self) -> None:
-        """Catalytic triad should be auto-discovered by plugin discovery."""
+    settings = SETTINGS.model_copy(update={"description": "Ser-His-Asp relay"})
 
-        from polyzymd.analyses.discovery import clear_cache, get_analysis, list_analyses
+    observables = CatalyticTriad().compute(_universe([3.0], [3.0]), _frames(), settings)
 
-        clear_cache()
-        assert list_analyses()["catalytic_triad"] is CatalyticTriadAnalysis
-        with pytest.raises(KeyError, match="Unknown analysis"):
-            get_analysis("triad")
+    assert observables[0].metadata["active_site"] == "LipA Catalytic Triad"
+    assert observables[0].metadata["description"] == "Ser-His-Asp relay"
+    assert observables[-1].metadata["pairs"] == ["Ser-His", "His-Asp"]
 
-    def test_class_vars_use_mda_replicate_artifacts(
-        self, triad_analysis: CatalyticTriadAnalysis
-    ) -> None:
-        """The plugin should expose MDA jobs and canonical aggregate artifacts."""
 
-        assert triad_analysis.name == "catalytic_triad"
-        assert triad_analysis.ReplicateResultClass is None
-        assert triad_analysis.AggregatedResultClass is None
-        assert "run_replicate" not in type(triad_analysis).__dict__
+def test_a_misspelled_setting_is_named_rather_than_absorbed() -> None:
+    """An unknown key such as 'cutoff' warns instead of silently doing nothing."""
 
-    def test_extract_metrics_metadata_preserves_primary_metric(
-        self, triad_analysis: CatalyticTriadAnalysis
-    ) -> None:
-        """Metric extraction should preserve the primary comparison metadata."""
-
-        summary = MagicMock(
-            overall_simultaneous_contact=0.72,
-            sem_simultaneous_contact=0.04,
-            per_replicate_simultaneous=[0.70, 0.72, 0.74],
+    with pytest.warns(UserWarning, match="cutoff"):
+        CatalyticTriadSettings(
+            pairs=[{"label": "a", "selection_a": "name OG", "selection_b": "name NE2"}],
+            cutoff=3.5,
         )
-        metric = triad_analysis.extract_metrics(summary)[SIMULTANEOUS_CONTACT_METRIC]
-
-        assert metric.name == SIMULTANEOUS_CONTACT_METRIC
-        assert metric.higher_is_better is True
-        assert metric.direction_labels == ("worsening", "unchanged", "improving")
-
-    def test_settings_validation(self, default_settings: CatalyticTriadSettings) -> None:
-        """Settings should validate required pairs and expose labels."""
-
-        assert default_settings.n_pairs == 2
-        assert default_settings.get_pair_labels() == ["Asp133-His156", "His156-Ser77"]
-        with pytest.raises(ValueError, match="At least one distance pair"):
-            CatalyticTriadSettings(pairs=[])
-
-
-class TestTriadMDACollector:
-    """Tests for triad pair-distance artifact collection."""
-
-    def test_collector_uses_strict_threshold_and_writes_sidecar(
-        self, tmp_path: Path, condition: Condition, default_settings: CatalyticTriadSettings
-    ) -> None:
-        """Simultaneous contact should require every pair to be strictly below threshold."""
-
-        matrix = np.asarray(
-            [
-                [3.0, 3.5, 3.49, 3.2],
-                [3.1, 3.0, 3.6, 3.4],
-            ],
-            dtype=np.float64,
-        )
-        ctx = _collector_context(tmp_path, condition, default_settings)
-
-        with patch(
-            "polyzymd.analyses._framework.results_base.get_polyzymd_version",
-            return_value="1.3.0",
-        ):
-            artifact = TriadArtifactCollector()(ctx, [_completed_pair_distance_job(matrix)])
-
-        assert artifact.analysis_name == "catalytic_triad"
-        assert artifact.payload["simultaneous_contact_fraction"] == pytest.approx(0.5)
-        assert artifact.payload["n_frames_simultaneous"] == 2
-        assert artifact.payload["metrics"][SIMULTANEOUS_CONTACT_METRIC] == pytest.approx(50.0)
-        assert len(artifact.sidecars) == 1
-
-        sidecar_path = ArtifactStore(ctx.output_dir).validate_sidecar(artifact.sidecars[0])
-        with np.load(sidecar_path) as npz_data:
-            np.testing.assert_allclose(npz_data["distance_matrix"], matrix)
-            np.testing.assert_array_equal(
-                npz_data["simultaneous_contact"], np.asarray([True, False, False, True])
-            )
-            assert npz_data["thresholds"].tolist() == [3.5, 3.5]
-            assert npz_data["pair_labels"].tolist() == ["Asp133-His156", "His156-Ser77"]
-
-
-class TestTriadAggregationAndComparison:
-    """Tests for artifact aggregation and scalar comparison compatibility."""
-
-    def test_mda_not_configured_fails_without_scalar_fallback(
-        self,
-        triad_analysis: CatalyticTriadAnalysis,
-        condition: Condition,
-        tmp_path: Path,
-        default_settings: CatalyticTriadSettings,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """A missing MDA job path should fail closed before scalar fallback."""
-
-        ctx = ReplicateContext(
-            condition=condition,
-            replicate=1,
-            sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="10ns",
-            recompute=True,
-            settings=default_settings,
-        )
-        monkeypatch.setattr(
-            "polyzymd.analyses.mda.lifecycle.run_mda_replicate_jobs",
-            lambda *_args: None,
-        )
-
-        with pytest.raises(PluginContractError, match=r"build_mda_jobs\(\) returned None"):
-            triad_analysis._run_compute_stage(ctx, replicate=1)
-
-    def test_direct_scalar_runner_path_is_removed(
-        self,
-        triad_analysis: CatalyticTriadAnalysis,
-    ) -> None:
-        """The old runner hook should not exist on catalytic triad."""
-
-        assert "build_runner" not in type(triad_analysis).__dict__
-        assert not hasattr(triad_analysis, "_run_replicate_via_runner")
-
-    def test_aggregate_requires_replicate_artifacts(
-        self,
-        triad_analysis: CatalyticTriadAnalysis,
-        condition: Condition,
-        tmp_path: Path,
-        default_settings: CatalyticTriadSettings,
-    ) -> None:
-        """Non-artifact replicate results should be rejected with recompute guidance."""
-
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1,),
-            output_dir=tmp_path / "aggregated",
-            equilibration="10ns",
-            settings=default_settings,
-        )
-
-        with pytest.raises(TypeError, match="recompute the condition"):
-            triad_analysis.aggregate(ctx, [object()])
-
-    def test_aggregate_rejects_stale_pair_distance_version(
-        self,
-        triad_analysis: CatalyticTriadAnalysis,
-        condition: Condition,
-        tmp_path: Path,
-        default_settings: CatalyticTriadSettings,
-    ) -> None:
-        """Artifacts written before alignment was removed are refused."""
-
-        artifact = _replicate_artifact(
-            tmp_path,
-            condition,
-            default_settings,
-            np.asarray([[3.0, 3.8, 3.1, 3.2], [3.1, 3.0, 3.7, 3.2]]),
-            replicate=1,
-        )
-        artifact.metadata["pair_distance_version"] = "1"
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1,),
-            output_dir=tmp_path / "aggregated",
-            equilibration="10ns",
-            settings=default_settings,
-        )
-
-        with pytest.raises(ValueError, match="clear stale caches"):
-            triad_analysis.aggregate(ctx, [artifact])
-
-    def test_aggregate_returns_condition_artifact_payload(
-        self,
-        triad_analysis: CatalyticTriadAnalysis,
-        condition: Condition,
-        tmp_path: Path,
-        default_settings: CatalyticTriadSettings,
-    ) -> None:
-        """Aggregation should return artifacts and leave persistence to the framework."""
-
-        artifacts = [
-            _replicate_artifact(
-                tmp_path,
-                condition,
-                default_settings,
-                np.asarray([[3.0, 3.8, 3.1, 3.2], [3.1, 3.0, 3.7, 3.2]]),
-                replicate=1,
-            ),
-            _replicate_artifact(
-                tmp_path,
-                condition,
-                default_settings,
-                np.asarray([[3.0, 3.2, 3.1, 3.2], [3.1, 3.0, 3.2, 3.2]]),
-                replicate=2,
-            ),
-        ]
-        two_replicate_condition = Condition(
-            label=condition.label,
-            config_path=condition.config_path,
-            replicates=(1, 2),
-            sim_config=condition.sim_config,
-        )
-        ctx = AggregateContext(
-            condition=two_replicate_condition,
-            replicates=(1, 2),
-            output_dir=tmp_path / "aggregated",
-            equilibration="10ns",
-            settings=default_settings,
-        )
-
-        artifact = triad_analysis.aggregate(ctx, artifacts)
-
-        assert artifact.artifact_type == "condition"
-        assert not (tmp_path / "aggregated" / "result.json").exists()
-        assert artifact.payload["metrics"][SIMULTANEOUS_CONTACT_METRIC]["values"] == [50.0, 100.0]
-        assert artifact.payload["metric_metadata"][SIMULTANEOUS_CONTACT_METRIC] == {
-            "label": "Simultaneous Contact",
-            "unit": "%",
-            "higher_is_better": True,
-            "direction_labels": ("worsening", "unchanged", "improving"),
-        }
-        assert artifact.payload["overall_simultaneous_contact"] == pytest.approx(0.75)
-        assert artifact.payload["per_replicate_simultaneous"] == [0.5, 1.0]
-        assert [pair["pair_label"] for pair in artifact.payload["pair_results"]] == [
-            "Asp133-His156",
-            "His156-Ser77",
-        ]
-
-    def test_compare_condition_artifacts_preserves_triad_metadata(
-        self,
-        triad_analysis: CatalyticTriadAnalysis,
-        condition: Condition,
-        tmp_path: Path,
-        default_settings: CatalyticTriadSettings,
-    ) -> None:
-        """Real condition artifacts should compare through the MDA artifact engine."""
-
-        control = Condition(
-            label="No Polymer",
-            config_path=Path("/fake/control.yaml"),
-            replicates=(1, 2),
-            sim_config=condition.sim_config,
-        )
-        peg = Condition(
-            label="PEG",
-            config_path=Path("/fake/peg.yaml"),
-            replicates=(1, 2),
-            sim_config=condition.sim_config,
-        )
-        control_base = tmp_path / "control" / "catalytic_triad"
-        peg_base = tmp_path / "peg" / "catalytic_triad"
-        control_artifact = triad_analysis.aggregate(
-            AggregateContext(
-                condition=control,
-                replicates=(1, 2),
-                output_dir=control_base / "aggregated",
-                equilibration="10ns",
-                settings=default_settings,
-            ),
-            [
-                _replicate_artifact(
-                    control_base,
-                    control,
-                    default_settings,
-                    np.asarray([[3.0, 3.8, 3.1, 3.2], [3.1, 3.0, 3.7, 3.2]]),
-                    replicate=1,
-                ),
-                _replicate_artifact(
-                    control_base,
-                    control,
-                    default_settings,
-                    np.asarray([[3.0, 3.2, 3.1, 3.8], [3.1, 3.0, 3.2, 3.2]]),
-                    replicate=2,
-                ),
-            ],
-        )
-        peg_artifact = triad_analysis.aggregate(
-            AggregateContext(
-                condition=peg,
-                replicates=(1, 2),
-                output_dir=peg_base / "aggregated",
-                equilibration="10ns",
-                settings=default_settings,
-            ),
-            [
-                _replicate_artifact(
-                    peg_base,
-                    peg,
-                    default_settings,
-                    np.asarray([[3.0, 3.2, 3.1, 3.8], [3.1, 3.0, 3.2, 3.2]]),
-                    replicate=1,
-                ),
-                _replicate_artifact(
-                    peg_base,
-                    peg,
-                    default_settings,
-                    np.asarray([[3.0, 3.2, 3.1, 3.2], [3.1, 3.0, 3.2, 3.2]]),
-                    replicate=2,
-                ),
-            ],
-        )
-        ctx = ComparisonContext(
-            name="triad-project",
-            conditions=[control, peg],
-            excluded_conditions=[],
-            control_label="No Polymer",
-            analysis_dirs={"No Polymer": control_base, "PEG": peg_base},
-            results_dir=tmp_path / "results",
-            equilibration="10ns",
-            settings=default_settings,
-            fdr_alpha=0.05,
-            ttest_method="welch",
-            posthoc_method="ttest_bh",
-            aggregated_results={"No Polymer": control_artifact, "PEG": peg_artifact},
-        )
-
-        comparison = triad_analysis.compare(ctx)
-
-        assert isinstance(comparison, ComparisonArtifact)
-        assert comparison.payload["ranking"] == ["PEG", "No Polymer"]
-        metadata = comparison.payload["metric_metadata"][SIMULTANEOUS_CONTACT_METRIC]
-        assert metadata["label"] == "Simultaneous Contact"
-        assert metadata["unit"] == "%"
-        assert metadata["higher_is_better"] is True
-        assert metadata["direction_labels"] == ["worsening", "unchanged", "improving"]
-        # The direction label is only assigned when the corrected test is
-        # significant; this fixture is not, so it reads as no change.
-        pairwise = comparison.payload["pairwise_comparisons"][0]
-        assert pairwise["significant"] is False
-        assert pairwise["direction"] == "no significant change"
-
-    def test_format_accepts_comparison_artifact(
-        self,
-        triad_analysis: CatalyticTriadAnalysis,
-    ) -> None:
-        """ComparisonArtifact output should use triad-specific scalar formatting."""
-
-        comparison = ComparisonArtifact(
-            analysis_name="catalytic_triad",
-            conditions=["No Polymer", "PEG"],
-            control_label="No Polymer",
-            effective_control="No Polymer",
-            payload={
-                "condition_summaries": [
-                    {
-                        "label": "No Polymer",
-                        "n_replicates": 2,
-                        "simultaneous_contact_fraction_mean": 62.5,
-                        "simultaneous_contact_fraction_sem": 12.5,
-                        "simultaneous_contact_fraction_replicate_values": [50.0, 75.0],
-                    },
-                    {
-                        "label": "PEG",
-                        "n_replicates": 2,
-                        "simultaneous_contact_fraction_mean": 87.5,
-                        "simultaneous_contact_fraction_sem": 12.5,
-                        "simultaneous_contact_fraction_replicate_values": [75.0, 100.0],
-                    },
-                ],
-                "pairwise_comparisons": [
-                    {
-                        "condition_a": "No Polymer",
-                        "condition_b": "PEG",
-                        "metric": SIMULTANEOUS_CONTACT_METRIC,
-                        "t_statistic": 1.0,
-                        "p_value": 0.5,
-                        "p_value_adjusted": 0.5,
-                        "posthoc_method": "ttest_bh",
-                        "cohens_d": 1.0,
-                        "effect_size_interpretation": "large",
-                        "direction": "improving",
-                        "significant": False,
-                        "percent_change": 40.0,
-                        "testable": True,
-                    }
-                ],
-                "anova": [],
-                "ranking": ["PEG", "No Polymer"],
-                "rankings_by_metric": {SIMULTANEOUS_CONTACT_METRIC: ["PEG", "No Polymer"]},
-                "metric_metadata": {
-                    SIMULTANEOUS_CONTACT_METRIC: {
-                        "label": "Simultaneous Contact",
-                        "unit": "%",
-                        "higher_is_better": True,
-                        "direction_labels": ["worsening", "unchanged", "improving"],
-                    }
-                },
-                "statistical_parameters": {
-                    "fdr_alpha": 0.05,
-                    "ttest_method": "welch",
-                    "posthoc_method": "ttest_bh",
-                    "control_label": "No Polymer",
-                    "effective_control": "No Polymer",
-                    "equilibration": "10ns",
-                },
-            },
-        )
-
-        formatted = triad_analysis.format(comparison, "text")
-        json_formatted = triad_analysis.format(comparison, "json")
-
-        assert "Catalytic Triad Comparison" in formatted
-        assert "Simultaneous Contact" in formatted
-        assert "PEG" in formatted
-        assert "artifact_type" not in formatted
-        assert '"artifact_type": "comparison"' in json_formatted
-        assert '"metric_metadata"' in json_formatted
-
-    def test_extract_metrics_preserves_percent_scaling(
-        self, triad_analysis: CatalyticTriadAnalysis
-    ) -> None:
-        """Non-canonical metric extraction should still report percentages.
-
-        The mean, SEM and interval come from the replicate values, which are
-        the sampling unit, so a stale stored SEM cannot leak into a comparison.
-        """
-
-        summary = MagicMock(
-            overall_simultaneous_contact=0.72,
-            sem_simultaneous_contact=0.04,
-            per_replicate_simultaneous=[0.70, 0.72, 0.74],
-        )
-
-        metrics = triad_analysis.extract_metrics(summary)
-
-        metric = metrics[SIMULTANEOUS_CONTACT_METRIC]
-        assert isinstance(metric, MetricValue)
-        assert metric.mean == pytest.approx(72.0)
-        assert metric.sem == pytest.approx(2.0 / math.sqrt(3.0))
-        assert metric.replicate_values == [70.0, 72.0, 74.0]
-        assert metric.unit == "%"
-        assert metric.ci_method == "student_t"
-        assert metric.ci95_low == pytest.approx(72.0 - 4.302652729749462 * metric.sem)
-
-    def test_deserialize_rejects_noncanonical_json(
-        self, triad_analysis: CatalyticTriadAnalysis, tmp_path: Path
-    ) -> None:
-        """Non-canonical triad JSON should not be loaded as a canonical aggregate."""
-
-        noncanonical_path = tmp_path / "triad_noncanonical.json"
-        noncanonical_path.write_text(
-            '{"analysis_type": "catalytic_triad_aggregated"}', encoding="utf-8"
-        )
-
-        with pytest.raises(ValueError, match="canonical MDAnalysis condition artifact"):
-            triad_analysis._deserialize_result(noncanonical_path)
-
-
-class TestTriadPlot:
-    """Tests for plotting helpers and artifact-only loading."""
-
-    def test_threshold_bars_overlay_pair_and_simultaneous_replicates(self) -> None:
-        """Threshold bars should pass per-replicate percentages to shared scatter."""
-
-        import matplotlib.pyplot as plt
-
-        from polyzymd.analyses.catalytic_triad._plotters import plot_triad_threshold_bars
-        from polyzymd.config.comparison import PlotSettings
-
-        pair_a = MagicMock(
-            pair_label="Asp-His",
-            selection1="resid 1",
-            selection2="resid 2",
-            overall_fraction_below=0.5,
-            sem_fraction_below=0.05,
-            per_replicate_fractions_below=[0.4, 0.6],
-        )
-        pair_b = MagicMock(
-            pair_label="His-Ser",
-            selection1="resid 2",
-            selection2="resid 3",
-            overall_fraction_below=0.25,
-            sem_fraction_below=0.02,
-            per_replicate_fractions_below=[0.2, 0.3],
-        )
-        result = MagicMock(
-            pair_results=[pair_a, pair_b],
-            overall_simultaneous_contact=0.1,
-            sem_simultaneous_contact=0.01,
-            per_replicate_simultaneous=[0.08, 0.12],
-            threshold=3.5,
-        )
-        result.get_pair_labels.return_value = ["Asp-His", "His-Ser"]
-
-        with patch(
-            "polyzymd.analyses.catalytic_triad._plotters.scatter_replicate_values"
-        ) as mock_scatter:
-            fig = plot_triad_threshold_bars(
-                [result], ["Control"], colors=["blue"], plot_settings=PlotSettings()
-            )
-
-        mock_scatter.assert_called_once()
-        assert mock_scatter.call_args.args[2] == [[40.0, 60.0], [20.0, 30.0], [8.0, 12.0]]
-        plt.close(fig)
-
-    @patch("polyzymd.analyses.catalytic_triad.plot_triad_threshold_bars_from_data")
-    @patch("polyzymd.analyses.catalytic_triad.plot_triad_kde_panel_from_data")
-    def test_plot_delegates_to_artifact_helpers(
-        self,
-        mock_kde_fn: MagicMock,
-        mock_bars_fn: MagicMock,
-        triad_analysis: CatalyticTriadAnalysis,
-        condition: Condition,
-        tmp_path: Path,
-        default_settings: CatalyticTriadSettings,
-    ) -> None:
-        """The public plot hook should delegate to artifact-backed helpers."""
-
-        from polyzymd.config.comparison import PlotSettings
-
-        mock_kde_fn.return_value = [tmp_path / "figures" / "triad_kde_panel.png"]
-        mock_bars_fn.return_value = [tmp_path / "figures" / "triad_threshold_bars.png"]
-        analysis_dir = tmp_path / "analysis" / "no_polymer" / "catalytic_triad"
-        analysis_dir.mkdir(parents=True)
-        ctx = PlotContext(
-            conditions=[condition],
-            analysis_dirs={"No Polymer": analysis_dir},
-            results_dir=tmp_path / "comparison",
-            output_dir=tmp_path / "figures",
-            settings=default_settings,
-            plot_settings=PlotSettings(),
-        )
-
-        plots = triad_analysis.plot(ctx)
-
-        assert len(plots) == 2
-        mock_kde_fn.assert_called_once()
-        mock_bars_fn.assert_called_once()
-
-    def test_from_data_helpers_apply_semantic_order_and_colors(self, tmp_path: Path) -> None:
-        """Artifact-backed triad helpers should pass semantic labels and colors to renderers."""
-
-        from polyzymd.analyses.catalytic_triad import _plotters
-        from polyzymd.config.comparison import PlotSettings
-
-        plot_settings = PlotSettings(
-            semantic_colors={
-                "enabled": True,
-                "order": ["Control", "Treatment"],
-                "conditions": {
-                    "Control": {"role": "control"},
-                    "Treatment": {"color": "#ff7f0e"},
-                },
-                "control_color": "#111111",
-            }
-        )
-        data = {"__meta__": {"control_label": "Control"}}
-        labels = ["Treatment", "Control"]
-        pooled = {
-            "Control": {"Asp-His": [2.8, 3.0]},
-            "Treatment": {"Asp-His": [3.5, 3.8]},
-        }
-        result = MagicMock()
-
-        with (
-            patch.object(
-                _plotters, "_pool_distances", return_value=(pooled, ["Asp-His"], 3.5)
-            ) as pool,
-            patch.object(
-                _plotters,
-                "plot_triad_kde_panel_pooled",
-                return_value=MagicMock(),
-            ) as kde,
-            patch.object(
-                _plotters,
-                "_load_aggregated_results",
-                return_value={"Control": result, "Treatment": result},
-            ) as load,
-            patch.object(_plotters, "plot_triad_threshold_bars", return_value=MagicMock()) as bars,
-            patch(
-                "polyzymd.analyses.shared.plotting.save_figure",
-                side_effect=lambda fig, path, settings: path,
-            ),
-        ):
-            kde_paths = _plotters.plot_triad_kde_panel_from_data(
-                data,
-                labels,
-                tmp_path,
-                plot_settings,
-            )
-            bar_paths = _plotters.plot_triad_threshold_bars_from_data(
-                data,
-                labels,
-                tmp_path,
-                plot_settings,
-            )
-
-        assert kde_paths == [tmp_path / "triad_kde_panel.png"]
-        assert bar_paths == [tmp_path / "triad_threshold_bars.png"]
-        assert pool.call_args.args[1] == ["Control", "Treatment"]
-        assert load.call_args.args[1] == ["Control", "Treatment"]
-        assert kde.call_args.kwargs["colors"] == ["#111111", "#ff7f0e"]
-        assert bars.call_args.kwargs["labels"] == ["Control", "Treatment"]
-        assert bars.call_args.kwargs["colors"] == ["#111111", "#ff7f0e"]
-        assert bars.call_args.kwargs["control_label"] == "Control"
-
-
-class TestTriadLifecycle:
-    """Tests for the MDA lifecycle hooks."""
-
-    def test_build_mda_collector_returns_triad_collector(
-        self,
-        triad_analysis: CatalyticTriadAnalysis,
-        condition: Condition,
-        tmp_path: Path,
-        default_settings: CatalyticTriadSettings,
-    ) -> None:
-        """The migrated plugin should expose a triad artifact collector."""
-
-        ctx = _collector_context(tmp_path, condition, default_settings)
-        assert isinstance(triad_analysis.build_mda_collector(ctx), TriadArtifactCollector)
-
-    def test_build_mda_jobs_delegates_to_triad_job_builder(
-        self, triad_analysis: CatalyticTriadAnalysis
-    ) -> None:
-        """The public hook should delegate to the triad job builder."""
-
-        mda_ctx = MagicMock()
-        mda_ctx.settings = MagicMock()
-        sentinel_jobs = [object()]
-        with patch(
-            "polyzymd.analyses.catalytic_triad.build_triad_jobs", return_value=sentinel_jobs
-        ):
-            assert triad_analysis.build_mda_jobs(mda_ctx) is sentinel_jobs
-
-
-class TestTriadDirectPayloadCompatibility:
-    """Tests for reusable payload structures used by triad adapters."""
-
-    def test_distance_payload_imports_from_mda_module(self) -> None:
-        """Distance payload classes should no longer require the deleted runner wrapper."""
-
-        payload = DistanceReplicatePayload(
-            n_frames_total=2,
-            n_frames_used=2,
-            pair_payloads=[
-                DistancePairPayload(
-                    pair_label="pair",
-                    selection1="a",
-                    selection2="b",
-                    distances=np.asarray([1.0, 2.0]),
-                    mean_distance=1.5,
-                    std_distance=0.5,
-                    median_distance=1.5,
-                    min_distance=1.0,
-                    max_distance=2.0,
-                    sem_distance=None,
-                    correlation_time=None,
-                    correlation_time_unit=None,
-                    n_independent_frames=None,
-                    statistical_inefficiency=None,
-                    autocorrelation_warning=None,
-                    threshold=3.5,
-                    fraction_below_threshold=1.0,
-                    histogram_edges=np.asarray([1.0, 2.0]),
-                    histogram_counts=np.asarray([2]),
-                    kde_x=None,
-                    kde_y=None,
-                    kde_peak=None,
-                    kde_bandwidth=None,
-                    n_frames_total=2,
-                    n_frames_used=2,
-                )
-            ],
-        )
-
-        assert payload.n_frames_used == 2

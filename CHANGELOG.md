@@ -273,6 +273,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`distances` and `catalytic_triad` are written against the observable
+  contract.**  Both plugins measured pair distances through the same primitive
+  and then repeated the framework around it, so between them they carried 5,892
+  lines of collectors, aggregation, comparison models, formatters and plotters.
+  Each is now one module that returns observables, and the measurement they
+  share is one function in `analyses/mda/pair_distance.py`.  Per pair,
+  `distances` reports a mean distance in angstrom and, where a threshold is set,
+  the fraction of frames below it; `catalytic_triad` reports the same two per
+  pair plus the fraction of frames in which every pair is within the cutoff at
+  once.  Per-frame distances are unchanged to the last bit, checked against
+  values frozen from the deleted packages on 100 frames of a real trajectory.
+  Triad contact fractions are now stored as fractions with unit `fraction`
+  rather than as percentages; a report that wants percent multiplies at display
+  time.  The `align_trajectory` and `alignment_*` settings, the per-pair
+  `above_label` and the per-plugin `plot_settings` blocks are accepted for one
+  release with a `DeprecationWarning` and change nothing, and any other
+  unrecognised key now warns by name so a typo such as `thresold` is not
+  absorbed.  A threshold comparison is strictly less than, recorded on every
+  fraction as `threshold_operator: strict_less_than`, and an endpoint selection
+  that spans several chains still warns, now onto the replicate artifact rather
+  than only the log.  The contact fractions are reported with their uncertainty
+  but kept out of the cross-condition tests, since each is a monotone function
+  of the series its pair's mean distance is already tested on.  The KDE
+  distribution figures are gone with the per-plugin plotters; the shared
+  contract figures draw the distances, the per-pair bars and the threshold
+  fractions.
+
 - **The periodic box is computed first, from the protein and substrate alone.**
   `SolventBuilder.compute_box_vectors()` derives the cell from the solute
   bounding box plus `2 * (polymers.packing.padding + solvent.box.padding)`

@@ -45,11 +45,7 @@ from polyzymd.analyses.mda.job import (
     MDAUniversePolicy,
 )
 from polyzymd.analyses.mda.lifecycle import MDAReplicateJobContext
-from polyzymd.analyses.mda.pair_distance import (
-    PairDistanceSpec,
-    build_pair_distance_analysis,
-    pair_distance_version,
-)
+from polyzymd.analyses.mda.pair_distance import PairSelection, pair_distance_matrix
 from polyzymd.analyses.mda.plugin import (
     MDAArtifactCollector,
     MDACollectorContext,
@@ -93,9 +89,8 @@ __all__ = [
     "MDAJobResult",
     "MDAUniversePolicy",
     "MDAReplicateJobContext",
-    "PairDistanceSpec",
-    "build_pair_distance_analysis",
-    "pair_distance_version",
+    "PairSelection",
+    "pair_distance_matrix",
     "MDAArtifactCollector",
     "MDACollectorContext",
     "StrictJSONMDAResultCollector",

@@ -43,6 +43,7 @@ doi:10.1093/biomet/34.1-2.28
 
 from __future__ import annotations
 
+import warnings
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -106,6 +107,22 @@ class Observable(BaseModel):
     higher_is_better : bool or None, optional
         Direction that counts as an improvement, used by formatters. ``None``
         when the quantity has no preferred direction.
+    metadata : dict, optional
+        JSON-compatible facts about how the value was measured, for example the
+        periodic boundary policy or whether the topology carried bonds. The
+        framework copies it onto the replicate estimate and writes it into the
+        replicate artifact. It takes no part in the statistics. Strings under
+        the ``"warnings"`` key are also copied onto the replicate artifact's
+        warning list.
+    tested : bool, optional
+        Whether the observable enters the cross-condition tests, by default
+        ``True``. Set it to ``False`` for a quantity that is a function of
+        others the plugin already reports, such as the last class of a set of
+        fractions that sums to one. An untested observable is still reduced,
+        aggregated and reported with its uncertainty; it is only kept out of
+        the pairwise tests and out of the multiple-comparison family, so it
+        cannot inflate the adjusted p-values of the quantities that carry
+        independent information.
     """
 
     name: str = Field(min_length=1)
@@ -114,6 +131,8 @@ class Observable(BaseModel):
     unit: str | None = None
     index: list[float] | None = None
     higher_is_better: bool | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    tested: bool = True
 
     model_config = ConfigDict(frozen=True)
 
@@ -158,6 +177,8 @@ class ObservableEstimate(BaseModel):
     profile: list[float] | None = None
     index: list[float] | None = None
     higher_is_better: bool | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    tested: bool = True
     n_frames: int
     statistical_inefficiency: float | None = None
     n_eff: float | None = None
@@ -180,8 +201,10 @@ class ObservableAggregate(BaseModel):
     profile_mean: list[float] | None = None
     profile_sem: list[float] | None = None
     index: list[float] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     n_eff_min: float | None = None
     higher_is_better: bool | None = None
+    tested: bool = True
 
 
 class ObservableComparison(BaseModel):
@@ -303,11 +326,13 @@ def reduce_observable(observable: Observable | ObservableEstimate) -> Observable
         return observable
 
     values = np.asarray(observable.values, dtype=np.float64)
-    common = {
+    common: dict[str, Any] = {
         "name": observable.name,
         "kind": observable.kind,
         "unit": observable.unit,
         "higher_is_better": observable.higher_is_better,
+        "metadata": dict(observable.metadata),
+        "tested": observable.tested,
         "n_frames": int(values.size),
     }
     if observable.kind == "profile":
@@ -382,6 +407,8 @@ def aggregate_observables(
             kind=head.kind,
             unit=head.unit,
             higher_is_better=head.higher_is_better,
+            metadata=dict(head.metadata),
+            tested=head.tested,
             n_replicates=len(estimates),
             n_eff_min=_min_or_none([est.n_eff for est in estimates]),
         )
@@ -459,9 +486,11 @@ def compare_observables(
     Returns
     -------
     list[ObservableComparison]
-        One entry per observable and non-control condition. Profiles are not
-        tested and are omitted. A pair with fewer than two replicates on either
-        side is reported with ``testable=False`` and a note.
+        One entry per observable and non-control condition. Profiles and
+        observables declared ``tested=False`` are omitted, so they neither get
+        a test nor enlarge the correction family. A pair with fewer than two
+        replicates on either side is reported with ``testable=False`` and a
+        note.
 
     Raises
     ------
@@ -485,7 +514,7 @@ def compare_observables(
 
     comparisons: list[ObservableComparison] = []
     for name, control_agg in samples[control].items():
-        if control_agg.kind == "profile":
+        if control_agg.kind == "profile" or not control_agg.tested:
             continue
         others = [label for label in labels if label != control and name in samples[label]]
         if use_tukey:
@@ -524,6 +553,42 @@ def compare_observables(
                 )
             )
     return _adjust(comparisons, fdr_alpha=fdr_alpha, use_tukey=use_tukey)
+
+
+def warn_unknown_settings(
+    settings: BaseModel, *, deprecated: Mapping[str, str] | None = None
+) -> None:
+    """Warn about settings keys the model does not define.
+
+    A settings model that accepts extra keys keeps an old comparison file
+    loading, but it also swallows a typo such as ``thresold``. Call this from a
+    model validator so every extra key is named out loud: a key listed in
+    ``deprecated`` gets its own message and a ``DeprecationWarning``, anything
+    else gets a ``UserWarning`` saying it is unknown and ignored.
+
+    Parameters
+    ----------
+    settings : BaseModel
+        Model instance to inspect, parsed with ``extra="allow"``.
+    deprecated : Mapping[str, str] or None, optional
+        Keys that are accepted on purpose for one release, mapped to the
+        sentence explaining what replaced them.
+    """
+    known = deprecated or {}
+    for key in sorted(settings.model_extra or {}):
+        if key in known:
+            warnings.warn(
+                f"{type(settings).__name__}: '{key}' is deprecated and ignored. {known[key]}",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+        else:
+            warnings.warn(
+                f"{type(settings).__name__}: '{key}' is not a setting of this analysis and is "
+                "ignored. Check the spelling against the plugin reference page.",
+                UserWarning,
+                stacklevel=3,
+            )
 
 
 def _adjust(

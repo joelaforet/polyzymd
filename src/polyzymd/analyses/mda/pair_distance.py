@@ -1,266 +1,181 @@
-"""Pair-distance ``AnalysisBase`` primitives for MDAnalysis integrations."""
+"""Per-frame distances between labelled pairs of positions.
+
+Both distance-based plugins measure the same thing, so the measurement lives
+here and neither plugin owns a copy. A pair names two selections written in the
+extended syntax of :mod:`polyzymd.analyses.shared.selections`, so an endpoint
+can be one atom, the midpoint of several atoms, or the centre of mass of a
+group. Distances are taken with the minimum-image convention when the timestep
+carries a valid box.
+
+Coordinates are read as the trajectory stores them. Nothing is aligned first,
+because a distance is invariant under rigid-body motion and rotating the
+coordinates while keeping the original box vectors corrupts the minimum image.
+
+References
+----------
+Michaud-Agrawal, N., Denning, E. J., Woolf, T. B. & Beckstein, O. (2011).
+MDAnalysis: a toolkit for the analysis of molecular dynamics simulations.
+*Journal of Computational Chemistry*, 32(10), 2319-2327. doi:10.1002/jcc.21787
+"""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import BaseModel, Field
 
-from polyzymd.analyses.shared.statistics import StatResult, compute_sem
+from polyzymd.analyses.contract import iter_frames
+from polyzymd.analyses.exceptions import SelectionError
+
+if TYPE_CHECKING:
+    from polyzymd.analyses.mda.frame_selection import FrameSelection
 
 LOGGER = logging.getLogger(__name__)
 
-__all__ = [
-    "PairDistanceSpec",
-    "build_pair_distance_analysis",
-    "pair_distance_version",
-]
+__all__ = ["PairSelection", "pair_distance_matrix"]
 
 
-@dataclass(frozen=True)
-class PairDistanceSpec:
-    """Resolved atom-group inputs for one pair-distance measurement.
+class PairSelection(BaseModel):
+    """One labelled pair of positions to measure between.
 
     Parameters
     ----------
     label : str
-        Human-readable pair label.
-    selection_a : str
-        Original selection string for the first atom group or point.
-    selection_b : str
-        Original selection string for the second atom group or point.
-    atoms_a : Any
-        First MDAnalysis atom group.
-    atoms_b : Any
-        Second MDAnalysis atom group.
-    mode_a : Any
-        Position-reduction mode understood by shared selection helpers.
-    mode_b : Any
-        Position-reduction mode understood by shared selection helpers.
-    threshold : float or None, optional
-        Optional distance threshold in Å for downstream state summaries.
+        Name the pair is reported under, for example ``"Ser77-His156"``.
+    selection_a, selection_b : str
+        Selections for the two endpoints, in the extended syntax of
+        :mod:`polyzymd.analyses.shared.selections`.
     """
 
-    label: str
-    selection_a: str
-    selection_b: str
-    atoms_a: Any
-    atoms_b: Any
-    mode_a: Any
-    mode_b: Any
-    threshold: float | None = None
+    label: str = Field(min_length=1, description="Name the pair is reported under")
+    selection_a: str = Field(min_length=1, description="First endpoint selection")
+    selection_b: str = Field(min_length=1, description="Second endpoint selection")
 
 
-@dataclass
-class PairAggregatedStats:
-    """Aggregated statistics for a single distance pair.
-
-    Parameters
-    ----------
-    mean_stats : StatResult
-        Mean distance across replicates.
-    median_stats : StatResult
-        Median distance across replicates.
-    fraction_stats : StatResult or None
-        Fraction below threshold, if available.
-    kde_peak_stats : StatResult or None
-        KDE peak distance, if available.
-    per_rep_means : list[float]
-        Per-replicate mean distances.
-    per_rep_stds : list[float]
-        Per-replicate standard deviations.
-    per_rep_medians : list[float]
-        Per-replicate median distances.
-    per_rep_fractions : list[float]
-        Per-replicate fractions below threshold.
-    per_rep_kde_peaks : list[float]
-        Per-replicate KDE peak distances.
-    """
-
-    mean_stats: StatResult
-    median_stats: StatResult
-    fraction_stats: StatResult | None
-    kde_peak_stats: StatResult | None
-    per_rep_means: list[float]
-    per_rep_stds: list[float]
-    per_rep_medians: list[float]
-    per_rep_fractions: list[float]
-    per_rep_kde_peaks: list[float]
-
-
-def aggregate_distance_pair_stats(
-    individual_results: Sequence[Any],
-    pair_idx: int,
-) -> PairAggregatedStats:
-    """Aggregate per-pair distance statistics across replicate results.
-
-    Parameters
-    ----------
-    individual_results : sequence
-        Per-replicate result objects with indexable ``pair_results`` entries.
-    pair_idx : int
-        Index of the pair to aggregate.
-
-    Returns
-    -------
-    PairAggregatedStats
-        Aggregated statistics for this pair.
-    """
-    per_rep_means: list[float] = []
-    per_rep_stds: list[float] = []
-    per_rep_medians: list[float] = []
-    per_rep_fractions: list[float] = []
-    per_rep_kde_peaks: list[float] = []
-
-    for result in individual_results:
-        pair_result = result.pair_results[pair_idx]
-        per_rep_means.append(pair_result.mean_distance)
-        per_rep_stds.append(pair_result.std_distance)
-        per_rep_medians.append(pair_result.median_distance)
-        if pair_result.fraction_below_threshold is not None:
-            per_rep_fractions.append(pair_result.fraction_below_threshold)
-        if pair_result.kde_peak is not None:
-            per_rep_kde_peaks.append(pair_result.kde_peak)
-
-    return PairAggregatedStats(
-        mean_stats=compute_sem(per_rep_means),
-        median_stats=compute_sem(per_rep_medians),
-        fraction_stats=compute_sem(per_rep_fractions) if per_rep_fractions else None,
-        kde_peak_stats=compute_sem(per_rep_kde_peaks) if per_rep_kde_peaks else None,
-        per_rep_means=per_rep_means,
-        per_rep_stds=per_rep_stds,
-        per_rep_medians=per_rep_medians,
-        per_rep_fractions=per_rep_fractions,
-        per_rep_kde_peaks=per_rep_kde_peaks,
-    )
-
-
-def build_pair_distance_analysis(
-    *,
+def pair_distance_matrix(
     universe: Any,
-    pairs: Sequence[PairDistanceSpec],
-    use_pbc: bool,
-    initial_warnings: Sequence[str] = (),
-) -> Any:
-    """Build a lazy custom ``AnalysisBase`` for pair-distance matrices.
+    frames: FrameSelection,
+    pairs: Sequence[PairSelection],
+    *,
+    use_pbc: bool = True,
+    notes: list[str] | None = None,
+) -> NDArray[np.float64]:
+    """Measure every pair on every production frame.
 
     Parameters
     ----------
-    universe : Any
-        MDAnalysis universe for one trajectory.
-    pairs : sequence of PairDistanceSpec
-        Resolved pair specifications.
-    use_pbc : bool
-        Whether to request minimum-image distances from MDAnalysis.
-    initial_warnings : sequence of str, optional
-        Messages recorded on the results before iteration, so a caller's
-        warning reaches the replicate artifact.
+    universe : MDAnalysis.Universe
+        Universe loaded by the framework.
+    frames : FrameSelection
+        Production window resolved by the framework.
+    pairs : sequence of PairSelection
+        Pairs to measure, in report order.
+    use_pbc : bool, optional
+        Take minimum-image distances when the timestep has a valid box, by
+        default True. A frame without one is measured without periodicity.
+    notes : list of str or None, optional
+        List that messages about the measurement are appended to, such as an
+        endpoint that spans several chains or a frame with no usable box. A
+        plugin passes one in and puts it under the ``warnings`` key of its
+        observables' metadata, so the message reaches the replicate artifact
+        instead of only the log.
 
     Returns
     -------
-    Any
-        ``AnalysisBase`` instance whose ``results.distance_matrix`` has shape
-        ``(n_pairs, n_frames)`` and whose results also include frame, time, and
-        warning metadata.
-    """
+    numpy.ndarray
+        Distances in angstrom with shape ``(n_pairs, n_frames)``.
 
-    from MDAnalysis.analysis.base import AnalysisBase
+    Raises
+    ------
+    SelectionError
+        If a selection matches no atoms, or matches several atoms without
+        saying which point of the group is meant.
+    """
     from MDAnalysis.lib.distances import calc_bonds
 
     from polyzymd.analyses.shared.selections import get_position
 
-    class PairDistanceAnalysis(AnalysisBase):  # type: ignore[misc]
-        """Collect pair distances while MDAnalysis owns frame iteration."""
-
-        def __init__(self) -> None:
-            self._pairs = list(pairs)
-            self._use_pbc = bool(use_pbc)
-            self._warnings: list[str] = [str(message) for message in initial_warnings]
-            super().__init__(universe.trajectory)
-
-        def _prepare(self) -> None:
-            """Initialize matrix rows before trajectory iteration."""
-
-            self.results.distance_matrix = [[] for _ in self._pairs]
-            self.results.warnings = list(self._warnings)
-
-        def _single_frame(self) -> None:
-            """Measure all pair distances for the current frame."""
-
-            if not self._pairs:
-                return
-            positions_a = np.asarray(
-                [get_position(pair.atoms_a, pair.mode_a) for pair in self._pairs],
-                dtype=np.float64,
+    collected: list[str] = [] if notes is None else notes
+    resolved = [
+        (
+            _resolve(universe, pair.selection_a, pair.label, collected),
+            _resolve(universe, pair.selection_b, pair.label, collected),
+        )
+        for pair in pairs
+    ]
+    rows: list[NDArray[np.float64]] = []
+    warned = False
+    for timestep in iter_frames(universe, frames):
+        box = _box(timestep) if use_pbc else None
+        if use_pbc and box is None and not warned:
+            warned = True
+            _note(
+                collected,
+                "pair distances: the timestep carries no usable box, so affected frames are "
+                "measured without the minimum-image convention",
             )
-            positions_b = np.asarray(
-                [get_position(pair.atoms_b, pair.mode_b) for pair in self._pairs],
-                dtype=np.float64,
-            )
-            box = self._pbc_box()
-            distances = calc_bonds(positions_a, positions_b, box=box).astype(np.float64)
-            for pair_index, distance in enumerate(distances):
-                self.results.distance_matrix[pair_index].append(float(distance))
-
-        def _conclude(self) -> None:
-            """Store arrays and metadata after frame iteration."""
-
-            self.results.distance_matrix = np.asarray(
-                self.results.distance_matrix,
-                dtype=np.float64,
-            )
-            self.results.frames = np.asarray(getattr(self, "frames", []), dtype=np.int64)
-            self.results.times_ps = np.asarray(getattr(self, "times", []), dtype=np.float64)
-            self.results.warnings = list(self._warnings)
-
-        def _pbc_box(self) -> NDArray[np.float32] | None:
-            """Return the current timestep box or disable PBC with one warning."""
-
-            if not self._use_pbc:
-                return None
-            dimensions = getattr(self._ts, "dimensions", None)
-            if dimensions is None:
-                self._warn_once(
-                    "PBC requested for pair distances, but the timestep has no box dimensions; "
-                    "using non-PBC distances for affected frames."
-                )
-                return None
-            box = np.asarray(dimensions, dtype=np.float32)
-            if box.shape[0] < 6 or not np.all(np.isfinite(box[:6])) or np.any(box[:3] <= 0):
-                self._warn_once(
-                    "PBC requested for pair distances, but the timestep box is invalid; "
-                    "using non-PBC distances for affected frames."
-                )
-                return None
-            return box[:6]
-
-        def _warn_once(self, message: str) -> None:
-            """Record and log a warning message once per analysis run."""
-
-            if message in self._warnings:
-                return
-            self._warnings.append(message)
-            LOGGER.warning(message)
-
-    return PairDistanceAnalysis()
+        positions_a = np.asarray(
+            [get_position(atoms, mode) for (atoms, mode), _ in resolved], dtype=np.float64
+        )
+        positions_b = np.asarray(
+            [get_position(atoms, mode) for _, (atoms, mode) in resolved], dtype=np.float64
+        )
+        rows.append(calc_bonds(positions_a, positions_b, box=box).astype(np.float64))
+    if not rows:
+        raise SelectionError("pair distances: the production window selected no frames")
+    return np.asarray(rows, dtype=np.float64).T
 
 
-def pair_distance_version() -> str:
-    """Return the pair-distance primitive schema version.
+def _resolve(universe: Any, selection: str, label: str, notes: list[str]) -> tuple[Any, Any]:
+    """Atom group and position mode for one endpoint, or a diagnostic error.
 
-    Version 2 is the first version measured without a preceding in-memory
-    alignment. Artifacts written by version 1 hold distances that were computed
-    from rotated coordinates against an unrotated box, so aggregation rejects
-    them rather than mixing the two.
-
-    Returns
-    -------
-    str
-        Version string for provenance records.
+    A selection that spans several chains is measured, not refused, because
+    residue numbers restart per chain and a midpoint or centre of mass then
+    silently averages over the copies. The note says so.
     """
+    from polyzymd.analyses.shared.diagnostics import (
+        get_selection_diagnostics,
+        warn_if_multi_chain_selection,
+    )
+    from polyzymd.analyses.shared.selections import SelectionMode, parse_selection_string
 
-    return "2"
+    parsed = parse_selection_string(selection)
+    atoms = universe.select_atoms(parsed.selection)
+    if len(atoms) == 0:
+        raise SelectionError(
+            f"selection {selection!r} matched no atoms.\n\n"
+            f"{get_selection_diagnostics(universe, selection)}"
+        )
+    if parsed.mode == SelectionMode.SINGLE and len(atoms) > 1:
+        raise SelectionError(
+            f"selection {selection!r} matched {len(atoms)} atoms, and a pair endpoint is one "
+            "point. Wrap it in midpoint(...) or com(...) to reduce the group to one position."
+        )
+    if warn_if_multi_chain_selection(atoms, selection, f"for distance pair {label!r}"):
+        notes.append(
+            f"selection {selection!r} of pair {label!r} matched atoms from several chains, so "
+            "the measured point averages over the copies. Restrict it with 'protein and' or "
+            "'chainid A and'."
+        )
+    return atoms, parsed.mode
+
+
+def _note(notes: list[str], message: str) -> None:
+    """Record a measurement message once, and log it."""
+    if message not in notes:
+        notes.append(message)
+    LOGGER.warning("%s", message)
+
+
+def _box(timestep: Any) -> NDArray[np.float32] | None:
+    """Unit cell of one timestep, or None when it is missing or degenerate."""
+    dimensions = getattr(timestep, "dimensions", None)
+    if dimensions is None:
+        return None
+    box = np.asarray(dimensions, dtype=np.float32)
+    if box.shape[0] < 6 or not np.all(np.isfinite(box[:6])) or np.any(box[:3] <= 0):
+        return None
+    return box[:6]

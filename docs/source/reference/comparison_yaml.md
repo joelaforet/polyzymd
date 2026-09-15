@@ -214,10 +214,9 @@ Each entry in `pairs`:
 | `threshold` | float | `3.5` | Global default threshold in Angstroms |
 | `pairs` | list | **(required)** | List of distance pair definitions |
 | `use_pbc` | bool | `true` | Apply periodic boundary conditions to distance calculations |
-| `align_trajectory` | bool | `true` | Align trajectory before computing distances |
-| `alignment_selection` | string | `"protein and name CA"` | MDAnalysis selection used for trajectory alignment |
-| `alignment_mode` | string | `"centroid"` | Alignment reference mode: `"centroid"` or `"frame"` |
-| `alignment_frame` | int | `null` | Frame index to use as reference when `alignment_mode` is `"frame"` |
+
+The `align_trajectory` and `alignment_*` keys are accepted for one release,
+ignored, and raise a `DeprecationWarning`.
 
 Each entry in `pairs`:
 
@@ -227,8 +226,7 @@ Each entry in `pairs`:
 | `selection_a` | string | **(required)** | MDAnalysis selection for group A. Supports `com(...)` syntax. |
 | `selection_b` | string | **(required)** | MDAnalysis selection for group B |
 | `threshold` | float | global `threshold` | Per-pair threshold override |
-| `below_label` | string | `"Below {threshold}Å"` | Display text for d ≤ threshold |
-| `above_label` | string | `"Above {threshold}Å"` | Display text for d > threshold |
+| `below_label` | string | `"below {threshold} A"` | Name of the below-threshold state. `above_label` is accepted for one release and ignored |
 
 ### `plugins.contacts`
 
@@ -475,22 +473,10 @@ level as `style`, `dpi`, etc.
 | `figsize_profile` | `[14, 4]` | Per-residue profile figure size |
 | `figsize_comparison` | `[8, 6]` | Bar comparison figure size |
 
-**`plot_settings.catalytic_triad`:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `generate_kde_panel` | `true` | Multi-row KDE panel |
-| `generate_bars` | `true` | Threshold bar chart |
-| `generate_2d_kde` | `false` | 2D joint KDE |
-| `kde_xlim` | `[0, 7]` | X-axis range for KDE (Angstroms) |
-
-**`plot_settings.distances`:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `show_threshold` | `true` | Threshold line on distributions |
-| `use_kde` | `true` | KDE vs histogram |
-| `generate_state_bars` | `true` | Above/below threshold bars |
+`distances` and `catalytic_triad` draw the shared contract figures and take no
+per-plugin plot settings. A `plot_settings.distances` or
+`plot_settings.catalytic_triad` block is accepted for one release, ignored, and
+raises a `DeprecationWarning`.
 
 **`plot_settings.contacts`:**
 

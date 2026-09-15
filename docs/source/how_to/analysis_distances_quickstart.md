@@ -51,17 +51,18 @@ Verify your setup:
 ls $(polyzymd info -c config.yaml --scratch-dir)/production_*/
 ```
 
-## What Distance Analysis Provides
+## What distance analysis provides
 
-The distance analysis module computes:
+For each configured pair, the plugin reports:
 
-| Feature | Description |
-|---------|-------------|
-| **Mean distance** | Average distance over trajectory (equilibrated portion) |
-| **SEM** | Autocorrelation-corrected standard error of the mean |
-| **Mode (KDE peak)** | Most probable distance from kernel density estimation |
-| **Contact fraction** | % of frames below a distance threshold |
-| **Distribution** | Full histogram and KDE for visualization |
+| Observable | Description |
+|------------|-------------|
+| Mean distance | Distance in angstrom, averaged over the production window of one replicate |
+| Contact fraction | Fraction of frames in which the pair is below its threshold |
+
+Both are reported per condition as a mean over replicates with its SEM and a
+95 percent Student t interval, and are tested against the control condition on
+replicate-level values.
 
 ```{tip}
 **When to use distances vs. contacts vs. triad:**
@@ -203,8 +204,8 @@ Distance analysis applies the minimum image convention by default
 know your trajectory is already unwrapped, because it is what keeps a pair from
 being measured the long way around the box.
 
-Distances are not aligned. `align_trajectory` now defaults to `false`, is
-ignored, and setting it raises a `DeprecationWarning`. A distance does not
+Distances are not aligned. `align_trajectory` and the `alignment_*` fields are
+accepted for one release, ignored, and raise a `DeprecationWarning`. A distance does not
 change when the whole system is rotated or translated, so alignment could only
 cost time, and the in-memory alignment PolyzyMD used to run rotated the
 coordinates without rotating the box, which broke the minimum image convention
@@ -222,9 +223,10 @@ polyzymd compare run distances -f comparison.yaml --eq-time 10ns
 
 This provides:
 
-- Pair-level summaries across conditions
-- Ranking by mean distance (primary) and fraction below threshold (secondary)
-- Statistical tests (t-tests, effect sizes, ANOVA)
+- A per-pair mean distance and contact fraction for every condition, each with
+  its SEM, its interval and its replicate count
+- A test of every pair against the control, with Cohen's d and a
+  Benjamini-Hochberg adjusted p-value over the whole run
 
 For broader multi-plugin workflows, see
 {doc}`analysis_compare_conditions`.
