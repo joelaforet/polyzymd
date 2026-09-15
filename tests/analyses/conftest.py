@@ -16,7 +16,7 @@ from typing import Any, Callable, Sequence
 
 import pytest
 
-_PLOTTER_MODULES = tuple(
+_PLOTTER_MODULES = ("polyzymd.analyses.contract_plots",) + tuple(
     f"polyzymd.analyses.{name}._plotters"
     for name in (
         "rmsd",

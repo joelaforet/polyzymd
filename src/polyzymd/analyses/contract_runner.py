@@ -9,7 +9,8 @@ itself stays a settings model plus one ``compute`` function.
 The adapter owns what every plugin used to repeat: it writes the replicate
 artifact with a framework-written identity block, reuses a replicate whose
 identity still matches, aggregates by observable kind, compares with the
-configured test under one Benjamini-Hochberg family, and formats the result.
+configured test under one Benjamini-Hochberg family, plots each observable
+according to its kind, and formats the result.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import inspect
 import logging
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, ClassVar, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from pydantic import BaseModel
 
@@ -33,6 +34,7 @@ from polyzymd.analyses.contract import (
     compare_observables,
     reduce_observable,
 )
+from polyzymd.analyses.contract_plots import ContractPlotSettings, plot_observables
 from polyzymd.analyses.exceptions import PluginContractError
 from polyzymd.analyses.mda.artifacts import (
     ArtifactSidecarRef,
@@ -43,6 +45,9 @@ from polyzymd.analyses.mda.artifacts import (
 from polyzymd.analyses.mda.job import MDAAnalysisJob
 from polyzymd.analyses.mda.plugin import frame_selection_payload
 from polyzymd.analyses.mda.store import ArtifactStore
+
+if TYPE_CHECKING:
+    from polyzymd.analyses.base import PlotContext
 
 logger = logging.getLogger("polyzymd.analyses")
 
@@ -253,6 +258,22 @@ class ContractAnalysis(Analysis):
             },
         )
 
+    def plot(self, ctx: PlotContext) -> list[Path]:
+        """Render the figures every observable kind calls for.
+
+        Parameters
+        ----------
+        ctx : PlotContext
+            Framework plot context carrying the figures directory.
+
+        Returns
+        -------
+        list[Path]
+            Paths of the figures written. See
+            :mod:`polyzymd.analyses.contract_plots` for which kind draws what.
+        """
+        return plot_observables(self.name, ctx)
+
     def format(self, result: Any, output_format: str = "text") -> str:
         """Render a comparison artifact as text or JSON.
 
@@ -391,6 +412,7 @@ def contract_analysis(plugin: Any) -> type[ContractAnalysis]:
         {
             "name": name,
             "Settings": settings_cls,
+            "PlotSettingsModel": getattr(instance, "PlotSettings", ContractPlotSettings),
             "plugin": instance,
             "references": tuple(getattr(instance, "references", ())),
             "__doc__": inspect.getdoc(instance) or f"Contract analysis {name}.",
