@@ -3794,19 +3794,6 @@ def info() -> None:
     help="PascalCase class prefix (default: auto-derived from NAME).",
 )
 @click.option(
-    "--style",
-    type=click.Choice(["dict", "contract"], case_sensitive=False),
-    default=None,
-    help="Scaffold style: 'contract' for an observable-contract plugin, "
-    "'dict' for the advanced canonical-artifact package.",
-)
-@click.option(
-    "--advanced",
-    is_flag=True,
-    default=False,
-    help="Request the advanced MDAnalysis-native package scaffold.",
-)
-@click.option(
     "--project-root",
     type=click.Path(exists=True, file_okay=False, resolve_path=True),
     default=None,
@@ -3827,8 +3814,6 @@ def info() -> None:
 def new_analysis(
     name: str,
     class_name: str | None,
-    style: str | None,
-    advanced: bool,
     project_root: str | None,
     force: bool,
     dry_run: bool,
@@ -3837,31 +3822,17 @@ def new_analysis(
 
     NAME is the snake_case plugin name (e.g. 'solvent_shell').
 
-    Default creates:
-
-    \b
-      src/polyzymd/analyses/<NAME>.py             — simple MDAnalysis-native plugin
-      tests/analyses/plugins/test_<NAME>.py       — contributor-focused tests
-
-    --style contract creates:
+    Creates:
 
     \b
       src/polyzymd/analyses/<NAME>.py             Settings plus compute()
       tests/analyses/plugins/test_<NAME>.py       two known-answer tests
-
-    Advanced package scaffolds create:
-
-    \b
-      src/polyzymd/analyses/<NAME>/__init__.py     — plugin lifecycle wiring
-      src/polyzymd/analyses/<NAME>/_mda.py         — lazy AnalysisBase helper
-      tests/analyses/plugins/test_<NAME>.py        — generated plugin tests
 
     Run the generated tests with:
 
     \b
       pixi run -e build pytest tests/analyses/plugins/test_<NAME>.py -v
     """
-    from polyzymd.cli._scaffold.models import DEFAULT_STYLE
     from polyzymd.cli.scaffold import generate_scaffold, validate_class_name, validate_name
 
     # Force needs scaffold-level ownership checks before registered-name rejection
@@ -3891,13 +3862,10 @@ def new_analysis(
         root = Path(project_root)
 
     try:
-        effective_style = style or DEFAULT_STYLE
         created = generate_scaffold(
             name,
             root,
             class_name=class_name,
-            style=effective_style,
-            advanced=advanced,
             force=force,
             dry_run=dry_run,
         )
@@ -3915,7 +3883,12 @@ def new_analysis(
     if not dry_run:
         colored_echo(f"\nPlugin '{name}' scaffolded successfully!", phase="cli")
         colored_echo(
-            f"Run tests: pixi run -e build pytest tests/analyses/plugins/test_{name}.py -v",
+            'The generated tests fail until you replace unit="TODO" with the real unit '
+            "and put the real measurement in compute().",
+            phase="cli",
+        )
+        colored_echo(
+            f"Run tests: pixi run -e test pytest tests/analyses/plugins/test_{name}.py -v",
             phase="cli",
         )
 

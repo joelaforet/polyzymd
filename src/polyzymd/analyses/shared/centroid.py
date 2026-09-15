@@ -236,35 +236,3 @@ def find_centroid_frame(
         )
 
     return representative_frame_idx
-
-
-def get_reference_mode_description(mode: ReferenceMode) -> str:
-    """Get a human-readable description of a reference mode.
-
-    Parameters
-    ----------
-    mode : {"centroid", "average", "frame", "external"}
-        The reference mode.
-
-    Returns
-    -------
-    str
-        Description of what this mode represents.
-    """
-    descriptions = {
-        "centroid": (
-            "Representative aligned frame (closest to aligned mean) - "
-            "measures flexibility around a representative equilibrium conformation"
-        ),
-        "average": ("Average structure - pure thermal fluctuations around the mathematical mean"),
-        "frame": (
-            "Specific frame - "
-            "fluctuations relative to a user-defined reference (e.g., functional state)"
-        ),
-        "external": (
-            "External PDB structure - "
-            "deviations from a condition-independent reference geometry "
-            "(e.g., catalytically competent crystal structure)"
-        ),
-    }
-    return descriptions.get(mode, f"Unknown mode: {mode}")

@@ -35,17 +35,6 @@ CANONICAL_AA_CLASS_ORDER: Final[list[str]] = [
 ]
 
 
-class AAClass(str, Enum):
-    """Standard amino acid classifications."""
-
-    AROMATIC = "aromatic"
-    POLAR = "polar"
-    NONPOLAR = "nonpolar"
-    CHARGED_POSITIVE = "charged_positive"
-    CHARGED_NEGATIVE = "charged_negative"
-    UNKNOWN = "unknown"
-
-
 # =============================================================================
 # Maximum Accessible Surface Area (maxASA)
 # =============================================================================
@@ -167,32 +156,6 @@ AA_CLASS_RESIDUES: Final[dict[str, list[str]]] = {
 # =============================================================================
 
 
-def get_aa_class(resname: str) -> str:
-    """Get amino acid classification for a residue name.
-
-    Parameters
-    ----------
-    resname : str
-        3-letter amino acid code (case-insensitive)
-
-    Returns
-    -------
-    str
-        Classification: 'aromatic', 'polar', 'nonpolar',
-        'charged_positive', 'charged_negative', or 'unknown'
-
-    Examples
-    --------
-    >>> get_aa_class("PHE")
-    'aromatic'
-    >>> get_aa_class("lys")
-    'charged_positive'
-    >>> get_aa_class("UNK")
-    'unknown'
-    """
-    return AA_CLASSIFICATION_TABLE.get(_canonical_resname(resname), "unknown")
-
-
 def get_max_asa(resname: str) -> float | None:
     """Get maximum accessible surface area for a residue name.
 
@@ -217,63 +180,3 @@ def get_max_asa(resname: str) -> float | None:
     >>> get_max_asa("UNK")  # Returns None for unknown residues
     """
     return MAX_ASA_TABLE.get(_canonical_resname(resname))
-
-
-def get_residues_for_class(aa_class: str) -> list[str]:
-    """Get all residue names belonging to an amino acid class.
-
-    Parameters
-    ----------
-    aa_class : str
-        One of: 'aromatic', 'polar', 'nonpolar',
-        'charged_positive', 'charged_negative'
-
-    Returns
-    -------
-    list[str]
-        List of 3-letter amino acid codes in this class
-
-    Raises
-    ------
-    ValueError
-        If aa_class is not a valid classification
-
-    Examples
-    --------
-    >>> get_residues_for_class("aromatic")
-    ['PHE', 'TRP', 'TYR', 'HIS']
-    """
-    if aa_class not in AA_CLASS_RESIDUES:
-        valid = list(AA_CLASS_RESIDUES.keys())
-        raise ValueError(f"Unknown AA class '{aa_class}'. Valid: {valid}")
-    return AA_CLASS_RESIDUES[aa_class].copy()
-
-
-def get_selection_for_class(aa_class: str) -> str:
-    """Get MDAnalysis selection string for an amino acid class.
-
-    Parameters
-    ----------
-    aa_class : str
-        One of: 'aromatic', 'polar', 'nonpolar',
-        'charged_positive', 'charged_negative'
-
-    Returns
-    -------
-    str
-        MDAnalysis selection string
-
-    Raises
-    ------
-    ValueError
-        If aa_class is not a valid classification
-
-    Examples
-    --------
-    >>> get_selection_for_class("aromatic")
-    'protein and resname PHE TRP TYR HIS'
-    """
-    if aa_class not in DEFAULT_AA_CLASS_SELECTIONS:
-        valid = list(DEFAULT_AA_CLASS_SELECTIONS.keys())
-        raise ValueError(f"Unknown AA class '{aa_class}'. Valid: {valid}")
-    return DEFAULT_AA_CLASS_SELECTIONS[aa_class]

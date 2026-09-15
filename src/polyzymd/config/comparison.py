@@ -715,12 +715,14 @@ class PlotSettings(BaseModel):
 
 
 class MDABackendPolicyConfig(BaseModel):
-    """Configuration for optional MDAnalysis internal backend execution.
+    """Deprecated block that once chose an MDAnalysis internal backend.
 
-    The default configuration forwards no backend-related keyword arguments to
-    MDAnalysis. This keeps PolyzyMD replicate-level scheduling as the default
-    execution model and avoids nested oversubscription unless users explicitly
-    opt in.
+    The backend applied to ``AnalysisBase.run()``, and no analysis builds an
+    ``AnalysisBase`` job any more: a plugin reports observables and the
+    framework runs its ``compute()`` once per replicate. The block still parses
+    for one release so an existing ``comparison.yaml`` loads, and a non-default
+    value warns that it is ignored. Parallelism is per replicate and is chosen
+    with ``polyzymd compare run --workers``.
     """
 
     model_config = {"extra": "forbid"}
@@ -749,27 +751,25 @@ class MDABackendPolicyConfig(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def validate_backend_required(self) -> "MDABackendPolicyConfig":
-        """Require an explicit backend before forwarding worker controls."""
-        if self.backend is None and (self.n_workers is not None or self.n_parts is not None):
-            raise ValueError("n_workers and n_parts require an explicit backend")
-        return self
+    def warn_that_the_block_is_ignored(self) -> "MDABackendPolicyConfig":
+        """Say that a configured backend does nothing, and why.
 
-    def to_policy(self) -> Any:
-        """Convert this config to an MDAnalysis backend policy.
-
-        Returns
-        -------
-        MDABackendPolicy
-            Import-light policy object consumed by ``MDAAnalysisJob``.
+        The block is kept for one release so an existing campaign file still
+        loads. A default block is silent; anything else warns and logs, because
+        a user who asked for eight workers should not be left believing they
+        got them.
         """
-        from polyzymd.analyses.mda import MDABackendPolicy
-
-        return MDABackendPolicy(
-            backend=self.backend,
-            n_workers=self.n_workers,
-            n_parts=self.n_parts,
+        if self.backend is None and self.n_workers is None and self.n_parts is None:
+            return self
+        message = (
+            "mda_backend_policy is ignored and will be removed in the next release. "
+            "It set the backend of MDAnalysis AnalysisBase.run(), and no analysis "
+            "builds an AnalysisBase job any more. Use 'polyzymd compare run --workers' "
+            "to run replicates in parallel instead."
         )
+        warnings.warn(message, UserWarning, stacklevel=2)
+        logging.getLogger("polyzymd.config").warning(message)
+        return self
 
 
 # ============================================================================

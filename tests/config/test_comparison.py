@@ -95,34 +95,25 @@ class TestUnknownTopLevelKeys:
 
 
 class TestMDABackendPolicyConfig:
-    """MDAnalysis backend policy config should be opt-in and validated."""
+    """The deprecated backend block parses, says it is ignored, and changes nothing."""
 
-    def test_default_policy_forwards_no_backend_kwargs(self) -> None:
-        """Default config should keep per-replicate execution serial."""
-        policy = MDABackendPolicyConfig().to_policy()
+    def test_a_default_block_is_silent(self, recwarn: pytest.WarningsRecorder) -> None:
+        """A campaign file that never set a backend sees no warning."""
+        MDABackendPolicyConfig()
 
-        assert policy.run_kwargs() == {}
-        assert policy.is_default()
+        assert not [w for w in recwarn if issubclass(w.category, UserWarning)]
 
-    def test_explicit_backend_accepts_workers_and_parts(self) -> None:
-        """Explicit backend should convert to an MDA job policy."""
-        policy = MDABackendPolicyConfig(
-            backend="multiprocessing",
-            n_workers=2,
-            n_parts=4,
-        ).to_policy()
+    def test_a_configured_backend_warns_that_it_is_ignored(self) -> None:
+        """A user who asked for a backend is told they did not get one."""
+        with pytest.warns(UserWarning, match="mda_backend_policy is ignored"):
+            MDABackendPolicyConfig(backend="multiprocessing", n_workers=2)
 
-        assert policy.run_kwargs() == {
-            "backend": "multiprocessing",
-            "n_workers": 2,
-            "n_parts": 4,
-        }
+    def test_worker_counts_no_longer_require_a_backend(self) -> None:
+        """The block only parses now, so it stopped policing its own fields."""
+        with pytest.warns(UserWarning, match="mda_backend_policy is ignored"):
+            config = MDABackendPolicyConfig(n_workers=2)
 
-    @pytest.mark.parametrize("field_name", ["n_workers", "n_parts"])
-    def test_worker_controls_require_backend(self, field_name: str) -> None:
-        """Worker and part controls should not imply backend opt-in."""
-        with pytest.raises(ValueError, match="require an explicit backend"):
-            MDABackendPolicyConfig(**{field_name: 2})
+        assert config.n_workers == 2
 
     @pytest.mark.parametrize("field_name", ["n_workers", "n_parts"])
     def test_worker_controls_must_be_positive_integers(self, field_name: str) -> None:
@@ -138,8 +129,8 @@ class TestMDABackendPolicyConfig:
         with pytest.raises(ValueError, match="backend must not be empty"):
             MDABackendPolicyConfig(backend="  ")
 
-    def test_from_yaml_accepts_top_level_policy(self, tmp_path: Path) -> None:
-        """comparison.yaml should expose a top-level MDA backend policy."""
+    def test_an_existing_campaign_file_still_loads(self, tmp_path: Path) -> None:
+        """A comparison.yaml naming a backend loads, with a warning."""
         yaml_path = tmp_path / "comparison.yaml"
         yaml_path.write_text(
             yaml.dump(
@@ -156,12 +147,11 @@ class TestMDABackendPolicyConfig:
             )
         )
 
-        config = ComparisonConfig.from_yaml(yaml_path)
+        with pytest.warns(UserWarning, match="mda_backend_policy is ignored"):
+            config = ComparisonConfig.from_yaml(yaml_path)
 
-        assert config.mda_backend_policy.to_policy().run_kwargs() == {
-            "backend": "multiprocessing",
-            "n_workers": 2,
-        }
+        assert config.mda_backend_policy.backend == "multiprocessing"
+        assert config.mda_backend_policy.n_workers == 2
 
     def test_legacy_analysis_settings_is_rejected(self, tmp_path: Path) -> None:
         """Legacy analysis_settings key should be rejected as unknown."""

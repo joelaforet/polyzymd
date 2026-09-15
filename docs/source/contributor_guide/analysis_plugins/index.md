@@ -1,102 +1,161 @@
-# New Analysis Contributor Path
+# Write an analysis plugin
 
-This landing page is for contributors who want to add a new PolyzyMD analysis
-plugin or make a safe change to an existing plugin. It is a map of the
-contributor path, not the tutorial itself.
+An analysis in PolyzyMD is one module holding a settings model and a
+`compute()` that returns observables. The framework owns everything else:
+loading the universe, choosing the production frames, caching the replicate,
+aggregating across replicates, testing across conditions, drawing the figures
+and formatting the report. A new analysis is about forty lines.
 
-Use it if you know Python and molecular simulation concepts, but are still
-learning how PolyzyMD connects MDAnalysis trajectory work to replicate
-artifacts, condition aggregation, cross-condition comparison, and plotting.
+This page is the whole contributor path. The
+[checklist](checklist.md) is what to run before opening the pull request.
 
-## Start
+## Scaffold it
 
-Begin here when you are new to contributing analysis code.
+```bash
+pixi run -e analysis polyzymd new-analysis solvent_shell
+```
 
-- [Set Up a Contributor Environment](../setup.md) — install the pixi-managed
-  environment used by docs, tests, and local development.
-- [Contributing to PolyzyMD](../contributing.md) — learn the branch, review, and
-  verification expectations for small, reviewable changes.
-- [Architecture](../../explanation/architecture.md) — orient to the package
-  layout before narrowing in on analysis plugins.
-- [How PolyzyMD analysis plugins work](architecture.md) — understand the plugin
-  lifecycle, public facades, artifacts, sidecars, and artifact-only plotting.
+That writes `src/polyzymd/analyses/solvent_shell.py` and
+`tests/analyses/plugins/test_solvent_shell.py`. Edit those two files and
+nothing else. There is no plugin package, no registry entry and no import to
+add; discovery walks `polyzymd.analyses` and finds the module.
 
-## Build
+## The contract
 
-Use these pages when you are creating your first plugin or replacing scaffolded
-placeholder logic with real analysis code.
+```python
+from typing import Any, ClassVar, Sequence
 
-- [Scaffold your first analysis plugin](first_scaffold.md) — generate a
-  single-file plugin and matching tests with a throwaway name such as
-  `solvent_shell`.
-- [Build a simple scalar analysis plugin](simple_scalar_plugin.md) — connect one
-  function job, collector, default aggregation path, and scalar comparison.
-- [Extend PolyzyMD with MDAnalysis-native analyses](../extending_analyses.md) —
-  use the full implementation guide for current scaffold patterns, public
-  imports, `MDAAnalysisJob`, collectors, artifacts, default comparison, and
-  artifact-only plotting.
+from pydantic import BaseModel
 
-## Scale
+from polyzymd.analyses.contract import Observable, contract_analysis, iter_frames
 
-Use these pages when a working plugin needs richer stored data or a larger module
-shape.
 
-- [Store large analysis outputs with artifact sidecars](sidecars.md) — persist
-  NPZ arrays, CSV tables, and other bulky outputs beside artifacts without
-  bloating JSON.
-- [Convert a plugin into an advanced package](advanced_package.md) — split a
-  single-file plugin into `_mda.py`, `_plotters.py`, `_models.py`, or
-  `_formatters.py` helpers when reviewability improves.
+class SolventShellSettings(BaseModel):
+    selection: str = "protein"
 
-## Verify
 
-Use these pages before opening a pull request or reviewing one.
+class SolventShell:
+    name: ClassVar[str] = "solvent_shell"
+    Settings: ClassVar[type[BaseModel]] = SolventShellSettings
+    references: ClassVar[tuple[str, ...]] = ("Author 2020, Journal 1:1, doi:10.0/x",)
 
-- [Test your analysis plugin contribution](testing.md) — cover discovery,
-  settings validation, MDAnalysis jobs, collectors, artifacts, sidecars,
-  aggregation, comparison metrics, and artifact-only plotting.
-- [Analysis plugin contribution checklist](checklist.md) — confirm the plugin
-  contract, import boundaries, tests, docs updates, and PR-ready commands.
+    def compute(
+        self, universe: Any, frames: Any, settings: SolventShellSettings
+    ) -> Sequence[Observable]:
+        group = universe.select_atoms(settings.selection)
+        values = [measure(group) for _ in iter_frames(universe, frames)]
+        return [
+            Observable(
+                name="solvent_shell",
+                kind="mean_of_timeseries",
+                unit="A",
+                values=values,
+            )
+        ]
 
-## Reference
 
-Use these lookup pages when you need exact import paths, commands, or settings.
+SolventShellAnalysis = contract_analysis(SolventShell)
+```
 
-- [API map for analysis plugin contributors](api_map.md) — find stable public
-  imports and the nearest API reference page without browsing internals.
-- [Analysis plugin API](../../api/analyses.md),
-  [analysis base classes](../../api/analyses_base.md),
-  [MDAnalysis integration](../../api/analyses_mda.md), and
-  [shared analysis utilities](../../api/analyses_shared.md) — inspect the API
-  reference directly.
-- [CLI reference](../../reference/cli_reference.md) and
-  [analysis plugin settings reference](../../reference/analysis_plugin_settings.md)
-  — look up commands and `comparison.yaml` plugin options.
+Keep the last line. Discovery looks for the class it returns.
 
-## Public and private import guardrails
+`compute()` runs once per replicate and returns raw per-frame numbers. Never
+average across replicates inside it, never run a statistical test, never write
+a file and never import matplotlib. The framework does all of that, and it does
+it from the `kind` of each observable.
 
-Contributor-facing plugin code should use public facades:
+## Pick the kind
 
-- `polyzymd.analyses.base` for `Analysis`, lifecycle contexts,
-  `MetricValue`, and comparison result models.
-- `polyzymd.analyses.mda` for MDAnalysis jobs, frame selection, artifacts,
-  artifact stores, aggregation helpers, and comparison helpers.
-- documented utilities from `polyzymd.analyses.shared` when an existing shared
-  helper fits the task.
+| kind | values are | replicate value | reported as |
+| --- | --- | --- | --- |
+| `mean_of_timeseries` | one number per frame | mean | mean, SEM and 95 percent interval across replicates |
+| `fluctuation` | one number per frame | sample standard deviation | the same, on the fluctuation |
+| `fraction` | 0 or 1 per frame | occupancy | the same, on the fraction |
+| `profile` | one number per index | the whole vector | per-index mean and SEM |
 
-Do not import from `polyzymd.analyses._framework` in contributor plugins. That
-package is an internal implementation detail behind the public facades.
+There is no distribution kind. Express a shape as a `profile` over histogram
+bins. The raw per-frame series is kept in an NPZ sidecar either way.
+
+The kind also picks the figures, so a plugin never writes a plotter. The
+time-series kinds get a comparison bar chart and a per-replicate time-series
+panel, a `fraction` gets bars on a `[0, 1]` axis, and a `profile` gets a line
+per condition with a 95 percent band, or grouped bars when its index names at
+most thirty categories. To change a figure, subclass `ContractPlotSettings` and
+attach it to the plugin as
+`PlotSettings: ClassVar[type[BasePlotSettings]] = MyPlotSettings`.
+
+A `profile` carries no single comparable number, so give it one with
+`reduce="mean_over_index"` or `"sum_over_index"`, reported as `<name>_mean` or
+`<name>_total`. Add `reduced_kind="fluctuation"` or `"fraction"` when that
+scalar is one of those, and set `n_frames` on the profile so the scalar counts
+frames rather than indices.
+
+When one observable is a function of others the plugin already reports, such as
+the last class of a set of fractions that sums to one, declare it
+`tested=False`. It is still aggregated and reported with its uncertainty, and it
+stays out of the pairwise tests and out of the Benjamini-Hochberg family, so it
+cannot weaken the adjusted p-values of the quantities that carry independent
+information.
+
+Every observable states a `unit`. The scaffold placeholder `"TODO"` is
+rejected, so the generated tests fail until it is replaced. A `profile` also
+states an `index`, one entry per value, and may set `index_label` to name the x
+axis of its figure.
+
+If the answer depends on a file the framework does not load, such as a
+reference structure the settings name, define
+`identity_files(settings) -> Sequence[Path]`. Those files join the replicate
+identity block, so replacing one recomputes the replicate.
+
+## Cite the method
+
+Put the method paper in the module docstring under a NumPy `References`
+heading and repeat it in `references`. The comparison artifact carries it.
+
+## Write the tests
+
+Two fixtures in `tests/analyses/conftest.py` do the setup. `synthetic_universe`
+is four unit-mass atoms on a cross, whose radius of gyration is exactly 1.0.
+`run_contract_analysis(AnalysisClass, settings, universe)` runs the real
+lifecycle over three replicates and returns the `ConditionArtifact`.
+
+```python
+def test_aggregates(synthetic_universe, run_contract_analysis):
+    settings = SolventShellSettings()
+
+    artifact = run_contract_analysis(SolventShellAnalysis, settings, synthetic_universe)
+
+    aggregate = ObservableAggregate.model_validate(artifact.payload["observables"][0])
+    assert aggregate.n_replicates == 3
+    assert aggregate.mean == pytest.approx(1.0)
+    assert aggregate.sem == pytest.approx(0.0)
+```
+
+Assert on the aggregate fields rather than on the raw observable: `mean`,
+`sem`, `ci95_low`, `ci95_high`, `n_replicates`, `replicate_values`, and for a
+profile `profile_mean`, `profile_sem` and `index`. A comparison entry carries
+`delta`, `p_value`, `p_adjusted`, `significant`, `testable` and `note`. The
+scaffolded test file already holds both tests; replace the numbers.
+
+```bash
+PYTHONPATH=$PWD/src pixi run -e test pytest tests/analyses/plugins/test_solvent_shell.py -q
+pixi run -e analysis polyzymd compare run solvent_shell -f comparison.yaml
+```
+
+## What to import
+
+A plugin imports from three places and nowhere else.
+
+- `polyzymd.analyses.contract` for `Observable` and `iter_frames`.
+- `polyzymd.analyses.shared` for a helper that already exists, such as
+  alignment, topology checks or amino acid classification.
+
+`polyzymd.analyses._framework` is internal. A plugin that imports from it is
+reaching past the contract, and the next change to the framework will break it.
 
 ```{toctree}
 :hidden:
 :maxdepth: 1
 
-How PolyzyMD analysis plugins work <architecture>
-Scaffold your first analysis plugin <first_scaffold>
-Build a simple scalar analysis plugin <simple_scalar_plugin>
-Store large analysis outputs with artifact sidecars <sidecars>
-Convert a plugin into an advanced package <advanced_package>
-Test your analysis plugin contribution <testing>
-API map for analysis plugin contributors <api_map>
 Analysis plugin contribution checklist <checklist>
 ```

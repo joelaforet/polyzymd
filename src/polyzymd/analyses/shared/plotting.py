@@ -689,7 +689,7 @@ def save_figure(
 # ---------------------------------------------------------------------------
 
 
-def finite_numeric_values(values: Any) -> "np.ndarray":
+def _finite_numeric_values(values: Any) -> "np.ndarray":
     """Return finite numeric values as a one-dimensional float array.
 
     Parameters
@@ -742,7 +742,7 @@ def finite_numeric_values(values: Any) -> "np.ndarray":
     return value_array[np.isfinite(value_array)]
 
 
-def replicate_jitter_offsets(n_values: int, bar_width: float) -> "np.ndarray":
+def _replicate_jitter_offsets(n_values: int, bar_width: float) -> "np.ndarray":
     """Return deterministic offsets for replicate dot overlays.
 
     Offsets are centred on the corresponding bar position so overlays are
@@ -769,69 +769,6 @@ def replicate_jitter_offsets(n_values: int, bar_width: float) -> "np.ndarray":
 
     max_jitter = bar_width * 0.25
     return np.linspace(-max_jitter, max_jitter, n_values)
-
-
-def has_replicate_uncertainty(
-    replicate_values: Any = None,
-    *,
-    n_replicates: int | None = None,
-) -> bool:
-    """Return whether replicate-level uncertainty can be displayed.
-
-    Parameters
-    ----------
-    replicate_values : Any, optional
-        Per-condition or per-bar replicate values. Finite numeric entries are
-        counted after coercion.
-    n_replicates : int or None, optional
-        Explicit replicate count when the raw replicate values are not
-        available.
-
-    Returns
-    -------
-    bool
-        True when at least two finite independent replicate values are present.
-    """
-
-    if n_replicates is not None:
-        return n_replicates >= 2
-    return finite_numeric_values(replicate_values).size >= 2
-
-
-def suppress_singleton_errors(
-    errors: Sequence[float],
-    replicate_values: Sequence[Any] | None,
-) -> list[float] | None:
-    """Return errors with singleton replicate uncertainties suppressed.
-
-    Parameters
-    ----------
-    errors : sequence of float
-        SEM or uncertainty values aligned to ``replicate_values``.
-    replicate_values : sequence or None
-        Per-bar replicate values used to decide whether an error bar is
-        statistically displayable.
-
-    Returns
-    -------
-    list of float or None
-        Sanitized error values. Returns ``None`` when no bar has replicate
-        uncertainty, allowing callers to omit error bars entirely.
-    """
-
-    if replicate_values is None:
-        return list(errors)
-
-    sanitized: list[float] = []
-    has_any_uncertainty = False
-    for error, values in zip(errors, replicate_values, strict=False):
-        if has_replicate_uncertainty(values):
-            sanitized.append(float(error))
-            has_any_uncertainty = True
-        else:
-            sanitized.append(0.0)
-
-    return sanitized if has_any_uncertainty else None
 
 
 def scatter_replicate_values(
@@ -910,11 +847,11 @@ def scatter_replicate_values(
 
     n_scattered = 0
     for idx, values in enumerate(replicate_values):
-        rep_arr = finite_numeric_values(values)
+        rep_arr = _finite_numeric_values(values)
         if rep_arr.size == 0:
             continue
 
-        jitter = replicate_jitter_offsets(rep_arr.size, bar_width)
+        jitter = _replicate_jitter_offsets(rep_arr.size, bar_width)
         position_arr = np.full(rep_arr.shape, float(positions[idx]), dtype=float) + jitter
         if orientation == "vertical":
             x_values = position_arr
@@ -935,147 +872,6 @@ def scatter_replicate_values(
         n_scattered += 1
 
     return n_scattered
-
-
-def scatter_stacked_segment_replicates(
-    ax: "Axes",
-    x_position: float,
-    bottom_value: float,
-    replicate_values: Sequence[Any],
-    plot_settings: "PlotSettings",
-    *,
-    replicate_base_values: Sequence[Any] | None = None,
-    positive_base_values: Sequence[Any] | None = None,
-    negative_base_values: Sequence[Any] | None = None,
-    bar_width: float = 0.8,
-    dot_color: Any | None = None,
-    dot_size: float | None = None,
-    dot_alpha: float | None = None,
-    placement: str = "center",
-    zorder: float = 5,
-) -> int:
-    """Overlay replicate dots on stacked segments.
-
-    The per-component replicate value is a segment height, not an absolute
-    stacked coordinate. Plotting at ``base + replicate / 2`` places each dot at
-    the center of the component-specific replicate segment. Callers should pass
-    replicate-specific bases when earlier stacked components vary by replicate.
-    Signed stacks may pass separate positive and negative bases so each dot is
-    placed on the same sign stack as its own replicate value.
-
-    Parameters
-    ----------
-    ax : matplotlib.axes.Axes
-        Axes containing the stacked bar chart.
-    x_position : float
-        Center x-coordinate of the condition bar.
-    bottom_value : float
-        Aggregate stack baseline for the current segment.
-    replicate_values : sequence of Any
-        Component-specific per-replicate segment heights.
-    plot_settings : PlotSettings
-        Plot configuration used for dot styling.
-    replicate_base_values : sequence of Any, optional
-        Per-replicate cumulative stack bases for unsigned stacks. When omitted,
-        ``bottom_value`` is used for every replicate for backward compatibility.
-    positive_base_values : sequence of Any, optional
-        Per-replicate cumulative positive stack bases for signed stacks.
-    negative_base_values : sequence of Any, optional
-        Per-replicate cumulative negative stack bases for signed stacks.
-    bar_width : float, optional
-        Width used for deterministic jitter, by default ``0.8``.
-    dot_color : Any, optional
-        Override for theme dot colour.
-    dot_size : float, optional
-        Override for theme dot size.
-    dot_alpha : float, optional
-        Override for theme dot alpha.
-    placement : {"center", "end"}, optional
-        Dot placement within each replicate segment. ``"center"`` uses
-        ``base + replicate / 2`` and ``"end"`` uses ``base + replicate``.
-    zorder : float, optional
-        Matplotlib z-order for dot overlays, by default ``5``.
-
-    Returns
-    -------
-    int
-        Number of scatter calls emitted.
-
-    Raises
-    ------
-    ValueError
-        If replicate base arrays do not align with ``replicate_values``.
-    """
-    import math
-
-    import numpy as np
-
-    if placement not in {"center", "end"}:
-        raise ValueError("placement must be 'center' or 'end'")
-
-    raw_values = list(replicate_values)
-    if positive_base_values is not None or negative_base_values is not None:
-        if positive_base_values is None or negative_base_values is None:
-            raise ValueError(
-                "positive_base_values and negative_base_values must be provided together"
-            )
-        positive_bases = list(positive_base_values)
-        negative_bases = list(negative_base_values)
-        if len(positive_bases) != len(raw_values) or len(negative_bases) != len(raw_values):
-            raise ValueError("signed replicate base lengths must match replicate_values length")
-        base_values: list[float] = []
-        segment_values_list: list[float] = []
-        for value, positive_base, negative_base in zip(raw_values, positive_bases, negative_bases):
-            try:
-                segment_value = float(value)
-                base_value = float(positive_base if segment_value >= 0.0 else negative_base)
-            except (TypeError, ValueError):
-                continue
-            if math.isfinite(segment_value) and math.isfinite(base_value):
-                segment_values_list.append(segment_value)
-                base_values.append(base_value)
-        segment_values = np.asarray(segment_values_list, dtype=float)
-        bases = np.asarray(base_values, dtype=float)
-    elif replicate_base_values is not None:
-        raw_bases = list(replicate_base_values)
-        if len(raw_bases) != len(raw_values):
-            raise ValueError("replicate_base_values length must match replicate_values length")
-        base_values = []
-        segment_values_list = []
-        for value, base in zip(raw_values, raw_bases):
-            try:
-                segment_value = float(value)
-                base_value = float(base)
-            except (TypeError, ValueError):
-                continue
-            if math.isfinite(segment_value) and math.isfinite(base_value):
-                segment_values_list.append(segment_value)
-                base_values.append(base_value)
-        segment_values = np.asarray(segment_values_list, dtype=float)
-        bases = np.asarray(base_values, dtype=float)
-    else:
-        segment_values = finite_numeric_values(raw_values)
-        bases = np.full(segment_values.shape, float(bottom_value), dtype=float)
-
-    if segment_values.size == 0:
-        return 0
-
-    divisor = 2.0 if placement == "center" else 1.0
-    segment_positions = [
-        float(base) + float(value) / divisor for base, value in zip(bases, segment_values)
-    ]
-    return scatter_replicate_values(
-        ax,
-        [x_position],
-        [segment_positions],
-        plot_settings,
-        orientation="vertical",
-        bar_width=bar_width,
-        dot_color=dot_color,
-        dot_size=dot_size,
-        dot_alpha=dot_alpha,
-        zorder=zorder,
-    )
 
 
 def grouped_bars(
@@ -1362,7 +1158,7 @@ def error_bar_half_widths(
     counts: list[int] = []
     for index in range(len(sems)):
         if replicate_values is not None and index < len(replicate_values):
-            counts.append(int(finite_numeric_values(replicate_values[index]).size))
+            counts.append(int(_finite_numeric_values(replicate_values[index]).size))
         else:
             counts.append(int(n_replicates or 0))
 
@@ -1478,9 +1274,9 @@ def annotate_uncertainty(
     if n_replicates is None:
         n_replicates = min(
             (
-                int(finite_numeric_values(values).size)
+                int(_finite_numeric_values(values).size)
                 for values in replicate_values or []
-                if finite_numeric_values(values).size
+                if _finite_numeric_values(values).size
             ),
             default=0,
         )

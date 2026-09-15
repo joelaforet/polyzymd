@@ -103,15 +103,15 @@ Analysis
 - :py:class:`~polyzymd.analyses.mda.artifacts.ConditionArtifact` - Aggregated output for one condition
 - :py:class:`~polyzymd.analyses.mda.artifacts.ComparisonArtifact` - Canonical comparison output for cross-condition results
 - :py:class:`~polyzymd.analyses.mda.store.ArtifactStore` - Canonical artifact persistence and loading helper
-- :py:class:`~polyzymd.analyses.base.MetricValue` - Scalar metric descriptor for default comparisons
-- :py:class:`~polyzymd.analyses.contacts.ParallelContactAnalyzer` - Polymer-protein contacts
+- :py:class:`~polyzymd.analyses.contract.Observable` - One measured quantity from one replicate
+- :py:mod:`polyzymd.analyses.contacts` - Polymer-protein contacts
 
 Comparison
 ~~~~~~~~~~
 
 - :py:class:`~polyzymd.analyses.base.Analysis` - Plugin base class for all analyses
-- :py:class:`~polyzymd.analyses.base.ComparisonResult` - Universal comparison result model
-- :py:class:`~polyzymd.analyses.base.MetricValue` - Scalar metric descriptor
+- :py:class:`~polyzymd.analyses.contract.ObservableAggregate` - One observable summarized across replicates
+- :py:class:`~polyzymd.analyses.contract.ObservableComparison` - One test of one observable between two conditions
 - :py:class:`~polyzymd.analyses.base.ReplicateContext` - Context for per-replicate computation
 - :py:class:`~polyzymd.analyses.base.ComparisonContext` - Context for cross-condition comparison
 

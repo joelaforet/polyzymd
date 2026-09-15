@@ -35,8 +35,7 @@ import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from polyzymd.analyses.base import SlurmResourceHint
-from polyzymd.analyses.contract import Observable
-from polyzymd.analyses.contract_runner import contract_analysis
+from polyzymd.analyses.contract import Observable, contract_analysis
 from polyzymd.analyses.exceptions import ReplicateError, SelectionError
 from polyzymd.analyses.shared.loader import canonical_element_symbol, element_spellings
 

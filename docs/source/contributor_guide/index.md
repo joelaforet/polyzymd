@@ -10,27 +10,13 @@ PolyzyMD, understand the codebase, or add new capabilities.
 - [Packaging and Distribution Notes](packaging.md)
 - [Architecture](../explanation/architecture.md)
 
-## New Analysis Contributor Path
+## Add an analysis
 
-Use the [New Analysis Contributor Path](analysis_plugins/index.md) if you want
-to add a new analysis plugin or modify an existing one. It gives new analysis
-contributors a recommended reading order, points to the current full extension
-guide, and highlights the public APIs to use before you start editing plugin
-code.
-
-Start there when you need to understand how a PolyzyMD analysis moves from
-MDAnalysis trajectory work to replicate artifacts, condition aggregation,
-comparison, and artifact-only plotting.
-
-## Extension Workflows
-
-- **[Extend the Analysis Framework](extending_analyses.md)** —
-  how to add an MDAnalysis-native analysis plugin with `MDAAnalysisJob`,
-  `ReplicateArtifact`, default artifact aggregation, comparison, formatting,
-  and artifact-only plotting
-- **[Store large analysis outputs with artifact sidecars](analysis_plugins/sidecars.md)** —
-  how to persist arrays, tables, and plotting inputs through registered
-  `ArtifactStore` sidecars instead of plugin-specific cache files
+[Write an analysis plugin](analysis_plugins/index.md) is the whole path. An
+analysis is one module holding a settings model and a `compute()` that returns
+observables; the framework owns caching, aggregation, testing, plotting and
+formatting. The [checklist](analysis_plugins/checklist.md) is what to run before
+opening the pull request.
 
 ## Contributor Mindset
 
@@ -48,6 +34,5 @@ config -> builders -> simulation -> workflow -> analyses. -->
 Contributing to PolyzyMD <contributing>
 Set Up a Contributor Environment <setup>
 Packaging and Distribution Notes <packaging>
-New Analysis Contributor Path <analysis_plugins/index>
-Extend the Analysis Framework <extending_analyses>
+Write an analysis plugin <analysis_plugins/index>
 ```

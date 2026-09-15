@@ -154,39 +154,6 @@ def mean_sem_ci(values: ArrayLike, coverage: float = DEFAULT_COVERAGE) -> MeanSe
     )
 
 
-def metric_summary_payload(
-    name: str,
-    values: Sequence[float],
-    *,
-    unit: str | None = None,
-    coverage: float = DEFAULT_COVERAGE,
-) -> dict:
-    """Build the serialized metric summary for one condition-level metric.
-
-    Every plugin writes its aggregated metrics in this shape, which matches
-    ``polyzymd.analyses.mda.aggregation.AggregatedMetric``. Deriving the mean,
-    the standard error, the spread and the interval from ``values`` in one place
-    keeps the stored statistics consistent with the replicate values that the
-    comparison layer recomputes them from. The spread, the standard error and
-    both limits are ``None`` for a single replicate.
-    """
-    numeric = [float(value) for value in values]
-    stats = mean_sem_ci(numeric, coverage=coverage)
-    std = None if stats.sem is None else stats.sem * np.sqrt(float(stats.n))
-    return {
-        "name": name,
-        "values": numeric,
-        "mean": stats.mean,
-        "sem": stats.sem,
-        "std": None if std is None else float(std),
-        "n": stats.n,
-        "unit": unit,
-        "ci95_low": stats.ci_low,
-        "ci95_high": stats.ci_high,
-        "ci_method": stats.ci_method,
-    }
-
-
 @dataclass
 class StatResult:
     """Container for a mean with its standard uncertainty and interval.

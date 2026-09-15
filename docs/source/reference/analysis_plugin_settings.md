@@ -81,24 +81,30 @@ the same plugin sees different coordinate semantics on the two engines. The
 field records which one was read rather than leaving it implied by a filename.
 ## Plot settings shared by every plugin
 
-Each plugin's `plot_settings` block inherits this key.
+Each plugin's `plot_settings` block takes these keys. They come from
+`polyzymd.analyses.contract_plots.ContractPlotSettings`, which every plugin uses
+unless it declares its own subclass.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `error_bar` | `"ci95" \| "sem"` | `"ci95"` | Interval drawn on comparison bars and shaded bands. `ci95` draws the 95 percent Student t confidence interval across replicates. `sem` draws one standard error, which at `n = 3` is 4.3 times narrower |
+| `figsize` | `[float, float]` | `[10.0, 6.0]` | Width and height in inches of every generated figure |
+| `timeseries_figsize` | `[float, float]` | `[12.0, 5.0]` | Width and height in inches of the per-frame panels, which are usually wider |
+| `show_replicates` | `bool` | `true` | Draw the per-replicate points on bars and the per-replicate traces on lines. Turn it off for a condition with many replicates |
+| `max_categories_for_bars` | `int` | `30` | Longest categorical profile still drawn as grouped bars. A longer one, or one indexed by a non-integer coordinate such as a histogram bin centre, is drawn as a line |
 
 ```yaml
 plugins:
   rmsf:
     plot_settings:
       error_bar: ci95
+      figsize: [10.0, 6.0]
+      show_replicates: true
 ```
 
 Whichever value is set, the figure carries a footnote naming the interval, the
-number of replicates and the production window, and per-replicate points stay
-overlaid on the bars. `hydrogen_bonds` has no plot settings model, and neither
-does a plugin written against the observable contract such as `rmsd`, so their
-figures always use the default.
+number of replicates and the production window. No shipped plugin declares its
+own `PlotSettings` subclass, so all nine take these defaults.
 
 ## `rmsf`
 

@@ -40,7 +40,6 @@ from polyzymd.analyses.exceptions import (
     StaleCacheError,
 )
 from polyzymd.analyses.mda.artifacts import ReplicateArtifact
-from polyzymd.analyses.mda.job import MDABackendPolicy
 from polyzymd.analyses.mda.lifecycle import build_trajectory_loader
 from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
 
@@ -74,142 +73,17 @@ FinalizeRun = Callable[..., dict[str, Any]]
 ExecutionSummary = Callable[["Analysis", list[Condition], BaseModel, str], None]
 
 
-class AnalysisLifecycleAdapter:
-    """Delegate lifecycle operations to an ``Analysis`` instance.
-
-    Parameters
-    ----------
-    analysis : Analysis
-        Analysis plugin instance whose hooks should be called.
-    """
-
-    def __init__(self, analysis: Analysis) -> None:
-        self.analysis = analysis
-
-    def filter_conditions(
-        self,
-        conditions: Sequence[Condition],
-        *,
-        settings: BaseModel,
-    ) -> list[Condition]:
-        """Delegate condition filtering to the analysis plugin.
-
-        Parameters
-        ----------
-        conditions : sequence of Condition
-            Conditions from the comparison configuration.
-        settings : BaseModel
-            Resolved analysis settings.
-
-        Returns
-        -------
-        list[Condition]
-            Conditions accepted by the plugin.
-        """
-
-        return self.analysis.filter_conditions(conditions, settings=settings)
-
-    def run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> Any:
-        """Delegate per-replicate compute to the internal analysis dispatcher.
-
-        Parameters
-        ----------
-        ctx : ReplicateContext
-            Framework-provided replicate context.
-        replicate : int
-            One-indexed replicate ID.
-
-        Returns
-        -------
-        Any
-            Plugin result for the replicate.
-        """
-
-        return self.analysis._run_compute_stage(ctx, replicate)
-
-    def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> Any:
-        """Delegate aggregation to ``Analysis.aggregate``.
-
-        Parameters
-        ----------
-        ctx : AggregateContext
-            Framework-provided aggregate context.
-        results : sequence of Any
-            Successful replicate results.
-
-        Returns
-        -------
-        Any
-            Aggregated plugin result.
-        """
-
-        return self.analysis.aggregate(ctx, results)
-
-    def compare(self, ctx: ComparisonContext) -> Any:
-        """Delegate comparison to ``Analysis.compare``.
-
-        Parameters
-        ----------
-        ctx : ComparisonContext
-            Framework-provided comparison context.
-
-        Returns
-        -------
-        Any
-            Comparison result, or ``None`` when no result is produced.
-        """
-
-        return self.analysis.compare(ctx)
-
-    def plot(self, ctx: PlotContext) -> list[Path]:
-        """Delegate plotting to ``Analysis.plot``.
-
-        Parameters
-        ----------
-        ctx : PlotContext
-            Framework-provided plot context.
-
-        Returns
-        -------
-        list[Path]
-            Generated plot paths.
-        """
-
-        return self.analysis.plot(ctx)
-
-    def format(self, result: Any, fmt: str = "text") -> str:
-        """Delegate CLI formatting to ``Analysis.format``.
-
-        Parameters
-        ----------
-        result : Any
-            Comparison result to format.
-        fmt : str, optional
-            Output format, by default ``"text"``.
-
-        Returns
-        -------
-        str
-            Formatted comparison output.
-        """
-
-        return self.analysis.format(result, fmt)
-
-
 class AnalysisLifecycle:
     """Template Method engine for one-analysis lifecycle execution.
 
     The orchestrator remains the public API and multi-analysis scheduling owner.
     This private engine owns the order for a single analysis and delegates
-    plugin-specific work through ``AnalysisLifecycleAdapter``.
+    plugin-specific work by calling the analysis hooks directly.
 
     Parameters
     ----------
     analysis : Analysis
         Analysis plugin instance.
-    adapter : AnalysisLifecycleAdapter | None, optional
-        Adapter used for lifecycle delegation. When omitted, a lifecycle adapter
-        is created for ``analysis``.
     settings_resolver : callable | None, optional
         Function that resolves plugin settings from a comparison config.
     prepare_comparison_run : callable | None, optional
@@ -226,7 +100,6 @@ class AnalysisLifecycle:
         self,
         analysis: Analysis,
         *,
-        adapter: AnalysisLifecycleAdapter | None = None,
         settings_resolver: SettingsResolver | None = None,
         prepare_comparison_run: PrepareRun | None = None,
         run_analysis: RunCondition | None = None,
@@ -234,7 +107,6 @@ class AnalysisLifecycle:
         execution_summary: ExecutionSummary | None = None,
     ) -> None:
         self.analysis = analysis
-        self.adapter = adapter or AnalysisLifecycleAdapter(analysis)
         self._settings_resolver = settings_resolver or _resolve_settings
         self._prepare_comparison_run = prepare_comparison_run
         self._run_analysis = run_analysis
@@ -281,7 +153,6 @@ class AnalysisLifecycle:
         output_dir: Path,
         replicate: int,
         recompute: bool,
-        backend_policy: MDABackendPolicy | None = None,
     ) -> Any:
         """Run one replicate compute stage and save the canonical ``result.json``.
 
@@ -299,8 +170,6 @@ class AnalysisLifecycle:
             One-indexed replicate ID.
         recompute : bool
             Whether recomputation was requested.
-        backend_policy : MDABackendPolicy or None, optional
-            MDAnalysis internal backend policy for MDA job-backed analyses.
 
         Returns
         -------
@@ -338,10 +207,9 @@ class AnalysisLifecycle:
             recompute=recompute,
             settings=settings,
             result_path=result_path,
-            backend_policy=backend_policy or _default_mda_backend_policy(),
         )
         try:
-            result = self.adapter.run_compute_stage(ctx, replicate)
+            result = self.analysis._run_compute_stage(ctx, replicate)
         except (FileNotFoundError, OSError):
             raise
         except ReplicateSkippedError:
@@ -553,7 +421,6 @@ class AnalysisLifecycle:
         equilibration: str = "0ns",
         output_dir: Path | None = None,
         recompute: bool = False,
-        backend_policy: MDABackendPolicy | None = None,
     ) -> Any:
         """Run compute and aggregate for one condition.
 
@@ -570,8 +437,6 @@ class AnalysisLifecycle:
             config path.
         recompute : bool, optional
             Force recomputation, by default ``False``.
-        backend_policy : MDABackendPolicy or None, optional
-            MDAnalysis internal backend policy for replicate jobs.
 
         Returns
         -------
@@ -605,7 +470,6 @@ class AnalysisLifecycle:
                     rep_dir,
                     rep,
                     recompute,
-                    backend_policy=backend_policy,
                 )
                 results.append(result)
                 successful.append(rep)
@@ -901,7 +765,7 @@ class AnalysisLifecycle:
         )
 
         try:
-            comparison_result = self.adapter.compare(comp_ctx)
+            comparison_result = self.analysis.compare(comp_ctx)
         except PluginContractError:
             raise
         except Exception as e:
@@ -936,7 +800,7 @@ class AnalysisLifecycle:
             equilibration=resolved_equilibration,
         )
         try:
-            plots = self.adapter.plot(plot_ctx)
+            plots = self.analysis.plot(plot_ctx)
         except PluginContractError:
             raise
         except Exception as e:
@@ -982,13 +846,12 @@ class AnalysisLifecycle:
             lambda analysis, cfg, eq: self.prepare_comparison_run(cfg, eq)
         )
         run_condition = self._run_analysis or (
-            lambda analysis, condition, settings, eq, output_dir, rec, backend: self.run_analysis(
+            lambda analysis, condition, settings, eq, output_dir, rec: self.run_analysis(
                 condition,
                 settings,
                 eq,
                 output_dir=output_dir,
                 recompute=rec,
-                backend_policy=backend,
             )
         )
         finalize_run = self._finalize_comparison_from_disk or (
@@ -1011,7 +874,6 @@ class AnalysisLifecycle:
         settings = prepared_state["settings"]
         equilibration = prepared_state["equilibration"]
         analysis_root = prepared_state["analysis_root"]
-        backend_policy = prepared_state.get("mda_backend_policy", MDABackendPolicy())
         summary = self._execution_summary
         if summary is not None:
             summary(self.analysis, valid_conditions, settings, equilibration)
@@ -1032,7 +894,6 @@ class AnalysisLifecycle:
                     equilibration,
                     cond_dir,
                     recompute,
-                    backend_policy,
                 )
                 if agg is not None:
                     analysis_dirs[cond.label] = cond_dir
@@ -1156,7 +1017,7 @@ class AnalysisLifecycle:
         )
 
         try:
-            paths = self.adapter.plot(plot_ctx)
+            paths = self.analysis.plot(plot_ctx)
             _check_plot_result(paths, self.analysis.name)
             return paths, []
         except PluginContractError:
@@ -1224,7 +1085,6 @@ class AnalysisLifecycle:
             "settings": settings,
             "equilibration": equilibration,
             "analysis_root": analysis_root,
-            "mda_backend_policy": _resolve_mda_backend_policy(config),
         }
 
     def _prepare_conditions_with_filter(
@@ -1251,7 +1111,7 @@ class AnalysisLifecycle:
         condition_by_label: dict[str, Condition] = {
             condition.label: condition for condition in all_conditions
         }
-        valid_conditions = self.adapter.filter_conditions(all_conditions, settings=settings)
+        valid_conditions = self.analysis.filter_conditions(all_conditions, settings=settings)
 
         foreign_labels = [
             condition.label
@@ -1343,7 +1203,7 @@ class AnalysisLifecycle:
             result_path=agg_result_path,
         )
         try:
-            aggregated = self.adapter.aggregate(agg_ctx, results)
+            aggregated = self.analysis.aggregate(agg_ctx, results)
         except (FileNotFoundError, OSError):
             raise
         except PluginContractError:
@@ -1401,42 +1261,6 @@ def _check_result_type(result: Any, method: str, analysis_name: str) -> None:
         f"{analysis_name}.{method}() returned {type(result).__name__}; "
         "expected dict, pydantic BaseModel, or None"
     )
-
-
-def _default_mda_backend_policy() -> MDABackendPolicy:
-    """Return the default MDAnalysis backend policy.
-
-    Returns
-    -------
-    MDABackendPolicy
-        Policy that forwards no backend keyword arguments.
-    """
-
-    from polyzymd.analyses.mda import MDABackendPolicy
-
-    return MDABackendPolicy()
-
-
-def _resolve_mda_backend_policy(config: ComparisonConfig) -> MDABackendPolicy:
-    """Resolve the comparison-level MDA backend policy.
-
-    Parameters
-    ----------
-    config : ComparisonConfig
-        Comparison configuration or a compatible test stand-in.
-
-    Returns
-    -------
-    MDABackendPolicy
-        Backend policy for replicate job construction.
-    """
-
-    policy_config = getattr(config, "mda_backend_policy", None)
-    if policy_config is None:
-        return _default_mda_backend_policy()
-    if hasattr(policy_config, "to_policy"):
-        return policy_config.to_policy()
-    return policy_config
 
 
 REPLICATE_CACHE_KEY_FIELDS = ("settings_fingerprint", "equilibration")

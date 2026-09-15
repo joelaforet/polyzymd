@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 import pytest
 from pydantic import BaseModel
 
-from polyzymd.analyses.base import Analysis, Condition, MetricValue
+from polyzymd.analyses.base import Analysis, Condition
 from polyzymd.analyses.orchestrator import _print_execution_summary, run_comparison
 from polyzymd.config.comparison import PlotSettings
 
@@ -44,16 +44,6 @@ class _DefaultHintAnalysis(_MDAContractMixin, Analysis):
             "mean_value": sum(values) / len(values),
             "sem_value": 0.0,
             "replicate_values": values,
-        }
-
-    def extract_metrics(self, summary: dict[str, Any]) -> dict[str, MetricValue]:
-        return {
-            "metric": MetricValue(
-                name="metric",
-                mean=float(summary["mean_value"]),
-                sem=float(summary["sem_value"]),
-                replicate_values=[float(v) for v in summary["replicate_values"]],
-            )
         }
 
 

@@ -37,26 +37,23 @@ To see what analyses exist, or to drive one yourself::
     RMSFAnalysis = get_analysis("rmsf")
     analysis = RMSFAnalysis()
 
-Adding a New Analysis
+Adding a new analysis
 ---------------------
-Create a package in ``src/polyzymd/analyses/<name>/`` and subclass
-:class:`~polyzymd.analyses.base.Analysis`.  The framework discovers
-it automatically — no imports, no registries, no bootstrap files.
-Use ``polyzymd new-analysis <name>`` to generate the boilerplate.
+Write one module under ``src/polyzymd/analyses/`` holding a settings model, a
+``compute()`` that returns :class:`~polyzymd.analyses.contract.Observable`
+objects, and one call to
+:func:`~polyzymd.analyses.contract.contract_analysis`. The framework
+discovers it by walking the package, so there is no registry to edit. Run
+``polyzymd new-analysis <name>`` to generate it.
 
-See :mod:`polyzymd.analyses.base` for the full contract.
+See :mod:`polyzymd.analyses.contract` for the full contract.
 """
 
 from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
-    ANOVAResult,
     ComparisonContext,
-    ComparisonResult,
     Condition,
-    ConditionSummary,
-    MetricValue,
-    PairwiseResult,
     PlotContext,
     ReplicateContext,
 )
@@ -77,16 +74,11 @@ __all__ = [
     # Agent-facing protocol
     "analyze",
     "ProtocolReport",
-    # Base class + contexts + result models
+    # Base class and framework contexts
     "Analysis",
     "AggregateContext",
-    "ANOVAResult",
     "ComparisonContext",
-    "ComparisonResult",
     "Condition",
-    "ConditionSummary",
-    "MetricValue",
-    "PairwiseResult",
     "PlotContext",
     "ReplicateContext",
     # Discovery

@@ -138,13 +138,14 @@ def synthetic_universe() -> Any:
 
 
 @pytest.fixture
-def run_contract_analysis(tmp_path: Path) -> Callable[..., Any]:
+def run_contract_analysis(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., Any]:
     """Run a contract analysis end to end on in-memory universes.
 
     The returned callable takes the generated analysis class, its settings, and
     either a universe or a ``replicate -> universe`` factory, and returns the
     ``ConditionArtifact`` that ``AnalysisLifecycle.run_analysis`` produced. The
-    trajectory loader and universe provider are replaced, so no files are read.
+    trajectory loader and the universe provider the replicate lifecycle uses are
+    replaced, so no files are read.
 
     Returns
     -------
@@ -176,7 +177,8 @@ def run_contract_analysis(tmp_path: Path) -> Callable[..., Any]:
             replicates=tuple(replicates),
             sim_config=make_simulation_config(label),
         )
-        stub_cls = _stubbed(analysis_cls, factory, tuple(inputs))
+        _stub_universe_source(monkeypatch, factory, tuple(inputs))
+        stub_cls = _stubbed(analysis_cls)
         return AnalysisLifecycle(stub_cls()).run_analysis(
             condition,
             settings,
@@ -187,13 +189,19 @@ def run_contract_analysis(tmp_path: Path) -> Callable[..., Any]:
     return run
 
 
-def _stubbed(analysis_cls: type, factory: Callable[[int], Any], inputs: tuple) -> type:
-    """Subclass an analysis with the loader and universe provider replaced."""
-    from polyzymd.analyses.shared.window import TrajectoryWindow
+def _stub_universe_source(
+    monkeypatch: pytest.MonkeyPatch, factory: Callable[[int], Any], inputs: tuple
+) -> None:
+    """Replace the loader and the universe provider the lifecycle builds."""
+    from polyzymd.analyses.mda import lifecycle
 
     class _Provider:
         def __init__(self, config: Any, loader: Any = None) -> None:
             self.config = config
+
+        @classmethod
+        def from_config(cls, config: Any, loader: Any = None) -> "_Provider":
+            return cls(config, loader=loader)
 
         def load_universe(self, replicate: int) -> Any:
             return factory(replicate)
@@ -205,13 +213,15 @@ def _stubbed(analysis_cls: type, factory: Callable[[int], Any], inputs: tuple) -
         def __init__(self, config: Any) -> None:
             self.config = config
 
+    monkeypatch.setattr(lifecycle, "UniverseProvider", _Provider)
+    monkeypatch.setattr(lifecycle, "build_trajectory_loader", lambda config: _Loader(config))
+
+
+def _stubbed(analysis_cls: type) -> type:
+    """Subclass an analysis with a fixed production window over every frame."""
+    from polyzymd.analyses.shared.window import TrajectoryWindow
+
     class _Stubbed(analysis_cls):  # type: ignore[valid-type, misc]
-        def _trajectory_loader_factory(self) -> type:
-            return _Loader
-
-        def _mda_universe_provider_factory(self) -> type:
-            return _Provider
-
         def get_trajectory_window(
             self, ctx: Any, replicate: int, loader: Any, universe: Any
         ) -> TrajectoryWindow:

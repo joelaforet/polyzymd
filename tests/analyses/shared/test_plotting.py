@@ -15,17 +15,14 @@ from polyzymd.analyses.mda import (
     ReplicateArtifact,
 )
 from polyzymd.analyses.shared.plotting import (
-    finite_numeric_values,
+    _finite_numeric_values,
     get_condition_color_map,
     get_condition_colors,
     get_palette_colors,
     grouped_bars,
-    has_replicate_uncertainty,
     load_canonical_plot_artifacts,
     order_condition_labels,
     scatter_replicate_values,
-    scatter_stacked_segment_replicates,
-    suppress_singleton_errors,
 )
 from polyzymd.config.comparison import PlotSettings, PlotTheme
 
@@ -364,27 +361,9 @@ def test_artifact_store_load_npz_sidecar_rejects_tampering(tmp_path) -> None:
 
 def test_finite_numeric_values_skips_invalid_entries() -> None:
     """Finite filtering should retain numeric values and skip invalid ones."""
-    values = finite_numeric_values([1.0, "bad", float("nan"), "2.5", float("inf")])
+    values = _finite_numeric_values([1.0, "bad", float("nan"), "2.5", float("inf")])
 
     np.testing.assert_allclose(values, [1.0, 2.5])
-
-
-def test_has_replicate_uncertainty_requires_two_replicates() -> None:
-    """Replicate uncertainty should require at least two finite values."""
-    assert has_replicate_uncertainty([1.0]) is False
-    assert has_replicate_uncertainty([1.0, 1.2]) is True
-    assert has_replicate_uncertainty(n_replicates=1) is False
-    assert has_replicate_uncertainty(n_replicates=2) is True
-
-
-def test_suppress_singleton_errors_returns_none_for_singletons() -> None:
-    """Singleton-only bars should omit uncertainty bars entirely."""
-    assert suppress_singleton_errors([0.1, 0.2], [[1.0], [2.0]]) is None
-
-
-def test_suppress_singleton_errors_zeroes_mixed_singletons() -> None:
-    """Mixed replicate bars should keep only displayable uncertainties."""
-    assert suppress_singleton_errors([0.1, 0.2], [[1.0], [2.0, 2.2]]) == [0.0, 0.2]
 
 
 def test_scatter_replicate_values_vertical_filters_and_jitters() -> None:
@@ -460,122 +439,6 @@ def test_scatter_replicate_values_rejects_length_mismatch() -> None:
     with pytest.raises(ValueError, match="replicate_values length must match"):
         scatter_replicate_values(ax, [0.0], [[1.0], [2.0]], plot_settings)
 
-    plt.close(fig)
-
-
-def test_scatter_stacked_segment_replicates_centers_positive_values() -> None:
-    """Stacked overlays should center positive segment replicate values."""
-    import matplotlib.pyplot as plt
-
-    plot_settings = PlotSettings()
-    fig, ax = plt.subplots()
-
-    with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
-        n_calls = scatter_stacked_segment_replicates(
-            ax,
-            1.0,
-            0.4,
-            [0.2, 0.4],
-            plot_settings,
-            bar_width=0.8,
-        )
-
-    assert n_calls == 1
-    np.testing.assert_allclose(mock_scatter.call_args.args[1], [0.8, 1.2])
-    np.testing.assert_allclose(mock_scatter.call_args.args[2], [0.5, 0.6])
-    plt.close(fig)
-
-
-def test_scatter_stacked_segment_replicates_centers_negative_values() -> None:
-    """Stacked overlays should center negative segment replicate values."""
-    import matplotlib.pyplot as plt
-
-    plot_settings = PlotSettings()
-    fig, ax = plt.subplots()
-
-    with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
-        n_calls = scatter_stacked_segment_replicates(
-            ax,
-            1.0,
-            -0.4,
-            [-0.2, -0.4],
-            plot_settings,
-            bar_width=0.8,
-        )
-
-    assert n_calls == 1
-    np.testing.assert_allclose(mock_scatter.call_args.args[2], [-0.5, -0.6])
-    plt.close(fig)
-
-
-def test_scatter_stacked_segment_replicates_uses_replicate_bases() -> None:
-    """Stacked overlays should use per-replicate cumulative bases."""
-    import matplotlib.pyplot as plt
-
-    plot_settings = PlotSettings()
-    fig, ax = plt.subplots()
-
-    with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
-        n_calls = scatter_stacked_segment_replicates(
-            ax,
-            1.0,
-            0.4,
-            [0.2, 0.4],
-            plot_settings,
-            replicate_base_values=[1.0, 2.0],
-            bar_width=0.8,
-        )
-
-    assert n_calls == 1
-    np.testing.assert_allclose(mock_scatter.call_args.args[2], [1.1, 2.2])
-    plt.close(fig)
-
-
-def test_scatter_stacked_segment_replicates_can_place_dots_at_segment_ends() -> None:
-    """Stacked overlays should optionally place dots at segment ends."""
-    import matplotlib.pyplot as plt
-
-    plot_settings = PlotSettings()
-    fig, ax = plt.subplots()
-
-    with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
-        n_calls = scatter_stacked_segment_replicates(
-            ax,
-            1.0,
-            0.4,
-            [0.2, 0.4],
-            plot_settings,
-            replicate_base_values=[1.0, 2.0],
-            placement="end",
-            bar_width=0.8,
-        )
-
-    assert n_calls == 1
-    np.testing.assert_allclose(mock_scatter.call_args.args[2], [1.2, 2.4])
-    plt.close(fig)
-
-
-def test_scatter_stacked_segment_replicates_uses_signed_replicate_bases() -> None:
-    """Signed stacked overlays should choose bases from each replicate sign."""
-    import matplotlib.pyplot as plt
-
-    plot_settings = PlotSettings()
-    fig, ax = plt.subplots()
-
-    with patch("matplotlib.axes.Axes.scatter", autospec=True) as mock_scatter:
-        n_calls = scatter_stacked_segment_replicates(
-            ax,
-            1.0,
-            0.0,
-            [2.0, -4.0],
-            plot_settings,
-            positive_base_values=[3.0, 30.0],
-            negative_base_values=[-30.0, -5.0],
-            bar_width=0.8,
-        )
-
-    assert n_calls == 1
-    np.testing.assert_allclose(mock_scatter.call_args.args[2], [4.0, -7.0])
     plt.close(fig)
 
 

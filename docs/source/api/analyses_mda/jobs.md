@@ -1,35 +1,15 @@
-# Job execution
+# Replicate records
 
-`MDAAnalysisJob` represents one named MDAnalysis-compatible analysis run on one
-replicate. It forwards `FrameSelection` kwargs to the wrapped object's `run()`
-method and returns an `MDAJobResult` with the completed analysis and its results.
+`MDAUniversePolicy` records which files one replicate was measured from: the
+condition label, the replicate number, and the provenance the trajectory loader
+already resolved. Every replicate artifact carries it, so a stored number can
+name the topology and the trajectory segments behind it.
 
-`MDAFunctionAdapter` is the simple-function path used by the default scaffold.
-It calls a function once with a loaded universe and frame-selection kwargs; it
-does not implement a custom frame loop. Functions that need per-frame iteration
-should use MDAnalysis primitives internally or be replaced by an `AnalysisBase`
-subclass.
+`MDAJobResult` is what one call to a plugin's `compute()` produced for one
+replicate, before the framework turns it into a `ReplicateArtifact`: the
+reduced observables, the sidecars written for them, and the frame selection
+they were measured over.
 
-`MDABackendPolicy` controls optional MDAnalysis internal backends. The default
-policy forwards no backend kwargs so PolyzyMD-level parallelism remains the
-default. In `comparison.yaml`, the top-level `mda_backend_policy` section maps
-to this object and is intentionally opt-in:
-
-```yaml
-mda_backend_policy:
-  backend: "multiprocessing"
-  n_workers: 2
-  n_parts: 2
-```
-
-Leave the section empty or omit it to forward no backend kwargs. Function-adapter
-jobs reject non-default backend policies; use an `AnalysisBase`-compatible job
-when opting into MDAnalysis internal parallelism.
-
-```{eval-rst}
-.. automodule:: polyzymd.analyses.mda.job
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-```
+Both live in `polyzymd.analyses.mda.lifecycle` and are documented on
+{doc}`lifecycle`. There is no job object, no function adapter and no backend
+policy; a plugin supplies `compute()` and the lifecycle calls it once.

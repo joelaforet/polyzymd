@@ -83,22 +83,27 @@ The analysis package is split by public surface and private implementation:
 
 ```text
 src/polyzymd/analyses/
-├── base.py          # stable contributor facade: Analysis, contexts, metrics
-├── discovery.py     # plugin auto-discovery
-├── orchestrator.py  # comparison workflow orchestration facade
-├── stats.py         # default scalar comparison pipeline
-├── mda/             # public MDAnalysis extension layer
-├── shared/          # reusable utilities shared by plugins
-├── _framework/      # private/internal lifecycle, I/O, and contracts
-└── <plugin>/        # built-in and contributed analysis plugins
+├── contract.py        # Observable, the kinds, aggregation, testing, the factory
+├── base.py            # the Analysis lifecycle and the framework contexts
+├── contract_plots.py  # one figure per observable kind
+├── discovery.py       # plugin auto-discovery
+├── orchestrator.py    # comparison workflow orchestration facade
+├── protocols.py       # analyze() and ProtocolReport, the agent surface
+├── stats.py           # the two direction-wording helpers the report uses
+├── mda/               # public MDAnalysis extension layer
+├── shared/            # reusable utilities shared by plugins
+├── _framework/        # private lifecycle, I/O and validation
+└── <plugin>.py        # one module per analysis
 ```
 
 The important public/private boundary is intentional:
 
-- `polyzymd.analyses.base` is the stable contributor facade for `Analysis`,
-  lifecycle contexts, metrics, and comparison result models.
-- `polyzymd.analyses.mda` is the public MDAnalysis extension layer for jobs,
-  frame selection, artifacts, artifact storage, aggregation, and Universe
+- `polyzymd.analyses.contract` is what a plugin author imports: `Observable`,
+  `iter_frames` and `contract_analysis`.
+- `polyzymd.analyses.base` holds `Analysis` and the four lifecycle contexts a
+  plugin receives rather than builds.
+- `polyzymd.analyses.mda` is the public MDAnalysis extension layer for frame
+  selection, the replicate lifecycle, artifacts, artifact storage and Universe
   handling.
 - `_framework/` modules are private implementation details behind the public
   facade.
@@ -121,9 +126,9 @@ objects through the MDA lifecycle. It also owns replicate discovery, cache
 identity, artifact storage, aggregation, cross-condition comparison, and CLI
 output.
 
-MDAnalysis owns the per-trajectory analysis idioms: selecting atoms, iterating
-frames, running `AnalysisBase`-compatible work, and producing MDAnalysis-style
-`Results` objects. PolyzyMD collectors then translate completed MDAnalysis jobs
+MDAnalysis owns the per-trajectory analysis idioms: selecting atoms and
+iterating frames. A plugin's `compute()` uses those and returns `Observable`
+objects holding raw per-frame or per-index numbers. The framework turns them
 into project-level artifacts.
 
 Conceptually, the current analysis flow is:
@@ -135,24 +140,22 @@ config -> builders -> simulation/workflow -> analyses/artifacts -> comparison ->
 Within `analyses/`, that becomes:
 
 ```text
-MDA jobs
-  -> MDAnalysis work and Results
-  -> collectors
-  -> ReplicateArtifact objects
-  -> condition artifacts
-  -> comparison artifacts or documented custom outputs
+plugin.compute()
+  -> Observable objects, one per reported quantity
+  -> ReplicateArtifact, with the per-frame series in an NPZ sidecar
+  -> ConditionArtifact, one aggregate per observable across replicates
+  -> ComparisonArtifact, one test per observable across conditions
   -> plots and formatted CLI output
 ```
 
-Most trajectory-native plugins implement `build_mda_jobs()` and usually provide
-a collector so completed jobs become `ReplicateArtifact` objects. Those
-replicate artifacts aggregate into per-condition artifacts, which then feed
-default comparison artifacts or a plugin's documented custom comparison output.
-Plots should read cached artifacts and sidecars rather than reloading
-trajectories or rerunning compute-stage analysis.
+There is one path. A plugin reports observables; the framework reduces each one
+according to its `kind`, aggregates across replicates, tests across conditions
+under one Benjamini-Hochberg family, and draws the figure that kind calls for.
+Plots read cached artifacts and sidecars rather than reloading trajectories or
+rerunning the compute stage.
 
 For concrete commands and code examples, see
-{doc}`../contributor_guide/extending_analyses`.
+{doc}`../contributor_guide/analysis_plugins/index`.
 
 ## Comparison infrastructure is distributed
 
@@ -161,8 +164,9 @@ Comparison behavior is distributed across focused modules:
 
 - `config/comparison.py` describes comparison and plotting settings.
 - `cli/compare.py` exposes the `polyzymd compare` command group.
-- `analyses/stats.py` implements the default scalar comparison pipeline,
-  including summaries, rankings, pairwise comparisons, and formatting helpers.
+- `analyses/contract.py` implements aggregation across replicates and the
+  cross-condition tests, with one correction family per run.
+- `analyses/contract_plots.py` draws the figure each observable kind calls for.
 - `analyses/shared/inferential_statistics.py` provides lower-level statistical
   primitives such as t-tests, ANOVA, and effect sizes.
 - `analyses/mda/` provides the artifact layer that carries replicate,
@@ -230,10 +234,11 @@ usable even when optional heavy dependencies are absent.
 
 ### Plugin-based extension points
 
-Analysis is the primary extensibility axis. Plugins are single files or packages
-under `analyses/` that subclass `Analysis`. The framework discovers both shapes
-automatically via `pkgutil`, so contributors do not need registries, decorators,
-or core imports to make a plugin available.
+Analysis is the primary extensibility axis. A plugin is one module under
+`analyses/` holding a settings model, a `compute()` and one call to
+`contract_analysis()`. The framework discovers it through `pkgutil`, so
+contributors do not need registries, decorators or core imports to make a plugin
+available.
 
 The reason for this design is the open-closed principle: new analyses should be
 added by extension, not by modifying the orchestrator or CLI every time a metric
@@ -246,8 +251,8 @@ artifact I/O, and validation contracts are implementation details. The public
 facade keeps contributor imports stable while giving maintainers room to improve
 internals.
 
-This is why documentation points contributors to `polyzymd.analyses.base` and
-`polyzymd.analyses.mda`, not to `_framework/`.
+This is why documentation points contributors to `polyzymd.analyses.contract`,
+`polyzymd.analyses.base` and `polyzymd.analyses.mda`, not to `_framework/`.
 
 ## Where contributors usually need to look
 
@@ -280,7 +285,7 @@ into module-level details or API reference pages.
 ## Related pages
 
 - contributor workflows: {doc}`../contributor_guide/contributing`
-- extending analyses: {doc}`../contributor_guide/extending_analyses`
+- writing an analysis: {doc}`../contributor_guide/analysis_plugins/index`
 - chain conventions: {doc}`residue_assignment`
 - SLURM usage: {doc}`../how_to/hpc_slurm`
 - API reference: {doc}`../api/index`

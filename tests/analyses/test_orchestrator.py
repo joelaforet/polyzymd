@@ -15,7 +15,6 @@ from polyzymd.analyses.base import (
     AggregateContext,
     Analysis,
     Condition,
-    MetricValue,
     ReplicateContext,
 )
 from polyzymd.analyses.exceptions import (
@@ -24,6 +23,7 @@ from polyzymd.analyses.exceptions import (
     ReplicateError,
     ReplicateSkippedError,
 )
+from polyzymd.analyses.mda import ComparisonArtifact
 from polyzymd.analyses.orchestrator import (
     _validate_dependencies,
     aggregate_condition_from_disk,
@@ -69,16 +69,16 @@ class _ParallelAnalysis(_MDAContractMixin, Analysis):
             "n_replicates": len(values),
         }
 
-    def extract_metrics(self, summary: dict[str, Any]) -> dict[str, MetricValue]:
-        return {
-            "metric": MetricValue(
-                name="metric",
-                mean=float(summary["mean_value"]),
-                sem=float(summary["sem_value"]),
-                replicate_values=[float(v) for v in summary["replicate_values"]],
-                higher_is_better=True,
-            )
-        }
+    def compare(self, ctx) -> Any:
+        """Return a comparison artifact shaped like a contract plugin's."""
+        labels = [getattr(condition, "label", condition) for condition in ctx.conditions]
+        return ComparisonArtifact(
+            analysis_name=self.name,
+            conditions=labels,
+            control_label=ctx.control_label,
+            effective_control=ctx.effective_control,
+            payload={"conditions": labels},
+        )
 
     def plot(self, ctx):
         out = ctx.output_dir / "parallel_toy.png"

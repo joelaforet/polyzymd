@@ -23,8 +23,7 @@ from typing import Any, ClassVar, Sequence
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from polyzymd.analyses.contract import Observable, warn_unknown_settings
-from polyzymd.analyses.contract_runner import contract_analysis
+from polyzymd.analyses.contract import Observable, contract_analysis, warn_unknown_settings
 from polyzymd.analyses.mda.pair_distance import PairSelection, pair_distance_matrix
 
 #: Comparison used against a threshold, recorded in every fraction's metadata.

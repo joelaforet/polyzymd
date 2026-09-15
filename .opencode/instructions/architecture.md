@@ -23,26 +23,22 @@ src/polyzymd/
 
 | Layer | Files | Role |
 |-------|-------|------|
-| **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the extension point |
-| **Private modules** | `_framework/`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
+| **Plugins** (public) | `rmsf/`, `contacts/`, `rg.py`, etc. | One settings model plus one `compute()` per analysis, the extension point |
+| **Private modules** | `_framework/` | Internal framework implementation, not a contributor import target |
 | **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics |
-| **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/` | Stable public facade, auto-discovery, artifact lifecycle |
+| **Framework** | `contract.py`, `base.py`, `contract_plots.py`, `discovery.py`, `orchestrator.py`, `mda/` | The contract, the lifecycle, auto-discovery, artifact storage |
 
-New analysis types may be simple single-file modules or packages under
-`analyses/`. Compute-stage plugins use `build_mda_jobs()` to create
-`MDAAnalysisJob` objects around `AnalysisBase`-compatible work and, when
-needed, `build_mda_collector()` to map completed jobs to `ReplicateArtifact`.
-PolyzyMD owns `ArtifactStore`, `ConditionArtifact`, `ComparisonArtifact`,
-ensemble orchestration, statistics, and plotting. Advanced packages should keep
-MDAnalysis helpers in a dedicated module such as `_mda.py`.
+An analysis is one module under `analyses/`. It declares a settings model and a
+`compute(universe, frames, settings)` that returns `Observable` objects, and it
+ends with `contract_analysis()`, which builds the `Analysis` subclass. PolyzyMD
+owns `ArtifactStore`, `ConditionArtifact`, `ComparisonArtifact`, ensemble
+orchestration, statistics and plotting; a plugin writes none of that.
 
-`polyzymd.analyses.base` is the stable public API facade for contributors. It
-re-exports `Analysis`, lifecycle context objects, metric descriptors, and
-comparison models while delegating implementation to private `_framework/`
-modules such as `compare.py`, `io.py`, `contract.py`, `contexts.py`, and
-`comparison_models.py`. Do not
-import these private modules from contributor plugins; import public symbols
-from `polyzymd.analyses.base`.
+A plugin imports `Observable`, `iter_frames` and `contract_analysis` from
+`polyzymd.analyses.contract`, and anything else from
+`polyzymd.analyses.shared`. `polyzymd.analyses.base` holds `Analysis` and the
+four framework contexts a plugin receives. Do not import
+`polyzymd.analyses._framework` from a plugin.
 
 `polyzymd.analyses.contacts` follows the same facade pattern. The public
 `ContactsAnalysis` class remains in `contacts/__init__.py`; artifact handling,
@@ -129,21 +125,17 @@ class AnalysisConfig(BaseModel):
 
 ### Adding a new analysis type (primary path)
 
-1. Run `polyzymd new-analysis <name>` to scaffold the plugin, OR create a module/package under `src/polyzymd/analyses/` manually
-2. Subclass `Analysis` with `name` and `Settings`
-3. Choose the lifecycle mode:
-   - MDAnalysis-native plugin: implement `build_mda_jobs()` and, when needed, `build_mda_collector()` when `has_compute_stage=True`; MDAnalysis owns per-trajectory iteration while PolyzyMD owns artifacts, ensemble aggregation, statistics, and plotting
-   - Compare-only plugin: set `has_compute_stage=False`
-4. Implement `aggregate()` only when `has_aggregate_stage=True`
-5. For default comparison: implement `extract_metrics()`
-6. Implement `plot()` using `_build_plot_data()` and shared plotting helpers
-7. Optionally implement `format()`
-8. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
-9. The CLI automatically discovers it via `polyzymd compare run <name>`
+1. Run `polyzymd new-analysis <name>` to write the module and its tests
+2. Declare `name`, `Settings`, `references` and `compute()` on a plain class
+3. Return one `Observable` per reported quantity, each with a `kind` and a
+   `unit`. The kind decides the reduction, the test and the figure
+4. End the module with `NameAnalysis = contract_analysis(Name)`
+5. **Test**: `PYTHONPATH=$PWD/src pixi run -e test pytest tests/analyses/plugins/test_<name>.py -q`
+6. The CLI discovers it automatically through `polyzymd compare run <name>`
 
-See the `polyzymd.analyses.base` facade for the public contract,
+See `polyzymd.analyses.contract` for the contract,
 `analysis-module.md` for detailed patterns, and
-`docs/source/contributor_guide/extending_analyses.md` for the contributor
+`docs/source/contributor_guide/analysis_plugins/index.md` for the contributor
 tutorial.
 
 ### Adding comparison statistics or formatters

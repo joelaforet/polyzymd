@@ -77,4 +77,4 @@ pixi install -e build
 - {doc}`index`
 - {doc}`packaging`
 - {doc}`contributing`
-- {doc}`extending_analyses`
+- {doc}`analysis_plugins/index`

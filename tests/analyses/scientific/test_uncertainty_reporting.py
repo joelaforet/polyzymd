@@ -16,18 +16,12 @@ import math
 
 import pytest
 
-from polyzymd.analyses._framework.comparison_models import MetricValue
+from polyzymd.analyses.contract import ObservableEstimate, aggregate_observables
 from polyzymd.analyses.exceptions import AnalysisError, StatisticsError
-from polyzymd.analyses.mda.aggregation import (
-    AggregatedMetric,
-    MDAAggregationContext,
-    aggregate_replicate_artifacts,
-)
 from polyzymd.analyses.mda.artifacts import ConditionArtifact, ReplicateArtifact
 from polyzymd.analyses.shared.statistics import (
     compute_sem,
     mean_sem_ci,
-    metric_summary_payload,
     student_t_coverage_factor,
     uncertainty_block,
 )
@@ -126,60 +120,6 @@ class TestMeanSemCI:
             mean_sem_ci([])
 
 
-class TestMetricModelsDeclareUnitsAndIntervals:
-    """Condition-level metric models must expose unit and interval fields."""
-
-    @pytest.mark.parametrize("field", ["unit", "ci95_low", "ci95_high", "ci_method"])
-    def test_metric_value_exposes_field(self, field: str) -> None:
-        """MetricValue carries the unit and both confidence limits."""
-
-        metric = MetricValue.from_replicate_values("mean_rmsd", [1.0, 1.2, 1.1], unit="A")
-        assert hasattr(metric, field)
-
-    @pytest.mark.parametrize("field", ["unit", "ci95_low", "ci95_high", "ci_method"])
-    def test_aggregated_metric_exposes_field(self, field: str) -> None:
-        """AggregatedMetric carries the same fields in its JSON payload."""
-
-        metric = AggregatedMetric(
-            name="mean_rmsd",
-            values=[1.0, 1.2, 1.1],
-            mean=1.1,
-            sem=0.1,
-            std=0.1,
-            n=3,
-            unit="A",
-        )
-        assert field in metric.model_dump()
-
-    def test_metric_value_fills_the_interval_from_replicates(self) -> None:
-        """The interval is derived from the replicate values and the unit kept."""
-
-        metric = MetricValue.from_replicate_values("mean_rmsd", [2.0, 2.2, 2.4], unit="A")
-
-        assert metric.unit == "A"
-        assert metric.ci_method == "student_t"
-        assert metric.ci95_high == pytest.approx(2.2 + T_FACTOR_N3 * metric.sem)
-
-    def test_metric_value_scales_fractions_to_percent(self) -> None:
-        """A scale factor converts the unit of every replicate value."""
-
-        metric = MetricValue.from_replicate_values(
-            "helix_fraction", [0.70, 0.72, 0.74], unit="%", scale=100.0
-        )
-
-        assert metric.replicate_values == pytest.approx([70.0, 72.0, 74.0])
-        assert metric.unit == "%"
-
-    def test_single_replicate_metric_has_no_interval(self) -> None:
-        """A singleton condition reports None, not a zero-width interval."""
-
-        metric = MetricValue.from_replicate_values("mean_rmsd", [2.0], unit="A")
-
-        assert metric.sem is None
-        assert metric.ci95_low is None
-        assert metric.ci95_high is None
-
-
 class TestUncertaintyBlock:
     """Every aggregated payload must say what its uncertainties are."""
 
@@ -210,59 +150,42 @@ class TestUncertaintyBlock:
 
         assert artifact.payload["uncertainty"] == uncertainty_block(3)
 
-    def test_generic_aggregation_declares_uncertainty_and_interval(self) -> None:
-        """The shared aggregation path fills both the block and the interval."""
+    def test_contract_aggregation_declares_uncertainty_and_interval(self) -> None:
+        """The shared aggregation path fills the interval and names its method."""
 
-        artifacts = [
-            ReplicateArtifact(
-                analysis_name="demo",
-                condition_label="Control",
-                replicate=replicate,
-                payload={"metrics": {"mean_value": value}},
-                provenance={"frame_selection": _frame_selection()},
-            )
-            for replicate, value in zip((1, 2, 3), (2.0, 2.2, 2.4), strict=True)
+        replicates = [
+            [
+                ObservableEstimate(
+                    name="mean_value", kind="mean_of_timeseries", unit="A", value=v, n_frames=10
+                )
+            ]
+            for v in (2.0, 2.2, 2.4)
         ]
-        ctx = MDAAggregationContext(
-            analysis_name="demo",
-            condition_label="Control",
-            expected_replicates=(1, 2, 3),
-            metric_units={"mean_value": "A"},
-        )
 
-        condition = aggregate_replicate_artifacts(artifacts, ctx)
+        aggregate = aggregate_observables(replicates)[0]
 
-        assert condition.payload["uncertainty"] == uncertainty_block(3)
-        metric = condition.payload["metrics"]["mean_value"]
-        assert metric["unit"] == "A"
-        assert metric["ci_method"] == "student_t"
-        assert metric["ci95_high"] == pytest.approx(2.2 + T_FACTOR_N3 * metric["sem"])
+        assert aggregate.n_replicates == 3
+        assert aggregate.unit == "A"
+        assert aggregate.ci_method == "student_t"
+        assert aggregate.mean == pytest.approx(2.2)
+        assert aggregate.ci95_high == pytest.approx(2.2 + T_FACTOR_N3 * aggregate.sem)
 
     def test_single_replicate_aggregate_writes_null_not_zero(self) -> None:
         """A one-replicate condition must not claim zero uncertainty."""
 
-        artifacts = [
-            ReplicateArtifact(
-                analysis_name="demo",
-                condition_label="Solo",
-                replicate=1,
-                payload={"metrics": {"mean_value": 2.0}},
-                provenance={"frame_selection": _frame_selection()},
-            )
+        replicates = [
+            [
+                ObservableEstimate(
+                    name="mean_value", kind="mean_of_timeseries", unit="A", value=2.0, n_frames=10
+                )
+            ]
         ]
-        ctx = MDAAggregationContext(
-            analysis_name="demo",
-            condition_label="Solo",
-            expected_replicates=(1,),
-        )
 
-        condition = aggregate_replicate_artifacts(artifacts, ctx)
+        aggregate = aggregate_observables(replicates)[0]
 
-        metric = condition.payload["metrics"]["mean_value"]
-        assert metric["sem"] is None
-        assert metric["std"] is None
-        assert metric["ci95_low"] is None
-        assert metric["ci95_high"] is None
+        assert aggregate.sem is None
+        assert aggregate.ci95_low is None
+        assert aggregate.ci95_high is None
 
     def test_replicate_count_falls_back_to_the_payload(self) -> None:
         """When the envelope lists no replicates, n comes from the payload."""
@@ -346,134 +269,8 @@ class TestDoctests:
         assert results.failed == 0, f"{results.failed} doctest failures"
 
 
-class TestSingleReplicateAggregation:
-    """One replicate must aggregate cleanly, with null uncertainty."""
-
-    @pytest.mark.parametrize("n_values", [1, 3])
-    def test_metric_summary_payload_handles_any_count(self, n_values: int) -> None:
-        """The shared metric summary never crashes on a singleton."""
-
-        summary = metric_summary_payload("demo", [2.0] * n_values, unit="A")
-
-        assert summary["n"] == n_values
-        if n_values == 1:
-            assert summary["sem"] is None
-            assert summary["std"] is None
-            assert summary["ci95_low"] is None
-        else:
-            assert summary["sem"] == pytest.approx(0.0)
-
-    @pytest.mark.parametrize("analysis_name", PLUGIN_NAMES)
-    def test_single_replicate_summary_is_json_safe(self, analysis_name: str) -> None:
-        """A one-replicate aggregate serializes with nulls, not zeros."""
-
-        artifact = ConditionArtifact.build(
-            analysis_name=analysis_name,
-            condition_label="Solo",
-            replicates=[1],
-            payload={"metrics": {"demo": metric_summary_payload("demo", [2.0], unit="A")}},
-        )
-
-        loaded = json.loads(artifact.model_dump_json())
-        metric = loaded["payload"]["metrics"]["demo"]
-        assert metric["sem"] is None
-        assert metric["std"] is None
-        assert metric["ci95_low"] is None
-        assert metric["ci95_high"] is None
-        assert loaded["payload"]["uncertainty"]["n"] == 1
-
-
-def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, object]]:
-    """Build one plugin's condition metrics from a single replicate.
-
-    Each plugin reduces its replicate payloads to condition metrics through its
-    own helper. These are the code paths that used to wrap an inestimable SEM
-    in ``float()`` and raise ``TypeError`` when only one replicate was present.
-
-    Parameters
-    ----------
-    analysis_name : str
-        Plugin whose condition metrics to build.
-
-    Returns
-    -------
-    dict
-        Metric summaries keyed by metric name.
-    """
-    if analysis_name == "rmsf":
-        # rmsf is a contract plugin; its one-replicate nulls come from
-        # aggregate_observables and are covered in tests/analyses/test_contract.py.
-        return {"rmsf_mean": metric_summary_payload("rmsf_mean", [1.5], unit="A")}
-
-    if analysis_name == "rmsd":
-        return {"run_1.mean_rmsd": metric_summary_payload("run_1.mean_rmsd", [1.0], unit="A")}
-
-    raise AssertionError(f"no single-replicate builder for {analysis_name!r}")
-
-
-class TestEveryPluginAggregatesOneReplicate:
-    """Aggregating a single replicate must not crash in any plugin."""
-
-    @pytest.mark.parametrize("analysis_name", PLUGIN_NAMES)
-    def test_condition_metrics_are_built(self, analysis_name: str) -> None:
-        """Each plugin reduces one replicate to a metric with null uncertainty."""
-
-        metrics = _one_replicate_condition_metrics(analysis_name)
-
-        assert metrics, f"{analysis_name} produced no metrics"
-        for metric_name, metric in metrics.items():
-            assert metric["n"] == 1, f"{analysis_name}.{metric_name}"
-            assert metric["sem"] is None, f"{analysis_name}.{metric_name}"
-            assert metric["std"] is None, f"{analysis_name}.{metric_name}"
-            assert metric["ci95_low"] is None, f"{analysis_name}.{metric_name}"
-            assert metric["ci95_high"] is None, f"{analysis_name}.{metric_name}"
-
-    @pytest.mark.parametrize("analysis_name", PLUGIN_NAMES)
-    def test_condition_metrics_declare_a_unit(self, analysis_name: str) -> None:
-        """Every metric with a physical dimension names its unit."""
-
-        metrics = _one_replicate_condition_metrics(analysis_name)
-
-        for metric_name, metric in metrics.items():
-            assert metric.get("unit"), f"{analysis_name}.{metric_name} declares no unit"
-
-
-class TestLegacyArtifactsStillShowAnInterval:
-    """An artifact written before the interval fields must not lose its interval."""
-
-    def test_payload_formatter_derives_the_interval_from_the_sem(self) -> None:
-        """With only ``sem`` stored, the table still prints real limits."""
-
-        from polyzymd.analyses.stats import format_scalar_comparison_artifact_payload
-
-        payload = {
-            "condition_summaries": [
-                {
-                    "label": "Control",
-                    "n_replicates": 3,
-                    "mean_rmsf_mean": 2.2,
-                    "mean_rmsf_sem": 0.1,
-                }
-            ],
-            "pairwise_comparisons": [],
-            "ranking": ["Control"],
-            "rankings_by_metric": {"mean_rmsf": ["Control"]},
-            "statistical_parameters": {"project_name": "legacy", "equilibration": "10ns"},
-        }
-
-        text = format_scalar_comparison_artifact_payload(
-            payload,
-            title="RMSF Comparison",
-            metric_label="Mean RMSF",
-            metric_unit="A",
-            metric_key="mean_rmsf",
-            output_format="text",
-        )
-
-        low = 2.2 - T_FACTOR_N3 * 0.1
-        high = 2.2 + T_FACTOR_N3 * 0.1
-        assert f"[{low:.4f} A, {high:.4f} A]" in text
-        assert "n/a" not in text
+class TestAggregateWithoutReplicates:
+    """An aggregate that names no replicates reports a null count."""
 
     def test_build_without_any_replicate_count_reports_null(self) -> None:
         """An aggregate that states no replicate count says so, rather than zero."""

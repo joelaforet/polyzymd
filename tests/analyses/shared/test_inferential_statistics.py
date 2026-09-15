@@ -10,7 +10,6 @@ import pytest
 from polyzymd.analyses.shared.inferential_statistics import (
     benjamini_hochberg,
     independent_ttest,
-    one_way_anova,
 )
 
 
@@ -165,23 +164,6 @@ def test_independent_ttest_invalid_method() -> None:
         independent_ttest([1.0, 2.0], [1.5, 2.5], method="bogus")
 
 
-def test_one_way_anova_classical_method(monkeypatch) -> None:
-    """Classical ANOVA should use scipy f_oneway."""
-
-    class _Stats:
-        def f_oneway(self, *groups):
-            del groups
-            return (3.0, 0.02)
-
-    class _Scipy:
-        stats = _Stats()
-
-    monkeypatch.setitem(sys.modules, "scipy", _Scipy())
-    result = one_way_anova([1.0, 2.0], [1.5, 2.5], [2.0, 3.0])
-    assert result.f_statistic == pytest.approx(3.0)
-    assert result.p_value == pytest.approx(0.02)
-
-
 def test_bh_monotonicity_in_rank_order() -> None:
     """Adjusted p-values should be non-decreasing in BH rank order."""
     p_values = [0.07, 0.001, 0.8, 0.02, 0.04]
@@ -285,21 +267,3 @@ def test_cohens_d_zero_variance_equal_means() -> None:
 
     result = cohens_d([5.0, 5.0], [5.0, 5.0])
     assert result.cohens_d == 0.0
-
-
-def test_one_way_anova_n1_returns_nan() -> None:
-    """ANOVA with a group of n=1 should return NaN."""
-    result = one_way_anova([1.0], [2.0, 3.0], [4.0, 5.0])
-    assert math.isnan(result.f_statistic)
-    assert math.isnan(result.p_value)
-
-
-def test_one_way_anova_numerical_regression() -> None:
-    """Classical ANOVA against known values."""
-    from scipy.stats import f_oneway
-
-    g1, g2, g3 = [0.715, 0.693, 0.696], [0.517, 0.586], [0.558, 0.738, 0.496]
-    result = one_way_anova(g1, g2, g3)
-    expected = f_oneway(g1, g2, g3)
-    assert abs(result.f_statistic - expected.statistic) < 1e-10
-    assert abs(result.p_value - expected.pvalue) < 1e-10

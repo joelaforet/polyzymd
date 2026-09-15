@@ -19,18 +19,18 @@ Here is what each stage does:
 |-------|-------|------------------|
 | **replicate stage** | One replicate of one condition | `ReplicateArtifact` at `analysis/<condition_label>/<plugin_name>/run_<N>/result.json` |
 | **aggregate** | All replicates of one condition | `ConditionArtifact` at `analysis/<condition_label>/<plugin_name>/aggregated/result.json` |
-| **compare** | All conditions together | `ComparisonArtifact` or active custom comparison result at `comparison/<plugin_name>/result.json` |
+| **compare** | All conditions together | `ComparisonArtifact` at `comparison/<plugin_name>/result.json` |
 | **plot** | All conditions together | Figures saved in the configured format, with `png` as the default and `pdf` or `svg` also supported |
 
 Each artifact stores a validated payload plus metadata, provenance, warnings,
 and references to sidecar files when an analysis needs large tables or arrays
 outside the main JSON document.
 
-Trajectory-native plugins generally create `MDAAnalysisJob` objects for their
-per-replicate computation. The corresponding collectors translate completed
-jobs into `ReplicateArtifact` objects. PolyzyMD then owns the surrounding
-workflow: condition aggregation, cross-condition comparison, artifact storage,
-and plot orchestration.
+A plugin supplies one function, `compute(universe, frames, settings)`, which
+measures one replicate and returns `Observable` objects. Everything around it
+belongs to the framework: writing the replicate artifact, reusing one whose
+identity still matches, aggregating across replicates, testing across
+conditions, storing artifacts, and drawing figures.
 
 Plots are deliberately downstream of this artifact layer. They read cached
 artifacts and sidecars only; they do not reload trajectories or rerun the
@@ -130,14 +130,14 @@ The pipeline processes data in this order:
 2. **Per-condition**: `aggregate` runs once per condition, combining replicate
    artifacts into a `ConditionArtifact`. That's 2 aggregate calls.
 3. **Cross-condition**: `compare` runs once, looking at all conditions together
-   and writing a `ComparisonArtifact` or an active custom comparison result.
-   `plot` then reads those cached outputs and any referenced sidecars.
+   and writing a `ComparisonArtifact`. `plot` then reads those cached outputs
+   and any referenced sidecars.
 
 ## Plugins — the analysis modules
 
-PolyzyMD ships with 9 analysis plugins. Each plugin is a self-contained
-module that knows how to compute one type of measurement, aggregate it, compare
-across conditions, and generate plots.
+PolyzyMD ships with nine analysis plugins. Each is one module that knows how to
+measure one kind of quantity from one replicate. Aggregation, comparison and
+plotting are the same code for all nine.
 
 The available plugins are:
 
@@ -163,7 +163,7 @@ comparison behavior, plotting behavior, and formatting behavior without changing
 the core orchestration code. The conceptual boundary is important because
 PolyzyMD owns artifact storage and orchestration, while plugins own the
 domain-specific measurement and interpretation logic. For a contributor-focused
-walkthrough, see {doc}`../contributor_guide/extending_analyses`.
+walkthrough, see {doc}`../contributor_guide/analysis_plugins/index`.
 
 You configure plugins in the `plugins:` block. For example, to run RMSF with a
 custom selection and contacts with defaults:
@@ -250,34 +250,35 @@ as the trajectory stores them.
 
 ## Statistical comparison
 
-When you have two or more conditions, the compare stage produces statistical
-output so you can assess whether differences are meaningful. There are two
-comparison paths:
+When you have two or more conditions, the compare stage tests whether the
+differences are meaningful. There is one comparison path, shared by every
+plugin: `polyzymd.analyses.contract.compare_observables`. A plugin supplies no
+comparison code of its own.
 
-- **Default scalar/artifact comparison**: plugins that expose scalar metrics can
-  use the framework's default comparison behavior. In that path, PolyzyMD can
-  compute pairwise tests, effect sizes, optional omnibus statistics, and metric
-  rankings from the condition artifacts.
-- **Custom comparison**: plugins with richer result structures can implement
-  their own comparison behavior. These plugins still write comparison output,
-  but they may not produce the same tests, tables, or rankings as the default
-  scalar path.
+One observable is tested at a time, each condition against the control, on the
+replicate values rather than on frames. The stage computes:
 
-Every comparison plugin computes:
+- **Pairwise t-tests**, Student by default and Welch on request, with
+  Benjamini-Hochberg correction over one family per analysis run. The family
+  holds every pairwise test that run produced, across every observable and
+  every condition pair, so `p_adjusted` accounts for the whole run and
+  `significant` is read from it.
+- **Effect sizes**, Cohen's d on each comparison, with Hedges' g derived from
+  it in the agent report, so you can see how large a difference is and not
+  only whether it reached significance.
 
-- **Pairwise t-tests** between each pair of conditions, with
-  Benjamini–Hochberg FDR correction over one family per analysis run. The
-  family holds every pairwise test that run produced, across all of its
-  metrics and all of its condition pairs.
-- **Effect sizes** (Cohen's d and Hedges' g) for each pair, so you can see not
-  just whether a difference is significant but how large it is.
-- **ANOVA** when there are three or more conditions. It is reported as an
-  omnibus statement about whether any condition differs at all. It is not
-  adjusted, and the pairwise tests run whether or not it reaches significance,
-  so it gates nothing.
-- **Rankings** of conditions according to each metric's directionality. These
-  rankings are screening aids for follow-up interpretation, not biological truth
-  by themselves.
+Two things it deliberately does not do. There is no omnibus F test: it gated
+nothing, and reporting an uncorrected omnibus p-value next to corrected
+pairwise ones invited readers to treat it as a gate. And there are no rankings:
+a ranked table of condition means reads as a result while being nothing more
+than the means sorted, and the means are already in the report with their
+intervals.
+
+An observable a plugin declares `tested=False`, because it is a function of
+others the plugin already reports, is still aggregated and reported with its
+uncertainty but stays out of the tests and out of the correction family. A
+profile carries no single value, so a plugin gives it a comparable scalar with
+`reduce` and that scalar is tested instead.
 
 The comparison results are saved as JSON and also printed to the terminal when
 you run `polyzymd compare run`. For details on interpreting these outputs, see
@@ -312,9 +313,9 @@ The three output directories map directly to the pipeline stages:
   a directory with `ReplicateArtifact` files in `run_1/`, `run_2/`, ... and a
   `ConditionArtifact` in `aggregated/result.json`.
 - **`comparison/`** holds the compare output. One `result.json` per plugin
-  stores a `ComparisonArtifact` or an active custom comparison result. Default
-  scalar comparisons include framework-generated tests and rankings; custom
-  comparison outputs may use plugin-specific summaries.
+  stores a `ComparisonArtifact`, holding each condition's aggregates and one
+  test per observable, each naming its test, its correction and its adjusted
+  p-value.
 - **`figures/`** holds the plot output. One subdirectory per plugin with PNG
   files by default, or another configured format such as PDF or SVG. Plots are
   generated from cached artifacts and sidecars only.
@@ -331,14 +332,29 @@ apart.
 
 Reuse is therefore conditional rather than automatic. A cached result is reused
 only when every input file it names still has the recorded size and
-modification time, when the set of trajectory files has not changed, and when
-the settings and equilibration window are the ones it was computed under. Size
-and modification time are weaker than a content hash, but they are cheap on a
-multi-gigabyte trajectory and they catch the case that actually happens, which
-is a file that grew. A result that cannot prove any of this, including one
-written before the framework recorded a cache key, is recomputed rather than
-trusted; where the command that found it cannot recompute, it stops and says
-which file changed.
+modification time, when the set of trajectory files has not changed, when the
+settings and equilibration window are the ones it was computed under, and when
+the code has not changed. Size and modification time are weaker than a content
+hash, but they are cheap on a multi-gigabyte trajectory and they catch the case
+that actually happens, which is a file that grew.
+
+The code is covered by two hashes. `plugin_code_hash` is a digest of the plugin
+module, so editing what a plugin measures recomputes it. `framework_code_hash`
+is a digest of `contract.py`, `base.py`, and every module under
+`analyses/shared/` the plugin reaches through its imports, so a fix to
+alignment, to the correlation-time estimator or to the reduction rules
+recomputes every plugin that depends on it. Neither hash needs a version
+constant to be bumped by hand, which is the failure this replaces: a shared
+module could change its answer while every cached artifact still looked current.
+
+The identity block also records the PolyzyMD version and, in a development
+checkout, the commit. The commit is provenance rather than a cache key, because
+comparing it would throw away every cached replicate whenever anything in the
+repository was committed, including documentation.
+
+A result that cannot prove any of this, including one written before the
+framework recorded a cache key, is recomputed rather than trusted; where the
+command that found it cannot recompute, it stops and says which file changed.
 
 ## Why a solvent-accessible surface area depends on how it was batched
 

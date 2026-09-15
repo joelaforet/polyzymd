@@ -61,26 +61,25 @@ by `ComparisonConfig`.
 
 ## Public base facade
 
-`polyzymd.analyses.base` is the stable public facade for contributor imports. It
-re-exports the `Analysis` base class, lifecycle context objects, scalar metric
-descriptors, and comparison result models from implementation modules.
+`polyzymd.analyses.base` holds the `Analysis` class and the lifecycle context
+objects. `Analysis` is concrete: one subclass exists per plugin, built by
+`polyzymd.analyses.contract.contract_analysis()`, and the subclasses differ only
+in `name`, `Settings` and the `plugin` they hold.
 
 For the complete class and context reference, see {doc}`analyses_base`.
 
-At a high level, compute-stage plugins implement `build_mda_jobs()` and
-`build_mda_collector()`. Collectors produce `ReplicateArtifact` objects;
-aggregation combines those into `ConditionArtifact` objects; comparison produces
-`ComparisonArtifact` outputs or an active custom comparison contract for plugins
-that still need specialized comparison models.
+One replicate produces a `ReplicateArtifact` holding the reduced observables and
+an NPZ sidecar with the per-frame series. Aggregation combines those into a
+`ConditionArtifact` with one entry per observable, and comparison produces a
+`ComparisonArtifact`.
 
 The detailed autodoc for this facade lives on {doc}`analyses_base`.
 
 ## Public MDAnalysis layer
 
 `polyzymd.analyses.mda` is the public MDAnalysis extension layer for jobs, frame
-selection, collectors, artifact envelopes, artifact storage, default aggregation,
-and artifact-based comparison. The primary contributor surface is documented in
-{doc}`analyses_mda`.
+selection, the replicate lifecycle, artifact envelopes and artifact storage. The
+primary contributor surface is documented in {doc}`analyses_mda`.
 
 The detailed autodoc for this layer lives on {doc}`analyses_mda`.
 

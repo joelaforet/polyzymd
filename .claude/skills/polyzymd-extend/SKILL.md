@@ -8,7 +8,7 @@ description: Add a new analysis to PolyzyMD in about 40 lines using the observab
 ## 1. Scaffold it
 
 ```bash
-pixi run -e analysis polyzymd new-analysis <name> --style contract
+pixi run -e analysis polyzymd new-analysis <name>
 ```
 
 This writes `src/polyzymd/analyses/<name>.py` and

@@ -39,8 +39,7 @@ import numpy as np
 from pydantic import BaseModel, Field, field_validator
 
 from polyzymd.analyses.base import SlurmResourceHint
-from polyzymd.analyses.contract import Observable, iter_frames
-from polyzymd.analyses.contract_runner import contract_analysis
+from polyzymd.analyses.contract import Observable, contract_analysis, iter_frames
 from polyzymd.analyses.exceptions import ReplicateError
 
 #: Simplified DSSP characters mdtraj returns, mapped to observable names.

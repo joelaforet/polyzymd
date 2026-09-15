@@ -1,9 +1,9 @@
-# Analysis Base Classes
+# Analysis base classes
 
-API reference for `polyzymd.analyses.base`, including the plugin base class,
-context objects, and shared comparison/result models. Contributor plugins should
-import `Analysis`, `MetricValue`, and lifecycle contexts from this module rather
-than private implementation modules.
+API reference for `polyzymd.analyses.base`, which holds the plugin base class
+and the lifecycle context objects the framework hands a plugin. A contract
+plugin does not subclass `Analysis` itself; `contract_analysis()` builds the
+subclass for it. See {doc}`../contributor_guide/analysis_plugins/index`.
 
 ```{eval-rst}
 .. automodule:: polyzymd.analyses.base

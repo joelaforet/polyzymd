@@ -457,7 +457,7 @@ def test_distances_plugin_keeps_minimum_image_and_refuses_alignment() -> None:
 
     from polyzymd.analyses.distances import Distances, DistancesSettings
 
-    with pytest.warns(DeprecationWarning, match="align_trajectory"):
+    with pytest.warns(UserWarning, match="align_trajectory"):
         settings = DistancesSettings(
             pairs=[{"label": "pair", "selection_a": "index 0", "selection_b": "index 1"}],
             use_pbc=True,

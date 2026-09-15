@@ -22,7 +22,7 @@ raw per-frame numbers. It never averages across replicates, runs a test or
 writes a file. The replicate stays the sampling unit because the plugin has no
 way to cross that boundary.
 
-## The five kinds
+## The four kinds
 
 | kind | replicate value | condition uncertainty | comparison |
 |---|---|---|---|
@@ -144,8 +144,7 @@ from typing import Any, ClassVar, Sequence
 
 from pydantic import BaseModel, Field
 
-from polyzymd.analyses.contract import Observable, iter_frames
-from polyzymd.analyses.contract_runner import contract_analysis
+from polyzymd.analyses.contract import Observable, contract_analysis, iter_frames
 from polyzymd.analyses.exceptions import ReplicateError
 
 

@@ -62,9 +62,9 @@ Commit messages use imperative mood with a 50-character subject line:
 ```
 Add radius of gyration analysis plugin
 
-Implement build_mda_jobs and artifact aggregation for the MDAnalysis-native
-trajectory lifecycle. Aggregate with SEM across replicates. Wire into default
-scalar comparison path via extract_metrics.
+Report the radius of gyration of the protein selection as one
+mean_of_timeseries observable in angstrom. The framework owns the aggregation,
+the testing and the figure.
 
 Closes #42
 ```
@@ -74,47 +74,40 @@ Never force-push to `main` or `dev`.
 ## How to Contribute a New Analysis Plugin
 
 This is the most common type of contribution. PolyzyMD's plugin system is
-designed so that adding a new analysis requires **one package** and **no changes
-to core code**.
+designed so that adding a new analysis requires one module and no changes to
+core code. A plugin is about forty lines.
 
 ### Step-by-Step
 
-1. **Read the tutorial**: `docs/source/contributor_guide/extending_analyses.md` — it
-   walks through every component of a plugin and has a complete working example.
+1. **Read the guide**: `docs/source/contributor_guide/analysis_plugins/index.md`
+   walks through the whole contract and has a complete working example.
 
-2. **Study an existing plugin**: Start with `src/polyzymd/analyses/secondary_structure/`
-   (simplest real plugin) or `src/polyzymd/analyses/rmsf/` (simple with default
-   comparison path).
+2. **Scaffold it**: `polyzymd new-analysis <name>` writes
+   `src/polyzymd/analyses/<name>.py` and
+   `tests/analyses/plugins/test_<name>.py`. Edit those two files and nothing
+   else.
 
-3. **Create your plugin package**: Use `polyzymd new-analysis <name>` to
-   scaffold automatically, or create `src/polyzymd/analyses/<name>/` with an
-   `__init__.py` manually
+3. **Study an existing plugin**: `src/polyzymd/analyses/rg.py` is a short one,
+   and `src/polyzymd/analyses/contacts/` is one that also returns an extra
+   sidecar array.
 
-4. **Subclass `Analysis`** and implement the required pieces:
-   - `name` — unique lowercase string identifier
-   - `Settings` — Pydantic v2 `BaseModel` with sensible defaults
-   - Choose the lifecycle mode that matches your plugin:
-      - **MDAnalysis-native plugin**: implement `build_mda_jobs()` and, when
-        needed, `build_mda_collector()` when `has_compute_stage=True`
-      - **Compare-only / no-compute plugin**: set `has_compute_stage=False`
-   - Implement `aggregate(ctx, results)` only when `has_aggregate_stage=True`
+4. **Declare the plugin** as a plain class with:
+   - `name`, a unique lowercase string identifier
+   - `Settings`, a pydantic v2 `BaseModel` with sensible defaults
+   - `references`, the citations for the method
+   - `compute(universe, frames, settings)`, returning a sequence of
+     `Observable`
 
-5. **Choose your comparison path**:
-   - **Default (recommended)**: Implement `extract_metrics()` returning
-     `MetricValue` objects. The framework handles t-tests, Cohen's d, ANOVA,
-     and ranking automatically.
-   - **Custom**: Override `compare()` entirely for multi-metric or entry-table
-     analyses.
+5. **Pick a kind for each observable**: `mean_of_timeseries`, `fluctuation`,
+   `fraction` or `profile`. The kind decides how the replicate reduces, how
+   conditions are compared, and which figure is drawn. Never aggregate across
+   replicates, run a test, write a file or import matplotlib inside
+   `compute()`. End the module with
+   `NameAnalysis = contract_analysis(Name)`, which is what discovery finds.
 
-6. **Write tests**: Create `tests/analyses/plugins/test_<name>.py` following the
-   pattern of existing plugin tests. The standard test structure covers:
-   - Discovery and class attributes
-   - Settings validation
-   - `build_mda_jobs()` and collector behavior for MDAnalysis-native plugins
-   - `aggregate` with sample data when `has_aggregate_stage=True`
-   - `extract_metrics` (if applicable)
-   - Plot generation
-   - Full lifecycle integration
+6. **Write two tests**: one asserting what `compute()` measures on the
+   `synthetic_universe` fixture, and one running `run_contract_analysis` over
+   three replicates and asserting on the `ObservableAggregate` fields.
 
 7. **Run the test suite**: `pixi run -e build pytest tests/ -v`
 
@@ -130,28 +123,26 @@ to core code**.
   mdtraj) lazily inside methods. This matters for testability — `@patch`
   targets must be importable at the module level.
 
-- **Use the context objects**: `ReplicateContext` and `AggregateContext` provide
-  everything you need (sim config, settings, output paths). Never construct
-  configs manually.
+- **Take what you are handed**: `compute()` receives the loaded universe, the
+  resolved production window and your settings model. Never load a config or
+  resolve a file path yourself.
 
-- **Result serialization**: If your aggregated result is a Pydantic model that
-  inherits from `BaseAnalysisResult`, set `AggregatedResultClass = YourModel`
-  on the plugin class. The framework handles serialization automatically. For
-  dict results, the framework falls back to `json.loads()`.
+- **Result serialization**: there is nothing to do. The framework writes the
+  replicate artifact, the per-frame series in an NPZ sidecar, the condition
+  aggregate and the comparison. A plugin that returns a bulky extra array
+  returns it as a second element of a `(observables, extras)` pair and the
+  framework writes that sidecar too.
 
 - **Chain convention**: A=protein, B=substrate, C=polymer, D+=solvent.
 
 ### Checklist Before Opening a PR
 
-- [ ] Plugin package in `src/polyzymd/analyses/<name>/`
-- [ ] `name` class variable set (lowercase, unique)
-- [ ] `Settings` inner class with default values for all fields
-- [ ] Lifecycle mode chosen and implemented correctly:
-  - `build_mda_jobs()` and any needed collector for MDAnalysis-native plugins, or
-  - `has_compute_stage=False` for compare-only / no-compute plugins
-- [ ] `aggregate` implemented when `has_aggregate_stage=True`
-- [ ] `extract_metrics` implemented (or `compare` overridden for custom path)
-- [ ] `AggregatedResultClass` set if using a Pydantic result model
+- [ ] Plugin module at `src/polyzymd/analyses/<name>.py`
+- [ ] `name` set (lowercase, unique), `Settings` a pydantic model with defaults,
+  `references` naming the method paper
+- [ ] `compute()` returns observables and does nothing else
+- [ ] Every observable states a real `unit`, not the scaffold's `"TODO"`
+- [ ] The module ends with `NameAnalysis = contract_analysis(Name)`
 - [ ] Test file in `tests/analyses/plugins/test_<name>.py`
 - [ ] `ruff check src/polyzymd/` passes
 - [ ] `black src/ --check` passes
@@ -212,13 +203,14 @@ src/polyzymd/
 ```
 
 The `analyses/` directory is the primary extension point. Each sub-package
-(`<name>/`) is one analysis plugin. Private `_*.py` modules inside each package
-are internal implementation details (calculators, result models, formatters).
+(`<name>.py`) is one analysis plugin. There is no plugin package holding
+private helper modules: persistence, statistics and figures belong to the
+framework.
 
 ## Getting Help
 
-- **Tutorial**: `docs/source/contributor_guide/extending_analyses.md`
-- **Plugin contract**: `src/polyzymd/analyses/base.py` (class docstring)
+- **Guide**: `docs/source/contributor_guide/analysis_plugins/index.md`
+- **Plugin contract**: `src/polyzymd/analyses/contract.py` (module docstring)
 - **Issues**: https://github.com/joelaforet/polyzymd/issues
 
 ## License

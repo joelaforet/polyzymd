@@ -11,16 +11,6 @@ def test_public_facade_reexports_primitives() -> None:
     """The package facade should expose the stable extension-layer primitives."""
 
     from polyzymd.analyses import mda
-    from polyzymd.analyses.mda.aggregation import (
-        AggregatedMetric,
-        ExplicitReplicateMetricPolicy,
-        MDAAggregationContext,
-        MDAAggregationError,
-        ReplicateMetricPolicy,
-        aggregate_replicate_artifacts,
-        aggregate_replicate_artifacts_from_disk,
-        validate_autocorrelation_estimator_version,
-    )
     from polyzymd.analyses.mda.artifacts import (
         MDA_ARTIFACT_SCHEMA_VERSION,
         ArtifactEnvelope,
@@ -36,29 +26,14 @@ def test_public_facade_reexports_primitives() -> None:
         MDAnalysisExtensionError,
         MDARunKwargs,
     )
-    from polyzymd.analyses.mda.comparison import (
-        MDAComparisonContext,
-        MDAComparisonError,
-        compare_condition_artifacts,
-    )
     from polyzymd.analyses.mda.frame_selection import FrameSelection
-    from polyzymd.analyses.mda.job import (
-        MDAAnalysisJob,
-        MDAAnalysisJobError,
-        MDABackendPolicy,
-        MDAFunctionAdapter,
+    from polyzymd.analyses.mda.lifecycle import (
         MDAJobResult,
+        MDAReplicateJobContext,
         MDAUniversePolicy,
-    )
-    from polyzymd.analyses.mda.lifecycle import MDAReplicateJobContext
-    from polyzymd.analyses.mda.pair_distance import PairSelection, pair_distance_matrix
-    from polyzymd.analyses.mda.plugin import (
-        MDAArtifactCollector,
-        MDACollectorContext,
-        StrictJSONMDAResultCollector,
         frame_selection_payload,
-        strict_json_payload,
     )
+    from polyzymd.analyses.mda.pair_distance import PairSelection, pair_distance_matrix
     from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
     from polyzymd.analyses.mda.universe import FileIdentity, UniverseProvenance, UniverseProvider
 
@@ -67,16 +42,7 @@ def test_public_facade_reexports_primitives() -> None:
     assert mda.AnalysisBaseLike is AnalysisBaseLike
     assert mda.MDAnalysisExtensionError is MDAnalysisExtensionError
     assert mda.MDARunKwargs is MDARunKwargs
-    assert mda.AggregatedMetric is AggregatedMetric
-    assert mda.ExplicitReplicateMetricPolicy is ExplicitReplicateMetricPolicy
-    assert mda.MDAAggregationContext is MDAAggregationContext
-    assert mda.MDAAggregationError is MDAAggregationError
-    assert mda.ReplicateMetricPolicy is ReplicateMetricPolicy
-    assert mda.aggregate_replicate_artifacts is aggregate_replicate_artifacts
-    assert mda.aggregate_replicate_artifacts_from_disk is aggregate_replicate_artifacts_from_disk
-    assert (
-        mda.validate_autocorrelation_estimator_version is validate_autocorrelation_estimator_version
-    )
+    assert mda.frame_selection_payload is frame_selection_payload
     assert mda.ArtifactEnvelope is ArtifactEnvelope
     assert mda.ArtifactManifest is ArtifactManifest
     assert mda.ArtifactSidecarRef is ArtifactSidecarRef
@@ -85,24 +51,13 @@ def test_public_facade_reexports_primitives() -> None:
     assert mda.ReplicateArtifact is ReplicateArtifact
     assert mda.ArtifactStore is ArtifactStore
     assert mda.ArtifactStoreError is ArtifactStoreError
-    assert mda.MDAComparisonContext is MDAComparisonContext
-    assert mda.MDAComparisonError is MDAComparisonError
-    assert mda.compare_condition_artifacts is compare_condition_artifacts
     assert mda.FrameSelection is FrameSelection
-    assert mda.MDAAnalysisJob is MDAAnalysisJob
-    assert mda.MDAAnalysisJobError is MDAAnalysisJobError
-    assert mda.MDABackendPolicy is MDABackendPolicy
-    assert mda.MDAFunctionAdapter is MDAFunctionAdapter
     assert mda.MDAJobResult is MDAJobResult
     assert mda.MDAUniversePolicy is MDAUniversePolicy
     assert mda.MDAReplicateJobContext is MDAReplicateJobContext
     assert mda.PairSelection is PairSelection
     assert mda.pair_distance_matrix is pair_distance_matrix
-    assert mda.MDAArtifactCollector is MDAArtifactCollector
-    assert mda.MDACollectorContext is MDACollectorContext
-    assert mda.StrictJSONMDAResultCollector is StrictJSONMDAResultCollector
     assert mda.frame_selection_payload is frame_selection_payload
-    assert mda.strict_json_payload is strict_json_payload
     assert mda.FileIdentity is FileIdentity
     assert mda.UniverseProvider is UniverseProvider
     assert mda.UniverseProvenance is UniverseProvenance
@@ -112,14 +67,6 @@ def test_public_facade_reexports_primitives() -> None:
         "AnalysisBaseLike",
         "MDAnalysisExtensionError",
         "MDARunKwargs",
-        "AggregatedMetric",
-        "ExplicitReplicateMetricPolicy",
-        "MDAAggregationContext",
-        "MDAAggregationError",
-        "ReplicateMetricPolicy",
-        "aggregate_replicate_artifacts",
-        "aggregate_replicate_artifacts_from_disk",
-        "validate_autocorrelation_estimator_version",
         "ArtifactEnvelope",
         "ArtifactManifest",
         "ArtifactSidecarRef",
@@ -128,24 +75,13 @@ def test_public_facade_reexports_primitives() -> None:
         "ReplicateArtifact",
         "ArtifactStore",
         "ArtifactStoreError",
-        "MDAComparisonContext",
-        "MDAComparisonError",
-        "compare_condition_artifacts",
         "FrameSelection",
-        "MDAAnalysisJob",
-        "MDAAnalysisJobError",
-        "MDABackendPolicy",
-        "MDAFunctionAdapter",
         "MDAJobResult",
         "MDAUniversePolicy",
         "MDAReplicateJobContext",
         "PairSelection",
         "pair_distance_matrix",
-        "MDAArtifactCollector",
-        "MDACollectorContext",
-        "StrictJSONMDAResultCollector",
         "frame_selection_payload",
-        "strict_json_payload",
         "FileIdentity",
         "UniverseProvider",
         "UniverseProvenance",
@@ -174,14 +110,10 @@ def test_import_does_not_load_heavy_simulation_modules() -> None:
     initially_loaded = {name for name in heavy_modules if name in sys.modules}
 
     importlib.import_module("polyzymd.analyses.mda")
-    importlib.import_module("polyzymd.analyses.mda.aggregation")
     importlib.import_module("polyzymd.analyses.mda.artifacts")
     importlib.import_module("polyzymd.analyses.mda.base")
-    importlib.import_module("polyzymd.analyses.mda.comparison")
     importlib.import_module("polyzymd.analyses.mda.frame_selection")
-    importlib.import_module("polyzymd.analyses.mda.job")
     importlib.import_module("polyzymd.analyses.mda.lifecycle")
-    importlib.import_module("polyzymd.analyses.mda.plugin")
     importlib.import_module("polyzymd.analyses.mda.store")
     importlib.import_module("polyzymd.analyses.mda.universe")
 

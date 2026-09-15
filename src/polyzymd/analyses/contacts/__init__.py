@@ -48,8 +48,7 @@ import numpy as np
 from pydantic import BaseModel, Field, model_validator
 
 from polyzymd.analyses.base import SlurmResourceHint
-from polyzymd.analyses.contract import Observable, iter_frames
-from polyzymd.analyses.contract_runner import contract_analysis
+from polyzymd.analyses.contract import Observable, contract_analysis, iter_frames
 from polyzymd.analyses.exceptions import ReplicateError, SelectionError
 from polyzymd.analyses.shared.topology import require_topology_bonds, topology_bond_source
 
@@ -285,7 +284,7 @@ class Contacts:
             settings,
             metadata,
         ), {
-            # A (observables, extra_sidecars) pair: contract_runner._unpack writes
+            # A (observables, extra_sidecars) pair: base._unpack writes
             # each extra array as its own NPZ, because an event table is neither a
             # per-frame series nor a profile.
             "contact_events": table
