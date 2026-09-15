@@ -20,6 +20,7 @@ from polyzymd.analyses.mda import (
 from polyzymd.analyses.mda.store import ArtifactStoreError
 from polyzymd.analyses.shared.aa_classification import CANONICAL_AA_CLASS_ORDER
 from polyzymd.analyses.shared.plotting import (
+    annotate_uncertainty,
     apply_axis_style,
     apply_legend,
     get_condition_colors,
@@ -28,7 +29,10 @@ from polyzymd.analyses.shared.plotting import (
     grouped_bars,
     has_replicate_uncertainty,
     order_condition_labels,
+    plugin_plot_settings,
+    resolve_error_bar,
     save_figure,
+    shared_count_half_widths,
 )
 
 LOGGER = logging.getLogger("polyzymd.analyses.contacts")
@@ -114,6 +118,7 @@ class ContactsPlotData:
     labels: tuple[str, ...]
     settings: Any
     control_label: str | None = None
+    equilibration: str | None = None
 
     @property
     def has_residence_times(self) -> bool:
@@ -165,6 +170,7 @@ def load_contacts_plot_data(ctx: PlotContext) -> ContactsPlotData:
         labels=tuple(order_condition_labels(labels, ctx.plot_settings)),
         settings=ctx.settings,
         control_label=ctx.control_label,
+        equilibration=getattr(ctx, "equilibration", None),
     )
 
 
@@ -456,6 +462,10 @@ def _plot_contact_fraction_profile(
             control_label=plot_data.control_label,
         )
         theme = get_theme(plot_settings)
+        error_bar = resolve_error_bar(
+            plugin_plot_settings(plot_settings, "contacts"), plot_settings
+        )
+        n_replicates_seen = 0
         fig, ax = plt.subplots(figsize=settings.figsize_contact_fraction_profile)
         has_data = False
         for index, label in enumerate(plot_data.labels):
@@ -464,14 +474,17 @@ def _plot_contact_fraction_profile(
             if resids.size == 0:
                 continue
             color = colors[index] if index < len(colors) else f"C{index}"
+            profile_n = int(condition.profile.n_replicates or 0)
             if (
                 settings.show_contact_fraction_profile_error
-                and has_replicate_uncertainty(n_replicates=condition.profile.n_replicates)
+                and has_replicate_uncertainty(n_replicates=profile_n)
                 and np.any(sems > 0)
             ):
+                band = shared_count_half_widths(sems, profile_n, error_bar=error_bar)
                 ax.fill_between(
-                    resids, means - sems, means + sems, alpha=theme.fill_alpha, color=color
+                    resids, means - band, means + band, alpha=theme.fill_alpha, color=color
                 )
+                n_replicates_seen = max(n_replicates_seen, profile_n)
             ax.plot(resids, means, label=label, color=color, linewidth=1.2)
             has_data = True
         if not has_data:
@@ -509,6 +522,13 @@ def _plot_contact_fraction_profile(
         ax.set_ylim(bottom=0)
         apply_legend(ax, plot_settings)
         plt.tight_layout()
+        annotate_uncertainty(
+            fig,
+            plot_settings,
+            "contacts",
+            n_replicates=n_replicates_seen,
+            equilibration=plot_data.equilibration,
+        )
         saved.append(
             save_figure(fig, get_output_path(output_dir, stem, plot_settings), plot_settings)
         )
@@ -536,6 +556,10 @@ def _plot_residence_time_profile(
             control_label=plot_data.control_label,
         )
         theme = get_theme(plot_settings)
+        error_bar = resolve_error_bar(
+            plugin_plot_settings(plot_settings, "contacts"), plot_settings
+        )
+        n_replicates_seen = 0
         fig, ax = plt.subplots(figsize=settings.figsize_residence_time_profile)
         has_data = False
         for index, label in enumerate(plot_data.labels):
@@ -544,14 +568,17 @@ def _plot_residence_time_profile(
             if resids.size == 0 or not np.any(means > 0):
                 continue
             color = colors[index] if index < len(colors) else f"C{index}"
+            profile_n = int(condition.profile.n_replicates or 0)
             if (
                 settings.show_residence_time_profile_error
-                and has_replicate_uncertainty(n_replicates=condition.profile.n_replicates)
+                and has_replicate_uncertainty(n_replicates=profile_n)
                 and np.any(sems > 0)
             ):
+                band = shared_count_half_widths(sems, profile_n, error_bar=error_bar)
                 ax.fill_between(
-                    resids, means - sems, means + sems, alpha=theme.fill_alpha, color=color
+                    resids, means - band, means + band, alpha=theme.fill_alpha, color=color
                 )
+                n_replicates_seen = max(n_replicates_seen, profile_n)
             ax.plot(resids, means, label=label, color=color, linewidth=1.2)
             has_data = True
         if not has_data:
@@ -580,6 +607,13 @@ def _plot_residence_time_profile(
         ax.set_ylim(bottom=0)
         apply_legend(ax, plot_settings)
         plt.tight_layout()
+        annotate_uncertainty(
+            fig,
+            plot_settings,
+            "contacts",
+            n_replicates=n_replicates_seen,
+            equilibration=plot_data.equilibration,
+        )
         saved.append(
             save_figure(fig, get_output_path(output_dir, stem, plot_settings), plot_settings)
         )
@@ -729,6 +763,9 @@ def _plot_grouped_contact_fraction_bars(
                 condition_replicates.append(reps)
             series.append((label, means, sems))
             replicate_values.append(condition_replicates)
+        error_bar = resolve_error_bar(
+            plugin_plot_settings(plot_settings, "contacts"), plot_settings
+        )
         grouped_bars(
             ax,
             x,
@@ -736,6 +773,7 @@ def _plot_grouped_contact_fraction_bars(
             colors,
             plot_settings,
             show_error=show_error,
+            error_bar=error_bar,
             reference_line=None,
             replicate_values=replicate_values,
         )
@@ -752,6 +790,21 @@ def _plot_grouped_contact_fraction_bars(
         ax.set_ylim(bottom=0)
         apply_legend(ax, plot_settings)
         plt.tight_layout()
+        if show_error:
+            annotate_uncertainty(
+                fig,
+                plot_settings,
+                "contacts",
+                n_replicates=min(
+                    (
+                        len(values)
+                        for condition in replicate_values
+                        for values in condition
+                        if values
+                    ),
+                    default=0,
+                ),
+            )
         saved.append(
             save_figure(fig, get_output_path(output_dir, stem, plot_settings), plot_settings)
         )
@@ -797,6 +850,16 @@ def _plot_grouped_residence_time_bars(
                 means.append(mean)
                 sems.append(sem)
             series.append((label, means, sems))
+        error_bar = resolve_error_bar(
+            plugin_plot_settings(plot_settings, "contacts"), plot_settings
+        )
+        n_replicates = min(
+            (
+                int(plot_data.conditions[label].profile.n_replicates or 0)
+                for label in plot_data.labels
+            ),
+            default=0,
+        )
         grouped_bars(
             ax,
             x,
@@ -804,6 +867,8 @@ def _plot_grouped_residence_time_bars(
             colors,
             plot_settings,
             show_error=show_error,
+            error_bar=error_bar,
+            n_replicates=n_replicates,
             reference_line=None,
             replicate_values=None,
         )
@@ -820,6 +885,14 @@ def _plot_grouped_residence_time_bars(
         ax.set_ylim(bottom=0)
         apply_legend(ax, plot_settings)
         plt.tight_layout()
+        if show_error and n_replicates >= 2:
+            annotate_uncertainty(
+                fig,
+                plot_settings,
+                "contacts",
+                n_replicates=n_replicates,
+                equilibration=plot_data.equilibration,
+            )
         saved.append(
             save_figure(fig, get_output_path(output_dir, stem, plot_settings), plot_settings)
         )

@@ -18,6 +18,7 @@ from numpy.typing import NDArray
 
 from polyzymd.analyses.mda import ArtifactStoreError
 from polyzymd.analyses.shared.plotting import (
+    annotate_uncertainty,
     apply_axis_style,
     apply_legend,
     get_condition_colors,
@@ -26,6 +27,8 @@ from polyzymd.analyses.shared.plotting import (
     grouped_bars,
     load_canonical_plot_artifacts,
     order_condition_labels,
+    plugin_plot_settings,
+    resolve_error_bar,
     save_figure,
 )
 
@@ -276,6 +279,7 @@ def _plot_distance_threshold_bars(
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
+    equilibration: str | None = None,
 ) -> list[Path]:
     """Generate grouped threshold-fraction bar chart across conditions.
 
@@ -369,6 +373,9 @@ def _plot_distance_threshold_bars(
         colors,
         plot_settings,
         reference_line=None,
+        error_bar=resolve_error_bar(
+            plugin_plot_settings(plot_settings, "distances"), plot_settings
+        ),
         replicate_values=replicate_values if replicate_values else None,
     )
 
@@ -384,6 +391,16 @@ def _plot_distance_threshold_bars(
     apply_legend(ax, plot_settings)
 
     plt.tight_layout()
+    annotate_uncertainty(
+        fig,
+        plot_settings,
+        "distances",
+        n_replicates=min(
+            (len(values) for cond in replicate_values for values in cond if values),
+            default=0,
+        ),
+        equilibration=equilibration,
+    )
 
     output_path = get_output_path(output_dir, "distance_threshold_bars", plot_settings)
     return [save_figure(fig, output_path, plot_settings)]
@@ -394,6 +411,7 @@ def _plot_distance_state_bars(
     labels: Sequence[str],
     output_dir: Path,
     plot_settings: Any,
+    equilibration: str | None = None,
 ) -> list[Path]:
     """Generate per-pair state bar plots for below/above threshold states.
 
@@ -436,6 +454,7 @@ def _plot_distance_state_bars(
             pair_settings=pair_settings,
             output_dir=output_dir,
             plot_settings=plot_settings,
+            equilibration=equilibration,
         )
         if fig_path is not None:
             generated.append(fig_path)
@@ -621,6 +640,7 @@ def _plot_distance_state_single_pair(
     pair_settings: list[Any] | None,
     output_dir: Path,
     plot_settings: Any,
+    equilibration: str | None = None,
 ) -> Path | None:
     """Generate one state-bar chart for a single distance pair.
 
@@ -724,6 +744,9 @@ def _plot_distance_state_single_pair(
         colors_state,
         plot_settings,
         reference_line=None,
+        error_bar=resolve_error_bar(
+            plugin_plot_settings(plot_settings, "distances"), plot_settings
+        ),
         replicate_values=rep_for_bars,
     )
 
@@ -736,6 +759,16 @@ def _plot_distance_state_single_pair(
     apply_legend(ax, plot_settings)
 
     plt.tight_layout()
+    annotate_uncertainty(
+        fig,
+        plot_settings,
+        "distances",
+        n_replicates=min(
+            (len(values) for group in rep_for_bars for values in group if values),
+            default=0,
+        ),
+        equilibration=equilibration,
+    )
 
     safe_name = user_label.replace(" ", "_").replace("(", "").replace(")", "")
     safe_name = safe_name.replace("-", "_").replace("/", "_").lower()

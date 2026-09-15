@@ -338,7 +338,9 @@ class CatalyticTriadAnalysis(Analysis):
         plots.extend(result)
 
         # Threshold bars plot
-        result = plot_triad_threshold_bars_from_data(data, labels, ctx.output_dir, plot_settings)
+        result = plot_triad_threshold_bars_from_data(
+            data, labels, ctx.output_dir, plot_settings, ctx.equilibration
+        )
         plots.extend(result)
 
         return plots
