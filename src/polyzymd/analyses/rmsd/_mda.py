@@ -26,13 +26,14 @@ from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_pa
 from polyzymd.analyses.shared.alignment import AlignmentConfig, align_trajectory
 from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 from polyzymd.analyses.shared.loader import parse_time_string
-from polyzymd.analyses.shared.statistics import compute_sem
+from polyzymd.analyses.shared.statistics import compute_sem, metric_summary_payload
 
 if TYPE_CHECKING:
     from polyzymd.analyses.mda import ArtifactSidecarRef, FrameSelection, MDAReplicateJobContext
     from polyzymd.analyses.rmsd import RMSDRunSettings, RMSDSettings
 
 LOGGER = logging.getLogger(__name__)
+RMSD_UNIT = "A"
 
 
 def build_rmsd_jobs(
@@ -236,18 +237,7 @@ def aggregate_rmsd_artifacts(
         for replicate, mean_value in zip(replicate_order, per_means):
             replicate_metrics[str(replicate)][metric_name] = mean_value
 
-        metrics[metric_name] = {
-            "name": metric_name,
-            "values": per_means,
-            "mean": mean_stats.mean,
-            "sem": mean_stats.sem,
-            "std": (
-                float(np.std(np.asarray(per_means, dtype=np.float64), ddof=1))
-                if len(per_means) > 1
-                else 0.0
-            ),
-            "n": len(per_means),
-        }
+        metrics[metric_name] = metric_summary_payload(metric_name, per_means, unit=RMSD_UNIT)
 
         template = run_entries[0]
         aggregated_runs.append(
@@ -291,7 +281,7 @@ def aggregate_rmsd_artifacts(
         )
 
     source_result_files = _source_result_files(output_dir, replicate_order)
-    return ConditionArtifact(
+    return ConditionArtifact.build(
         analysis_name="rmsd",
         condition_label=condition_label,
         replicates=replicate_order,

@@ -24,7 +24,7 @@ from polyzymd.analyses.mda import (
 )
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
 from polyzymd.analyses.shared.loader import parse_time_string
-from polyzymd.analyses.shared.statistics import compute_sem
+from polyzymd.analyses.shared.statistics import compute_sem, metric_summary_payload
 
 if TYPE_CHECKING:
     from polyzymd.analyses.mda import ArtifactSidecarRef, MDAReplicateJobContext
@@ -359,7 +359,7 @@ def aggregate_secondary_structure_artifacts(
     helix_stats = compute_sem(per_replicate["helix"])
     strand_stats = compute_sem(per_replicate["strand"])
     coil_stats = compute_sem(per_replicate["coil"])
-    metric = _metric_summary(HELIX_FRACTION_METRIC, per_replicate["helix"], helix_stats)
+    metric = metric_summary_payload(HELIX_FRACTION_METRIC, per_replicate["helix"], unit="fraction")
     metric.update(SS_METRIC_METADATA)
     replicate_metrics = {
         str(artifact.replicate): {HELIX_FRACTION_METRIC: value}
@@ -367,7 +367,7 @@ def aggregate_secondary_structure_artifacts(
     }
     eq_value, eq_unit = parse_time_string(equilibration)
     config_hash = str(first_artifact.metadata.get("config_hash", "unknown"))
-    artifact = ConditionArtifact(
+    artifact = ConditionArtifact.build(
         analysis_name="secondary_structure",
         condition_label=condition_label,
         replicates=[int(replicate) for replicate in replicates],
@@ -706,25 +706,12 @@ def _aggregate_persistence(
         stack = np.vstack(values).astype(np.float64)
         payload[f"mean_persistence_{state}"] = stack.mean(axis=0).tolist()
         if stack.shape[0] == 1:
-            sem = np.zeros(stack.shape[1], dtype=np.float64)
+            # One replicate gives no spread; NaN marks it inestimable.
+            sem = np.full(stack.shape[1], np.nan, dtype=np.float64)
         else:
             sem = stack.std(axis=0, ddof=1) / math.sqrt(stack.shape[0])
         payload[f"sem_persistence_{state}"] = sem.tolist()
     return payload
-
-
-def _metric_summary(name: str, values: Sequence[float], stats: Any) -> dict[str, Any]:
-    """Build an aggregated metric payload."""
-
-    value_array = np.asarray(values, dtype=np.float64)
-    return {
-        "name": name,
-        "values": [float(value) for value in values],
-        "mean": float(stats.mean),
-        "sem": float(stats.sem),
-        "std": float(np.std(value_array, ddof=1)) if len(value_array) > 1 else 0.0,
-        "n": int(len(value_array)),
-    }
 
 
 def _validate_and_order_artifacts(

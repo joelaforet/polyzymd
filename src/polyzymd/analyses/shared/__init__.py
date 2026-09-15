@@ -80,11 +80,17 @@ from polyzymd.analyses.shared.plotting import (
     symmetric_clim,
 )
 from polyzymd.analyses.shared.statistics import (
+    CI_METHOD_STUDENT_T,
+    UNCERTAINTY_KIND_REPLICATE_SEM,
+    MeanSemCI,
     PerResidueStats,
     StatResult,
     aggregate_per_residue_stats,
     aggregate_region_stats,
     compute_sem,
+    mean_sem_ci,
+    student_t_coverage_factor,
+    uncertainty_block,
     weighted_mean_with_sem,
 )
 from polyzymd.analyses.shared.window import (
@@ -109,9 +115,15 @@ __all__ = [
     "align_trajectory",
     "get_alignment_description",
     # Statistics
+    "CI_METHOD_STUDENT_T",
+    "UNCERTAINTY_KIND_REPLICATE_SEM",
+    "MeanSemCI",
     "StatResult",
     "PerResidueStats",
     "compute_sem",
+    "mean_sem_ci",
+    "student_t_coverage_factor",
+    "uncertainty_block",
     "aggregate_per_residue_stats",
     "aggregate_region_stats",
     "weighted_mean_with_sem",

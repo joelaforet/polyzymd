@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
@@ -43,9 +44,13 @@ from polyzymd.analyses.base import (
 )
 from polyzymd.analyses.shared.multi_run_formatting import (
     SINGLE_REPLICATE_SEM_NOTE,
+    format_interval,
+    format_interval_from_sem,
     format_sem_value,
     is_sem_estimable,
+    uncertainty_header_line,
 )
+from polyzymd.analyses.shared.statistics import uncertainty_block
 
 logger = logging.getLogger("polyzymd.analyses")
 
@@ -546,6 +551,10 @@ def default_scalar_comparison(
             extra[f"{metric_name}_mean"] = mv.mean
             extra[f"{metric_name}_sem"] = mv.sem
             extra[f"{metric_name}_replicate_values"] = mv.replicate_values
+            extra[f"{metric_name}_unit"] = mv.unit
+            extra[f"{metric_name}_ci95_low"] = mv.ci95_low
+            extra[f"{metric_name}_ci95_high"] = mv.ci95_high
+            extra[f"{metric_name}_ci_method"] = mv.ci_method
         if metrics:
             rep_counts = [len(mv.replicate_values) for mv in metrics.values()]
             n_reps = min(rep_counts)
@@ -571,6 +580,9 @@ def default_scalar_comparison(
         fdr_alpha=fdr_alpha,
         ttest_method=ttest_method,
         posthoc_method=posthoc_method,
+        uncertainty=uncertainty_block(
+            min((summary.n_replicates for summary in condition_summaries), default=0)
+        ),
         conditions=condition_summaries,
         pairwise_comparisons=all_pairwise,
         anova=all_anova if all_anova else None,
@@ -641,8 +653,14 @@ def format_scalar_comparison(
     def _get_mean(cond: ConditionSummary) -> float:
         return getattr(cond, f"{metric_key}_mean", 0.0)
 
-    def _get_sem(cond: ConditionSummary) -> float:
-        return getattr(cond, f"{metric_key}_sem", 0.0)
+    def _get_sem(cond: ConditionSummary) -> float | None:
+        return getattr(cond, f"{metric_key}_sem", None)
+
+    def _get_ci(cond: ConditionSummary) -> tuple[float | None, float | None]:
+        return (
+            getattr(cond, f"{metric_key}_ci95_low", None),
+            getattr(cond, f"{metric_key}_ci95_high", None),
+        )
 
     def _get_cond(label: str) -> ConditionSummary:
         for c in result.conditions:
@@ -661,6 +679,7 @@ def format_scalar_comparison(
             metric_key,
             _get_mean,
             _get_sem,
+            _get_ci,
             _get_cond,
             higher_is_better,
         )
@@ -673,6 +692,7 @@ def format_scalar_comparison(
         metric_key,
         _get_mean,
         _get_sem,
+        _get_ci,
         _get_cond,
         higher_is_better,
     )
@@ -733,39 +753,64 @@ def format_scalar_comparison_artifact_payload(
     equilibration = str(statistical_parameters.get("equilibration", "0ns"))
     control_label = payload.get("effective_control") or payload.get("control_label")
 
+    uncertainty = payload.get("uncertainty") or {}
+    payload_n = int(uncertainty.get("n") or 0)
+    if payload_n == 0:
+        counts = [
+            _condition_replicate_count(item, metric_key)
+            for item in conditions
+            if isinstance(item, dict)
+        ]
+        counts = [count for count in counts if count]
+        payload_n = min(counts) if counts else 0
+    header_note = uncertainty_header_line(payload_n, equilibration=equilibration)
+
+    def _entry(condition: dict[str, Any]) -> tuple[str, str]:
+        n_reps = _condition_replicate_count(condition, metric_key) or payload_n
+        mean_value = _payload_metric(condition, metric_key, "mean")
+        ci_low = _payload_optional_metric(condition, metric_key, "ci95_low")
+        ci_high = _payload_optional_metric(condition, metric_key, "ci95_high")
+        sem_value = _payload_optional_metric(condition, metric_key, "sem")
+        if ci_low is None or ci_high is None:
+            # Artifacts written before the interval fields existed store only the
+            # standard error; the limits follow from it and the replicate count.
+            interval = format_interval_from_sem(
+                mean_value, sem_value, n_reps, precision=4, unit=unit_str
+            )
+        else:
+            interval = format_interval(ci_low, ci_high, n_reps, precision=4, unit=unit_str)
+        return (
+            f"{mean_value:.4f}{unit_str} {interval}",
+            format_sem_value(sem_value, n_reps, precision=4, unit=unit_str),
+        )
+
     if output_format == "markdown":
         lines = [f"# {title}: {comparison_name}", ""]
         lines.append(f"**Equilibration:** {equilibration}")
         if control_label:
             lines.append(f"**Control:** {control_label}")
-        lines.extend(["", f"## Condition ranking ({metric_label})", ""])
-        lines.append(f"| Rank | Condition | {metric_label} | SEM |")
+        lines.extend(["", f"## Condition ranking ({metric_label})", "", header_note, ""])
+        lines.append(f"| Rank | Condition | {metric_label} (95% CI) | SEM |")
         lines.append("|---:|---|---:|---:|")
         for item in ranking:
             label = str(item.get("label", ""))
             condition = condition_by_label.get(label, {})
-            lines.append(
-                f"| {item.get('rank', '')} | {label} | "
-                f"{_payload_metric(condition, metric_key, 'mean'):.4f}{unit_str} | "
-                f"{_payload_metric(condition, metric_key, 'sem'):.4f}{unit_str} |"
-            )
+            mean_text, sem_text = _entry(condition)
+            lines.append(f"| {item.get('rank', '')} | {label} | {mean_text} | {sem_text} |")
         return "\n".join(lines)
 
     lines = ["", f"{title}: {comparison_name}", "=" * 60, f"Equilibration: {equilibration}"]
     if control_label:
         lines.append(f"Control: {control_label}")
-    lines.extend(["", f"Condition ranking ({metric_label}):"])
+    lines.extend(["", f"Condition ranking ({metric_label}):", header_note])
     direction = _payload_direction_label(higher_is_better)
     if direction:
         lines.append(direction)
     for item in ranking:
         label = str(item.get("label", ""))
         condition = condition_by_label.get(label, {})
-        lines.append(
-            f"  {item.get('rank', '')}. {label}: "
-            f"{_payload_metric(condition, metric_key, 'mean'):.4f}{unit_str} ± "
-            f"{_payload_metric(condition, metric_key, 'sem'):.4f}{unit_str}"
-        )
+        mean_text, sem_text = _entry(condition)
+        lines.append(f"  {item.get('rank', '')}. {label}: {mean_text}, SEM {sem_text}")
     if pairwise:
         lines.extend(["", "Pairwise comparisons:"])
         for item in pairwise:
@@ -806,6 +851,33 @@ def _payload_ranking(payload: dict[str, Any], metric_key: str) -> list[dict[str,
         elif isinstance(item, str):
             normalized.append({"rank": index, "label": item})
     return normalized
+
+
+def _condition_replicate_count(condition: dict[str, Any], metric_key: str) -> int:
+    """Return how many replicates back one payload condition summary.
+
+    The stored ``n_replicates`` is preferred; when absent the count comes from
+    the replicate values themselves rather than defaulting to zero.
+    """
+
+    stored = condition.get("n_replicates")
+    if isinstance(stored, int) and not isinstance(stored, bool) and stored > 0:
+        return stored
+    values = condition.get(f"{metric_key}_replicate_values", condition.get("replicate_values"))
+    if isinstance(values, Sequence) and not isinstance(values, (str, bytes, bytearray)):
+        return len(values)
+    return 0
+
+
+def _payload_optional_metric(
+    condition: dict[str, Any], metric_key: str, suffix: str
+) -> float | None:
+    """Return a scalar metric from a payload condition summary, or ``None``."""
+
+    value = condition.get(f"{metric_key}_{suffix}", condition.get(suffix))
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
 
 
 def _payload_metric(condition: dict[str, Any], metric_key: str, suffix: str) -> float:
@@ -954,6 +1026,7 @@ def _format_scalar_text(
     metric_key: str,
     _get_mean,
     _get_sem,
+    _get_ci,
     _get_cond,
     higher_is_better: bool | None,
 ) -> str:
@@ -991,8 +1064,18 @@ def _format_scalar_text(
     else:
         rank_desc = "highest first" if higher_is_better else "lowest first"
     lines.append(f"Condition Summary (ranked by {metric_label}, {rank_desc})")
+    replicate_counts = [_get_cond(label).n_replicates for label in selected_ranking]
+    lines.append(
+        uncertainty_header_line(
+            min(replicate_counts) if replicate_counts else 0,
+            equilibration=result.equilibration_time,
+        )
+    )
     lines.append("-" * 60)
-    header = f"{'Rank':<5} {'Condition':<20} {metric_label:<14} {'SEM':<10} {'N':<4}"
+    header = (
+        f"{'Rank':<5} {'Condition':<20} {metric_label + unit_str:>12}  "
+        f"{'95% CI':<28} {'SEM':<24} {'N':<4}"
+    )
     lines.append(header)
     lines.append("-" * 60)
 
@@ -1001,10 +1084,12 @@ def _format_scalar_text(
         marker = "*" if label == result.control_label else " "
         mean_val = _get_mean(cond)
         sem_val = _get_sem(cond)
+        ci_low, ci_high = _get_ci(cond)
         sem_str = format_sem_value(sem_val, cond.n_replicates, precision=4)
+        ci_str = format_interval(ci_low, ci_high, cond.n_replicates, precision=4)
         lines.append(
-            f"{rank:<5} {cond.label:<20} {mean_val:>10.4f}{unit_str}  "
-            f"{sem_str:>8}  {cond.n_replicates:<4}{marker}"
+            f"{rank:<5} {cond.label:<20} {mean_val:>12.4f}{unit_str}  "
+            f"{ci_str:<28} {sem_str:<24} {cond.n_replicates:<4}{marker}"
         )
 
     lines.append("-" * 60)
@@ -1163,6 +1248,7 @@ def _format_scalar_markdown(
     metric_key: str,
     _get_mean,
     _get_sem,
+    _get_ci,
     _get_cond,
     higher_is_better: bool | None,
 ) -> str:
@@ -1199,9 +1285,19 @@ def _format_scalar_markdown(
     # Condition table
     lines.append("## Condition Summary")
     lines.append("")
-    lines.append(f"| Rank | Condition | {metric_label}{unit_str} | SEM | N |")
+    replicate_counts = [_get_cond(label).n_replicates for label in selected_ranking]
     lines.append(
-        "|------|-----------|" + "-" * (len(metric_label) + len(unit_str) + 2) + "|-----|---|"
+        uncertainty_header_line(
+            min(replicate_counts) if replicate_counts else 0,
+            equilibration=result.equilibration_time,
+        )
+    )
+    lines.append("")
+    lines.append(f"| Rank | Condition | {metric_label}{unit_str} | 95% CI | SEM | N |")
+    lines.append(
+        "|------|-----------|"
+        + "-" * (len(metric_label) + len(unit_str) + 2)
+        + "|--------|-----|---|"
     )
 
     for rank, label in enumerate(selected_ranking, 1):
@@ -1209,10 +1305,12 @@ def _format_scalar_markdown(
         marker = " (control)" if label == result.control_label else ""
         mean_val = _get_mean(cond)
         sem_val = _get_sem(cond)
+        ci_low, ci_high = _get_ci(cond)
         sem_str = format_sem_value(sem_val, cond.n_replicates, precision=4)
+        ci_str = format_interval(ci_low, ci_high, cond.n_replicates, precision=4)
         lines.append(
             f"| {rank} | **{cond.label}**{marker} | "
-            f"{mean_val:.4f} | {sem_str} | {cond.n_replicates} |"
+            f"{mean_val:.4f} | {ci_str} | {sem_str} | {cond.n_replicates} |"
         )
 
     if any(not is_sem_estimable(_get_cond(label).n_replicates) for label in selected_ranking):

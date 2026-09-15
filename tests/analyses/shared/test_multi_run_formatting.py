@@ -26,7 +26,8 @@ def test_make_ranked_headers() -> None:
 
     assert "Condition" in text_header[0]
     assert "Mean RMSD (Å)" in text_header[0]
-    assert markdown_header[0] == "| Condition | Mean Rg (A) | SEM | Rank |"
+    assert markdown_header[0] == "| Condition | Mean Rg (A) | 95% CI | SEM | Rank |"
+    assert "95% CI" in text_header[0]
 
 
 def test_make_ranked_rows() -> None:

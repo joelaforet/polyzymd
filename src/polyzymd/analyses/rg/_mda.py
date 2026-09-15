@@ -28,6 +28,8 @@ from polyzymd.analyses.mda import (
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
 from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 from polyzymd.analyses.shared.loader import parse_time_string
+from polyzymd.analyses.shared.statistics import compute_sem, metric_summary_payload
+
 from polyzymd.analyses.shared.statistics import compute_sem
 from polyzymd.analyses.shared.topology import require_topology_bonds
 
@@ -36,6 +38,7 @@ if TYPE_CHECKING:
     from polyzymd.analyses.rg import RgRunSettings, RgSettings
 
 LOGGER = logging.getLogger(__name__)
+RG_UNIT = "A"
 
 RG_PBC_POLICY_WARNING = (
     "Rg coordinates are used exactly as loaded; no unwrap, center, or make-whole "
@@ -475,7 +478,7 @@ def aggregate_rg_artifacts(
     )
     metrics, replicate_metrics = _condition_metrics(run_results, [int(rep) for rep in replicates])
     source_result_files = _source_result_files(output_dir, replicates)
-    return ConditionArtifact(
+    return ConditionArtifact.build(
         analysis_name="rg",
         condition_label=condition_label,
         replicates=[int(rep) for rep in replicates],
@@ -1145,18 +1148,7 @@ def _condition_metrics(
     for run in run_results:
         metric_name = f"{run.get('run_label', 'run')}.mean_rg"
         values = [float(value) for value in run.get("per_replicate_means", [])]
-        metrics[metric_name] = {
-            "name": metric_name,
-            "values": values,
-            "mean": float(run.get("overall_mean", 0.0)),
-            "sem": float(run.get("overall_sem", 0.0) or 0.0),
-            "std": (
-                float(np.std(np.asarray(values, dtype=np.float64), ddof=1))
-                if len(values) > 1
-                else 0.0
-            ),
-            "n": len(values),
-        }
+        metrics[metric_name] = metric_summary_payload(metric_name, values, unit=RG_UNIT)
         for replicate, value in zip(run.get("replicates", []), values, strict=True):
             replicate_metrics.setdefault(str(replicate), {})[metric_name] = value
     return metrics, replicate_metrics

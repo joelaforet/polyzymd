@@ -31,12 +31,19 @@ from polyzymd.analyses.mda import (
 from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_payload
 from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 from polyzymd.analyses.shared.loader import parse_time_string
+from polyzymd.analyses.shared.statistics import (
+    mean_sem_ci,
+    metric_summary_payload,
+    uncertainty_block,
+)
 
 if TYPE_CHECKING:
     from polyzymd.analyses.distances import DistancesSettings
     from polyzymd.analyses.mda import ArtifactSidecarRef, MDAReplicateJobContext
 
 LOGGER = logging.getLogger(__name__)
+DISTANCE_UNIT = "A"
+FRACTION_UNIT = "fraction"
 
 DISTANCES_ALIGNMENT_DEPRECATION = (
     "align_trajectory and the alignment_* settings no longer affect distances. "
@@ -357,7 +364,7 @@ def aggregate_distance_artifacts(
     sidecar = _write_condition_sidecar(output_dir, ordered_artifacts, pair_results)
     metrics, replicate_metrics = _condition_metrics(pair_results, [int(rep) for rep in replicates])
     first_metadata = ordered_artifacts[0].metadata
-    return ConditionArtifact(
+    return ConditionArtifact.build(
         analysis_name="distances",
         condition_label=condition_label,
         replicates=[int(rep) for rep in replicates],
@@ -788,23 +795,13 @@ def _condition_metrics(
         label = str(pair.get("pair_label", "pair"))
         mean_name = f"{label}.mean_distance"
         values = [float(value) for value in pair.get("per_replicate_means", [])]
-        metrics[mean_name] = _metric_summary(
-            mean_name,
-            values,
-            float(pair.get("overall_mean", 0.0)),
-            float(pair.get("overall_sem", 0.0) or 0.0),
-        )
+        metrics[mean_name] = metric_summary_payload(mean_name, values, unit=DISTANCE_UNIT)
         for replicate, value in zip(replicates, values, strict=True):
             replicate_metrics.setdefault(str(replicate), {})[mean_name] = float(value)
         if pair.get("per_replicate_fractions_below") is not None:
             frac_name = f"{label}.fraction_below_threshold"
             frac_values = [float(value) for value in pair.get("per_replicate_fractions_below", [])]
-            metrics[frac_name] = _metric_summary(
-                frac_name,
-                frac_values,
-                float(pair.get("overall_fraction_below") or 0.0),
-                float(pair.get("sem_fraction_below") or 0.0),
-            )
+            metrics[frac_name] = metric_summary_payload(frac_name, frac_values, unit=FRACTION_UNIT)
             for replicate, value in zip(replicates, frac_values, strict=True):
                 replicate_metrics.setdefault(str(replicate), {})[frac_name] = float(value)
     return metrics, replicate_metrics
@@ -816,27 +813,14 @@ def _mean(values: Sequence[float]) -> float:
     return float(np.mean(np.asarray(values, dtype=np.float64))) if values else 0.0
 
 
-def _sem(values: Sequence[float]) -> float:
-    """Return the standard error across replicate values."""
+def _sem(values: Sequence[float]) -> float | None:
+    """Return the standard error across replicate values.
 
-    array = np.asarray(values, dtype=np.float64)
-    if array.size <= 1:
-        return 0.0
-    return float(np.std(array, ddof=1) / np.sqrt(float(array.size)))
+    Returns ``None`` for a single replicate, where the standard error does not
+    exist. Reporting zero there would claim a measurement with no uncertainty.
+    """
 
-
-def _metric_summary(name: str, values: Sequence[float], mean: float, sem: float) -> dict[str, Any]:
-    """Return an artifact metric summary."""
-
-    array = np.asarray(values, dtype=np.float64)
-    return {
-        "name": name,
-        "values": [float(value) for value in values],
-        "mean": float(mean),
-        "sem": float(sem),
-        "std": float(np.std(array, ddof=1)) if array.size > 1 else 0.0,
-        "n": int(array.size),
-    }
+    return mean_sem_ci(np.asarray(values, dtype=np.float64)).sem if len(values) else None
 
 
 def _analysis_time_ns(

@@ -38,6 +38,14 @@ class DependencyError(AnalysisError):
     """Raised when declared analysis dependencies are invalid or missing."""
 
 
+class StatisticsError(AnalysisError, ValueError):
+    """Raised when a statistical estimator is given an input it cannot use.
+
+    An invalid sample or an unsupported option is a typed failure, not a
+    silently degraded zero. It also subclasses ``ValueError`` so that callers
+    written before the typed error existed keep working.
+    """
+
 class TopologyBondsMissingError(AnalysisError):
     """Raised when an analysis needs topology bonds and the topology has none.
 
@@ -86,6 +94,7 @@ class StaleCacheError(AnalysisError):
     ``--recompute``, which is the only way forward when the command that hit
     the stale cache cannot recompute the result itself.
     """
+
 
 class SelectionError(AnalysisError):
     """Raised when an analysis selection is empty or cannot be resolved."""

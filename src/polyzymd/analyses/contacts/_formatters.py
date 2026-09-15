@@ -14,10 +14,17 @@ from __future__ import annotations
 from polyzymd.analyses.contacts._comparison_results import ContactsComparisonResult
 from polyzymd.analyses.shared.multi_run_formatting import (
     SINGLE_REPLICATE_SEM_NOTE,
+    format_interval_from_sem,
     format_sem_value,
     is_sem_estimable,
 )
 from polyzymd.analyses.stats import format_pct
+
+
+def _as_percent(value: float | None) -> float | None:
+    """Return a fraction as a percentage, preserving an absent value."""
+
+    return None if value is None else float(value) * 100.0
 
 
 def format_contacts_console_table(
@@ -63,7 +70,7 @@ def format_contacts_console_table(
     # Conditions summary table - Coverage
     lines.append("Condition Summary - Coverage (ranked, highest first)")
     lines.append("-" * 80)
-    header = f"{'Rank':<5} {'Condition':<25} {'Coverage':<12} {'SEM':<10} {'N':<4}"
+    header = f"{'Rank':<5} {'Condition':<25} {'Coverage':<12} {'95% CI':<26} {'SEM':<10} {'N':<4}"
     lines.append(header)
     lines.append("-" * 80)
 
@@ -71,12 +78,14 @@ def format_contacts_console_table(
         cond = result.get_condition(label)
         marker = "*" if label == result.control_label else " "
         coverage_pct = cond.coverage_mean * 100
-        sem_str = format_sem_value(
-            cond.coverage_sem * 100, cond.n_replicates, precision=2, unit="%"
+        coverage_sem_pct = _as_percent(cond.coverage_sem)
+        sem_str = format_sem_value(coverage_sem_pct, cond.n_replicates, precision=2, unit="%")
+        ci_str = format_interval_from_sem(
+            coverage_pct, coverage_sem_pct, cond.n_replicates, precision=2, unit="%"
         )
         lines.append(
             f"{rank:<5} {cond.label:<25} {coverage_pct:>8.1f}%   "
-            f"{sem_str:>8}  {cond.n_replicates:<4}{marker}"
+            f"{ci_str:<26} {sem_str:>8}  {cond.n_replicates:<4}{marker}"
         )
 
     lines.append("-" * 80)
@@ -87,7 +96,7 @@ def format_contacts_console_table(
     # Conditions summary table - Mean Contact Fraction
     lines.append("Condition Summary - Mean Contact Fraction (ranked, highest first)")
     lines.append("-" * 80)
-    header = f"{'Rank':<5} {'Condition':<25} {'Contact %':<12} {'SEM':<10} {'N':<4}"
+    header = f"{'Rank':<5} {'Condition':<25} {'Contact %':<12} {'95% CI':<26} {'SEM':<10} {'N':<4}"
     lines.append(header)
     lines.append("-" * 80)
 
@@ -95,15 +104,14 @@ def format_contacts_console_table(
         cond = result.get_condition(label)
         marker = "*" if label == result.control_label else " "
         contact_pct = cond.mean_contact_fraction * 100
-        sem_str = format_sem_value(
-            cond.mean_contact_fraction_sem * 100,
-            cond.n_replicates,
-            precision=2,
-            unit="%",
+        contact_sem_pct = _as_percent(cond.mean_contact_fraction_sem)
+        sem_str = format_sem_value(contact_sem_pct, cond.n_replicates, precision=2, unit="%")
+        ci_str = format_interval_from_sem(
+            contact_pct, contact_sem_pct, cond.n_replicates, precision=2, unit="%"
         )
         lines.append(
             f"{rank:<5} {cond.label:<25} {contact_pct:>8.1f}%   "
-            f"{sem_str:>8}  {cond.n_replicates:<4}{marker}"
+            f"{ci_str:<26} {sem_str:>8}  {cond.n_replicates:<4}{marker}"
         )
 
     lines.append("-" * 80)
@@ -314,19 +322,21 @@ def format_contacts_markdown(
     lines.append("")
     lines.append("Ranked by coverage (fraction of protein residues contacted):")
     lines.append("")
-    lines.append("| Rank | Condition | Coverage | SEM | N Replicates |")
-    lines.append("|------|-----------|----------|-----|--------------|")
+    lines.append("| Rank | Condition | Coverage | 95% CI | SEM | N Replicates |")
+    lines.append("|------|-----------|----------|--------|-----|--------------|")
 
     for rank, label in enumerate(result.ranking_by_coverage, 1):
         cond = result.get_condition(label)
         marker = " (control)" if label == result.control_label else ""
         coverage_pct = cond.coverage_mean * 100
-        sem_str = format_sem_value(
-            cond.coverage_sem * 100, cond.n_replicates, precision=2, unit="%"
+        coverage_sem_pct = _as_percent(cond.coverage_sem)
+        sem_str = format_sem_value(coverage_sem_pct, cond.n_replicates, precision=2, unit="%")
+        ci_str = format_interval_from_sem(
+            coverage_pct, coverage_sem_pct, cond.n_replicates, precision=2, unit="%"
         )
         lines.append(
             f"| {rank} | **{cond.label}**{marker} | {coverage_pct:.1f}% | "
-            f"{sem_str} | {cond.n_replicates} |"
+            f"{ci_str} | {sem_str} | {cond.n_replicates} |"
         )
 
     lines.append("")
@@ -342,22 +352,21 @@ def format_contacts_markdown(
     lines.append("")
     lines.append("Ranked by mean contact fraction across all residues:")
     lines.append("")
-    lines.append("| Rank | Condition | Contact % | SEM | N Replicates |")
-    lines.append("|------|-----------|-----------|-----|--------------|")
+    lines.append("| Rank | Condition | Contact % | 95% CI | SEM | N Replicates |")
+    lines.append("|------|-----------|-----------|--------|-----|--------------|")
 
     for rank, label in enumerate(result.ranking_by_contact_fraction, 1):
         cond = result.get_condition(label)
         marker = " (control)" if label == result.control_label else ""
         contact_pct = cond.mean_contact_fraction * 100
-        sem_str = format_sem_value(
-            cond.mean_contact_fraction_sem * 100,
-            cond.n_replicates,
-            precision=2,
-            unit="%",
+        contact_sem_pct = _as_percent(cond.mean_contact_fraction_sem)
+        sem_str = format_sem_value(contact_sem_pct, cond.n_replicates, precision=2, unit="%")
+        ci_str = format_interval_from_sem(
+            contact_pct, contact_sem_pct, cond.n_replicates, precision=2, unit="%"
         )
         lines.append(
             f"| {rank} | **{cond.label}**{marker} | {contact_pct:.1f}% | "
-            f"{sem_str} | {cond.n_replicates} |"
+            f"{ci_str} | {sem_str} | {cond.n_replicates} |"
         )
 
     lines.append("")

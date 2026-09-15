@@ -35,7 +35,7 @@ from polyzymd.analyses.sasa._artifacts import (
 )
 from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 from polyzymd.analyses.shared.loader import parse_time_string
-from polyzymd.analyses.shared.statistics import compute_sem
+from polyzymd.analyses.shared.statistics import compute_sem, metric_summary_payload
 
 if TYPE_CHECKING:
     from polyzymd.analyses.mda import ArtifactSidecarRef, MDAReplicateJobContext
@@ -48,6 +48,7 @@ SASA_SIDECAR_PREFIX = "sidecars/sasa"
 SASA_METRIC_METADATA: dict[str, Any] = {
     "higher_is_better": False,
     "direction_labels": ("shielding", "unchanged", "exposure"),
+    "unit": "A^2",
     "units": "A^2",
     "description": "Mean solvent-accessible surface area over selected frames",
     "statistical_policy": "mean_based",
@@ -491,7 +492,7 @@ def aggregate_sasa_artifacts(
 
     eq_value, eq_unit = parse_time_string(equilibration)
     config_hash = str(ordered_artifacts[0].metadata.get("config_hash", "unknown"))
-    artifact = ConditionArtifact(
+    artifact = ConditionArtifact.build(
         analysis_name="sasa",
         condition_label=condition_label,
         replicates=[int(replicate) for replicate in replicates],
@@ -1420,19 +1421,28 @@ def _condition_metrics(run_results: Sequence[Mapping[str, Any]]) -> dict[str, di
     for run in run_results:
         values = [_json_float_or_none(value) for value in run["per_replicate_means"]]
         finite = [value for value in values if value is not None]
-        if len(finite) > 1:
-            std = _json_float_or_none(np.std(finite, ddof=1))
+        metric_key = _metric_key(str(run["run_label"]))
+        if finite:
+            summary = metric_summary_payload(
+                metric_key,
+                finite,
+                unit=str(SASA_METRIC_METADATA["unit"]),
+            )
         else:
-            std = 0.0 if finite else None
-        metrics[_metric_key(str(run["run_label"]))] = {
-            "name": _metric_key(str(run["run_label"])),
-            "values": values,
-            "mean": _json_float_or_none(run.get("overall_mean")),
-            "sem": _json_float_or_none(run.get("overall_sem")),
-            "std": std,
-            "n": len(finite),
-            **SASA_METRIC_METADATA,
-        }
+            summary = {
+                "name": metric_key,
+                "mean": None,
+                "sem": None,
+                "std": None,
+                "n": 0,
+                "unit": str(SASA_METRIC_METADATA["unit"]),
+                "ci95_low": None,
+                "ci95_high": None,
+                "ci_method": None,
+            }
+        summary["values"] = values
+        summary.update(SASA_METRIC_METADATA)
+        metrics[metric_key] = summary
     return metrics
 
 

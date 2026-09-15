@@ -8,11 +8,13 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from polyzymd.analyses.mda.artifacts import ConditionArtifact, ReplicateArtifact
 from polyzymd.analyses.mda.base import MDAnalysisExtensionError
 from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
+from polyzymd.analyses.shared.statistics import mean_sem_ci, uncertainty_block
+
 from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 
 
@@ -60,14 +62,25 @@ def validate_autocorrelation_estimator_version(
 
 
 class AggregatedMetric(BaseModel):
-    """Summary statistics for one metric across biological replicates."""
+    """Summary statistics for one metric across biological replicates.
+
+    The replicate is the sampling unit. ``ci95_low`` and ``ci95_high`` are the
+    two-sided Student t limits at 95 percent coverage. With one replicate the
+    spread, the standard error and both limits are ``None``, not zero.
+    """
+
+    model_config = ConfigDict(ser_json_inf_nan="strings")
 
     name: str
     values: list[float] = Field(default_factory=list)
     mean: float
-    sem: float
-    std: float
+    sem: float | None
+    std: float | None
     n: int = Field(ge=1)
+    unit: str | None = None
+    ci95_low: float | None = None
+    ci95_high: float | None = None
+    ci_method: str | None = None
 
 
 class ReplicateMetricPolicy(Protocol):
@@ -161,6 +174,7 @@ class MDAAggregationContext:
     artifact_stores: Mapping[int, ArtifactStore] = field(default_factory=dict)
     source_replicates: Sequence[Mapping[str, Any]] = ()
     skipped_replicates: Sequence[Mapping[str, Any]] = ()
+    metric_units: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Normalize replicate identity and validate minimum count."""
@@ -181,6 +195,7 @@ class MDAAggregationContext:
             "skipped_replicates",
             tuple(dict(entry) for entry in self.skipped_replicates),
         )
+        object.__setattr__(self, "metric_units", dict(self.metric_units))
 
 
 def aggregate_replicate_artifacts(
@@ -219,7 +234,7 @@ def aggregate_replicate_artifacts(
     }
     if ctx.settings_fingerprint is not None:
         metadata["settings_fingerprint"] = ctx.settings_fingerprint
-    return ConditionArtifact(
+    return ConditionArtifact.build(
         analysis_name=ctx.analysis_name,
         condition_label=ctx.condition_label,
         replicates=replicate_ids,
@@ -229,6 +244,7 @@ def aggregate_replicate_artifacts(
                 str(replicate): dict(metrics) for replicate, metrics in replicate_metrics.items()
             },
             "n_replicates": len(replicate_ids),
+            "uncertainty": uncertainty_block(len(replicate_ids)),
         },
         provenance={
             "source": "mda_replicate_artifact_aggregation",
@@ -520,19 +536,19 @@ def _summarize_metrics(
         values = [
             float(replicate_metrics[replicate][name]) for replicate in sorted(replicate_metrics)
         ]
-        mean = sum(values) / len(values)
-        if len(values) == 1:
-            std = 0.0
-        else:
-            std = math.sqrt(sum((value - mean) ** 2 for value in values) / (len(values) - 1))
-        sem = std / math.sqrt(len(values))
+        stats = mean_sem_ci(values)
+        std = None if stats.sem is None else stats.sem * math.sqrt(len(values))
         summaries[name] = AggregatedMetric(
             name=name,
             values=values,
-            mean=mean,
-            sem=sem,
+            mean=stats.mean,
+            sem=stats.sem,
             std=std,
-            n=len(values),
+            n=stats.n,
+            unit=ctx.metric_units.get(name),
+            ci95_low=stats.ci_low,
+            ci95_high=stats.ci_high,
+            ci_method=stats.ci_method,
         )
     if not summaries:
         raise MDAAggregationError(f"{ctx.analysis_name}: no metrics available to aggregate")
