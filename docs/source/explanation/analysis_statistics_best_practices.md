@@ -192,6 +192,60 @@ trapped in the same metastable basin, or if different replicates have not
 reached comparable stationary behavior, the between-replicate spread may still
 understate or misrepresent uncertainty.
 
+## From a standard error to a confidence interval
+
+A standard error is not an interval. It is the estimated standard deviation of
+the mean, and on its own it says nothing about how often a stated range would
+contain the true value. To turn it into a 95 percent confidence interval you
+multiply it by a coverage factor:
+
+```
+interval = mean +/- k(n) * SEM
+```
+
+If the standard deviation of the replicate means were known exactly, `k` would
+be 1.96. It is not known exactly. It is estimated from the same handful of
+replicates, so the factor comes from the Student t distribution with `n - 1`
+degrees of freedom. With the replicate counts an MD study can afford, that
+matters a great deal:
+
+| Replicates | `k` at 95 percent | Interval width relative to `+/- 1 SEM` |
+|---|---|---|
+| 2 | 12.71 | 12.7x |
+| 3 | 4.30 | 4.3x |
+| 5 | 2.78 | 2.8x |
+| 10 | 2.26 | 2.3x |
+| large | 1.96 | 2.0x |
+
+### Why plus or minus one SEM misleads at three replicates
+
+Suppose two conditions each have three replicates, and their `+/- 1 SEM` bars do
+not touch. It is tempting to read that as a real difference. It is not. At
+`n = 3` the 95 percent interval is over four times wider than the SEM bar, so
+the two intervals can overlap heavily while the SEM bars sit far apart. The
+gap between one-SEM bars is not evidence of anything; only the interval, or the
+t-test the comparison already runs, can answer that question.
+
+This is why PolyzyMD reports the 95 percent interval alongside the standard
+error in every table rather than the standard error alone.
+
+### Why a single replicate has no uncertainty at all
+
+With one replicate there is nothing to take a spread over. PolyzyMD writes
+`null` for the SEM, the standard deviation and both confidence limits, and
+prints `n/a (single replicate)` in tables, rather than writing `0.0`. A zero
+would claim a measurement with no uncertainty, which is the opposite of what a
+single run supports.
+
+### What PolyzyMD does not yet estimate
+
+The interval above is the only one the package computes. There is no block
+averaging, no bootstrap and no jackknife. Fractions and occupancies are given
+the same symmetric interval as unbounded quantities, so near 0 or 1 a limit can
+fall outside the physical range; read those limits as an indication of spread
+rather than a bound. Within-replicate correlation times are reported as
+diagnostics and do not enter any condition-level interval.
+
 ## Practical interpretation principles
 
 ### Compare timescales before trusting uncertainty
@@ -205,13 +259,13 @@ error bar is not strong evidence of convergence.
 
 A statistically significant difference can be scientifically small, while a
 large apparent effect can be uncertain if replicate counts are low. Interpret
-PolyzyMD comparison output by considering the direction, magnitude, confidence
-intervals or SEMs, and the physical plausibility of the change.
+PolyzyMD comparison output by considering the direction, magnitude, the
+95 percent confidence interval, and the physical plausibility of the change.
 
 ### Treat diagnostics as evidence, not proof
 
-Autocorrelation estimates, block averages, and replicate SEMs are diagnostics.
-They summarize available sampling; they cannot reveal unsampled states that the
+Autocorrelation estimates and replicate intervals are diagnostics. They
+summarize available sampling; they cannot reveal unsampled states that the
 trajectory never visited. Use them alongside structural inspection and domain
 knowledge.
 
@@ -372,6 +426,15 @@ Useful background includes:
 
 > **Flyvbjerg, H., & Petersen, H. G.** (1989). "Error estimates on averages
 > of correlated data." *Journal of Chemical Physics*, 91(1), 461-466.
+
+> **Joint Committee for Guides in Metrology** (2008). "JCGM 100: Evaluation of
+> measurement data - Guide to the expression of uncertainty in measurement
+> (GUM)." BIPM.
+> [PDF](https://www.bipm.org/utils/common/documents/jcgm/JCGM_100_2008_E.pdf)
+
+The coverage factors above follow the section of Grossfield et al. (2018) on
+turning a standard uncertainty into a confidence interval, which in turn
+follows the GUM.
 
 > **Welch, B. L.** (1947). "The generalization of 'Student's' problem when
 > several different population variances are involved." *Biometrika*, 34(1-2),

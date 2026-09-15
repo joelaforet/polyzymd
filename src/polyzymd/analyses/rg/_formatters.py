@@ -12,6 +12,7 @@ from polyzymd.analyses.rg._comparison_results import RgComparisonResult
 from polyzymd.analyses.shared.multi_run_formatting import (
     SINGLE_REPLICATE_SEM_NOTE,
     format_anova_line,
+    format_interval_from_sem,
     format_pairwise_line,
     format_sem_value,
     is_sem_estimable,
@@ -19,6 +20,8 @@ from polyzymd.analyses.shared.multi_run_formatting import (
     make_ranked_rows,
     make_ranked_table_header,
     make_section_title,
+    min_run_replicates,
+    uncertainty_header_line,
 )
 from polyzymd.analyses.stats import format_pct
 
@@ -106,9 +109,15 @@ def _format_rg_table(result: RgComparisonResult) -> str:
 
     for run_label in result.run_labels:
         lines.extend(make_section_title(f"Rg Comparison: {run_label}", 41))
+        ranking = result.get_ranking(run_label)
+        lines.append(
+            uncertainty_header_line(
+                min_run_replicates(result, ranking, run_label),
+                equilibration=result.equilibration_time,
+            )
+        )
         lines.extend(make_ranked_table_header(mean_label="Mean Rg (A)"))
 
-        ranking = result.get_ranking(run_label)
         ranked_rows = make_ranked_rows(
             ranking,
             lambda label, run_label=run_label: (
@@ -121,7 +130,10 @@ def _format_rg_table(result: RgComparisonResult) -> str:
             run_summary = condition.get_run(run_label)
             n_replicates = condition.n_replicates or len(run_summary.per_replicate_means)
             sem_str = format_sem_value(sem_rg, n_replicates, precision=2)
-            lines.append(f"{condition.label:<18} {mean_rg:<15.2f} {sem_str:<8} {rank:<4}")
+            ci_str = format_interval_from_sem(mean_rg, sem_rg, n_replicates, precision=2)
+            lines.append(
+                f"{condition.label:<18} {mean_rg:<15.2f} {ci_str:<26} {sem_str:<8} {rank:<4}"
+            )
             mode_line = _format_mode(run_summary)
             if mode_line is not None:
                 lines.append(f"  {mode_line}")
@@ -181,9 +193,16 @@ def _format_rg_markdown(result: RgComparisonResult) -> str:
     for run_label in result.run_labels:
         lines.append(f"## Rg Comparison: {run_label}")
         lines.append("")
+        ranking = result.get_ranking(run_label)
+        lines.append(
+            uncertainty_header_line(
+                min_run_replicates(result, ranking, run_label),
+                equilibration=result.equilibration_time,
+            )
+        )
+        lines.append("")
         lines.extend(make_ranked_markdown_header(mean_label="Mean Rg (A)"))
 
-        ranking = result.get_ranking(run_label)
         ranked_rows = make_ranked_rows(
             ranking,
             lambda label, run_label=run_label: (
@@ -196,7 +215,8 @@ def _format_rg_markdown(result: RgComparisonResult) -> str:
             run_summary = condition.get_run(run_label)
             n_replicates = condition.n_replicates or len(run_summary.per_replicate_means)
             sem_str = format_sem_value(sem_rg, n_replicates, precision=2)
-            lines.append(f"| {condition.label} | {mean_rg:.2f} | {sem_str} | {rank} |")
+            ci_str = format_interval_from_sem(mean_rg, sem_rg, n_replicates, precision=2)
+            lines.append(f"| {condition.label} | {mean_rg:.2f} | {ci_str} | {sem_str} | {rank} |")
 
         if any(
             not is_sem_estimable(

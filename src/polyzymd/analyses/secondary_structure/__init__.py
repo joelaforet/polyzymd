@@ -254,11 +254,10 @@ class SecondaryStructureAnalysis(Analysis):
                 "payload. Recompute the condition or clear stale caches before comparing."
             )
         return {
-            HELIX_FRACTION_METRIC: MetricValue(
-                name=HELIX_FRACTION_METRIC,
-                mean=float(metric["mean"]),
-                sem=float(metric["sem"]),
-                replicate_values=[float(value) for value in metric["values"]],
+            HELIX_FRACTION_METRIC: MetricValue.from_replicate_values(
+                HELIX_FRACTION_METRIC,
+                [float(value) for value in metric["values"]],
+                unit=str(metric.get("unit") or "fraction"),
                 higher_is_better=bool(metric.get("higher_is_better", True)),
                 direction_labels=tuple(
                     metric.get("direction_labels", ("destabilizing", "unchanged", "stabilizing"))

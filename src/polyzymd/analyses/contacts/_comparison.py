@@ -292,11 +292,24 @@ def _validate_metric_summary(
             f"len(values)={len(values)}, n={stored_n}, replicates={expected_n}. Recompute contacts."
         )
     mean = float(np.mean(values)) if values else 0.0
-    std = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
-    sem = float(std / np.sqrt(len(values))) if len(values) > 1 else 0.0
-    expected_stats = {"mean": mean, "std": std, "sem": sem}
+    # A single replicate gives no spread at all, so the stored std and SEM are
+    # None rather than zero. Expect that instead of a fabricated zero.
+    std = float(np.std(values, ddof=1)) if len(values) > 1 else None
+    sem = float(std / np.sqrt(len(values))) if std is not None else None
+    expected_stats: dict[str, float | None] = {"mean": mean, "std": std, "sem": sem}
     for stat_name, expected_value in expected_stats.items():
-        stored_value = _metric_float(metric.get(stat_name), metric_name, stat_name, cond)
+        stored_raw = metric.get(stat_name)
+        if expected_value is None:
+            if stored_raw is None or stored_raw == 0.0:
+                # 0.0 comes from artifacts written before singleton uncertainty
+                # became null. Read it, but never write it again.
+                continue
+            raise ValueError(
+                f"contacts: condition {cond.label!r} metric {metric_name!r} stores "
+                f"{stat_name}={stored_raw!r} for a single replicate, where it is not "
+                "estimable. Recompute contacts."
+            )
+        stored_value = _metric_float(stored_raw, metric_name, stat_name, cond)
         if not np.isclose(
             stored_value,
             expected_value,

@@ -1060,9 +1060,9 @@ class HydrogenBondsAnalysis(Analysis):
                         donor=pair_data["donor"],
                         acceptor=pair_data["acceptor"],
                         mean_occupancy=float(np.mean(occupancies)),
-                        sem_occupancy=float(compute_sem(occupancies).sem),
+                        sem_occupancy=compute_sem(occupancies).sem,
                         mean_events_per_frame=float(np.mean(events_per_frame)),
-                        sem_events_per_frame=float(compute_sem(events_per_frame).sem),
+                        sem_events_per_frame=compute_sem(events_per_frame).sem,
                         per_replicate_occupancy=list(occupancies.tolist()),
                     )
                 )
@@ -1099,9 +1099,9 @@ class HydrogenBondsAnalysis(Analysis):
                         residue_a=pair_data["residue_a"],
                         residue_b=pair_data["residue_b"],
                         mean_occupancy=float(np.mean(occupancies)),
-                        sem_occupancy=float(compute_sem(occupancies).sem),
+                        sem_occupancy=compute_sem(occupancies).sem,
                         mean_events_per_frame=float(np.mean(events_per_frame)),
-                        sem_events_per_frame=float(compute_sem(events_per_frame).sem),
+                        sem_events_per_frame=compute_sem(events_per_frame).sem,
                         per_replicate_occupancy=list(occupancies.tolist()),
                     )
                 )
@@ -1122,12 +1122,12 @@ class HydrogenBondsAnalysis(Analysis):
                     ),
                     n_replicates=n_replicates,
                     mean_hbonds_per_frame=float(hbonds_stats.mean),
-                    sem_hbonds_per_frame=float(hbonds_stats.sem),
+                    sem_hbonds_per_frame=hbonds_stats.sem,
                     per_replicate_mean_hbonds=hbonds_values,
                     mean_unique_pairs_per_frame=float(unique_pairs_stats.mean),
-                    sem_unique_pairs_per_frame=float(unique_pairs_stats.sem),
+                    sem_unique_pairs_per_frame=unique_pairs_stats.sem,
                     mean_fraction_with_any=float(fraction_stats.mean),
-                    sem_fraction_with_any=float(fraction_stats.sem),
+                    sem_fraction_with_any=fraction_stats.sem,
                     per_replicate_fraction_with_any=fraction_values,
                     directed_pairs=directed_aggregates,
                     undirected_pairs=undirected_aggregates,
@@ -1212,10 +1212,10 @@ class HydrogenBondsAnalysis(Analysis):
                     donor_partition=donor_partition,
                     acceptor_partition=acceptor_partition,
                     mean_hbonds_per_frame=float(np.mean(hbonds_array)),
-                    sem_hbonds_per_frame=float(compute_sem(hbonds_array).sem),
+                    sem_hbonds_per_frame=compute_sem(hbonds_array).sem,
                     per_replicate_hbonds=per_rep_hbonds,
                     mean_fraction_of_total=float(np.mean(fractions_array)),
-                    sem_fraction_of_total=float(compute_sem(fractions_array).sem),
+                    sem_fraction_of_total=compute_sem(fractions_array).sem,
                     per_replicate_fraction=per_rep_fractions,
                 )
             )
@@ -1258,8 +1258,6 @@ class HydrogenBondsAnalysis(Analysis):
         for item in summaries:
             if isinstance(item, dict):
                 name = str(item.get("name", "unknown"))
-                mean_val = float(item.get("mean_hbonds_per_frame", 0.0))
-                sem_val = float(item.get("sem_hbonds_per_frame", 0.0))
                 replicate_values = [float(v) for v in item.get("per_replicate_mean_hbonds", [])]
             else:
                 raise PluginContractError(
@@ -1268,11 +1266,10 @@ class HydrogenBondsAnalysis(Analysis):
                 )
 
             metric_key = f"mean_hbonds_{name}"
-            metrics[metric_key] = MetricValue(
-                name=metric_key,
-                mean=mean_val,
-                sem=sem_val,
-                replicate_values=replicate_values,
+            metrics[metric_key] = MetricValue.from_replicate_values(
+                metric_key,
+                replicate_values,
+                unit="hydrogen bonds per frame",
                 higher_is_better=None,
                 direction_labels=("fewer H-bonds", "similar", "more H-bonds"),
             )
