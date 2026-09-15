@@ -16,6 +16,26 @@ FDR thresholds for comparison workflows are configured through top-level
 plugin-local settings unless a plugin explicitly lists its own `fdr_alpha` field
 below.
 
+## Plot settings shared by every plugin
+
+Each plugin's `plot_settings` block inherits this key.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `error_bar` | `"ci95" \| "sem"` | `"ci95"` | Interval drawn on comparison bars and shaded bands. `ci95` draws the 95 percent Student t confidence interval across replicates. `sem` draws one standard error, which at `n = 3` is 4.3 times narrower |
+
+```yaml
+plugins:
+  rmsd:
+    plot_settings:
+      error_bar: ci95
+```
+
+Whichever value is set, the figure carries a footnote naming the interval, the
+number of replicates and the production window, and per-replicate points stay
+overlaid on the bars. `hydrogen_bonds` has no plot settings model, so its
+figures always use the default.
+
 ## Universe loading (`pbc_policy`)
 
 Every plugin reads its coordinates through `TrajectoryLoader.load_universe()`
