@@ -338,8 +338,16 @@ class SecondaryStructureAnalysis(Analysis):
         ctx.output_dir.mkdir(parents=True, exist_ok=True)
         plots: list[Path] = []
         plots.extend(_plot_ss_timeline_heatmap(data, labels, ctx.output_dir, ctx.plot_settings))
-        plots.extend(_plot_ss_content_bars(data, labels, ctx.output_dir, ctx.plot_settings))
-        plots.extend(_plot_ss_individual_bars(data, labels, ctx.output_dir, ctx.plot_settings))
+        plots.extend(
+            _plot_ss_content_bars(
+                data, labels, ctx.output_dir, ctx.plot_settings, ctx.equilibration
+            )
+        )
+        plots.extend(
+            _plot_ss_individual_bars(
+                data, labels, ctx.output_dir, ctx.plot_settings, ctx.equilibration
+            )
+        )
         plots.extend(
             _plot_ss_persistence_diff_heatmap(data, labels, ctx.output_dir, ctx.plot_settings)
         )

@@ -7,13 +7,21 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar, Generic, Self, TypeVar
+from typing import ClassVar, Generic, Literal, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class BasePlotSettings(BaseModel):
-    """Base class for per-analysis plot settings."""
+    """Base class for per-analysis plot settings.
+
+    ``error_bar`` chooses the interval drawn on comparison bars and bands.
+    ``"ci95"`` draws the 95 percent Student t interval across replicates, which
+    is what Grossfield et al. (2018) ask authors to graph. ``"sem"`` draws one
+    standard error, which at n = 3 is 4.3 times narrower.
+    """
+
+    error_bar: Literal["ci95", "sem"] = "ci95"
 
 
 class SlurmResourceHint(BaseModel):

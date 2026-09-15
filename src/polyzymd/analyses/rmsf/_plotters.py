@@ -14,13 +14,18 @@ from typing import Any, Sequence
 import numpy as np
 
 from polyzymd.analyses.shared.plotting import (
+    annotate_uncertainty,
     apply_axis_style,
     apply_legend,
+    error_bar_half_widths,
     get_condition_colors,
     get_output_path,
     order_condition_labels,
+    plugin_plot_settings,
+    resolve_error_bar,
     save_figure,
     scatter_replicate_values,
+    shared_count_half_widths,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,6 +103,8 @@ def _plot_rmsf_profile(
         fig, ax_rmsf = plt.subplots(figsize=plot_settings.rmsf.figsize_profile)
         ax_ss = None
 
+    error_bar = resolve_error_bar(plugin_plot_settings(plot_settings, "rmsf"), plot_settings)
+    n_replicates_seen = 0
     for idx, label in enumerate(ordered_labels):
         if label not in profiles:
             continue
@@ -108,19 +115,15 @@ def _plot_rmsf_profile(
 
         color = colors[idx] if idx < len(colors) else f"C{idx}"
 
-        if (
-            plot_settings.rmsf.show_error
-            and profile.get("n_replicates", 0) > 1
-            and "sem" in profile
-        ):
-            sem = np.array(profile["sem"])
-            ax_rmsf.fill_between(
-                residues,
-                rmsf - sem,
-                rmsf + sem,
-                alpha=t.fill_alpha,
-                color=color,
+        profile_n = int(profile.get("n_replicates", 0) or 0)
+        if plot_settings.rmsf.show_error and profile_n > 1 and "sem" in profile:
+            band = shared_count_half_widths(
+                np.array(profile["sem"], dtype=float), profile_n, error_bar=error_bar
             )
+            ax_rmsf.fill_between(
+                residues, rmsf - band, rmsf + band, alpha=t.fill_alpha, color=color
+            )
+            n_replicates_seen = max(n_replicates_seen, profile_n)
 
         ax_rmsf.plot(residues, rmsf, label=label, color=color, linewidth=1.5)
 
@@ -141,6 +144,8 @@ def _plot_rmsf_profile(
 
     if not show_reference_ss:
         plt.tight_layout()
+
+    annotate_uncertainty(fig, plot_settings, "rmsf", n_replicates=n_replicates_seen)
 
     output_path = get_output_path(output_dir, "rmsf_profile", plot_settings)
     return [save_figure(fig, output_path, plot_settings)]
@@ -236,6 +241,7 @@ def _plot_rmsf_comparison_from_aggregated(
     ax.invert_yaxis()
 
     plt.tight_layout()
+    annotate_uncertainty(fig, plot_settings, "rmsf", replicate_values=replicate_data)
 
     output_path = get_output_path(output_dir, "rmsf_comparison", plot_settings)
     return [save_figure(fig, output_path, plot_settings)]
@@ -249,17 +255,25 @@ def _draw_sem_errorbars(
     replicate_data: Sequence[Any],
     plot_settings: Any,
 ) -> None:
-    """Draw SEM error bars only for conditions with replicate uncertainty."""
+    """Draw the chosen interval only for conditions with replicate uncertainty."""
 
     mask = np.array([len(values) > 1 for values in replicate_data], dtype=bool)
     if not np.any(mask):
+        return
+
+    half_widths = error_bar_half_widths(
+        list(np.asarray(sems, dtype=float)),
+        list(replicate_data),
+        error_bar=resolve_error_bar(plugin_plot_settings(plot_settings, "rmsf"), plot_settings),
+    )
+    if half_widths is None:
         return
 
     theme = plot_settings.theme
     ax.errorbar(
         means[mask],
         positions[mask],
-        xerr=sems[mask],
+        xerr=np.asarray(half_widths, dtype=float)[mask],
         fmt="none",
         ecolor=theme.bar_edgecolor,
         elinewidth=theme.bar_linewidth,
