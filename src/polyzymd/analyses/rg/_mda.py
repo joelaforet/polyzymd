@@ -29,6 +29,8 @@ from polyzymd.analyses.mda.plugin import frame_selection_payload, strict_json_pa
 from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 from polyzymd.analyses.shared.loader import parse_time_string
 from polyzymd.analyses.shared.statistics import compute_sem, metric_summary_payload
+
+from polyzymd.analyses.shared.statistics import compute_sem
 from polyzymd.analyses.shared.topology import require_topology_bonds
 
 if TYPE_CHECKING:
