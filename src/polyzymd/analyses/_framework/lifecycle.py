@@ -277,7 +277,7 @@ class AnalysisLifecycle:
             return None
         mismatches = verify_input_identity(recorded, output_dir)
         try:
-            loader = build_trajectory_loader(self.analysis, condition.sim_config)
+            loader = build_trajectory_loader(condition.sim_config)
             current = [str(path) for path in loader.get_trajectory_info(replicate).trajectory_files]
         except (AttributeError, ImportError, OSError, TypeError, ValueError) as exc:
             # Without the current layout a segment that appeared since the cache

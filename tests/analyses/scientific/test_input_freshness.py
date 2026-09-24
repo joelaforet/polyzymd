@@ -274,6 +274,32 @@ class TestReplicateCacheFreshness:
 
         assert analysis.compute_calls == 2
 
+    def test_new_segment_forces_recompute(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A segment the engine resolves now but the cache never read is not a hit."""
+
+        from polyzymd.analyses._framework import lifecycle
+
+        first = tmp_path / "prod_seg0.dcd"
+        second = tmp_path / "prod_seg1.dcd"
+        first.write_bytes(b"DCD")
+        second.write_bytes(b"DCD")
+        analysis = _FreshnessAnalysis(first)
+        condition = _condition(tmp_path)
+        run_dir = tmp_path / "analysis" / analysis.name / "run_1"
+        _run_once(analysis, condition, run_dir, recompute=True)
+
+        def loader(sim_config: Any) -> Any:
+            del sim_config
+            info = SimpleNamespace(trajectory_files=[first, second])
+            return SimpleNamespace(get_trajectory_info=lambda replicate: info)
+
+        monkeypatch.setattr(lifecycle, "build_trajectory_loader", loader)
+        _run_once(analysis, condition, run_dir)
+
+        assert analysis.compute_calls == 2
+
     def test_cache_without_a_key_is_not_reused(self, tmp_path: Path) -> None:
         """A cache that records no key cannot be shown to match, so it is stale."""
 
