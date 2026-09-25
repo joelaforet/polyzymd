@@ -46,7 +46,8 @@ config.
 ## Change plugin settings
 
 Pass `--set key=value` once per setting. Values are read as YAML, so numbers
-and booleans arrive with the right type, and a dotted key nests.
+and booleans arrive with the right type. `--set` takes only top-level settings;
+put nested ones in a comparison.yaml and pass it with `-f`.
 
 ```bash
 pixi run -e analysis polyzymd analyze rmsf \
