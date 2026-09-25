@@ -25,6 +25,7 @@ from polyzymd.analyses.protocols import (
     ConditionReport,
     PairwiseReport,
     ProtocolReport,
+    _difference_ci,
     analyze,
     build_report,
 )
@@ -423,18 +424,72 @@ class TestAgentText:
         assert "|" not in text
         assert "" not in [line.strip() for line in lines]
 
-    def test_many_conditions_still_fit_the_budget(
+    def test_many_conditions_print_every_line(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """A wide comparison drops lines and says how many it dropped."""
+        """A wide comparison prints every condition and comparison."""
         _install_toy(monkeypatch)
         values = {f"C{index}": [10.0 + index, 10.1 + index, 10.2 + index] for index in range(12)}
         report = _run(tmp_path, values)
 
         lines = report.to_agent_text().strip().split("\n")
 
-        assert len(lines) <= 25
-        assert any("omitted" in line for line in lines)
+        conditions = [line for line in lines if line.startswith("C") and "  n 3  " in line]
+        comparisons = [line for line in lines if line.startswith("C0 vs ")]
+        assert len(conditions) == 12
+        assert len(comparisons) == 11
+        assert not any("omitted" in line for line in lines)
+
+    def test_every_replicate_value_is_printed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A condition with many replicates prints all of their values."""
+        _install_toy(monkeypatch)
+        values = {
+            "A": [10.0 + 0.1 * index for index in range(8)],
+            "B": [12.0 + 0.1 * index for index in range(8)],
+        }
+        report = _run(tmp_path, values)
+
+        line = next(
+            line for line in report.to_agent_text().split("\n") if line.startswith("A  n 8")
+        )
+
+        printed = line.split("  values ", 1)[1].split(", ")
+        assert len(printed) == 8
+        assert "more" not in line
+
+
+class TestDifferenceInterval:
+    """The interval on a difference matches the reported test."""
+
+    A = [1.0, 2.0, 3.0]
+    B = [2.0, 4.0, 6.0, 8.0]
+
+    def test_student_uses_the_pooled_variance(self) -> None:
+        """Pooled variance 4.4 with 5 degrees of freedom gives 3 +/- 4.118."""
+        low, high = _difference_ci(self.A, self.B, "student_t")
+        assert (low, high) == pytest.approx((-1.118283, 7.118283), abs=1e-6)
+
+    def test_welch_uses_separate_variances(self) -> None:
+        """Welch's interval is narrower here than the pooled one."""
+        low, high = _difference_ci(self.A, self.B, "welch_t")
+        assert (low, high) == pytest.approx((-0.897975, 6.897975), abs=1e-6)
+
+    @pytest.mark.parametrize(
+        "values_a, values_b, test",
+        [
+            (A, B, "tukey_hsd"),
+            ([1.0], B, "student_t"),
+            ([1.0, 1.0], [2.0, 2.0], "student_t"),
+            ([1.0, 1.0], [2.0, 2.0], "welch_t"),
+        ],
+    )
+    def test_no_interval_when_none_can_be_estimated(
+        self, values_a: list[float], values_b: list[float], test: str
+    ) -> None:
+        """Tukey, one replicate and zero variance give no interval."""
+        assert _difference_ci(values_a, values_b, test) is None
 
 
 class TestErrors:
