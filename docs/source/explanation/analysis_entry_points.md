@@ -80,8 +80,10 @@ loads, where no trajectory is involved. It is not a general-purpose route.
 The layers grew from the bottom. `TrajectoryLoader` came first, the plugin
 framework was built on it, the CLI was built on the framework, and the protocol
 was added last because the framework alone still demanded too much of a caller
-who only wanted a number. Each layer is still used by the one above it, so none
-of them can be removed, but only the top one is meant to be the starting point.
+who only wanted a number. Each layer is still used by the one above it, and
+only the top one is meant to be the starting point. The layers inside the plugin
+framework are planned to be merged into a single runner in a later release;
+`TrajectoryLoader` and the protocol will stay as they are.
 
 ## See also
 

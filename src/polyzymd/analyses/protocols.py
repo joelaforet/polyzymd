@@ -743,8 +743,8 @@ def _difference_ci(
     The interval matches the variance assumption of the reported test: a pooled
     variance with ``n_a + n_b - 2`` degrees of freedom for Student's t, and
     separate variances with Welch-Satterthwaite degrees of freedom for Welch's
-    t [2]_. Tukey HSD gets no interval, because a studentised-range interval is
-    not a t interval. The interval covers this one difference and carries no
+    t [2]_. Tukey HSD gets no interval, because its simultaneous intervals are
+    not computed here. The interval covers this one difference and carries no
     multiplicity correction, so a comparison can be non-significant after the
     correction while its interval excludes zero.
     """
