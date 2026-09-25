@@ -10,6 +10,7 @@ five lines.
 from __future__ import annotations
 
 import importlib
+import inspect
 import types
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -113,18 +114,24 @@ def synthetic_universe() -> Any:
 def serve_replicates(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
     """Serve in-memory universes to the framework in place of trajectories.
 
-    The returned callable takes one universe, or a ``replicate -> universe``
-    factory, and optionally ``inputs``: the file identity records the cache
-    compares, as a list or a ``replicate -> list`` callable. After it is called,
+    The returned callable takes one universe, or a ``replicate -> universe`` or
+    ``(condition_label, replicate) -> universe`` factory, and optionally ``inputs``: the file identity records the cache
+    compares, as a list or a ``replicate -> list`` callable, and ``warnings``,
+    which the loader reports for every replicate. After it is called,
     every framework entry point reads these universes, with every frame as the
     production window, and no trajectory is opened. It is the only place the
     test suite reaches into how the framework loads a replicate.
     """
 
-    def install(universe: Any, inputs: Any = _DEFAULT_INPUTS) -> None:
-        factory = universe if callable(universe) else (lambda replicate: universe)
+    def install(universe: Any, inputs: Any = _DEFAULT_INPUTS, warnings: Sequence[str] = ()) -> None:
+        if not callable(universe):
+            factory = lambda label, replicate: universe  # noqa: E731
+        elif len(inspect.signature(universe).parameters) == 2:
+            factory = universe
+        else:
+            factory = lambda label, replicate: universe(replicate)  # noqa: E731
         current = inputs if callable(inputs) else (lambda replicate: list(inputs))
-        _stub_universe_source(monkeypatch, factory, current)
+        _stub_universe_source(monkeypatch, factory, current, tuple(warnings))
 
     return install
 
@@ -224,8 +231,9 @@ def make_comparison(
 
 def _stub_universe_source(
     monkeypatch: pytest.MonkeyPatch,
-    factory: Callable[[int], Any],
+    factory: Callable[[str | None, int], Any],
     inputs: Callable[[int], list[dict[str, Any]]],
+    warnings: tuple[str, ...] = (),
 ) -> None:
     """Replace the loader, the universe provider and the window the framework uses."""
     from polyzymd.analyses._framework import lifecycle as framework_lifecycle
@@ -242,10 +250,14 @@ def _stub_universe_source(
             return cls(config, loader=loader)
 
         def load_universe(self, replicate: int) -> Any:
-            return factory(replicate)
+            return factory(getattr(self.config, "name", None), replicate)
 
         def provenance_for(self, replicate: int) -> dict[str, Any]:
-            return {"topology": None, "trajectories": inputs(replicate), "warnings": []}
+            return {
+                "topology": None,
+                "trajectories": inputs(replicate),
+                "warnings": list(warnings),
+            }
 
     class _Loader:
         def __init__(self, config: Any) -> None:
