@@ -119,7 +119,7 @@ def to_pascal_case(snake: str) -> str:
     return "".join(part.capitalize() for part in snake.split("_"))
 
 
-def _build_spec(name: str, class_name: str | None) -> ScaffoldSpec:
+def _build_spec(name: str, class_name: str | None, *, in_study: bool = False) -> ScaffoldSpec:
     """Validate user inputs and build a scaffold render specification.
 
     Parameters
@@ -128,6 +128,8 @@ def _build_spec(name: str, class_name: str | None) -> ScaffoldSpec:
         Plugin name in snake_case.
     class_name : str or None
         Optional PascalCase class prefix.
+    in_study : bool, optional
+        Whether the plugin goes in a study's analyses folder, by default False.
 
     Returns
     -------
@@ -148,7 +150,7 @@ def _build_spec(name: str, class_name: str | None) -> ScaffoldSpec:
     if cls_error:
         raise ValueError(cls_error)
 
-    return ScaffoldSpec(name=name, class_name=cls)
+    return ScaffoldSpec(name=name, class_name=cls, module=name if in_study else None)
 
 
 def _format_paths(paths: list[Path]) -> str:
@@ -302,11 +304,12 @@ def _check_layout_conflicts(spec: ScaffoldSpec, project_root: Path) -> None:
 
 def generate_scaffold(
     name: str,
-    project_root: Path,
+    project_root: Path | None = None,
     *,
     class_name: str | None = None,
     force: bool = False,
     dry_run: bool = False,
+    study_root: Path | None = None,
 ) -> list[Path]:
     """Create scaffold files for a new analysis plugin.
 
@@ -314,8 +317,9 @@ def generate_scaffold(
     ----------
     name : str
         Plugin name in snake_case, for example ``"solvent_shell"``.
-    project_root : Path
-        Repository root directory containing ``src/`` and ``tests/``.
+    project_root : Path or None, optional
+        Repository root directory containing ``src/`` and ``tests/``, for a
+        built-in analysis. Not used when ``study_root`` is given.
     class_name : str or None, optional
         PascalCase class prefix. Auto-derived from *name* when omitted, by
         default None.
@@ -323,6 +327,9 @@ def generate_scaffold(
         Overwrite existing files, by default False.
     dry_run : bool, optional
         Return paths without writing files, by default False.
+    study_root : Path or None, optional
+        Root of a study. When given, the plugin and its test are written to the
+        study's analyses folder instead of the PolyzyMD source tree.
 
     Returns
     -------
@@ -334,13 +341,26 @@ def generate_scaffold(
     FileExistsError
         If a target path exists and ``force`` is False.
     ValueError
-        If the plugin name or the class prefix is invalid.
+        If the plugin name or the class prefix is invalid, or neither root is
+        given.
     """
-    spec = _build_spec(name=name, class_name=class_name)
-    _check_layout_conflicts(spec=spec, project_root=project_root)
-    files = render_scaffold(spec=spec, project_root=project_root)
-    _check_registered_name_conflict(spec=spec)
-    _check_target_conflicts(files=files, project_root=project_root, force=force)
+    spec = _build_spec(name=name, class_name=class_name, in_study=study_root is not None)
+    if study_root is not None:
+        from polyzymd.config.study import STUDY_FILE, StudyConfig
+
+        analyses_dir = (
+            Path(study_root) / StudyConfig.from_yaml(Path(study_root) / STUDY_FILE).analyses
+        )
+        _check_study_name_conflict(spec=spec, analyses_dir=analyses_dir)
+        files = render_scaffold(spec=spec, project_root=Path(study_root), analyses_dir=analyses_dir)
+        _check_target_conflicts(files=files, project_root=Path(study_root), force=force)
+    else:
+        if project_root is None:
+            raise ValueError("generate_scaffold() needs project_root or study_root")
+        _check_layout_conflicts(spec=spec, project_root=project_root)
+        files = render_scaffold(spec=spec, project_root=project_root)
+        _check_registered_name_conflict(spec=spec)
+        _check_target_conflicts(files=files, project_root=project_root, force=force)
 
     created: list[Path] = []
     for path, content in files.items():
@@ -350,3 +370,34 @@ def generate_scaffold(
         created.append(path)
 
     return created
+
+
+def _check_study_name_conflict(spec: ScaffoldSpec, analyses_dir: Path) -> None:
+    """Reject a name a built-in analysis or another study module already uses.
+
+    Raises
+    ------
+    ValueError
+        If the name is a built-in analysis or an importable module, since the
+        generated test imports the plugin by that name.
+    FileExistsError
+        If a module or package of that name already exists in the study's
+        analyses folder.
+    """
+    import importlib.util
+
+    from polyzymd.analyses.discovery import _cached_registry
+
+    if spec.name in _cached_registry():
+        raise ValueError(
+            f"'{spec.name}' is a built-in PolyzyMD analysis; choose another name for the "
+            "study's analysis."
+        )
+    if importlib.util.find_spec(spec.name) is not None:
+        raise ValueError(
+            f"'{spec.name}' is already an importable Python module, so the generated test "
+            "could not import the analysis by that name. Choose another name."
+        )
+    for existing in (analyses_dir / f"{spec.name}.py", analyses_dir / spec.name):
+        if existing.exists():
+            raise FileExistsError(f"{existing} already exists. Choose a different analysis name.")

@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 from polyzymd.cli.colors import colored_echo, echo_logo, setup_colored_logging
 from polyzymd.cli.env_warnings import warn_if_wrong_pixi_env
+from polyzymd.cli.study import study as study_group
 from polyzymd.core.branding import prepend_file_header
 
 # Bootstrap a minimal root handler so suppress_openff_logs() works at import
@@ -3794,10 +3795,16 @@ def info() -> None:
     help="PascalCase class prefix (default: auto-derived from NAME).",
 )
 @click.option(
+    "--builtin",
+    is_flag=True,
+    default=False,
+    help="Write a built-in PolyzyMD analysis into the source tree, even inside a study.",
+)
+@click.option(
     "--project-root",
     type=click.Path(exists=True, file_okay=False, resolve_path=True),
     default=None,
-    help="Repository root. Default: auto-detected from this file's location.",
+    help="Repository root for --builtin. Default: auto-detected from this file's location.",
 )
 @click.option(
     "--force",
@@ -3814,6 +3821,7 @@ def info() -> None:
 def new_analysis(
     name: str,
     class_name: str | None,
+    builtin: bool,
     project_root: str | None,
     force: bool,
     dry_run: bool,
@@ -3822,18 +3830,20 @@ def new_analysis(
 
     NAME is the snake_case plugin name (e.g. 'solvent_shell').
 
-    Creates:
+    Inside a study (a directory holding study.yaml, or below one) this creates:
+
+    \b
+      analyses/<NAME>.py          Settings plus compute()
+      analyses/test_<NAME>.py     two known-answer tests
+
+    Outside a study, or with --builtin, it creates a built-in analysis:
 
     \b
       src/polyzymd/analyses/<NAME>.py             Settings plus compute()
       tests/analyses/plugins/test_<NAME>.py       two known-answer tests
-
-    Run the generated tests with:
-
-    \b
-      pixi run -e build pytest tests/analyses/plugins/test_<NAME>.py -v
     """
     from polyzymd.cli.scaffold import generate_scaffold, validate_class_name, validate_name
+    from polyzymd.config.study import find_study_root
 
     # Force needs scaffold-level ownership checks before registered-name rejection
     error = validate_name(name, check_existing=not force)
@@ -3846,8 +3856,10 @@ def new_analysis(
         if cls_error:
             raise click.BadParameter(cls_error, param_hint="'--class-name'")
 
-    # Resolve project root
-    if project_root is None:
+    study_root = None if builtin or project_root else find_study_root(Path.cwd())
+    if study_root is not None:
+        root = study_root
+    elif project_root is None:
         # Walk up from this file to find pyproject.toml
         root = Path(__file__).resolve().parent
         for _ in range(10):
@@ -3868,6 +3880,7 @@ def new_analysis(
             class_name=class_name,
             force=force,
             dry_run=dry_run,
+            study_root=study_root,
         )
     except (FileExistsError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -3887,10 +3900,19 @@ def new_analysis(
             "and put the real measurement in compute().",
             phase="cli",
         )
-        colored_echo(
-            f"Run tests: pixi run -e test pytest tests/analyses/plugins/test_{name}.py -v",
-            phase="cli",
-        )
+        test_path = created[-1]
+        try:
+            test_path = test_path.relative_to(root)
+        except ValueError:
+            pass
+        colored_echo(f"Run tests: pytest {test_path} -v", phase="cli")
+        if study_root is not None:
+            colored_echo(
+                f"Name '{name}' under plugins: in a comparison.yaml to run it.", phase="cli"
+            )
+
+
+cli.add_command(study_group)
 
 
 # =============================================================================

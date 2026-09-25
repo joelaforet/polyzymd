@@ -1,50 +1,50 @@
 """Tests for the {{ spec.name }} analysis.
 
-Both tests fail until the plugin states a real unit in place of "TODO". The
-fixtures come from tests/analyses/conftest.py: ``synthetic_universe`` is four
-unit-mass atoms on a cross, whose radius of gyration is exactly 1.0, and
-``run_contract_analysis`` runs the real lifecycle over three replicates without
-touching the filesystem.
+Both tests fail until the plugin states a real unit in place of "TODO".
+``synthetic_universe()`` is four unit-mass atoms on a cross, whose radius of
+gyration is exactly 1.0, and ``run_in_memory`` runs compute() on three
+replicates and aggregates them the way the framework does, without touching
+the filesystem.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
-from polyzymd.analyses.contract import ObservableAggregate
-from polyzymd.analyses.mda.frame_selection import FrameSelection
-from polyzymd.analyses.{{ spec.name }} import (
-    {{ spec.class_name }},
-    {{ spec.class_name }}Analysis,
-    {{ spec.class_name }}Settings,
-)
+{% set testing_import = "from polyzymd.analyses.testing import all_frames, run_in_memory, synthetic_universe" -%}
+{% set plugin_import = "from " ~ spec.import_path ~ " import " ~ spec.class_name ~ ", " ~ spec.class_name ~ "Settings" -%}
+{% if not spec.import_path.startswith("polyzymd.") -%}
+{{ testing_import }}
+
+{{ plugin_import }}
+{% elif spec.import_path < "polyzymd.analyses.testing" -%}
+{{ plugin_import }}
+{{ testing_import }}
+{% else -%}
+{{ testing_import }}
+{{ plugin_import }}
+{% endif %}
 
 
-def test_compute_reports_one_value_per_selected_frame(synthetic_universe: Any) -> None:
+def test_compute_reports_one_value_per_selected_frame() -> None:
     """The observable covers the production window and states its unit."""
-    frames = FrameSelection(start=0, stop=5, step=1, n_frames_total=5)
-
+    universe = synthetic_universe()
     settings = {{ spec.class_name }}Settings()
 
-    observables = {{ spec.class_name }}().compute(synthetic_universe, frames, settings)
+    observables = {{ spec.class_name }}().compute(universe, all_frames(universe), settings)
 
     assert [observable.kind for observable in observables] == ["mean_of_timeseries"]
     assert len(observables[0].values) == 5
     assert observables[0].values[0] == pytest.approx(1.0)
 
 
-def test_aggregates_over_three_replicates(
-    synthetic_universe: Any, run_contract_analysis: Any
-) -> None:
+def test_aggregates_over_three_replicates() -> None:
     """Three identical replicates give the known mean and a zero SEM."""
     settings = {{ spec.class_name }}Settings()
 
-    aggregate = run_contract_analysis({{ spec.class_name }}Analysis, settings, synthetic_universe)
+    aggregates = run_in_memory({{ spec.class_name }}, settings, synthetic_universe())
 
-    observable = ObservableAggregate.model_validate(aggregate.payload["observables"][0])
-    assert observable.n_replicates == 3
-    assert observable.replicate_values == pytest.approx([1.0, 1.0, 1.0])
-    assert observable.mean == pytest.approx(1.0)
-    assert observable.sem == pytest.approx(0.0)
+    assert aggregates[0].n_replicates == 3
+    assert aggregates[0].replicate_values == pytest.approx([1.0, 1.0, 1.0])
+    assert aggregates[0].mean == pytest.approx(1.0)
+    assert aggregates[0].sem == pytest.approx(0.0)

@@ -41,7 +41,9 @@ def render_template(template_name: str, spec: ScaffoldSpec) -> str:
     return template.render(spec=spec)
 
 
-def render_scaffold(spec: ScaffoldSpec, project_root: Path) -> dict[Path, str]:
+def render_scaffold(
+    spec: ScaffoldSpec, project_root: Path, *, analyses_dir: Path | None = None
+) -> dict[Path, str]:
     """Render the plugin module and its test for one analysis scaffold.
 
     Parameters
@@ -50,15 +52,21 @@ def render_scaffold(spec: ScaffoldSpec, project_root: Path) -> dict[Path, str]:
         Scaffold rendering specification.
     project_root : Path
         Repository root that will contain generated ``src`` and ``tests`` files.
+    analyses_dir : Path or None, optional
+        A study's analyses folder. When given, the plugin and its test are both
+        written there and ``project_root`` is not used.
 
     Returns
     -------
     dict[Path, str]
         Mapping of output paths to rendered content.
     """
-    analyses_root = project_root / "src" / "polyzymd" / "analyses"
-    tests_dir = project_root / "tests" / "analyses" / "plugins"
+    if analyses_dir is not None:
+        plugin_dir = tests_dir = analyses_dir
+    else:
+        plugin_dir = project_root / "src" / "polyzymd" / "analyses"
+        tests_dir = project_root / "tests" / "analyses" / "plugins"
     return {
-        analyses_root / f"{spec.name}.py": render_template("contract_plugin.py.jinja", spec),
+        plugin_dir / f"{spec.name}.py": render_template("contract_plugin.py.jinja", spec),
         tests_dir / f"test_{spec.name}.py": render_template("test_contract_plugin.py.jinja", spec),
     }

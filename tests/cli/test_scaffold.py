@@ -187,8 +187,8 @@ class TestGenerateScaffold:
         assert "test_compute_reports_one_value_per_selected_frame" in text
         assert "test_aggregates_over_three_replicates" in text
         assert "synthetic_universe" in text
-        assert "run_contract_analysis" in text
-        assert "ObservableAggregate" in text
+        assert "run_in_memory" in text
+        assert "from polyzymd.analyses.solvent_shell import" in text
 
     def test_custom_class_name(self, tmp_path: Path):
         _prepare_project(tmp_path)
