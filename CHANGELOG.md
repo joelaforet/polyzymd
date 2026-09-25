@@ -108,6 +108,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Study results as tables.**  `polyzymd.analyses.load_results` reads every
+  comparison result in a study, a comparison folder or a glob, and returns
+  tidy `conditions`, `comparisons` and `profiles` tables with CSV and pandas
+  exports.  `polyzymd study results` writes them to `results/`.  Only the
+  comparison results are read, so a published study works without its
+  trajectories.
 - **Portable study results.**  Replicate results record their input files by
   path relative to the replicate's working directory, with a content
   fingerprint, and aggregates record a fingerprint of each replicate result

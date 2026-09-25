@@ -6,6 +6,7 @@ Public API
 
     analyze
     ProtocolReport
+    load_results
     load_replicate
     Observable
     contract_analysis
@@ -25,6 +26,15 @@ uncertainty and its sample size::
 
     report = analyze("rg", ["A/config.yaml", "B/config.yaml"], equilibration="10ns")
     print(report.to_agent_text())
+
+Read every result of a study
+----------------------------
+:func:`~polyzymd.analyses.results.load_results` returns tidy tables of every
+condition's numbers and every pairwise test, for figure scripts::
+
+    from polyzymd.analyses import load_results
+
+    load_results("my_study").to_csv("my_study/results")
 
 Read a replicate yourself
 -------------------------
@@ -72,11 +82,15 @@ from polyzymd.analyses.orchestrator import (
     run_comparison,
 )
 from polyzymd.analyses.protocols import ProtocolReport, analyze
+from polyzymd.analyses.results import Results, load_results
 
 __all__ = [
     # Get a number
     "analyze",
     "ProtocolReport",
+    # Read results
+    "load_results",
+    "Results",
     # Read a replicate
     "load_replicate",
     "Replicate",

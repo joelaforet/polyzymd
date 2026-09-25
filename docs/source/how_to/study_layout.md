@@ -92,6 +92,31 @@ Files in `analyses/` whose names start with `_` or `test_`, and a `tests/`
 folder, are not loaded as analyses. Put shared helpers in a file such as
 `analyses/_geometry.py` and import them with `from ._geometry import angle`.
 
+## Collect every number
+
+`polyzymd study results`, run anywhere inside the study, writes three tables to
+`results/`:
+
+- `conditions.csv`: one row per comparison, analysis, condition and scalar
+  observable, with the mean, SEM, 95 percent interval over replicates, the
+  replicate values and their count.
+- `comparisons.csv`: one row per pairwise test, with the difference, the test,
+  the adjusted p-value and the effect size.
+- `profiles.csv`: one row per residue or bin of a profile observable.
+
+The same tables are available in Python, which is how a figure script in
+`workflows/` should read them:
+
+```python
+from polyzymd.analyses import load_results
+
+results = load_results(".")                      # the study root
+temperatures = results.to_dataframe("conditions")
+```
+
+Only the comparison results are read, so this also works on a published study
+without its trajectories.
+
 ## Work outside the framework
 
 The framework's statistics apply to analyses written against the contract. For

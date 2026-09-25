@@ -893,6 +893,20 @@ Create a study folder: `study.yaml`, a `README.md` describing the layout, a
 polyzymd study init -n NAME [--description TEXT]
 ```
 
+(polyzymd-study-results)=
+## polyzymd study results
+
+Write every comparison's numbers in the study as `conditions.csv`,
+`comparisons.csv` and `profiles.csv`. Run it anywhere inside a study.
+
+```bash
+polyzymd study results [-o DIRECTORY] [--analysis NAME ...]
+```
+
+`-o` defaults to `results/` in the study root. `--analysis` limits the tables to
+the named analyses. The Python equivalent is
+`polyzymd.analyses.load_results(study_root)`.
+
 ---
 
 (cli-analyze)=

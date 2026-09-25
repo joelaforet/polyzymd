@@ -99,3 +99,38 @@ def init(name: str, description: str | None) -> None:
     click.echo(f"  cd {root}")
     click.echo("  polyzymd init -n conditions/<condition>")
     click.echo("  polyzymd compare init -n <comparison> -o comparisons")
+
+
+@study.command("results")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Directory for the CSV files. Default: results/ in the study root.",
+)
+@click.option("--analysis", "analyses", multiple=True, help="Only this analysis; repeatable.")
+def results(output: Path | None, analyses: tuple[str, ...]) -> None:
+    """Write every comparison's numbers in the study as three CSV tables.
+
+    Run anywhere inside a study. Writes conditions.csv (one row per condition
+    and observable), comparisons.csv (one row per pairwise test) and
+    profiles.csv (one row per residue or bin of a profile observable).
+    """
+    from polyzymd.analyses.results import load_results
+    from polyzymd.config.study import find_study_root
+
+    root = find_study_root(Path.cwd())
+    if root is None:
+        click.echo("Error: not inside a study (no study.yaml found above this folder).", err=True)
+        sys.exit(1)
+    loaded = load_results(root, analyses=analyses or None)
+    for warning in loaded.warnings:
+        click.secho(f"Warning: {warning}", fg="yellow", err=True)
+    written = loaded.to_csv(output or root / "results")
+    click.echo(
+        f"{len(loaded.conditions)} condition rows, {len(loaded.comparisons)} comparison rows, "
+        f"{len(loaded.profiles)} profile rows"
+    )
+    for path in written:
+        click.echo(f"  {path}")
