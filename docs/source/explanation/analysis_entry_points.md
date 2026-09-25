@@ -57,7 +57,8 @@ more detail than `ProtocolReport` and correspondingly more shapes to handle.
 
 `TrajectoryLoader.load_universe(replicate)` is the canonical way to get an
 MDAnalysis `Universe` from a PolyzyMD config. It chains the production segments
-in order, checks their lineage, and enriches elements. Use it when you need a
+in order and fills in the element attribute of the MDAnalysis universe from the
+atom type if possible, otherwise from the atom name. Use it when you need a
 measurement no plugin provides. Do not use it to reimplement one that exists:
 a hand-written loop will not equilibrate uniformly, will not aggregate across
 replicates the way the framework does, and will produce a number with no
