@@ -24,7 +24,7 @@ EXIT_ANALYSIS_ERROR = 2
 
 
 def _settings(raw: tuple[str, ...]) -> dict[str, Any]:
-    """Parse ``key=value`` pairs, reading each value as YAML and nesting dotted keys."""
+    """Parse flat ``key=value`` pairs, reading each value as YAML."""
     import yaml
 
     from polyzymd.analyses.exceptions import ProtocolError
@@ -45,10 +45,12 @@ def _settings(raw: tuple[str, ...]) -> dict[str, Any]:
                 f"Cannot read the value of setting {key!r}: {exc}",
                 hint="Quote the value, for example --set selection='name CA'.",
             ) from exc
-        target, parts = settings, key.split(".")
-        for part in parts[:-1]:
-            target = target.setdefault(part, {})
-        target[parts[-1]] = parsed
+        if "." in key:
+            raise ProtocolError(
+                f"Setting {key!r} is nested, and --set takes only top-level settings.",
+                hint="Put nested settings in a comparison.yaml and pass it with -f.",
+            )
+        settings[key] = parsed
     return settings
 
 
@@ -126,7 +128,7 @@ def _one_line(text: str) -> str:
     "--set",
     "setting_overrides",
     multiple=True,
-    help="Plugin setting as key=value. Repeatable; a dotted key nests.",
+    help="Top-level plugin setting as key=value. Repeatable.",
 )
 @click.option(
     "--format",

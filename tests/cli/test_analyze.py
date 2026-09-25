@@ -262,6 +262,17 @@ class TestExitCodes:
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         assert "Cannot read setting" in result.stderr
 
+    def test_nested_setting_exits_two(self, config_paths: list[Path]) -> None:
+        """A dotted --set key is rejected with a pointer to comparison.yaml."""
+        result = CliRunner().invoke(
+            analyze_command,
+            ["rg", "-c", str(config_paths[0]), "--set", "composition.partitions={}"],
+        )
+
+        assert result.exit_code == EXIT_ANALYSIS_ERROR
+        assert "top-level settings" in result.stderr
+        assert "comparison.yaml" in result.stderr
+
     def test_bad_replicate_range_exits_two(self, config_paths: list[Path]) -> None:
         """An unparsable --replicates value is a typed error."""
         result = CliRunner().invoke(

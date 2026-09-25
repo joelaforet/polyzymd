@@ -910,7 +910,7 @@ List the available analysis names with `polyzymd compare run --list`.
 | `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default: the comparison default, `10ns`. |
 | `--label TEXT` | No | Condition label, one per `-c` in the same order. Default: the name of the directory holding the config. |
 | `--run LABEL` | No | Run or pair label to report when the analysis measures one metric on several selections, for example `Protein` or `Polymer Oligomers` for rg. Default: the first one the plugin lists; the rest appear in `all_runs`. |
-| `--set KEY=VALUE` | No | Plugin setting. Repeatable. The value is read as YAML, so `--set n_bins=50` gives an integer; a dotted key nests. |
+| `--set KEY=VALUE` | No | Top-level plugin setting. Repeatable. The value is read as YAML, so `--set n_bins=50` gives an integer. Nested settings go in a comparison.yaml passed with `-f`. |
 | `--format agent\|json` | No | `agent` (default) prints one line per condition and comparison; `json` prints the full `ProtocolReport`. For a human-readable table of the same comparison, use `polyzymd compare run --format table`. |
 | `-o, --output PATH` | No | Also write the rendered output to this file. |
 | `--output-dir PATH` | No | Directory for `analysis/`, `comparison/` and `figures/`. Default: the current directory. |
