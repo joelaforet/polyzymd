@@ -72,8 +72,9 @@ it handed to them through `MDAReplicateJobContext`; analysis code outside a
 plugin should not construct one, because the provenance it records has nowhere
 to go.
 
-Loading a file with `mda.Universe()` directly skips element enrichment and the
-lineage check. A few plugins do it for topology-only or external-reference
+Loading a file with `mda.Universe()` directly leaves the element attribute empty
+when the topology file has none, and does not chain the production segments. A
+few plugins do it for topology-only or external-reference
 loads, where no trajectory is involved. It is not a general-purpose route.
 
 ## Why there is more than one
