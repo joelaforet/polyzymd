@@ -19,15 +19,14 @@ from typing import Any, ClassVar, Sequence
 import pytest
 from pydantic import BaseModel
 
-from polyzymd.analyses._framework.aggregate_validation import (
-    AggregateValidationError,
-    validate_aggregate_not_outdated,
-)
+from polyzymd.analyses._framework.aggregate_validation import AggregateValidationError
 from polyzymd.analyses._framework.cache_identity import verify_input_identity, verify_input_set
-from polyzymd.analyses.base import AggregateContext, Analysis, Condition, ReplicateContext
+from polyzymd.analyses.contract import Observable, contract_analysis, iter_frames
 from polyzymd.analyses.exceptions import StaleCacheError
-from polyzymd.analyses.mda.artifacts import ReplicateArtifact
+from polyzymd.analyses.mda.universe import FileIdentity
 from polyzymd.analyses.orchestrator import aggregate_condition_from_disk, run_replicate_once
+from polyzymd.analyses.testing import synthetic_universe
+from tests.analyses.conftest import make_condition
 
 
 class TestVerifyInputIdentity:
@@ -94,121 +93,63 @@ class TestVerifyInputSet:
 
 
 class _FreshnessSettings(BaseModel):
-    """Settings model for the freshness lifecycle fake."""
+    """Settings for the freshness probe."""
 
     scale: float = 1.0
 
 
-class _FreshnessAnalysis(Analysis):
-    """Analysis that records the identity of the trajectory files it read."""
+class _FreshnessProbe:
+    """Contract plugin that counts how often it is computed."""
 
     name: ClassVar[str] = "freshness_probe"
-    Settings: ClassVar[type] = _FreshnessSettings
-    min_replicates: ClassVar[int] = 1
+    Settings: ClassVar[type[BaseModel]] = _FreshnessSettings
+    references: ClassVar[tuple[str, ...]] = ()
+    calls: ClassVar[int] = 0
 
-    def __init__(self, *trajectories: Path) -> None:
-        self.trajectories = list(trajectories)
-        self.compute_calls = 0
-
-    def build_mda_jobs(self, ctx: Any) -> list[Any]:
-        """Decline the MDA job path so the direct compute hook runs."""
-
-        del ctx
-        return []
-
-    def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> ReplicateArtifact:
-        """Return an artifact carrying the identity of its input files."""
-
-        self.compute_calls += 1
-        trajectories = []
-        for trajectory in self.trajectories:
-            stat = trajectory.stat()
-            trajectories.append(
-                {
-                    "path": str(trajectory),
-                    "format": "dcd",
-                    "size_bytes": stat.st_size,
-                    "mtime_ns": stat.st_mtime_ns,
-                }
-            )
-        return ReplicateArtifact(
-            analysis_name=self.name,
-            condition_label=ctx.condition.label,
-            replicate=replicate,
-            payload={"value": float(replicate)},
-            provenance={
-                "universe_policy": {"provenance": {"topology": None, "trajectories": trajectories}}
-            },
-        )
-
-    def aggregate(self, ctx: AggregateContext, results: Sequence[Any]) -> dict[str, Any]:
-        """Average the replicate values."""
-
-        del ctx
-        values = [
-            float(result["value"] if isinstance(result, dict) else result.payload["value"])
-            for result in results
-        ]
-        return {"mean_value": sum(values) / len(values), "n_replicates": len(values)}
+    def compute(self, universe: Any, frames: Any, settings: _FreshnessSettings) -> list[Any]:
+        """Report the scale on every frame and count the call."""
+        type(self).calls += 1
+        values = [settings.scale for _ in iter_frames(universe, frames)]
+        return [Observable(name="value", kind="mean_of_timeseries", unit="A", values=values)]
 
 
-def _condition(tmp_path: Path, replicates: tuple[int, ...] = (1,)) -> Condition:
-    """Build a condition that needs no simulation config.
+_FreshnessAnalysis = contract_analysis(_FreshnessProbe)
 
-    Parameters
-    ----------
-    tmp_path : Path
-        Directory used for the synthetic condition config path.
-    replicates : tuple of int, optional
-        Replicate IDs for the condition, by default ``(1,)``.
 
-    Returns
-    -------
-    Condition
-        Condition usable by the framework lifecycle.
-    """
+@pytest.fixture
+def probe(tmp_path: Path, serve_replicates: Any) -> SimpleNamespace:
+    """A served replicate whose inputs are real files the test can change."""
+    _FreshnessProbe.calls = 0
+    trajectory = tmp_path / "prod.dcd"
+    trajectory.write_bytes(b"DCD")
+    state = SimpleNamespace(
+        files=[trajectory],
+        trajectory=trajectory,
+        condition=make_condition("Cond", tmp_path, (1,)),
+        output_dir=tmp_path / "analysis" / "Cond" / _FreshnessAnalysis.name,
+    )
 
-    return Condition("Cond", tmp_path / "cond.yaml", replicates, SimpleNamespace())
+    def inputs(replicate: int) -> list[dict[str, Any]]:
+        return [FileIdentity.from_path(path).as_dict() for path in state.files]
+
+    serve_replicates(synthetic_universe(), inputs)
+    return state
 
 
 def _run_once(
-    analysis: _FreshnessAnalysis,
-    condition: Condition,
-    run_dir: Path,
+    probe: SimpleNamespace,
     *,
     recompute: bool = False,
     equilibration: str = "0ns",
     scale: float = 1.0,
 ) -> Any:
-    """Run one replicate through the public lifecycle entry point.
-
-    Parameters
-    ----------
-    analysis : _FreshnessAnalysis
-        Analysis under test.
-    condition : Condition
-        Condition being analyzed.
-    run_dir : Path
-        Replicate run directory.
-    recompute : bool, optional
-        Force recomputation, by default False.
-    equilibration : str, optional
-        Equilibration window, by default ``"0ns"``.
-    scale : float, optional
-        Settings value, by default 1.0.
-
-    Returns
-    -------
-    Any
-        Replicate result.
-    """
-
+    """Run replicate 1 of the probe through the public entry point."""
     return run_replicate_once(
-        analysis,
-        condition,
+        _FreshnessAnalysis(),
+        probe.condition,
         _FreshnessSettings(scale=scale),
         equilibration,
-        run_dir,
+        probe.output_dir / "run_1",
         1,
         recompute=recompute,
     )
@@ -217,137 +158,78 @@ def _run_once(
 class TestReplicateCacheFreshness:
     """Cached replicate results are reused only when they provably still hold."""
 
-    def test_fresh_cache_is_reused_without_recomputing(self, tmp_path: Path) -> None:
+    def test_fresh_cache_is_reused_without_recomputing(self, probe: SimpleNamespace) -> None:
         """A cache whose recorded inputs and key match is reused."""
+        _run_once(probe, recompute=True)
+        _run_once(probe)
 
-        trajectory = tmp_path / "prod.dcd"
-        trajectory.write_bytes(b"DCD")
-        analysis = _FreshnessAnalysis(trajectory)
-        condition = _condition(tmp_path)
-        run_dir = tmp_path / "analysis" / analysis.name / "run_1"
+        assert _FreshnessProbe.calls == 1
 
-        _run_once(analysis, condition, run_dir, recompute=True)
-        _run_once(analysis, condition, run_dir)
-
-        assert analysis.compute_calls == 1
-
-    def test_changed_input_forces_recompute(self, tmp_path: Path) -> None:
+    def test_changed_input_forces_recompute(self, probe: SimpleNamespace) -> None:
         """A cache whose trajectory changed on disk is recomputed."""
+        _run_once(probe, recompute=True)
+        probe.trajectory.write_bytes(b"DCDDCDDCD")
+        _run_once(probe)
 
-        trajectory = tmp_path / "prod.dcd"
-        trajectory.write_bytes(b"DCD")
-        analysis = _FreshnessAnalysis(trajectory)
-        condition = _condition(tmp_path)
-        run_dir = tmp_path / "analysis" / analysis.name / "run_1"
+        assert _FreshnessProbe.calls == 2
 
-        _run_once(analysis, condition, run_dir, recompute=True)
-        trajectory.write_bytes(b"DCDDCDDCD")
-        _run_once(analysis, condition, run_dir)
-
-        assert analysis.compute_calls == 2
-
-    def test_changed_equilibration_forces_recompute(self, tmp_path: Path) -> None:
-        """The equilibration window drives frame selection, so it is part of the key."""
-
-        trajectory = tmp_path / "prod.dcd"
-        trajectory.write_bytes(b"DCD")
-        analysis = _FreshnessAnalysis(trajectory)
-        condition = _condition(tmp_path)
-        run_dir = tmp_path / "analysis" / analysis.name / "run_1"
-
-        _run_once(analysis, condition, run_dir, recompute=True, equilibration="0ns")
-        _run_once(analysis, condition, run_dir, equilibration="50ns")
-
-        assert analysis.compute_calls == 2
-
-    def test_changed_settings_force_recompute(self, tmp_path: Path) -> None:
-        """A different settings fingerprint is not a cache hit."""
-
-        trajectory = tmp_path / "prod.dcd"
-        trajectory.write_bytes(b"DCD")
-        analysis = _FreshnessAnalysis(trajectory)
-        condition = _condition(tmp_path)
-        run_dir = tmp_path / "analysis" / analysis.name / "run_1"
-
-        _run_once(analysis, condition, run_dir, recompute=True, scale=1.0)
-        _run_once(analysis, condition, run_dir, scale=2.0)
-
-        assert analysis.compute_calls == 2
-
-    def test_new_segment_forces_recompute(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_new_segment_forces_recompute(self, probe: SimpleNamespace, tmp_path: Path) -> None:
         """A segment the engine resolves now but the cache never read is not a hit."""
+        _run_once(probe, recompute=True)
+        segment = tmp_path / "prod_seg1.dcd"
+        segment.write_bytes(b"DCD")
+        probe.files.append(segment)
+        _run_once(probe)
 
-        from polyzymd.analyses._framework import lifecycle
+        assert _FreshnessProbe.calls == 2
 
-        first = tmp_path / "prod_seg0.dcd"
-        second = tmp_path / "prod_seg1.dcd"
-        first.write_bytes(b"DCD")
-        second.write_bytes(b"DCD")
-        analysis = _FreshnessAnalysis(first)
-        condition = _condition(tmp_path)
-        run_dir = tmp_path / "analysis" / analysis.name / "run_1"
-        _run_once(analysis, condition, run_dir, recompute=True)
+    def test_changed_equilibration_forces_recompute(self, probe: SimpleNamespace) -> None:
+        """The equilibration window drives frame selection, so it is part of the key."""
+        _run_once(probe, recompute=True, equilibration="0ns")
+        _run_once(probe, equilibration="50ns")
 
-        def loader(sim_config: Any) -> Any:
-            del sim_config
-            info = SimpleNamespace(trajectory_files=[first, second])
-            return SimpleNamespace(get_trajectory_info=lambda replicate: info)
+        assert _FreshnessProbe.calls == 2
 
-        monkeypatch.setattr(lifecycle, "build_trajectory_loader", loader)
-        _run_once(analysis, condition, run_dir)
+    def test_changed_settings_force_recompute(self, probe: SimpleNamespace) -> None:
+        """A different settings fingerprint is not a cache hit."""
+        _run_once(probe, recompute=True, scale=1.0)
+        _run_once(probe, scale=2.0)
 
-        assert analysis.compute_calls == 2
+        assert _FreshnessProbe.calls == 2
 
-    def test_cache_without_a_key_is_not_reused(self, tmp_path: Path) -> None:
-        """A cache that records no key cannot be shown to match, so it is stale."""
-
-        trajectory = tmp_path / "prod.dcd"
-        trajectory.write_bytes(b"DCD")
-        analysis = _FreshnessAnalysis(trajectory)
-        condition = _condition(tmp_path)
-        run_dir = tmp_path / "analysis" / analysis.name / "run_1"
-        _run_once(analysis, condition, run_dir, recompute=True)
-
-        result_path = run_dir / "result.json"
+    def test_cache_without_an_identity_is_not_reused(self, probe: SimpleNamespace) -> None:
+        """A cache that records no identity cannot be shown to match, so it is stale."""
+        _run_once(probe, recompute=True)
+        result_path = probe.output_dir / "run_1" / "result.json"
         payload = json.loads(result_path.read_text())
-        payload["metadata"] = {}
+        payload["provenance"] = {}
         result_path.write_text(json.dumps(payload))
 
-        _run_once(analysis, condition, run_dir)
+        _run_once(probe)
 
-        assert analysis.compute_calls == 2
+        assert _FreshnessProbe.calls == 2
 
-    def test_framework_stamps_the_cache_key(self, tmp_path: Path) -> None:
+    def test_framework_stamps_the_cache_key(self, probe: SimpleNamespace) -> None:
         """The framework records the key, so plugins need not remember to."""
+        _run_once(probe, recompute=True, equilibration="25ns")
 
-        trajectory = tmp_path / "prod.dcd"
-        trajectory.write_bytes(b"DCD")
-        analysis = _FreshnessAnalysis(trajectory)
-        condition = _condition(tmp_path)
-        run_dir = tmp_path / "analysis" / analysis.name / "run_1"
-
-        _run_once(analysis, condition, run_dir, recompute=True, equilibration="25ns")
-
-        metadata = json.loads((run_dir / "result.json").read_text())["metadata"]
+        metadata = json.loads((probe.output_dir / "run_1" / "result.json").read_text())["metadata"]
         assert metadata["equilibration"] == "25ns"
         assert metadata["settings_fingerprint"]
 
-    def test_stale_cache_raises_when_aggregating_from_disk(self, tmp_path: Path) -> None:
+    def test_stale_cache_raises_when_aggregating_from_disk(self, probe: SimpleNamespace) -> None:
         """Aggregation from disk has no compute stage, so it must refuse."""
-
-        trajectory = tmp_path / "prod.dcd"
-        trajectory.write_bytes(b"DCD")
-        analysis = _FreshnessAnalysis(trajectory)
-        condition = _condition(tmp_path)
-        output_dir = tmp_path / "analysis" / analysis.name
-        _run_once(analysis, condition, output_dir / "run_1", recompute=True)
-        trajectory.write_bytes(b"DCDDCDDCD")
+        _run_once(probe, recompute=True)
+        probe.trajectory.write_bytes(b"DCDDCDDCD")
 
         with pytest.raises(StaleCacheError) as excinfo:
             aggregate_condition_from_disk(
-                analysis, condition, _FreshnessSettings(), "0ns", output_dir, [1]
+                _FreshnessAnalysis(),
+                probe.condition,
+                _FreshnessSettings(),
+                "0ns",
+                probe.output_dir,
+                [1],
             )
 
         message = str(excinfo.value)
@@ -359,93 +241,72 @@ class TestAggregateFreshness:
     """Aggregates older than the replicate artifacts they summarise are stale."""
 
     @staticmethod
-    def _write_pair(tmp_path: Path, *, replicate_is_newer: bool) -> Path:
+    def _write_pair(root: Path, *, replicate_is_newer: bool) -> Path:
         """Write an aggregate and one replicate result with ordered mtimes.
 
         The mtimes are set explicitly, because both files are otherwise written
         within the same clock tick and the comparison would depend on ordering.
-
-        Parameters
-        ----------
-        tmp_path : Path
-            Condition analysis directory.
-        replicate_is_newer : bool
-            Whether the replicate result is stamped after the aggregate.
-
-        Returns
-        -------
-        Path
-            Path to the aggregate result file.
         """
+        from polyzymd.analyses.mda.artifacts import ConditionArtifact
+        from polyzymd.analyses.mda.store import ArtifactStore
 
-        aggregated_dir = tmp_path / "aggregated"
-        aggregated_dir.mkdir()
+        run_dir = root / "run_1"
+        run_dir.mkdir(parents=True)
+        (run_dir / "result.json").write_text(json.dumps({"value": 1.0}))
+        aggregated_dir = root / "aggregated"
+        ArtifactStore(aggregated_dir).write_condition_result(
+            ConditionArtifact(
+                analysis_name="freshness_probe",
+                condition_label="Cond",
+                replicates=[1],
+                payload={"observables": []},
+            )
+        )
         aggregate_path = aggregated_dir / "result.json"
-        aggregate_path.write_text(json.dumps({"mean_value": 1.0, "replicates": [1]}))
-        run_dir = tmp_path / "run_1"
-        run_dir.mkdir()
-        replicate_path = run_dir / "result.json"
-        replicate_path.write_text(json.dumps({"value": 1.0}))
         base_ns = aggregate_path.stat().st_mtime_ns
         offset = 10**9 if replicate_is_newer else -(10**9)
-        os.utime(replicate_path, ns=(base_ns + offset, base_ns + offset))
-        return aggregate_path
+        os.utime(run_dir / "result.json", ns=(base_ns + offset, base_ns + offset))
+        return aggregated_dir
 
     def test_newer_replicate_artifact_rejects_aggregate(self, tmp_path: Path) -> None:
-        """An aggregate written before a replicate result is refused."""
+        """An aggregate written before a replicate result is refused when read."""
+        from polyzymd.analyses.mda.store import ArtifactStore
 
-        aggregate_path = self._write_pair(tmp_path, replicate_is_newer=True)
+        aggregated_dir = self._write_pair(tmp_path, replicate_is_newer=True)
 
         with pytest.raises(AggregateValidationError) as excinfo:
-            validate_aggregate_not_outdated(
-                json.loads(aggregate_path.read_text()),
-                analysis_name="freshness_probe",
-                source=aggregate_path,
-            )
+            ArtifactStore(aggregated_dir).read_condition_result()
 
         assert "run_1" in str(excinfo.value)
 
     def test_older_replicate_artifact_is_accepted(self, tmp_path: Path) -> None:
         """An aggregate written after its replicate results stays valid."""
+        from polyzymd.analyses.mda.store import ArtifactStore
 
-        aggregate_path = self._write_pair(tmp_path, replicate_is_newer=False)
+        aggregated_dir = self._write_pair(tmp_path, replicate_is_newer=False)
 
-        validate_aggregate_not_outdated(
-            json.loads(aggregate_path.read_text()),
-            analysis_name="freshness_probe",
-            source=aggregate_path,
+        assert ArtifactStore(aggregated_dir).read_condition_result().replicates == [1]
+
+    def test_fresh_aggregate_is_not_judged_by_the_file_it_replaces(
+        self, tmp_path: Path, serve_replicates: Any
+    ) -> None:
+        """Rerunning a condition whose old aggregate is stale rebuilds it without error."""
+        from polyzymd.analyses.orchestrator import run_analysis
+
+        serve_replicates(synthetic_universe())
+        condition = make_condition("Cond", tmp_path, (1, 2))
+        output_dir = tmp_path / "analysis" / "Cond" / _FreshnessAnalysis.name
+        run_analysis(_FreshnessAnalysis(), condition, _FreshnessSettings(), "0ns", output_dir)
+        aggregate_path = output_dir / "aggregated" / "result.json"
+        replicate_path = output_dir / "run_1" / "result.json"
+        later = aggregate_path.stat().st_mtime_ns + 10**9
+        os.utime(replicate_path, ns=(later, later))
+
+        artifact = run_analysis(
+            _FreshnessAnalysis(), condition, _FreshnessSettings(), "0ns", output_dir
         )
 
-    def test_fresh_aggregate_is_not_judged_by_the_file_it_replaces(self, tmp_path: Path) -> None:
-        """A newly computed aggregate is not compared against the stale file.
-
-        ``validate_aggregated_result`` runs on an in-memory aggregate whose
-        ``source`` still names the file about to be overwritten. Applying the
-        mtime comparison there rejected results that were about to replace it.
-        """
-
-        analysis = _FreshnessAnalysis(tmp_path / "prod.dcd")
-        aggregated_dir = tmp_path / "aggregated"
-        aggregated_dir.mkdir()
-        aggregate_path = aggregated_dir / "result.json"
-        aggregate_path.write_text(json.dumps({"mean_value": -1.0, "stale": True}))
-        run_dir = tmp_path / "run_1"
-        run_dir.mkdir()
-        replicate_path = run_dir / "result.json"
-        replicate_path.write_text(json.dumps({"value": 1.0}))
-        base_ns = aggregate_path.stat().st_mtime_ns
-        os.utime(replicate_path, ns=(base_ns + 10**9, base_ns + 10**9))
-
-        validated = analysis.validate_aggregated_result(
-            {"mean_value": 1.0, "replicates": [1], "n_replicates": 1},
-            condition=None,
-            settings=None,
-            equilibration="0ns",
-            source=aggregate_path,
-            expected_replicates=[1],
-        )
-
-        assert validated["mean_value"] == 1.0
+        assert artifact.replicates == [1, 2]
 
 
 class TestArtifactVersionStamping:
@@ -455,7 +316,7 @@ class TestArtifactVersionStamping:
         """``stamp_software_versions`` records the running versions."""
 
         import polyzymd
-        from polyzymd.analyses.mda.artifacts import stamp_software_versions
+        from polyzymd.analyses.mda.artifacts import ReplicateArtifact, stamp_software_versions
 
         artifact = stamp_software_versions(
             ReplicateArtifact(analysis_name="rmsd", condition_label="Cond", replicate=1)
@@ -464,112 +325,58 @@ class TestArtifactVersionStamping:
         assert artifact.polyzymd_version == polyzymd.__version__
         assert artifact.mdanalysis_version is not None
 
-    def test_version_mismatch_warns_without_failing(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    def test_version_mismatch_warns_and_reuses(
+        self, probe: SimpleNamespace, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """A cache from another PolyzyMD version warns rather than raising."""
+        """A cache from another PolyzyMD version warns; the code hashes decide reuse."""
+        _run_once(probe, recompute=True)
+        result_path = probe.output_dir / "run_1" / "result.json"
+        payload = json.loads(result_path.read_text())
+        payload["polyzymd_version"] = "0.0.0-not-a-real-version"
+        result_path.write_text(json.dumps(payload))
 
-        from polyzymd.analyses._framework.cache_identity import warn_on_version_mismatch
+        with caplog.at_level(logging.WARNING):
+            _run_once(probe)
 
-        with caplog.at_level(logging.WARNING, logger="polyzymd.analyses._framework.cache_identity"):
-            message = warn_on_version_mismatch(
-                {"polyzymd_version": "0.0.0-not-a-real-version"}, tmp_path / "result.json"
-            )
-
-        assert message is not None
         assert "0.0.0-not-a-real-version" in caplog.text
-
-
-class TestOverridingPluginsCannotBypassTheCheck:
-    """Plugins that override the aggregate loader still get the staleness check."""
-
-    @pytest.mark.parametrize("plugin_name", ["rg", "rmsd", "sasa"])
-    def test_outdated_aggregate_is_rejected(self, tmp_path: Path, plugin_name: str) -> None:
-        """Each override reads through ArtifactStore, where the check lives."""
-
-        from polyzymd.analyses.mda.artifacts import ConditionArtifact
-        from polyzymd.analyses.mda.store import ArtifactStore
-
-        analysis_dir = tmp_path / plugin_name
-        run_dir = analysis_dir / "run_1"
-        run_dir.mkdir(parents=True)
-        (run_dir / "result.json").write_text(json.dumps({"value": 1.0}))
-        aggregated_dir = analysis_dir / "aggregated"
-        ArtifactStore(aggregated_dir).write_condition_result(
-            ConditionArtifact(
-                analysis_name=plugin_name,
-                condition_label="Cond",
-                replicates=[1],
-                payload={"metric": 1.0},
-            )
-        )
-        aggregate_path = aggregated_dir / "result.json"
-        base_ns = aggregate_path.stat().st_mtime_ns
-        os.utime(run_dir / "result.json", ns=(base_ns + 10**9, base_ns + 10**9))
-
-        with pytest.raises(AggregateValidationError) as excinfo:
-            ArtifactStore(aggregated_dir).read_condition_result()
-
-        assert "run_1" in str(excinfo.value)
+        assert _FreshnessProbe.calls == 1
 
 
 class TestAggregateFromDiskGates:
-    """Both gates agree: the aggregate path checks the cache key too."""
+    """Aggregating from disk refuses what a compute run would recompute."""
 
-    def test_changed_equilibration_is_refused(self, tmp_path: Path) -> None:
+    def test_changed_equilibration_is_refused(self, probe: SimpleNamespace) -> None:
         """A 0ns replicate result must not aggregate under a 50ns request."""
-
-        trajectory = tmp_path / "prod.dcd"
-        trajectory.write_bytes(b"DCD")
-        analysis = _FreshnessAnalysis(trajectory)
-        condition = _condition(tmp_path)
-        output_dir = tmp_path / "analysis" / analysis.name
-        _run_once(analysis, condition, output_dir / "run_1", recompute=True, equilibration="0ns")
+        _run_once(probe, recompute=True, equilibration="0ns")
 
         with pytest.raises(StaleCacheError) as excinfo:
             aggregate_condition_from_disk(
-                analysis, condition, _FreshnessSettings(), "50ns", output_dir, [1]
+                _FreshnessAnalysis(),
+                probe.condition,
+                _FreshnessSettings(),
+                "50ns",
+                probe.output_dir,
+                [1],
             )
 
         assert "equilibration" in str(excinfo.value)
 
-    def test_artifact_without_provenance_is_refused(self, tmp_path: Path) -> None:
-        """An artifact envelope that records no inputs cannot be checked."""
-
-        from polyzymd.analyses.mda.store import ArtifactStore
-
-        analysis = _FreshnessAnalysis(tmp_path / "prod.dcd")
-        condition = _condition(tmp_path)
-        output_dir = tmp_path / "analysis" / analysis.name
-        ArtifactStore(output_dir / "run_1").write_replicate_result(
-            ReplicateArtifact(
-                analysis_name=analysis.name,
-                condition_label="Cond",
-                replicate=1,
-                payload={"value": 1.0},
-                metadata={"equilibration": "0ns"},
-            )
-        )
+    def test_artifact_without_provenance_is_refused(self, probe: SimpleNamespace) -> None:
+        """A replicate artifact that records no identity cannot be checked."""
+        _run_once(probe, recompute=True)
+        result_path = probe.output_dir / "run_1" / "result.json"
+        payload = json.loads(result_path.read_text())
+        payload["provenance"] = {}
+        result_path.write_text(json.dumps(payload))
 
         with pytest.raises(StaleCacheError) as excinfo:
             aggregate_condition_from_disk(
-                analysis, condition, _FreshnessSettings(), "0ns", output_dir, [1]
+                _FreshnessAnalysis(),
+                probe.condition,
+                _FreshnessSettings(),
+                "0ns",
+                probe.output_dir,
+                [1],
             )
 
-        assert "records no input file identity" in str(excinfo.value)
-
-    def test_plain_result_payload_still_aggregates(self, tmp_path: Path) -> None:
-        """A plugin payload the framework never stamped is left alone."""
-
-        analysis = _FreshnessAnalysis(tmp_path / "prod.dcd")
-        condition = _condition(tmp_path)
-        output_dir = tmp_path / "analysis" / analysis.name
-        run_dir = output_dir / "run_1"
-        run_dir.mkdir(parents=True)
-        (run_dir / "result.json").write_text(json.dumps({"value": 2.0}))
-
-        aggregated = aggregate_condition_from_disk(
-            analysis, condition, _FreshnessSettings(), "0ns", output_dir, [1]
-        )
-
-        assert aggregated["n_replicates"] == 1
+        assert "--recompute" in str(excinfo.value)

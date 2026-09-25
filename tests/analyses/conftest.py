@@ -110,14 +110,34 @@ def synthetic_universe() -> Any:
 
 
 @pytest.fixture
-def run_contract_analysis(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., Any]:
-    """Run a contract analysis end to end on in-memory universes.
+def serve_replicates(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Serve in-memory universes to the framework in place of trajectories.
 
-    The returned callable takes the generated analysis class, its settings, and
-    either a universe or a ``replicate -> universe`` factory, and returns the
-    ``ConditionArtifact`` that ``AnalysisLifecycle.run_analysis`` produced. The
-    trajectory loader and the universe provider the replicate lifecycle uses are
-    replaced, so no files are read.
+    The returned callable takes one universe, or a ``replicate -> universe``
+    factory, and optionally ``inputs``: the file identity records the cache
+    compares, as a list or a ``replicate -> list`` callable. After it is called,
+    every framework entry point reads these universes, with every frame as the
+    production window, and no trajectory is opened. It is the only place the
+    test suite reaches into how the framework loads a replicate.
+    """
+
+    def install(universe: Any, inputs: Any = _DEFAULT_INPUTS) -> None:
+        factory = universe if callable(universe) else (lambda replicate: universe)
+        current = inputs if callable(inputs) else (lambda replicate: list(inputs))
+        _stub_universe_source(monkeypatch, factory, current)
+
+    return install
+
+
+@pytest.fixture
+def run_contract_analysis(
+    tmp_path: Path, serve_replicates: Callable[..., None]
+) -> Callable[..., Any]:
+    """Run a contract analysis for one condition on in-memory universes.
+
+    The returned callable takes the analysis class, its settings, and either a
+    universe or a ``replicate -> universe`` factory, and returns the
+    ``ConditionArtifact`` that ``orchestrator.run_analysis`` produced.
 
     Returns
     -------
@@ -135,37 +155,83 @@ def run_contract_analysis(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ca
         label: str = "A",
         replicates: Sequence[int] = (1, 2, 3),
         equilibration: str = "0ns",
-        inputs: Sequence[dict[str, Any]] = _DEFAULT_INPUTS,
+        inputs: Any = _DEFAULT_INPUTS,
         root: Path | None = None,
     ) -> Any:
-        from polyzymd.analyses._framework.contexts import Condition
-        from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
+        from polyzymd.analyses.orchestrator import run_analysis
 
         base = root or tmp_path
-        factory = universe if callable(universe) else (lambda replicate: universe)
-        condition = Condition(
-            label=label,
-            config_path=base / f"{label}.yaml",
-            replicates=tuple(replicates),
-            sim_config=make_simulation_config(label),
-        )
-        _stub_universe_source(monkeypatch, factory, tuple(inputs))
-        stub_cls = _stubbed(analysis_cls)
-        return AnalysisLifecycle(stub_cls()).run_analysis(
-            condition,
+        serve_replicates(universe, inputs)
+        return run_analysis(
+            analysis_cls(),
+            make_condition(label, base, replicates),
             settings,
             equilibration,
-            base / "analysis" / label / stub_cls.name,
+            base / "analysis" / label / analysis_cls.name,
         )
 
     return run
 
 
+def make_condition(label: str, root: Path, replicates: Sequence[int] = (1, 2, 3)) -> Any:
+    """A condition whose simulation config needs no files on disk."""
+    from polyzymd.analyses.base import Condition
+
+    return Condition(
+        label=label,
+        config_path=root / f"{label}.yaml",
+        replicates=tuple(replicates),
+        sim_config=make_simulation_config(label),
+    )
+
+
+def make_comparison(
+    root: Path,
+    *,
+    labels: Sequence[str] = ("A", "B"),
+    replicates: Sequence[int] = (1, 2, 3),
+    control: str | None = "A",
+    settings: dict[str, Any] | None = None,
+    equilibration: str = "0ns",
+    **defaults: Any,
+) -> Any:
+    """A comparison config over conditions whose simulation configs need no files.
+
+    ``settings`` maps analysis name to its settings; ``defaults`` sets
+    ``fdr_alpha``, ``ttest_method`` or ``posthoc_method``. Use it together with
+    ``serve_replicates``, which makes these conditions load without YAML.
+    """
+    from types import SimpleNamespace
+
+    from polyzymd.config.comparison import PlotSettings
+
+    plugins = dict(settings or {})
+    config = SimpleNamespace(
+        name="project",
+        source_path=root / "comparison.yaml",
+        defaults=SimpleNamespace(equilibration_time=equilibration, **defaults),
+        control=control,
+        conditions=[
+            SimpleNamespace(label=label, config=root / f"{label}.yaml", replicates=list(replicates))
+            for label in labels
+        ],
+        plugins=SimpleNamespace(get=plugins.get, get_enabled_plugins=lambda: list(plugins)),
+        plot_settings=PlotSettings(output_dir=root / "figures"),
+    )
+    config.model_copy = lambda deep=True: config
+    return config
+
+
 def _stub_universe_source(
-    monkeypatch: pytest.MonkeyPatch, factory: Callable[[int], Any], inputs: tuple
+    monkeypatch: pytest.MonkeyPatch,
+    factory: Callable[[int], Any],
+    inputs: Callable[[int], list[dict[str, Any]]],
 ) -> None:
-    """Replace the loader and the universe provider the lifecycle builds."""
+    """Replace the loader, the universe provider and the window the framework uses."""
+    from polyzymd.analyses._framework import lifecycle as framework_lifecycle
+    from polyzymd.analyses.base import Analysis, Condition
     from polyzymd.analyses.mda import lifecycle
+    from polyzymd.analyses.shared.window import TrajectoryWindow
 
     class _Provider:
         def __init__(self, config: Any, loader: Any = None) -> None:
@@ -179,35 +245,39 @@ def _stub_universe_source(
             return factory(replicate)
 
         def provenance_for(self, replicate: int) -> dict[str, Any]:
-            return {"topology": None, "trajectories": list(inputs), "warnings": []}
+            return {"topology": None, "trajectories": inputs(replicate), "warnings": []}
 
     class _Loader:
         def __init__(self, config: Any) -> None:
             self.config = config
 
+        def get_trajectory_info(self, replicate: int) -> Any:
+            files = [Path(entry["path"]) for entry in inputs(replicate) if "path" in entry]
+            return types.SimpleNamespace(trajectory_files=files)
+
+    def full_window(self: Any, ctx: Any, replicate: int, loader: Any, universe: Any) -> Any:
+        n_frames = len(universe.trajectory)
+        return TrajectoryWindow(
+            start=0,
+            stop=n_frames,
+            step=1,
+            equilibration_start=0,
+            n_frames_total=n_frames,
+            n_frames_selected=n_frames,
+            timestep_ps=1.0,
+            equilibration_ps=0.0,
+            equilibration=ctx.equilibration,
+        )
+
+    def condition_from_config(cfg: Any) -> Any:
+        return Condition(
+            cfg.label, Path(cfg.config), tuple(cfg.replicates), make_simulation_config(cfg.label)
+        )
+
+    monkeypatch.setattr(Condition, "from_condition_config", staticmethod(condition_from_config))
     monkeypatch.setattr(lifecycle, "UniverseProvider", _Provider)
     monkeypatch.setattr(lifecycle, "build_trajectory_loader", lambda config: _Loader(config))
-
-
-def _stubbed(analysis_cls: type) -> type:
-    """Subclass an analysis with a fixed production window over every frame."""
-    from polyzymd.analyses.shared.window import TrajectoryWindow
-
-    class _Stubbed(analysis_cls):  # type: ignore[valid-type, misc]
-        def get_trajectory_window(
-            self, ctx: Any, replicate: int, loader: Any, universe: Any
-        ) -> TrajectoryWindow:
-            n_frames = len(universe.trajectory)
-            return TrajectoryWindow(
-                start=0,
-                stop=n_frames,
-                step=1,
-                equilibration_start=0,
-                n_frames_total=n_frames,
-                n_frames_selected=n_frames,
-                timestep_ps=1.0,
-                equilibration_ps=0.0,
-                equilibration=ctx.equilibration,
-            )
-
-    return _Stubbed
+    monkeypatch.setattr(
+        framework_lifecycle, "build_trajectory_loader", lambda config: _Loader(config)
+    )
+    monkeypatch.setattr(Analysis, "get_trajectory_window", full_window)

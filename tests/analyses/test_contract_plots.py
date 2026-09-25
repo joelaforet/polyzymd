@@ -476,50 +476,19 @@ def test_the_footnote_promises_points_only_when_points_are_drawn(
 
 
 def test_rg_writes_its_figures_through_run_comparison(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, serve_replicates: Any
 ) -> None:
     """A real plugin gets figures from the full comparison lifecycle, unedited."""
-    from types import SimpleNamespace
-
-    from polyzymd.analyses._framework.contexts import Condition
-    from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
+    from polyzymd.analyses.orchestrator import run_comparison
     from polyzymd.analyses.rg import RgAnalysis, RgSettings
-    from polyzymd.config.comparison import PlotSettings
-    from tests.analyses.conftest import _stub_universe_source, _stubbed
+    from tests.analyses.conftest import make_comparison
 
     settings = RgSettings(runs=[{"label": "protein", "selection": "all"}])
-    monkeypatch.setattr(
-        Condition,
-        "from_condition_config",
-        staticmethod(
-            lambda cfg: Condition(
-                cfg.label, cfg.config, tuple(cfg.replicates), make_simulation_config(cfg.label)
-            )
-        ),
+    serve_replicates(
+        lambda replicate: make_synthetic_universe(scale=1.0 + 0.5 * replicate, n_frames=8), ()
     )
-    config = SimpleNamespace(
-        name="project",
-        source_path=tmp_path / "comparison.yaml",
-        defaults=SimpleNamespace(equilibration_time="0ns"),
-        control="A",
-        conditions=[
-            SimpleNamespace(label=label, config=tmp_path / f"{label}.yaml", replicates=[1, 2, 3])
-            for label in ("A", "B")
-        ],
-        plugins=SimpleNamespace(get=lambda name: None),
-        plot_settings=PlotSettings(output_dir=tmp_path / "figures"),
-    )
-    config.model_copy = lambda deep=True: config
-    _stub_universe_source(
-        monkeypatch,
-        lambda replicate: make_synthetic_universe(scale=1.0 + 0.5 * replicate, n_frames=8),
-        (),
-    )
-    stubbed = _stubbed(RgAnalysis)
 
-    result = AnalysisLifecycle(stubbed(), settings_resolver=lambda _a, _c: settings).run_comparison(
-        config
-    )
+    result = run_comparison(RgAnalysis(), make_comparison(tmp_path, settings={"rg": settings}))
 
     assert [path.name for path in result["plots"]] == [
         "rg_rg_protein_comparison.png",
