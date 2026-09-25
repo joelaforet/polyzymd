@@ -16,6 +16,8 @@ from typing import Any, Callable, Sequence
 
 import pytest
 
+from polyzymd.analyses.testing import synthetic_universe as make_synthetic_universe
+
 #: Every plugin is on the observable contract, so the framework draws every
 #: figure and there is one module left to audit.
 _PLOTTER_MODULES = ("polyzymd.analyses.contract_plots",)
@@ -82,37 +84,7 @@ def audit_plot_uncertainty_footnotes(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(module, "save_figure", _checked)
 
 
-#: Four atoms on a unit cross. The radius of gyration of this shape is its scale.
-CROSS = ((1.0, 0.0, 0.0), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, -1.0, 0.0))
-
 _DEFAULT_INPUTS = ({"path": "/tmp/topology.pdb", "format": "pdb", "size_bytes": 1, "mtime_ns": 2},)
-
-
-def make_synthetic_universe(scale: float = 1.0, n_frames: int = 5) -> Any:
-    """Build an in-memory universe of four unit-mass atoms on a cross.
-
-    Parameters
-    ----------
-    scale : float, optional
-        Distance of each atom from the origin, by default 1.0. The radius of
-        gyration of the group is exactly this value.
-    n_frames : int, optional
-        Number of identical frames, by default 5.
-
-    Returns
-    -------
-    MDAnalysis.Universe
-        Universe backed by ``MemoryReader``.
-    """
-    import MDAnalysis as mda
-    import numpy as np
-    from MDAnalysis.coordinates.memory import MemoryReader
-
-    universe = mda.Universe.empty(4, n_residues=1, atom_resindex=[0] * 4, trajectory=True)
-    universe.add_TopologyAttr("masses", [1.0] * 4)
-    positions = np.asarray(CROSS, dtype=np.float32) * scale
-    universe.load_new(np.stack([positions] * n_frames), format=MemoryReader)
-    return universe
 
 
 def make_simulation_config(label: str = "A") -> types.SimpleNamespace:

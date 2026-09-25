@@ -20,7 +20,8 @@ from polyzymd.analyses.exceptions import (
     TopologyBondsMissingError,
 )
 from polyzymd.analyses.rg import Rg, RgAnalysis, RgRunSettings, RgSettings
-from tests.analyses.conftest import CROSS, make_synthetic_universe
+from polyzymd.analyses.testing import CROSS
+from tests.analyses.conftest import make_synthetic_universe
 
 FRAMES = (0, 3, 1)
 

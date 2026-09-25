@@ -902,6 +902,14 @@ class ComparisonConfig(BaseModel):
                     if not cond_path.is_absolute():
                         cond["config"] = str(config_dir / cond_path)
 
+        # Register the study's own analyses before any plugin name is looked up
+        from polyzymd.analyses.discovery import load_analysis_directory
+        from polyzymd.config.study import analyses_directory
+
+        study_analyses = analyses_directory(path)
+        if study_analyses is not None:
+            load_analysis_directory(study_analyses)
+
         # Resolve plugin-declared settings path fields relative to comparison.yaml
         plugins = data.get("plugins")
         if isinstance(plugins, dict):

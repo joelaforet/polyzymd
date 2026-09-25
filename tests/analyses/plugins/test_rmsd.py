@@ -22,7 +22,7 @@ from polyzymd.analyses.rmsd import (
     RMSDSettings,
     observable_name,
 )
-from tests.analyses.conftest import CROSS
+from polyzymd.analyses.testing import CROSS
 
 SCALES = (1.0, 1.2, 1.4, 1.6, 1.8)
 EXPECTED_MEAN = 0.4  # mean of |s - 1| over SCALES

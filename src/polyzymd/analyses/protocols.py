@@ -194,7 +194,7 @@ class ProtocolReport(BaseModel):
 
 
 def analyze(
-    name: str,
+    name: Any,
     configs: Sequence[Path | str],
     *,
     replicates: Sequence[int] | None = None,
@@ -213,8 +213,13 @@ def analyze(
 
     Parameters
     ----------
-    name : str
-        Canonical analysis name, for example ``"rg"``.
+    name : str or plugin
+        Canonical analysis name, for example ``"rg"``, or an analysis defined in
+        a script: a plugin class or instance satisfying
+        :class:`~polyzymd.analyses.contract.AnalysisProtocol`, or the class
+        :func:`~polyzymd.analyses.contract.contract_analysis` returned. Names
+        from the study's ``analyses/`` folder resolve as well; the folder is
+        found from the first config.
     configs : sequence of Path or str
         Simulation ``config.yaml`` paths, control first.
     replicates : sequence of int, optional
@@ -242,9 +247,12 @@ def analyze(
     Raises
     ------
     ProtocolError
-        If the name is unknown, a config is missing, the labels do not match
-        the configs, the settings are invalid, or no replicates are found.
+        If the name is unknown, the plugin breaks the contract, a config is
+        missing, the labels do not match the configs, the settings are invalid,
+        or no replicates are found.
     """
+    if configs:
+        _load_study_analyses(Path(configs[0]).expanduser())
     analysis_cls = _analysis_class(name)
     config = _build_config(
         analysis_cls,
@@ -353,16 +361,43 @@ def build_report(
     )
 
 
-def _analysis_class(name: str) -> type["Analysis"]:
-    """Look up an analysis plugin class by name, raising ``ProtocolError`` if unknown."""
-    from polyzymd.analyses.discovery import get_analysis, list_all_names
+def _analysis_class(name: Any) -> type["Analysis"]:
+    """Resolve a name or a plugin to its analysis class, raising ``ProtocolError``.
 
+    A plugin object is registered first, so the comparison config can validate
+    its settings by name like any other analysis.
+    """
+    from polyzymd.analyses.discovery import get_analysis, list_all_names, register_analysis
+    from polyzymd.analyses.exceptions import PluginContractError
+
+    if not isinstance(name, str):
+        try:
+            return register_analysis(name)
+        except PluginContractError as exc:
+            raise ProtocolError(
+                str(exc), hint="See polyzymd.analyses.contract.AnalysisProtocol."
+            ) from exc
     try:
         return get_analysis(name)
     except KeyError as exc:
         raise ProtocolError(
             f"Unknown analysis {name!r}.", hint=f"Use one of: {', '.join(list_all_names())}."
         ) from exc
+
+
+def _load_study_analyses(start: Path) -> None:
+    """Register the analyses of the study that ``start`` belongs to, if any."""
+    from polyzymd.analyses.discovery import load_analysis_directory
+    from polyzymd.analyses.exceptions import PluginContractError
+    from polyzymd.config.study import analyses_directory
+
+    directory = analyses_directory(start)
+    if directory is None:
+        return
+    try:
+        load_analysis_directory(directory)
+    except PluginContractError as exc:
+        raise ProtocolError(str(exc), hint=f"Fix the analysis files in {directory}.") from exc
 
 
 # Config construction
