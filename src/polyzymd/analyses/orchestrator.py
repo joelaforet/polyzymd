@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from pydantic import BaseModel
 
@@ -44,6 +44,12 @@ from polyzymd.analyses.base import (
     PlotContext,
     _measurement_warnings,
     _unpack,
+)
+from polyzymd.analyses.completeness import (
+    comparison_completeness,
+    condition_completeness,
+    replicate_completeness,
+    summaries,
 )
 from polyzymd.analyses.contract import ObservableEstimate, aggregate_observables, reduce_replicate
 from polyzymd.analyses.exceptions import (
@@ -84,6 +90,8 @@ def run_replicate_once(
     output_dir: Path,
     replicate: int,
     recompute: bool,
+    *,
+    include_running: bool = False,
 ) -> ReplicateArtifact:
     """Compute one replicate, or reuse its cached result, and write it.
 
@@ -104,11 +112,16 @@ def run_replicate_once(
         One-indexed replicate number.
     recompute : bool
         Ignore a cached result.
+    include_running : bool, optional
+        Also read production segments that are still being written, or that
+        were interrupted or failed, by default False. The replicate is then
+        marked incomplete.
 
     Returns
     -------
     ReplicateArtifact
-        The reduced observables with their identity block.
+        The reduced observables, their identity block, and a completeness
+        record in ``metadata["completeness"]``.
 
     Raises
     ------
@@ -121,12 +134,14 @@ def run_replicate_once(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     if not recompute:
-        cached = _reusable(analysis, condition, settings, equilibration, output_dir, replicate)
+        cached = _reusable(
+            analysis, condition, settings, equilibration, output_dir, replicate, include_running
+        )
         if cached is not None:
             return cached
     try:
         artifact, arrays = _compute_replicate(
-            analysis, condition, settings, equilibration, replicate
+            analysis, condition, settings, equilibration, replicate, include_running
         )
     except (FileNotFoundError, OSError, ReplicateSkippedError, PluginContractError):
         raise
@@ -147,6 +162,7 @@ def _compute_replicate(
     settings: BaseModel,
     equilibration: str,
     replicate: int,
+    include_running: bool = False,
 ) -> tuple[ReplicateArtifact, dict[str, dict[str, Any]]]:
     """Load the replicate and run ``compute()``.
 
@@ -155,7 +171,7 @@ def _compute_replicate(
     every observable, and any extra table the plugin returned.
     """
     universe, frames, provenance = loading.open_replicate(
-        condition.sim_config, replicate, equilibration
+        condition.sim_config, replicate, equilibration, require_complete=not include_running
     )
     if frames.warning_message:
         logger.warning(
@@ -200,6 +216,7 @@ def _compute_replicate(
             "result_kind": "observables",
             "settings_fingerprint": identity.settings_fingerprint(settings),
             "equilibration": str(equilibration),
+            "completeness": replicate_completeness(frames, provenance, condition.sim_config),
         },
         warnings=list(dict.fromkeys(warnings)),
     )
@@ -215,6 +232,7 @@ def _reusable(
     equilibration: str,
     output_dir: Path,
     replicate: int,
+    include_running: bool = False,
 ) -> ReplicateArtifact | None:
     """Return the cached replicate when its identity still matches, else ``None``."""
     result_path = output_dir / RESULT_FILE
@@ -237,7 +255,11 @@ def _reusable(
         settings,
         equilibration,
         identity.describe_inputs(
-            identity.input_files(loading.replicate_provenance(condition.sim_config, replicate)),
+            identity.input_files(
+                loading.replicate_provenance(
+                    condition.sim_config, replicate, require_complete=not include_running
+                )
+            ),
             _working_dir(condition, replicate),
         ),
     )
@@ -274,12 +296,17 @@ def run_analysis(
     equilibration: str = "0ns",
     output_dir: Path | None = None,
     recompute: bool = False,
+    *,
+    include_running: bool = False,
 ) -> ConditionArtifact:
     """Compute every replicate of one condition and aggregate them.
 
     A replicate that cannot be read (a missing file, or a
     :class:`~polyzymd.analyses.exceptions.ReplicateSkippedError`) is skipped
-    with a warning. Any other failure stops the condition.
+    with a warning, so a condition whose replicates are not all finished can
+    still be looked at. The aggregate records which replicates were used and
+    why any were not; see :mod:`polyzymd.analyses.completeness`. Any other
+    failure stops the condition.
 
     Returns
     -------
@@ -301,6 +328,7 @@ def run_analysis(
     successful: list[int] = []
     failed: list[int] = []
     reasons: list[str] = []
+    dropped: dict[int, str] = {}
     for replicate in condition.replicates:
         try:
             results.append(
@@ -312,6 +340,7 @@ def run_analysis(
                     output_dir / f"run_{replicate}",
                     replicate,
                     recompute,
+                    include_running=include_running,
                 )
             )
             successful.append(replicate)
@@ -321,10 +350,12 @@ def run_analysis(
             )
             failed.append(replicate)
             reasons.append(f"replicate {replicate}: {type(exc).__name__}: {exc}")
+            dropped[replicate] = f"{type(exc).__name__}: {exc}"
         except ReplicateSkippedError as exc:
             logger.warning("  Skipping %s rep %d: %s", condition.label, replicate, exc)
             failed.append(replicate)
             reasons.append(f"replicate {replicate}: {exc}")
+            dropped[replicate] = str(exc)
     if not results:
         raise ValueError(
             f"{analysis.name}: condition '{condition.label}' has 0 successful replicates, "
@@ -340,7 +371,15 @@ def run_analysis(
             len(condition.replicates),
         )
     aggregated = _aggregate(
-        analysis, condition, settings, equilibration, output_dir, results, successful, recompute
+        analysis,
+        condition,
+        settings,
+        equilibration,
+        output_dir,
+        results,
+        successful,
+        recompute,
+        dropped=dropped,
     )
     logger.info(f"  Aggregated {len(results)} replicates for '{condition.label}'")
     return aggregated
@@ -371,10 +410,12 @@ def aggregate_condition_from_disk(
     successful: list[int] = []
     missing: list[Path] = []
     warnings: list[str] = []
+    dropped: dict[int, str] = {}
     for replicate in replicates:
         path = output_dir / f"run_{replicate}" / RESULT_FILE
         if not path.exists():
             missing.append(path)
+            dropped[replicate] = "no replicate result on disk"
             logger.warning(
                 "%s: missing replicate result for '%s' rep %d at %s",
                 analysis.name,
@@ -413,6 +454,7 @@ def aggregate_condition_from_disk(
         successful,
         recompute,
         warnings=warnings,
+        dropped=dropped,
     )
 
 
@@ -493,6 +535,7 @@ def _aggregate(
     recompute: bool,
     *,
     warnings: Sequence[str] = (),
+    dropped: Mapping[int, str] | None = None,
 ) -> ConditionArtifact:
     """Aggregate replicate artifacts by observable kind and write the result."""
     aggregated_dir = output_dir / "aggregated"
@@ -531,6 +574,14 @@ def _aggregate(
             "equilibration": str(equilibration),
             "config_hash": identity.compute_config_hash(condition.sim_config),
             "n_replicates": len(results),
+            "completeness": condition_completeness(
+                condition.replicates,
+                {
+                    int(replicate): result.metadata.get("completeness")
+                    for replicate, result in zip(replicates, results, strict=True)
+                },
+                dict(dropped or {}),
+            ),
         },
         warnings=list(warnings),
     )
@@ -615,17 +666,21 @@ def run_comparison(
     config: ComparisonConfig,
     recompute: bool = False,
     equilibration: str | None = None,
+    *,
+    include_running: bool = False,
 ) -> dict[str, Any]:
     """Run one analysis over every condition of a comparison.
 
     A condition that fails is logged and left out, and finalizing then refuses
-    the incomplete comparison. A plugin contract error stops everything.
+    the incomplete comparison. A condition whose replicates are not all
+    finished is computed from what it has and marked partial. A plugin
+    contract error stops everything.
 
     Returns
     -------
     dict
         ``aggregated`` (label to aggregate), ``comparison``,
-        ``comparison_path`` and ``plots``.
+        ``comparison_path``, ``plots`` and ``completeness``.
     """
     from polyzymd.analyses.shared.paths import sanitize_label
 
@@ -643,7 +698,13 @@ def run_comparison(
         directory = analysis_root / sanitize_label(condition.label) / analysis.name
         try:
             aggregated[condition.label] = run_analysis(
-                analysis, condition, settings, equilibration, directory, recompute
+                analysis,
+                condition,
+                settings,
+                equilibration,
+                directory,
+                recompute,
+                include_running=include_running,
             )
             analysis_dirs[condition.label] = directory
         except PluginContractError:
@@ -694,7 +755,8 @@ def finalize_comparison_from_disk(
     Returns
     -------
     dict
-        ``comparison``, ``comparison_path`` and ``plots``.
+        ``comparison``, ``comparison_path``, ``plots`` and ``completeness``,
+        which says whether every condition used every listed replicate in full.
     """
     if prepared_state is None:
         prepared = prepare_comparison_run(analysis, config, config.defaults.equilibration_time)
@@ -805,6 +867,13 @@ def finalize_comparison_from_disk(
             f"{analysis.name}: compare failed for comparison='{config.name}': "
             f"{type(exc).__name__}: {exc}"
         ) from exc
+    completeness = comparison_completeness(
+        {label: artifact.metadata.get("completeness") for label, artifact in valid.items()},
+        [c.label for c in dropped],
+    )
+    comparison.metadata["completeness"] = completeness
+    for line in summaries(completeness["conditions"]):
+        logger.warning("%s: PARTIAL: %s", analysis.name, line)
     try:
         ArtifactStore(results_dir).write_comparison_result(comparison, RESULT_FILE)
     except OSError as exc:
@@ -834,7 +903,12 @@ def finalize_comparison_from_disk(
             f"{analysis.name}: plot failed for comparison='{config.name}': "
             f"{type(exc).__name__}: {exc}"
         ) from exc
-    return {"comparison": comparison, "comparison_path": comparison_path, "plots": list(plots)}
+    return {
+        "comparison": comparison,
+        "comparison_path": comparison_path,
+        "plots": list(plots),
+        "completeness": completeness,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -921,6 +995,8 @@ def run_all_comparisons(
     analysis_names: list[str] | None = None,
     recompute: bool = False,
     equilibration: str | None = None,
+    *,
+    include_running: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Run several analyses, recording a failure as ``{"error": message}``."""
     from polyzymd.analyses.discovery import get_analysis
@@ -935,7 +1011,11 @@ def run_all_comparisons(
         logger.info(f"{'=' * 60}\nRunning {analysis.name} comparison\n{'=' * 60}")
         try:
             results[analysis.name] = run_comparison(
-                analysis, config, recompute, equilibration=equilibration
+                analysis,
+                config,
+                recompute,
+                equilibration=equilibration,
+                include_running=include_running,
             )
         except PluginContractError:
             raise

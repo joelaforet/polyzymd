@@ -1262,6 +1262,7 @@ def annotate_uncertainty(
     n_replicates: int | None = None,
     equilibration: str | None = None,
     points: bool = True,
+    partial: str | None = None,
 ) -> str:
     """Resolve a plugin's error-bar setting and footnote the figure with it.
 
@@ -1288,6 +1289,7 @@ def annotate_uncertainty(
         n_replicates=n_replicates,
         equilibration=equilibration,
         points=points,
+        partial=partial,
     )
 
 
@@ -1298,13 +1300,15 @@ def add_uncertainty_footnote(
     n_replicates: int | None = None,
     equilibration: str | None = None,
     points: bool = True,
+    partial: str | None = None,
 ) -> str:
     """Write the sentence saying what a figure's error bars mean, and return it.
 
     Grossfield et al. (2018) ask that every figure describe the meaning and
     basis of its uncertainties. This is that sentence. Pass ``points=False``
     on a figure that draws no per-replicate points, so the footnote does not
-    promise marks the reader cannot find.
+    promise marks the reader cannot find. ``partial`` is appended as it
+    stands, for a figure drawn from incomplete data.
     """
     what = (
         "Error bars: 1 SEM (not a 95% interval)"
@@ -1318,7 +1322,7 @@ def add_uncertainty_footnote(
     )
     window = f"; production window t >= {equilibration}" if equilibration else ""
     marks = " Points are per-replicate values." if points else ""
-    text = f"{what}{across}{window}.{marks}"
+    text = f"{what}{across}{window}.{marks}" + (f" {partial}" if partial else "")
     fig.text(
         0.01,
         0.01,

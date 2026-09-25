@@ -117,13 +117,15 @@ def open_replicate(
     return universe, frames, provider.provenance_for(replicate).as_dict()
 
 
-def replicate_provenance(config: Any, replicate: int) -> dict[str, Any]:
+def replicate_provenance(
+    config: Any, replicate: int, *, require_complete: bool = True
+) -> dict[str, Any]:
     """The input files a replicate would be read from now, without loading it.
 
     The runner compares this with a cached replicate's identity, so a new
     restart segment or an extended trajectory is seen before any frame is read.
     """
-    provider, _ = _provider(config, True, "as_is")
+    provider, _ = _provider(config, require_complete, "as_is")
     return provider.provenance_for(replicate).as_dict()
 
 

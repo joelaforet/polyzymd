@@ -192,7 +192,11 @@ class Analysis:
             if output_format == "json":
                 return json.dumps(result, indent=2, default=str)
             return str(result)
+        from polyzymd.analyses.completeness import summaries
+
         lines = [f"# {self.name}  eq {result.metadata.get('equilibration')}"]
+        completeness = result.metadata.get("completeness") or {}
+        lines += [f"PARTIAL: {line}" for line in summaries(completeness.get("conditions") or {})]
         for label, payloads in result.payload["conditions"].items():
             for payload in payloads:
                 lines.append(

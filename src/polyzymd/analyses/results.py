@@ -14,6 +14,10 @@ table instead of from artifact JSON::
 95 percent interval over replicates, the replicate values and their count.
 ``comparisons`` holds one row per pairwise test, with the adjusted p-value.
 ``profiles`` holds one row per index of a per-residue or per-bin observable.
+Every row says whether it is ``complete``: computed from every replicate the
+comparison lists, each covering its planned production length. A row from
+partial data has ``complete`` false, and a condition row also names the
+replicates listed and the smallest fraction of production any of them reached.
 Only the ``comparison/<analysis>/result.json`` files are read, so a published
 study works without its trajectories.
 """
@@ -49,6 +53,9 @@ _CONDITION_COLUMNS = (
     "n_eff_min",
     "replicate_values",
     "equilibration",
+    "complete",
+    "replicates_listed",
+    "min_production_fraction",
 )
 _COMPARISON_COLUMNS = (
     "study",
@@ -71,6 +78,7 @@ _COMPARISON_COLUMNS = (
     "significant",
     "testable",
     "note",
+    "complete",
 )
 _PROFILE_COLUMNS = (
     "study",
@@ -84,6 +92,7 @@ _PROFILE_COLUMNS = (
     "mean",
     "sem",
     "n_replicates",
+    "complete",
 )
 
 
@@ -172,6 +181,12 @@ def _add_rows(results: Results, base: dict[str, Any], artifact: Any) -> None:
     """Append one comparison artifact's rows to the three tables."""
     control = artifact.control_label
     equilibration = artifact.metadata.get("equilibration")
+    records = (artifact.metadata.get("completeness") or {}).get("conditions") or {}
+
+    def complete(label: str) -> bool | None:
+        record = records.get(label)
+        return None if record is None else bool(record.get("complete"))
+
     for label, aggregates in (artifact.payload.get("conditions") or {}).items():
         for item in aggregates:
             if item.get("kind") == "profile":
@@ -187,6 +202,7 @@ def _add_rows(results: Results, base: dict[str, Any], artifact: Any) -> None:
                             "mean": _at(item.get("profile_mean"), position),
                             "sem": _at(item.get("profile_sem"), position),
                             "n_replicates": item.get("n_replicates"),
+                            "complete": complete(label),
                         }
                     )
                 continue
@@ -207,11 +223,20 @@ def _add_rows(results: Results, base: dict[str, Any], artifact: Any) -> None:
                     "n_eff_min": item.get("n_eff_min"),
                     "replicate_values": list(item.get("replicate_values") or []),
                     "equilibration": equilibration,
+                    "complete": complete(label),
+                    "replicates_listed": list(
+                        (records.get(label) or {}).get("replicates_listed") or []
+                    ),
+                    "min_production_fraction": (records.get(label) or {}).get(
+                        "min_production_fraction"
+                    ),
                 }
             )
     for item in artifact.payload.get("comparisons") or []:
         row = {**base, **{key: item.get(key) for key in _COMPARISON_COLUMNS if key not in base}}
         row["observable"] = item.get("name")
+        pair = (complete(str(item.get("control"))), complete(str(item.get("condition"))))
+        row["complete"] = None if None in pair else all(pair)
         results.comparisons.append(row)
 
 

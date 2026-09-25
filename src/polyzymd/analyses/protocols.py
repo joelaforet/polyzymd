@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any, Iterator, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from polyzymd.analyses.completeness import summaries
 from polyzymd.analyses.exceptions import AnalysisError, ProtocolError
 
 if TYPE_CHECKING:
@@ -161,12 +162,18 @@ class ProtocolReport(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     provenance: ProtocolProvenance
     verdict: list[str] = Field(default_factory=list)
+    complete: bool = True
+    """Whether every condition used every listed replicate over its full production."""
+    partial: list[str] = Field(default_factory=list)
+    """One line per condition that is not complete, saying what it is missing."""
 
     def to_agent_text(self, max_lines: int = MAX_AGENT_LINES) -> str:
         """Render the report as at most ``max_lines`` lines of fixed-vocabulary text.
 
-        Condition and comparison lines are dropped first when the report does
-        not fit, and the dropped count is stated on the last line. The output
+        A report from partial data says so on the lines right after the header,
+        which are never dropped. Condition and comparison lines are dropped
+        first when the report does not fit, and the dropped count is stated on
+        the last line. The output
         has no table borders, no colour and no blank lines.
         """
         run = f"  run {self.run}" if self.run else ""
@@ -177,14 +184,15 @@ class ProtocolReport(BaseModel):
             f"  replicates {','.join(str(c.n_replicates) for c in self.conditions) or 'none'}"
             f"  protocol {self.analysis}/{self.protocol_version}"
         )
+        partial = [f"PARTIAL: {text}" for text in self.partial]
         tail = [f"warning: {text}" for text in self.warnings]
         tail += [f"verdict: {text}" for text in self.verdict]
         body = _fit(
             [_condition_line(item) for item in self.conditions],
             [_pairwise_line(item) for item in self.pairwise],
-            max(max_lines - 1 - len(tail), 0),
+            max(max_lines - 1 - len(partial) - len(tail), 0),
         )
-        lines = [header, *body, *tail]
+        lines = [header, *partial, *body, *tail]
         if len(lines) > max_lines:
             lines = lines[: max_lines - 1] + [_omitted(len(lines) - max_lines + 1)]
         return "\n".join(lines) + "\n"
@@ -204,6 +212,7 @@ def analyze(
     output_dir: Path | None = None,
     recompute: bool = False,
     run: str | None = None,
+    include_running: bool = False,
 ) -> ProtocolReport:
     """Run one analysis over one or more simulation conditions.
 
@@ -238,6 +247,10 @@ def analyze(
     run : str, optional
         Run or pair label to report, for a plugin that measures one metric on
         several selections. Defaults to the first one.
+    include_running : bool, optional
+        Also read production segments still being written, for a look at a
+        simulation that has not finished, by default False. The report is then
+        marked partial.
 
     Returns
     -------
@@ -264,7 +277,12 @@ def analyze(
         output_dir=output_dir,
     )
     return run_protocol(
-        analysis_cls(), config, equilibration=equilibration, recompute=recompute, run=run
+        analysis_cls(),
+        config,
+        equilibration=equilibration,
+        recompute=recompute,
+        run=run,
+        include_running=include_running,
     )
 
 
@@ -275,6 +293,7 @@ def run_protocol(
     equilibration: str | None = None,
     recompute: bool = False,
     run: str | None = None,
+    include_running: bool = False,
 ) -> ProtocolReport:
     """Run the pipeline for an existing comparison config and report it.
 
@@ -289,7 +308,13 @@ def run_protocol(
         analysis = _analysis_class(analysis)()
     resolved = equilibration or config.defaults.equilibration_time
     try:
-        result = run_comparison(analysis, config, recompute=recompute, equilibration=resolved)
+        result = run_comparison(
+            analysis,
+            config,
+            recompute=recompute,
+            equilibration=resolved,
+            include_running=include_running,
+        )
     except AnalysisError:
         raise
     except (FileNotFoundError, ValueError, OSError) as exc:
@@ -342,6 +367,11 @@ def build_report(
     unit = read.units.get(group) or read.units.get(read.metric)
     aggregated = dict(pipeline_result.get("aggregated") or {})
     ordered = [group] + [name for name in read.groups if name != group]
+    completeness = dict(
+        pipeline_result.get("completeness")
+        or getattr(comparison, "metadata", {}).get("completeness")
+        or {}
+    )
 
     return ProtocolReport(
         analysis=analysis.name,
@@ -358,6 +388,8 @@ def build_report(
         warnings=_warnings(comparison, aggregated, conditions, pairwise, group, read),
         provenance=_provenance(analysis, config, pipeline_result),
         verdict=_verdict(metric, unit, conditions, pairwise),
+        complete=bool(completeness.get("complete", True)),
+        partial=summaries(completeness.get("conditions") or {}),
     )
 
 

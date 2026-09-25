@@ -526,6 +526,11 @@ def _output_validation_result(result: dict, output_format: str) -> None:
     help="Force recompute even if cached results exist.",
 )
 @click.option(
+    "--include-running",
+    is_flag=True,
+    help="Also read production segments still being written. Results are marked partial.",
+)
+@click.option(
     "--list",
     "list_types",
     is_flag=True,
@@ -541,6 +546,7 @@ def run_comparison(
     quiet: bool,
     debug: bool,
     list_types: bool,
+    include_running: bool,
 ):
     """Run a comparison using the analysis plugin system.
 
@@ -608,7 +614,11 @@ def run_comparison(
     analysis = analysis_cls()
     try:
         pipeline_result = _run_pipeline(
-            analysis, config, recompute=recompute, equilibration=equilibration
+            analysis,
+            config,
+            recompute=recompute,
+            equilibration=equilibration,
+            include_running=include_running,
         )
         result = pipeline_result["comparison"]
     except PluginContractError as e:
@@ -866,6 +876,11 @@ def plot_all(
     help="Force recompute even if cached results exist.",
 )
 @click.option(
+    "--include-running",
+    is_flag=True,
+    help="Also read production segments still being written. Results are marked partial.",
+)
+@click.option(
     "--plot/--no-plot",
     "run_plots",
     default=False,
@@ -886,6 +901,7 @@ def run_all(
     config_file: Path,
     eq_time: str | None,
     recompute: bool,
+    include_running: bool,
     run_plots: bool,
     quiet: bool,
     debug: bool,
@@ -941,6 +957,7 @@ def run_all(
             analysis_names=None,  # run all enabled
             recompute=recompute,
             equilibration=equilibration,
+            include_running=include_running,
         )
     except PluginContractError as e:
         analysis_name = _contract_error_analysis_name(e, "run-all")

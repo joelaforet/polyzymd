@@ -117,6 +117,36 @@ temperatures = results.to_dataframe("conditions")
 Only the comparison results are read, so this also works on a published study
 without its trajectories.
 
+## Look at a study before it finishes
+
+Nothing waits for every replicate. If a comparison lists replicates 1 to 5 and
+only 1 to 3 have trajectories, `polyzymd compare run` computes the condition
+from those three. A replicate still running contributes the segments that have
+finished. Every result records what it used: the replicates listed and the
+ones used, why any were left out, and for each replicate the frames read, the
+simulated time they cover and that time as a fraction of the planned
+production length.
+
+A result from partial data says so wherever it is read:
+
+- the text report and the agent report start with `PARTIAL:` lines, for
+  example `PARTIAL: SBMA: replicates 1-3 of 1-5; replicate 2 at 64% of 100 ns (still running)`;
+- the figure footnote ends with the same statement;
+- rows of `polyzymd study results` have `complete` false, and condition rows
+  name the replicates listed and the smallest production fraction reached;
+- `polyzymd study export` names every partial result it packages.
+
+To look at a replicate while it is still being written, for example to see
+whether the protein is unfolding, also read the segment in progress:
+
+```bash
+polyzymd analyze rmsd -c conditions/CALB_noPoly_343K/config.yaml --replicates 2 \
+    --eq 10ns --include-running
+```
+
+Run it again later and the replicate is recomputed with the new frames, since
+the growing trajectory no longer matches the cached result.
+
 ## Work outside the framework
 
 The framework's statistics apply to analyses written against the contract. For

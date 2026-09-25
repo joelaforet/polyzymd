@@ -970,6 +970,7 @@ List the available analysis names with `polyzymd compare run --list`.
 | `-o, --output PATH` | No | Also write the rendered output to this file. |
 | `--output-dir PATH` | No | Directory for `analysis/`, `comparison/` and `figures/`. Default: the current directory. |
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
+| `--include-running` | No | Also read production segments still being written, to look at a simulation that has not finished. The report is marked partial. |
 
 ### Agent format
 
@@ -1112,6 +1113,7 @@ Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
   --eq-time TEXT          Override equilibration time (e.g. '10ns', '5000ps')
   --recompute            Force recompute even if cached results exist
+  --include-running      Also read production segments still being written
   --format TEXT           Output format: table, markdown, json, agent [default: table]
   -o, --output PATH      Save formatted output to file
   -q, --quiet            Suppress INFO messages

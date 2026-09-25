@@ -154,6 +154,11 @@ def _one_line(text: str) -> str:
 @click.option(
     "--recompute", is_flag=True, help="Recompute replicates instead of reusing cached results."
 )
+@click.option(
+    "--include-running",
+    is_flag=True,
+    help="Also read production segments still being written. Results are marked partial.",
+)
 def analyze_command(
     name: str,
     configs: tuple[Path, ...],
@@ -167,6 +172,7 @@ def analyze_command(
     output_path: Path | None,
     output_dir: Path | None,
     recompute: bool,
+    include_running: bool,
 ) -> None:
     """Run one analysis and print a validated result.
 
@@ -179,6 +185,7 @@ def analyze_command(
         polyzymd analyze rg -c A/config.yaml
         polyzymd analyze rg -c A/config.yaml -c B/config.yaml --eq 10ns
         polyzymd analyze rmsf -f comparison.yaml --format json -o rmsf.json
+        polyzymd analyze rmsd -c A/config.yaml --replicates 2 --include-running
     """
     warn_if_wrong_pixi_env("analyze", ANALYSIS_PIXI_ENVS)
 
@@ -196,6 +203,7 @@ def analyze_command(
             setting_overrides=setting_overrides,
             output_dir=output_dir,
             recompute=recompute,
+            include_running=include_running,
         )
     except AnalysisError as exc:
         hint = getattr(exc, "hint", None)
@@ -232,6 +240,7 @@ def _run(
     setting_overrides: tuple[str, ...],
     output_dir: Path | None,
     recompute: bool,
+    include_running: bool = False,
 ) -> "ProtocolReport":
     """Resolve the options and run the protocol, through -f or through -c configs."""
     from polyzymd.analyses.exceptions import ProtocolError
@@ -265,7 +274,14 @@ def _run(
                 f"Could not load {path}: {exc}",
                 hint="Fix the comparison.yaml, or use -c config.yaml instead.",
             ) from exc
-        return run_protocol(name, config, equilibration=equilibration, recompute=recompute, run=run)
+        return run_protocol(
+            name,
+            config,
+            equilibration=equilibration,
+            recompute=recompute,
+            run=run,
+            include_running=include_running,
+        )
 
     return analyze(
         name,
@@ -277,4 +293,5 @@ def _run(
         output_dir=output_dir,
         recompute=recompute,
         run=run,
+        include_running=include_running,
     )

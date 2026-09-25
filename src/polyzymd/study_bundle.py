@@ -48,6 +48,8 @@ class ExportPlan:
     unreferenced: list[Path] = field(default_factory=list)
     outside: list[str] = field(default_factory=list)
     trajectories: list[dict[str, Any]] = field(default_factory=list)
+    partial: list[str] = field(default_factory=list)
+    """Comparison results computed from incomplete data, one line each."""
 
     @property
     def size_bytes(self) -> int:
@@ -113,6 +115,7 @@ def plan_export(root: Path | str) -> ExportPlan:
     ]
     for directory, labels in labels_by_comparison.items():
         plan.trajectories += _trajectories(root, directory, labels)
+        plan.partial += _partial_results(root, directory)
     return plan
 
 
@@ -145,6 +148,7 @@ def export_study(root: Path | str, output: Path | str) -> ExportPlan:
         "left_out_conditions": [
             path.relative_to(plan.root).as_posix() for path in plan.unreferenced
         ],
+        "partial_results": plan.partial,
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     prefix = plan.root.name
@@ -265,6 +269,26 @@ def _trajectories(
                 }
             )
     return listed
+
+
+def _partial_results(root: Path, comparison_dir: Path) -> list[str]:
+    """One line per comparison result in a folder that was computed from partial data."""
+    from polyzymd.analyses.completeness import summaries
+
+    lines = []
+    for result in sorted(comparison_dir.glob("comparison/*/result.json")):
+        try:
+            completeness = (json.loads(result.read_text()).get("metadata") or {}).get(
+                "completeness"
+            )
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not completeness or completeness.get("complete"):
+            continue
+        where = result.parent.relative_to(root).as_posix()
+        details = "; ".join(summaries(completeness.get("conditions") or {})) or "incomplete"
+        lines.append(f"{where}: {details}")
+    return lines
 
 
 def _config_working_dir(config: Path, replicate: int) -> Path | None:

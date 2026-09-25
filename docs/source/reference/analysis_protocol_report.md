@@ -29,6 +29,8 @@ contract raises `ProtocolError` naming the `--recompute` that replaces it.
 | `warnings` | `list[str]` | Sampling warnings first, then warnings carried by the comparison and condition artifacts. Deduplicated. |
 | `provenance` | `ProtocolProvenance` | Versions, config hashes and output paths. |
 | `verdict` | `list[str]` | One sentence per pairwise comparison, or one sentence describing the single condition. |
+| `complete` | `bool` | Whether every condition used every replicate its comparison lists, each covering its planned production length with every segment finished. |
+| `partial` | `list[str]` | One line per condition that is not complete, for example `SBMA: replicates 1-3 of 1-5; replicate 2 at 64% of 100 ns (still running)`. `to_agent_text` prints each as `PARTIAL: ...` right after the header and never drops them. |
 
 `ProtocolReport.to_agent_text(max_lines=25)` renders the report as at most 25
 lines of plain text with no borders and no blank lines. Condition and

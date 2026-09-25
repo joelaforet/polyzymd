@@ -117,13 +117,23 @@ def serve_replicates(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
     The returned callable takes one universe, or a ``replicate -> universe`` or
     ``(condition_label, replicate) -> universe`` factory, and optionally ``inputs``: the file identity records the cache
     compares, as a list or a ``replicate -> list`` callable, and ``warnings``,
-    which the loader reports for every replicate. After it is called,
+    which the loader reports for every replicate. ``timestep_ps`` sets the frame
+    interval, so a replicate's covered time can be compared with its config's
+    planned production length, and ``segment_status`` (a mapping, or a
+    ``replicate -> mapping`` callable) says which production segments finished. After it is called,
     every framework entry point reads these universes, with every frame as the
     production window, and no trajectory is opened. It is the only place the
     test suite reaches into how the framework loads a replicate.
     """
 
-    def install(universe: Any, inputs: Any = _DEFAULT_INPUTS, warnings: Sequence[str] = ()) -> None:
+    def install(
+        universe: Any,
+        inputs: Any = _DEFAULT_INPUTS,
+        warnings: Sequence[str] = (),
+        *,
+        timestep_ps: float | None = None,
+        segment_status: Any = None,
+    ) -> None:
         if not callable(universe):
             factory = lambda label, replicate: universe  # noqa: E731
         elif len(inspect.signature(universe).parameters) == 2:
@@ -131,7 +141,10 @@ def serve_replicates(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
         else:
             factory = lambda label, replicate: universe(replicate)  # noqa: E731
         current = inputs if callable(inputs) else (lambda replicate: list(inputs))
-        _stub_universe_source(monkeypatch, factory, current, tuple(warnings))
+        status = segment_status if callable(segment_status) else (lambda replicate: segment_status)
+        _stub_universe_source(
+            monkeypatch, factory, current, tuple(warnings), timestep_ps=timestep_ps, status=status
+        )
 
     return install
 
@@ -234,6 +247,9 @@ def _stub_universe_source(
     factory: Callable[[str | None, int], Any],
     inputs: Callable[[int], list[dict[str, Any]]],
     warnings: tuple[str, ...] = (),
+    *,
+    timestep_ps: float | None = None,
+    status: Callable[[int], Any] = lambda replicate: None,
 ) -> None:
     """Replace how the runner loads a replicate and loads a condition's config."""
     from polyzymd.analyses import loading
@@ -241,11 +257,27 @@ def _stub_universe_source(
     from polyzymd.analyses.testing import all_frames
 
     def provenance(replicate: int) -> dict[str, Any]:
-        return {"topology": None, "trajectories": inputs(replicate), "warnings": list(warnings)}
+        return {
+            "topology": None,
+            "trajectories": inputs(replicate),
+            "warnings": list(warnings),
+            "segment_status": dict(status(replicate) or {}),
+        }
 
     def open_replicate(config: Any, replicate: int, equilibration: str, **_: Any) -> Any:
         universe = factory(getattr(config, "name", None), replicate)
-        return universe, all_frames(universe), provenance(replicate)
+        frames = all_frames(universe)
+        if timestep_ps is not None:
+            frames = type(frames)(
+                start=frames.start,
+                stop=frames.stop,
+                step=frames.step,
+                n_frames_total=frames.n_frames_total,
+                timestep_ps=timestep_ps,
+                first_frame_time_ps=timestep_ps,
+                selected_start_time_ps=timestep_ps,
+            )
+        return universe, frames, provenance(replicate)
 
     def condition_from_config(cfg: Any) -> Any:
         return Condition(
@@ -254,6 +286,6 @@ def _stub_universe_source(
 
     monkeypatch.setattr(loading, "open_replicate", open_replicate)
     monkeypatch.setattr(
-        loading, "replicate_provenance", lambda config, replicate: provenance(replicate)
+        loading, "replicate_provenance", lambda config, replicate, **_: provenance(replicate)
     )
     monkeypatch.setattr(Condition, "from_condition_config", staticmethod(condition_from_config))

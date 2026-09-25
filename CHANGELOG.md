@@ -108,6 +108,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Partial results are recorded, not refused.**  Every replicate result records
+  the frames it used, the simulated time they cover and that time as a
+  fraction of the planned production length, and any production segment that
+  was running, interrupted, failed or left out.  Every aggregate records the
+  replicates its comparison lists, the ones used and why any were left out.  A
+  result from partial data says so in the text and agent reports (`PARTIAL:`
+  lines, `ProtocolReport.complete` and `partial`), in the figure footnote, in
+  the `complete`, `replicates_listed` and `min_production_fraction` columns of
+  `load_results`, and in `polyzymd study export`.  `--include-running` on
+  `compare run`, `compare run-all` and `analyze`, and `include_running=True` in
+  `analyze()`, also read segments still being written.
 - **Study packages.**  `polyzymd study export` zips a study for publication:
   the condition folders its comparisons list, its analyses, workflows,
   structures and results, without trajectories, checkpoints or logs, plus a

@@ -170,6 +170,8 @@ def export(output: Path | None) -> None:
         click.secho(f"  Left out {path.relative_to(root)}: no comparison lists it", fg="yellow")
     for entry in plan.outside:
         click.secho(f"  Not packaged, outside the study: {entry}", fg="yellow")
+    for line in plan.partial:
+        click.secho(f"  Partial result packaged: {line}", fg="yellow")
 
 
 @study.command("verify")

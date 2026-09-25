@@ -103,6 +103,7 @@ class _ConditionData:
     label: str
     aggregates: dict[str, ObservableAggregate]
     series: dict[str, list[Any]]
+    completeness: dict[str, Any] | None = None
 
 
 def plot_observables(analysis_name: str, ctx: PlotContext) -> list[Path]:
@@ -207,7 +208,7 @@ def _bar_figure(
     if aggregates[0].kind == "fraction":
         _mark_fraction_bound(ax)
     apply_legend(ax, ctx.plot_settings)
-    _footnote(fig, ctx, analysis_name, counts, points=points)
+    _footnote(fig, ctx, analysis_name, counts, points=points, conditions=conditions)
     return save_figure(
         fig,
         get_output_path(ctx.output_dir, f"{analysis_name}_{name}_comparison", ctx.plot_settings),
@@ -263,6 +264,7 @@ def _timeseries_figure(
         ylabel=_axis_label(conditions[0].aggregates[name]),
     )
     apply_legend(ax, ctx.plot_settings)
+    _partial_footnote(fig, conditions)
     return save_figure(
         fig,
         get_output_path(ctx.output_dir, f"{analysis_name}_{name}_timeseries", ctx.plot_settings),
@@ -305,7 +307,7 @@ def _profile_figure(
     if aggregates[0].kind == "fraction":
         _mark_fraction_bound(ax)
     apply_legend(ax, ctx.plot_settings)
-    _footnote(fig, ctx, analysis_name, counts, points=points)
+    _footnote(fig, ctx, analysis_name, counts, points=points, conditions=conditions)
     return save_figure(
         fig,
         get_output_path(ctx.output_dir, f"{analysis_name}_{name}_comparison", ctx.plot_settings),
@@ -411,9 +413,16 @@ def _footnote(
     counts: Sequence[int],
     *,
     points: bool,
+    conditions: Sequence[_ConditionData] = (),
 ) -> None:
-    """Say what the figure's interval is, unless one replicate left none to draw."""
+    """Say what the figure's interval is, and whether its data are partial.
+
+    The interval sentence is left out when one replicate leaves none to draw;
+    the partial note never is.
+    """
+    partial = _partial_text(conditions)
     if min(counts, default=0) < 2:
+        _partial_footnote(fig, conditions)
         return
     annotate_uncertainty(
         fig,
@@ -422,7 +431,23 @@ def _footnote(
         n_replicates=min(counts),
         equilibration=ctx.equilibration,
         points=points,
+        partial=partial,
     )
+
+
+def _partial_text(conditions: Sequence[_ConditionData]) -> str | None:
+    """``Partial: ...`` naming what each partial condition in a figure is missing."""
+    from polyzymd.analyses.completeness import summaries
+
+    lines = summaries({data.label: data.completeness for data in conditions})
+    return f"Partial: {'; '.join(lines)}." if lines else None
+
+
+def _partial_footnote(fig: Any, conditions: Sequence[_ConditionData]) -> None:
+    """Write the partial note alone, on a figure with no interval sentence."""
+    text = _partial_text(conditions)
+    if text:
+        fig.text(0.01, 0.01, text, fontsize=7, color="dimgray", ha="left", va="bottom")
 
 
 def _mark_fraction_bound(ax: Any) -> None:
@@ -563,7 +588,12 @@ def _load_condition(ctx: PlotContext, label: str) -> _ConditionData | None:
     for replicate, artifact in sorted(artifacts.replicate_artifacts.items()):
         for name, values in _sidecar_arrays(artifacts.run_dirs[replicate], artifact):
             series.setdefault(name, []).append(values)
-    return _ConditionData(label=label, aggregates=aggregates, series=series)
+    return _ConditionData(
+        label=label,
+        aggregates=aggregates,
+        series=series,
+        completeness=artifacts.condition_artifact.metadata.get("completeness"),
+    )
 
 
 def _sidecar_arrays(run_dir: Path, artifact: Any) -> Iterator[tuple[str, Any]]:
