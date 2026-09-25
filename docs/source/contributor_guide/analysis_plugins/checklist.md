@@ -65,10 +65,10 @@ Plugin: `PLUGIN_NAME`
 
 ### Tests
 
-- [ ] One test asserts what `compute()` measures on `synthetic_universe`,
+- [ ] One test asserts what `compute()` measures on `synthetic_universe()`,
   including the frame count over the production window.
-- [ ] One test runs `run_contract_analysis` over three replicates and asserts on
-  the aggregate fields, not on the raw observable.
+- [ ] One test runs `run_in_memory` over three replicates and asserts on the
+  aggregate fields, not on the raw observable.
 - [ ] A test that needs real trajectory data is marked `@pytest.mark.slow`.
 
 ### Documentation

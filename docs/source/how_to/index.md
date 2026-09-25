@@ -85,6 +85,7 @@ See also {doc}`../tutorials/sasa_analysis` for a guided SASA walkthrough.
 ```{toctree}
 :maxdepth: 1
 
+Organize a Study <study_layout>
 Which Analysis Should I Run? <analysis_chooser>
 Get a Validated Number with One Command <analysis_agent_protocol>
 Compare Simulation Conditions <analysis_compare_conditions>

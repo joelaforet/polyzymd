@@ -9,16 +9,26 @@ and formatting the report. A new analysis is about forty lines.
 This page is the whole contributor path. The
 [checklist](checklist.md) is what to run before opening the pull request.
 
+## Where it lives
+
+An analysis written for a study lives in the study's `analyses/` folder; see
+{doc}`../../how_to/study_layout`. An analysis contributed to PolyzyMD itself
+lives in `src/polyzymd/analyses/`. The contract is the same in both places.
+
 ## Scaffold it
 
+Inside a study:
+
 ```bash
-pixi run -e analysis polyzymd new-analysis solvent_shell
+polyzymd new-analysis solvent_shell
 ```
 
-That writes `src/polyzymd/analyses/solvent_shell.py` and
-`tests/analyses/plugins/test_solvent_shell.py`. Edit those two files and
-nothing else. There is no plugin package, no registry entry and no import to
-add; discovery walks `polyzymd.analyses` and finds the module.
+That writes `analyses/solvent_shell.py` and `analyses/test_solvent_shell.py`.
+In a PolyzyMD checkout, or with `--builtin`, it writes
+`src/polyzymd/analyses/solvent_shell.py` and
+`tests/analyses/plugins/test_solvent_shell.py` instead. Edit those two files
+and nothing else. There is no registry entry and no import to add; discovery
+finds the module.
 
 ## The contract
 
@@ -27,7 +37,7 @@ from typing import Any, ClassVar, Sequence
 
 from pydantic import BaseModel
 
-from polyzymd.analyses.contract import Observable, contract_analysis, iter_frames
+from polyzymd.analyses import Observable, contract_analysis, iter_frames
 
 
 class SolventShellSettings(BaseModel):
@@ -57,7 +67,9 @@ class SolventShell:
 SolventShellAnalysis = contract_analysis(SolventShell)
 ```
 
-Keep the last line. Discovery looks for the class it returns.
+The last line is optional. Discovery registers a module-level class that has
+`name`, `Settings` and `compute()` whether or not it is wrapped, and wrapping it
+yourself gives a name to import in a script.
 
 `compute()` runs once per replicate and returns raw per-frame numbers. Never
 average across replicates inside it, never run a statistical test, never write
@@ -114,21 +126,24 @@ heading and repeat it in `references`. The comparison artifact carries it.
 
 ## Write the tests
 
-Two fixtures in `tests/analyses/conftest.py` do the setup. `synthetic_universe`
-is four unit-mass atoms on a cross, whose radius of gyration is exactly 1.0.
-`run_contract_analysis(AnalysisClass, settings, universe)` runs the real
-lifecycle over three replicates and returns the `ConditionArtifact`.
+`polyzymd.analyses.testing` does the setup without trajectories or disk.
+`synthetic_universe()` is four unit-mass atoms on a cross, whose radius of
+gyration is exactly 1.0. `run_in_memory(plugin, settings, universes)` runs
+`compute()` on three replicates, or on one universe per replicate if you pass a
+list, and returns the aggregates the framework would report.
 
 ```python
-def test_aggregates(synthetic_universe, run_contract_analysis):
+from polyzymd.analyses.testing import run_in_memory, synthetic_universe
+
+
+def test_aggregates():
     settings = SolventShellSettings()
 
-    artifact = run_contract_analysis(SolventShellAnalysis, settings, synthetic_universe)
+    aggregates = run_in_memory(SolventShell, settings, synthetic_universe())
 
-    aggregate = ObservableAggregate.model_validate(artifact.payload["observables"][0])
-    assert aggregate.n_replicates == 3
-    assert aggregate.mean == pytest.approx(1.0)
-    assert aggregate.sem == pytest.approx(0.0)
+    assert aggregates[0].n_replicates == 3
+    assert aggregates[0].mean == pytest.approx(1.0)
+    assert aggregates[0].sem == pytest.approx(0.0)
 ```
 
 Assert on the aggregate fields rather than on the raw observable: `mean`,
@@ -138,17 +153,23 @@ profile `profile_mean`, `profile_sem` and `index`. A comparison entry carries
 scaffolded test file already holds both tests; replace the numbers.
 
 ```bash
+pytest analyses/test_solvent_shell.py -q                       # in a study
 PYTHONPATH=$PWD/src pixi run -e test pytest tests/analyses/plugins/test_solvent_shell.py -q
 pixi run -e analysis polyzymd compare run solvent_shell -f comparison.yaml
 ```
+
+A plugin defined in a script or notebook can skip the file entirely:
+`analyze(SolventShell, ["A/config.yaml", "B/config.yaml"], equilibration="10ns")`
+registers it and runs it like any other analysis.
 
 ## What to import
 
 A plugin imports from three places and nowhere else.
 
-- `polyzymd.analyses.contract` for `Observable` and `iter_frames`.
+- `polyzymd.analyses` for `Observable`, `iter_frames` and `contract_analysis`.
 - `polyzymd.analyses.shared` for a helper that already exists, such as
   alignment, topology checks or amino acid classification.
+- `polyzymd.analyses.testing` in its tests.
 
 `polyzymd.analyses._framework` is internal. A plugin that imports from it is
 reaching past the contract, and the next change to the framework will break it.

@@ -92,6 +92,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Study folders and analyses outside the source tree.**  `polyzymd study init`
+  creates a study: `study.yaml` marks its root, and `conditions/`,
+  `comparisons/`, `analyses/`, `structures/` and `workflows/` hold everything a
+  paper needs.  Analyses in the study's `analyses/` folder are loaded by every
+  `comparison.yaml` inside the study, validated and run exactly like built-in
+  ones, and may not reuse a built-in name.  A comparison outside a study loads
+  an `analyses/` folder next to its file.  Inside a study,
+  `polyzymd new-analysis` writes the plugin and its test there; `--builtin`
+  keeps the old target.  A plugin module no longer needs the
+  `contract_analysis()` line; a bare class with `name`, `Settings` and
+  `compute()` is registered.
+- **Public helpers for scripts and plugin tests.**  `load_replicate(config,
+  replicate, equilibration=...)` returns the universe and production window an
+  analysis receives.  `analyze()` accepts a plugin object as well as a name.
+  `polyzymd.analyses.testing` provides `synthetic_universe()` and
+  `run_in_memory()`, which run a plugin on in-memory replicates and aggregate
+  them the way the framework does; the scaffolded tests use them.
 - **`Observable.tested`.**  A contract plugin can declare an observable
   `tested=False` when it is a function of others it already reports, such as the
   last class of a set of fractions that sums to one.  The observable is still

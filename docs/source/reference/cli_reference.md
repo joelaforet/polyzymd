@@ -853,19 +853,44 @@ polyzymd new-analysis NAME [OPTIONS]
 
 Options:
   --class-name TEXT                 PascalCase class prefix
-  --project-root DIRECTORY          Repository root
+  --builtin                         Write a built-in analysis into the source tree
+  --project-root DIRECTORY          Repository root for --builtin
   --force                           Overwrite existing files
   --dry-run                         Print paths without writing files
 ```
 
-The command writes two files: the plugin at `src/polyzymd/analyses/<NAME>.py`,
-holding a pydantic settings model, a class with a `compute()` that returns
-observables, and the `contract_analysis()` call that discovery finds; and its
-tests at `tests/analyses/plugins/test_<NAME>.py`. There is one scaffold style.
+Inside a study, meaning the current directory holds `study.yaml` or sits below
+one, the command writes `analyses/<NAME>.py` and `analyses/test_<NAME>.py` in
+the study. The plugin holds a pydantic settings model and a class with a
+`compute()` that returns observables. NAME may not be a built-in analysis or an
+importable Python module, since the test imports the plugin by that name.
 
 ```bash
-polyzymd new-analysis solvent_shell
+polyzymd new-analysis lid_opening
+pytest analyses/test_lid_opening.py -q
+```
+
+Outside a study, or with `--builtin`, it writes a built-in analysis to
+`src/polyzymd/analyses/<NAME>.py` and its tests to
+`tests/analyses/plugins/test_<NAME>.py`.
+
+```bash
+polyzymd new-analysis solvent_shell --builtin
 PYTHONPATH=$PWD/src pixi run -e test pytest tests/analyses/plugins/test_solvent_shell.py -q
+```
+
+---
+
+(polyzymd-study-init)=
+## polyzymd study init
+
+Create a study folder: `study.yaml`, a `README.md` describing the layout, a
+`.gitignore` for trajectories and checkpoints, and the folders `conditions/`,
+`comparisons/`, `analyses/`, `structures/` and `workflows/`. See
+{doc}`../how_to/study_layout`.
+
+```bash
+polyzymd study init -n NAME [--description TEXT]
 ```
 
 ---
