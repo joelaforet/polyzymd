@@ -25,6 +25,7 @@ from polyzymd.analyses.protocols import (
     ConditionReport,
     PairwiseReport,
     ProtocolReport,
+    _difference_ci,
     analyze,
     build_report,
 )
@@ -444,7 +445,10 @@ class TestAgentText:
     ) -> None:
         """A condition with many replicates prints all of their values."""
         _install_toy(monkeypatch)
-        values = {"A": [10.0 + 0.1 * index for index in range(8)], "B": [12.0] * 8}
+        values = {
+            "A": [10.0 + 0.1 * index for index in range(8)],
+            "B": [12.0 + 0.1 * index for index in range(8)],
+        }
         report = _run(tmp_path, values)
 
         line = next(
@@ -454,6 +458,38 @@ class TestAgentText:
         printed = line.split("  values ", 1)[1].split(", ")
         assert len(printed) == 8
         assert "more" not in line
+
+
+class TestDifferenceInterval:
+    """The interval on a difference matches the reported test."""
+
+    A = [1.0, 2.0, 3.0]
+    B = [2.0, 4.0, 6.0, 8.0]
+
+    def test_student_uses_the_pooled_variance(self) -> None:
+        """Pooled variance 4.4 with 5 degrees of freedom gives 3 +/- 4.118."""
+        low, high = _difference_ci(self.A, self.B, "student_t")
+        assert (low, high) == pytest.approx((-1.118283, 7.118283), abs=1e-6)
+
+    def test_welch_uses_separate_variances(self) -> None:
+        """Welch's interval is narrower here than the pooled one."""
+        low, high = _difference_ci(self.A, self.B, "welch_t")
+        assert (low, high) == pytest.approx((-0.897975, 6.897975), abs=1e-6)
+
+    @pytest.mark.parametrize(
+        "values_a, values_b, test",
+        [
+            (A, B, "tukey_hsd"),
+            ([1.0], B, "student_t"),
+            ([1.0, 1.0], [2.0, 2.0], "student_t"),
+            ([1.0, 1.0], [2.0, 2.0], "welch_t"),
+        ],
+    )
+    def test_no_interval_when_none_can_be_estimated(
+        self, values_a: list[float], values_b: list[float], test: str
+    ) -> None:
+        """Tukey, one replicate and zero variance give no interval."""
+        assert _difference_ci(values_a, values_b, test) is None
 
 
 class TestErrors:
