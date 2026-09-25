@@ -67,6 +67,7 @@ If you are adding or reviewing an analysis plugin, read these pages first:
 :maxdepth: 1
 
 Analysis system concepts <analysis_concepts>
+Which analysis entry point should I use <analysis_entry_points>
 Architecture and design rationale <architecture>
 Residue assignment and chain conventions <residue_assignment>
 Why PolyzyMD guards the prepared structure <simulation_safeguards>

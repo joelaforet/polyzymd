@@ -511,3 +511,44 @@ class TestDiscoveryRobustness:
         ):
             with pytest.raises(ModuleNotFoundError, match="totally_missing_pkg"):
                 _discover_plugins()
+
+
+class TestDiscoveryImportCost:
+    """Discovery must not pull in the plotting and statistics stack."""
+
+    def test_list_analyses_leaves_plotting_libraries_unimported(self) -> None:
+        """Importing the package and listing plugins imports no heavy library.
+
+        seaborn, scipy.stats and matplotlib.pyplot together cost about 1.8
+        seconds. An agent that only wants the list of analyses must not pay
+        for them, so the check runs in a clean interpreter.
+        """
+        import json
+        import subprocess
+
+        script = textwrap.dedent("""
+            import json
+            import sys
+
+            import polyzymd.analyses
+            from polyzymd.analyses.discovery import list_analyses
+
+            names = sorted(list_analyses())
+            heavy = [
+                module
+                for module in ("seaborn", "scipy.stats", "matplotlib.pyplot")
+                if module in sys.modules
+            ]
+            print(json.dumps({"names": names, "heavy": heavy}))
+            """)
+
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        result = json.loads(completed.stdout.strip().splitlines()[-1])
+
+        assert len(result["names"]) == 10, result["names"]
+        assert result["heavy"] == []

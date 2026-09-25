@@ -4,6 +4,8 @@ Public API
 ----------
 .. autosummary::
 
+    analyze
+    ProtocolReport
     get_analysis
     list_analyses
     list_all_names
@@ -14,7 +16,16 @@ Public API
 
 Quick Start
 -----------
-::
+To get a number, start with :func:`~polyzymd.analyses.protocols.analyze`. It
+builds the comparison, runs the pipeline and returns a report in which every
+number states its unit, its uncertainty and its sample size::
+
+    from polyzymd.analyses import analyze
+
+    report = analyze("rg", ["A/config.yaml", "B/config.yaml"], equilibration="10ns")
+    print(report.to_agent_text())
+
+To see what analyses exist, or to drive one yourself::
 
     from polyzymd.analyses import get_analysis, list_analyses
 
@@ -60,8 +71,12 @@ from polyzymd.analyses.orchestrator import (
     run_analysis,
     run_comparison,
 )
+from polyzymd.analyses.protocols import ProtocolReport, analyze
 
 __all__ = [
+    # Agent-facing protocol
+    "analyze",
+    "ProtocolReport",
     # Base class + contexts + result models
     "Analysis",
     "AggregateContext",
