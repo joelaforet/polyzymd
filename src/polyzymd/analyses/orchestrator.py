@@ -945,14 +945,10 @@ def run_all_comparisons(
     return results
 
 
-def order_analyses_for_execution(
-    analysis_names: Sequence[str],
-    satisfied: set[str] | None = None,
-) -> list[str]:
+def order_analyses_for_execution(analysis_names: Sequence[str]) -> list[str]:
     """Canonical analysis names in the order given, without duplicates.
 
     Analyses do not depend on each other, so the order is the requested one.
-    ``satisfied`` is accepted for callers that still pass it.
 
     Raises
     ------
@@ -961,7 +957,6 @@ def order_analyses_for_execution(
     """
     from polyzymd.analyses.discovery import get_analysis
 
-    del satisfied
     ordered: list[str] = []
     for name in analysis_names:
         canonical = get_analysis(name).name
