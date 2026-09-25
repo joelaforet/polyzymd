@@ -24,6 +24,8 @@ from polyzymd.analyses.protocols import (
     build_report,
 )
 from polyzymd.analyses.stats import interpret_direction
+from polyzymd.analyses.testing import synthetic_universe
+from tests.analyses.conftest import _stub_universe_source
 
 # Replicate values the toy plugin reports, keyed by condition label. Tests set
 # this before calling analyze().
@@ -48,8 +50,16 @@ class ToyProtocolPlugin:
     observable_names: tuple[str, ...] = ("mean_value",)
 
     def compute(self, universe: Any, frames: Any, settings: Any) -> list[Observable]:
-        """Never called; the test drives the compute stage directly."""
-        raise AssertionError("the toy plugin computes through _run_compute_stage")
+        """Report the value the test assigned to this condition and replicate."""
+        values = REPLICATE_VALUES[universe.probe_label]
+        value = float(values[universe.probe_replicate - 1]) * settings.scale
+        scales = {"mean_value": 1.0, "doubled_value": 2.0}
+        return [
+            Observable(
+                name=name, kind="mean_of_timeseries", values=[value * scales[name]], unit="A"
+            )
+            for name in self.observable_names
+        ]
 
 
 class ToyMultiMetricPlugin(ToyProtocolPlugin):
@@ -60,38 +70,9 @@ class ToyMultiMetricPlugin(ToyProtocolPlugin):
 
 
 class ToyProtocolAnalysis(contract_analysis(ToyProtocolPlugin)):  # type: ignore[misc]
-    """Analysis that skips the universe and reports the test's values."""
+    """Analysis whose replicate values the test assigns."""
 
     protocol_version: ClassVar[str] = "1"
-
-    def _run_compute_stage(self, ctx: Any, replicate: int) -> ReplicateArtifact:
-        """Write one replicate artifact from the values the test assigned.
-
-        The contract lifecycle owns aggregation, testing and formatting from
-        here, so the toy only has to produce the observables a real plugin's
-        ``compute()`` would have measured.
-        """
-        value = float(REPLICATE_VALUES[ctx.condition.label][replicate - 1]) * ctx.settings.scale
-        scales = {"mean_value": 1.0, "doubled_value": 2.0}
-        observables = [
-            Observable(
-                name=name,
-                kind="mean_of_timeseries",
-                values=[value * scales[name]],
-                unit="A",
-            )
-            for name in self.plugin.observable_names
-        ]
-        return ReplicateArtifact(
-            analysis_name=self.name,
-            condition_label=ctx.condition.label,
-            replicate=replicate,
-            payload={
-                "observables": [
-                    estimate.model_dump(mode="json") for estimate in reduce_replicate(observables)
-                ]
-            },
-        )
 
     def plot(self, ctx: Any) -> list[Path]:
         """Write a placeholder figure so the pipeline does not need matplotlib."""
@@ -128,12 +109,13 @@ def _install_toy(monkeypatch: pytest.MonkeyPatch, analysis_cls: type = ToyProtoc
 
     monkeypatch.setattr("polyzymd.analyses.discovery.get_analysis", _get_analysis)
     monkeypatch.setattr("polyzymd.analyses.discovery.list_all_names", lambda: sorted(registry))
-    monkeypatch.setattr(
-        "polyzymd.analyses.orchestrator.Condition.from_condition_config",
-        lambda cond: Condition(
-            cond.label, Path(cond.config), tuple(cond.replicates), SimpleNamespace()
-        ),
-    )
+
+    def universe_for(label: str, replicate: int) -> Any:
+        universe = synthetic_universe(n_frames=1)
+        universe.probe_label, universe.probe_replicate = label, replicate
+        return universe
+
+    _stub_universe_source(monkeypatch, universe_for, lambda replicate: [])
 
 
 def _write_configs(tmp_path: Path, labels: Sequence[str]) -> list[Path]:

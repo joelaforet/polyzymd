@@ -16,9 +16,9 @@ from unittest.mock import patch
 
 import numpy as np
 
-from polyzymd.analyses._framework.lifecycle import AnalysisLifecycle
 from polyzymd.analyses.contract import ObservableEstimate
 from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
+from polyzymd.analyses.orchestrator import run_replicate_once
 from polyzymd.analyses.rg import RgAnalysis, RgSettings
 from polyzymd.engines.gromacs import GromacsEngine
 from tests._support.gromacs_smoke import (
@@ -100,8 +100,8 @@ def test_contract_runner_writes_a_replicate_from_a_gromacs_layout(tmp_path: Path
             GromacsEngine, "resolve_trajectory_layout", autospec=True, wraps=original_resolve
         ) as resolve_spy,
     ):
-        result = AnalysisLifecycle(RgAnalysis()).run_replicate_once(
-            condition, settings, "0ns", output_dir, 1, recompute=True
+        result = run_replicate_once(
+            RgAnalysis(), condition, settings, "0ns", output_dir, 1, recompute=True
         )
 
     assert resolve_spy.call_count >= 1

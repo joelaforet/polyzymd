@@ -818,7 +818,7 @@ def _provenance(
     from importlib.metadata import PackageNotFoundError, version
 
     from polyzymd import __version__
-    from polyzymd.analyses._framework.lifecycle import _resolve_settings
+    from polyzymd.analyses.orchestrator import _resolve_settings
 
     hashes = {}
     for condition in getattr(config, "conditions", []):

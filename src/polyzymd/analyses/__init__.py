@@ -51,12 +51,10 @@ See :mod:`polyzymd.analyses.contract` for the full contract and
 """
 
 from polyzymd.analyses.base import (
-    AggregateContext,
     Analysis,
     ComparisonContext,
     Condition,
     PlotContext,
-    ReplicateContext,
 )
 from polyzymd.analyses.contract import Observable, contract_analysis, iter_frames
 from polyzymd.analyses.discovery import (
@@ -95,11 +93,9 @@ __all__ = [
     "clear_cache",
     # Framework internals kept importable for the CLI and tests
     "Analysis",
-    "AggregateContext",
     "ComparisonContext",
     "Condition",
     "PlotContext",
-    "ReplicateContext",
     "run_analysis",
     "run_comparison",
     "run_all_comparisons",

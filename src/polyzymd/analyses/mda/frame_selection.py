@@ -579,3 +579,49 @@ class FrameSelection:
         if n_frames_selected == 0:
             raise ValueError("Frame selection must select at least one frame")
         object.__setattr__(self, "n_frames_selected", n_frames_selected)
+
+
+def frame_selection_payload(frame_selection: FrameSelection) -> dict[str, Any]:
+    """Serialize frame-selection provenance to primitive values.
+
+    Parameters
+    ----------
+    frame_selection : FrameSelection
+        Frame selection used for a job or replicate context.
+
+    Returns
+    -------
+    dict[str, Any]
+        JSON-compatible frame-selection metadata.
+    """
+
+    return {
+        "start": _normalize_scalar_value(frame_selection.start),
+        "stop": _normalize_scalar_value(frame_selection.stop),
+        "step": _normalize_scalar_value(frame_selection.step),
+        "frames": _frame_selector_payload(frame_selection.frames),
+        "equilibration": frame_selection.equilibration,
+        "equilibration_start": _normalize_scalar_value(frame_selection.equilibration_start),
+        "equilibration_ps": _normalize_scalar_value(frame_selection.equilibration_ps),
+        "timestep_ps": _normalize_scalar_value(frame_selection.timestep_ps),
+        "first_frame_time_ps": _normalize_scalar_value(frame_selection.first_frame_time_ps),
+        "selected_start_time_ps": _normalize_scalar_value(frame_selection.selected_start_time_ps),
+        "equilibration_time_reference": frame_selection.equilibration_time_reference,
+        "n_frames_total": _normalize_scalar_value(frame_selection.n_frames_total),
+        "n_frames_selected": _normalize_scalar_value(frame_selection.n_frames_selected),
+        "warning_message": frame_selection.warning_message,
+    }
+
+
+def _frame_selector_payload(frames: Any) -> list[int | bool] | None:
+    """Serialize explicit frame selectors to JSON-safe Python scalars."""
+
+    if frames is None:
+        return None
+    try:
+        return _normalize_frame_selector_values(frames)
+    except ValueError as exc:
+        raise ValueError(
+            "The plugin produced a non-integer explicit frame selector; "
+            "use integer indices or a boolean mask"
+        ) from exc

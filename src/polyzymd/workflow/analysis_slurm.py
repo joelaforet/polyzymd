@@ -553,7 +553,7 @@ def build_manifest(
     resolved_equilibration = prepared["equilibration"]
     condition_specs = _condition_specs_from_conditions(valid_conditions)
     pipeline_mode: Literal["full", "finalize_only"] = (
-        "finalize_only" if not analysis.has_compute_stage else "full"
+        "finalize_only" if not getattr(analysis, "has_compute_stage", True) else "full"
     )
     settings_snapshot = settings.model_dump(mode="json") if hasattr(settings, "model_dump") else {}
     snapshot_hash = compute_manifest_snapshot_hash(

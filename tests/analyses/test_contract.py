@@ -481,13 +481,13 @@ def test_runner_recomputes_when_shared_code_changes(
     ``shared/alignment.py`` or in the reduction rules of ``contract.py`` has to
     reach the identity block through the framework hash.
     """
-    from polyzymd.analyses import base as analyses_base
+    from polyzymd.analyses import identity as analyses_identity
 
     run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
     marker = tmp_path / "analysis" / "A" / "rg" / "run_1" / "observables.npz"
     stamp = marker.stat().st_mtime_ns
 
-    monkeypatch.setattr(analyses_base, "_framework_code_hash", lambda module: "deadbeefdeadbeef")
+    monkeypatch.setattr(analyses_identity, "framework_code_hash", lambda module: "deadbeefdeadbeef")
     run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
 
     assert marker.stat().st_mtime_ns != stamp
@@ -499,8 +499,8 @@ def _hash_in(package_root: Path, module: str = "polyzymd.analyses.rg") -> str:
     import sys
 
     script = (
-        "from polyzymd.analyses.base import _framework_code_hash;"
-        f"print(_framework_code_hash({module!r}))"
+        "from polyzymd.analyses.identity import framework_code_hash;"
+        f"print(framework_code_hash({module!r}))"
     )
     completed = subprocess.run(
         [sys.executable, "-c", script],
@@ -552,7 +552,7 @@ def test_editing_a_plotter_leaves_the_framework_hash_alone(tmp_path: Path) -> No
 
 def test_the_framework_hash_reaches_frame_selection_and_the_universe() -> None:
     """Frame selection and the universe decide numbers, so they are hashed."""
-    from polyzymd.analyses.base import _hashed_imports
+    from polyzymd.analyses.identity import _hashed_imports
 
     reached = _hashed_imports("polyzymd.analyses.rg")
 
@@ -564,7 +564,7 @@ def test_the_framework_hash_reaches_frame_selection_and_the_universe() -> None:
 
 def test_the_framework_hash_ignores_the_plotters() -> None:
     """A change to a figure must not discard a campaign's cached replicates."""
-    from polyzymd.analyses.base import _hashed_imports
+    from polyzymd.analyses.identity import _hashed_imports
 
     reached = _hashed_imports("polyzymd.analyses.rg")
 
@@ -576,15 +576,15 @@ def test_an_unreadable_module_is_an_error_rather_than_a_matching_hash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A hash that skipped a module would compare equal to one taken before it changed."""
-    from polyzymd.analyses import base as analyses_base
+    from polyzymd.analyses import identity as analyses_identity
 
-    monkeypatch.setattr(analyses_base, "_module_source", lambda name: None)
-    analyses_base._framework_code_hash.cache_clear()
+    monkeypatch.setattr(analyses_identity, "_module_source", lambda name: None)
+    analyses_identity.framework_code_hash.cache_clear()
     try:
         with pytest.raises(PluginContractError, match="cannot read the source of"):
-            analyses_base._framework_code_hash("polyzymd.analyses.rg")
+            analyses_identity.framework_code_hash("polyzymd.analyses.rg")
     finally:
-        analyses_base._framework_code_hash.cache_clear()
+        analyses_identity.framework_code_hash.cache_clear()
 
 
 def test_the_identity_block_records_the_build_it_came_from(
@@ -592,13 +592,13 @@ def test_the_identity_block_records_the_build_it_came_from(
 ) -> None:
     """The identity block names the version, the code hashes and the commit."""
     from polyzymd import __version__
-    from polyzymd.analyses.base import _framework_code_hash
+    from polyzymd.analyses.identity import framework_code_hash
 
     aggregate = run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
 
     identity = aggregate.provenance["identity"]
     assert identity["polyzymd_version"] == __version__
-    assert identity["framework_code_hash"] == _framework_code_hash("polyzymd.analyses.rg")
+    assert identity["framework_code_hash"] == framework_code_hash("polyzymd.analyses.rg")
     assert "git_commit" in identity
     assert "git_dirty" in identity
 
@@ -681,13 +681,13 @@ def test_runner_recomputes_when_the_plugin_source_changes(
     the superseded one produced, without a hand-maintained version key in the
     plugin.
     """
-    import polyzymd.analyses.base as runner
+    import polyzymd.analyses.identity as runner
 
     run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
     marker = tmp_path / "analysis" / "A" / "rg" / "run_1" / "observables.npz"
     stamp = marker.stat().st_mtime_ns
 
-    monkeypatch.setattr(runner, "_code_hash", lambda plugin: "a different plugin")
+    monkeypatch.setattr(runner, "code_hash", lambda plugin: "a different plugin")
     run_contract_analysis(RgAnalysis, RG_SETTINGS, _scaled_universes, root=tmp_path)
 
     assert marker.stat().st_mtime_ns != stamp

@@ -1,181 +1,62 @@
-"""Tests for framework aggregate validation hooks."""
+"""The check an aggregate on disk passes before a comparison uses it."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, ClassVar
 
 import pytest
 from pydantic import BaseModel
 
-from polyzymd.analyses._framework.cache_identity import settings_fingerprint
-from polyzymd.analyses.base import AggregateValidationError, Analysis, Condition
+from polyzymd.analyses.exceptions import AggregateValidationError
+from polyzymd.analyses.identity import settings_fingerprint
+from polyzymd.analyses.mda.artifacts import ConditionArtifact
+from polyzymd.analyses.orchestrator import _check_aggregate
+from tests.analyses.conftest import make_condition
 
 
-class DummySettings(BaseModel):
-    """Settings model used by aggregate validation tests."""
-
+class _Settings(BaseModel):
     cutoff: float = 4.5
 
 
-class DummyAggregate(BaseModel):
-    """Aggregate model with the standard validation metadata."""
-
-    settings_fingerprint: str | None = None
-    equilibration_time: float = 10.0
-    equilibration_unit: str = "ns"
-    replicates: list[int]
-    n_replicates: int
-
-
-class CountOnlyAggregate(BaseModel):
-    """Aggregate model with only replicate count metadata."""
-
-    settings_fingerprint: str | None = None
-    n_replicates: int
-
-
-class DummyAnalysis(Analysis):
-    """Minimal analysis implementation for hook tests."""
-
-    name: ClassVar[str] = "dummy"
-    Settings: ClassVar[type] = DummySettings
-    AggregatedResultClass: ClassVar[type] = DummyAggregate
-    has_compute_stage: ClassVar[bool] = False
-    has_aggregate_stage: ClassVar[bool] = False
-
-
-class CountOnlyAnalysis(DummyAnalysis):
-    """Analysis using an aggregate model without replicate IDs."""
-
-    name: ClassVar[str] = "count_only"
-    AggregatedResultClass: ClassVar[type] = CountOnlyAggregate
-
-
-def _condition() -> Condition:
-    """Return a lightweight condition for validation tests."""
-
-    return Condition(
-        label="condition",
-        config_path=Path("/tmp/config.yaml"),
-        replicates=(1, 2, 3),
-        sim_config=object(),
+def _aggregate(replicates: list[int], **metadata: object) -> ConditionArtifact:
+    base = {"settings_fingerprint": settings_fingerprint(_Settings()), "equilibration": "10ns"}
+    return ConditionArtifact(
+        analysis_name="probe",
+        condition_label="A",
+        replicates=replicates,
+        metadata={**base, **metadata},
     )
 
 
-def _payload(settings: DummySettings, **overrides: Any) -> dict[str, Any]:
-    """Return a valid aggregate payload with optional overrides."""
-
-    payload: dict[str, Any] = {
-        "settings_fingerprint": settings_fingerprint(settings),
-        "equilibration_time": 10.0,
-        "equilibration_unit": "ns",
-        "replicates": [1, 2],
-        "n_replicates": 2,
-    }
-    payload.update(overrides)
-    return payload
+def test_a_matching_aggregate_passes(tmp_path: Path) -> None:
+    _check_aggregate(_aggregate([1, 2, 3]), make_condition("A", tmp_path), _Settings(), "10ns")
 
 
-def test_validation_coerces_dict_through_result_class() -> None:
-    """Dict aggregates should be parsed through AggregatedResultClass."""
-
-    settings = DummySettings()
-    analysis = DummyAnalysis()
-
-    result = analysis.validate_aggregated_result(
-        _payload(settings),
-        condition=_condition(),
-        settings=settings,
-        equilibration="10ns",
-        expected_replicates=(1, 2),
-    )
-
-    assert isinstance(result, DummyAggregate)
-    assert result.replicates == [1, 2]
-
-
-def test_validation_rejects_settings_mismatch() -> None:
-    """Aggregates from different settings should be rejected."""
-
-    settings = DummySettings()
-    analysis = DummyAnalysis()
-
-    with pytest.raises(AggregateValidationError, match="settings fingerprint mismatch"):
-        analysis.validate_aggregated_result(
-            _payload(settings, settings_fingerprint="deadbeef"),
-            condition=_condition(),
-            settings=settings,
-            equilibration="10ns",
-            expected_replicates=(1, 2),
+def test_other_settings_are_refused(tmp_path: Path) -> None:
+    with pytest.raises(AggregateValidationError, match="settings_fingerprint mismatch"):
+        _check_aggregate(
+            _aggregate([1, 2, 3]), make_condition("A", tmp_path), _Settings(cutoff=6.0), "10ns"
         )
 
 
-def test_validation_rejects_missing_fingerprint() -> None:
-    """Non-canonical aggregates without settings identity should be rejected."""
-
-    settings = DummySettings()
-    analysis = DummyAnalysis()
+def test_a_missing_fingerprint_is_refused(tmp_path: Path) -> None:
+    artifact = _aggregate([1, 2, 3])
+    del artifact.metadata["settings_fingerprint"]
 
     with pytest.raises(AggregateValidationError, match="missing settings fingerprint"):
-        analysis.validate_aggregated_result(
-            _payload(settings, settings_fingerprint=None),
-            condition=_condition(),
-            settings=settings,
-            equilibration="10ns",
-            expected_replicates=(1, 2),
-        )
+        _check_aggregate(artifact, make_condition("A", tmp_path), _Settings(), "10ns")
 
 
-def test_validation_rejects_replicate_mismatch() -> None:
-    """Exact replicate validation should reject stale aggregate coverage."""
-
-    settings = DummySettings()
-    analysis = DummyAnalysis()
-
-    with pytest.raises(AggregateValidationError, match="replicate mismatch"):
-        analysis.validate_aggregated_result(
-            _payload(settings, replicates=[1, 3]),
-            condition=_condition(),
-            settings=settings,
-            equilibration="10ns",
-            expected_replicates=(1, 2),
-        )
+def test_another_window_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(AggregateValidationError, match="equilibration mismatch"):
+        _check_aggregate(_aggregate([1, 2, 3]), make_condition("A", tmp_path), _Settings(), "0ns")
 
 
-def test_validation_allows_replicate_subset_when_enabled() -> None:
-    """Subset mode should accept successful finalized replicate subsets."""
-
-    settings = DummySettings()
-    analysis = DummyAnalysis()
-
-    result = analysis.validate_aggregated_result(
-        _payload(settings, replicates=[1, 2]),
-        condition=_condition(),
-        settings=settings,
-        equilibration="10ns",
-        expected_replicates=(1, 2, 3),
-        allow_replicate_subset=True,
-    )
-
-    assert result.n_replicates == 2
+def test_a_subset_of_the_replicates_passes(tmp_path: Path) -> None:
+    """A condition with a skipped replicate still aggregates the others."""
+    _check_aggregate(_aggregate([1, 3]), make_condition("A", tmp_path), _Settings(), "10ns")
 
 
-def test_validation_uses_count_when_ids_are_absent() -> None:
-    """Aggregates with only n_replicates should validate exact counts."""
-
-    settings = DummySettings()
-    analysis = CountOnlyAnalysis()
-
-    result = analysis.validate_aggregated_result(
-        {
-            "settings_fingerprint": settings_fingerprint(settings),
-            "n_replicates": 2,
-        },
-        condition=_condition(),
-        settings=settings,
-        equilibration="10ns",
-        expected_replicates=(1, 2),
-    )
-
-    assert isinstance(result, CountOnlyAggregate)
+def test_a_replicate_the_condition_does_not_list_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(AggregateValidationError, match="not a subset"):
+        _check_aggregate(_aggregate([1, 4]), make_condition("A", tmp_path), _Settings(), "10ns")

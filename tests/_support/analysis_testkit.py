@@ -11,8 +11,6 @@ Import directly::
     from tests._support.analysis_testkit import (
         FakeUniverse,
         make_condition,
-        make_replicate_context,
-        make_aggregate_context,
         make_comparison_context,
         make_plot_context,
     )
@@ -32,11 +30,9 @@ import numpy as np
 from pydantic import BaseModel
 
 from polyzymd.analyses.base import (
-    AggregateContext,
     ComparisonContext,
     Condition,
     PlotContext,
-    ReplicateContext,
 )
 from polyzymd.analyses.shared.loader import TrajectoryInfo, TrajectoryLoader
 from polyzymd.config.schema import SimulationConfig
@@ -297,79 +293,6 @@ def make_condition(
         config_path=Path(config_path),
         replicates=replicates,
         sim_config=sim_config if sim_config is not None else _default_sim_config_mock(),
-    )
-
-
-def make_replicate_context(
-    condition: Condition | None = None,
-    replicate: int = 1,
-    output_dir: Path | None = None,
-    settings: Any | None = None,
-    equilibration: str = "10ns",
-    recompute: bool = False,
-) -> ReplicateContext:
-    """Create a ``ReplicateContext`` with sensible defaults.
-
-    Parameters
-    ----------
-    condition : Condition | None
-        Condition object.  If ``None``, ``make_condition()`` is used.
-    replicate : int
-        Replicate number.
-    output_dir : Path | None
-        Output directory.  If ``None``, a ``Path("/tmp/run_1")`` is used.
-    settings : Any | None
-        Plugin settings. If ``None``, a minimal ``BaseModel`` settings object is used.
-    equilibration : str
-        Equilibration time string.
-    recompute : bool
-        Whether to force recomputation.
-    """
-    cond = condition or make_condition()
-    out = output_dir or Path("/tmp") / f"run_{replicate}"
-    return ReplicateContext(
-        condition=cond,
-        replicate=replicate,
-        sim_config=cond.sim_config,
-        output_dir=out,
-        equilibration=equilibration,
-        recompute=recompute,
-        settings=settings if settings is not None else _default_settings(),
-        result_path=out / "result.json",
-    )
-
-
-def make_aggregate_context(
-    condition: Condition | None = None,
-    replicates: tuple[int, ...] = (1, 2, 3),
-    output_dir: Path | None = None,
-    settings: Any | None = None,
-    equilibration: str = "10ns",
-) -> AggregateContext:
-    """Create an ``AggregateContext`` with sensible defaults.
-
-    Parameters
-    ----------
-    condition : Condition | None
-        Condition.  If ``None``, ``make_condition()`` is used.
-    replicates : tuple[int, ...]
-        Successful replicate numbers.
-    output_dir : Path | None
-        Output directory.  If ``None``, ``Path("/tmp/aggregated")`` is used.
-    settings : Any | None
-        Plugin settings.
-    equilibration : str
-        Equilibration time string.
-    """
-    cond = condition or make_condition()
-    out = output_dir or Path("/tmp/aggregated")
-    return AggregateContext(
-        condition=cond,
-        replicates=replicates,
-        output_dir=out,
-        equilibration=equilibration,
-        settings=settings if settings is not None else _default_settings(),
-        result_path=out / "result.json",
     )
 
 

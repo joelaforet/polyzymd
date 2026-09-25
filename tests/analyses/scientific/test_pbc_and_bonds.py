@@ -615,8 +615,8 @@ def test_provenance_refresh_keeps_bond_facts(tmp_path: Path) -> None:
 def test_every_condition_failing_the_same_way_is_reported(tmp_path: Path) -> None:
     """A typed error shared by every condition reaches the raised message."""
 
-    from polyzymd.analyses._framework.lifecycle import _no_conditions_message
     from polyzymd.analyses.exceptions import TopologyBondsMissingError
+    from polyzymd.analyses.orchestrator import _no_conditions_message
 
     error = TopologyBondsMissingError(
         context="contacts polymer chain detection",

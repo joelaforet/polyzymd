@@ -1,102 +1,31 @@
-"""Tests for the analyses plugin infrastructure (Phase A).
-
-Tests the base class contract, discovery, stats utilities, and orchestrator
-without requiring heavy dependencies (OpenMM, MDAnalysis, etc.).
-"""
+"""The Analysis class and the context objects the runner passes it."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import ClassVar, Sequence
+from typing import Any, ClassVar
 
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from polyzymd.analyses.base import (
-    AggregateContext,
-    Analysis,
-    ComparisonContext,
-    Condition,
-    PlotContext,
-    ReplicateContext,
-    SlurmResourceHint,
-)
-from polyzymd.analyses.exceptions import PluginContractError
-
-# ============================================================================
-# Fixtures: Toy analysis implementations for testing
-# ============================================================================
+from polyzymd.analyses.base import ComparisonContext, Condition, PlotContext, SlurmResourceHint
+from polyzymd.analyses.contract import Observable, contract_analysis
 
 
 class ToySettings(BaseModel):
-    """Minimal settings for testing."""
-
     threshold: float = 1.0
 
 
-class ToyResult(BaseModel):
-    """Minimal result for testing."""
-
-    value: float
-    replicate: int
-
-
-class ToyAggregatedResult(BaseModel):
-    """Minimal aggregated result for testing."""
-
-    mean_value: float
-    sem_value: float
-    replicate_values: list[float]
-    n_replicates: int
-    replicates: list[int] | None = None
-    settings_fingerprint: str | None = None
-
-    def save(self, path: Path) -> Path:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self.model_dump_json(indent=2))
-        return path
-
-    @classmethod
-    def load(cls, path: Path) -> "ToyAggregatedResult":
-        return cls.model_validate_json(path.read_text())
-
-
-class _MDAContractMixin:
-    """Provide the required MDA lifecycle seam for direct compute fakes."""
-
-    def build_mda_jobs(self, ctx):
-        """Return no jobs for tests that override the internal dispatcher."""
-
-        del ctx
-        return []
-
-
-class ToyAnalysis(_MDAContractMixin, Analysis):
-    """Concrete analysis for testing the plugin system."""
-
+class _Toy:
     name: ClassVar[str] = "toy"
-    Settings: ClassVar[type] = ToySettings
-    AggregatedResultClass: ClassVar[type] = ToyAggregatedResult
-    dependencies: ClassVar[tuple[str, ...]] = ()
-    min_replicates: ClassVar[int] = 2
+    Settings: ClassVar[type[BaseModel]] = ToySettings
+    references: ClassVar[tuple[str, ...]] = ()
 
-    def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> ToyResult:
-        return ToyResult(value=replicate * 1.5, replicate=replicate)
+    def compute(self, universe: Any, frames: Any, settings: ToySettings) -> list[Observable]:
+        return [Observable(name="value", kind="mean_of_timeseries", unit="A", values=[1.0])]
 
-    def aggregate(self, ctx: AggregateContext, results: Sequence[ToyResult]) -> ToyAggregatedResult:
-        values = [r.value for r in results]
-        import statistics
 
-        mean_val = statistics.mean(values)
-        sem_val = statistics.stdev(values) / len(values) ** 0.5 if len(values) > 1 else 0.0
-        return ToyAggregatedResult(
-            mean_value=mean_val,
-            sem_value=sem_val,
-            replicate_values=values,
-            n_replicates=len(values),
-            replicates=list(ctx.replicates),
-            settings_fingerprint=self.aggregate_settings_fingerprint(ctx.settings),
-        )
+ToyAnalysis = contract_analysis(_Toy)
 
 
 @pytest.fixture
@@ -106,7 +35,7 @@ def toy_analysis():
 
 @pytest.fixture
 def toy_condition(tmp_path):
-    """Build a Condition with a mock sim_config."""
+    """Build a Condition with a stand-in sim_config."""
     return Condition(
         label="Test Condition",
         config_path=tmp_path / "config.yaml",
@@ -115,107 +44,25 @@ def toy_condition(tmp_path):
     )
 
 
-@pytest.fixture
-def toy_settings():
-    return ToySettings(threshold=2.0)
-
-
-# ============================================================================
-# Tests: Analysis ABC contract
-# ============================================================================
-
-
-class TestAnalysisBase:
-    """Behaviour every analysis inherits from the base class."""
-
-    def test_internal_compute_dispatch_uses_mda_lifecycle(
-        self, toy_analysis, toy_condition
-    ) -> None:
-        """The internal compute dispatcher should run the configured compute seam."""
-        ctx = ReplicateContext(
-            condition=toy_condition,
-            replicate=2,
-            sim_config=toy_condition.sim_config,
-            output_dir=Path("/tmp/run_2"),
-            equilibration="10ns",
-            recompute=False,
-            settings=ToySettings(),
-        )
-
-        result = toy_analysis._run_compute_stage(ctx, replicate=2)
-
-        assert result == ToyResult(value=3.0, replicate=2)
-
-    def test_compare_only_subclass_can_disable_compute_stage(self) -> None:
-        """Compare-only plugins should remain valid with compute disabled."""
-
-        class CompareOnlyAnalysis(Analysis):
-            name: ClassVar[str] = "compare_only"
-            Settings: ClassVar[type] = ToySettings
-            has_compute_stage: ClassVar[bool] = False
-            has_aggregate_stage: ClassVar[bool] = False
-
-        plugin = CompareOnlyAnalysis()
-        assert plugin.has_compute_stage is False
-        assert plugin.has_aggregate_stage is False
-
-    def test_concrete_subclass_valid(self, toy_analysis):
-        """ToyAnalysis should instantiate without error."""
-        assert toy_analysis.name == "toy"
-        assert toy_analysis.min_replicates == 2
-
-    def test_repr(self, toy_analysis):
-        assert "ToyAnalysis" in repr(toy_analysis)
-        assert "toy" in repr(toy_analysis)
-
-    def test_default_filter_conditions(self, toy_analysis, toy_condition):
-        """Default filter_conditions keeps all conditions."""
-        conditions = [toy_condition]
-        result = toy_analysis.filter_conditions(conditions)
-        assert result == conditions
-
+class TestSlurmResourceHint:
     def test_default_slurm_resource_hint_is_none(self, toy_analysis) -> None:
-        """Default slurm_resource_hint should be unset."""
+        """An analysis that states no SLURM needs has no hint."""
         assert toy_analysis.slurm_resource_hint is None
 
-    def test_subclass_can_set_slurm_resource_hint(self) -> None:
-        """Subclass should be able to provide SLURM defaults."""
+    def test_plugin_hint_is_copied_onto_the_analysis(self) -> None:
+        """contract_analysis copies a plugin's SLURM hint, which the CLI reads."""
 
-        class SlurmHintAnalysis(_MDAContractMixin, Analysis):
-            name: ClassVar[str] = "slurm_hint"
-            Settings: ClassVar[type] = ToySettings
-            slurm_resource_hint: ClassVar[SlurmResourceHint | None] = SlurmResourceHint(
-                mem="16G",
-                time="04:00:00",
-                cpus_per_task=4,
-            )
+        class _Hungry(_Toy):
+            name: ClassVar[str] = "hungry"
+            slurm_resource_hint = SlurmResourceHint(mem="16G", time="04:00:00", cpus_per_task=4)
 
-            def _run_compute_stage(self, ctx: ReplicateContext, replicate: int) -> dict[str, float]:
-                del ctx
-                return {"value": float(replicate)}
-
-            def aggregate(
-                self,
-                ctx: AggregateContext,
-                results: Sequence[dict[str, float]],
-            ) -> dict[str, float]:
-                return {"mean": 1.0}
-
-        plugin = SlurmHintAnalysis()
-        assert plugin.slurm_resource_hint is not None
-        assert plugin.slurm_resource_hint.mem == "16G"
-        assert plugin.slurm_resource_hint.time == "04:00:00"
-        assert plugin.slurm_resource_hint.cpus_per_task == 4
+        hint = contract_analysis(_Hungry)().slurm_resource_hint
+        assert (hint.mem, hint.time, hint.cpus_per_task) == ("16G", "04:00:00", 4)
 
     def test_slurm_resource_hint_model_validation(self) -> None:
         """SlurmResourceHint should validate declared field types."""
         with pytest.raises(ValidationError):
             SlurmResourceHint(cpus_per_task="four")
-
-
-# ============================================================================
-# Tests: Context objects
-# ============================================================================
 
 
 class TestContextObjects:
@@ -224,54 +71,6 @@ class TestContextObjects:
     def test_condition_creation(self, toy_condition):
         assert toy_condition.label == "Test Condition"
         assert toy_condition.replicates == (1, 2, 3)
-
-    def test_replicate_context(self, toy_condition, toy_settings):
-        ctx = ReplicateContext(
-            condition=toy_condition,
-            replicate=1,
-            sim_config=toy_condition.sim_config,
-            output_dir=Path("/tmp/run_1"),
-            equilibration="10ns",
-            recompute=False,
-            settings=toy_settings,
-            result_path=Path("/tmp/run_1/result.json"),
-        )
-        assert ctx.replicate == 1
-        assert ctx.equilibration == "10ns"
-        assert ctx.settings.threshold == 2.0
-
-    def test_aggregate_context_preserves_positional_api(self, toy_condition, toy_settings):
-        """Old positional aggregate context construction should remain valid."""
-        result_path = Path("/tmp/aggregated/result.json")
-
-        ctx = AggregateContext(
-            toy_condition,
-            (1, 2),
-            Path("/tmp/aggregated"),
-            "10ns",
-            toy_settings,
-            result_path,
-        )
-
-        assert ctx.condition is toy_condition
-        assert ctx.replicates == (1, 2)
-        assert ctx.output_dir == Path("/tmp/aggregated")
-        assert ctx.equilibration == "10ns"
-        assert ctx.settings is toy_settings
-        assert ctx.result_path == result_path
-        assert ctx.recompute is False
-
-        recompute_ctx = AggregateContext(
-            toy_condition,
-            (1, 2),
-            Path("/tmp/aggregated"),
-            "10ns",
-            toy_settings,
-            result_path,
-            recompute=True,
-        )
-        assert recompute_ctx.result_path == result_path
-        assert recompute_ctx.recompute is True
 
     def test_comparison_context_effective_control(self, toy_condition):
         cond2 = Condition(
@@ -309,112 +108,6 @@ class TestContextObjects:
             result_path=Path("/tmp/result.json"),
         )
         assert ctx.effective_control is None
-
-    def test_comparison_context_preserves_positional_api(self, toy_condition):
-        """Old positional comparison context construction should remain valid."""
-        result_path = Path("/tmp/results/result.json")
-        failed_conditions = [toy_condition]
-        aggregated_results = {"Test Condition": {"ok": True}}
-
-        ctx = ComparisonContext(
-            "Test Project",
-            [toy_condition],
-            [],
-            None,
-            {"Test Condition": Path("/tmp/analysis/toy")},
-            Path("/tmp/results"),
-            "10ns",
-            ToySettings(),
-            0.1,
-            "welch",
-            "tukey_hsd",
-            result_path,
-            failed_conditions,
-            aggregated_results,
-        )
-
-        assert ctx.name == "Test Project"
-        assert ctx.conditions == [toy_condition]
-        assert ctx.excluded_conditions == []
-        assert ctx.control_label is None
-        assert ctx.analysis_dirs == {"Test Condition": Path("/tmp/analysis/toy")}
-        assert ctx.results_dir == Path("/tmp/results")
-        assert ctx.equilibration == "10ns"
-        assert isinstance(ctx.settings, ToySettings)
-        assert ctx.fdr_alpha == 0.1
-        assert ctx.ttest_method == "welch"
-        assert ctx.posthoc_method == "tukey_hsd"
-        assert ctx.result_path == result_path
-        assert ctx.failed_conditions == failed_conditions
-        assert ctx.aggregated_results == aggregated_results
-        assert ctx.recompute is False
-
-        recompute_ctx = ComparisonContext(
-            "Test Project",
-            [toy_condition],
-            [],
-            None,
-            {"Test Condition": Path("/tmp/analysis/toy")},
-            Path("/tmp/results"),
-            "10ns",
-            ToySettings(),
-            0.1,
-            "welch",
-            "tukey_hsd",
-            result_path,
-            failed_conditions,
-            aggregated_results,
-            recompute=True,
-        )
-        assert recompute_ctx.fdr_alpha == 0.1
-        assert recompute_ctx.aggregated_results == aggregated_results
-        assert recompute_ctx.recompute is True
-
-    def test_plot_context_preserves_positional_api(self, toy_condition):
-        """Old positional plot context construction should remain valid."""
-        from polyzymd.config.comparison import PlotSettings
-
-        plot_settings = PlotSettings()
-        comparison_path = Path("/tmp/results/result.json")
-
-        ctx = PlotContext(
-            [toy_condition],
-            {"Test Condition": Path("/tmp/analysis/toy")},
-            Path("/tmp/results"),
-            Path("/tmp/figures/toy"),
-            ToySettings(),
-            plot_settings,
-            comparison_path,
-            "Test Condition",
-            "10ns",
-        )
-
-        assert ctx.conditions == [toy_condition]
-        assert ctx.analysis_dirs == {"Test Condition": Path("/tmp/analysis/toy")}
-        assert ctx.results_dir == Path("/tmp/results")
-        assert ctx.output_dir == Path("/tmp/figures/toy")
-        assert isinstance(ctx.settings, ToySettings)
-        assert ctx.plot_settings is plot_settings
-        assert ctx.comparison_path == comparison_path
-        assert ctx.control_label == "Test Condition"
-        assert ctx.equilibration == "10ns"
-        assert ctx.recompute is False
-
-        recompute_ctx = PlotContext(
-            [toy_condition],
-            {"Test Condition": Path("/tmp/analysis/toy")},
-            Path("/tmp/results"),
-            Path("/tmp/figures/toy"),
-            ToySettings(),
-            plot_settings,
-            comparison_path,
-            "Test Condition",
-            "10ns",
-            recompute=True,
-        )
-        assert recompute_ctx.comparison_path == comparison_path
-        assert recompute_ctx.equilibration == "10ns"
-        assert recompute_ctx.recompute is True
 
 
 # ============================================================================

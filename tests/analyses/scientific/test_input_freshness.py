@@ -19,77 +19,90 @@ from typing import Any, ClassVar, Sequence
 import pytest
 from pydantic import BaseModel
 
-from polyzymd.analyses._framework.aggregate_validation import AggregateValidationError
-from polyzymd.analyses._framework.cache_identity import verify_input_identity, verify_input_set
+from polyzymd.analyses import identity
 from polyzymd.analyses.contract import Observable, contract_analysis, iter_frames
-from polyzymd.analyses.exceptions import StaleCacheError
+from polyzymd.analyses.exceptions import AggregateValidationError, StaleCacheError
 from polyzymd.analyses.mda.universe import FileIdentity
 from polyzymd.analyses.orchestrator import aggregate_condition_from_disk, run_replicate_once
 from polyzymd.analyses.testing import synthetic_universe
 from tests.analyses.conftest import make_condition
 
 
-class TestVerifyInputIdentity:
-    """``verify_input_identity`` compares recorded identity against disk."""
+def _identity_of(*paths: Path) -> dict[str, Any]:
+    """An identity block recording only the given input files."""
+    return {"inputs": [FileIdentity.from_path(path).as_dict() for path in paths]}
+
+
+class TestIdentityMismatch:
+    """``identity_mismatch`` compares a recorded identity with the current one."""
 
     def test_matching_files_report_no_mismatch(self, tmp_path: Path) -> None:
-        """A file that has not changed produces no mismatch message."""
-
+        """A file that has not changed produces no mismatch."""
         path = tmp_path / "prod.dcd"
         path.write_bytes(b"DCD")
-        stat = path.stat()
-        recorded = [{"path": str(path), "size_bytes": stat.st_size, "mtime_ns": stat.st_mtime_ns}]
+        recorded = _identity_of(path)
 
-        assert verify_input_identity(recorded, tmp_path) == []
+        current = {"inputs": identity.restat(recorded["inputs"])}
+
+        assert identity.identity_mismatch(recorded, current) is None
 
     def test_changed_size_is_reported_with_the_path(self, tmp_path: Path) -> None:
         """A grown trajectory is reported and names the file."""
-
         path = tmp_path / "prod.dcd"
         path.write_bytes(b"DCD")
-        stat = path.stat()
-        recorded = [{"path": str(path), "size_bytes": stat.st_size, "mtime_ns": stat.st_mtime_ns}]
+        recorded = _identity_of(path)
         path.write_bytes(b"DCDDCDDCD")
 
-        mismatches = verify_input_identity(recorded, tmp_path)
+        reason = identity.identity_mismatch(
+            recorded, {"inputs": identity.restat(recorded["inputs"])}
+        )
 
-        assert len(mismatches) == 1
-        assert "prod.dcd" in mismatches[0]
+        assert reason is not None and "prod.dcd" in reason and "size" in reason
 
     def test_missing_file_is_reported(self, tmp_path: Path) -> None:
         """A deleted input is reported rather than ignored."""
+        path = tmp_path / "prod.dcd"
+        path.write_bytes(b"DCD")
+        recorded = _identity_of(path)
+        path.unlink()
 
-        recorded = [{"path": "prod.dcd", "size_bytes": 3, "mtime_ns": 1}]
+        reason = identity.identity_mismatch(
+            recorded, {"inputs": identity.restat(recorded["inputs"])}
+        )
 
-        mismatches = verify_input_identity(recorded, tmp_path)
+        assert reason is not None and "missing" in reason
 
-        assert len(mismatches) == 1
-        assert "prod.dcd" in mismatches[0]
-
-
-class TestVerifyInputSet:
-    """A new or vanished trajectory file changes the result on its own."""
-
-    def test_identical_sets_report_nothing(self) -> None:
+    def test_order_of_segments_does_not_matter(self, tmp_path: Path) -> None:
         """The same file set in a different order is still the same set."""
+        a, b = tmp_path / "a.dcd", tmp_path / "b.dcd"
+        a.write_bytes(b"A")
+        b.write_bytes(b"B")
 
-        assert verify_input_set(["a.dcd", "b.dcd"], ["b.dcd", "a.dcd"]) == []
+        assert identity.identity_mismatch(_identity_of(a, b), _identity_of(b, a)) is None
 
-    def test_new_segment_is_reported(self) -> None:
+    def test_new_segment_is_reported(self, tmp_path: Path) -> None:
         """A segment that appeared since the cache was written is a mismatch."""
+        a, b = tmp_path / "a.dcd", tmp_path / "b.dcd"
+        a.write_bytes(b"A")
+        b.write_bytes(b"B")
 
-        mismatches = verify_input_set(["a.dcd"], ["a.dcd", "b.dcd"])
+        reason = identity.identity_mismatch(_identity_of(a), _identity_of(a, b))
 
-        assert len(mismatches) == 1
-        assert "b.dcd" in mismatches[0]
+        assert reason is not None and "b.dcd" in reason
 
-    def test_vanished_segment_is_reported(self) -> None:
-        """A file the cache read but the engine no longer resolves is a mismatch."""
+    def test_vanished_segment_is_reported(self, tmp_path: Path) -> None:
+        """A file the cache read but the loader no longer resolves is a mismatch."""
+        a, b = tmp_path / "a.dcd", tmp_path / "b.dcd"
+        a.write_bytes(b"A")
+        b.write_bytes(b"B")
 
-        mismatches = verify_input_set(["a.dcd", "b.dcd"], ["a.dcd"])
+        reason = identity.identity_mismatch(_identity_of(a, b), _identity_of(a))
 
-        assert len(mismatches) == 1
-        assert "b.dcd" in mismatches[0]
+        assert reason is not None and "b.dcd" in reason
+
+    def test_an_empty_identity_never_matches(self) -> None:
+        """A block that records nothing cannot be shown to match."""
+        assert identity.identity_mismatch({}, {"inputs": []}) is not None
 
 
 class _FreshnessSettings(BaseModel):
@@ -194,6 +207,34 @@ class TestReplicateCacheFreshness:
         """A different settings fingerprint is not a cache hit."""
         _run_once(probe, recompute=True, scale=1.0)
         _run_once(probe, scale=2.0)
+
+        assert _FreshnessProbe.calls == 2
+
+    def test_changed_plugin_code_forces_recompute(
+        self, probe: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A fix inside the plugin invalidates the replicates it already wrote."""
+        _run_once(probe, recompute=True)
+        monkeypatch.setattr(identity, "code_hash", lambda plugin: "edited plugin")
+        _run_once(probe)
+
+        assert _FreshnessProbe.calls == 2
+
+    def test_changed_framework_code_forces_recompute(
+        self, probe: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A fix in shared code a plugin reaches invalidates its replicates too."""
+        _run_once(probe, recompute=True)
+        monkeypatch.setattr(identity, "framework_code_hash", lambda module: "edited framework")
+        _run_once(probe)
+
+        assert _FreshnessProbe.calls == 2
+
+    def test_changed_simulation_config_forces_recompute(self, probe: SimpleNamespace) -> None:
+        """A replicate belongs to the condition it was computed for."""
+        _run_once(probe, recompute=True)
+        probe.condition.sim_config.thermodynamics.temperature = 363.0
+        _run_once(probe)
 
         assert _FreshnessProbe.calls == 2
 

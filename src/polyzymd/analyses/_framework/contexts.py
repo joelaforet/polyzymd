@@ -48,33 +48,6 @@ class Condition:
 
 
 @dataclass(frozen=True)
-class ReplicateContext:
-    """Context passed to per-replicate analysis execution."""
-
-    condition: Condition
-    replicate: int
-    sim_config: SimulationConfig
-    output_dir: Path
-    equilibration: str
-    recompute: bool
-    settings: BaseModel
-    result_path: Path | None = None
-
-
-@dataclass(frozen=True)
-class AggregateContext:
-    """Context passed to condition-level aggregation."""
-
-    condition: Condition
-    replicates: tuple[int, ...]
-    output_dir: Path
-    equilibration: str
-    settings: BaseModel
-    result_path: Path | None = None
-    recompute: bool = False
-
-
-@dataclass(frozen=True)
 class ComparisonContext:
     """Context passed to cross-condition comparison."""
 

@@ -235,61 +235,25 @@ def _stub_universe_source(
     inputs: Callable[[int], list[dict[str, Any]]],
     warnings: tuple[str, ...] = (),
 ) -> None:
-    """Replace the loader, the universe provider and the window the framework uses."""
-    from polyzymd.analyses._framework import lifecycle as framework_lifecycle
-    from polyzymd.analyses.base import Analysis, Condition
-    from polyzymd.analyses.mda import lifecycle
-    from polyzymd.analyses.shared.window import TrajectoryWindow
+    """Replace how the runner loads a replicate and loads a condition's config."""
+    from polyzymd.analyses import loading
+    from polyzymd.analyses.base import Condition
+    from polyzymd.analyses.testing import all_frames
 
-    class _Provider:
-        def __init__(self, config: Any, loader: Any = None) -> None:
-            self.config = config
+    def provenance(replicate: int) -> dict[str, Any]:
+        return {"topology": None, "trajectories": inputs(replicate), "warnings": list(warnings)}
 
-        @classmethod
-        def from_config(cls, config: Any, loader: Any = None) -> "_Provider":
-            return cls(config, loader=loader)
-
-        def load_universe(self, replicate: int) -> Any:
-            return factory(getattr(self.config, "name", None), replicate)
-
-        def provenance_for(self, replicate: int) -> dict[str, Any]:
-            return {
-                "topology": None,
-                "trajectories": inputs(replicate),
-                "warnings": list(warnings),
-            }
-
-    class _Loader:
-        def __init__(self, config: Any) -> None:
-            self.config = config
-
-        def get_trajectory_info(self, replicate: int) -> Any:
-            files = [Path(entry["path"]) for entry in inputs(replicate) if "path" in entry]
-            return types.SimpleNamespace(trajectory_files=files)
-
-    def full_window(self: Any, ctx: Any, replicate: int, loader: Any, universe: Any) -> Any:
-        n_frames = len(universe.trajectory)
-        return TrajectoryWindow(
-            start=0,
-            stop=n_frames,
-            step=1,
-            equilibration_start=0,
-            n_frames_total=n_frames,
-            n_frames_selected=n_frames,
-            timestep_ps=1.0,
-            equilibration_ps=0.0,
-            equilibration=ctx.equilibration,
-        )
+    def open_replicate(config: Any, replicate: int, equilibration: str, **_: Any) -> Any:
+        universe = factory(getattr(config, "name", None), replicate)
+        return universe, all_frames(universe), provenance(replicate)
 
     def condition_from_config(cfg: Any) -> Any:
         return Condition(
             cfg.label, Path(cfg.config), tuple(cfg.replicates), make_simulation_config(cfg.label)
         )
 
-    monkeypatch.setattr(Condition, "from_condition_config", staticmethod(condition_from_config))
-    monkeypatch.setattr(lifecycle, "UniverseProvider", _Provider)
-    monkeypatch.setattr(lifecycle, "build_trajectory_loader", lambda config: _Loader(config))
+    monkeypatch.setattr(loading, "open_replicate", open_replicate)
     monkeypatch.setattr(
-        framework_lifecycle, "build_trajectory_loader", lambda config: _Loader(config)
+        loading, "replicate_provenance", lambda config, replicate: provenance(replicate)
     )
-    monkeypatch.setattr(Analysis, "get_trajectory_window", full_window)
+    monkeypatch.setattr(Condition, "from_condition_config", staticmethod(condition_from_config))

@@ -68,6 +68,15 @@ class StaleCacheError(AnalysisError):
     the stale cache cannot recompute the result itself.
     """
 
+
+class AggregateValidationError(AnalysisError, ValueError):
+    """Raised when an aggregate on disk does not describe the current run.
+
+    It was computed for other settings, another equilibration window or
+    another config, or it is older than a replicate result it summarizes.
+    """
+
+
 class TopologyBondsMissingError(AnalysisError):
     """Raised when an analysis needs topology bonds and the topology has none.
 

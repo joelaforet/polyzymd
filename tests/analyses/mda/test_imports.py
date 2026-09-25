@@ -26,13 +26,7 @@ def test_public_facade_reexports_primitives() -> None:
         MDAnalysisExtensionError,
         MDARunKwargs,
     )
-    from polyzymd.analyses.mda.frame_selection import FrameSelection
-    from polyzymd.analyses.mda.lifecycle import (
-        MDAJobResult,
-        MDAReplicateJobContext,
-        MDAUniversePolicy,
-        frame_selection_payload,
-    )
+    from polyzymd.analyses.mda.frame_selection import FrameSelection, frame_selection_payload
     from polyzymd.analyses.mda.pair_distance import PairSelection, pair_distance_matrix
     from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
     from polyzymd.analyses.mda.universe import FileIdentity, UniverseProvenance, UniverseProvider
@@ -52,9 +46,6 @@ def test_public_facade_reexports_primitives() -> None:
     assert mda.ArtifactStore is ArtifactStore
     assert mda.ArtifactStoreError is ArtifactStoreError
     assert mda.FrameSelection is FrameSelection
-    assert mda.MDAJobResult is MDAJobResult
-    assert mda.MDAUniversePolicy is MDAUniversePolicy
-    assert mda.MDAReplicateJobContext is MDAReplicateJobContext
     assert mda.PairSelection is PairSelection
     assert mda.pair_distance_matrix is pair_distance_matrix
     assert mda.frame_selection_payload is frame_selection_payload
@@ -76,9 +67,6 @@ def test_public_facade_reexports_primitives() -> None:
         "ArtifactStore",
         "ArtifactStoreError",
         "FrameSelection",
-        "MDAJobResult",
-        "MDAUniversePolicy",
-        "MDAReplicateJobContext",
         "PairSelection",
         "pair_distance_matrix",
         "frame_selection_payload",
@@ -113,7 +101,6 @@ def test_import_does_not_load_heavy_simulation_modules() -> None:
     importlib.import_module("polyzymd.analyses.mda.artifacts")
     importlib.import_module("polyzymd.analyses.mda.base")
     importlib.import_module("polyzymd.analyses.mda.frame_selection")
-    importlib.import_module("polyzymd.analyses.mda.lifecycle")
     importlib.import_module("polyzymd.analyses.mda.store")
     importlib.import_module("polyzymd.analyses.mda.universe")
 

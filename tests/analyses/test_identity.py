@@ -7,9 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from polyzymd.analyses._framework.cache_identity import (
-    settings_fingerprint,
-)
+from polyzymd.analyses.identity import settings_fingerprint
 
 
 class SimpleSettings(BaseModel):
@@ -82,40 +80,3 @@ class TestSettingsFingerprint:
         )
 
         assert settings_fingerprint(original) != settings_fingerprint(changed)
-
-
-class TestPluginFingerprintAgreement:
-    """A plugin's own cache tag must match what the framework stamps on artifacts."""
-
-    @staticmethod
-    def _analyses_with_a_private_cache_tag() -> list[tuple[str, object]]:
-        """Return registered analyses that compute their own settings cache tag."""
-
-        from polyzymd.analyses.discovery import get_analysis, list_analyses
-
-        found = []
-        for name in list_analyses():
-            analysis = get_analysis(name)()
-            if hasattr(analysis, "_make_settings_cache_tag"):
-                found.append((name, analysis))
-        return found
-
-    def test_private_cache_tag_matches_aggregate_fingerprint(self):
-        """Every plugin that folds extra identity in must also override the hook.
-
-        ``_stamp_replicate_identity`` writes ``aggregate_settings_fingerprint``
-        onto a replicate artifact, while aggregation compares against the
-        plugin's own tag. A plugin that folds a version into one and not the
-        other rejects every artifact it just wrote. Every built-in plugin now
-        runs on the observable contract, where the runner owns the identity
-        block, so the list this walks is empty; the check stays as a guard for
-        a plugin that brings a private tag back.
-        """
-
-        for name, analysis in self._analyses_with_a_private_cache_tag():
-            settings = analysis.Settings()
-            assert analysis.aggregate_settings_fingerprint(
-                settings
-            ) == analysis._make_settings_cache_tag(
-                settings
-            ), f"{name}: aggregate_settings_fingerprint and _make_settings_cache_tag disagree"

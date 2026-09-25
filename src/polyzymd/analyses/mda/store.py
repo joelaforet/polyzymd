@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Sequence
 
 from pydantic import ValidationError
 
-from polyzymd.analyses._framework.aggregate_validation import validate_aggregate_not_outdated
+from polyzymd.analyses.exceptions import AggregateValidationError
 from polyzymd.analyses.mda.artifacts import (
     ArtifactManifest,
     ArtifactSidecarRef,
@@ -520,3 +520,115 @@ class ArtifactStore:
             for chunk in iter(lambda: handle.read(_HASH_CHUNK_SIZE), b""):
                 digest.update(chunk)
         return digest.hexdigest()
+
+
+def validate_aggregate_not_outdated(
+    result: Any,
+    *,
+    analysis_name: str,
+    source: str | Path | None,
+    expected_replicates: Sequence[int] | None = None,
+) -> None:
+    """Reject an aggregate that is older than the replicate results it covers.
+
+    An aggregate summarises the ``run_N/result.json`` files beside it. If one
+    of those files was written after the aggregate, the aggregate describes a
+    replicate result that no longer exists.
+
+    Call this only for an aggregate that was just read from ``source``. An
+    aggregate that is about to be written there is newer than every replicate
+    result by construction, even though the file still on disk is not.
+
+    Parameters
+    ----------
+    result : Any
+        Coerced aggregate result.
+    expected_replicates : sequence of int or None
+        Replicate IDs requested by the caller, used when the aggregate records
+        none itself.
+    analysis_name : str
+        Analysis name used in diagnostics.
+    source : str or Path or None
+        Path the aggregate was loaded from. The check is skipped for aggregates
+        that were not loaded from a file.
+    """
+
+    if not isinstance(source, Path) or not source.is_file():
+        return
+    replicates = _replicates_from_result(result)
+    if replicates is None:
+        replicates = tuple(expected_replicates) if expected_replicates is not None else ()
+    aggregate_mtime_ns = source.stat().st_mtime_ns
+    condition_dir = source.parent.parent
+    newer: list[str] = []
+    for replicate in replicates:
+        replicate_path = condition_dir / f"run_{int(replicate)}" / source.name
+        if not replicate_path.is_file():
+            continue
+        if replicate_path.stat().st_mtime_ns > aggregate_mtime_ns:
+            newer.append(str(replicate_path))
+    if newer:
+        raise _validation_error(
+            analysis_name,
+            source,
+            "aggregate is older than the replicate result(s) it summarizes ("
+            + ", ".join(newer)
+            + "); rerun with --recompute to rebuild it",
+        )
+
+
+def _replicates_from_result(result: Any) -> tuple[int, ...] | None:
+    """Return aggregate replicate IDs when the result declares them."""
+
+    for field_name in ("replicates", "replicate_ids"):
+        value = _field_value(result, field_name)
+        if value is not None:
+            try:
+                return tuple(int(rep) for rep in value)
+            except (TypeError, ValueError) as exc:
+                raise AggregateValidationError(
+                    "Aggregate result has invalid replicate identity. Recompute the analysis "
+                    "or clear stale analysis cache files."
+                ) from exc
+    for field_name in ("replicates", "replicate_ids"):
+        value = _metadata_value(result, field_name)
+        if value is not None:
+            try:
+                return tuple(int(rep) for rep in value)
+            except (TypeError, ValueError) as exc:
+                raise AggregateValidationError(
+                    "Aggregate result metadata has invalid replicate identity. Recompute the "
+                    "analysis or clear stale analysis cache files."
+                ) from exc
+    return None
+
+
+def _validation_error(
+    analysis_name: str,
+    source: str | Path | None,
+    detail: str,
+) -> AggregateValidationError:
+    """Build a user-actionable aggregate validation error."""
+
+    source_text = f" at {source}" if source is not None else ""
+    return AggregateValidationError(
+        f"{analysis_name}: stale or incompatible aggregated result{source_text}: {detail}. "
+        "Recompute the analysis with --recompute or clear stale analysis cache files."
+    )
+
+
+def _field_value(result: Any, field_name: str) -> Any:
+    """Return a top-level result field from models or mappings."""
+
+    if isinstance(result, dict):
+        return result.get(field_name)
+    return getattr(result, field_name, None)
+
+
+def _metadata_value(result: Any, field_name: str) -> Any:
+    """Return a metadata field from models or mappings."""
+
+    metadata = _field_value(result, "metadata")
+    if isinstance(metadata, dict):
+        return metadata.get(field_name)
+    return None

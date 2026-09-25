@@ -29,8 +29,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from polyzymd.analyses._framework.cache_identity import settings_fingerprint
 from polyzymd.analyses.base import ComparisonContext, Condition
+from polyzymd.analyses.identity import settings_fingerprint
 from polyzymd.analyses.mda import ConditionArtifact
 
 LOW_VARIANCE = (10.0, 10.1, 9.9)

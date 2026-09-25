@@ -73,19 +73,39 @@ def load_replicate(
     TrajectoryLineageError
         If the restart segments overlap, run backwards or leave gaps.
     """
-    from polyzymd.analyses.mda.frame_selection import FrameSelection
-    from polyzymd.analyses.mda.universe import UniverseProvider
-    from polyzymd.analyses.shared.loader import TrajectoryLoader
-    from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
-
     if isinstance(config, (str, Path)):
         from polyzymd.config.loader import load_config
 
         config = load_config(config)
-    loader = TrajectoryLoader(config)
-    provider = UniverseProvider.from_config(
-        config, loader=loader, require_complete=require_complete, pbc_policy=pbc_policy
+    universe, frames, _ = open_replicate(
+        config,
+        replicate,
+        equilibration,
+        require_complete=require_complete,
+        pbc_policy=pbc_policy,
     )
+    return Replicate(universe, frames)
+
+
+def open_replicate(
+    config: Any,
+    replicate: int,
+    equilibration: str,
+    *,
+    require_complete: bool = True,
+    pbc_policy: str = "as_is",
+) -> tuple[Any, FrameSelection, dict[str, Any]]:
+    """Load a replicate and return its universe, window and input provenance.
+
+    This is what the analysis runner calls for every replicate it computes, and
+    what :func:`load_replicate` wraps. The provenance names the topology and
+    trajectory files read, with their sizes and modification times, plus any
+    warnings the loader raised.
+    """
+    from polyzymd.analyses.mda.frame_selection import FrameSelection
+    from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
+
+    provider, loader = _provider(config, require_complete, pbc_policy)
     universe = provider.load_universe(replicate)
     window = resolve_replicate_trajectory_window(
         loader=loader,
@@ -93,4 +113,27 @@ def load_replicate(
         equilibration=equilibration,
         n_frames_total=len(universe.trajectory),
     )
-    return Replicate(universe, FrameSelection.from_trajectory_window(window))
+    frames = FrameSelection.from_trajectory_window(window)
+    return universe, frames, provider.provenance_for(replicate).as_dict()
+
+
+def replicate_provenance(config: Any, replicate: int) -> dict[str, Any]:
+    """The input files a replicate would be read from now, without loading it.
+
+    The runner compares this with a cached replicate's identity, so a new
+    restart segment or an extended trajectory is seen before any frame is read.
+    """
+    provider, _ = _provider(config, True, "as_is")
+    return provider.provenance_for(replicate).as_dict()
+
+
+def _provider(config: Any, require_complete: bool, pbc_policy: str) -> tuple[Any, Any]:
+    """Universe provider and trajectory loader for one condition."""
+    from polyzymd.analyses.mda.universe import UniverseProvider
+    from polyzymd.analyses.shared.loader import TrajectoryLoader
+
+    loader = TrajectoryLoader(config)
+    provider = UniverseProvider.from_config(
+        config, loader=loader, require_complete=require_complete, pbc_policy=pbc_policy
+    )
+    return provider, loader
