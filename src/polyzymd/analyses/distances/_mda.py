@@ -667,6 +667,7 @@ def _validate_and_order_artifacts(
                 f"Distances artifact replicate {artifact.replicate} has settings fingerprint "
                 f"{artifact.metadata.get('settings_fingerprint')}, expected {settings_fingerprint}"
             )
+        validate_autocorrelation_estimator_version(artifact, analysis_label="Distances")
         artifact_version = artifact.metadata.get("pair_distance_version")
         if artifact_version != expected_version:
             raise ValueError(
@@ -675,7 +676,6 @@ def _validate_and_order_artifacts(
                 "or clear stale caches before aggregating."
             )
 
-        validate_autocorrelation_estimator_version(artifact, analysis_label="Distances")
         _validate_pair_payloads(
             artifact,
             expected_pairs,
