@@ -57,7 +57,8 @@ more detail than `ProtocolReport` and correspondingly more shapes to handle.
 
 `TrajectoryLoader.load_universe(replicate)` is the canonical way to get an
 MDAnalysis `Universe` from a PolyzyMD config. It chains the production segments
-in order, checks their lineage, and enriches elements. Use it when you need a
+in order and fills in the element attribute of the MDAnalysis universe from the
+atom type if possible, otherwise from the atom name. Use it when you need a
 measurement no plugin provides. Do not use it to reimplement one that exists:
 a hand-written loop will not equilibrate uniformly, will not aggregate across
 replicates the way the framework does, and will produce a number with no
@@ -71,8 +72,9 @@ it handed to them through `MDAReplicateJobContext`; analysis code outside a
 plugin should not construct one, because the provenance it records has nowhere
 to go.
 
-Loading a file with `mda.Universe()` directly skips element enrichment and the
-lineage check. A few plugins do it for topology-only or external-reference
+Loading a file with `mda.Universe()` directly leaves the element attribute empty
+when the topology file has none, and does not chain the production segments. A
+few plugins do it for topology-only or external-reference
 loads, where no trajectory is involved. It is not a general-purpose route.
 
 ## Why there is more than one
@@ -80,8 +82,10 @@ loads, where no trajectory is involved. It is not a general-purpose route.
 The layers grew from the bottom. `TrajectoryLoader` came first, the plugin
 framework was built on it, the CLI was built on the framework, and the protocol
 was added last because the framework alone still demanded too much of a caller
-who only wanted a number. Each layer is still used by the one above it, so none
-of them can be removed, but only the top one is meant to be the starting point.
+who only wanted a number. Each layer is still used by the one above it, and
+only the top one is meant to be the starting point. The layers inside the plugin
+framework are planned to be merged into a single runner in a later release;
+`TrajectoryLoader` and the protocol will stay as they are.
 
 ## See also
 
