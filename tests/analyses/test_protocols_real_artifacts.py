@@ -184,11 +184,12 @@ def test_stored_comparison_reports_its_own_numbers(
 
 @pytest.mark.parametrize("analysis", [case[0] for case in CASES])
 def test_stored_comparison_renders_agent_text(analysis: str) -> None:
-    """Agent text stays inside its budget and carries a verdict for every stored result."""
-    text = _report(analysis).to_agent_text()
-    lines = text.strip().split("\n")
+    """Agent text prints every item and carries a verdict for every stored result."""
+    report = _report(analysis)
+    lines = report.to_agent_text().strip().split("\n")
 
-    assert len(lines) <= 25
+    items = report.conditions + report.pairwise + report.warnings + report.verdict
+    assert len(lines) == 1 + len(items)
     assert lines[0].startswith(f"# polyzymd analyze {analysis}")
     assert any(line.startswith("verdict:") for line in lines)
     assert "" not in [line.strip() for line in lines]

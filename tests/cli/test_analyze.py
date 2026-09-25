@@ -138,7 +138,7 @@ class TestSuccess:
     def test_agent_format_is_the_default(
         self, stub_analyze: dict[str, object], config_paths: list[Path]
     ) -> None:
-        """Without --format the command prints at most 25 agent lines."""
+        """Without --format the command prints the agent report."""
         result = CliRunner().invoke(
             analyze_command,
             ["rg", "-c", str(config_paths[0]), "-c", str(config_paths[1])],
@@ -146,7 +146,6 @@ class TestSuccess:
 
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
-        assert len(lines) <= 25
         assert lines[0].startswith("# polyzymd analyze rg")
         assert any(line.startswith("verdict:") for line in lines)
 

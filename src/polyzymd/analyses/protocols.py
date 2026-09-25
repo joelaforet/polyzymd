@@ -65,13 +65,9 @@ VERDICT_VOCABULARY = (
     VERDICT_NOT_TESTABLE,
 )
 
-MAX_AGENT_LINES = 25
-"""Line budget of :meth:`ProtocolReport.to_agent_text`."""
-
 _MAX_PRINTED_VALUES = 6
 
 __all__ = [
-    "MAX_AGENT_LINES",
     "VERDICT_VOCABULARY",
     "ConditionReport",
     "PairwiseReport",
@@ -166,12 +162,11 @@ class ProtocolReport(BaseModel):
     provenance: ProtocolProvenance
     verdict: list[str] = Field(default_factory=list)
 
-    def to_agent_text(self, max_lines: int = MAX_AGENT_LINES) -> str:
-        """Render the report as at most ``max_lines`` lines of fixed-vocabulary text.
+    def to_agent_text(self) -> str:
+        """Render the report as fixed-vocabulary text, one line per item.
 
-        Condition and comparison lines are dropped first when the report does
-        not fit, and the dropped count is stated on the last line. The output
-        has no table borders, no colour and no blank lines.
+        Every condition, comparison, warning and verdict gets its own line. The
+        output has no table borders, no colour and no blank lines.
         """
         run = f"  run {self.run}" if self.run else ""
         header = (
@@ -181,16 +176,13 @@ class ProtocolReport(BaseModel):
             f"  replicates {','.join(str(c.n_replicates) for c in self.conditions) or 'none'}"
             f"  protocol {self.analysis}/{self.protocol_version}"
         )
-        tail = [f"warning: {text}" for text in self.warnings]
-        tail += [f"verdict: {text}" for text in self.verdict]
-        body = _fit(
-            [_condition_line(item) for item in self.conditions],
-            [_pairwise_line(item) for item in self.pairwise],
-            max(max_lines - 1 - len(tail), 0),
-        )
-        lines = [header, *body, *tail]
-        if len(lines) > max_lines:
-            lines = lines[: max_lines - 1] + [_omitted(len(lines) - max_lines + 1)]
+        lines = [
+            header,
+            *(_condition_line(item) for item in self.conditions),
+            *(_pairwise_line(item) for item in self.pairwise),
+            *(f"warning: {text}" for text in self.warnings),
+            *(f"verdict: {text}" for text in self.verdict),
+        ]
         return "\n".join(lines) + "\n"
 
 
@@ -1014,19 +1006,3 @@ def _pairwise_line(pair: PairwiseReport) -> str:
         f"  p {_num(pair.p)}  p_adj {_num(pair.p_adjusted)}  test {pair.test}"
         f"  correction {pair.correction}  d {_num(pair.cohens_d)}  {flag}"
     )
-
-
-def _omitted(count: int) -> str:
-    """Render the line accounting for dropped lines."""
-    return f"# {count} line(s) omitted; use --format json for the full report"
-
-
-def _fit(conditions: list[str], pairwise: list[str], budget: int) -> list[str]:
-    """Trim the condition and comparison blocks to a shared line budget."""
-    total = len(conditions) + len(pairwise)
-    if total <= budget:
-        return conditions + pairwise
-    room = max(budget - 1, 0)
-    keep_a = min(len(conditions), max(room // 2, 1) if room else 0)
-    keep_b = max(room - keep_a, 0)
-    return conditions[:keep_a] + pairwise[:keep_b] + [_omitted(total - keep_a - keep_b)]

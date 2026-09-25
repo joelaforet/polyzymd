@@ -24,10 +24,9 @@ reads back exactly what `model_dump_json()` wrote.
 | `provenance` | `ProtocolProvenance` | Versions, config hashes and output paths. |
 | `verdict` | `list[str]` | One sentence per pairwise comparison, or one sentence describing the single condition. |
 
-`ProtocolReport.to_agent_text(max_lines=25)` renders the report as at most 25
-lines of plain text with no borders and no blank lines. Condition and
-comparison lines are dropped first when a report does not fit, and the dropped
-count is stated on the last line.
+`ProtocolReport.to_agent_text()` renders the report as plain text with no
+borders and no blank lines, one line for each condition, comparison, warning
+and verdict. No line is dropped, however many conditions the report holds.
 
 ## ConditionReport
 

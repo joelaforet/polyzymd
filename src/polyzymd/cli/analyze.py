@@ -134,7 +134,7 @@ def _one_line(text: str) -> str:
     type=click.Choice(["agent", "json"]),
     default="agent",
     show_default=True,
-    help="agent prints at most 25 lines; json prints the full ProtocolReport.",
+    help="agent prints one line per condition and comparison; json prints the full ProtocolReport.",
 )
 @click.option(
     "-o",

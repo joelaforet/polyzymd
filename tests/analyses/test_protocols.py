@@ -423,18 +423,21 @@ class TestAgentText:
         assert "|" not in text
         assert "" not in [line.strip() for line in lines]
 
-    def test_many_conditions_still_fit_the_budget(
+    def test_many_conditions_print_every_line(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """A wide comparison drops lines and says how many it dropped."""
+        """A wide comparison prints every condition and comparison."""
         _install_toy(monkeypatch)
         values = {f"C{index}": [10.0 + index, 10.1 + index, 10.2 + index] for index in range(12)}
         report = _run(tmp_path, values)
 
         lines = report.to_agent_text().strip().split("\n")
 
-        assert len(lines) <= 25
-        assert any("omitted" in line for line in lines)
+        conditions = [line for line in lines if line.startswith("C") and "  n 3  " in line]
+        comparisons = [line for line in lines if line.startswith("C0 vs ")]
+        assert len(conditions) == 12
+        assert len(comparisons) == 11
+        assert not any("omitted" in line for line in lines)
 
 
 class TestErrors:
