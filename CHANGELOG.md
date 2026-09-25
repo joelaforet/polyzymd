@@ -108,6 +108,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Study packages.**  `polyzymd study export` zips a study for publication:
+  the condition folders its comparisons list, its analyses, workflows,
+  structures and results, without trajectories, checkpoints or logs, plus a
+  `bundle_manifest.json` with every file's SHA-256 and every trajectory the
+  results came from.  `polyzymd study verify` checks an unpacked study, and
+  any downloaded trajectories, against that manifest.
 - **Study results as tables.**  `polyzymd.analyses.load_results` reads every
   comparison result in a study, a comparison folder or a glob, and returns
   tidy `conditions`, `comparisons` and `profiles` tables with CSV and pandas

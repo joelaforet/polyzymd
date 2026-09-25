@@ -158,6 +158,19 @@ Run `polyzymd compare validate` in each comparison before publishing. It warns
 about any condition named by an absolute path, which stops the study working
 once it moves.
 
+To package the study, run `polyzymd study export` anywhere inside it. It writes
+`<study>.zip` next to the study folder. Only condition folders that some
+`comparison.yaml` lists are packaged, so reruns and tests that sit beside them
+stay out, and the command names each one it left out. Trajectories,
+checkpoints, caches and SLURM logs are never packaged. The zip holds
+`bundle_manifest.json`, which records the SHA-256 of every packaged file and
+every trajectory the published results were computed from, with its size and
+content fingerprint; that list is what to deposit on Zenodo.
+
+Whoever receives the zip unpacks it and runs `polyzymd study verify <study>`.
+Every packaged file is checked, and every listed trajectory that has been
+downloaded to where its condition's config expects it is checked by content.
+
 ## Studies that predate the study folder
 
 A comparison outside any study still works. It finds analyses in an

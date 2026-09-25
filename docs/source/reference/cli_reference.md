@@ -907,6 +907,34 @@ polyzymd study results [-o DIRECTORY] [--analysis NAME ...]
 the named analyses. The Python equivalent is
 `polyzymd.analyses.load_results(study_root)`.
 
+(polyzymd-study-export)=
+## polyzymd study export
+
+Package the study as a zip for publication, without its trajectories.
+
+```bash
+polyzymd study export [-o PATH.zip]
+```
+
+Only condition folders listed by a `comparison.yaml` are packaged. Files with
+the suffixes `.dcd`, `.xtc`, `.trr`, `.nc`, `.chk` and `.cpt`, and the folders
+`slurm_logs`, `.polymer_cache`, `.pixi`, `.git` and `__pycache__`, are left out.
+The zip holds `bundle_manifest.json` with the SHA-256 of every file and the
+size and fingerprint of every trajectory the results were computed from.
+
+(polyzymd-study-verify)=
+## polyzymd study verify
+
+Check an unpacked study against its `bundle_manifest.json`.
+
+```bash
+polyzymd study verify [PATH]
+```
+
+Exits non-zero when a packaged file is missing or changed, or a downloaded
+trajectory does not match the manifest. Trajectories not yet downloaded are
+counted, not failed.
+
 ---
 
 (cli-analyze)=

@@ -134,3 +134,71 @@ def results(output: Path | None, analyses: tuple[str, ...]) -> None:
     )
     for path in written:
         click.echo(f"  {path}")
+
+
+@study.command("export")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Zip file to write. Default: <study>.zip next to the study folder.",
+)
+def export(output: Path | None) -> None:
+    """Package the study for publication, without its trajectories.
+
+    Run anywhere inside a study. Condition folders no comparison.yaml lists are
+    left out. The zip holds bundle_manifest.json, which records every file's
+    SHA-256 and every trajectory the results were computed from, to archive
+    separately.
+    """
+    from polyzymd.config.study import find_study_root
+    from polyzymd.study_bundle import export_study
+
+    root = find_study_root(Path.cwd())
+    if root is None:
+        click.echo("Error: not inside a study (no study.yaml found above this folder).", err=True)
+        sys.exit(1)
+    target = output or root.parent / f"{root.name}.zip"
+    plan = export_study(root, target)
+    click.echo(
+        f"Wrote {target}: {len(plan.files)} files, {plan.size_bytes / 2**20:.1f} MiB, "
+        f"{len(plan.conditions)} condition(s)"
+    )
+    click.echo(f"  {len(plan.trajectories)} trajectory file(s) to archive separately")
+    for path in plan.unreferenced:
+        click.secho(f"  Left out {path.relative_to(root)}: no comparison lists it", fg="yellow")
+    for entry in plan.outside:
+        click.secho(f"  Not packaged, outside the study: {entry}", fg="yellow")
+
+
+@study.command("verify")
+@click.argument("path", type=click.Path(file_okay=False, exists=True, path_type=Path), default=".")
+def verify(path: Path) -> None:
+    """Check an unpacked study against its bundle_manifest.json.
+
+    Every packaged file is checked by SHA-256. Every trajectory the manifest
+    lists is checked by size and content fingerprint if it has been downloaded
+    to where its condition's config expects it. Exits non-zero when a file is
+    missing or changed, or a trajectory changed.
+    """
+    from polyzymd.study_bundle import MANIFEST_NAME, verify_study
+
+    if not (path / MANIFEST_NAME).is_file():
+        click.echo(f"Error: {path} holds no {MANIFEST_NAME}.", err=True)
+        sys.exit(1)
+    report = verify_study(path)
+    click.echo(f"Checked {report.checked_files} files")
+    for name in report.missing_files:
+        click.secho(f"  Missing: {name}", fg="red")
+    for name in report.changed_files:
+        click.secho(f"  Changed: {name}", fg="red")
+    click.echo(
+        f"Trajectories: {len(report.trajectories_ok)} match, "
+        f"{len(report.trajectories_absent)} not downloaded, "
+        f"{len(report.trajectories_changed)} changed"
+    )
+    for name in report.trajectories_changed:
+        click.secho(f"  Changed: {name}", fg="red")
+    if not report.ok:
+        sys.exit(1)
