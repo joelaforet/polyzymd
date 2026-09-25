@@ -62,13 +62,7 @@ VERDICT_VOCABULARY = (
     VERDICT_NOT_TESTABLE,
 )
 
-MAX_AGENT_LINES = 25
-"""Line budget of :meth:`ProtocolReport.to_agent_text`."""
-
-_MAX_PRINTED_VALUES = 6
-
 __all__ = [
-    "MAX_AGENT_LINES",
     "VERDICT_VOCABULARY",
     "ConditionReport",
     "PairwiseReport",
@@ -162,12 +156,11 @@ class ProtocolReport(BaseModel):
     provenance: ProtocolProvenance
     verdict: list[str] = Field(default_factory=list)
 
-    def to_agent_text(self, max_lines: int = MAX_AGENT_LINES) -> str:
-        """Render the report as at most ``max_lines`` lines of fixed-vocabulary text.
+    def to_agent_text(self) -> str:
+        """Render the report as fixed-vocabulary text, one line per item.
 
-        Condition and comparison lines are dropped first when the report does
-        not fit, and the dropped count is stated on the last line. The output
-        has no table borders, no colour and no blank lines.
+        Every condition, comparison, warning and verdict gets its own line. The
+        output has no table borders, no colour and no blank lines.
         """
         run = f"  run {self.run}" if self.run else ""
         header = (
@@ -177,16 +170,13 @@ class ProtocolReport(BaseModel):
             f"  replicates {','.join(str(c.n_replicates) for c in self.conditions) or 'none'}"
             f"  protocol {self.analysis}/{self.protocol_version}"
         )
-        tail = [f"warning: {text}" for text in self.warnings]
-        tail += [f"verdict: {text}" for text in self.verdict]
-        body = _fit(
-            [_condition_line(item) for item in self.conditions],
-            [_pairwise_line(item) for item in self.pairwise],
-            max(max_lines - 1 - len(tail), 0),
-        )
-        lines = [header, *body, *tail]
-        if len(lines) > max_lines:
-            lines = lines[: max_lines - 1] + [_omitted(len(lines) - max_lines + 1)]
+        lines = [
+            header,
+            *(_condition_line(item) for item in self.conditions),
+            *(_pairwise_line(item) for item in self.pairwise),
+            *(f"warning: {text}" for text in self.warnings),
+            *(f"verdict: {text}" for text in self.verdict),
+        ]
         return "\n".join(lines) + "\n"
 
 
@@ -675,45 +665,28 @@ def _difference_ci(
 ) -> tuple[float, float] | None:
     """Return the 95 percent interval on ``mean(b) - mean(a)``.
 
-    The interval matches the variance assumption of the reported test: a pooled
-    variance with ``n_a + n_b - 2`` degrees of freedom for Student's t, and
-    separate variances with Welch-Satterthwaite degrees of freedom for Welch's
-    t [2]_. Tukey HSD gets no interval, because a studentised-range interval is
-    not a t interval. The interval covers this one difference and carries no
-    multiplicity correction, so a comparison can be non-significant after the
-    correction while its interval excludes zero.
+    The interval comes from ``scipy.stats.ttest_ind``, the same call that runs
+    the test, so it matches the variance assumption of the reported test: a
+    pooled variance for Student's t and separate variances with
+    Welch-Satterthwaite degrees of freedom for Welch's t [2]_. Tukey HSD gets no
+    interval, because its simultaneous intervals are not computed here. The
+    interval covers this one difference and carries no multiplicity correction,
+    so a comparison can be non-significant after the correction while its
+    interval excludes zero. ``None`` when a condition has fewer than two values
+    or both have zero variance, where no interval can be estimated.
     """
-    from polyzymd.analyses.shared.statistics import student_t_coverage_factor
-
-    n_a, n_b = len(values_a), len(values_b)
-    if test == "tukey_hsd" or n_a < 2 or n_b < 2:
+    if test == "tukey_hsd" or len(values_a) < 2 or len(values_b) < 2:
+        return None
+    if len(set(values_a)) == 1 and len(set(values_b)) == 1:
         return None
 
-    mean_a, mean_b = sum(values_a) / n_a, sum(values_b) / n_b
-    var_a = sum((value - mean_a) ** 2 for value in values_a) / (n_a - 1)
-    var_b = sum((value - mean_b) ** 2 for value in values_b) / (n_b - 1)
+    from scipy import stats
 
-    if test == "welch_t":
-        error = math.sqrt(var_a / n_a + var_b / n_b)
-        spread = (var_a / n_a) ** 2 / (n_a - 1) + (var_b / n_b) ** 2 / (n_b - 1)
-        if error == 0.0 or spread == 0.0:
-            return None
-        degrees = (var_a / n_a + var_b / n_b) ** 2 / spread
-    else:
-        pooled = ((n_a - 1) * var_a + (n_b - 1) * var_b) / (n_a + n_b - 2)
-        error = math.sqrt(pooled * (1.0 / n_a + 1.0 / n_b))
-        degrees = float(n_a + n_b - 2)
-        if error == 0.0:
-            return None
-
-    # student_t_coverage_factor quantiles at n - 1 degrees of freedom, so a
-    # difference with df degrees of freedom asks for df + 1. Welch's fractional
-    # df is passed through unrounded.
-    factor = student_t_coverage_factor(degrees + 1.0)
-    if factor is None:
+    result = stats.ttest_ind(values_b, values_a, equal_var=test != "welch_t")
+    low, high = (float(limit) for limit in result.confidence_interval(0.95))
+    if not (math.isfinite(low) and math.isfinite(high)) or low == high:
         return None
-    delta = mean_b - mean_a
-    return (delta - factor * error, delta + factor * error)
+    return (low, high)
 
 
 def _frames(
@@ -917,10 +890,7 @@ def _interval(limits: Sequence[float] | None) -> str:
 
 def _condition_line(condition: ConditionReport) -> str:
     """Render one condition on a single line."""
-    shown = ", ".join(_num(value) for value in condition.replicate_values[:_MAX_PRINTED_VALUES])
-    extra = len(condition.replicate_values) - _MAX_PRINTED_VALUES
-    if extra > 0:
-        shown += f", +{extra} more"
+    shown = ", ".join(_num(value) for value in condition.replicate_values)
     return (
         f"{condition.label}  n {condition.n_replicates}  mean {_num(condition.mean)}"
         f"  sem {_num(condition.sem)}  ci95 {_interval(condition.ci95)}"
@@ -941,19 +911,3 @@ def _pairwise_line(pair: PairwiseReport) -> str:
         f"  p {_num(pair.p)}  p_adj {_num(pair.p_adjusted)}  test {pair.test}"
         f"  correction {pair.correction}  d {_num(pair.cohens_d)}  {flag}"
     )
-
-
-def _omitted(count: int) -> str:
-    """Render the line accounting for dropped lines."""
-    return f"# {count} line(s) omitted; use --format json for the full report"
-
-
-def _fit(conditions: list[str], pairwise: list[str], budget: int) -> list[str]:
-    """Trim the condition and comparison blocks to a shared line budget."""
-    total = len(conditions) + len(pairwise)
-    if total <= budget:
-        return conditions + pairwise
-    room = max(budget - 1, 0)
-    keep_a = min(len(conditions), max(room // 2, 1) if room else 0)
-    keep_b = max(room - keep_a, 0)
-    return conditions[:keep_a] + pairwise[:keep_b] + [_omitted(total - keep_a - keep_b)]
