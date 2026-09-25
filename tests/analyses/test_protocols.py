@@ -439,6 +439,22 @@ class TestAgentText:
         assert len(comparisons) == 11
         assert not any("omitted" in line for line in lines)
 
+    def test_every_replicate_value_is_printed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A condition with many replicates prints all of their values."""
+        _install_toy(monkeypatch)
+        values = {"A": [10.0 + 0.1 * index for index in range(8)], "B": [12.0] * 8}
+        report = _run(tmp_path, values)
+
+        line = next(
+            line for line in report.to_agent_text().split("\n") if line.startswith("A  n 8")
+        )
+
+        printed = line.split("  values ", 1)[1].split(", ")
+        assert len(printed) == 8
+        assert "more" not in line
+
 
 class TestErrors:
     """Setup failures raise typed errors that say how to fix them."""

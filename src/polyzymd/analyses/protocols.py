@@ -65,8 +65,6 @@ VERDICT_VOCABULARY = (
     VERDICT_NOT_TESTABLE,
 )
 
-_MAX_PRINTED_VALUES = 6
-
 __all__ = [
     "VERDICT_VOCABULARY",
     "ConditionReport",
@@ -982,10 +980,7 @@ def _interval(limits: Sequence[float] | None) -> str:
 
 def _condition_line(condition: ConditionReport) -> str:
     """Render one condition on a single line."""
-    shown = ", ".join(_num(value) for value in condition.replicate_values[:_MAX_PRINTED_VALUES])
-    extra = len(condition.replicate_values) - _MAX_PRINTED_VALUES
-    if extra > 0:
-        shown += f", +{extra} more"
+    shown = ", ".join(_num(value) for value in condition.replicate_values)
     return (
         f"{condition.label}  n {condition.n_replicates}  mean {_num(condition.mean)}"
         f"  sem {_num(condition.sem)}  ci95 {_interval(condition.ci95)}"
