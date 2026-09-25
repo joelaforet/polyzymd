@@ -8,6 +8,12 @@ current one and is the only test the runner applies before it reuses a cached
 replicate or aggregates one from disk, so a change to any of those recomputes
 the number.
 
+An identity survives moving a study. Input files are matched by their path
+relative to the replicate's working directory and, when a modification time
+differs, by a content fingerprint, so a copied or unzipped study still matches
+its cached results while an edited trajectory does not. The config hash leaves
+out where the study lives, and settings files are matched by name and content.
+
 The PolyzyMD version and the git commit are recorded as provenance but not
 compared. The code hashes already change whenever code that can change a
 number changes, and a version bump on its own should not throw away a
@@ -46,6 +52,13 @@ COMPARED_KEYS = (
     "config_hash",
     "settings_files",
 )
+
+#: Files up to this size are fingerprinted by a SHA-256 over their whole content.
+FULL_HASH_LIMIT = 256 * 2**20
+
+#: Larger files, which are trajectories, are fingerprinted by their size and
+#: this many bytes from each end, so checking a moved campaign stays cheap.
+SAMPLE_BYTES = 2**20
 
 #: Framework modules every plugin computes through, whatever it imports.
 _FRAMEWORK_MODULES = (
@@ -136,6 +149,9 @@ def identity_mismatch(stored: Mapping[str, Any] | None, current: Mapping[str, An
             reason = _inputs_mismatch(stored.get("inputs") or [], current.get("inputs") or [])
             if reason is not None:
                 return reason
+        elif key == "settings_files":
+            if _portable_files(stored.get(key)) != _portable_files(current.get(key)):
+                return "a file the settings name changed"
         elif stored.get(key) != current.get(key):
             return f"{key} changed: cached {stored.get(key)!r}, current {current.get(key)!r}"
     return None
@@ -152,23 +168,89 @@ def input_files(provenance: Mapping[str, Any] | None) -> list[dict[str, Any]]:
     return [dict(entry) for entry in files if isinstance(entry, Mapping)]
 
 
-def restat(inputs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def describe_inputs(
+    entries: Sequence[Mapping[str, Any]],
+    working_dir: Path | None,
+    *,
+    fingerprint: bool = False,
+) -> list[dict[str, Any]]:
+    """Add the location-independent parts of each input file's identity.
+
+    Parameters
+    ----------
+    entries : sequence of mapping
+        File identities with ``path``, ``size_bytes`` and ``mtime_ns``.
+    working_dir : Path or None
+        The replicate's working directory. A file under it gets a
+        ``relative_path``, which is how it is matched after the study moves.
+    fingerprint : bool, optional
+        Also record a content fingerprint, as the runner does when it computes
+        a replicate, by default False.
+    """
+    described: list[dict[str, Any]] = []
+    for entry in entries:
+        item = dict(entry)
+        path = Path(str(item.get("path", "")))
+        if working_dir is not None:
+            try:
+                item["relative_path"] = path.resolve().relative_to(working_dir.resolve()).as_posix()
+            except (ValueError, OSError):
+                pass
+        if fingerprint and path.is_file():
+            item["fingerprint"] = file_fingerprint(path)
+        described.append(item)
+    return described
+
+
+def restat(
+    inputs: Sequence[Mapping[str, Any]], working_dir: Path | None = None
+) -> list[dict[str, Any]]:
     """The recorded input files as they are on disk now.
 
     Used where the runner has only the artifact to go on, when aggregating
-    replicate results a worker wrote. A file that is gone is recorded as
-    missing, so the comparison reports it.
+    replicate results a worker wrote. A file recorded with a
+    ``relative_path`` is looked for under ``working_dir`` first, so a moved
+    study finds its trajectories. A file that is not found is marked
+    ``missing``.
     """
     from polyzymd.analyses.mda.universe import FileIdentity
 
     current: list[dict[str, Any]] = []
     for entry in inputs:
         path = Path(str(entry.get("path", "")))
+        relative = entry.get("relative_path")
+        if relative and working_dir is not None and (working_dir / relative).is_file():
+            path = working_dir / relative
         if path.is_file():
-            current.append(FileIdentity.from_path(path, entry.get("format")).as_dict())
+            item = FileIdentity.from_path(path, entry.get("format")).as_dict()
         else:
-            current.append({"path": str(path), "missing": True})
+            item = {"path": str(path), "missing": True}
+        if relative:
+            item["relative_path"] = relative
+        current.append(item)
     return current
+
+
+def file_fingerprint(path: Path) -> str:
+    """Fingerprint of a file's content that does not depend on where it lives.
+
+    A file up to :data:`FULL_HASH_LIMIT` is hashed whole. A larger one is
+    hashed from its size and :data:`SAMPLE_BYTES` at each end, which catches a
+    trajectory that was extended, truncated or regenerated but not an edit
+    confined to its middle.
+    """
+    digest = hashlib.sha256()
+    size = path.stat().st_size
+    with path.open("rb") as stream:
+        if size <= FULL_HASH_LIMIT:
+            for block in iter(lambda: stream.read(2**20), b""):
+                digest.update(block)
+            return digest.hexdigest()
+        digest.update(str(size).encode())
+        digest.update(stream.read(SAMPLE_BYTES))
+        stream.seek(size - SAMPLE_BYTES)
+        digest.update(stream.read(SAMPLE_BYTES))
+    return "sampled:" + digest.hexdigest()
 
 
 def warn_on_version_mismatch(recorded: Any, source: Path | str) -> str | None:
@@ -190,11 +272,14 @@ def warn_on_version_mismatch(recorded: Any, source: Path | str) -> str | None:
 
 
 def compute_config_hash(config: SimulationConfig) -> str:
-    """Hash the simulation config fields that change how a trajectory is read.
+    """Hash what a simulation config says about the system that was simulated.
 
-    The enzyme, substrate and polymer definitions, the thermodynamic state and
-    the output locations are included. Simulation phases and force fields are
-    left out, because they are already baked into a finished trajectory.
+    The enzyme, substrate and polymer definitions and the thermodynamic state
+    are included; structure files are named by file name only. Where the study
+    and its trajectories live is left out, because the input file identities
+    already say which trajectories were read, and a moved study must keep its
+    hash. Simulation phases and force fields are left out, because they are
+    already baked into a finished trajectory.
 
     Returns
     -------
@@ -203,21 +288,17 @@ def compute_config_hash(config: SimulationConfig) -> str:
     """
     hash_data: dict[str, Any] = {
         "name": config.name,
-        "enzyme": {"name": config.enzyme.name, "pdb_path": str(config.enzyme.pdb_path)},
+        "enzyme": {"name": config.enzyme.name, "pdb": Path(str(config.enzyme.pdb_path)).name},
         "thermodynamics": {
             "temperature": config.thermodynamics.temperature,
             "pressure": config.thermodynamics.pressure,
         },
-        "output": {
-            "projects_directory": str(config.output.projects_directory),
-            "scratch_directory": str(config.output.effective_scratch_directory),
-            "naming_template": config.output.naming_template,
-        },
+        "naming_template": config.output.naming_template,
     }
     if config.substrate is not None:
         hash_data["substrate"] = {
             "name": config.substrate.name,
-            "sdf_path": str(config.substrate.sdf_path),
+            "sdf": Path(str(config.substrate.sdf_path)).name,
         }
     if config.polymers is not None and config.polymers.enabled:
         hash_data["polymers"] = {
@@ -258,11 +339,12 @@ def settings_file_identity(plugin: Any, settings: BaseModel) -> list[dict[str, A
     entries: list[dict[str, Any]] = []
     for path in declare(settings):
         resolved = Path(path).expanduser()
-        entries.append(
-            FileIdentity.from_path(resolved).as_dict()
-            if resolved.exists()
-            else {"path": str(resolved), "missing": True}
-        )
+        if resolved.is_file():
+            entry = FileIdentity.from_path(resolved).as_dict()
+            entry["fingerprint"] = file_fingerprint(resolved)
+        else:
+            entry = {"path": str(resolved), "missing": True}
+        entries.append(entry)
     return entries
 
 
@@ -312,29 +394,70 @@ def framework_code_hash(plugin_module: str) -> str:
 def _inputs_mismatch(
     stored: Sequence[Mapping[str, Any]], current: Sequence[Mapping[str, Any]]
 ) -> str | None:
-    """Name the first input file that changed, appeared or vanished."""
-    stored_by_path = {str(entry.get("path")): entry for entry in stored}
-    current_by_path = {str(entry.get("path")): entry for entry in current}
-    for path, entry in stored_by_path.items():
-        now = current_by_path.get(path)
+    """Name the first input file that changed, appeared or vanished.
+
+    Files are matched by ``relative_path`` when both sides record one, and by
+    absolute path otherwise. A file whose modification time changed still
+    matches when its content fingerprint does, which is what a copy or an
+    unzip does to a file.
+    """
+    stored_by_key = {_input_key(entry, current): entry for entry in stored}
+    current_by_key = {_input_key(entry, stored): entry for entry in current}
+    for key, entry in stored_by_key.items():
+        now = current_by_key.get(key)
         if now is None:
-            return f"{path} is no longer among the inputs"
+            return f"{key} is no longer among the inputs"
         if now.get("missing"):
-            return f"{path} is missing or unreadable"
+            return f"{key} is missing or unreadable"
         if now.get("size_bytes") != entry.get("size_bytes"):
             return (
-                f"{path} changed size: recorded {entry.get('size_bytes')} bytes, "
+                f"{key} changed size: recorded {entry.get('size_bytes')} bytes, "
                 f"found {now.get('size_bytes')}"
             )
-        if now.get("mtime_ns") != entry.get("mtime_ns"):
+        if now.get("mtime_ns") == entry.get("mtime_ns"):
+            continue
+        recorded = entry.get("fingerprint")
+        if recorded is None:
             return (
-                f"{path} changed modification time: recorded {entry.get('mtime_ns')} ns, "
+                f"{key} changed modification time: recorded {entry.get('mtime_ns')} ns, "
                 f"found {now.get('mtime_ns')} ns"
             )
-    for path in current_by_path:
-        if path not in stored_by_path:
-            return f"{path} is a new input the cached result never read"
+        found = now.get("fingerprint") or _fingerprint_or_none(Path(str(now.get("path", ""))))
+        if found != recorded:
+            return f"{key} changed content"
+    for key in current_by_key:
+        if key not in stored_by_key:
+            return f"{key} is a new input the cached result never read"
     return None
+
+
+def _input_key(entry: Mapping[str, Any], others: Sequence[Mapping[str, Any]]) -> str:
+    """Match by relative path when every file on the other side records one."""
+    relative = entry.get("relative_path")
+    if relative and all(other.get("relative_path") for other in others):
+        return str(relative)
+    return str(entry.get("path"))
+
+
+def _fingerprint_or_none(path: Path) -> str | None:
+    """Fingerprint of a file, or ``None`` when it cannot be read."""
+    try:
+        return file_fingerprint(path)
+    except OSError:
+        return None
+
+
+def _portable_files(entries: Any) -> list[tuple[Any, ...]]:
+    """Settings files by name, size and content, independent of their location."""
+    return sorted(
+        (
+            Path(str(entry.get("path", ""))).name,
+            bool(entry.get("missing")),
+            entry.get("size_bytes"),
+            entry.get("fingerprint"),
+        )
+        for entry in entries or []
+    )
 
 
 def _hashed_imports(module_name: str) -> set[str]:

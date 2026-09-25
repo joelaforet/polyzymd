@@ -426,6 +426,7 @@ def validate(config_file: Path, output_format: str):
         "file": str(config_file),
         "valid": False,
         "errors": [],
+        "warnings": [],
         "summary": {},
     }
 
@@ -442,6 +443,7 @@ def validate(config_file: Path, output_format: str):
         # Run validation
         errors = config.validate_config()
         result["errors"] = errors
+        result["warnings"] = config.portability_warnings()
         result["valid"] = len(errors) == 0
 
         # Build summary
@@ -501,6 +503,8 @@ def _output_validation_result(result: dict, output_format: str) -> None:
             sections = summary.get("sections_configured", [])
             if sections:
                 click.echo(f"  Analysis sections: {', '.join(sections)}")
+        for warning in result.get("warnings", []):
+            click.secho(f"  Warning: {warning}", fg="yellow")
     else:
         click.secho("✗ Configuration has errors", fg="red")
         click.echo()

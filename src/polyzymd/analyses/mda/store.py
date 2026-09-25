@@ -555,11 +555,38 @@ def validate_aggregate_not_outdated(
 
     if not isinstance(source, Path) or not source.is_file():
         return
+    condition_dir = source.parent.parent
+    recorded = [
+        entry
+        for entry in getattr(result, "source_replicates", None) or []
+        if isinstance(entry, dict) and entry.get("fingerprint") and "replicate" in entry
+    ]
+    if recorded:
+        # Content, not modification times, decides: a copied, unzipped or cloned
+        # study gets new modification times in no particular order.
+        from polyzymd.analyses.identity import file_fingerprint
+
+        changed = []
+        for entry in recorded:
+            replicate_path = condition_dir / f"run_{int(entry['replicate'])}" / source.name
+            if (
+                replicate_path.is_file()
+                and file_fingerprint(replicate_path) != entry["fingerprint"]
+            ):
+                changed.append(str(replicate_path))
+        if changed:
+            raise _validation_error(
+                analysis_name,
+                source,
+                "replicate result(s) changed after they were aggregated ("
+                + ", ".join(changed)
+                + "); rerun with --recompute to rebuild it",
+            )
+        return
     replicates = _replicates_from_result(result)
     if replicates is None:
         replicates = tuple(expected_replicates) if expected_replicates is not None else ()
     aggregate_mtime_ns = source.stat().st_mtime_ns
-    condition_dir = source.parent.parent
     newer: list[str] = []
     for replicate in replicates:
         replicate_path = condition_dir / f"run_{int(replicate)}" / source.name

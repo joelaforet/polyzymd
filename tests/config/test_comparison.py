@@ -630,3 +630,33 @@ class TestPluginSettingsPathResolution:
         settings = config.plugins.get("fake_paths")
         assert settings is not None
         assert settings.enzyme_pdb_for_sasa is None
+
+
+class TestPortabilityWarnings:
+    """A comparison says when it would break after its study is moved."""
+
+    @staticmethod
+    def _write(tmp_path, config_path: str):
+        from polyzymd.config.comparison import ComparisonConfig
+
+        path = tmp_path / "comparison.yaml"
+        path.write_text(
+            "name: study\n"
+            "conditions:\n"
+            "  - label: A\n"
+            f"    config: {config_path}\n"
+            "    replicates: [1]\n"
+        )
+        return ComparisonConfig.from_yaml(path)
+
+    def test_an_absolute_condition_path_is_reported(self, tmp_path) -> None:
+        config = self._write(tmp_path, str(tmp_path / "conditions" / "a" / "config.yaml"))
+
+        warnings = config.portability_warnings()
+
+        assert len(warnings) == 1 and "'A'" in warnings[0] and "relative" in warnings[0]
+
+    def test_a_relative_condition_path_is_not(self, tmp_path) -> None:
+        config = self._write(tmp_path, "../conditions/a/config.yaml")
+
+        assert config.portability_warnings() == []

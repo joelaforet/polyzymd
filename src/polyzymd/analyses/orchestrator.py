@@ -182,7 +182,11 @@ def _compute_replicate(
                 condition.sim_config,
                 settings,
                 equilibration,
-                identity.input_files(provenance),
+                identity.describe_inputs(
+                    identity.input_files(provenance),
+                    _working_dir(condition, replicate),
+                    fingerprint=True,
+                ),
             ),
             "frame_selection": frame_selection_payload(frames),
             "universe_policy": {
@@ -232,7 +236,10 @@ def _reusable(
         condition.sim_config,
         settings,
         equilibration,
-        identity.input_files(loading.replicate_provenance(condition.sim_config, replicate)),
+        identity.describe_inputs(
+            identity.input_files(loading.replicate_provenance(condition.sim_config, replicate)),
+            _working_dir(condition, replicate),
+        ),
     )
     reason = identity.identity_mismatch(cached.provenance.get("identity"), current)
     if reason is not None:
@@ -363,6 +370,7 @@ def aggregate_condition_from_disk(
     loaded: list[ReplicateArtifact] = []
     successful: list[int] = []
     missing: list[Path] = []
+    warnings: list[str] = []
     for replicate in replicates:
         path = output_dir / f"run_{replicate}" / RESULT_FILE
         if not path.exists():
@@ -382,7 +390,9 @@ def aggregate_condition_from_disk(
                 f"{analysis.name}: failed to load replicate result for "
                 f"condition='{condition.label}' replicate={replicate} from {path}: {exc}"
             ) from exc
-        _require_fresh(analysis, condition, settings, equilibration, artifact, path, replicate)
+        warnings += _require_fresh(
+            analysis, condition, settings, equilibration, artifact, path, replicate
+        )
         identity.warn_on_version_mismatch(artifact.polyzymd_version, path)
         loaded.append(artifact)
         successful.append(replicate)
@@ -394,7 +404,15 @@ def aggregate_condition_from_disk(
             f"disk, need at least 1. Expected missing replicate output path(s): {shown}{more}"
         )
     return _aggregate(
-        analysis, condition, settings, equilibration, output_dir, loaded, successful, recompute
+        analysis,
+        condition,
+        settings,
+        equilibration,
+        output_dir,
+        loaded,
+        successful,
+        recompute,
+        warnings=warnings,
     )
 
 
@@ -406,23 +424,62 @@ def _require_fresh(
     artifact: ReplicateArtifact,
     path: Path,
     replicate: int,
-) -> None:
-    """Refuse a replicate result whose identity no longer matches this run."""
+) -> list[str]:
+    """Refuse a replicate result that no longer matches this run.
+
+    An input that is gone cannot be checked, which is the normal state of a
+    published study whose trajectories are archived elsewhere. Its recorded
+    value is aggregated as it stands, and the returned warning says so. An
+    input that is present but changed is refused.
+
+    Returns
+    -------
+    list of str
+        Warnings about inputs that could not be checked.
+
+    Raises
+    ------
+    StaleCacheError
+        If the result records no identity, or an input or any other compared
+        field changed.
+    """
     stored = artifact.provenance.get("identity") or {}
-    current = identity.replicate_identity(
-        analysis.plugin,
-        condition.sim_config,
-        settings,
-        equilibration,
-        identity.restat(stored.get("inputs") or []),
+    recorded = stored.get("inputs") or []
+    current = identity.restat(recorded, _working_dir(condition, replicate))
+    unverified = [entry for entry in current if entry.get("missing")]
+    comparable = [
+        original if now.get("missing") else now
+        for original, now in zip(recorded, current, strict=True)
+    ]
+    reason = identity.identity_mismatch(
+        stored,
+        identity.replicate_identity(
+            analysis.plugin, condition.sim_config, settings, equilibration, comparable
+        ),
     )
-    reason = identity.identity_mismatch(stored, current)
     if reason is not None:
         raise StaleCacheError(
             f"{analysis.name}: cached result {path} for condition='{condition.label}' "
             f"replicate={replicate} no longer matches this run: {reason}. Rerun with "
             "--recompute to recompute this replicate."
         )
+    if not unverified:
+        return []
+    message = (
+        f"replicate {replicate}: {len(unverified)} input file(s) are not on disk, so the "
+        f"recorded values were aggregated without checking them "
+        f"({', '.join(str(entry.get('relative_path') or entry['path']) for entry in unverified[:3])})"
+    )
+    logger.warning("%s: %s [condition=%s]", analysis.name, message, condition.label)
+    return [message]
+
+
+def _working_dir(condition: Condition, replicate: int) -> Path | None:
+    """The replicate's working directory, or ``None`` when the config cannot say."""
+    try:
+        return Path(condition.sim_config.get_working_directory(replicate))
+    except Exception:
+        return None
 
 
 def _aggregate(
@@ -434,6 +491,8 @@ def _aggregate(
     results: Sequence[ReplicateArtifact],
     replicates: Sequence[int],
     recompute: bool,
+    *,
+    warnings: Sequence[str] = (),
 ) -> ConditionArtifact:
     """Aggregate replicate artifacts by observable kind and write the result."""
     aggregated_dir = output_dir / "aggregated"
@@ -455,10 +514,16 @@ def _aggregate(
         ) from exc
     first = dict(results[0].provenance.get("identity") or {})
     first.pop("inputs", None)
+    sources = [
+        {"replicate": int(replicate), "fingerprint": identity.file_fingerprint(path)}
+        for replicate in replicates
+        if (path := output_dir / f"run_{replicate}" / RESULT_FILE).is_file()
+    ]
     artifact = ConditionArtifact(
         analysis_name=analysis.name,
         condition_label=condition.label,
         replicates=[int(replicate) for replicate in replicates],
+        source_replicates=sources,
         payload={"observables": [item.model_dump(mode="json") for item in aggregates]},
         provenance={"source": "observable_contract", "identity": first},
         metadata={
@@ -467,6 +532,7 @@ def _aggregate(
             "config_hash": identity.compute_config_hash(condition.sim_config),
             "n_replicates": len(results),
         },
+        warnings=list(warnings),
     )
     try:
         ArtifactStore(aggregated_dir).write_condition_result(artifact, RESULT_FILE)

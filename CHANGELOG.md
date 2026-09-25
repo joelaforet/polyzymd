@@ -21,6 +21,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **One analysis runner.**  `polyzymd.analyses.orchestrator` now runs every
+  analysis itself; the lifecycle, io, aggregate validation, cache identity and
+  MDA job modules are gone, together with the `dependencies`,
+  `min_replicates`, `has_compute_stage`, `has_aggregate_stage`,
+  `filter_conditions`, `AggregatedResultClass` and `ReplicateResultClass`
+  hooks no contract plugin used.  The public entry points the CLI and the SLURM
+  workers call are unchanged.  The simulation config hash no longer includes
+  the projects and scratch directories or the full structure file paths, so
+  existing cached replicates are recomputed once.
+- **Stale caches after code or config changes.**  A cached replicate was reused
+  after the plugin's source, shared framework code or the condition's
+  simulation config changed, because the cache check that ran first compared
+  only the input files, the settings and the equilibration window.  Every
+  cached replicate and every aggregate from disk is now checked against one
+  identity that includes the code hashes and the config hash.  Finalizing also
+  refuses an aggregate computed under another equilibration window or config.
 - **`mda_backend_policy` is ignored.**  The block chose a backend for
   MDAnalysis `AnalysisBase.run()`, and no analysis builds an `AnalysisBase` job
   any more.  It still parses for one release so an existing campaign file loads,
@@ -92,6 +108,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Portable study results.**  Replicate results record their input files by
+  path relative to the replicate's working directory, with a content
+  fingerprint, and aggregates record a fingerprint of each replicate result
+  they summarize.  A copied, unzipped or cloned study keeps its cached and
+  published results; a study without its trajectories still aggregates, with a
+  warning on each aggregate.  `polyzymd compare validate` warns about absolute
+  condition paths.
 - **Study folders and analyses outside the source tree.**  `polyzymd study init`
   creates a study: `study.yaml` marks its root, and `conditions/`,
   `comparisons/`, `analyses/`, `structures/` and `workflows/` hold everything a

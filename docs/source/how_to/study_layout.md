@@ -113,9 +113,29 @@ rg = [protein.radius_of_gyration() for _ in iter_frames(universe, frames)]
 `AnalysisBase.run()` call. Scripts in `workflows/` may also read the JSON
 results under each comparison and style figures however the paper needs.
 
+## Share or move the study
+
+Every replicate result records the files it was computed from by their path
+relative to the replicate's working directory, their size and a content
+fingerprint, and the config hash leaves out where the study lives. So a study
+copied to another machine, unzipped or cloned from git keeps its cached
+results: a file whose modification time changed still matches when its content
+does, and an edited trajectory does not.
+
+A published study usually arrives without its trajectories. Its comparisons
+still aggregate, compare and plot from the replicate results in `analysis/`.
+The inputs those results were computed from cannot be checked, so each
+aggregate records a warning saying so rather than refusing. Recomputing a
+replicate needs the trajectories again, downloaded to the location each
+condition's `output.scratch_directory` names.
+
+Run `polyzymd compare validate` in each comparison before publishing. It warns
+about any condition named by an absolute path, which stops the study working
+once it moves.
+
 ## Studies that predate the study folder
 
 A comparison outside any study still works. It finds analyses in an
 `analyses/` folder next to its `comparison.yaml`, and it resolves condition
 paths relative to that file as before. Absolute condition paths still load,
-but a study that uses them will not run on another machine.
+but `compare validate` warns about them.

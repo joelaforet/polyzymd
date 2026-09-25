@@ -831,6 +831,8 @@ class ComparisonConfig(BaseModel):
     mda_backend_policy: MDABackendPolicyConfig = Field(default_factory=MDABackendPolicyConfig)
     plot_settings: PlotSettings = Field(default_factory=PlotSettings)
     source_path: Path | None = Field(default=None, exclude=True)
+    absolute_condition_paths: list[str] = Field(default_factory=list, exclude=True)
+    """Labels of conditions whose ``config`` the file gives as an absolute path."""
 
     @field_validator("plugins", mode="before")
     @classmethod
@@ -895,11 +897,14 @@ class ComparisonConfig(BaseModel):
 
         # Resolve relative paths relative to the config file location
         config_dir = path.parent.resolve()
+        absolute_labels: list[str] = []
         if "conditions" in data:
             for cond in data["conditions"]:
                 if "config" in cond:
                     cond_path = Path(cond["config"])
-                    if not cond_path.is_absolute():
+                    if cond_path.is_absolute():
+                        absolute_labels.append(str(cond.get("label", cond_path)))
+                    else:
                         cond["config"] = str(config_dir / cond_path)
 
         # Register the study's own analyses before any plugin name is looked up
@@ -935,6 +940,7 @@ class ComparisonConfig(BaseModel):
 
         config = cls(**data)
         config.source_path = path.resolve()
+        config.absolute_condition_paths = absolute_labels
         return config
 
     def to_yaml(self, path: Path | str) -> None:
@@ -1021,6 +1027,22 @@ class ComparisonConfig(BaseModel):
                 errors.append(f"Config not found for '{cond.label}': {cond.config}")
 
         return errors
+
+    def portability_warnings(self) -> list[str]:
+        """Say what would stop this comparison working after its study is moved.
+
+        Returns
+        -------
+        list[str]
+            One message per condition whose config is named by an absolute
+            path, which breaks once the study is copied, unzipped or cloned
+            elsewhere.
+        """
+        return [
+            f"Condition '{label}' names its config by an absolute path; write it relative "
+            "to this comparison.yaml so the study still works after it is moved."
+            for label in self.absolute_condition_paths
+        ]
 
 
 def generate_comparison_template(name: str, eq_time: str = "10ns") -> str:
