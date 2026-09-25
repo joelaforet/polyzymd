@@ -550,9 +550,7 @@ class TestNewAnalysisCLI:
             "    pass\n\n\n"
             "class ExternalForceAnalysis(Analysis):\n"
             f"    name: ClassVar[str] = {plugin_name!r}\n"
-            "    Settings: ClassVar[type[BaseModel]] = ExternalForceSettings\n"
-            "    has_compute_stage: ClassVar[bool] = False\n"
-            "    has_aggregate_stage: ClassVar[bool] = False\n",
+            "    Settings: ClassVar[type[BaseModel]] = ExternalForceSettings\n",
             encoding="utf-8",
         )
 

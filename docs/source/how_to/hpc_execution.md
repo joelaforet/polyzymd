@@ -2,7 +2,7 @@
 
 This guide shows you how to submit PolyzyMD analysis computations as SLURM
 jobs. It covers submitting a full analysis DAG (replicate → aggregate →
-finalize), monitoring progress, cross-plugin dependency ordering, and
+finalize), monitoring progress, submitting every analysis at once, and
 collecting comparison results — all without running analysis interactively on a
 login node.
 
@@ -65,10 +65,9 @@ Each job includes automatic retry logic. If a worker exits with a non-zero
 code, it requeues itself up to `--max-retries` times (default: 3) before
 marking the task as failed.
 
-## Submitting all enabled analyses with dependency ordering
+## Submitting all enabled analyses
 
-Use `compare submit-all` to submit every enabled plugin from `comparison.yaml`
-in dependency order:
+Use `compare submit-all` to submit every enabled plugin from `comparison.yaml`:
 
 ```bash
 pixi run -e analysis polyzymd compare submit-all \
@@ -80,8 +79,9 @@ pixi run -e analysis polyzymd compare submit-all \
 This command:
 
 - discovers enabled plugins from `plugins:`
-- orders plugins by declared `dependencies`
-- submits each plugin DAG with cross-plugin finalize dependencies
+- submits one DAG per plugin, in the order `plugins:` lists them
+
+Analyses do not depend on each other, so the DAGs run independently.
 
 Exclude one or more analyses with repeatable `--exclude`:
 
@@ -94,20 +94,6 @@ pixi run -e analysis polyzymd compare submit-all \
 
 Use `--dry-run` to generate all scripts and print the submission summary table
 without dispatching jobs.
-
-## Framework finalize-only mode
-
-The submission framework supports plugins that do not implement
-compute/aggregate stages and only run comparison/plot logic. For those plugins,
-the manifest pipeline mode is `finalize_only`, and submission creates a single
-finalize job.
-
-The stable v1.3 analysis plugins use compute and/or aggregate stages before
-finalization. Treat `finalize_only` as a framework capability for future or
-custom compare-only plugins, not as the normal path for the stable plugins
-listed in this guide.
-
-This behavior applies to both `compare submit` and `compare submit-all`.
 
 ## The Example Study
 

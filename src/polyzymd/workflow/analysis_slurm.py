@@ -126,7 +126,6 @@ class AnalysisJobManifest(BaseModel):
     condition_specs: list[ConditionTaskSpec]
     settings_snapshot: dict[str, Any]
     snapshot_hash: str = Field(min_length=1)
-    pipeline_mode: Literal["full", "finalize_only"]
     partial_policy: Literal["strict", "allow_partial"]
     equilibration: str
     recompute: bool
@@ -514,20 +513,16 @@ def _ensure_layout(hpc_dir: Path, manifest: AnalysisJobManifest) -> None:
     _scripts_dir(hpc_dir).mkdir(parents=True, exist_ok=True)
     _logs_dir(hpc_dir).mkdir(parents=True, exist_ok=True)
 
-    if manifest.pipeline_mode == "full":
-        (hpc_dir / "status" / "replicates").mkdir(parents=True, exist_ok=True)
-        (hpc_dir / "status" / "conditions").mkdir(parents=True, exist_ok=True)
-
-        for cond_spec in manifest.condition_specs:
-            for rep_spec in cond_spec.replicate_specs:
-                status_path = _rep_status_path(
-                    hpc_dir, cond_spec.condition_slug, rep_spec.replicate
-                )
-                if not status_path.exists():
-                    update_task_status(status_path, "pending", 0)
-            cond_status = _cond_status_path(hpc_dir, cond_spec.condition_slug)
-            if not cond_status.exists():
-                update_task_status(cond_status, "pending", 0)
+    (hpc_dir / "status" / "replicates").mkdir(parents=True, exist_ok=True)
+    (hpc_dir / "status" / "conditions").mkdir(parents=True, exist_ok=True)
+    for cond_spec in manifest.condition_specs:
+        for rep_spec in cond_spec.replicate_specs:
+            status_path = _rep_status_path(hpc_dir, cond_spec.condition_slug, rep_spec.replicate)
+            if not status_path.exists():
+                update_task_status(status_path, "pending", 0)
+        cond_status = _cond_status_path(hpc_dir, cond_spec.condition_slug)
+        if not cond_status.exists():
+            update_task_status(cond_status, "pending", 0)
 
     fin = _final_status_path(hpc_dir)
     if not fin.exists():
@@ -552,9 +547,6 @@ def build_manifest(
     settings = prepared["settings"]
     resolved_equilibration = prepared["equilibration"]
     condition_specs = _condition_specs_from_conditions(valid_conditions)
-    pipeline_mode: Literal["full", "finalize_only"] = (
-        "finalize_only" if not getattr(analysis, "has_compute_stage", True) else "full"
-    )
     settings_snapshot = settings.model_dump(mode="json") if hasattr(settings, "model_dump") else {}
     snapshot_hash = compute_manifest_snapshot_hash(
         analysis_name=analysis.name,
@@ -569,7 +561,6 @@ def build_manifest(
         condition_specs=condition_specs,
         settings_snapshot=settings_snapshot,
         snapshot_hash=snapshot_hash,
-        pipeline_mode=pipeline_mode,
         partial_policy="allow_partial" if allow_partial else "strict",
         equilibration=resolved_equilibration,
         recompute=recompute,
@@ -1275,7 +1266,6 @@ def submit_analysis_graph(
     manifest: AnalysisJobManifest,
     resources: AnalysisSlurmResources,
     hpc_dir: Path,
-    root_dependencies: Sequence[str] = (),
 ) -> SubmittedJobGraph:
     """Submit replicate, aggregate, and finalizer jobs with dependencies.
 
@@ -1309,38 +1299,30 @@ def submit_analysis_graph(
     submitted_job_ids: list[str] = []
 
     try:
-        if manifest.pipeline_mode == "finalize_only":
-            finalize_script = generate_finalize_script(manifest, resources, hpc_dir)
-            dependency = None
-            if root_dependencies:
-                dependency = "afterok:" + ":".join(root_dependencies)
-            finalizer_job_id = _submit_sbatch(finalize_script, dependency=dependency)
-            submitted_job_ids.append(finalizer_job_id)
-        else:
-            for cond_spec in manifest.condition_specs:
-                for rep_spec in cond_spec.replicate_specs:
-                    script = generate_replicate_script(manifest, rep_spec, resources, hpc_dir)
-                    job_id = _submit_sbatch(script)
-                    replicate_jobs[(rep_spec.condition_index, rep_spec.replicate)] = job_id
-                    submitted_job_ids.append(job_id)
-
-            for cond_spec in manifest.condition_specs:
-                replicate_ids = [
-                    replicate_jobs[(cond_spec.condition_index, rep_spec.replicate)]
-                    for rep_spec in cond_spec.replicate_specs
-                ]
-                dependency = "afterany:" + ":".join(replicate_ids)
-                script = generate_aggregate_script(manifest, cond_spec, resources, hpc_dir)
-                job_id = _submit_sbatch(script, dependency=dependency)
-                aggregator_jobs[cond_spec.condition_index] = job_id
+        for cond_spec in manifest.condition_specs:
+            for rep_spec in cond_spec.replicate_specs:
+                script = generate_replicate_script(manifest, rep_spec, resources, hpc_dir)
+                job_id = _submit_sbatch(script)
+                replicate_jobs[(rep_spec.condition_index, rep_spec.replicate)] = job_id
                 submitted_job_ids.append(job_id)
 
-            aggregate_dependency = "afterany:" + ":".join(
-                aggregator_jobs[idx] for idx in sorted(aggregator_jobs.keys())
-            )
-            finalize_script = generate_finalize_script(manifest, resources, hpc_dir)
-            finalizer_job_id = _submit_sbatch(finalize_script, dependency=aggregate_dependency)
-            submitted_job_ids.append(finalizer_job_id)
+        for cond_spec in manifest.condition_specs:
+            replicate_ids = [
+                replicate_jobs[(cond_spec.condition_index, rep_spec.replicate)]
+                for rep_spec in cond_spec.replicate_specs
+            ]
+            dependency = "afterany:" + ":".join(replicate_ids)
+            script = generate_aggregate_script(manifest, cond_spec, resources, hpc_dir)
+            job_id = _submit_sbatch(script, dependency=dependency)
+            aggregator_jobs[cond_spec.condition_index] = job_id
+            submitted_job_ids.append(job_id)
+
+        aggregate_dependency = "afterany:" + ":".join(
+            aggregator_jobs[idx] for idx in sorted(aggregator_jobs.keys())
+        )
+        finalize_script = generate_finalize_script(manifest, resources, hpc_dir)
+        finalizer_job_id = _submit_sbatch(finalize_script, dependency=aggregate_dependency)
+        submitted_job_ids.append(finalizer_job_id)
     except (RuntimeError, subprocess.SubprocessError, OSError) as exc:
         cancel_results: dict[str, dict[str, Any]] = {}
         if submitted_job_ids:

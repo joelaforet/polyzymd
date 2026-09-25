@@ -32,10 +32,9 @@ contract raises `ProtocolError` naming the `--recompute` that replaces it.
 | `complete` | `bool` | Whether every condition used every replicate its comparison lists, each covering its planned production length with every segment finished. |
 | `partial` | `list[str]` | One line per condition that is not complete, for example `SBMA: replicates 1-3 of 1-5; replicate 2 at 64% of 100 ns (still running)`. `to_agent_text` prints each as `PARTIAL: ...` right after the header and never drops them. |
 
-`ProtocolReport.to_agent_text(max_lines=25)` renders the report as at most 25
-lines of plain text with no borders and no blank lines. Condition and
-comparison lines are dropped first when a report does not fit, and the dropped
-count is stated on the last line.
+`ProtocolReport.to_agent_text()` renders the report as plain text with no
+borders and no blank lines, one line for each condition, comparison, warning
+and verdict. No line is dropped, however many conditions the report holds.
 
 ## ConditionReport
 
@@ -56,12 +55,12 @@ count is stated on the last line.
 | `a` | `str` | Control condition label. |
 | `b` | `str` | Compared condition label. |
 | `delta` | `float` | `mean(b) - mean(a)`, in the metric's unit. |
-| `delta_ci95` | `tuple[float, float] \| None` | 95 percent Student t interval on `delta`, uncorrected for multiplicity. Pooled variance with `n_a + n_b - 2` degrees of freedom for `student_t`, separate variances with Welch-Satterthwaite degrees of freedom (passed to the quantile unrounded) for `welch_t`. `None` for `tukey_hsd`, whose interval is a studentised-range interval rather than a t interval, when a condition has fewer than two replicate values, or when the plugin stored no replicate values. |
+| `delta_ci95` | `tuple[float, float] \| None` | 95 percent Student t interval on `delta`, uncorrected for multiplicity. Pooled variance with `n_a + n_b - 2` degrees of freedom for `student_t`, separate variances with Welch-Satterthwaite degrees of freedom (passed to the quantile unrounded) for `welch_t`. `None` for `tukey_hsd`, whose simultaneous intervals are not computed by the report, when a condition has fewer than two replicate values, or when the plugin stored no replicate values. |
 | `p` | `float \| None` | Unadjusted p value of the two-sample test. |
 | `p_adjusted` | `float \| None` | p value after the correction named by `correction`. `None` when the plugin stored no corrected value, which makes the comparison a description rather than a decision; the verdict then reads `no test recorded`. |
 | `test` | `str` | `student_t`, `welch_t` or `tukey_hsd`. |
 | `correction` | `str` | `BH` (Benjamini-Hochberg), `tukey_hsd`, or the configured post-hoc name. |
-| `cohens_d` | `float \| None` | Standardised mean difference, oriented like `delta`: positive means `b` is larger. The framework's own `PairwiseResult.cohens_d` uses the opposite sign and is flipped here. |
+| `cohens_d` | `float \| None` | Standardised mean difference, oriented like `delta`: positive means `b` is larger. The comparison code computes d as control minus compared, positive when the control is larger. It is negated in the report, together with `hedges_g`, so both have the same sign as `delta`. |
 | `hedges_g` | `float \| None` | Small-sample-corrected standardised mean difference, oriented like `cohens_d`, when the plugin reports one. Otherwise `None`. |
 | `direction` | `str` | The plugin's own direction word, for example `increased`. |
 | `significant` | `bool` | Whether `p_adjusted` cleared the configured alpha (0.05 by default). Always `False` when `testable` is `False`. |

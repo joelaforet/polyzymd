@@ -26,7 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MDA job modules are gone, together with the `dependencies`,
   `min_replicates`, `has_compute_stage`, `has_aggregate_stage`,
   `filter_conditions`, `AggregatedResultClass` and `ReplicateResultClass`
-  hooks no contract plugin used.  The public entry points the CLI and the SLURM
+  hooks no contract plugin used.  The SLURM manifest's `pipeline_mode` and the
+  single-job `finalize_only` submission it selected are removed, as are the
+  cross-analysis dependency preflight in `compare submit` and the
+  `root_dependencies` wiring in `compare submit-all`; an older `manifest.json`
+  that still records `pipeline_mode` loads unchanged.  The public entry points the CLI and the SLURM
   workers call are unchanged.  The simulation config hash no longer includes
   the projects and scratch directories or the full structure file paths, so
   existing cached replicates are recomputed once.

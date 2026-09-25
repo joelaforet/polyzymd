@@ -171,9 +171,9 @@ def _echo_submit_all_summary(rows: list[dict[str, str]]) -> None:
     """Print a compact submit-all summary table."""
     click.echo()
     click.echo("Submitted analyses summary:")
-    click.echo("analysis\tmode\tjobs\tfinalize_job_id")
+    click.echo("analysis\tjobs\tfinalize_job_id")
     for row in rows:
-        click.echo(f"{row['analysis']}\t{row['mode']}\t{row['jobs']}\t{row['finalize_job_id']}")
+        click.echo(f"{row['analysis']}\t{row['jobs']}\t{row['finalize_job_id']}")
 
 
 def _echo_qos_tip_if_needed(partition: str | None, qos: str | None) -> None:
@@ -1118,25 +1118,6 @@ def submit_analysis_hpc(
             "'polyzymd compare run' instead."
         )
 
-    dependencies = tuple(getattr(analysis_cls, "dependencies", ()))
-    if dependencies:
-        source = config.source_path
-        comparison_root = source.parent / "comparison" if source is not None else Path("comparison")
-        for dep_name in dependencies:
-            expected_path = comparison_root / dep_name / "result.json"
-            if not expected_path.exists():
-                raise click.UsageError(
-                    (
-                        f"Error: '{plugin.name}' depends on '{dep_name}', but '{dep_name}' comparison "
-                        "results were not found at: "
-                        f"{expected_path}\n\n"
-                        f"Run '{dep_name}' first:\n"
-                        f"  polyzymd compare submit {dep_name} [--partition ...] [--qos ...]\n\n"
-                        "Or use 'compare submit-all' to submit all analyses with correct "
-                        "dependency ordering."
-                    )
-                )
-
     resources = _resolve_submit_resources_with_hints(
         plugin=plugin,
         pixi_path=pixi_path,
@@ -1171,27 +1152,23 @@ def submit_analysis_hpc(
     replicate_count = sum(len(cond.replicate_specs) for cond in manifest.condition_specs)
     array_count = len(manifest.condition_specs)
     aggregate_count = len(manifest.condition_specs)
-    finalize_only = getattr(manifest, "pipeline_mode", "full") == "finalize_only"
 
     if dry_run:
-        if not finalize_only:
-            for cond in manifest.condition_specs:
-                if job_arrays:
-                    generate_array_script(
-                        cond,
-                        manifest,
-                        resources,
-                        [rep.replicate for rep in cond.replicate_specs],
-                        hpc_dir,
-                    )
-                else:
-                    for rep in cond.replicate_specs:
-                        generate_replicate_script(manifest, rep, resources, hpc_dir)
-                generate_aggregate_script(manifest, cond, resources, hpc_dir)
+        for cond in manifest.condition_specs:
+            if job_arrays:
+                generate_array_script(
+                    cond,
+                    manifest,
+                    resources,
+                    [rep.replicate for rep in cond.replicate_specs],
+                    hpc_dir,
+                )
+            else:
+                for rep in cond.replicate_specs:
+                    generate_replicate_script(manifest, rep, resources, hpc_dir)
+            generate_aggregate_script(manifest, cond, resources, hpc_dir)
         generate_finalize_script(manifest, resources, hpc_dir)
-        if finalize_only:
-            click.echo("Would submit 1 finalize job (compare-only plugin)")
-        elif job_arrays:
+        if job_arrays:
             total = array_count + aggregate_count + 1
             click.echo(
                 "Would submit "
@@ -1207,16 +1184,12 @@ def submit_analysis_hpc(
         click.echo("Dry run only: no jobs were submitted")
         return
 
-    if finalize_only:
-        graph = submit_analysis_graph(manifest, resources, hpc_dir)
-    elif job_arrays:
+    if job_arrays:
         graph = submit_analysis_graph_with_arrays(manifest, resources, hpc_dir)
     else:
         graph = submit_analysis_graph(manifest, resources, hpc_dir)
     graph.save(hpc_dir / "job_graph.json")
-    if finalize_only:
-        click.echo("Submitted 1 finalize job (compare-only plugin)")
-    elif job_arrays:
+    if job_arrays:
         total = array_count + aggregate_count + 1
         click.echo(
             "Submitted "
@@ -1320,17 +1293,8 @@ def submit_all_analyses_hpc(
     if not filtered:
         raise click.ClickException("No enabled analyses remain after applying --exclude filters.")
 
-    source = config.source_path
-    comparison_root = source.parent / "comparison" if source is not None else Path("comparison")
-    satisfied: set[str] = set()
-    for excluded_name in excluded_set:
-        result_path = comparison_root / excluded_name / "result.json"
-        if result_path.exists():
-            satisfied.add(excluded_name)
+    ordered = order_analyses_for_execution(filtered)
 
-    ordered = order_analyses_for_execution(filtered, satisfied=satisfied)
-
-    finalize_ids: dict[str, str] = {}
     summary_rows: list[dict[str, str]] = []
     for analysis_name in ordered:
         analysis_cls = get_analysis(analysis_name)
@@ -1369,47 +1333,29 @@ def submit_all_analyses_hpc(
         manifest_path = hpc_dir / "manifest.json"
         manifest.save(manifest_path)
 
-        dependencies = tuple(getattr(analysis_cls, "dependencies", ()))
-        root_dependencies = [finalize_ids[dep] for dep in dependencies if dep in finalize_ids]
-
-        replicate_count = sum(len(cond.replicate_specs) for cond in manifest.condition_specs)
-        aggregate_count = len(manifest.condition_specs)
-        finalize_only = getattr(manifest, "pipeline_mode", "full") == "finalize_only"
+        total_jobs = sum(len(cond.replicate_specs) for cond in manifest.condition_specs)
+        total_jobs += len(manifest.condition_specs) + 1
 
         if dry_run:
-            if not finalize_only:
-                for cond in manifest.condition_specs:
-                    for rep in cond.replicate_specs:
-                        generate_replicate_script(manifest, rep, resources, hpc_dir)
-                    generate_aggregate_script(manifest, cond, resources, hpc_dir)
+            for cond in manifest.condition_specs:
+                for rep in cond.replicate_specs:
+                    generate_replicate_script(manifest, rep, resources, hpc_dir)
+                generate_aggregate_script(manifest, cond, resources, hpc_dir)
             generate_finalize_script(manifest, resources, hpc_dir)
-
-            fake_finalize_id = f"dry-run:{plugin.name}:finalize"
-            finalize_ids[plugin.name] = fake_finalize_id
-            total_jobs = 1 if finalize_only else (replicate_count + aggregate_count + 1)
             summary_rows.append(
                 {
                     "analysis": plugin.name,
-                    "mode": manifest.pipeline_mode,
                     "jobs": str(total_jobs),
-                    "finalize_job_id": fake_finalize_id,
+                    "finalize_job_id": f"dry-run:{plugin.name}:finalize",
                 }
             )
             continue
 
-        graph = submit_analysis_graph(
-            manifest,
-            resources,
-            hpc_dir,
-            root_dependencies=tuple(root_dependencies),
-        )
+        graph = submit_analysis_graph(manifest, resources, hpc_dir)
         graph.save(hpc_dir / "job_graph.json")
-        finalize_ids[plugin.name] = graph.finalizer_job_id
-        total_jobs = 1 if finalize_only else (replicate_count + aggregate_count + 1)
         summary_rows.append(
             {
                 "analysis": plugin.name,
-                "mode": manifest.pipeline_mode,
                 "jobs": str(total_jobs),
                 "finalize_job_id": graph.finalizer_job_id,
             }
@@ -1569,37 +1515,25 @@ def finalize_analysis_hpc(
     analysis_root = prepared["analysis_root"]
     analysis_dirs: dict[str, Path] = {}
     aggregated_results: dict[str, object] = {}
-    expects_aggregated_results = bool(getattr(plugin, "has_compute_stage", True))
-    if not getattr(plugin, "has_aggregate_stage", True):
-        expects_aggregated_results = False
-
     for condition in valid_conditions:
         cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
         analysis_dirs[condition.label] = cond_dir
-        if expects_aggregated_results:
-            aggregated = plugin._load_aggregated_result(cond_dir / "aggregated")
-            if aggregated is not None:
-                aggregated_results[condition.label] = aggregated
+        aggregated = plugin._load_aggregated_result(cond_dir / "aggregated")
+        if aggregated is not None:
+            aggregated_results[condition.label] = aggregated
 
-    missing_conditions: list[str] = []
-    if expects_aggregated_results:
-        missing_conditions = [
-            condition.label
-            for condition in valid_conditions
-            if condition.label not in aggregated_results
-        ]
+    missing_conditions = [
+        condition.label
+        for condition in valid_conditions
+        if condition.label not in aggregated_results
+    ]
 
     if missing_conditions:
         expected_paths = []
         for condition in valid_conditions:
             if condition.label in missing_conditions:
                 cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
-                aggregate_result_path = getattr(plugin, "aggregate_result_path", None)
-                if callable(aggregate_result_path):
-                    expected_path = aggregate_result_path(cond_dir / "aggregated")
-                else:
-                    expected_path = cond_dir / "aggregated" / "result.json"
-                expected_paths.append(str(expected_path))
+                expected_paths.append(str(plugin.aggregate_result_path(cond_dir / "aggregated")))
         click.echo(
             "Warning: missing aggregated results for condition(s): "
             f"{', '.join(missing_conditions)}\n"
@@ -1774,37 +1708,23 @@ def worker_finalize(manifest_path: Path):
     analysis_dirs: dict[str, Path] = {}
     aggregated_results: dict[str, object] = {}
     missing_conditions: list[str] = []
-    expects_aggregated_results = bool(getattr(plugin, "has_compute_stage", True))
-    if getattr(manifest, "pipeline_mode", "full") == "finalize_only":
-        expects_aggregated_results = False
-
-    if expects_aggregated_results:
-        for cond_idx, condition in enumerate(valid_conditions):
-            cond_spec = _resolve_manifest_task_condition(manifest, cond_idx)
-            if condition.label != cond_spec.condition_label:
-                raise click.ClickException(
-                    "Manifest/config drift detected: condition labels no longer align with submission"
-                )
-            cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
-            aggregated = plugin._load_aggregated_result(cond_dir / "aggregated")
-            if aggregated is not None:
-                analysis_dirs[condition.label] = cond_dir
-                aggregated_results[condition.label] = aggregated
-            else:
-                missing_conditions.append(condition.label)
-    else:
-        for cond_idx, condition in enumerate(valid_conditions):
-            cond_spec = _resolve_manifest_task_condition(manifest, cond_idx)
-            if condition.label != cond_spec.condition_label:
-                raise click.ClickException(
-                    "Manifest/config drift detected: condition labels no longer align with submission"
-                )
-            cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
+    for cond_idx, condition in enumerate(valid_conditions):
+        cond_spec = _resolve_manifest_task_condition(manifest, cond_idx)
+        if condition.label != cond_spec.condition_label:
+            raise click.ClickException(
+                "Manifest/config drift detected: condition labels no longer align with submission"
+            )
+        cond_dir = analysis_root / sanitize_label(condition.label) / plugin.name
+        aggregated = plugin._load_aggregated_result(cond_dir / "aggregated")
+        if aggregated is not None:
             analysis_dirs[condition.label] = cond_dir
+            aggregated_results[condition.label] = aggregated
+        else:
+            missing_conditions.append(condition.label)
 
     partial_policy = getattr(manifest, "partial_policy", "strict")
     allow_partial = partial_policy == "allow_partial"
-    if expects_aggregated_results and missing_conditions:
+    if missing_conditions:
         if allow_partial:
             message = "Proceeding with partial finalize"
         else:
