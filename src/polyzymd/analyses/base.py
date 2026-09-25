@@ -140,6 +140,15 @@ class Analysis(ABC):
     """
 
     name: ClassVar[str]
+    protocol_version: ClassVar[str] = "1"
+    """Version of this plugin's reported protocol.
+
+    ``polyzymd.analyses.protocols`` copies it into every ``ProtocolReport`` so a
+    stored number can be matched to the code that produced it. Bump it in the
+    plugin whenever the meaning, the unit or the estimator of a reported metric
+    changes. New plugins start at ``"1"``.
+    """
+
     Settings: ClassVar[type]
     PlotSettingsModel: ClassVar[type[BasePlotSettings] | None] = None
     AggregatedResultClass: ClassVar[type | None] = None

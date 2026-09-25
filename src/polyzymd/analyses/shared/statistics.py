@@ -28,7 +28,6 @@ from typing import Sequence
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from scipy.stats import t as student_t
 
 from polyzymd.analyses.exceptions import StatisticsError
 
@@ -53,6 +52,10 @@ def student_t_coverage_factor(n: int, coverage: float = DEFAULT_COVERAGE) -> flo
         raise StatisticsError(f"coverage must be in (0, 1), got {coverage!r}")
     if n < 2:
         return None
+
+    # Imported here, not at module level: scipy.stats costs half a second and
+    # plugin discovery imports this module without ever taking a quantile.
+    from scipy.stats import t as student_t
 
     return float(student_t.ppf(0.5 + coverage / 2.0, n - 1))
 

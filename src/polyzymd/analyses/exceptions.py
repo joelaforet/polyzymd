@@ -7,7 +7,25 @@ handled gracefully by higher-level orchestration.
 
 
 class AnalysisError(Exception):
-    """Base class for analysis lifecycle errors."""
+    """Base class for analysis lifecycle errors.
+
+    Parameters
+    ----------
+    message : str
+        What went wrong.
+    hint : str, optional
+        One sentence telling the caller how to fix it. Command-line and agent
+        callers print this on its own line, so keep it short and concrete.
+
+    Attributes
+    ----------
+    hint : str or None
+        The fix hint, or ``None`` when the error carries none.
+    """
+
+    def __init__(self, message: str = "", hint: str | None = None) -> None:
+        super().__init__(message)
+        self.hint = hint
 
 
 class PluginContractError(AnalysisError):
@@ -95,6 +113,9 @@ class StaleCacheError(AnalysisError):
     the stale cache cannot recompute the result itself.
     """
 
+
+class ProtocolError(AnalysisError):
+    """Raised when an agent-facing protocol run cannot be set up or reported."""
 
 class SelectionError(AnalysisError):
     """Raised when an analysis selection is empty or cannot be resolved."""
