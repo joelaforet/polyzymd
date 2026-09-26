@@ -59,10 +59,6 @@ You can enable multiple plugins in the same `comparison.yaml` file:
 
 ```yaml
 plugins:
-  rmsd:
-    runs:
-      - label: "Protein Backbone"
-        selection: "protein and name CA"
   rmsf:
     selection: "protein and name CA"
   contacts: {}

@@ -1085,7 +1085,7 @@ polyzymd compare run rmsf --eq-time 20ns
 polyzymd compare run contacts --format markdown -o report.md
 
 # Print the compact agent report instead of the plugin's table
-polyzymd compare run rmsd --format agent
+polyzymd compare run rmsf --format agent
 
 # List all available analysis types
 polyzymd compare run --list
