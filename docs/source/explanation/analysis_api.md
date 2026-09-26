@@ -34,13 +34,15 @@ study = pz.Study.from_configs(
 
 A study folder marked by `study.yaml` loads the same way with
 `pz.Study("path/to/study")`. The first condition is the control unless you name
-another one when you compare.
+another one when you compare. The equilibration window is measured in
+simulation time from the start of each replicate's production trajectory, with
+its segments joined in order.
 
 Every replicate gives you its `Universe` and the frames PolyzyMD will analyse:
 
 ```python
 for replicate in study["SBMA 50%"].replicates:
-    u = replicate.universe()      # production segments in order, bond-complete topology
+    u = replicate.universe()      # production segments in order
     frames = replicate.frames     # frame indices after the equilibration window
 ```
 
@@ -61,18 +63,20 @@ def radius_of_gyration(atoms):
 rg = study.timeseries(radius_of_gyration, pz.select("protein"), unit="Å")
 ```
 
-`pz.select("protein")` stands for an `AtomGroup`. An `AtomGroup` belongs to one
-`Universe`, so PolyzyMD builds it again for each replicate from the selection
-string, and records the string. Use `pz.universe()` where your function takes
+`pz.select("protein")` stands for an `AtomGroup`. The string is an ordinary
+MDAnalysis selection string. An `AtomGroup` belongs to one `Universe`, so
+PolyzyMD builds it again for each replicate from the selection string, and
+records the string. Several `pz.select` arguments reach your function in the
+order you give them. Use `pz.universe()` where your function takes
 the `Universe` itself. Every other argument is passed to your function
 unchanged and recorded.
 
 PolyzyMD runs `AnalysisFromFunction` on each replicate with that replicate's
 production frames, so your function never sees an equilibration frame. Pass
 `step=5` to measure every fifth production frame, for an expensive measurement
-such as solvent-accessible surface area; the step is recorded with the result. The
-result holds, for each replicate, the per-frame values, the frame indices and
-the simulation times.
+such as solvent-accessible surface area; the step is recorded with the result.
+The result holds, for each replicate, the per-frame values, the frame indices
+and the simulation times. Give `unit=None` for a dimensionless quantity.
 
 A function that returns an array gives one value per frame for each entry of
 the array. Name the entries with `labels`, either a list or a function of the
@@ -124,15 +128,33 @@ mean_rg = rg.reduce("mean")
 
 The named reductions are `"mean"`, `"fraction"` (the mean of a series of 0 and
 1, rejected for any other values) and `"std"` (the sample standard deviation
-over frames). Any function that takes the per-frame values and times of one
-replicate and returns a number or a labelled array also works, for example a
-residence time or the slope of a mean squared displacement:
+over frames). A stored time series can be transformed frame by frame before it
+is reduced, without measuring the trajectory again. For example, the fraction
+of frames in which a distance is below 4 Å comes from the stored distances:
+
+```python
+distance = study.timeseries(atom_distance, pz.select("resid 77 and name OG"),
+                            pz.select("resid 156 and name NE2"), unit="Å")
+mean_distance = distance.reduce("mean")
+below_4 = distance.transform(lambda d: d < 4.0, unit=None).reduce("fraction")
+```
+
+The transform is recorded with the result like any other function.
+
+Besides the named reductions, any function that takes the per-frame values and
+times of one replicate and returns a number or a labelled array works as a
+reduction, for example a residence time or the slope of a mean squared
+displacement:
 
 ```python
 def mean_lifetime(values, times): ...
 
-lifetime = contact.reduce(mean_lifetime, unit="ns")
+lifetime = contact.reduce(mean_lifetime, unit="ns", bounds=(0.0, None))
 ```
+
+`reduce`, `per_replicate` and the `value=` form of `study.run` all take
+`bounds=(low, high)` for a quantity with a physical limit; use `None` for a
+side with no limit. A reduction named `"fraction"` has the bounds 0 and 1.
 
 When you want to compute the per-replicate value yourself from the `Universe`,
 use `study.per_replicate`. Your function receives the `Universe` and the
@@ -153,7 +175,17 @@ and its arguments like any other result.
 summary = mean_rg.summary()                     # one row per condition
 report = mean_rg.compare(control="No polymer")  # every condition against the control
 print(report.to_agent_text())
+
+polymers = contacts.compare(control="SBMA 50%", conditions=["SBMA 50%", "EGMA 50%"])
+print(pz.report(mean_distance, below_4, polymers).to_agent_text())
 ```
+
+`conditions=` limits a summary or a comparison to some of the study's
+conditions, for example when the control has no polymer and the quantity
+concerns the polymer. `summary()` and `compare()` results both print with
+`to_agent_text()`, and `pz.report` joins several of them into one text block
+and one JSON document, each result under its own name. A result is named after
+its function unless you pass `name=`.
 
 `summary()` gives, for each condition, the number of replicates, the mean, the
 standard error and the 95 percent interval, along with every replicate value.
@@ -163,7 +195,10 @@ multiple comparisons, and Cohen's d. For a labelled result there is one row per
 label, and every label is one test in the correction. Leave a label out with
 `untested=["coil"]` when its value is fixed by the others, for example the last
 of a set of fractions that sum to one. It is still summarised with its interval
-but takes no part in the tests or the correction.
+but takes no part in the tests or the correction. A label with the same value
+in every replicate of both conditions, such as a residue that is never in
+contact, has no variance to test; it is reported as not testable and is left
+out of the correction automatically.
 
 The statistics follow Grossfield et al. (2018), the LiveCoMS best practices for
 quantifying uncertainty in molecular simulations:
@@ -188,10 +223,11 @@ quantifying uncertainty in molecular simulations:
 - Grossfield et al. point out that a quantity with a strict upper or lower
   limit is not Gaussian, and that a t interval can then extend past the limit.
   They recommend bootstrapping for such quantities, but also caution that
-  bootstrap intervals are unreliable for small samples, which is the usual case of three to five
-  replicates. PolyzyMD therefore keeps the t interval and adds a warning when
-  the interval extends past a limit. The limits of a fraction are 0 and 1; give
-  `bounds=(low, high)` for any other bounded quantity. When every replicate has
+  bootstrap intervals are unreliable for small samples, which is the usual
+  case of three to five replicates. PolyzyMD therefore keeps the t interval
+  and adds a warning when
+  the interval extends past a limit, using the `bounds` of the result. When
+  every replicate has
   the same value, the interval is reported as not estimable rather than as a
   zero-width interval.
 
@@ -202,7 +238,7 @@ fast because nothing is recomputed, or from the universes, when it needs the
 structures:
 
 ```python
-def my_comparison(results): ...          # per-replicate values and records, keyed by condition
+def my_comparison(results): ...          # stored results, keyed by condition
 
 report = mean_rg.compare(control="No polymer", method=my_comparison)
 
