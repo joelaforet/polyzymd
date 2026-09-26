@@ -86,3 +86,45 @@ def test_cli_rg_with_one_config_prints_a_summary(configs: dict[str, Path], tmp_p
     assert len(lines) == 3
     assert lines[1].startswith("A  n 3  mean 1.26")
     assert lines[2].startswith("verdict: A mean_rg 1.26 A (95% CI")
+
+
+def test_python_analyze_rg_gives_the_cli_report(configs: dict[str, Path], tmp_path) -> None:
+    """protocols.analyze("rg", ...) runs the same path as the CLI and returns its report."""
+    from polyzymd.analyses import analyze
+
+    report = analyze(
+        "rg",
+        [configs["A"], configs["B"]],
+        equilibration=EQUILIBRATION,
+        labels=["control", "treated"],
+        replicates=[1, 2],
+        settings={"selection": "all"},
+        output_dir=tmp_path,
+    )
+
+    assert report.analysis == "rg" and report.metric == "mean_rg" and report.unit == "A"
+    assert [row.label for row in report.conditions] == ["control", "treated"]
+    assert report.conditions[0].replicate_values == pytest.approx([1.16, 1.26], abs=1e-5)
+    assert report.frames_per_replicate == {"control": [7, 7], "treated": [7, 7]}
+    (row,) = report.pairwise
+    assert (row.a, row.b, row.test) == ("control", "treated", "welch_t")
+    assert row.delta == pytest.approx(1.0, abs=1e-5)
+    assert (tmp_path / "polyzymd_results/rg/treated/replicate_2/record.json").is_file()
+
+    arguments = ["rg", "-c", str(configs["A"]), "-c", str(configs["B"]), "--eq", EQUILIBRATION]
+    arguments += ["--label", "control", "--label", "treated", "--replicates", "1-2"]
+    arguments += ["--set", "selection=all", "--output-dir", str(tmp_path), "--format", "json"]
+    result = CliRunner().invoke(analyze_command, arguments)
+    assert ProtocolReport.model_validate_json(result.stdout) == report
+
+
+def test_python_analyze_rg_refuses_other_settings_and_names_rg(configs) -> None:
+    """Unknown settings are refused, and an unknown analysis lists rg among the names."""
+    from polyzymd.analyses import analyze
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    with pytest.raises(ProtocolError, match="no setting other than selection"):
+        analyze("rg", [configs["A"]], equilibration=EQUILIBRATION, settings={"runs": []})
+    with pytest.raises(ProtocolError) as excinfo:
+        analyze("not_an_analysis", [configs["A"]])
+    assert "rg" in excinfo.value.hint.split("Use one of: ")[1].split(", ")

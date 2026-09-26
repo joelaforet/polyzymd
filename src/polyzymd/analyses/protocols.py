@@ -65,7 +65,11 @@ VERDICT_VOCABULARY = (
     VERDICT_NOT_TESTABLE,
 )
 
+#: Analyses that run through Study.timeseries instead of a plugin.
+FUNCTION_ANALYSES = ("rg",)
+
 __all__ = [
+    "FUNCTION_ANALYSES",
     "VERDICT_VOCABULARY",
     "ConditionReport",
     "PairwiseReport",
@@ -246,7 +250,22 @@ def analyze(
     ProtocolError
         If the name is unknown, a config is missing, the labels do not match
         the configs, the settings are invalid, or no replicates are found.
+
+    Notes
+    -----
+    ``"rg"`` runs through :func:`_analyze_rg` instead of a plugin.
     """
+    if name == "rg":
+        return _analyze_rg(
+            configs,
+            replicates=replicates,
+            equilibration=equilibration,
+            settings=settings,
+            labels=labels,
+            output_dir=output_dir,
+            recompute=recompute,
+            run=run,
+        )
     analysis_cls = get_analysis_class(name)
     config = _build_config(
         analysis_cls,
@@ -279,6 +298,11 @@ def run_protocol(
     """
     from polyzymd.analyses.orchestrator import run_comparison
 
+    if analysis in FUNCTION_ANALYSES:
+        raise ProtocolError(
+            f"{analysis} reads simulation configs, not a comparison.yaml.",
+            hint=f"Run polyzymd analyze {analysis} -c A/config.yaml -c B/config.yaml.",
+        )
     if isinstance(analysis, str):
         analysis = get_analysis_class(analysis)()
     resolved = equilibration or config.defaults.equilibration_time
@@ -363,8 +387,55 @@ def get_analysis_class(name: str) -> type["Analysis"]:
         return get_analysis(name)
     except KeyError as exc:
         raise ProtocolError(
-            f"Unknown analysis {name!r}.", hint=f"Use one of: {', '.join(list_all_names())}."
+            f"Unknown analysis {name!r}.",
+            hint=f"Use one of: {', '.join(sorted([*list_all_names(), *FUNCTION_ANALYSES]))}.",
         ) from exc
+
+
+def _analyze_rg(
+    configs: Sequence[Path | str],
+    *,
+    replicates: Sequence[int] | None,
+    equilibration: str | None,
+    settings: dict | None,
+    labels: Sequence[str] | None,
+    output_dir: Path | None,
+    recompute: bool,
+    run: str | None,
+) -> ProtocolReport:
+    """Measure the mass-weighted radius of gyration and report its per-replicate mean.
+
+    The atoms are ``protein`` unless ``settings={"selection": ...}`` names
+    others. With one config the report summarises it; with several it compares
+    each one with the first by Welch's t test. Raises ``ProtocolError`` for a
+    ``run`` or any setting other than ``selection``.
+    """
+    from polyzymd.analyses.functions import radius_of_gyration
+    from polyzymd.analyses.study import Study
+    from polyzymd.analyses.timeseries import select
+    from polyzymd.config.comparison import AnalysisDefaults
+
+    settings = dict(settings or {})
+    if run is not None or set(settings) - {"selection"}:
+        raise ProtocolError(
+            "rg measures one selection and takes no run and no setting other than selection.",
+            hint="Run polyzymd analyze rg -c A/config.yaml --set selection='protein and name CA'.",
+        )
+    paths = [Path(item).expanduser().resolve() for item in configs]
+    study = Study.from_configs(
+        dict(zip(_labels(paths, labels), paths, strict=True)),
+        equilibration=equilibration or AnalysisDefaults().equilibration_time,
+        replicates=replicates,
+    )
+    values = study.timeseries(
+        radius_of_gyration,
+        select(str(settings.get("selection", "protein"))),
+        unit="A",
+        name="rg",
+        recompute=recompute,
+        output_dir=output_dir,
+    ).reduce("mean")
+    return values.compare() if len(study) > 1 else values.summary()
 
 
 # Config construction
