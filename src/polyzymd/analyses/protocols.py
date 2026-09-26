@@ -84,8 +84,13 @@ __all__ = [
 class ConditionReport(BaseModel):
     """One condition's mean with the uncertainty and sample size behind it.
 
-    ``ci_method`` is ``"student_t"`` from replicate values and
-    ``"student_t_from_sem"`` when it was rebuilt from a stored standard error.
+    ``ci_method`` is ``"student_t"`` from replicate values,
+    ``"student_t_from_sem"`` when it was rebuilt from a stored standard error,
+    and ``"not_estimable"`` when every replicate has the same value.
+    ``replicates``, ``statistical_inefficiency`` and ``n_effective`` list, for
+    each entry of ``replicate_values``, its replicate number and the pymbar
+    statistical inefficiency and effective sample size of its time series.
+    They are empty for a result read from a plugin artifact.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -97,6 +102,9 @@ class ConditionReport(BaseModel):
     ci95: tuple[float, float] | None = None
     ci_method: str | None = None
     replicate_values: list[float] = Field(default_factory=list)
+    replicates: list[int] = Field(default_factory=list)
+    statistical_inefficiency: list[float] = Field(default_factory=list)
+    n_effective: list[float] = Field(default_factory=list)
 
 
 class PairwiseReport(BaseModel):
@@ -153,7 +161,7 @@ class ProtocolReport(BaseModel):
     all_metrics: list[str] = Field(default_factory=list)
     all_runs: list[str] = Field(default_factory=list)
     equilibration: str
-    frames_per_replicate: dict[str, int | None] = Field(default_factory=dict)
+    frames_per_replicate: dict[str, int | list[int] | None] = Field(default_factory=dict)
     conditions: list[ConditionReport] = Field(default_factory=list)
     pairwise: list[PairwiseReport] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -894,7 +902,7 @@ def _verdict(
         if not pair.testable:
             sentences.append(
                 f"{VERDICT_NOT_TESTABLE}: {metric} for {pair.a} vs {pair.b} needs at least two "
-                f"replicates per condition ({n_text})"
+                f"replicates per condition and a value that varies ({n_text})"
             )
         elif pair.p_adjusted is None:
             sentences.append(
@@ -964,11 +972,18 @@ def _interval(limits: Sequence[float] | None) -> str:
 def _condition_line(condition: ConditionReport) -> str:
     """Render one condition on a single line."""
     shown = ", ".join(_num(value) for value in condition.replicate_values)
-    return (
+    line = (
         f"{condition.label}  n {condition.n_replicates}  mean {_num(condition.mean)}"
         f"  sem {_num(condition.sem)}  ci95 {_interval(condition.ci95)}"
         f"  values {shown or 'none'}"
     )
+    if condition.statistical_inefficiency:
+        line += (
+            f"  replicates {', '.join(str(index) for index in condition.replicates)}"
+            f"  g {', '.join(_num(value) for value in condition.statistical_inefficiency)}"
+            f"  n_eff {', '.join(_num(value) for value in condition.n_effective)}"
+        )
+    return line
 
 
 def _pairwise_line(pair: PairwiseReport) -> str:

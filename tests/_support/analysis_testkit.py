@@ -440,3 +440,99 @@ def make_plot_context(
         settings=settings if settings is not None else _default_settings(),
         plot_settings=plot_settings,
     )
+
+
+# ---------------------------------------------------------------------------
+# On-disk simulation outputs
+# ---------------------------------------------------------------------------
+
+#: Four unit-mass atoms on a unit cross. The radius of gyration is the scale.
+CROSS = ((1.0, 0.0, 0.0), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, -1.0, 0.0))
+
+
+def write_simulation_config(directory: Path, *, scratch: Path, name: str = "toy") -> Path:
+    """Write a minimal OpenMM ``config.yaml`` whose run directories go in ``scratch``.
+
+    Parameters
+    ----------
+    directory : Path
+        Folder to write ``config.yaml`` into. It is created when missing.
+    scratch : Path
+        Scratch directory the config puts its run directories in.
+    name : str, optional
+        Simulation name.
+
+    Returns
+    -------
+    Path
+        Path of the written ``config.yaml``.
+    """
+    import yaml
+
+    directory.mkdir(parents=True, exist_ok=True)
+    data = {
+        "name": name,
+        "engine": "openmm",
+        "enzyme": {"name": "TestEnzyme", "pdb_path": "test.pdb"},
+        "thermodynamics": {"temperature": 300.0},
+        "simulation_phases": {
+            "equilibration_stages": [
+                {"name": "eq1", "duration": 0.1, "temperature": 300.0, "ensemble": "NVT"}
+            ],
+            "production": {
+                "ensemble": "NPT",
+                "duration": 1.0,
+                "samples": 10,
+                "checkpoint_interval": 60.0,
+            },
+        },
+        "output": {"projects_directory": str(directory), "scratch_directory": str(scratch)},
+    }
+    path = directory / "config.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    return path
+
+
+def write_openmm_replicate(
+    config_path: Path, replicate: int, scales: Sequence[float], *, dt_ps: float = 100.0
+) -> Path:
+    """Write an OpenMM run directory with one DCD production segment.
+
+    Frame ``k`` is the four-atom cross of :data:`CROSS` scaled by
+    ``scales[k]``, so its mass-weighted radius of gyration is ``scales[k]``
+    and its time is ``k * dt_ps`` ps.
+
+    Parameters
+    ----------
+    config_path : Path
+        Simulation ``config.yaml`` written by :func:`write_simulation_config`.
+    replicate : int
+        Replicate number.
+    scales : sequence of float
+        Radius of gyration of each frame.
+    dt_ps : float, optional
+        Time between frames in ps.
+
+    Returns
+    -------
+    Path
+        The run directory.
+    """
+    mda = importlib.import_module("MDAnalysis")
+
+    run_dir = SimulationConfig.from_yaml(config_path).get_working_directory(replicate)
+    segment = run_dir / "production_0"
+    segment.mkdir(parents=True, exist_ok=True)
+    universe = mda.Universe.empty(4, n_residues=1, atom_resindex=[0] * 4, trajectory=True)
+    universe.add_TopologyAttr("names", ["C1", "C2", "C3", "C4"])
+    universe.add_TopologyAttr("resnames", ["MOL"])
+    universe.add_TopologyAttr("masses", [1.0] * 4)
+    cross = np.asarray(CROSS, dtype=np.float32)
+    universe.atoms.positions = cross
+    universe.atoms.write(str(run_dir / "solvated_system.pdb"))
+    path = segment / "production_0_trajectory.dcd"
+    with mda.Writer(str(path), n_atoms=4, dt=dt_ps, istart=0, nsavc=1) as writer:
+        for scale in scales:
+            universe.atoms.positions = cross * float(scale)
+            writer.write(universe.atoms)
+    return run_dir

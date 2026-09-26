@@ -38,6 +38,10 @@ __all__ = [
     "__email__",
     # Configuration (lightweight, always available)
     "SimulationConfig",
+    # Analysis (lazy loaded; building a study imports MDAnalysis)
+    "Study",
+    "select",
+    "universe",
     # Building (requires OpenFF - lazy loaded)
     "SystemBuilder",
     # Simulation (requires OpenMM - lazy loaded)
@@ -69,6 +73,17 @@ def __getattr__(name: str):
         from polyzymd.config.schema import SimulationConfig
 
         return SimulationConfig
+
+    # Analysis - imports numpy and MDAnalysis only when used
+    if name == "Study":
+        from polyzymd.analyses.study import Study
+
+        return Study
+
+    if name in ("select", "universe"):
+        from polyzymd.analyses import timeseries
+
+        return getattr(timeseries, name)
 
     # Builders - require OpenFF
     if name == "SystemBuilder":
