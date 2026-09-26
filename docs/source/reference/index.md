@@ -78,7 +78,6 @@ ProtocolReport Schema <analysis_protocol_report>
 Analysis Plugin Settings Reference <analysis_plugin_settings>
 Comparison and Plotting Reference <analysis_comparison_reference>
 RMSD Plugin Reference <analysis_rmsd_reference>
-Rg Plugin Reference <analysis_rg_reference>
 RMSF Plugin Reference <analysis_rmsf_reference>
 Catalytic Triad Plugin Reference <analysis_triad_reference>
 Distances Plugin Reference <analysis_distances_reference>
