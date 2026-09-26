@@ -216,7 +216,7 @@ def analyze(
     Parameters
     ----------
     name : str
-        Canonical analysis name, for example ``"rg"``.
+        Canonical analysis name, for example ``"rmsf"``.
     configs : sequence of Path or str
         Simulation ``config.yaml`` paths, control first.
     replicates : sequence of int, optional

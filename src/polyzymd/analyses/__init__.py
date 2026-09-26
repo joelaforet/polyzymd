@@ -22,7 +22,7 @@ number states its unit, its uncertainty and its sample size::
 
     from polyzymd.analyses import analyze
 
-    report = analyze("rg", ["A/config.yaml", "B/config.yaml"], equilibration="10ns")
+    report = analyze("rmsf", ["A/config.yaml", "B/config.yaml"], equilibration="10ns")
     print(report.to_agent_text())
 
 To see what analyses exist, or to drive one yourself::

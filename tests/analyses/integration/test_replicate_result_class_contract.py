@@ -12,7 +12,6 @@ from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
 MDA_ARTIFACT_PLUGINS = {
     "rmsf",
     "rmsd",
-    "rg",
     "catalytic_triad",
     "distances",
     "secondary_structure",

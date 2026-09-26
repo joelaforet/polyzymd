@@ -536,3 +536,43 @@ def write_openmm_replicate(
             universe.atoms.positions = cross * float(scale)
             writer.write(universe.atoms)
     return run_dir
+
+
+def replicate_values(per_condition: dict[str, list[float]], how: str = "mean") -> Any:
+    """Build :class:`~polyzymd.analyses.timeseries.ReplicateValues` without a trajectory.
+
+    Each replicate is a constant series of 20 frames, so ``"mean"`` and
+    ``"fraction"`` reduce it to the given value, its statistical inefficiency
+    is 1 and its effective sample size is 20.
+
+    Parameters
+    ----------
+    per_condition : dict of str to list of float
+        Replicate values of each condition, control first.
+    how : str, optional
+        Reduction passed to ``Timeseries.reduce``.
+
+    Returns
+    -------
+    ReplicateValues
+        Values named ``<how>_rg`` in unit ``A``, equilibration ``10ns``.
+    """
+    from types import SimpleNamespace
+
+    from polyzymd.analyses.timeseries import ReplicateSeries, Timeseries
+
+    class _Study:
+        control = next(iter(per_condition))
+
+        def __getitem__(self, label: str) -> Any:
+            return SimpleNamespace(equilibration="10ns", config_hash="hash")
+
+    frames = np.arange(20)
+    series = {
+        label: [
+            ReplicateSeries(label, index, np.full(20, value), frames, frames * 0.1, Path())
+            for index, value in enumerate(values, start=1)
+        ]
+        for label, values in per_condition.items()
+    }
+    return Timeseries("rg", "A", _Study(), series, Path()).reduce(how)

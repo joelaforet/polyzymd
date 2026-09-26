@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from types import SimpleNamespace
+
+import pytest
 
 from polyzymd.analyses.base import (
     ComparisonResult,
@@ -27,8 +28,6 @@ from polyzymd.analyses.distances._formatters import (
     format_distances_console_table,
     format_distances_markdown,
 )
-from polyzymd.analyses.rg import RgAnalysis
-from polyzymd.analyses.rg._comparison_results import RgRunPairwiseComparison
 from polyzymd.analyses.rmsd._comparison_results import RMSDRunPairwiseComparison
 from polyzymd.analyses.sasa._comparison_results import SASARunPairwiseComparison
 from polyzymd.analyses.shared.inferential_statistics import percent_change
@@ -117,28 +116,6 @@ def test_pairwise_result_inf_round_trip_json() -> None:
 
     payload = result.model_dump_json()
     loaded = PairwiseResult.model_validate_json(payload)
-
-    assert math.isinf(loaded.percent_change)
-    assert loaded.percent_change > 0
-
-
-def test_rg_pairwise_inf_round_trip_json() -> None:
-    """Rg pairwise model should preserve infinite percent_change across JSON round-trip."""
-    comparison = RgRunPairwiseComparison(
-        run_label="protein_backbone",
-        condition_a="Control",
-        condition_b="Treatment",
-        t_statistic=1.0,
-        p_value=0.01,
-        cohens_d=1.5,
-        effect_interpretation="large",
-        direction="expansion",
-        significant=True,
-        percent_change=math.inf,
-    )
-
-    payload = comparison.model_dump_json()
-    loaded = RgRunPairwiseComparison.model_validate_json(payload)
 
     assert math.isinf(loaded.percent_change)
     assert loaded.percent_change > 0
@@ -377,22 +354,23 @@ def test_pairwise_comparison_zero_control_not_similar() -> None:
     assert comp.direction == "higher"
 
 
-def test_rg_compare_run_handles_zero_control_infinite_direction() -> None:
-    """Custom Rg compare path should classify zero-control +inf as expansion."""
-    run_a = SimpleNamespace(mean_rg=0.0, per_replicate_means=[0.0, 0.0, 0.0])
-    run_b = SimpleNamespace(mean_rg=4.0, per_replicate_means=[3.8, 4.0, 4.2])
+def test_function_path_zero_control_reports_a_finite_difference_and_direction() -> None:
+    """A control of zero gives the plain difference and a larger verdict, never "similar".
 
-    comp = RgAnalysis._compare_run(
-        run_label="protein",
-        condition_a="Control",
-        condition_b="Treatment",
-        run_a=run_a,
-        run_b=run_b,
-    )
+    The function path reports ``mean(b) - mean(a)`` instead of a percent
+    change, so a zero control cannot produce an infinite value.
+    """
+    from tests._support.analysis_testkit import replicate_values
 
-    assert math.isinf(comp.percent_change)
-    assert comp.percent_change > 0
-    assert comp.direction == "expansion"
+    values = replicate_values({"Control": [0.0, 0.0, 0.0], "Treatment": [3.8, 4.0, 4.2]})
+    report = values.compare()
+    (row,) = report.pairwise
+
+    assert math.isfinite(row.delta)
+    assert row.delta == pytest.approx(4.0)
+    assert row.testable and row.significant
+    assert row.direction == "increased"
+    assert report.verdict[0].startswith("Treatment larger mean_rg than Control")
 
 
 def test_distances_formatter_zero_control_emits_infinity_with_direction() -> None:

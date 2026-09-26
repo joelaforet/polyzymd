@@ -552,7 +552,7 @@ def run_comparison(
         polyzymd compare run rmsf
         polyzymd compare run catalytic_triad --eq-time 10ns
         polyzymd compare run contacts --format markdown
-        polyzymd compare run rg --format agent
+        polyzymd compare run rmsf --format agent
         polyzymd compare run --list
     """
     warn_if_wrong_pixi_env("compare run", ANALYSIS_PIXI_ENVS)

@@ -11,7 +11,6 @@ import importlib
 import json
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -21,8 +20,11 @@ import polyzymd as pz
 from polyzymd.analyses.exceptions import ProtocolError
 from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 from polyzymd.analyses.shared.statistics import mean_sem_ci
-from polyzymd.analyses.timeseries import ReplicateSeries, Timeseries
-from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+from tests._support.analysis_testkit import (
+    replicate_values,
+    write_openmm_replicate,
+    write_simulation_config,
+)
 
 pytest.importorskip("MDAnalysis")
 pytestmark = [
@@ -227,33 +229,11 @@ class TestReduce:
             _run(study, tmp_path).reduce("fraction")
 
 
-def _values(per_condition: dict[str, list[float]], how: str = "mean", equal: bool = True):
-    """Build replicate values from constant series without a trajectory.
-
-    A constant series reduces to its value under ``"mean"`` and ``"fraction"``.
-    """
-
-    class _Study:
-        control = next(iter(per_condition))
-
-        def __getitem__(self, label):
-            return SimpleNamespace(equilibration="10ns", config_hash="hash")
-
-    series = {
-        label: [
-            ReplicateSeries(label, index, np.full(20, value), np.arange(20), np.arange(20), Path())
-            for index, value in enumerate(values, start=1)
-        ]
-        for label, values in per_condition.items()
-    }
-    return Timeseries("rg", "A", _Study(), series, Path()).reduce(how)
-
-
 class TestSummaryAndCompare:
     """Intervals, tests and warnings with known answers."""
 
     def test_summary_matches_mean_sem_ci(self) -> None:
-        report = _values({"A": [1.0, 2.0, 4.0]}).summary()
+        report = replicate_values({"A": [1.0, 2.0, 4.0]}).summary()
         (row,) = report.conditions
         expected = mean_sem_ci([1.0, 2.0, 4.0])
         assert (row.mean, row.sem, row.ci95) == (
@@ -266,19 +246,19 @@ class TestSummaryAndCompare:
         assert row.n_effective == [20.0, 20.0, 20.0]
 
     def test_identical_replicates_are_not_estimable(self) -> None:
-        report = _values({"A": [3.0, 3.0, 3.0]}).summary()
+        report = replicate_values({"A": [3.0, 3.0, 3.0]}).summary()
         assert report.conditions[0].ci95 is None
         assert report.conditions[0].ci_method == "not_estimable"
         assert any("not estimable" in text for text in report.warnings)
 
     def test_fraction_interval_past_one_is_flagged(self) -> None:
-        report = _values({"A": [1.0, 1.0, 0.0]}, how="fraction").summary()
+        report = replicate_values({"A": [1.0, 1.0, 0.0]}, how="fraction").summary()
         assert report.unit is None
         assert any("fraction bounds" in text for text in report.warnings)
 
     def test_compare_welch_student_bh_and_cohens_d(self) -> None:
         data = {"A": [1.0, 1.2, 1.1], "B": [2.0, 2.4, 2.2], "C": [1.0, 1.3, 1.15]}
-        values = _values(data)
+        values = replicate_values(data)
         welch = values.compare()
         student = values.compare(test="student")
         for row in welch.pairwise:
@@ -296,7 +276,7 @@ class TestSummaryAndCompare:
         assert welch.pairwise[0].test == "welch_t"
 
     def test_constant_conditions_are_not_testable(self) -> None:
-        report = _values({"A": [0.0, 0.0], "B": [0.0, 0.0], "C": [1.0, 2.0]}).compare()
+        report = replicate_values({"A": [0.0, 0.0], "B": [0.0, 0.0], "C": [1.0, 2.0]}).compare()
         untestable, testable = report.pairwise
         assert not untestable.testable and untestable.p is None
         assert untestable.p_adjusted is None
@@ -304,13 +284,15 @@ class TestSummaryAndCompare:
         assert testable.p_adjusted == pytest.approx(testable.p)
 
     def test_conditions_and_control_arguments(self) -> None:
-        values = _values({"A": [1.0, 2.0], "B": [3.0, 4.0], "C": [5.0, 6.0]})
+        values = replicate_values({"A": [1.0, 2.0], "B": [3.0, 4.0], "C": [5.0, 6.0]})
         report = values.compare(control="B", conditions=["C"])
         assert [(row.a, row.b) for row in report.pairwise] == [("B", "C")]
         assert [row.label for row in values.summary(conditions=["C"]).conditions] == ["C"]
 
     def test_agent_text_lists_every_value(self) -> None:
-        text = _values({"A": [1.0, 2.0, 4.0], "B": [2.0, 3.0, 5.0]}).compare().to_agent_text()
+        text = (
+            replicate_values({"A": [1.0, 2.0, 4.0], "B": [2.0, 3.0, 5.0]}).compare().to_agent_text()
+        )
         assert "values 1, 2, 4" in text and "g 1, 1, 1" in text and "A vs B" in text
 
 
@@ -341,7 +323,7 @@ def test_statistics_match_the_stored_legacy_rg_comparison() -> None:
             if summary["label"] == run
         }
         legacy = {row.label: row for row in _report("rg", run=run).conditions}
-        values = _values(per_condition)
+        values = replicate_values(per_condition)
         for row in values.summary().conditions:
             assert row.sem == pytest.approx(sems[row.label], rel=1e-12)
             assert row.mean == pytest.approx(legacy[row.label].mean, rel=1e-12)
