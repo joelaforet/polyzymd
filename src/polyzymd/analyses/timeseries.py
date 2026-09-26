@@ -52,6 +52,18 @@ if TYPE_CHECKING:
 
 RESULTS_DIR = "polyzymd_results"
 
+#: A replicate is warned about when pymbar's detected start of the
+#: equilibrated region falls later than this fraction of its production frames.
+#: detect_equilibration picks the start that maximises the effective sample
+#: size, and on a stationary series that maximum is flat, so the start moves
+#: into the series by chance. On 200 stationary AR(1) series of 2000 frames
+#: the start passed 5 percent in 5 to 10 percent of series with 100 or more
+#: effective samples and passed 10 percent in 1 to 7 percent of them, while a
+#: relaxation that decays over the first 10 percent was found. With about 10
+#: effective samples the start passed 10 percent in 45 percent of series, so
+#: there the warning says as much about the series length as about the window.
+EQUILIBRATION_WARNING_FRACTION = 0.10
+
 
 @dataclass(frozen=True)
 class Select:
@@ -400,7 +412,11 @@ class Timeseries:
         """
         import numpy as np
 
-        from polyzymd.analyses.shared.autocorrelation import n_effective, statistical_inefficiency
+        from polyzymd.analyses.shared.autocorrelation import (
+            detect_equilibration,
+            n_effective,
+            statistical_inefficiency,
+        )
 
         def fraction(values: np.ndarray, times: np.ndarray) -> float:
             if not np.isin(values, (0.0, 1.0)).all():
@@ -421,11 +437,12 @@ class Timeseries:
             )
         reducer = how if callable(how) else named[how]
         label = getattr(how, "__name__", "reduced") if callable(how) else how
-        rows: dict[str, list[tuple[int, float, float, float, int]]] = {}
+        rows: dict[str, list[tuple]] = {}
         for condition, items in self.series.items():
             rows[condition] = []
             for item in items:
                 g = statistical_inefficiency(item.values)
+                start = detect_equilibration(item.values)
                 rows[condition].append(
                     (
                         item.replicate,
@@ -433,6 +450,8 @@ class Timeseries:
                         g,
                         n_effective(len(item.values), g),
                         len(item.values),
+                        start,
+                        float(item.times[start]),
                     )
                 )
         if unit is ...:
@@ -449,7 +468,7 @@ class ReplicateValues:
         metric: str,
         unit: str | None,
         is_fraction: bool,
-        rows: dict[str, list[tuple[int, float, float, float, int]]],
+        rows: dict[str, list[tuple]],
     ) -> None:
         self.source, self.metric, self.unit = source, metric, unit
         self.is_fraction, self.rows = is_fraction, rows
@@ -581,6 +600,16 @@ class ReplicateValues:
             item.replicates = [row[0] for row in rows]
             item.statistical_inefficiency = [row[2] for row in rows]
             item.n_effective = [row[3] for row in rows]
+            item.eq_detected_frame = [row[5] for row in rows]
+            item.eq_detected_ns = [row[6] for row in rows]
+            for row in rows:
+                if row[5] > EQUILIBRATION_WARNING_FRACTION * row[4]:
+                    notes.append(
+                        f"condition {label} replicate {row[0]}: pymbar detect_equilibration puts "
+                        f"the start of the equilibrated region at {row[6]:.4g} ns, production "
+                        f"frame {row[5] + 1} of {row[4]}, after the equilibration window; the "
+                        "window may be too short for it"
+                    )
             if len(rows) > 1 and len({row[1] for row in rows}) == 1:
                 item.ci95, item.ci_method = None, "not_estimable"
                 notes.append(

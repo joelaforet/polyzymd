@@ -422,6 +422,19 @@ def statistical_inefficiency_multiple(timeseries_list: list[ArrayLike]) -> float
     return float(_pymbar_timeseries().statistical_inefficiency_multiple(arrays))
 
 
+def detect_equilibration(x: ArrayLike) -> int:
+    """Index of the first equilibrated sample, from pymbar ``detect_equilibration``.
+
+    pymbar picks the start ``t0`` that maximises the number of effective samples
+    in ``x[t0:]`` (Chodera 2016, doi:10.1021/acs.jctc.5b00784). Only about 100
+    evenly spaced starts are tried, so a long series costs no more than a short
+    one and ``t0`` is known to 1 percent of the series length.
+    """
+    x = np.asarray(x, dtype=np.float64)
+    step = max(1, len(x) // 100)
+    return int(_pymbar_timeseries().detect_equilibration(x, nskip=step)[0])
+
+
 def n_effective(n_samples: int, g: float) -> float:
     """Compute number of effective independent samples.
 

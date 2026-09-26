@@ -104,7 +104,11 @@ class ConditionReport(BaseModel):
     ``replicates``, ``statistical_inefficiency`` and ``n_effective`` list, for
     each entry of ``replicate_values``, its replicate number and the pymbar
     statistical inefficiency and effective sample size of its time series.
-    They are empty for a result read from a plugin artifact.
+    ``eq_detected_frame`` and ``eq_detected_ns`` give, for each, the start of
+    the equilibrated region that pymbar ``detect_equilibration`` finds in the
+    production series, as a production frame index from 0 and as simulation
+    time. They are diagnostics and change no value. All are empty for a result
+    read from a plugin artifact.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -119,6 +123,8 @@ class ConditionReport(BaseModel):
     replicates: list[int] = Field(default_factory=list)
     statistical_inefficiency: list[float] = Field(default_factory=list)
     n_effective: list[float] = Field(default_factory=list)
+    eq_detected_frame: list[int] = Field(default_factory=list)
+    eq_detected_ns: list[float] = Field(default_factory=list)
 
 
 class PairwiseReport(BaseModel):
@@ -1088,6 +1094,8 @@ def _condition_line(condition: ConditionReport) -> str:
             f"  g {', '.join(_num(value) for value in condition.statistical_inefficiency)}"
             f"  n_eff {', '.join(_num(value) for value in condition.n_effective)}"
         )
+    if condition.eq_detected_ns:
+        line += f"  eq_detected {_num(max(condition.eq_detected_ns))} ns"
     return line
 
 

@@ -340,3 +340,53 @@ def test_statistics_match_the_stored_legacy_rg_comparison() -> None:
         key = (row["run_label"], row["condition_a"], row["condition_b"])
         assert raw[key] == pytest.approx(row["p_value"], rel=1e-9)
         assert corrected.adjusted_p_value == pytest.approx(row["p_value_adjusted"], rel=1e-9)
+
+
+class TestDetectedEquilibration:
+    """pymbar detect_equilibration is reported per replicate and changes nothing."""
+
+    @staticmethod
+    def _values(relaxation: float) -> object:
+        from polyzymd.analyses.timeseries import ReplicateSeries, Timeseries
+
+        rng = np.random.default_rng(4)
+        frames = np.arange(1000)
+        series = {}
+        for label in ("A", "B"):
+            items = []
+            for index in (1, 2, 3):
+                values = rng.normal(size=1000) + index
+                if label == "B" and index == 2:
+                    values += relaxation * np.exp(-frames / 60.0)
+                items.append(ReplicateSeries(label, index, values, frames, frames * 0.1, Path()))
+            series[label] = items
+
+        class _Study:
+            control = "A"
+
+            def __getitem__(self, label):
+                from types import SimpleNamespace
+
+                return SimpleNamespace(equilibration="0ns", config_hash="hash")
+
+        return Timeseries("x", "A", _Study(), series, Path()).reduce("mean")
+
+    def test_relaxation_is_warned_about_and_values_are_unchanged(self) -> None:
+        stationary, relaxed = self._values(0.0), self._values(20.0)
+        report = relaxed.compare()
+        row = next(item for item in report.conditions if item.label == "B")
+        assert row.eq_detected_frame[1] > 100
+        assert row.eq_detected_ns[1] == pytest.approx(0.1 * row.eq_detected_frame[1])
+        warned = [text for text in report.warnings if "detect_equilibration" in text]
+        assert len(warned) == 1 and "condition B replicate 2" in warned[0]
+        assert f"eq_detected {row.eq_detected_ns[1]:.4g} ns" in report.to_agent_text()
+        # The diagnostic changes no frame or value: the relaxed replicate keeps its mean.
+        expected = float(np.mean(relaxed.source.series["B"][1].values))
+        assert relaxed.values["B"][1] == expected
+        assert relaxed.values["A"] == stationary.values["A"]
+        assert report.frames_per_replicate == {"A": [1000] * 3, "B": [1000] * 3}
+
+    def test_stationary_series_is_not_warned_about(self) -> None:
+        report = self._values(0.0).summary()
+        assert not [text for text in report.warnings if "detect_equilibration" in text]
+        assert all(frame < 100 for row in report.conditions for frame in row.eq_detected_frame)
