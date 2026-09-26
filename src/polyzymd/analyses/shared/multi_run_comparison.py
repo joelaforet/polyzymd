@@ -1,7 +1,7 @@
 """Shared helpers for multi-run comparison orchestration.
 
 These helpers keep run-wise comparison logic concise across plugins that
-compare multiple named runs (RMSD, Rg, SASA).
+compare multiple named runs, such as SASA.
 """
 
 from __future__ import annotations

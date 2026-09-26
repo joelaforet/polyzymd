@@ -94,53 +94,6 @@ def _base_metadata(settings: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _rmsd_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]:
-    from polyzymd.analyses.rmsd import RMSDAnalysis, RMSDRunSettings, RMSDSettings
-
-    settings = RMSDSettings(runs=[RMSDRunSettings(label="protein_backbone")])
-
-    def artifact(label: str, values: tuple[float, ...]) -> ConditionArtifact:
-        return ConditionArtifact(
-            analysis_name="rmsd",
-            condition_label=label,
-            replicates=[1, 2, 3],
-            payload={
-                "runs": [
-                    {
-                        "run_label": "protein_backbone",
-                        "selection": "protein and name CA",
-                        "alignment_selection": "protein and name CA",
-                        "replicates": [1, 2, 3],
-                        "n_replicates": 3,
-                        "overall_mean": float(np.mean(values)),
-                        "overall_sem": 0.05,
-                        "overall_median": float(np.median(values)),
-                        "per_replicate_means": list(values),
-                        "per_replicate_stds": [0.2, 0.2, 0.2],
-                        "per_replicate_medians": list(values),
-                        "per_replicate_convergence_times_ns": [None, None, None],
-                        "per_replicate_convergence_assessable": [True, True, True],
-                        "n_converged_replicates": 0,
-                        "n_assessable_replicates": 3,
-                        "convergence_fraction": 0.0,
-                        "all_converged": False,
-                    }
-                ],
-                "metrics": {},
-                "replicate_metrics": {},
-                "n_replicates": 3,
-            },
-            metadata={**_base_metadata(settings), "selection_string": "protein and name CA"},
-            provenance={"frame_selection": {"equilibration": "10ns"}},
-        )
-
-    aggregated = {
-        "Control": artifact("Control", LOW_VARIANCE),
-        "Treated": artifact("Treated", HIGH_VARIANCE),
-    }
-    return RMSDAnalysis(), _context(tmp_path, settings, aggregated, ttest_method)
-
-
 def _sasa_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]:
     from polyzymd.analyses.sasa import SASAAnalysis, SASARunSettings, SASASettings
 
@@ -324,7 +277,6 @@ def _contacts_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonCo
 
 
 CASES = {
-    "rmsd": _rmsd_case,
     "sasa": _sasa_case,
     "distances": _distances_case,
     "contacts": _contacts_case,
@@ -384,7 +336,7 @@ def test_pairwise_results_carry_adjusted_p_values(plugin: str, tmp_path: Path) -
         assert adjusted_p >= raw_p
 
 
-@pytest.mark.parametrize("plugin", ["distances", "rmsd", "sasa"])
+@pytest.mark.parametrize("plugin", ["distances", "sasa"])
 def test_single_comparison_leaves_p_value_unchanged(plugin: str, tmp_path: Path) -> None:
     """A family of one test must have an adjusted p-value equal to the raw one."""
     analysis, ctx = CASES[plugin](tmp_path, "welch")

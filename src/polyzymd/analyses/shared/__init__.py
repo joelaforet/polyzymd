@@ -54,10 +54,6 @@ from polyzymd.analyses.shared.autocorrelation import (
     statistical_inefficiency,
     statistical_inefficiency_multiple,
 )
-from polyzymd.analyses.shared.convergence import (
-    ConvergenceResult,
-    find_convergence_time,
-)
 from polyzymd.analyses.shared.loader import (
     TrajectoryInfo,
     TrajectoryLoader,
@@ -142,9 +138,6 @@ __all__ = [
     "statistical_inefficiency_multiple",
     "n_effective",
     "check_statistical_reliability",
-    # Convergence
-    "ConvergenceResult",
-    "find_convergence_time",
     # Plotting
     "get_theme",
     "apply_axis_style",

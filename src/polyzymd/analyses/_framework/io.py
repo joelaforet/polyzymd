@@ -20,7 +20,6 @@ _STRICT_CANONICAL_AGGREGATE_ANALYSES = frozenset(
         "contacts",
         "distances",
         "hydrogen_bonds",
-        "rmsd",
         "rmsf",
         "sasa",
         "secondary_structure",
