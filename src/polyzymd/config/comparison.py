@@ -119,14 +119,15 @@ class ConditionConfig(BaseModel):
 # Dynamic Settings Containers
 # ============================================================================
 
-#: Analyses that left the plugin system. A comparison.yaml block for one of
-#: them is ignored with :data:`RETIRED_PLUGIN_WARNING` instead of failing.
-RETIRED_PLUGINS = frozenset({"rg"})
+#: Analyses that left the plugin system, with the function in
+#: polyzymd.analyses.functions that measures each one. A comparison.yaml block
+#: for one of them is ignored with :data:`RETIRED_PLUGIN_WARNING` instead of failing.
+RETIRED_PLUGINS = {"rg": "radius_of_gyration", "rmsd": "rmsd"}
 
 RETIRED_PLUGIN_WARNING = (
     "comparison.yaml has a {section}.{name} block, which is ignored: {name} no longer runs "
     "through compare. Run polyzymd analyze {name} -c <config.yaml> --eq <time>, or in Python "
-    "Study.timeseries(radius_of_gyration, pz.select('protein'), unit='A')."
+    "study.timeseries with polyzymd.analyses.functions.{function}."
 )
 
 
@@ -135,7 +136,9 @@ def _warn_retired(section: str, name: str) -> None:
     import warnings
 
     warnings.warn(
-        RETIRED_PLUGIN_WARNING.format(section=section, name=name), UserWarning, stacklevel=3
+        RETIRED_PLUGIN_WARNING.format(section=section, name=name, function=RETIRED_PLUGINS[name]),
+        UserWarning,
+        stacklevel=3,
     )
 
 

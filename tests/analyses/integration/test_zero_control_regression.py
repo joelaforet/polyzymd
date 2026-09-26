@@ -28,7 +28,6 @@ from polyzymd.analyses.distances._formatters import (
     format_distances_console_table,
     format_distances_markdown,
 )
-from polyzymd.analyses.rmsd._comparison_results import RMSDRunPairwiseComparison
 from polyzymd.analyses.sasa._comparison_results import SASARunPairwiseComparison
 from polyzymd.analyses.shared.inferential_statistics import percent_change
 from polyzymd.analyses.stats import (
@@ -116,28 +115,6 @@ def test_pairwise_result_inf_round_trip_json() -> None:
 
     payload = result.model_dump_json()
     loaded = PairwiseResult.model_validate_json(payload)
-
-    assert math.isinf(loaded.percent_change)
-    assert loaded.percent_change > 0
-
-
-def test_rmsd_pairwise_inf_round_trip_json() -> None:
-    """RMSD pairwise model should preserve infinite percent_change across JSON round-trip."""
-    comparison = RMSDRunPairwiseComparison(
-        run_label="protein_backbone",
-        condition_a="Control",
-        condition_b="Treatment",
-        t_statistic=1.0,
-        p_value=0.01,
-        cohens_d=1.5,
-        effect_interpretation="large",
-        direction="destabilizing",
-        significant=True,
-        percent_change=math.inf,
-    )
-
-    payload = comparison.model_dump_json()
-    loaded = RMSDRunPairwiseComparison.model_validate_json(payload)
 
     assert math.isinf(loaded.percent_change)
     assert loaded.percent_change > 0

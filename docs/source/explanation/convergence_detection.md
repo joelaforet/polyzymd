@@ -1,18 +1,20 @@
 # Establishing Convergence in MD Simulations
 
-Understanding when a molecular dynamics simulation has converged — and what
-convergence means in practice — is essential for drawing reliable conclusions.
+Understanding when a molecular dynamics simulation has converged, and what
+convergence means in practice, is essential for drawing reliable conclusions.
 
 ```{important}
-Automated convergence detection is a **diagnostic heuristic**, not proof that a
+Automated equilibration detection is a **diagnostic**, not proof that a
 trajectory has converged, equilibrated, or sampled ergodically. Treat it as one
 line of evidence alongside visual inspection, agreement among independent
 replicates, uncertainty analysis, and scientific judgment about the system and
-observable being studied.
+observable being studied. In PolyzyMD it never refuses a calculation, never
+moves the equilibration window you set, and never changes a value or a
+statistic.
 ```
 
 ```{versionadded} 1.3.0
-Automated convergence detection was added alongside the RMSD analysis plugin.
+The pymbar equilibration diagnostic was added with the study API.
 ```
 
 ## What Is Convergence in MD?
@@ -25,22 +27,30 @@ a fluctuating plateau rather than continuing to increase or decrease.
 Convergence is **not the same as equilibration**. Equilibration refers to the
 initial transient period after simulation launch, during which the system
 relaxes from its starting configuration. Convergence refers to the state of
-the production region itself — whether the trajectory has sampled long enough
+the production region itself: whether the trajectory has sampled long enough
 that running averages are stable and the statistical properties of the
 observable are no longer evolving.
 
 ## Why It Matters
 
-Conclusions drawn from non-converged simulations are unreliable. If the RMSD
-is still drifting upward, the mean RMSD and its uncertainty will change
-depending on how much data you include. Effect sizes between conditions may
-appear significant or insignificant depending on where you truncate the
-timeseries.
+Conclusions drawn from non-converged simulations of an equilibrium property are
+unreliable. If the RMSD is still drifting upward, the mean RMSD and its
+uncertainty will change depending on how much data you include. Effect sizes
+between conditions may appear significant or insignificant depending on where
+you truncate the timeseries.
 
 Grossfield et al. (2018) emphasize that quantifying uncertainty requires
 sampling from a stationary distribution. If the distribution itself is still
-evolving — as it is during a drift — standard error estimates understate the
+evolving, as it is during a drift, standard error estimates understate the
 true uncertainty.
+
+```{note}
+Not every study measures an equilibrium property. A thermal unfolding
+simulation, for example, is not expected to reach a stationary state, and its
+metrics are still worth computing and comparing between conditions as
+replicate-level quantities. PolyzyMD computes every metric whatever the
+diagnostic says; the diagnostic tells you how to read the result.
+```
 
 ## Visual Indicators of Convergence
 
@@ -55,142 +65,83 @@ timeseries plots. Signs that a trajectory has converged include:
   of the observable converges to a consistent value rather than growing.
 
 These visual checks remain valuable even when automated diagnostics are
-available. Automated methods can miss patterns — such as oscillations between
-two metastable states — that are obvious to a trained eye.
+available. Automated methods can miss patterns, such as oscillations between
+two metastable states, that are obvious to a trained eye.
 
-## PolyzyMD's Sliding-Window Approach
+## PolyzyMD's equilibration diagnostic
 
-PolyzyMD implements a sliding-window slope heuristic for convergence detection.
-The algorithm operates on any 1D timeseries (typically RMSD vs. time) and
-proceeds as follows:
+For every time series measured through the study API, PolyzyMD runs
+`pymbar.timeseries.detect_equilibration` (Chodera 2016) on each replicate's
+production frames, the frames left after the equilibration window you set.
+The method tries a range of starting frames and picks the one that maximises
+the number of effective samples in the remaining data. PolyzyMD tries about
+100 evenly spaced starts, so the detected start is known to about 1 percent of
+the series length.
 
-1. **Divide the timeseries into overlapping windows.** Each window spans a
-   fixed duration (default: 15 ns) and successive windows are offset by a
-   step size (default: 5 ns).
+The detected start is reported for every replicate, and the condition line of
+the report ends with `eq_detected <ns>`, the latest detected start among the
+condition's replicates. Two kinds of message can follow:
 
-2. **Compute the mean observable in each window.** This smooths out
-   frame-to-frame noise while preserving slow drift.
+- **A replicate with at least 20 effective samples** whose detected start lies
+  more than 10 percent of its production frames past the start of the window
+  gets a warning such as
+  `condition B replicate 2: pymbar detect_equilibration puts the start of the equilibrated region at 45.6 ns, production frame 457 of 2000, after the equilibration window; the window may be too short for it`.
+  That replicate may still have been relaxing after your window.
+- **Replicates with fewer than 20 effective samples** get one line per
+  condition instead, such as
+  `condition X: replicates 1, 3, 4 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected`.
 
-3. **Estimate the slope between successive window means.** The slope captures
-   the rate of change in the smoothed signal.
+The 20-sample threshold comes from how the method behaves on correlated data.
+On stationary synthetic series with 100 or more effective samples, the
+detected start passed 10 percent of the series in 1 to 7 percent of cases; with
+about 10 effective samples it did so in 45 percent. On the stored RMSD series of
+the LipA 363 K study, with 3 to 18 effective samples per replicate, the method
+put the start in the last few percent of 28 of 30 replicates, on a short tail
+whose statistical inefficiency is close to 1. On such data a late start says
+the replicate holds too few independent samples to judge, not that the window
+is too short.
 
-4. **Check for sustained low slope.** If the absolute slope remains below a
-   threshold for a sustained duration, the diagnostic suggests that the
-   timeseries has reached an apparent plateau. The reported convergence time is
-   the start of the first sustained plateau.
-
-This approach is designed to reduce sensitivity to brief transient excursions —
-a single window with a slightly elevated slope does not reset the clock unless
-it exceeds the threshold. The requirement for *sustained* low slope reduces,
-but does not eliminate, false positives from momentary pauses in an otherwise
-drifting trajectory.
-
-## Default Parameters and When to Tune Them
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `convergence_window_size_ns` | 15.0 | Width of each averaging window (ns) |
-| `convergence_step_size_ns` | 5.0 | Step between successive window starts (ns) |
-| `convergence_slope_threshold` | 0.0005 | Maximum absolute slope, in the observable's units per ns, to qualify as "flat" |
-| `convergence_sustained_for_ns` | 15.0 | Required duration below threshold before the diagnostic suggests convergence (ns) |
-
-```{important}
-The slope threshold is an **absolute** value in the observable's units per ns.
-The default is calibrated for protein backbone RMSD reported in Ångströms,
-where typical plateau values are 1–5 Å and a slope of 0.0005 Å/ns represents
-~0.05 Å drift over 100 ns — well below the noise floor for many systems.
-
-For observables on a different scale (for example, radius of gyration,
-solvent-accessible surface area, or unitless order parameters), you **must**
-choose a threshold that matches the units, magnitude, and natural variability of
-your signal. Thresholds do not transfer automatically across metrics or unit
-conventions. A threshold appropriate for RMSD in Ångströms may be too stringent
-for SASA or too permissive for a normalised order parameter (0–1).
-```
-
-**Guidance for tuning:**
-
-- **Very long simulations (> 500 ns):** Increase `convergence_window_size_ns`
-  and `convergence_sustained_for_ns` proportionally. A 15 ns window in a
-  1 μs trajectory may be too sensitive to short-timescale fluctuations.
-
-- **High-precision comparisons:** Decrease `convergence_slope_threshold` to
-  require a flatter plateau before the diagnostic suggests convergence.
-
-- **Noisy observables:** Increase `convergence_slope_threshold` to tolerate
-  larger fluctuations. Polymer RMSD, for example, tends to be noisier than
-  protein backbone RMSD.
-
-- **Short simulations (< 50 ns):** Decrease `convergence_window_size_ns` and
-  `convergence_sustained_for_ns` so the algorithm has enough data to assess.
-  Be aware that shorter windows reduce the reliability of the assessment.
+Pass `--no-eq-check` to `polyzymd analyze`, or `detect_equilibration=False`
+to `Timeseries.reduce`, to skip the diagnostic entirely. Values, intervals and
+tests are identical with it on or off.
 
 ## Limitations
 
-The sliding-window heuristic is a practical diagnostic, not a theoretical
-proof of convergence. Important limitations include:
-
-- **Not a proof of ergodic sampling.** A flat RMSD timeseries does not
+- **Not a proof of ergodic sampling.** A stationary-looking series does not
   guarantee that the simulation has explored all relevant conformational
   states. The system could be trapped in a metastable basin.
 
-- **Insensitive to slow conformational drift.** If the drift rate is below the
-  slope threshold, the diagnostic may suggest convergence even though the
-  observable is still changing — just slowly.
+- **Needs many effective samples.** With few independent samples per
+  replicate the detected start is unreliable, which is why PolyzyMD reports it
+  without judging it below 20 effective samples.
 
-- **Parameter dependent.** The four tunable parameters (window size, step size,
-  slope threshold, sustained duration) introduce subjective choices. Different
-  parameter values can yield different convergence conclusions for the same
-  trajectory.
+- **Single-observable limitation.** Equilibration of RMSD does not imply
+  equilibration of other observables (e.g., hydrogen bond occupancy, active
+  site geometry). Different metrics may relax at different rates, which is why
+  the diagnostic runs separately on every measured series.
 
-- **Scale-dependent threshold.** The default slope threshold (0.0005 Å/ns) is
-  calibrated for protein backbone RMSD in Ångströms. Applying it to observables
-  with different units or magnitudes without adjustment can produce misleading
-  diagnostic calls.
-
-- **Single-observable limitation.** Convergence in RMSD does not imply
-  convergence in other observables (e.g., hydrogen bond occupancy, active site
-  geometry). Different metrics may converge at different rates.
-
-- **Multiple independent replicates remain essential.** Even with a converged
-  RMSD timeseries in a single replicate, independent replicates are needed to
-  quantify system-level variability and test reproducibility.
+- **Multiple independent replicates remain essential.** Every interval and
+  test in PolyzyMD comes from the spread between independent replicates, and
+  no single-replicate diagnostic replaces that.
 
 ## Relationship to Equilibration Time
 
-Convergence detection and equilibration time (`--eq-time`) address related but
-distinct concerns:
+The equilibration window and the diagnostic address related but distinct
+concerns:
 
 - **Equilibration** removes transient artifacts from the start of the
-  simulation — the period during which the system relaxes from its initial
-  configuration. The equilibration time is a fixed cutoff applied *before*
+  simulation, the period during which the system relaxes from its initial
+  configuration. The window is a fixed cutoff you set with `--eq` or
+  `equilibration=`, applied to every replicate of every condition before
   analysis begins.
 
-- **Convergence detection** tests whether the production-region observable
-  (after equilibration) appears stationary. It helps diagnose whether the
-  remaining data is reliable for computing time-averaged properties.
+- **The diagnostic** asks whether the production-region observable, after the
+  window, still looks like it is relaxing. It can help *inform* the choice of
+  window, but PolyzyMD never changes the window itself.
 
-Convergence detection can help *inform* the choice of `--eq-time`. If the
-convergence diagnostic reports a convergence time of 12 ns but you set
-`--eq-time 5ns`, the first 7 ns of your "production" data may still contain
-drift. Conversely, if convergence is detected at 5 ns and you set
-`--eq-time 20ns`, you may be discarding usable data.
-
-In practice, the two are complementary: set `--eq-time` conservatively based
-on visual inspection of the RMSD timeseries, then use convergence detection as
-an independent consistency check.
-
-## Beyond RMSD
-
-The public convergence utility (`polyzymd.analyses.shared.convergence`) accepts
-any 1D timeseries — it is not specific to RMSD. The `find_convergence_time()`
-function takes arrays of time values and signal values, so the heuristic can be
-used to test whether scalar observables such as radius of gyration,
-solvent-accessible surface area, or order parameters appear stationary.
-
-Beyond documented RMSD usage, integration into additional PolyzyMD analysis
-plugins should be treated as future or aspirational until a specific plugin
-documents support for the diagnostic.
+In practice the two are complementary: set the window conservatively from
+visual inspection of the time series, then read the diagnostic as an
+independent consistency check.
 
 ## References
 
@@ -203,21 +154,23 @@ The authoritative guide for uncertainty quantification in MD, including
 discussion of convergence assessment, autocorrelation, and effective sample
 sizes.
 
+**Chodera JD.** (2016) "A Simple Method for Automated Equilibration Detection
+in Molecular Simulations." *Journal of Chemical Theory and Computation*
+12(4):1799-1805. [doi:10.1021/acs.jctc.5b00784](https://doi.org/10.1021/acs.jctc.5b00784)
+
+The method behind `pymbar.timeseries.detect_equilibration`.
+
 **Knapp B, Frantal S, Greshake B, Schwarz R, et al.** (2018) "Is an Intuitive
 Convergence Definition of Molecular Dynamics Simulations Solely Based on the
 Root Mean Square Deviation Possible?" *Journal of Computational Biology*
 25:1069-1077.
 
-Analysis of RMSD-based convergence criteria and their reliability, motivating
-the use of sliding-window and sustained-plateau approaches over simple visual
-inspection alone.
+Analysis of RMSD-based convergence criteria and their reliability.
 
 ## See Also
 
-- {doc}`/how_to/analysis_rmsd_quickstart` — RMSD quick start with convergence configuration
-- {doc}`/explanation/analysis_rmsd_best_practices` — RMSD interpretation and best practices
-- {doc}`/explanation/analysis_statistics_best_practices` — Statistical foundations for MD analysis
-- [pymbar timeseries](https://pymbar.readthedocs.io/en/latest/timeseries.html)
-  — `detectEquilibration()` and `statisticalInefficiency()` provide
-  statistically rigorous alternatives to heuristic convergence detection.
-  Integration with PolyzyMD is under consideration for a future release.
+- {doc}`/how_to/analysis_rmsd_quickstart`: RMSD quick start
+- {doc}`/explanation/analysis_rmsd_best_practices`: RMSD interpretation and best practices
+- {doc}`/explanation/analysis_statistics_best_practices`: Statistical foundations for MD analysis
+- [pymbar timeseries](https://pymbar.readthedocs.io/en/latest/timeseries.html):
+  `detect_equilibration` and `statistical_inefficiency`

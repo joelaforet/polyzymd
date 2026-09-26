@@ -65,8 +65,18 @@ VERDICT_VOCABULARY = (
     VERDICT_NOT_TESTABLE,
 )
 
-#: Analyses that run through Study.timeseries instead of a plugin.
-FUNCTION_ANALYSES = ("rg",)
+#: Analyses that run through Study.timeseries instead of a plugin, with the
+#: settings each one takes and their defaults.
+FUNCTION_ANALYSES = {
+    "rg": {"selection": "protein"},
+    "rmsd": {
+        "selection": "protein and name CA",
+        "alignment_selection": "protein and name CA",
+        "reference_mode": "centroid",
+        "reference_frame": 1,
+        "reference_file": None,
+    },
+}
 
 __all__ = [
     "FUNCTION_ANALYSES",
@@ -94,7 +104,11 @@ class ConditionReport(BaseModel):
     ``replicates``, ``statistical_inefficiency`` and ``n_effective`` list, for
     each entry of ``replicate_values``, its replicate number and the pymbar
     statistical inefficiency and effective sample size of its time series.
-    They are empty for a result read from a plugin artifact.
+    ``eq_detected_frame`` and ``eq_detected_ns`` give, for each, the start of
+    the equilibrated region that pymbar ``detect_equilibration`` finds in the
+    production series, as a production frame index from 0 and as simulation
+    time. They are diagnostics and change no value. All are empty for a result
+    read from a plugin artifact.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -109,6 +123,8 @@ class ConditionReport(BaseModel):
     replicates: list[int] = Field(default_factory=list)
     statistical_inefficiency: list[float] = Field(default_factory=list)
     n_effective: list[float] = Field(default_factory=list)
+    eq_detected_frame: list[int] = Field(default_factory=list)
+    eq_detected_ns: list[float] = Field(default_factory=list)
 
 
 class PairwiseReport(BaseModel):
@@ -210,6 +226,7 @@ def analyze(
     output_dir: Path | None = None,
     recompute: bool = False,
     run: str | None = None,
+    eq_check: bool = True,
 ) -> ProtocolReport:
     """Run one analysis over one or more simulation conditions.
 
@@ -239,6 +256,10 @@ def analyze(
     run : str, optional
         Run or pair label to report, for a plugin that measures one metric on
         several selections. Defaults to the first one.
+    eq_check : bool, optional
+        For ``rg`` and ``rmsd``, report the pymbar detected start of the
+        equilibrated region of each replicate. ``False`` skips it. It changes
+        no value either way.
 
     Returns
     -------
@@ -253,10 +274,12 @@ def analyze(
 
     Notes
     -----
-    ``"rg"`` runs through :func:`_analyze_rg` instead of a plugin.
+    ``"rg"`` and ``"rmsd"`` run through :func:`_analyze_function` instead of
+    a plugin.
     """
-    if name == "rg":
-        return _analyze_rg(
+    if name in FUNCTION_ANALYSES:
+        return _analyze_function(
+            name,
             configs,
             replicates=replicates,
             equilibration=equilibration,
@@ -265,6 +288,7 @@ def analyze(
             output_dir=output_dir,
             recompute=recompute,
             run=run,
+            eq_check=eq_check,
         )
     analysis_cls = get_analysis_class(name)
     config = _build_config(
@@ -298,7 +322,7 @@ def run_protocol(
     """
     from polyzymd.analyses.orchestrator import run_comparison
 
-    if analysis in FUNCTION_ANALYSES:
+    if isinstance(analysis, str) and analysis in FUNCTION_ANALYSES:
         raise ProtocolError(
             f"{analysis} reads simulation configs, not a comparison.yaml.",
             hint=f"Run polyzymd analyze {analysis} -c A/config.yaml -c B/config.yaml.",
@@ -392,7 +416,8 @@ def get_analysis_class(name: str) -> type["Analysis"]:
         ) from exc
 
 
-def _analyze_rg(
+def _analyze_function(
+    name: str,
     configs: Sequence[Path | str],
     *,
     replicates: Sequence[int] | None,
@@ -402,24 +427,45 @@ def _analyze_rg(
     output_dir: Path | None,
     recompute: bool,
     run: str | None,
+    eq_check: bool = True,
 ) -> ProtocolReport:
-    """Measure the mass-weighted radius of gyration and report its per-replicate mean.
+    """Measure ``name`` on every production frame and report its per-replicate mean.
 
-    The atoms are ``protein`` unless ``settings={"selection": ...}`` names
-    others. With one config the report summarises it; with several it compares
-    each one with the first by Welch's t test. Raises ``ProtocolError`` for a
-    ``run`` or any setting other than ``selection``.
+    ``rg`` measures :func:`~polyzymd.analyses.functions.radius_of_gyration`
+    of ``selection``. ``rmsd`` measures :func:`~polyzymd.analyses.functions.rmsd`
+    of ``selection`` from the reference that ``reference_mode``,
+    ``reference_frame``, ``reference_file`` and ``alignment_selection`` give
+    to :func:`~polyzymd.analyses.reference.reference`. Settings left out take
+    the defaults in :data:`FUNCTION_ANALYSES`. With one config the report
+    summarises it; with several it compares each one with the first by
+    Welch's t test. Raises ``ProtocolError`` for a ``run`` or a setting the
+    analysis does not take.
     """
-    from polyzymd.analyses.functions import radius_of_gyration
+    from polyzymd.analyses import functions
+    from polyzymd.analyses.reference import reference
     from polyzymd.analyses.study import Study
     from polyzymd.analyses.timeseries import select
     from polyzymd.config.comparison import AnalysisDefaults
 
-    settings = dict(settings or {})
-    if run is not None or set(settings) - {"selection"}:
+    unknown = set(settings or {}) - set(FUNCTION_ANALYSES[name])
+    if run is not None or unknown:
         raise ProtocolError(
-            "rg measures one selection and takes no run and no setting other than selection.",
-            hint="Run polyzymd analyze rg -c A/config.yaml --set selection='protein and name CA'.",
+            f"{name} measures one selection and takes no run and no setting other than "
+            f"{', '.join(FUNCTION_ANALYSES[name])}.",
+            hint=f"Run polyzymd analyze {name} -c A/config.yaml "
+            "--set selection='protein and name CA'.",
+        )
+    settings = {**FUNCTION_ANALYSES[name], **(settings or {})}
+    arguments = [select(str(settings["selection"]))]
+    if name == "rmsd":
+        arguments.append(
+            reference(
+                str(settings["reference_mode"]),
+                str(settings["selection"]),
+                frame=settings["reference_frame"],
+                file=settings["reference_file"],
+                alignment=str(settings["alignment_selection"]),
+            )
         )
     paths = [Path(item).expanduser().resolve() for item in configs]
     study = Study.from_configs(
@@ -427,14 +473,15 @@ def _analyze_rg(
         equilibration=equilibration or AnalysisDefaults().equilibration_time,
         replicates=replicates,
     )
+    function = functions.rmsd if name == "rmsd" else functions.radius_of_gyration
     values = study.timeseries(
-        radius_of_gyration,
-        select(str(settings.get("selection", "protein"))),
+        function,
+        *arguments,
         unit="A",
-        name="rg",
+        name=name,
         recompute=recompute,
         output_dir=output_dir,
-    ).reduce("mean")
+    ).reduce("mean", detect_equilibration=eq_check)
     return values.compare() if len(study) > 1 else values.summary()
 
 
@@ -1054,6 +1101,8 @@ def _condition_line(condition: ConditionReport) -> str:
             f"  g {', '.join(_num(value) for value in condition.statistical_inefficiency)}"
             f"  n_eff {', '.join(_num(value) for value in condition.n_effective)}"
         )
+    if condition.eq_detected_ns:
+        line += f"  eq_detected {_num(max(condition.eq_detected_ns))} ns"
     return line
 
 

@@ -44,7 +44,7 @@ representative frames or structures.
 ## Time-series statistics and convergence
 
 These modules provide statistical summaries, autocorrelation-aware estimates,
-inferential tests, and convergence diagnostics used by built-in and contributor
+and inferential tests used by built-in and contributor
 plugins.
 
 ```{eval-rst}
@@ -67,11 +67,6 @@ plugins.
    :show-inheritance:
    :no-index:
 
-.. automodule:: polyzymd.analyses.shared.convergence
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
 ```
 
 ## Plotting

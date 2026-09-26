@@ -248,25 +248,10 @@ Each entry in `pairs`:
 
 ### `plugins.rmsd`
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `runs` | list | **(required)** | List of RMSD run definitions |
-
-Each entry in `runs`:
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `label` | string | **(required)** | Name for this RMSD computation (e.g., `"backbone"`) |
-| `selection` | string | **(required)** | MDAnalysis selection for RMSD atoms |
-| `alignment_selection` | string | same as `selection` | MDAnalysis selection for alignment |
-| `reference_mode` | string | `"centroid"` | Reference structure mode: `"centroid"` or `"frame"` |
-| `reference_frame` | int | `0` | Frame index to use as reference when `reference_mode` is `"frame"` |
-| `reference_file` | path | `null` | Path to external PDB reference structure |
-| `centroid_selection` | string | `null` | MDAnalysis selection for centroid computation. If `null`, uses `alignment_selection`. |
-| `convergence_window_size_ns` | float | `15.0` | Rolling window size in nanoseconds for convergence detection |
-| `convergence_step_size_ns` | float | `5.0` | Step size in nanoseconds between convergence windows |
-| `convergence_slope_threshold` | float | `0.0005` | Maximum slope (Å/ns) for a window to be considered converged |
-| `convergence_sustained_for_ns` | float | `15.0` | Duration in nanoseconds that convergence must be sustained |
+RMSD runs through `polyzymd analyze rmsd` or the study API, not through
+`comparison.yaml`. A `plugins.rmsd` block in an existing file still loads, is
+ignored with a warning, and leaves every other plugin in the file working. See
+{doc}`../how_to/analysis_rmsd_quickstart`.
 
 ### `plugins.rg`
 

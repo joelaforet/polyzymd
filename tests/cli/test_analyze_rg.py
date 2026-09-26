@@ -83,6 +83,14 @@ def test_cli_rg_with_one_config_prints_a_summary(configs: dict[str, Path], tmp_p
     result = CliRunner().invoke(analyze_command, [*arguments, "--output-dir", str(tmp_path)])
     assert result.exit_code == 0, result.output
     lines = result.stdout.strip().split("\n")
+    # Seven frames per replicate are too few to judge the equilibrated start.
+    (note,) = [line for line in lines if line.startswith("warning:")]
+    assert "replicates 1, 2, 3 have fewer than 20 effective samples" in note
+    quiet = CliRunner().invoke(
+        analyze_command, [*arguments, "--output-dir", str(tmp_path), "--no-eq-check"]
+    )
+    assert "warning:" not in quiet.stdout and "eq_detected" not in quiet.stdout
+    lines = [line for line in lines if not line.startswith("warning:")]
     assert len(lines) == 3
     assert lines[1].startswith("A  n 3  mean 1.26")
     assert lines[2].startswith("verdict: A mean_rg 1.26 A (95% CI")

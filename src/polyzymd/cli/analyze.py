@@ -156,6 +156,12 @@ def _one_line(text: str) -> str:
 @click.option(
     "--recompute", is_flag=True, help="Recompute replicates instead of reusing cached results."
 )
+@click.option(
+    "--no-eq-check",
+    "no_eq_check",
+    is_flag=True,
+    help="Skip the pymbar detected equilibration start for rg and rmsd. No value changes.",
+)
 def analyze_command(
     name: str,
     configs: tuple[Path, ...],
@@ -169,6 +175,7 @@ def analyze_command(
     output_path: Path | None,
     output_dir: Path | None,
     recompute: bool,
+    no_eq_check: bool,
 ) -> None:
     """Run one analysis and print a validated result.
 
@@ -180,6 +187,7 @@ def analyze_command(
     Examples:
         polyzymd analyze rg -c A/config.yaml
         polyzymd analyze rg -c A/config.yaml -c B/config.yaml --eq 10ns
+        polyzymd analyze rmsd -c A/config.yaml --set reference_mode=average
         polyzymd analyze rmsf -f comparison.yaml --format json -o rmsf.json
     """
     warn_if_wrong_pixi_env("analyze", ANALYSIS_PIXI_ENVS)
@@ -198,6 +206,7 @@ def analyze_command(
             setting_overrides=setting_overrides,
             output_dir=output_dir,
             recompute=recompute,
+            eq_check=not no_eq_check,
         )
     except AnalysisError as exc:
         hint = getattr(exc, "hint", None)
@@ -234,6 +243,7 @@ def _run(
     setting_overrides: tuple[str, ...],
     output_dir: Path | None,
     recompute: bool,
+    eq_check: bool = True,
 ) -> "ProtocolReport":
     """Resolve the options and run the protocol, through -f or through -c configs."""
     from polyzymd.analyses.exceptions import ProtocolError
@@ -279,4 +289,5 @@ def _run(
         output_dir=output_dir,
         recompute=recompute,
         run=run,
+        eq_check=eq_check,
     )
