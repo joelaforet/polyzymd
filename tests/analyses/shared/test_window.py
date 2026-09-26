@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from polyzymd.analyses.shared.window import (
+    _equilibration_start_frame,
     resolve_replicate_trajectory_window,
     resolve_trajectory_window,
 )
@@ -233,3 +234,36 @@ def test_resolve_replicate_trajectory_window_accepts_timestep_override() -> None
     assert loader.calls == [(3, "first:ps")]
     assert window.timestep_ps == 400.0
     assert window.start == 4
+
+
+AKMA_PS = 0.04888821
+
+
+def _float32_akma_timestep(timestep_ps: float) -> float:
+    """Return a timestep as a DCD stores it, in float32 AKMA units read back to ps."""
+    import numpy as np
+
+    return float(np.float32(timestep_ps / AKMA_PS)) * AKMA_PS
+
+
+@pytest.mark.parametrize(
+    ("equilibration_ps", "expected_frame"),
+    [(480.0, 12), (200_000.0, 5000), (1_000_000.0, 25_000)],
+)
+def test_equilibration_on_a_frame_keeps_that_frame_with_a_float32_timestep(
+    equilibration_ps: float, expected_frame: int
+) -> None:
+    """A window ending exactly on a frame starts there despite float32 rounding."""
+    timestep_ps = _float32_akma_timestep(40.0)
+
+    assert _equilibration_start_frame(equilibration_ps, timestep_ps) == expected_frame
+
+
+@pytest.mark.parametrize(("equilibration_ps", "expected_frame"), [(479.0, 12), (481.0, 13)])
+def test_equilibration_between_frames_starts_at_the_next_frame(
+    equilibration_ps: float, expected_frame: int
+) -> None:
+    """A window ending between two frames starts at the later one."""
+    timestep_ps = _float32_akma_timestep(40.0)
+
+    assert _equilibration_start_frame(equilibration_ps, timestep_ps) == expected_frame
