@@ -66,6 +66,7 @@ If you are adding or reviewing an analysis plugin, read these pages first:
 ```{toctree}
 :maxdepth: 1
 
+Analysing a set of simulations <analysis_api>
 Analysis system concepts <analysis_concepts>
 Which analysis entry point should I use <analysis_entry_points>
 Architecture and design rationale <architecture>
