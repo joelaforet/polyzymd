@@ -119,6 +119,25 @@ class ConditionConfig(BaseModel):
 # Dynamic Settings Containers
 # ============================================================================
 
+#: Analyses that left the plugin system. A comparison.yaml block for one of
+#: them is ignored with :data:`RETIRED_PLUGIN_WARNING` instead of failing.
+RETIRED_PLUGINS = frozenset({"rg"})
+
+RETIRED_PLUGIN_WARNING = (
+    "comparison.yaml has a {section}.{name} block, which is ignored: {name} no longer runs "
+    "through compare. Run polyzymd analyze {name} -c <config.yaml> --eq <time>, or in Python "
+    "Study.timeseries(radius_of_gyration, pz.select('protein'), unit='A')."
+)
+
+
+def _warn_retired(section: str, name: str) -> None:
+    """Warn that a comparison.yaml block for a retired plugin is ignored."""
+    import warnings
+
+    warnings.warn(
+        RETIRED_PLUGIN_WARNING.format(section=section, name=name), UserWarning, stacklevel=3
+    )
+
 
 class PluginSettingsContainer(BaseModel):
     """Container for unified plugin settings keyed by analysis name."""
@@ -133,6 +152,9 @@ class PluginSettingsContainer(BaseModel):
         for key, value in data.items():
             key_lower = str(key).lower()
             if value is None:
+                continue
+            if key_lower in RETIRED_PLUGINS:
+                _warn_retired("plugins", key_lower)
                 continue
             try:
                 analysis_cls = get_analysis(key_lower)
@@ -565,6 +587,8 @@ class PlotSettings(BaseModel):
         for key, value in data.items():
             if key in PlotSettings._GLOBAL_FIELDS:
                 global_data[key] = value
+            elif key in RETIRED_PLUGINS:
+                _warn_retired("plot_settings", key)
             elif key in _plot_models:
                 settings_class = _plot_models[key]
                 if isinstance(value, dict):

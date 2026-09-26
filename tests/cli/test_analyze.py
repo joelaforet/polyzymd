@@ -336,7 +336,7 @@ class TestCompareRunAgentFormat:
         from polyzymd.cli.compare import compare
 
         class _Analysis:
-            name = "rg"
+            name = "rmsf"
 
             def format(self, result, output_format="text"):
                 raise AssertionError("agent format must not call the plugin formatter")
@@ -367,7 +367,7 @@ class TestCompareRunAgentFormat:
 
         result = CliRunner().invoke(
             compare,
-            ["run", "rg", "-f", str(tmp_path / "comparison.yaml"), "--format", "agent"],
+            ["run", "rmsf", "-f", str(tmp_path / "comparison.yaml"), "--format", "agent"],
         )
 
         assert result.exit_code == 0
