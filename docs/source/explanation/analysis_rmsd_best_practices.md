@@ -361,29 +361,16 @@ motion, unfolding, or simply insufficient sampling. Distinguish these by
 inspecting structures and complementary observables.
 ```
 
-### Automated convergence detection
+### Automated equilibration diagnostic
 
-```{versionadded} 1.3.0
-```
-
-PolyzyMD can run a sliding-window convergence diagnostic on RMSD timeseries. The
-diagnostic evaluates whether reference-relative RMSD changes remain below a
-configured threshold over a sustained interval. The resulting information is
-stored as part of the canonical RMSD artifact payload and provenance, with
-condition-level summaries represented in aggregated artifacts. Larger timeseries
-or plot-ready data may be represented through sidecars referenced by the
-artifact.
-
-**This is a diagnostic tool, not a definitive convergence proof.** The
-heuristic can miss slow drift below the slope threshold, and convergence in
-RMSD does not guarantee convergence of other observables. Always use multiple
-replicates and visual inspection alongside automated diagnostics.
-
-For command-oriented usage, see the
-[RMSD Quick Start Guide](../how_to/analysis_rmsd_quickstart.md). For a full
-conceptual treatment of convergence diagnostics — including the algorithm,
-parameters, tuning guidance, and limitations — see
-{doc}`/explanation/convergence_detection`.
+For every RMSD series, PolyzyMD reports where
+`pymbar.timeseries.detect_equilibration` puts the start of the equilibrated
+region in each replicate, and warns when a replicate with at least 20
+effective samples appears to have still been relaxing after your window.
+Replicates with fewer effective samples are reported as too correlated to
+judge. **This is a diagnostic, not a convergence proof**, and it never changes
+the window or any value. See {doc}`/explanation/convergence_detection` for how
+it works and when to switch it off.
 
 ## References
 

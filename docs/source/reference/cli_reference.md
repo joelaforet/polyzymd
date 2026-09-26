@@ -915,6 +915,7 @@ List the available analysis names with `polyzymd compare run --list`.
 | `-o, --output PATH` | No | Also write the rendered output to this file. |
 | `--output-dir PATH` | No | Directory for `analysis/`, `comparison/` and `figures/`. Default: the current directory. |
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
+| `--no-eq-check` | No | Skip the pymbar equilibration diagnostic for analyses on the study API (rg, rmsd). Values and statistics are the same either way. |
 
 ### Agent format
 
@@ -939,7 +940,7 @@ Line shapes:
 | Line | Fields |
 |---|---|
 | header | `# polyzymd analyze <analysis>  metric <key>  unit <unit or none>[  run <label>]  eq <window>  conditions <count>  replicates <n,n,...>  protocol <analysis>/<protocol_version>` |
-| condition | `<label>  n <count>  mean <value>  sem <value>  ci95 <low> to <high>  values <per-replicate values>[  replicates <numbers>  g <value>  n_eff <value>]`; the bracketed fields appear when the per-frame series is stored, and `g` and `n_eff` are the statistical inefficiency and effective sample size of each replicate's series |
+| condition | `<label>  n <count>  mean <value>  sem <value>  ci95 <low> to <high>  values <per-replicate values>[  replicates <numbers>  g <value>  n_eff <value>  eq_detected <ns>]`; the bracketed fields appear when the per-frame series is stored; `g` and `n_eff` are the statistical inefficiency and effective sample size of each replicate's series, and `eq_detected` is the latest start of an equilibrated region that pymbar detects among the replicates (see {doc}`../explanation/convergence_detection`) |
 | comparison | `<a> vs <b>  delta <signed>  ci95 <low> to <high>  p <value>  p_adj <value>  test <name>  correction <name>  d <value>  significant\|not_significant\|no_test\|not_testable` |
 | warning | `warning: <text>` |
 | verdict | `verdict: <sentence>` |
