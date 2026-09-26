@@ -65,8 +65,18 @@ VERDICT_VOCABULARY = (
     VERDICT_NOT_TESTABLE,
 )
 
-#: Analyses that run through Study.timeseries instead of a plugin.
-FUNCTION_ANALYSES = ("rg",)
+#: Analyses that run through Study.timeseries instead of a plugin, with the
+#: settings each one takes and their defaults.
+FUNCTION_ANALYSES = {
+    "rg": {"selection": "protein"},
+    "rmsd": {
+        "selection": "protein and name CA",
+        "alignment_selection": "protein and name CA",
+        "reference_mode": "centroid",
+        "reference_frame": 1,
+        "reference_file": None,
+    },
+}
 
 __all__ = [
     "FUNCTION_ANALYSES",
@@ -253,10 +263,12 @@ def analyze(
 
     Notes
     -----
-    ``"rg"`` runs through :func:`_analyze_rg` instead of a plugin.
+    ``"rg"`` and ``"rmsd"`` run through :func:`_analyze_function` instead of
+    a plugin.
     """
-    if name == "rg":
-        return _analyze_rg(
+    if name in FUNCTION_ANALYSES:
+        return _analyze_function(
+            name,
             configs,
             replicates=replicates,
             equilibration=equilibration,
@@ -298,7 +310,7 @@ def run_protocol(
     """
     from polyzymd.analyses.orchestrator import run_comparison
 
-    if analysis in FUNCTION_ANALYSES:
+    if isinstance(analysis, str) and analysis in FUNCTION_ANALYSES:
         raise ProtocolError(
             f"{analysis} reads simulation configs, not a comparison.yaml.",
             hint=f"Run polyzymd analyze {analysis} -c A/config.yaml -c B/config.yaml.",
@@ -392,7 +404,8 @@ def get_analysis_class(name: str) -> type["Analysis"]:
         ) from exc
 
 
-def _analyze_rg(
+def _analyze_function(
+    name: str,
     configs: Sequence[Path | str],
     *,
     replicates: Sequence[int] | None,
@@ -403,23 +416,43 @@ def _analyze_rg(
     recompute: bool,
     run: str | None,
 ) -> ProtocolReport:
-    """Measure the mass-weighted radius of gyration and report its per-replicate mean.
+    """Measure ``name`` on every production frame and report its per-replicate mean.
 
-    The atoms are ``protein`` unless ``settings={"selection": ...}`` names
-    others. With one config the report summarises it; with several it compares
-    each one with the first by Welch's t test. Raises ``ProtocolError`` for a
-    ``run`` or any setting other than ``selection``.
+    ``rg`` measures :func:`~polyzymd.analyses.functions.radius_of_gyration`
+    of ``selection``. ``rmsd`` measures :func:`~polyzymd.analyses.functions.rmsd`
+    of ``selection`` from the reference that ``reference_mode``,
+    ``reference_frame``, ``reference_file`` and ``alignment_selection`` give
+    to :func:`~polyzymd.analyses.reference.reference`. Settings left out take
+    the defaults in :data:`FUNCTION_ANALYSES`. With one config the report
+    summarises it; with several it compares each one with the first by
+    Welch's t test. Raises ``ProtocolError`` for a ``run`` or a setting the
+    analysis does not take.
     """
-    from polyzymd.analyses.functions import radius_of_gyration
+    from polyzymd.analyses import functions
+    from polyzymd.analyses.reference import reference
     from polyzymd.analyses.study import Study
     from polyzymd.analyses.timeseries import select
     from polyzymd.config.comparison import AnalysisDefaults
 
-    settings = dict(settings or {})
-    if run is not None or set(settings) - {"selection"}:
+    unknown = set(settings or {}) - set(FUNCTION_ANALYSES[name])
+    if run is not None or unknown:
         raise ProtocolError(
-            "rg measures one selection and takes no run and no setting other than selection.",
-            hint="Run polyzymd analyze rg -c A/config.yaml --set selection='protein and name CA'.",
+            f"{name} measures one selection and takes no run and no setting other than "
+            f"{', '.join(FUNCTION_ANALYSES[name])}.",
+            hint=f"Run polyzymd analyze {name} -c A/config.yaml "
+            "--set selection='protein and name CA'.",
+        )
+    settings = {**FUNCTION_ANALYSES[name], **(settings or {})}
+    arguments = [select(str(settings["selection"]))]
+    if name == "rmsd":
+        arguments.append(
+            reference(
+                str(settings["reference_mode"]),
+                str(settings["selection"]),
+                frame=settings["reference_frame"],
+                file=settings["reference_file"],
+                alignment=str(settings["alignment_selection"]),
+            )
         )
     paths = [Path(item).expanduser().resolve() for item in configs]
     study = Study.from_configs(
@@ -427,11 +460,12 @@ def _analyze_rg(
         equilibration=equilibration or AnalysisDefaults().equilibration_time,
         replicates=replicates,
     )
+    function = functions.rmsd if name == "rmsd" else functions.radius_of_gyration
     values = study.timeseries(
-        radius_of_gyration,
-        select(str(settings.get("selection", "protein"))),
+        function,
+        *arguments,
         unit="A",
-        name="rg",
+        name=name,
         recompute=recompute,
         output_dir=output_dir,
     ).reduce("mean")

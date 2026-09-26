@@ -180,6 +180,7 @@ def analyze_command(
     Examples:
         polyzymd analyze rg -c A/config.yaml
         polyzymd analyze rg -c A/config.yaml -c B/config.yaml --eq 10ns
+        polyzymd analyze rmsd -c A/config.yaml --set reference_mode=average
         polyzymd analyze rmsf -f comparison.yaml --format json -o rmsf.json
     """
     warn_if_wrong_pixi_env("analyze", ANALYSIS_PIXI_ENVS)
