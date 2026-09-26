@@ -64,6 +64,16 @@ RESULTS_DIR = "polyzymd_results"
 #: there the warning says as much about the series length as about the window.
 EQUILIBRATION_WARNING_FRACTION = 0.10
 
+#: The detected start is judged only for a replicate with at least this many
+#: effective samples. On the stationary AR(1) series above, the start passed
+#: 10 percent in 1 to 7 percent of series with 100 or more effective samples
+#: and in 45 percent of series with about 10. On the LipA 363 K rmsd
+#: replicates, with 3 to 18 effective samples, pymbar put the start within
+#: the last few percent of 28 of 30 runs, on a tail short enough that its
+#: statistical inefficiency is near 1. Below 20 the start says more about the
+#: length of the run than about the window, so it is reported without a warning.
+EQUILIBRATION_MIN_N_EFFECTIVE = 20
+
 
 @dataclass(frozen=True)
 class Select:
@@ -390,7 +400,9 @@ class Timeseries:
     ) -> None:
         self.name, self.unit, self.study, self.series, self.path = name, unit, study, series, path
 
-    def reduce(self, how: str | Callable = "mean", *, unit: Any = ...) -> ReplicateValues:
+    def reduce(
+        self, how: str | Callable = "mean", *, unit: Any = ..., detect_equilibration: bool = True
+    ) -> ReplicateValues:
         """Turn each replicate's series into one value.
 
         Parameters
@@ -403,6 +415,9 @@ class Timeseries:
         unit : str or None, optional
             Unit of the reduced value. Defaults to the series unit, or
             ``None`` for ``"fraction"``.
+        detect_equilibration : bool, optional
+            Find the start of the equilibrated region of each series with
+            pymbar, as a diagnostic that changes no value. ``False`` skips it.
 
         Returns
         -------
@@ -412,11 +427,8 @@ class Timeseries:
         """
         import numpy as np
 
-        from polyzymd.analyses.shared.autocorrelation import (
-            detect_equilibration,
-            n_effective,
-            statistical_inefficiency,
-        )
+        from polyzymd.analyses.shared.autocorrelation import detect_equilibration as detect_start
+        from polyzymd.analyses.shared.autocorrelation import n_effective, statistical_inefficiency
 
         def fraction(values: np.ndarray, times: np.ndarray) -> float:
             if not np.isin(values, (0.0, 1.0)).all():
@@ -442,7 +454,7 @@ class Timeseries:
             rows[condition] = []
             for item in items:
                 g = statistical_inefficiency(item.values)
-                start = detect_equilibration(item.values)
+                start = detect_start(item.values) if detect_equilibration else None
                 rows[condition].append(
                     (
                         item.replicate,
@@ -451,7 +463,7 @@ class Timeseries:
                         n_effective(len(item.values), g),
                         len(item.values),
                         start,
-                        float(item.times[start]),
+                        None if start is None else float(item.times[start]),
                     )
                 )
         if unit is ...:
@@ -600,10 +612,22 @@ class ReplicateValues:
             item.replicates = [row[0] for row in rows]
             item.statistical_inefficiency = [row[2] for row in rows]
             item.n_effective = [row[3] for row in rows]
-            item.eq_detected_frame = [row[5] for row in rows]
-            item.eq_detected_ns = [row[6] for row in rows]
-            for row in rows:
-                if row[5] > EQUILIBRATION_WARNING_FRACTION * row[4]:
+            checked = [row for row in rows if row[5] is not None]
+            item.eq_detected_frame = [row[5] for row in checked]
+            item.eq_detected_ns = [row[6] for row in checked]
+            few = [str(row[0]) for row in checked if row[3] < EQUILIBRATION_MIN_N_EFFECTIVE]
+            if few:
+                notes.append(
+                    f"condition {label}: replicates {', '.join(few)} have fewer than "
+                    f"{EQUILIBRATION_MIN_N_EFFECTIVE} effective samples, so the start of an "
+                    "equilibrated region cannot be detected reliably; values and statistics "
+                    "are unaffected"
+                )
+            for row in checked:
+                if (
+                    row[3] >= EQUILIBRATION_MIN_N_EFFECTIVE
+                    and row[5] > EQUILIBRATION_WARNING_FRACTION * row[4]
+                ):
                     notes.append(
                         f"condition {label} replicate {row[0]}: pymbar detect_equilibration puts "
                         f"the start of the equilibrated region at {row[6]:.4g} ns, production "

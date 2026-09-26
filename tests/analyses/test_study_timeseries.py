@@ -343,21 +343,26 @@ def test_statistics_match_the_stored_legacy_rg_comparison() -> None:
 
 
 class TestDetectedEquilibration:
-    """pymbar detect_equilibration is reported per replicate and changes nothing."""
+    """pymbar detect_equilibration is reported per replicate and changes nothing.
+
+    Replicate B2 is raised by one for its first 20 percent of frames.
+    """
 
     @staticmethod
-    def _values(relaxation: float) -> object:
+    def _values(relaxation: float, n_frames: int = 2000, **kwargs) -> object:
+        from types import SimpleNamespace
+
         from polyzymd.analyses.timeseries import ReplicateSeries, Timeseries
 
         rng = np.random.default_rng(4)
-        frames = np.arange(1000)
+        frames = np.arange(n_frames)
         series = {}
         for label in ("A", "B"):
             items = []
             for index in (1, 2, 3):
-                values = rng.normal(size=1000) + index
+                values = rng.normal(size=n_frames) + index
                 if label == "B" and index == 2:
-                    values += relaxation * np.exp(-frames / 60.0)
+                    values += relaxation * (frames < 0.2 * n_frames)
                 items.append(ReplicateSeries(label, index, values, frames, frames * 0.1, Path()))
             series[label] = items
 
@@ -365,28 +370,46 @@ class TestDetectedEquilibration:
             control = "A"
 
             def __getitem__(self, label):
-                from types import SimpleNamespace
-
                 return SimpleNamespace(equilibration="0ns", config_hash="hash")
 
-        return Timeseries("x", "A", _Study(), series, Path()).reduce("mean")
+        return Timeseries("x", "A", _Study(), series, Path()).reduce("mean", **kwargs)
 
-    def test_relaxation_is_warned_about_and_values_are_unchanged(self) -> None:
-        stationary, relaxed = self._values(0.0), self._values(20.0)
-        report = relaxed.compare()
+    @staticmethod
+    def _lines(report) -> list[str]:
+        return [text for text in report.warnings if "equilibrat" in text]
+
+    def test_relaxation_with_enough_samples_is_warned_about(self) -> None:
+        report = self._values(1.0).compare()
         row = next(item for item in report.conditions if item.label == "B")
-        assert row.eq_detected_frame[1] > 100
+        assert row.n_effective[1] >= 20 and row.eq_detected_frame[1] > 200
         assert row.eq_detected_ns[1] == pytest.approx(0.1 * row.eq_detected_frame[1])
-        warned = [text for text in report.warnings if "detect_equilibration" in text]
-        assert len(warned) == 1 and "condition B replicate 2" in warned[0]
+        (line,) = self._lines(report)
+        assert line.startswith("condition B replicate 2: pymbar detect_equilibration puts")
         assert f"eq_detected {row.eq_detected_ns[1]:.4g} ns" in report.to_agent_text()
-        # The diagnostic changes no frame or value: the relaxed replicate keeps its mean.
-        expected = float(np.mean(relaxed.source.series["B"][1].values))
-        assert relaxed.values["B"][1] == expected
-        assert relaxed.values["A"] == stationary.values["A"]
-        assert report.frames_per_replicate == {"A": [1000] * 3, "B": [1000] * 3}
 
     def test_stationary_series_is_not_warned_about(self) -> None:
         report = self._values(0.0).summary()
-        assert not [text for text in report.warnings if "detect_equilibration" in text]
-        assert all(frame < 100 for row in report.conditions for frame in row.eq_detected_frame)
+        assert self._lines(report) == []
+        assert all(frame < 200 for row in report.conditions for frame in row.eq_detected_frame)
+
+    def test_few_effective_samples_give_one_line_per_condition(self) -> None:
+        report = self._values(1.0, n_frames=15).summary()
+        assert self._lines(report) == [
+            f"condition {label}: replicates 1, 2, 3 have fewer than 20 effective samples, so "
+            "the start of an equilibrated region cannot be detected reliably; values and "
+            "statistics are unaffected"
+            for label in ("A", "B")
+        ]
+        assert [len(row.eq_detected_ns) for row in report.conditions] == [3, 3]
+
+    def test_opt_out_computes_nothing_and_values_are_identical(self) -> None:
+        on, off = self._values(1.0), self._values(1.0, detect_equilibration=False)
+        report = off.compare()
+        assert all(row.eq_detected_frame == [] == row.eq_detected_ns for row in report.conditions)
+        assert self._lines(report) == [] and "eq_detected" not in report.to_agent_text()
+        assert on.values == off.values
+        assert on.values["B"][1] == float(np.mean(on.source.series["B"][1].values))
+        assert on.compare().pairwise == report.pairwise
+        summary_on = {row.label: (row.mean, row.sem, row.ci95) for row in on.summary().conditions}
+        summary_off = {row.label: (row.mean, row.sem, row.ci95) for row in off.summary().conditions}
+        assert summary_on == summary_off

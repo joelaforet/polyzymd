@@ -226,6 +226,7 @@ def analyze(
     output_dir: Path | None = None,
     recompute: bool = False,
     run: str | None = None,
+    eq_check: bool = True,
 ) -> ProtocolReport:
     """Run one analysis over one or more simulation conditions.
 
@@ -255,6 +256,10 @@ def analyze(
     run : str, optional
         Run or pair label to report, for a plugin that measures one metric on
         several selections. Defaults to the first one.
+    eq_check : bool, optional
+        For ``rg`` and ``rmsd``, report the pymbar detected start of the
+        equilibrated region of each replicate. ``False`` skips it. It changes
+        no value either way.
 
     Returns
     -------
@@ -283,6 +288,7 @@ def analyze(
             output_dir=output_dir,
             recompute=recompute,
             run=run,
+            eq_check=eq_check,
         )
     analysis_cls = get_analysis_class(name)
     config = _build_config(
@@ -421,6 +427,7 @@ def _analyze_function(
     output_dir: Path | None,
     recompute: bool,
     run: str | None,
+    eq_check: bool = True,
 ) -> ProtocolReport:
     """Measure ``name`` on every production frame and report its per-replicate mean.
 
@@ -474,7 +481,7 @@ def _analyze_function(
         name=name,
         recompute=recompute,
         output_dir=output_dir,
-    ).reduce("mean")
+    ).reduce("mean", detect_equilibration=eq_check)
     return values.compare() if len(study) > 1 else values.summary()
 
 
