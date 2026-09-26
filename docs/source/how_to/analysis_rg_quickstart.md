@@ -8,9 +8,35 @@ unit.
 Rg analysis was added in PolyzyMD 1.3.0.
 ```
 
-All commands assume the analysis environment, either through
-`pixi shell -e analysis` or by prefixing each command with
-`pixi run -e analysis`.
+```{note}
+This page focuses on getting results quickly. For what each shipped function
+measures, see {doc}`../reference/analysis_functions`; for the study API behind
+it, see {doc}`../explanation/analysis_api`.
+```
+
+:::{admonition} Environment Setup
+:class: tip
+
+All analysis commands below assume you have activated the PolyzyMD analysis
+pixi environment:
+
+```bash
+pixi shell -e analysis
+```
+
+Alternatively, prefix each command with `pixi run -e analysis`.
+:::
+
+```{tip}
+Rg complements RMSD and RMSF:
+
+- **Rg** answers compactness questions
+- **RMSD** answers reference-deviation questions
+- **RMSF** answers per-residue flexibility questions
+
+Rg is translation and rotation invariant, so it does not require alignment or
+reference structures.
+```
 
 ## From the command line
 
