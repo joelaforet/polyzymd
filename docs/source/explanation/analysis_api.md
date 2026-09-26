@@ -12,6 +12,20 @@ That interface is described below. The shipped analyses, such as radius of
 gyration or hydrogen-bond occupancy, are ordinary functions written against the
 same interface, so anything they do, your own code can do too.
 
+:::{admonition} Environment Setup
+:class: tip
+
+The examples on this page assume you have activated the PolyzyMD analysis pixi
+environment, which provides MDAnalysis and the statistics dependencies:
+
+```bash
+pixi shell -e analysis
+```
+
+Alternatively, prefix each command with `pixi run -e analysis`, for example
+`pixi run -e analysis python my_analysis.py`.
+:::
+
 ## What you write and what PolyzyMD does
 
 | You write | PolyzyMD does |
