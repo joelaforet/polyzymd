@@ -42,6 +42,7 @@ __all__ = [
     "Study",
     "select",
     "universe",
+    "reference",
     # Building (requires OpenFF - lazy loaded)
     "SystemBuilder",
     # Simulation (requires OpenMM - lazy loaded)
@@ -84,6 +85,11 @@ def __getattr__(name: str):
         from polyzymd.analyses import timeseries
 
         return getattr(timeseries, name)
+
+    if name == "reference":
+        from polyzymd.analyses.reference import reference
+
+        return reference
 
     # Builders - require OpenFF
     if name == "SystemBuilder":

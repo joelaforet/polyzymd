@@ -113,12 +113,33 @@ def _function_record(function: Callable) -> dict[str, Any]:
     }
 
 
+def _file_record(path: str | Path) -> dict[str, str]:
+    """Record a file by its absolute path and the SHA-256 hash of its content."""
+    path = Path(path).expanduser().resolve()
+    return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
 def _argument_record(value: Any) -> Any:
-    """Describe one argument for the record; values JSON cannot hold are recorded by repr."""
+    """Describe one argument for the record; values JSON cannot hold are recorded by repr.
+
+    A string or path naming an existing file is recorded with the SHA-256 hash
+    of its content, so a changed file changes the record.
+    """
+    from polyzymd.analyses.reference import Reference
+
     if isinstance(value, Select):
         return {"select": value.selection}
     if isinstance(value, UniverseArgument):
         return {"universe": True}
+    if isinstance(value, Reference):
+        record = {key: getattr(value, key) for key in ("mode", "selection", "alignment", "frame")}
+        return {"reference": {**record, "file": value.file and _file_record(value.file)}}
+    if isinstance(value, (str, Path)):
+        try:
+            if Path(value).expanduser().is_file():
+                return {"file": _file_record(value)}
+        except (OSError, ValueError):
+            pass
     try:
         return json.loads(json.dumps(value))
     except (TypeError, ValueError):
@@ -136,6 +157,21 @@ def _build(value: Any, universe_: Any) -> Any:
             )
         return atoms
     return universe_ if isinstance(value, UniverseArgument) else value
+
+
+def _build_arguments(
+    arguments: dict[int | str, Any], replicate: Replicate
+) -> tuple[dict[int | str, Any], dict[str, Any]]:
+    """Build every placeholder for one replicate, with the frames that references chose."""
+    from polyzymd.analyses.reference import Reference, build_reference
+
+    u, built, chosen = replicate.universe(), {}, {}
+    for where, value in arguments.items():
+        if isinstance(value, Reference):
+            built[where], chosen[str(where)] = build_reference(value, u, replicate.frames)
+        else:
+            built[where] = _build(value, u)
+    return built, chosen
 
 
 def _safe(text: str) -> str:
@@ -191,7 +227,10 @@ def run_timeseries(
     the equilibration window, the frames, the times, the unit and the
     PolyzyMD, MDAnalysis, NumPy and Python versions. A stored series is read
     back instead of measured when every field of its record except the
-    versions equals the new one.
+    versions equals the new one. A
+    :func:`~polyzymd.analyses.reference.reference` argument is built once per
+    replicate before its frames are measured, and the production frame it
+    chose, if any, is stored under ``chosen``, which is not compared either.
 
     Parameters
     ----------
@@ -201,7 +240,8 @@ def run_timeseries(
         Called once per frame with ``*args`` and ``**kwargs``; returns a number.
     *args
         Arguments of ``function``. :func:`select` becomes the replicate's
-        ``AtomGroup`` and :func:`universe` its ``Universe``.
+        ``AtomGroup``, :func:`universe` its ``Universe`` and
+        :func:`~polyzymd.analyses.reference.reference` the reference atoms.
     unit : str or None
         Unit of the returned number; ``None`` for a dimensionless quantity.
     name : str, optional
@@ -248,11 +288,12 @@ def run_timeseries(
             values = None if recompute else _stored_values(folder, record)
             if values is None:
                 u = replicate.universe()
+                built, chosen = _build_arguments({**dict(enumerate(args)), **kwargs}, replicate)
                 analysis = AnalysisFromFunction(
                     function,
                     u.trajectory,
-                    *(_build(value, u) for value in args),
-                    **{key: _build(value, u) for key, value in kwargs.items()},
+                    *(built[index] for index in range(len(args))),
+                    **{key: built[key] for key in kwargs},
                 ).run(frames=replicate.frames)
                 values = np.asarray(analysis.results.timeseries, dtype=np.float64)
                 if values.shape != (len(record["frames"]),):
@@ -269,7 +310,7 @@ def run_timeseries(
                     times=replicate.times,
                 )
                 (folder / "record.json").write_text(
-                    json.dumps({**record, "versions": _versions()}, indent=1)
+                    json.dumps({**record, "chosen": chosen, "versions": _versions()}, indent=1)
                 )
             series[condition.label].append(
                 ReplicateSeries(
@@ -297,12 +338,13 @@ def _replicate_record(base: dict[str, Any], replicate: Replicate) -> dict[str, A
 
 
 def _stored_values(folder: Path, record: dict[str, Any]) -> np.ndarray | None:
-    """Return the stored values when the stored record matches, apart from versions."""
+    """Return the stored values when the stored record matches, apart from versions and chosen."""
     import numpy as np
 
     try:
         stored = json.loads((folder / "record.json").read_text())
         stored.pop("versions", None)
+        stored.pop("chosen", None)
         if stored != record:
             return None
         with np.load(folder / "series.npz") as data:
