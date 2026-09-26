@@ -245,6 +245,18 @@ def _run(
             hint="Drop -f to build the comparison from the -c configs.",
         )
     settings = _settings(setting_overrides)
+    if name == "rg":
+        return _run_rg(
+            configs=configs,
+            comparison_file=comparison_file,
+            replicate_spec=replicate_spec,
+            equilibration=equilibration,
+            labels=labels,
+            run=run,
+            settings=settings,
+            output_dir=output_dir,
+            recompute=recompute,
+        )
 
     if comparison_file is not None:
         from polyzymd.config.comparison import ComparisonConfig
@@ -280,3 +292,52 @@ def _run(
         recompute=recompute,
         run=run,
     )
+
+
+def _run_rg(
+    *,
+    configs: tuple[Path, ...],
+    comparison_file: Path | None,
+    replicate_spec: str | None,
+    equilibration: str | None,
+    labels: tuple[str, ...],
+    run: str | None,
+    settings: dict[str, Any],
+    output_dir: Path | None,
+    recompute: bool,
+) -> "ProtocolReport":
+    """Measure the mass-weighted radius of gyration and report its per-replicate mean.
+
+    The atoms are ``protein`` unless ``--set selection=...`` names others.
+    With one config the report summarises it; with several it compares each
+    one with the first by Welch's t test.
+    """
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.functions import radius_of_gyration
+    from polyzymd.analyses.protocols import _labels
+    from polyzymd.analyses.study import Study
+    from polyzymd.analyses.timeseries import select
+    from polyzymd.config.comparison import AnalysisDefaults
+
+    if comparison_file is not None or run is not None or set(settings) - {"selection"}:
+        raise ProtocolError(
+            "rg takes -c configs and one --set selection=..., not -f, --run or other settings.",
+            hint="Run polyzymd analyze rg -c A/config.yaml --set selection='protein and name CA'.",
+        )
+    if not configs:
+        raise ProtocolError("No simulation configs given.", hint="Pass at least one -c.")
+    paths = [Path(item).expanduser().resolve() for item in configs]
+    study = Study.from_configs(
+        dict(zip(_labels(paths, list(labels) or None), paths, strict=True)),
+        equilibration=equilibration or AnalysisDefaults().equilibration_time,
+        replicates=_replicates(replicate_spec),
+    )
+    values = study.timeseries(
+        radius_of_gyration,
+        select(str(settings.get("selection", "protein"))),
+        unit="A",
+        name="rg",
+        recompute=recompute,
+        output_dir=output_dir,
+    ).reduce("mean")
+    return values.compare() if len(study) > 1 else values.summary()
