@@ -5,7 +5,7 @@ does not prove by itself, and how to compare conditions without over-reading a
 single compactness metric.
 
 ```{versionadded} 1.3.0
-The Rg analysis plugin was added in PolyzyMD 1.3.0.
+Rg analysis was added in PolyzyMD 1.3.0.
 ```
 
 ```{note}
@@ -19,7 +19,7 @@ the difference between means vs. variances), see the
 [Statistics Best Practices Guide](analysis_statistics_best_practices.md).
 
 This page focuses on **Rg-specific** guidance: what the values mean,
-how to interpret timeseries behavior, and how to compare conditions.
+and how to interpret timeseries behavior.
 ```
 
 ## What is Radius of Gyration?
@@ -201,80 +201,6 @@ extended conformational states. This is often seen with:
 For oscillating systems, report the **range and period** of oscillation rather
 than just the mean Rg.
 
-## How PolyzyMD Handles Autocorrelation
-
-Rg timeseries are correlated — adjacent frames are similar because MD
-evolves continuously. PolyzyMD reports correlation-aware diagnostics and
-uncertainty estimates for the Rg timeseries:
-
-1. **Computes Rg timeseries** using MDAnalysis `AtomGroup.radius_of_gyration()`
-2. **Estimates correlation behavior** using autocorrelation-based diagnostics
-3. **Reports an effective-sample-size estimate** based on statistical
-   inefficiency rather than raw frame count
-4. **Reports correlation-aware SEM estimates** for within-trajectory summaries
-
-### Example Autocorrelation Output
-
-```text
-Run: Whole Protein
-  Correlation time: 3821 ps (3.8 ns)
-  Statistical inefficiency: 473.7
-  Independent samples: 19 (from 9000 frames)
-  SEM (corrected): 0.098 Å
-```
-
-This means:
-- Rg values appear to decorrelate on roughly nanosecond timescales for this
-  analyzed window
-- The raw 9000 frames contain far less independent information than the frame
-  count alone suggests
-- The reported SEM is a correlation-aware estimate, not a guarantee that all
-  sampling limitations have been removed
-
-These estimates depend on stationarity, sampling quality, and the reliability of
-the autocorrelation estimate. If the trajectory drifts, switches slowly between
-states, or samples too few transitions, correlation-aware uncertainty can still
-understate the true uncertainty in the condition-level conclusion.
-
-```{seealso}
-For the mathematical details of autocorrelation functions and the LiveCoMS
-recommendations, see the
-[Statistics Best Practices Guide](analysis_statistics_best_practices.md).
-```
-
-## Multi-Run Analysis: Why and When
-
-### Why Multiple Runs?
-
-Different Rg selections answer different questions:
-
-| Run Label | Selection | Question |
-|-----------|-----------|----------|
-| "Whole Protein" | `protein` | Overall protein compactness? |
-| "Protein Backbone" | `protein and name CA` | Backbone compactness (less side-chain noise)? |
-| "Core Region" | Core residues only | Is the structured core stable? |
-| "Polymer" | `chainid C` | Is the polymer extended or collapsed? |
-| "Enzyme+Polymer" | `protein or chainid C` | Overall conjugate compactness? |
-
-### When to Use Multi-Run
-
-- **Always** include at least one whole-protein or backbone Rg run as a baseline
-- **Add core-region runs** when flexible termini or loops dominate the signal
-- **Add polymer runs** when studying enzyme-polymer conjugate behavior
-- **Add combined runs** when the relative sizes of enzyme and polymer matter
-
-### Independent Ranking
-
-Each run is ranked independently across conditions. This prevents averaging
-Rg from structurally different selections (which would be meaningless):
-
-```text
-Rankings:
-  Whole Protein:     With Polymer < No Polymer (compaction)
-  Protein Backbone:  With Polymer < No Polymer (compaction)
-  Polymer:           100% SBMA < 100% EGMA (more compact polymer)
-```
-
 ## Why No Alignment or Reference?
 
 Rg is **intrinsically translation and rotation invariant**. The quantity being
@@ -290,7 +216,7 @@ Mathematically, this is because:
 This gives Rg several practical advantages over RMSD:
 - **No alignment artifacts** — RMSD can be affected by imperfect alignment
 - **No reference structure needed** — no need to choose centroid, average, or external
-- **Simpler configuration** — only `label` and `selection` are required
+- **Simpler setup**: only an atom selection is needed
 - **Complementary information** — Rg and RMSD together give a more complete picture
 
 ```{note}
@@ -341,70 +267,12 @@ a singleton. Pairwise inferential tests require at least 2 replicates per
 condition.
 ```
 
-## Comparing Conditions
-
-### What PolyzyMD Computes
-
-For each Rg run, the comparison produces:
-
-| Statistic | Description |
-|-----------|-------------|
-| **Ranking** | Conditions sorted by mean Rg (lowest = most compact) |
-| **Percent change** | Relative to control condition |
-| **Direction** | `compaction` (< −1%), `expansion` (> +1%), or `unchanged` |
-| **t-statistic** | Two-sample t-test on replicate means |
-| **p-value** | Two-tailed significance |
-| **Cohen's d** | Effect size magnitude |
-| **ANOVA** | Omnibus F-test when 3+ conditions (per-run) |
-
-### Direction Labels
-
-PolyzyMD classifies the direction of change based on percent change in mean
-Rg relative to control:
-
-| Percent Change | Direction | Meaning |
-|---------------|-----------|---------|
-| < −1% | `compaction` | Mean Rg is lower than control for this selection |
-| > +1% | `expansion` | Mean Rg is higher than control for this selection |
-| −1% to +1% | `unchanged` | Mean Rg change is within the direction threshold |
-
-### Interpreting the Comparison
-
-```text
-Rg Comparison — Whole Protein
-================================
-Ranking (lower = more compact):
-  1. 100% SBMA:   17.812 ± 0.038 Å
-  2. No Polymer:  18.256 ± 0.044 Å
-  3. 100% EGMA:   18.891 ± 0.061 Å
-
-100% SBMA vs No Polymer:
-  Change: -2.4% (compaction), p=0.0123*, d=1.87 (large)
-
-100% EGMA vs No Polymer:
-  Change: +3.5% (expansion), p=0.0078*, d=2.14 (large)
-
-ANOVA: F=22.31, p=0.0018* (evidence of differences across conditions)
-```
-
-**Reading this output:**
-- SBMA is associated with lower whole-protein Rg for this selection.
-- EGMA is associated with higher whole-protein Rg for this selection.
-- The ANOVA suggests evidence that at least one condition differs from the
-  others, subject to model assumptions and sampling quality.
-- Large Cohen's d values mean the replicate-level Rg differences are large
-  relative to replicate variation.
-
-Lower or higher Rg alone does not establish stabilization or destabilization of
-the native fold. Use the comparison as evidence for a compactness difference,
-then check structural mechanisms with visualization and complementary analyses.
-
 ## Common Pitfalls
 
 ### 1. Insufficient Equilibration
 
 **Symptom:** Rg mean and comparison results change with different
-`--eq-time` values.
+`--eq` values.
 
 **Cause:** Including the initial equilibration phase biases the mean.
 
@@ -434,7 +302,7 @@ identical selections.
 ```text
 # WRONG: "Condition A (18.256 Å) is less compact than B (18.291 Å)"
 # RIGHT: "Condition A (18.256 ± 0.044 Å) and B (18.291 ± 0.038 Å)
-#         are not significantly different (p = 0.62, unchanged)"
+#         are not significantly different (p = 0.62)"
 ```
 
 ### 4. Ignoring Timeseries Shape
@@ -495,129 +363,6 @@ atoms in the selection.
 - Whole-protein Rg → `"protein"` or `"protein and name CA"`
 - Core stability → exclude flexible termini with specific residue ranges
 - Polymer behavior → `"chainid C"`
-
-## Fragment Mode Best Practices
-
-```{versionadded} 1.3.0
-```
-
-When your selection contains multiple disconnected molecules (e.g., many
-polymer chains in solution), use `calculation_mode: "fragments"` to compute
-per-fragment Rg and reduce to a meaningful per-frame average. Without
-fragment mode, the whole-group Rg is dominated by the spatial separation
-between molecules rather than individual chain conformations.
-
-### Selection Strategy
-
-For a standard PolyzyMD enzyme-polymer conjugate, `chainid C` remains the
-canonical polymer-chain selection. Use `resname`-based selections when your
-scientific question is explicitly about a multi-fragment polymer population,
-for example several independent chains or multiple polymer residue names in the
-same condition.
-
-```{code-block} yaml
-:caption: Fragment-mode run nested under plugins.rg.runs
-
-plugins:
-  rg:
-    runs:
-      - label: polymer_population_rg
-        selection: "resname SBM or resname EGM or resname EGP"
-        calculation_mode: fragments
-```
-
-### Verify Fragment Count Conceptually
-
-Before relying on fragment-mode results, confirm that the topology represents
-the physical fragments you intend to analyze. The number of detected fragments
-should match the expected number of independent polymer chains or oligomeric
-units. If it does not, check for unexpected bonds bridging chains, missing bonds
-within chains, or a selection that includes atoms outside the intended fragment
-population. Use the [Rg quickstart](../how_to/analysis_rg_quickstart.md) and
-[Rg reference](../reference/analysis_rg_reference.md) for task-oriented setup
-and field-level configuration details.
-
-### When to Use Each Mode
-
-| Scenario | Recommended mode |
-|----------|-----------------|
-| Single protein chain | `selection` (default) |
-| Single polymer chain | `selection` |
-| Many polymer chains in solution | `fragments` |
-| Oligomer populations | `fragments` |
-| Protein + single polymer combined | `selection` |
-
-### Fragment Weighting
-
-- **`equal`** (default): Arithmetic mean — all fragments contribute equally
-  regardless of size. Best when fragments are similar in length and you want
-  each chain to contribute equally to the per-frame reduced value.
-- **`mass`**: Mass-weighted mean — heavier fragments contribute more. Best
-  when fragment sizes vary significantly and you want the average to reflect
-  the total material, not just the chain count.
-
-### Statistical Comparison with Fragment Mode
-
-The **reduced Rg timeseries** (per-frame mean across fragments) is the
-primary metric used for cross-condition statistical comparison (t-tests,
-ANOVA, ranking). This is stored in `rg_values` in the NPZ sidecar and
-drives the mean, SEM, and correlation time reported in JSON results.
-
-The **fragment Rg distribution** is supplementary and descriptive. Fragment
-values pooled across frames and trajectories are correlated and should not be
-treated as independent evidence for statistical significance. Use fragment
-distributions to understand *why* replicate-level comparisons may differ, not
-as a substitute for reduced or replicate-level inference.
-
-## Interpreting Distribution Plots
-
-Distribution plots provide a deeper view of Rg behavior beyond mean and SEM.
-
-### Reduced Rg Distribution
-
-The reduced distribution shows the spread of per-frame Rg values (one value
-per frame). Because each frame's value is already an average over multiple
-fragments (in fragment mode), this distribution is relatively **narrow** —
-a consequence of the central limit theorem.
-
-Use reduced distributions to:
-
-- Compare overall conformational states across conditions
-- Identify bimodal behavior (two distinct conformational states)
-- Assess whether conditions produce overlapping or distinct Rg ranges
-
-### Fragment Rg Distribution
-
-The fragment distribution pools ALL individual fragment Rg values across
-all frames and all replicates. It captures the **full range of sizes**
-that individual chains adopt, including rare extended or collapsed
-conformations that average out in the reduced series.
-
-Use fragment distributions to:
-
-- Detect conformational heterogeneity within a population
-- Identify subpopulations of chains with distinct sizes
-- Understand the physical origin of differences seen in reduced distributions
-
-Because these values are correlated within trajectories and across fragments in
-the same simulation box, interpret this distribution as descriptive structure,
-not as a collection of independent samples for p-values.
-
-### Comparing Reduced and Fragment Distributions
-
-| Observation | Possible Interpretation |
-|-------------|-------------------------|
-| Reduced distributions differ, fragment distributions also differ | Many chains may shift conformational state in the same direction |
-| Reduced distributions differ, fragment distributions overlap | The reduced mean may be influenced by a subset of chains or frames |
-| Reduced distributions overlap, fragment distributions differ | Individual chains may sample different states that average out |
-| Both distributions overlap | No clear descriptive distribution difference |
-
-```{tip}
-If reduced distributions overlap but fragment distributions differ, this
-suggests individual chains are sampling different conformational states that
-cancel out in the average. This is a sign of **conformational heterogeneity**
-that merits visual inspection of trajectories.
-```
 
 ## Rg as a Folding Clue
 

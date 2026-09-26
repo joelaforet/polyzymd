@@ -65,7 +65,11 @@ VERDICT_VOCABULARY = (
     VERDICT_NOT_TESTABLE,
 )
 
+#: Analyses that run through Study.timeseries instead of a plugin.
+FUNCTION_ANALYSES = ("rg",)
+
 __all__ = [
+    "FUNCTION_ANALYSES",
     "VERDICT_VOCABULARY",
     "ConditionReport",
     "PairwiseReport",
@@ -84,8 +88,13 @@ __all__ = [
 class ConditionReport(BaseModel):
     """One condition's mean with the uncertainty and sample size behind it.
 
-    ``ci_method`` is ``"student_t"`` from replicate values and
-    ``"student_t_from_sem"`` when it was rebuilt from a stored standard error.
+    ``ci_method`` is ``"student_t"`` from replicate values,
+    ``"student_t_from_sem"`` when it was rebuilt from a stored standard error,
+    and ``"not_estimable"`` when every replicate has the same value.
+    ``replicates``, ``statistical_inefficiency`` and ``n_effective`` list, for
+    each entry of ``replicate_values``, its replicate number and the pymbar
+    statistical inefficiency and effective sample size of its time series.
+    They are empty for a result read from a plugin artifact.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -97,6 +106,9 @@ class ConditionReport(BaseModel):
     ci95: tuple[float, float] | None = None
     ci_method: str | None = None
     replicate_values: list[float] = Field(default_factory=list)
+    replicates: list[int] = Field(default_factory=list)
+    statistical_inefficiency: list[float] = Field(default_factory=list)
+    n_effective: list[float] = Field(default_factory=list)
 
 
 class PairwiseReport(BaseModel):
@@ -153,7 +165,7 @@ class ProtocolReport(BaseModel):
     all_metrics: list[str] = Field(default_factory=list)
     all_runs: list[str] = Field(default_factory=list)
     equilibration: str
-    frames_per_replicate: dict[str, int | None] = Field(default_factory=dict)
+    frames_per_replicate: dict[str, int | list[int] | None] = Field(default_factory=dict)
     conditions: list[ConditionReport] = Field(default_factory=list)
     pairwise: list[PairwiseReport] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -208,7 +220,7 @@ def analyze(
     Parameters
     ----------
     name : str
-        Canonical analysis name, for example ``"rg"``.
+        Canonical analysis name, for example ``"rmsf"``.
     configs : sequence of Path or str
         Simulation ``config.yaml`` paths, control first.
     replicates : sequence of int, optional
@@ -238,7 +250,22 @@ def analyze(
     ProtocolError
         If the name is unknown, a config is missing, the labels do not match
         the configs, the settings are invalid, or no replicates are found.
+
+    Notes
+    -----
+    ``"rg"`` runs through :func:`_analyze_rg` instead of a plugin.
     """
+    if name == "rg":
+        return _analyze_rg(
+            configs,
+            replicates=replicates,
+            equilibration=equilibration,
+            settings=settings,
+            labels=labels,
+            output_dir=output_dir,
+            recompute=recompute,
+            run=run,
+        )
     analysis_cls = get_analysis_class(name)
     config = _build_config(
         analysis_cls,
@@ -271,6 +298,11 @@ def run_protocol(
     """
     from polyzymd.analyses.orchestrator import run_comparison
 
+    if analysis in FUNCTION_ANALYSES:
+        raise ProtocolError(
+            f"{analysis} reads simulation configs, not a comparison.yaml.",
+            hint=f"Run polyzymd analyze {analysis} -c A/config.yaml -c B/config.yaml.",
+        )
     if isinstance(analysis, str):
         analysis = get_analysis_class(analysis)()
     resolved = equilibration or config.defaults.equilibration_time
@@ -355,8 +387,55 @@ def get_analysis_class(name: str) -> type["Analysis"]:
         return get_analysis(name)
     except KeyError as exc:
         raise ProtocolError(
-            f"Unknown analysis {name!r}.", hint=f"Use one of: {', '.join(list_all_names())}."
+            f"Unknown analysis {name!r}.",
+            hint=f"Use one of: {', '.join(sorted([*list_all_names(), *FUNCTION_ANALYSES]))}.",
         ) from exc
+
+
+def _analyze_rg(
+    configs: Sequence[Path | str],
+    *,
+    replicates: Sequence[int] | None,
+    equilibration: str | None,
+    settings: dict | None,
+    labels: Sequence[str] | None,
+    output_dir: Path | None,
+    recompute: bool,
+    run: str | None,
+) -> ProtocolReport:
+    """Measure the mass-weighted radius of gyration and report its per-replicate mean.
+
+    The atoms are ``protein`` unless ``settings={"selection": ...}`` names
+    others. With one config the report summarises it; with several it compares
+    each one with the first by Welch's t test. Raises ``ProtocolError`` for a
+    ``run`` or any setting other than ``selection``.
+    """
+    from polyzymd.analyses.functions import radius_of_gyration
+    from polyzymd.analyses.study import Study
+    from polyzymd.analyses.timeseries import select
+    from polyzymd.config.comparison import AnalysisDefaults
+
+    settings = dict(settings or {})
+    if run is not None or set(settings) - {"selection"}:
+        raise ProtocolError(
+            "rg measures one selection and takes no run and no setting other than selection.",
+            hint="Run polyzymd analyze rg -c A/config.yaml --set selection='protein and name CA'.",
+        )
+    paths = [Path(item).expanduser().resolve() for item in configs]
+    study = Study.from_configs(
+        dict(zip(_labels(paths, labels), paths, strict=True)),
+        equilibration=equilibration or AnalysisDefaults().equilibration_time,
+        replicates=replicates,
+    )
+    values = study.timeseries(
+        radius_of_gyration,
+        select(str(settings.get("selection", "protein"))),
+        unit="A",
+        name="rg",
+        recompute=recompute,
+        output_dir=output_dir,
+    ).reduce("mean")
+    return values.compare() if len(study) > 1 else values.summary()
 
 
 # Config construction
@@ -894,7 +973,7 @@ def _verdict(
         if not pair.testable:
             sentences.append(
                 f"{VERDICT_NOT_TESTABLE}: {metric} for {pair.a} vs {pair.b} needs at least two "
-                f"replicates per condition ({n_text})"
+                f"replicates per condition and a value that varies ({n_text})"
             )
         elif pair.p_adjusted is None:
             sentences.append(
@@ -964,11 +1043,18 @@ def _interval(limits: Sequence[float] | None) -> str:
 def _condition_line(condition: ConditionReport) -> str:
     """Render one condition on a single line."""
     shown = ", ".join(_num(value) for value in condition.replicate_values)
-    return (
+    line = (
         f"{condition.label}  n {condition.n_replicates}  mean {_num(condition.mean)}"
         f"  sem {_num(condition.sem)}  ci95 {_interval(condition.ci95)}"
         f"  values {shown or 'none'}"
     )
+    if condition.statistical_inefficiency:
+        line += (
+            f"  replicates {', '.join(str(index) for index in condition.replicates)}"
+            f"  g {', '.join(_num(value) for value in condition.statistical_inefficiency)}"
+            f"  n_eff {', '.join(_num(value) for value in condition.n_effective)}"
+        )
+    return line
 
 
 def _pairwise_line(pair: PairwiseReport) -> str:

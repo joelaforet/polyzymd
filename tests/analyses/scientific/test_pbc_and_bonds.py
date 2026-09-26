@@ -1,8 +1,9 @@
 """Known-answer tests for periodic boundary handling and bond requirements.
 
-These tests pin three behaviours. Fragment-based observables (Rg in fragment
-mode, contacts chain identity) must fail loudly when the topology carries no
-bonds instead of collapsing the selection into a single fragment. Pair
+These tests pin three behaviours. Fragment lookups (the shared
+``require_topology_bonds`` and contacts chain identity) must fail loudly when
+the topology carries no bonds instead of collapsing the selection into a
+single fragment. Pair
 distances must use the minimum image convention against the box of the frame
 they were measured in, which means no rigid-body alignment may run first.
 Universe provenance must state which periodic boundary policy was applied.
@@ -61,83 +62,17 @@ def _two_chain_universe() -> Any:
     return universe
 
 
-def _fragment_run(**overrides: Any) -> Any:
-    """Build an Rg run in fragment mode.
-
-    Parameters
-    ----------
-    **overrides : Any
-        Field overrides for ``RgRunSettings``.
-
-    Returns
-    -------
-    Any
-        Configured ``RgRunSettings`` instance.
-    """
-
-    from polyzymd.analyses.rg import RgRunSettings
-
-    fields: dict[str, Any] = {
-        "label": "polymer",
-        "selection": "all",
-        "calculation_mode": "fragments",
-    }
-    fields.update(overrides)
-    return RgRunSettings(**fields)
-
-
-def _run_rg(universe: Any, run: Any) -> Any:
-    """Run the Rg analysis object for one universe.
-
-    Parameters
-    ----------
-    universe : Any
-        MDAnalysis universe to measure.
-    run : Any
-        Configured Rg run settings.
-
-    Returns
-    -------
-    Any
-        Completed ``AnalysisBase`` instance.
-    """
-
-    from polyzymd.analyses.rg._mda import build_rg_analysis
-
-    analysis = build_rg_analysis(universe=universe, run=run, replicate=1, timestep_ps=1.0)
-    analysis.run()
-    return analysis
-
-
-def test_rg_fragment_mode_measures_each_bonded_chain() -> None:
-    """Fragment mode should report one Rg per bonded chain."""
-
-    universe = _two_chain_universe()
-
-    analysis = _run_rg(universe, _fragment_run())
-
-    assert analysis.results.fragment_counts_per_frame.tolist() == [2]
-    fragment_rg = np.asarray(analysis.results.fragment_rg_values)
-    assert fragment_rg.shape == (2,)
-    np.testing.assert_allclose(
-        fragment_rg,
-        [math.sqrt(2.0 / 3.0), math.sqrt(32.0 / 3.0)],
-        rtol=1e-6,
-    )
-    whole_selection_rg = float(universe.atoms.radius_of_gyration())
-    assert not math.isclose(float(analysis.results.rg_values[0]), whole_selection_rg, rel_tol=1e-3)
-
-
-def test_rg_fragment_mode_without_bonds_raises_typed_error() -> None:
-    """Fragment mode must refuse a topology with no bonds."""
+def test_fragment_lookup_without_bonds_raises_typed_error() -> None:
+    """The shared fragment lookup must refuse a topology with no bonds."""
 
     from polyzymd.analyses.exceptions import TopologyBondsMissingError
+    from polyzymd.analyses.shared.topology import require_topology_bonds
 
     universe = _two_chain_universe()
     universe.del_TopologyAttr("bonds")
 
     with pytest.raises(TopologyBondsMissingError) as excinfo:
-        _run_rg(universe, _fragment_run())
+        require_topology_bonds(universe.atoms, context="contacts polymer chain detection")
 
     message = str(excinfo.value)
     assert "6 atoms" in message
@@ -145,16 +80,20 @@ def test_rg_fragment_mode_without_bonds_raises_typed_error() -> None:
     assert "bond" in message.lower()
 
 
-def test_rg_fragment_mode_fallback_is_opt_in() -> None:
+def test_single_fragment_fallback_is_opt_in() -> None:
     """The old single-fragment fallback stays reachable behind a flag."""
+
+    from polyzymd.analyses.contacts._events import identify_polymer_chains
 
     universe = _two_chain_universe()
     universe.del_TopologyAttr("bonds")
 
-    analysis = _run_rg(universe, _fragment_run(allow_single_fragment_fallback=True))
+    chain_indices, warnings = identify_polymer_chains(
+        universe.atoms, allow_single_fragment_fallback=True
+    )
 
-    assert analysis.results.fragment_counts_per_frame.tolist() == [1]
-    assert analysis.results.fragment_topology["fallback_used"] is True
+    assert chain_indices.tolist() == [0, 0]
+    assert warnings
 
 
 def test_identify_polymer_chains_without_bonds_raises_typed_error() -> None:
@@ -234,7 +173,7 @@ def test_partially_bonded_topology_is_detected_as_unbonded_selection() -> None:
     """A selection with no bonds of its own fails even when the protein has bonds."""
 
     from polyzymd.analyses.exceptions import TopologyBondsMissingError
-    from polyzymd.analyses.shared.topology import topology_bond_source
+    from polyzymd.analyses.shared.topology import require_topology_bonds, topology_bond_source
 
     universe = _partially_bonded_universe()
 
@@ -248,7 +187,9 @@ def test_partially_bonded_topology_is_detected_as_unbonded_selection() -> None:
     ]
 
     with pytest.raises(TopologyBondsMissingError) as excinfo:
-        _run_rg(universe, _fragment_run(selection="resname SBM"))
+        require_topology_bonds(
+            universe.select_atoms("resname SBM"), context="contacts polymer chain detection"
+        )
 
     assert "3 atoms" in str(excinfo.value)
 
@@ -268,11 +209,16 @@ def test_partially_bonded_topology_rejects_polymer_chain_identity() -> None:
 def test_partially_bonded_topology_allows_the_bonded_selection() -> None:
     """The bonded protein selection still resolves its fragment."""
 
+    from polyzymd.analyses.shared.topology import require_topology_bonds
+
     universe = _partially_bonded_universe()
 
-    analysis = _run_rg(universe, _fragment_run(selection="resname ALA"))
+    fragments, fallback = require_topology_bonds(
+        universe.select_atoms("resname ALA"), context="contacts polymer chain detection"
+    )
 
-    assert analysis.results.fragment_counts_per_frame.tolist() == [1]
+    assert fallback is None
+    assert len(fragments) == 1
 
 
 def _mostly_bonded_universe(n_unbonded: int) -> Any:
@@ -319,7 +265,7 @@ def test_a_few_unbonded_atoms_are_tolerated() -> None:
     from polyzymd.analyses.shared.topology import require_topology_bonds
 
     fragments, fallback = require_topology_bonds(
-        _mostly_bonded_universe(1).atoms, context="Rg run 'polymer' in fragment mode"
+        _mostly_bonded_universe(1).atoms, context="contacts polymer chain detection"
     )
 
     assert fallback is None
@@ -335,7 +281,7 @@ def test_mostly_unbonded_selection_is_rejected_with_counts() -> None:
     with pytest.raises(TopologyBondsMissingError) as excinfo:
         require_topology_bonds(
             _mostly_bonded_universe(4).atoms,
-            context="Rg run 'polymer' in fragment mode",
+            context="contacts polymer chain detection",
         )
 
     message = str(excinfo.value)
@@ -343,15 +289,16 @@ def test_mostly_unbonded_selection_is_rejected_with_counts() -> None:
     assert "10 percent" in message
 
 
-def test_partially_bonded_selection_is_rejected_by_rg_fragment_mode() -> None:
+def test_partially_bonded_selection_is_rejected() -> None:
     """A protein-plus-polymer selection with unbonded polymer fails, not averages to zero."""
 
     from polyzymd.analyses.exceptions import TopologyBondsMissingError
+    from polyzymd.analyses.shared.topology import require_topology_bonds
 
     universe = _partially_bonded_universe()
 
     with pytest.raises(TopologyBondsMissingError) as excinfo:
-        _run_rg(universe, _fragment_run(selection="all"))
+        require_topology_bonds(universe.atoms, context="contacts polymer chain detection")
 
     assert "3 of the 6 selected atoms are single-atom fragments" in str(excinfo.value)
 

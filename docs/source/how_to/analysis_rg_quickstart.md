@@ -1,16 +1,17 @@
-# Rg Analysis: Quick Start
+# Rg analysis: quick start
 
-Compute Radius of Gyration timeseries to track structural compactness for
-protein and polymer selections with autocorrelation-aware uncertainty.
+Measure the radius of gyration (Rg) of a selection on every production frame of
+every replicate, and compare conditions with the replicate as the sampling
+unit.
 
 ```{versionadded} 1.3.0
-The Rg analysis plugin was added in PolyzyMD 1.3.0.
+Rg analysis was added in PolyzyMD 1.3.0.
 ```
 
 ```{note}
-This page focuses on getting results quickly. For full field-level settings,
-output schema details, plot variants, and troubleshooting lookup, see
-{doc}`../reference/analysis_rg_reference`.
+This page focuses on getting results quickly. For what each shipped function
+measures, see {doc}`../reference/analysis_functions`; for the study API behind
+it, see {doc}`../explanation/analysis_api`.
 ```
 
 :::{admonition} Environment Setup
@@ -26,45 +27,6 @@ pixi shell -e analysis
 Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
-## TL;DR
-
-```bash
-# Configure Rg runs in comparison.yaml, then run:
-polyzymd compare run rg -f comparison.yaml --eq-time 10ns
-
-# Run all enabled analyses in the same workflow
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-
-# Force recompute and machine-readable output
-polyzymd compare run rg -f comparison.yaml --eq-time 10ns --recompute --format json
-```
-
-## Prerequisites
-
-Before running Rg analysis, you need:
-
-1. Completed production simulation data for at least one replicate
-2. A `comparison.yaml` file with conditions and plugin settings
-3. Trajectory files in the scratch location used by each condition config
-
-Verify your setup:
-
-```bash
-ls $(polyzymd info -c config.yaml --scratch-dir)/production_*/
-```
-
-## What Rg Analysis Provides
-
-The Rg plugin computes per-run compactness statistics and comparison outputs:
-
-| Feature | Description |
-|---------|-------------|
-| **Mean Rg** | Average radius of gyration (Å) for the selected atom group |
-| **SEM** | Autocorrelation-corrected standard error |
-| **Median / Min / Max / Final Rg** | Robust center, range, and endpoint diagnostics |
-| **Timeseries** | Full per-frame Rg stored in NPZ sidecars |
-| **Multi-run support** | Multiple named selections in one plugin section |
-
 ```{tip}
 Rg complements RMSD and RMSF:
 
@@ -76,180 +38,53 @@ Rg is translation and rotation invariant, so it does not require alignment or
 reference structures.
 ```
 
-## Basic Usage
-
-`````{tab-set}
-
-````{tab-item} YAML (Recommended)
-Define Rg runs in `comparison.yaml`:
-
-```yaml
-name: "rg_quickstart"
-control: "no_polymer"
-
-conditions:
-  - label: "no_polymer"
-    config: "configs/no_polymer.yaml"
-    replicates: [1, 2, 3]
-  - label: "with_polymer"
-    config: "configs/with_polymer.yaml"
-    replicates: [1, 2, 3]
-
-plugins:
-  rg:
-    runs:
-      - label: "Whole Protein"
-        selection: "protein"
-      - label: "Protein Backbone"
-        selection: "protein and name CA"
-```
-
-Run analysis:
+## From the command line
 
 ```bash
-polyzymd compare run rg -f comparison.yaml --eq-time 10ns
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-polyzymd compare run rg -f comparison.yaml --eq-time 10ns --recompute
-```
-````
-
-````{tab-item} CLI
-Single plugin run:
-
-```bash
-polyzymd compare run rg -f comparison.yaml --eq-time 10ns
+polyzymd analyze rg -c noPoly/config.yaml -c SBMA50/config.yaml \
+  --label "No polymer" --label "SBMA 50%" --eq 200ns
 ```
 
-Run all enabled plugins:
+The first `-c` is the control. For each replicate, the mass-weighted radius of
+gyration of the `protein` atoms is measured on every frame after the
+equilibration window and averaged over those frames. The replicate means are
+then summarised per condition, and every other condition is compared with the
+control by Welch's t test with the Benjamini-Hochberg correction. Measure a
+different selection with `--set selection='protein and name CA'`.
 
-```bash
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-```
-````
+Add `--format json` for the full report, `--replicates 1-3` to use only some
+replicates, and `--recompute` to ignore stored results. The line format and the
+verdict words are described under {ref}`polyzymd analyze <cli-analyze>`.
 
-`````
+## From Python
 
-## Multi-Run Configuration
+The same analysis written with the {doc}`study API <../explanation/analysis_api>`:
 
-Rg uses a `runs` list. Each run defines a label and selection, and each run is
-computed independently for every replicate.
+```python
+import polyzymd as pz
+from polyzymd.analyses.functions import radius_of_gyration
 
-```yaml
-plugins:
-  rg:
-    runs:
-      - label: "Whole Protein"
-        selection: "protein"
-
-      - label: "Protein Backbone"
-        selection: "protein and name CA"
-
-      - label: "Core Region"
-        selection: "protein and name CA and resid 20:250"
-
-      - label: "Polymer"
-        selection: "chainid C"
+study = pz.Study.from_configs(
+    {"No polymer": "noPoly/config.yaml", "SBMA 50%": "SBMA50/config.yaml"},
+    equilibration="200ns",
+)
+rg = study.timeseries(radius_of_gyration, pz.select("protein"), unit="Å")
+print(rg.reduce("mean").compare(control="No polymer").to_agent_text())
 ```
 
-```{important}
-Runs are not replicates.
+`radius_of_gyration(atoms)` calls MDAnalysis `AtomGroup.radius_of_gyration()`
+on the current frame. Any function of an `AtomGroup` that returns one number
+works in its place, for example the radius of gyration of one polymer chain.
 
-- A **run** is a named metric definition within the plugin
-- A **replicate** is an independent simulation repeat (`run_1`, `run_2`, ...)
+Each replicate's per-frame values are stored under
+`polyzymd_results/<name>/<condition>/replicate_<n>/` with a record of the
+function, the selection, the input files and the frames used, and they are
+reused on the next run only when all of those match.
 
-All configured runs are evaluated for each available replicate.
-```
+## Before interpreting the numbers
 
-## Key Mode: Fragment-Aware Rg
-
-```{versionadded} 1.3.0
-Fragment-aware Rg calculation was added in PolyzyMD 1.3.0.
-```
-
-Use fragment mode when a selection contains many disconnected molecules (for
-example, many polymer chains) and you want average fragment compactness rather
-than whole-cloud compactness.
-
-```yaml
-plugins:
-  rg:
-    runs:
-      - label: "protein_rg"
-        selection: "protein"
-
-      - label: "polymer_blob_rg"
-        selection: "resname SBM or resname EGM or resname EGP"
-        calculation_mode: "fragments"
-        fragment_weighting: "equal"
-```
-
-Fragment mode needs a topology that carries bonds, because fragments are
-connected components of the bond graph. If the selected atoms have no bonds, the
-run fails with `TopologyBondsMissingError` instead of quietly measuring the
-whole selection as one fragment. This is common for solvated systems above
-99999 atoms, where MDAnalysis skips the CONECT records that OpenMM writes in
-hexadecimal. Load a topology that carries bonds, or guess bonds for the protein
-and polymer selection. If whole-selection Rg is genuinely what you want, set
-`allow_single_fragment_fallback: true` on the run and say so when you report the
-number.
-
-Fragment mode details, weighting behavior, and related output fields are
-documented in {doc}`../reference/analysis_rg_reference`.
-
-## Comparing Rg Across Conditions
-
-Run condition comparisons with the standard compare command:
-
-```bash
-polyzymd compare run rg -f comparison.yaml --eq-time 10ns
-```
-
-Per run, PolyzyMD reports:
-
-- Ranking by mean Rg (lower means more compact)
-- Pairwise tests with p-values and effect sizes
-- Direction labels (`compaction`, `expansion`, `unchanged`)
-- ANOVA when 3+ conditions are present
-
-Example output:
-
-```text
-Rg Comparison — Whole Protein
-===============================
-Ranking: With Polymer > No Polymer (lower Rg = more compact)
-
-No Polymer:   18.256 ± 0.044 Å
-With Polymer: 17.812 ± 0.038 Å
-
-With Polymer vs No Polymer:
-  Change: -2.4% (compaction)
-  p-value: 0.0123 *
-  Cohen's d: 1.87 (large)
-```
-
-For full comparison workflow context, see {doc}`analysis_compare_conditions`.
-
-## Reference and Troubleshooting
-
-For complete lookup material, see {doc}`../reference/analysis_rg_reference`,
-including:
-
-- Full `RgRunSettings` and `RgSettings` field tables
-- Output directory layout and JSON/NPZ structures
-- Plot type details and `plot_settings.rg` options
-- CLI option lookup
-- Troubleshooting cases and fixes
-- Rg vs RMSD and Rg vs RMSF comparison tables
-
-For interpretation guidance, see
-{doc}`../explanation/analysis_rg_best_practices` and
-{doc}`../explanation/analysis_statistics_best_practices`.
-
-## Next Steps
-
-- {doc}`../reference/analysis_rg_reference`
-- {doc}`analysis_compare_conditions`
-- {doc}`analysis_rmsd_quickstart`
-- {doc}`analysis_rmsf_quickstart`
-- {doc}`analysis_distances_quickstart`
-- {doc}`analysis_contacts_quickstart`
+Rg does not unwrap molecules split across periodic boundaries, so check that
+the selected atoms are whole in the trajectory. Plot a few replicates' time
+series before choosing the equilibration window.
+{doc}`../explanation/analysis_rg_best_practices` covers what Rg does and does
+not show, and how to read its time series.

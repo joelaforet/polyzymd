@@ -1,8 +1,9 @@
 """Hypothesis testing must behave the same way in every comparison plugin.
 
-Each plugin that overrides ``compare`` runs its own pairwise tests. These
-tests pin the three properties that must not depend on which plugin was
-asked:
+Each plugin that overrides ``compare`` runs its own pairwise tests, and
+``ReplicateValues.compare`` in ``polyzymd.analyses.timeseries`` runs them for
+the radius of gyration. These tests pin the three properties that must not
+depend on which one was asked:
 
 1. ``ttest_method`` from the comparison config selects the variance
    assumption. With equal group sizes and unequal variances Welch's test
@@ -138,47 +139,6 @@ def _rmsd_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContex
         "Treated": artifact("Treated", HIGH_VARIANCE),
     }
     return RMSDAnalysis(), _context(tmp_path, settings, aggregated, ttest_method)
-
-
-def _rg_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]:
-    from polyzymd.analyses.rg import RgAnalysis, RgRunSettings, RgSettings
-
-    settings = RgSettings(runs=[RgRunSettings(label="protein_rg", selection="protein")])
-
-    def artifact(label: str, values: tuple[float, ...]) -> ConditionArtifact:
-        return ConditionArtifact(
-            analysis_name="rg",
-            condition_label=label,
-            replicates=[1, 2, 3],
-            payload={
-                "runs": [
-                    {
-                        "run_label": "protein_rg",
-                        "selection": "protein",
-                        "replicates": [1, 2, 3],
-                        "n_replicates": 3,
-                        "overall_mean": float(np.mean(values)),
-                        "overall_sem": 0.05,
-                        "per_replicate_means": list(values),
-                        "per_replicate_stds": [0.2, 0.2, 0.2],
-                        "per_replicate_medians": list(values),
-                        "calculation_mode": "selection",
-                        "fragment_weighting": "equal",
-                    }
-                ],
-                "metrics": {},
-                "replicate_metrics": {},
-                "n_replicates": 3,
-            },
-            metadata={**_base_metadata(settings), "selection_string": "protein"},
-            provenance={"frame_selection": {"equilibration": "10ns"}},
-        )
-
-    aggregated = {
-        "Control": artifact("Control", LOW_VARIANCE),
-        "Treated": artifact("Treated", HIGH_VARIANCE),
-    }
-    return RgAnalysis(), _context(tmp_path, settings, aggregated, ttest_method)
 
 
 def _sasa_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]:
@@ -365,7 +325,6 @@ def _contacts_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonCo
 
 CASES = {
     "rmsd": _rmsd_case,
-    "rg": _rg_case,
     "sasa": _sasa_case,
     "distances": _distances_case,
     "contacts": _contacts_case,
@@ -425,7 +384,7 @@ def test_pairwise_results_carry_adjusted_p_values(plugin: str, tmp_path: Path) -
         assert adjusted_p >= raw_p
 
 
-@pytest.mark.parametrize("plugin", ["distances", "rg", "rmsd", "sasa"])
+@pytest.mark.parametrize("plugin", ["distances", "rmsd", "sasa"])
 def test_single_comparison_leaves_p_value_unchanged(plugin: str, tmp_path: Path) -> None:
     """A family of one test must have an adjusted p-value equal to the raw one."""
     analysis, ctx = CASES[plugin](tmp_path, "welch")
@@ -566,3 +525,47 @@ def test_correction_family_spans_every_metric(monkeypatch: pytest.MonkeyPatch) -
     assert result.anova is not None
     assert len(result.anova) == 2
     assert all(anova.p_value_adjusted is None for anova in result.anova)
+
+
+def _function_path(test: str) -> Any:
+    """Compare the two groups through ReplicateValues.compare."""
+    from tests._support.analysis_testkit import replicate_values
+
+    values = replicate_values({"Control": list(LOW_VARIANCE), "Treated": list(HIGH_VARIANCE)})
+    return values.compare(test=test)
+
+
+def test_function_path_welch_gives_larger_p_than_student() -> None:
+    """Welch's test widens the p-value on the function path too."""
+    (welch,) = _function_path("welch").pairwise
+    (student,) = _function_path("student").pairwise
+
+    assert welch.p > student.p
+    assert welch.p != pytest.approx(student.p)
+
+
+def test_function_path_single_comparison_leaves_p_value_unchanged() -> None:
+    """One comparison is a family of one, so its adjusted p-value is the raw one."""
+    (row,) = _function_path("welch").pairwise
+
+    assert row.p_adjusted is not None
+    assert row.p_adjusted == pytest.approx(row.p)
+
+
+def test_function_path_direction_requires_significance() -> None:
+    """A comparison that is not significant claims no direction."""
+    from polyzymd.analyses.shared.inferential_statistics import NO_SIGNIFICANT_CHANGE
+
+    (row,) = _function_path("welch").pairwise
+
+    assert not row.significant
+    assert row.direction == NO_SIGNIFICANT_CHANGE
+
+
+def test_function_path_reports_hedges_g() -> None:
+    """Hedges' g is Cohen's d times J and points the same way as the difference."""
+    (row,) = _function_path("welch").pairwise
+
+    expected_j = 1.0 - 3.0 / (4.0 * 6 - 9.0)
+    assert row.hedges_g == pytest.approx(row.cohens_d * expected_j)
+    assert row.delta > 0 and row.cohens_d > 0

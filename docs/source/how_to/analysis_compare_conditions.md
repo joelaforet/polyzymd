@@ -174,13 +174,6 @@ plugins:
         selection: "protein and (resid 77 or resid 133 or resid 156) and name CA"
         alignment_selection: "protein and name CA"
         reference_mode: "centroid"
-
-  rg:
-    runs:
-      - label: "Whole Protein"
-        selection: "protein"
-      - label: "Protein Backbone"
-        selection: "protein and name CA"
 ```
 
 :::{admonition} Statistical settings for pairwise comparisons
@@ -340,7 +333,6 @@ print(pipeline_result["comparison_path"])
 Common next additions to `comparison.yaml` are:
 
 - `rmsd` for RMSD timeseries and structural stability comparison
-- `rg` for Radius of Gyration and structural compactness comparison
 - `contacts` for polymer coverage and contact fraction
 - `distances` for custom atom-pair distances
 - `catalytic_triad` for active-site geometry

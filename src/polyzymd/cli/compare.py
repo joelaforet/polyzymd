@@ -508,6 +508,25 @@ def _output_validation_result(result: dict, output_format: str) -> None:
             click.echo(f"  • {error}", err=True)
 
 
+def _exit_retired(name: str, config_file: Path, eq_time: str | None) -> None:
+    """Exit 1 with the polyzymd analyze command that replaces compare run for ``name``."""
+    import shlex
+
+    config = load_comparison_config(config_file)
+    command = [f"polyzymd analyze {name}"]
+    for condition in config.conditions:
+        command += [
+            f"-c {shlex.quote(str(condition.config))}",
+            f"--label {shlex.quote(condition.label)}",
+        ]
+    if len({tuple(condition.replicates) for condition in config.conditions}) == 1:
+        command.append(f"--replicates {','.join(map(str, config.conditions[0].replicates))}")
+    command.append(f"--eq {eq_time or config.defaults.equilibration_time}")
+    click.echo(f"Error: {name} no longer runs through 'polyzymd compare run'.", err=True)
+    click.echo(f"fix: {' '.join(command)}", err=True)
+    sys.exit(1)
+
+
 @compare.command("run")
 @click.argument(
     "comparison_type",
@@ -552,7 +571,7 @@ def run_comparison(
         polyzymd compare run rmsf
         polyzymd compare run catalytic_triad --eq-time 10ns
         polyzymd compare run contacts --format markdown
-        polyzymd compare run rg --format agent
+        polyzymd compare run rmsf --format agent
         polyzymd compare run --list
     """
     warn_if_wrong_pixi_env("compare run", ANALYSIS_PIXI_ENVS)
@@ -560,6 +579,7 @@ def run_comparison(
     from polyzymd.analyses.discovery import get_analysis, list_all_names, list_analyses
     from polyzymd.analyses.orchestrator import run_comparison as _run_pipeline
     from polyzymd.cli.logging_utils import setup_logging
+    from polyzymd.config.comparison import RETIRED_PLUGINS
 
     # Handle --list flag
     if list_types:
@@ -577,6 +597,9 @@ def run_comparison(
 
     # Set up logging
     setup_logging(quiet=quiet, debug=debug)
+
+    if comparison_type in RETIRED_PLUGINS:
+        _exit_retired(comparison_type, config_file, eq_time)
 
     # Look up the analysis plugin
     try:

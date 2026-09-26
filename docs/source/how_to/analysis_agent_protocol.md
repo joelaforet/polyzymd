@@ -12,8 +12,8 @@ pixi run -e analysis polyzymd analyze rg -c enzyme_water/config.yaml --eq 10ns
 ```
 
 ```
-# polyzymd analyze rg  metric mean_rg  unit A  eq 10ns  conditions 1  replicates 3  protocol rg/1
-enzyme_water  n 3  mean 18.42  sem 0.05  ci95 18.2 to 18.64  values 18.4, 18.5, 18.36
+# polyzymd analyze rg  metric mean_rg  unit A  eq 10ns  conditions 1  replicates 3  protocol rg/2
+enzyme_water  n 3  mean 18.42  sem 0.05  ci95 18.2 to 18.64  values 18.4, 18.5, 18.36  replicates 1,2,3  g 473.7  n_eff 19
 verdict: enzyme_water mean_rg 18.42 A (95% CI 18.2 to 18.64, n 3)
 ```
 
@@ -33,10 +33,10 @@ pixi run -e analysis polyzymd analyze rg \
 ```
 
 ```
-# polyzymd analyze rg  metric mean_rg  unit A  eq 10ns  conditions 2  replicates 3,3  protocol rg/1
-no polymer  n 3  mean 18.42  sem 0.05  ci95 18.2 to 18.64  values 18.4, 18.5, 18.36
-50% SBMA  n 3  mean 18.73  sem 0.06  ci95 18.47 to 18.99  values 18.71, 18.8, 18.68
-no polymer vs 50% SBMA  delta +0.31  ci95 0.02 to 0.6  p 0.041  p_adj 0.041  test student_t  correction BH  d 1.9  significant
+# polyzymd analyze rg  metric mean_rg  unit A  eq 10ns  conditions 2  replicates 3,3  protocol rg/2
+no polymer  n 3  mean 18.42  sem 0.05  ci95 18.2 to 18.64  values 18.4, 18.5, 18.36  replicates 1,2,3  g 473.7  n_eff 19
+50% SBMA  n 3  mean 18.73  sem 0.06  ci95 18.47 to 18.99  values 18.71, 18.8, 18.68  replicates 1,2,3  g 402.1  n_eff 22
+no polymer vs 50% SBMA  delta +0.31  ci95 0.02 to 0.6  p 0.041  p_adj 0.041  test welch_t  correction BH  d 1.9  significant
 verdict: 50% SBMA larger mean_rg than no polymer (delta +0.31 A, 95% CI 0.02 to 0.6, p_adj 0.041, n 3 vs 3)
 ```
 
@@ -57,14 +57,13 @@ pixi run -e analysis polyzymd analyze rmsf \
 
 ## Pick a selection when the analysis measures several
 
-Some analyses report one metric for several selections: rg measures the protein
-and the polymer oligomers, sasa measures four contexts, distances measures each
-atom pair. The report covers one of them at a time, names it in `run`, and
+Some analyses report one metric for several selections: sasa measures four
+contexts and distances measures each atom pair. The report covers one of them at a time, names it in `run`, and
 lists the rest in `all_runs`. Pick another with `--run`:
 
 ```bash
-pixi run -e analysis polyzymd analyze rg -c A/config.yaml -c B/config.yaml \
-  --run "Polymer Oligomers"
+pixi run -e analysis polyzymd analyze distances -c A/config.yaml -c B/config.yaml \
+  --run "Substrate-Ser77"
 ```
 
 ## Get the full record

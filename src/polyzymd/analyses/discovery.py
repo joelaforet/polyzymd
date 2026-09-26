@@ -47,6 +47,9 @@ _SKIP_MODULES = frozenset(
         "mda",
         "runner",
         "config",
+        "study",
+        "timeseries",
+        "functions",
     }
 )
 

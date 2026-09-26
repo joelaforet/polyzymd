@@ -39,7 +39,6 @@ T_FACTOR_N5 = 2.7764451051977934
 PLUGIN_NAMES = (
     "rmsd",
     "rmsf",
-    "rg",
     "sasa",
     "contacts",
     "distances",
@@ -448,23 +447,6 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
         )
         return metrics
 
-    if analysis_name == "rg":
-        from polyzymd.analyses.rg._mda import _condition_metrics as rg_metrics
-
-        metrics, _replicate_metrics = rg_metrics(
-            [
-                {
-                    "run_label": "run_1",
-                    "per_replicate_means": [12.0],
-                    "overall_mean": 12.0,
-                    "overall_sem": None,
-                    "replicates": [1],
-                }
-            ],
-            [1],
-        )
-        return metrics
-
     if analysis_name == "sasa":
         from polyzymd.analyses.sasa._mda import _condition_metrics as sasa_metrics
 
@@ -566,3 +548,36 @@ class TestLegacyArtifactsStillShowAnInterval:
         )
 
         assert artifact.payload["uncertainty"]["n"] is None
+
+
+class TestFunctionPathUncertainty:
+    """ReplicateValues.summary reports the same intervals as the plugins did.
+
+    The radius of gyration moved from the rg plugin to
+    ``polyzymd.analyses.timeseries``, so its interval rules are pinned here.
+    """
+
+    def test_three_replicates_use_the_student_t_factor(self) -> None:
+        """The half-width is 4.30 standard errors at n = 3, with the unit stated."""
+
+        from tests._support.analysis_testkit import replicate_values
+
+        report = replicate_values({"A": [2.0, 2.2, 2.4]}).summary()
+        (row,) = report.conditions
+
+        assert report.unit == "A"
+        assert row.ci_method == "student_t"
+        assert row.ci95[1] - row.mean == pytest.approx(T_FACTOR_N3 * row.sem, rel=1e-12)
+        assert row.sem == pytest.approx(0.2 / math.sqrt(3.0))
+
+    def test_one_replicate_has_no_uncertainty(self) -> None:
+        """A single replicate reports its value with no SEM and no interval."""
+
+        from tests._support.analysis_testkit import replicate_values
+
+        report = replicate_values({"Solo": [12.0]}).summary()
+        (row,) = report.conditions
+
+        assert (row.n_replicates, row.mean) == (1, 12.0)
+        assert row.sem is None and row.ci95 is None and row.ci_method is None
+        assert any("one replicate" in text for text in report.warnings)

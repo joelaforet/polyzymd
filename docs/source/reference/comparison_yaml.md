@@ -270,20 +270,10 @@ Each entry in `runs`:
 
 ### `plugins.rg`
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `runs` | list | **(required)** | List of Rg run definitions |
-
-Each entry in `runs`:
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `label` | string | **(required)** | Name for this Rg computation |
-| `selection` | string | **(required)** | MDAnalysis selection for Rg atoms |
-| `calculation_mode` | string | `"selection"` | Computation mode: `"selection"` (single Rg for the whole selection) or `"fragments"` (per-fragment Rg) |
-| `fragment_weighting` | string | `"equal"` | How to weight fragments when `calculation_mode` is `"fragments"`: `"equal"` or `"mass"` |
-| `save_fragment_distribution` | bool | `true` | Save per-frame fragment Rg distributions |
-| `histogram_bins` | int | `50` | Number of bins for Rg distribution histograms |
+Rg runs through `polyzymd analyze rg` or the study API, not through
+`comparison.yaml`. A `plugins.rg` block in an existing file still loads, is
+ignored with a warning, and leaves every other plugin in the file working. See
+{doc}`../how_to/analysis_rg_quickstart`.
 
 ### `plugins.hydrogen_bonds`
 

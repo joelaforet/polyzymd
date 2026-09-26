@@ -909,7 +909,7 @@ List the available analysis names with `polyzymd compare run --list`.
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
 | `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default: the comparison default, `10ns`. |
 | `--label TEXT` | No | Condition label, one per `-c` in the same order. Default: the name of the directory holding the config. |
-| `--run LABEL` | No | Run or pair label to report when the analysis measures one metric on several selections, for example `Protein` or `Polymer Oligomers` for rg. Default: the first one the plugin lists; the rest appear in `all_runs`. |
+| `--run LABEL` | No | Run or pair label to report when the analysis measures one metric on several selections, for example one atom pair for distances. Default: the first one the plugin lists; the rest appear in `all_runs`. |
 | `--set KEY=VALUE` | No | Top-level plugin setting. Repeatable. The value is read as YAML, so `--set n_bins=50` gives an integer. Nested settings go in a comparison.yaml passed with `-f`. |
 | `--format agent\|json` | No | `agent` (default) prints one line per condition and comparison; `json` prints the full `ProtocolReport`. For a human-readable table of the same comparison, use `polyzymd compare run --format table`. |
 | `-o, --output PATH` | No | Also write the rendered output to this file. |
@@ -927,10 +927,10 @@ polyzymd analyze rg -c noPoly/config.yaml -c SBMA50/config.yaml --eq 10ns
 ```
 
 ```
-# polyzymd analyze rg  metric mean_rg  unit A  eq 10ns  conditions 2  replicates 3,3  protocol rg/1
-noPoly  n 3  mean 18.42  sem 0.05  ci95 18.2 to 18.64  values 18.4, 18.5, 18.36
-SBMA50  n 3  mean 18.73  sem 0.06  ci95 18.47 to 18.99  values 18.71, 18.8, 18.68
-noPoly vs SBMA50  delta +0.31  ci95 0.02 to 0.6  p 0.041  p_adj 0.041  test student_t  correction BH  d 1.9  significant
+# polyzymd analyze rg  metric mean_rg  unit A  eq 10ns  conditions 2  replicates 3,3  protocol rg/2
+noPoly  n 3  mean 18.42  sem 0.05  ci95 18.2 to 18.64  values 18.4, 18.5, 18.36  replicates 1,2,3  g 473.7  n_eff 19
+SBMA50  n 3  mean 18.73  sem 0.06  ci95 18.47 to 18.99  values 18.71, 18.8, 18.68  replicates 1,2,3  g 402.1  n_eff 22
+noPoly vs SBMA50  delta +0.31  ci95 0.02 to 0.6  p 0.041  p_adj 0.041  test welch_t  correction BH  d 1.9  significant
 verdict: SBMA50 larger mean_rg than noPoly (delta +0.31 A, 95% CI 0.02 to 0.6, p_adj 0.041, n 3 vs 3)
 ```
 
@@ -939,7 +939,7 @@ Line shapes:
 | Line | Fields |
 |---|---|
 | header | `# polyzymd analyze <analysis>  metric <key>  unit <unit or none>[  run <label>]  eq <window>  conditions <count>  replicates <n,n,...>  protocol <analysis>/<protocol_version>` |
-| condition | `<label>  n <count>  mean <value>  sem <value>  ci95 <low> to <high>  values <per-replicate values>` |
+| condition | `<label>  n <count>  mean <value>  sem <value>  ci95 <low> to <high>  values <per-replicate values>[  replicates <numbers>  g <value>  n_eff <value>]`; the bracketed fields appear when the per-frame series is stored, and `g` and `n_eff` are the statistical inefficiency and effective sample size of each replicate's series |
 | comparison | `<a> vs <b>  delta <signed>  ci95 <low> to <high>  p <value>  p_adj <value>  test <name>  correction <name>  d <value>  significant\|not_significant\|no_test\|not_testable` |
 | warning | `warning: <text>` |
 | verdict | `verdict: <sentence>` |
@@ -986,8 +986,8 @@ polyzymd analyze sasa -c A/config.yaml -c B/config.yaml \
 # An existing comparison project
 polyzymd analyze rmsf -f comparison.yaml
 
-# Report the polymer selection instead of the protein
-polyzymd analyze rg -c A/config.yaml -c B/config.yaml --run "Polymer Oligomers"
+# Measure the protein backbone instead of all protein atoms
+polyzymd analyze rg -c A/config.yaml -c B/config.yaml --set selection='protein and name CA'
 ```
 
 ### Notes
@@ -997,7 +997,10 @@ polyzymd analyze rg -c A/config.yaml -c B/config.yaml --run "Polymer Oligomers"
 - The replicate is the sampling unit. Every interval and every test uses the
   replicate count as its sample size.
 - The run writes and reuses the same cached artifacts as
-  `polyzymd compare run`, so the two commands share results.
+  `polyzymd compare run`, so the two commands share results. `rg` is the
+  exception: it runs through the study API, stores its per-frame values under
+  `polyzymd_results/` in the output directory, and takes only `--set
+  selection=...`.
 
 ---
 
@@ -1082,7 +1085,7 @@ polyzymd compare run rmsf --eq-time 20ns
 polyzymd compare run contacts --format markdown -o report.md
 
 # Print the compact agent report instead of the plugin's table
-polyzymd compare run rg --format agent
+polyzymd compare run rmsd --format agent
 
 # List all available analysis types
 polyzymd compare run --list

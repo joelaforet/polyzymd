@@ -114,7 +114,6 @@ class TestDiscovery:
             "contacts",
             "distances",
             "hydrogen_bonds",
-            "rg",
             "rmsd",
             "rmsf",
             "sasa",
@@ -549,5 +548,5 @@ class TestDiscoveryImportCost:
         )
         result = json.loads(completed.stdout.strip().splitlines()[-1])
 
-        assert len(result["names"]) == 9, result["names"]
+        assert len(result["names"]) == 8, result["names"]
         assert result["heavy"] == []
