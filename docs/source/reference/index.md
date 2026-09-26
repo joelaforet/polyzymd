@@ -75,6 +75,7 @@ Benchmarks <benchmarks>
 
 Comparison YAML Schema <comparison_yaml>
 ProtocolReport Schema <analysis_protocol_report>
+Shipped analysis functions <analysis_functions>
 Analysis Plugin Settings Reference <analysis_plugin_settings>
 Comparison and Plotting Reference <analysis_comparison_reference>
 RMSD Plugin Reference <analysis_rmsd_reference>
