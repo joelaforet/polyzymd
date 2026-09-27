@@ -114,12 +114,14 @@ class ConditionReport(BaseModel):
     the equilibrated region that pymbar ``detect_equilibration`` finds in the
     production series, as a production frame index from 0 and as simulation
     time. They are diagnostics and change no value. All are empty for a result
-    read from a plugin artifact.
+    read from a plugin artifact. ``entry`` is the label of this row in a
+    labelled result, such as a residue ID, and ``None`` otherwise.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
 
     label: str
+    entry: str | None = None
     n_replicates: int
     mean: float
     sem: float | None = None
@@ -142,13 +144,15 @@ class PairwiseReport(BaseModel):
     ``False`` means a condition has fewer than two replicates. ``family_size``
     is the number of tests in the Benjamini-Hochberg family this row was
     corrected in, one family per outcome, and ``None`` when that is not known
-    or the row was not tested.
+    or the row was not tested. ``entry`` is the label compared in a labelled
+    result, such as a residue ID, and ``None`` otherwise.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
 
     a: str
     b: str
+    entry: str | None = None
     delta: float
     delta_ci95: tuple[float, float] | None = None
     p: float | None = None
@@ -205,11 +209,12 @@ class ProtocolReport(BaseModel):
         output has no table borders, no colour and no blank lines.
         """
         run = f"  run {self.run}" if self.run else ""
+        counts = {item.label: item.n_replicates for item in self.conditions}
         header = (
             f"# polyzymd analyze {self.analysis}  metric {self.metric}"
             f"  unit {self.unit or 'none'}{run}  eq {self.equilibration}"
-            f"  conditions {len(self.conditions)}"
-            f"  replicates {','.join(str(c.n_replicates) for c in self.conditions) or 'none'}"
+            f"  conditions {len(counts)}"
+            f"  replicates {','.join(str(n) for n in counts.values()) or 'none'}"
             f"  protocol {self.analysis}/{self.protocol_version}"
         )
         lines = [
@@ -1288,8 +1293,9 @@ def _interval(limits: Sequence[float] | None) -> str:
 def _condition_line(condition: ConditionReport) -> str:
     """Render one condition on a single line."""
     shown = ", ".join(_num(value) for value in condition.replicate_values)
+    entry = "" if condition.entry is None else f"{condition.entry}  "
     line = (
-        f"{condition.label}  n {condition.n_replicates}  mean {_num(condition.mean)}"
+        f"{entry}{condition.label}  n {condition.n_replicates}  mean {_num(condition.mean)}"
         f"  sem {_num(condition.sem)}  ci95 {_interval(condition.ci95)}"
         f"  values {shown or 'none'}"
     )
@@ -1313,8 +1319,9 @@ def _pairwise_line(pair: PairwiseReport) -> str:
     else:
         flag = "significant" if pair.significant else "not_significant"
     family = "" if pair.family_size is None else f"  family {pair.family_size}"
+    entry = "" if pair.entry is None else f"{pair.entry}  "
     return (
-        f"{pair.a} vs {pair.b}  delta {_signed(pair.delta)}  ci95 {_interval(pair.delta_ci95)}"
+        f"{entry}{pair.a} vs {pair.b}  delta {_signed(pair.delta)}  ci95 {_interval(pair.delta_ci95)}"
         f"  p {_num(pair.p)}  p_adj {_num(pair.p_adjusted)}  test {pair.test}"
         f"  correction {pair.correction}{family}  d {_num(pair.cohens_d)}  {flag}"
     )

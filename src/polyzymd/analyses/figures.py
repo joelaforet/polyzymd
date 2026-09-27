@@ -2,7 +2,8 @@
 
 :func:`plot_timeseries`, :func:`plot_distribution` and
 :func:`plot_condition_values` are reached as ``Timeseries.plot``,
-``Timeseries.plot_distribution`` and ``ReplicateValues.plot``.
+``Timeseries.plot_distribution`` and ``ReplicateValues.plot``, and
+:func:`plot_profile` as ``ReplicateValues.plot`` of labelled values.
 :func:`plot_values` and :func:`plot_distributions`, reached as
 ``pz.plot_values`` and ``pz.plot_distributions``, draw several results in
 one figure. They read the values already held by those objects,
@@ -352,6 +353,78 @@ def plot_condition_values(
     )
     fig.tight_layout(rect=[0, 0.04, 1, 1])
     _footnote(fig, {len(entry) for entry in data}, values.source.study[labels[0]].equilibration)
+    return _save(fig, output_dir, name, settings)
+
+
+def plot_profile(
+    values: ReplicateValues,
+    output_dir: str | Path,
+    name: str,
+    title: str | None = None,
+    plot_settings: PlotSettings | None = None,
+    highlight: Sequence = (),
+    xlabel: str = "label",
+) -> Path:
+    """Draw a labelled result along its labels, one line per replicate and per condition.
+
+    Each replicate's value at every label is a thin line. A thick line gives
+    each condition's mean at every label, with a band of the 95 percent
+    Student t interval across replicates, the values that ``summary()``
+    reports, as the legacy rmsf profile drew each condition's mean and band.
+    Numeric labels, such as residue IDs, are placed at their value on the x
+    axis and other labels in order. Each ``highlight`` label is marked with a
+    red dashed vertical line.
+
+    Returns
+    -------
+    Path
+        The saved figure file.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from polyzymd.analyses.shared.plotting import apply_axis_style, apply_legend, band_half_widths
+
+    settings, labels, colors = _setup(values.source, plot_settings)
+    try:
+        x = np.asarray(values.labels, dtype=float)
+        ticks = None
+    except (TypeError, ValueError):
+        x, ticks = np.arange(len(values.labels), dtype=float), [str(k) for k in values.labels]
+    fig, ax = plt.subplots(figsize=(14, 5))
+    counts = set()
+    for label in labels:
+        matrix, color = np.vstack(values.values[label]), colors[label]
+        counts.add(len(matrix))
+        for row in matrix:
+            ax.plot(x, row, color=color, linewidth=0.6, alpha=0.35, zorder=1)
+        mean, band = matrix.mean(axis=0), band_half_widths(matrix)
+        ax.plot(x, mean, color=color, linewidth=1.8, zorder=3, label=f"{label} (n = {len(matrix)})")
+        if band is not None:
+            ax.fill_between(x, mean - band, mean + band, color=color, alpha=0.2, zorder=2)
+    where = {str(k): position for k, position in zip(values.labels, x, strict=True)}
+    for key in highlight:
+        if str(key) in where:
+            ax.axvline(where[str(key)], color="red", linestyle="--", linewidth=1, alpha=0.6)
+    if ticks is not None:
+        ax.set_xticks(x)
+        ax.set_xticklabels(ticks, rotation=90)
+    apply_axis_style(
+        ax,
+        settings,
+        title=title or values.source.name,
+        xlabel=xlabel,
+        ylabel=_label(values.source.name, values.unit),
+    )
+    apply_legend(ax, settings, loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0)
+    fig.tight_layout(rect=[0, 0.04, 0.84, 1])
+    _footnote(
+        fig,
+        counts,
+        values.source.study[labels[0]].equilibration,
+        drawn="Band",
+        points="Thin lines are per-replicate values; the thick line is their mean",
+    )
     return _save(fig, output_dir, name, settings)
 
 
