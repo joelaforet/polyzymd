@@ -37,7 +37,6 @@ T_FACTOR_N3 = 4.302652729749462
 T_FACTOR_N5 = 2.7764451051977934
 
 PLUGIN_NAMES = (
-    "rmsd",
     "rmsf",
     "sasa",
     "contacts",
@@ -460,9 +459,6 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
                 }
             ]
         )
-
-    if analysis_name == "rmsd":
-        return {"run_1.mean_rmsd": metric_summary_payload("run_1.mean_rmsd", [1.0], unit="A")}
 
     if analysis_name == "hydrogen_bonds":
         return {

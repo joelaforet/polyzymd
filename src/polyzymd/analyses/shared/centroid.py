@@ -46,40 +46,16 @@ from polyzymd.analyses.shared.alignment import ReferenceMode
 LOGGER = logging.getLogger(__name__)
 
 
-def _kabsch_align_to_reference(
-    coordinates: NDArray[np.float64],
-    reference: NDArray[np.float64],
-) -> NDArray[np.float64]:
-    """Align coordinates to a reference with Kabsch superposition.
-
-    Parameters
-    ----------
-    coordinates : NDArray[np.float64]
-        Coordinates to align with shape (n_atoms, 3).
-    reference : NDArray[np.float64]
-        Reference coordinates with shape (n_atoms, 3).
-
-    Returns
-    -------
-    NDArray[np.float64]
-        Coordinates aligned to the centered reference.
-    """
-    centered = coordinates - np.mean(coordinates, axis=0)
-    ref_centered = reference - np.mean(reference, axis=0)
-
-    covariance = centered.T @ ref_centered
-    u_matrix, _, v_t = np.linalg.svd(covariance)
-
-    rotation = u_matrix @ v_t
-    if np.linalg.det(rotation) < 0:
-        u_matrix[:, -1] *= -1.0
-        rotation = u_matrix @ v_t
-
-    return centered @ rotation
-
-
 def _find_frame_closest_to_aligned_mean(coordinates: NDArray[np.float64]) -> tuple[int, float]:
-    """Find frame closest to aligned mean coordinates.
+    """Find the frame closest to the iterative average structure.
+
+    The average comes from ``MDAnalysis.analysis.align.iterative_average``,
+    which superposes every frame on the current average and averages again
+    until the average moves by less than 1e-4 Å. The MDAnalysis default of
+    1e-6 Å is below the float32 rounding of coordinates near 50 Å, where it
+    does not converge. Each frame's distance to it
+    is ``MDAnalysis.analysis.rms.rmsd`` after optimal superposition, the
+    square root of the mean squared distance per atom.
 
     Parameters
     ----------
@@ -89,23 +65,37 @@ def _find_frame_closest_to_aligned_mean(coordinates: NDArray[np.float64]) -> tup
     Returns
     -------
     tuple[int, float]
-        Relative index of frame closest to the aligned mean structure and the
-        corresponding RMSD to aligned mean.
+        Relative index of the frame closest to the average structure and its
+        RMSD to that average in Å.
     """
     if coordinates.ndim != 3:
         raise ValueError("coordinates must have shape (n_frames, n_atoms, 3)")
 
-    n_frames = coordinates.shape[0]
-    if n_frames == 1:
+    if coordinates.shape[0] == 1:
         return 0, 0.0
 
-    reference = coordinates[0]
-    aligned = np.empty_like(coordinates)
-    for frame_idx in range(n_frames):
-        aligned[frame_idx] = _kabsch_align_to_reference(coordinates[frame_idx], reference)
+    import contextlib
+    import io
+    import warnings
 
-    mean_coordinates = np.mean(aligned, axis=0)
-    rmsd_to_mean = np.sqrt(np.mean((aligned - mean_coordinates) ** 2, axis=(1, 2)))
+    import MDAnalysis as mda
+    from MDAnalysis.analysis import align, rms
+    from MDAnalysis.coordinates.memory import MemoryReader
+
+    frames = mda.Universe.empty(coordinates.shape[1], trajectory=True)
+    frames.add_TopologyAttr("masses", np.ones(coordinates.shape[1]))
+    frames.load_new(coordinates.astype(np.float32), format=MemoryReader)
+    # iterative_average always draws a progress bar on stderr and warns that
+    # this universe has no atom types, so both are silenced here.
+    with warnings.catch_warnings(), contextlib.redirect_stderr(io.StringIO()):
+        warnings.simplefilter("ignore")
+        mean_coordinates = align.iterative_average(frames, eps=1e-4).results.positions
+    rmsd_to_mean = np.array(
+        [
+            rms.rmsd(frame, mean_coordinates, center=True, superposition=True)
+            for frame in coordinates
+        ]
+    )
     relative_idx = int(np.argmin(rmsd_to_mean))
     return relative_idx, float(rmsd_to_mean[relative_idx])
 
@@ -120,9 +110,9 @@ def find_centroid_frame(
     """Find a representative aligned frame.
 
     This function identifies the frame closest to the aligned mean structure.
-    It first performs rigid-body alignment of each frame to a common reference,
-    computes the mean coordinates in aligned space, then returns the trajectory
-    frame with minimum RMSD to that aligned mean.
+    The mean is the iterative average structure of
+    ``MDAnalysis.analysis.align.iterative_average``, and the frame returned is
+    the one with the smallest RMSD to it after optimal superposition.
 
     This approach avoids contamination from translation/rotation and provides a
     scientifically defensible representative frame for downstream alignment and
@@ -153,9 +143,9 @@ def find_centroid_frame(
 
     Notes
     -----
-    The algorithm aligns all candidate frames to a common reference frame,
-    computes the aligned mean structure, then selects the frame with minimum
-    RMSD to that mean.
+    Superposing every frame on the iterative average and averaging again
+    gives the same average back. A single pass that superposes every frame on
+    one frame gives an average that depends on which frame that was.
 
     Using all protein atoms (default) rather than just CA atoms captures
     the full conformational state including side chain rotamers.

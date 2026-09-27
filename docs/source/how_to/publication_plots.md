@@ -272,26 +272,6 @@ Common ranges:
 In addition to global settings, plugins can define their own plot options under
 `plot_settings.<plugin_name>`.
 
-### RMSD example
-
-```yaml
-plot_settings:
-  format: "pdf"
-  style: "compact"
-  rmsd:
-    show_per_replicate: true
-    figsize: [10, 6]
-    timeseries_figsize: [12, 5]
-    show_convergence_plots: true
-    convergence_figsize: [12, 5]
-```
-
-What changes:
-
-- `show_per_replicate: true` overlays each replicate trace
-- `timeseries_figsize` changes the width/height of RMSD time plots
-- `show_convergence_plots: true` adds convergence diagnostics
-
 ### RMSF example
 
 ```yaml
@@ -350,5 +330,4 @@ If a plugin has no cached comparison result yet, run that comparison first
 - [How to Compare Simulation Conditions](analysis_compare_conditions.md)
 - [Create Custom Plots from Analysis Artifacts](custom_artifact_plotting.md)
 - [Comparison and Plotting Reference](../reference/analysis_comparison_reference.md)
-- [RMSD Analysis Reference](../reference/analysis_rmsd_reference.md)
 - [RMSF Analysis Reference](../reference/analysis_rmsf_reference.md)

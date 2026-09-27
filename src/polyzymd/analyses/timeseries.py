@@ -52,6 +52,28 @@ if TYPE_CHECKING:
 
 RESULTS_DIR = "polyzymd_results"
 
+#: A replicate is warned about when pymbar's detected start of the
+#: equilibrated region falls later than this fraction of its production frames.
+#: detect_equilibration picks the start that maximises the effective sample
+#: size, and on a stationary series that maximum is flat, so the start moves
+#: into the series by chance. On 200 stationary AR(1) series of 2000 frames
+#: the start passed 5 percent in 5 to 10 percent of series with 100 or more
+#: effective samples and passed 10 percent in 1 to 7 percent of them, while a
+#: relaxation that decays over the first 10 percent was found. With about 10
+#: effective samples the start passed 10 percent in 45 percent of series, so
+#: there the warning says as much about the series length as about the window.
+EQUILIBRATION_WARNING_FRACTION = 0.10
+
+#: The detected start is judged only for a replicate with at least this many
+#: effective samples. On the stationary AR(1) series above, the start passed
+#: 10 percent in 1 to 7 percent of series with 100 or more effective samples
+#: and in 45 percent of series with about 10. On the LipA 363 K rmsd
+#: replicates, with 3 to 18 effective samples, pymbar put the start within
+#: the last few percent of 28 of 30 runs, on a tail short enough that its
+#: statistical inefficiency is near 1. Below 20 the start says more about the
+#: length of the run than about the window, so it is reported without a warning.
+EQUILIBRATION_MIN_N_EFFECTIVE = 20
+
 
 @dataclass(frozen=True)
 class Select:
@@ -113,12 +135,33 @@ def _function_record(function: Callable) -> dict[str, Any]:
     }
 
 
+def _file_record(path: str | Path) -> dict[str, str]:
+    """Record a file by its absolute path and the SHA-256 hash of its content."""
+    path = Path(path).expanduser().resolve()
+    return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
 def _argument_record(value: Any) -> Any:
-    """Describe one argument for the record; values JSON cannot hold are recorded by repr."""
+    """Describe one argument for the record; values JSON cannot hold are recorded by repr.
+
+    A string or path naming an existing file is recorded with the SHA-256 hash
+    of its content, so a changed file changes the record.
+    """
+    from polyzymd.analyses.reference import Reference
+
     if isinstance(value, Select):
         return {"select": value.selection}
     if isinstance(value, UniverseArgument):
         return {"universe": True}
+    if isinstance(value, Reference):
+        record = {key: getattr(value, key) for key in ("mode", "selection", "alignment", "frame")}
+        return {"reference": {**record, "file": value.file and _file_record(value.file)}}
+    if isinstance(value, (str, Path)):
+        try:
+            if Path(value).expanduser().is_file():
+                return {"file": _file_record(value)}
+        except (OSError, ValueError):
+            pass
     try:
         return json.loads(json.dumps(value))
     except (TypeError, ValueError):
@@ -136,6 +179,21 @@ def _build(value: Any, universe_: Any) -> Any:
             )
         return atoms
     return universe_ if isinstance(value, UniverseArgument) else value
+
+
+def _build_arguments(
+    arguments: dict[int | str, Any], replicate: Replicate
+) -> tuple[dict[int | str, Any], dict[str, Any]]:
+    """Build every placeholder for one replicate, with the frames that references chose."""
+    from polyzymd.analyses.reference import Reference, build_reference
+
+    u, built, chosen = replicate.universe(), {}, {}
+    for where, value in arguments.items():
+        if isinstance(value, Reference):
+            built[where], chosen[str(where)] = build_reference(value, u, replicate.frames)
+        else:
+            built[where] = _build(value, u)
+    return built, chosen
 
 
 def _safe(text: str) -> str:
@@ -191,7 +249,10 @@ def run_timeseries(
     the equilibration window, the frames, the times, the unit and the
     PolyzyMD, MDAnalysis, NumPy and Python versions. A stored series is read
     back instead of measured when every field of its record except the
-    versions equals the new one.
+    versions equals the new one. A
+    :func:`~polyzymd.analyses.reference.reference` argument is built once per
+    replicate before its frames are measured, and the production frame it
+    chose, if any, is stored under ``chosen``, which is not compared either.
 
     Parameters
     ----------
@@ -201,7 +262,8 @@ def run_timeseries(
         Called once per frame with ``*args`` and ``**kwargs``; returns a number.
     *args
         Arguments of ``function``. :func:`select` becomes the replicate's
-        ``AtomGroup`` and :func:`universe` its ``Universe``.
+        ``AtomGroup``, :func:`universe` its ``Universe`` and
+        :func:`~polyzymd.analyses.reference.reference` the reference atoms.
     unit : str or None
         Unit of the returned number; ``None`` for a dimensionless quantity.
     name : str, optional
@@ -248,11 +310,12 @@ def run_timeseries(
             values = None if recompute else _stored_values(folder, record)
             if values is None:
                 u = replicate.universe()
+                built, chosen = _build_arguments({**dict(enumerate(args)), **kwargs}, replicate)
                 analysis = AnalysisFromFunction(
                     function,
                     u.trajectory,
-                    *(_build(value, u) for value in args),
-                    **{key: _build(value, u) for key, value in kwargs.items()},
+                    *(built[index] for index in range(len(args))),
+                    **{key: built[key] for key in kwargs},
                 ).run(frames=replicate.frames)
                 values = np.asarray(analysis.results.timeseries, dtype=np.float64)
                 if values.shape != (len(record["frames"]),):
@@ -269,7 +332,7 @@ def run_timeseries(
                     times=replicate.times,
                 )
                 (folder / "record.json").write_text(
-                    json.dumps({**record, "versions": _versions()}, indent=1)
+                    json.dumps({**record, "chosen": chosen, "versions": _versions()}, indent=1)
                 )
             series[condition.label].append(
                 ReplicateSeries(
@@ -297,12 +360,13 @@ def _replicate_record(base: dict[str, Any], replicate: Replicate) -> dict[str, A
 
 
 def _stored_values(folder: Path, record: dict[str, Any]) -> np.ndarray | None:
-    """Return the stored values when the stored record matches, apart from versions."""
+    """Return the stored values when the stored record matches, apart from versions and chosen."""
     import numpy as np
 
     try:
         stored = json.loads((folder / "record.json").read_text())
         stored.pop("versions", None)
+        stored.pop("chosen", None)
         if stored != record:
             return None
         with np.load(folder / "series.npz") as data:
@@ -336,7 +400,9 @@ class Timeseries:
     ) -> None:
         self.name, self.unit, self.study, self.series, self.path = name, unit, study, series, path
 
-    def reduce(self, how: str | Callable = "mean", *, unit: Any = ...) -> ReplicateValues:
+    def reduce(
+        self, how: str | Callable = "mean", *, unit: Any = ..., detect_equilibration: bool = True
+    ) -> ReplicateValues:
         """Turn each replicate's series into one value.
 
         Parameters
@@ -349,6 +415,9 @@ class Timeseries:
         unit : str or None, optional
             Unit of the reduced value. Defaults to the series unit, or
             ``None`` for ``"fraction"``.
+        detect_equilibration : bool, optional
+            Find the start of the equilibrated region of each series with
+            pymbar, as a diagnostic that changes no value. ``False`` skips it.
 
         Returns
         -------
@@ -358,6 +427,7 @@ class Timeseries:
         """
         import numpy as np
 
+        from polyzymd.analyses.shared.autocorrelation import detect_equilibration as detect_start
         from polyzymd.analyses.shared.autocorrelation import n_effective, statistical_inefficiency
 
         def fraction(values: np.ndarray, times: np.ndarray) -> float:
@@ -379,11 +449,12 @@ class Timeseries:
             )
         reducer = how if callable(how) else named[how]
         label = getattr(how, "__name__", "reduced") if callable(how) else how
-        rows: dict[str, list[tuple[int, float, float, float, int]]] = {}
+        rows: dict[str, list[tuple]] = {}
         for condition, items in self.series.items():
             rows[condition] = []
             for item in items:
                 g = statistical_inefficiency(item.values)
+                start = detect_start(item.values) if detect_equilibration else None
                 rows[condition].append(
                     (
                         item.replicate,
@@ -391,6 +462,8 @@ class Timeseries:
                         g,
                         n_effective(len(item.values), g),
                         len(item.values),
+                        start,
+                        None if start is None else float(item.times[start]),
                     )
                 )
         if unit is ...:
@@ -407,7 +480,7 @@ class ReplicateValues:
         metric: str,
         unit: str | None,
         is_fraction: bool,
-        rows: dict[str, list[tuple[int, float, float, float, int]]],
+        rows: dict[str, list[tuple]],
     ) -> None:
         self.source, self.metric, self.unit = source, metric, unit
         self.is_fraction, self.rows = is_fraction, rows
@@ -539,6 +612,28 @@ class ReplicateValues:
             item.replicates = [row[0] for row in rows]
             item.statistical_inefficiency = [row[2] for row in rows]
             item.n_effective = [row[3] for row in rows]
+            checked = [row for row in rows if row[5] is not None]
+            item.eq_detected_frame = [row[5] for row in checked]
+            item.eq_detected_ns = [row[6] for row in checked]
+            few = [str(row[0]) for row in checked if row[3] < EQUILIBRATION_MIN_N_EFFECTIVE]
+            if few:
+                notes.append(
+                    f"condition {label}: replicates {', '.join(few)} have fewer than "
+                    f"{EQUILIBRATION_MIN_N_EFFECTIVE} effective samples, so the start of an "
+                    "equilibrated region cannot be detected reliably; values and statistics "
+                    "are unaffected"
+                )
+            for row in checked:
+                if (
+                    row[3] >= EQUILIBRATION_MIN_N_EFFECTIVE
+                    and row[5] > EQUILIBRATION_WARNING_FRACTION * row[4]
+                ):
+                    notes.append(
+                        f"condition {label} replicate {row[0]}: pymbar detect_equilibration puts "
+                        f"the start of the equilibrated region at {row[6]:.4g} ns, production "
+                        f"frame {row[5] + 1} of {row[4]}, after the equilibration window; the "
+                        "window may be too short for it"
+                    )
             if len(rows) > 1 and len({row[1] for row in rows}) == 1:
                 item.ci95, item.ci_method = None, "not_estimable"
                 notes.append(

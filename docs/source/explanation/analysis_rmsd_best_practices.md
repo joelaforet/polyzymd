@@ -7,7 +7,7 @@ PolyzyMD trajectories, with emphasis on reference choice, atom selection,
 autocorrelation, and cautious condition-level comparison.
 
 ```{versionadded} 1.3.0
-The RMSD analysis plugin was added in PolyzyMD 1.3.0.
+RMSD analysis was added in PolyzyMD 1.3.0.
 ```
 
 ```{note}
@@ -161,8 +161,9 @@ RMSD timeseries are autocorrelated because adjacent MD frames are not
 independent samples. A trajectory with many saved frames can still contain far
 fewer statistically independent observations.
 
-PolyzyMD reports uncertainty in terms of statistical inefficiency where
-possible. Conceptually, the effective sample size is `N_eff = N / g`, where `g`
+PolyzyMD takes every interval and test from the spread between independent
+replicates, and reports the statistical inefficiency of each replicate's
+series as a diagnostic. Conceptually, the effective sample size is `N_eff = N / g`, where `g`
 is the statistical inefficiency. For a simple integrated autocorrelation-time
 estimate, `g ≈ 1 + 2τ/dt`, with `τ` the integrated autocorrelation time and `dt`
 the frame spacing. Larger `g` means stronger correlation and fewer effective
@@ -178,27 +179,17 @@ recommendations, see the
 [Statistics Best Practices Guide](analysis_statistics_best_practices.md).
 ```
 
-## Multi-Run Analysis: Why It Helps Interpretation
+## Choosing a selection
 
-Different RMSD selections answer different questions:
+Different RMSD selections answer different questions, so measure each one as
+its own analysis and compare conditions within one selection at a time:
 
-| Run Label | Selection | Question |
+| Name | Selection | Question |
 |-----------|-----------|----------|
 | "Protein Backbone" | `protein and name CA` | How close is the global backbone to this reference? |
 | "Active Site" | Catalytic residues CA | How close is the local active-site geometry to this reference? |
 | "Polymer Core" | `chainid C and not name H*` | How close is the polymer conformation to this reference? |
 | "Crystal Deviation" | `protein and name CA` (external ref) | How close is the protein to an external structural state? |
-
-Each run is ranked independently across conditions. This prevents averaging
-RMSD from structurally different selections, which would be difficult to
-interpret:
-
-```text
-Rankings:
-  Protein Backbone: With Polymer < No Polymer (closer to reference)
-  Active Site:      With Polymer < No Polymer (closer to reference)
-  Polymer Core:     No Polymer — (single condition only)
-```
 
 ## External Reference for Catalytic Competence
 
@@ -253,55 +244,6 @@ variability across independent simulations cannot be estimated from a singleton.
 Pairwise inferential tests require at least 2 replicates per condition.
 ```
 
-## Comparing Conditions
-
-### What PolyzyMD computes
-
-For each RMSD run, the comparison produces:
-
-| Statistic | Description |
-|-----------|-------------|
-| **Ranking** | Conditions sorted by mean RMSD (lowest = closest to the chosen reference) |
-| **Percent change** | Relative to control condition |
-| **Direction** | Plugin labels such as `stabilizing`, `destabilizing`, or `unchanged`; interpret as reference-relative unless separately justified |
-| **t-statistic** | Two-sample t-test on replicate means |
-| **p-value** | Two-tailed significance |
-| **Cohen's d** | Effect size magnitude |
-| **ANOVA** | Omnibus F-test when 3+ conditions (per-run) |
-
-### Direction labels
-
-PolyzyMD classifies the direction of change based on percent change in mean RMSD
-relative to control. For RMSD, these labels are shorthand and should be read as
-changes in closeness to the chosen reference, not proof of biological stability.
-
-| Percent Change | Direction | Meaning |
-|---------------|-----------|---------|
-| < −1% | `stabilizing` | Treatment reduces reference-relative deviation |
-| > +1% | `destabilizing` | Treatment increases reference-relative deviation |
-| −1% to +1% | `unchanged` | No meaningful difference by this threshold |
-
-### Interpreting the comparison
-
-When one condition has lower mean RMSD than another, the most direct statement
-is that it stayed closer to the chosen reference for the selected atoms over the
-analyzed interval. Stronger claims, such as improved stability or functional
-preservation, require supporting evidence from the scientific context and other
-observables.
-
-PolyzyMD writes canonical RMSD artifacts through the analysis lifecycle. The
-stable locations are:
-
-- `analysis/<sanitized_condition_label>/rmsd/run_<N>/result.json` for
-  replicate-level artifacts
-- `analysis/<sanitized_condition_label>/rmsd/aggregated/result.json` for
-  condition-level artifacts
-- `comparison/rmsd/result.json` for comparison artifacts
-
-Treat artifact contents as structured payloads and provenance that may refer to
-sidecars for larger data. Avoid depending on undocumented raw JSON field names
-unless they are described in reference documentation.
-
 ## Common Pitfalls
 
 ### 1. Treating a plateau as proof of equilibration
@@ -337,7 +279,7 @@ replicate variation dominates:
 ```text
 # WRONG: "Condition A (1.856 Å) is less stable than B (1.861 Å)"
 # RIGHT: "Condition A (1.856 ± 0.034 Å) and B (1.861 ± 0.028 Å)
-#         are not significantly different (p = 0.91, unchanged)"
+#         are not significantly different (p = 0.91)"
 ```
 
 ### 4. Ignoring timeseries shape
@@ -419,29 +361,16 @@ motion, unfolding, or simply insufficient sampling. Distinguish these by
 inspecting structures and complementary observables.
 ```
 
-### Automated convergence detection
+### Automated equilibration diagnostic
 
-```{versionadded} 1.3.0
-```
-
-PolyzyMD can run a sliding-window convergence diagnostic on RMSD timeseries. The
-diagnostic evaluates whether reference-relative RMSD changes remain below a
-configured threshold over a sustained interval. The resulting information is
-stored as part of the canonical RMSD artifact payload and provenance, with
-condition-level summaries represented in aggregated artifacts. Larger timeseries
-or plot-ready data may be represented through sidecars referenced by the
-artifact.
-
-**This is a diagnostic tool, not a definitive convergence proof.** The
-heuristic can miss slow drift below the slope threshold, and convergence in
-RMSD does not guarantee convergence of other observables. Always use multiple
-replicates and visual inspection alongside automated diagnostics.
-
-For command-oriented usage, see the
-[RMSD Quick Start Guide](../how_to/analysis_rmsd_quickstart.md). For a full
-conceptual treatment of convergence diagnostics — including the algorithm,
-parameters, tuning guidance, and limitations — see
-{doc}`/explanation/convergence_detection`.
+For every RMSD series, PolyzyMD reports where
+`pymbar.timeseries.detect_equilibration` puts the start of the equilibrated
+region in each replicate, and warns when a replicate with at least 20
+effective samples appears to have still been relaxing after your window.
+Replicates with fewer effective samples are reported as too correlated to
+judge. **This is a diagnostic, not a convergence proof**, and it never changes
+the window or any value. See {doc}`/explanation/convergence_detection` for how
+it works and when to switch it off.
 
 ## References
 

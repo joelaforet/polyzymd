@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from typing import Any
-
 SINGLE_REPLICATE_SEM_NOTE = "SEM: n/a (single replicate; not estimable)"
 SINGLE_REPLICATE_LABEL = "n/a (single replicate)"
 
@@ -87,85 +84,6 @@ def format_sem_phrase(
     if not is_sem_estimable(n_replicates):
         return "SEM: n/a (single replicate)"
     return f"SEM: {format_sem_value(sem, n_replicates, precision=precision, unit=unit)}"
-
-
-def min_run_replicates(result: Any, ranking: Sequence[str], run_label: str) -> int:
-    """Return the smallest replicate count among the ranked conditions of a run.
-
-    That count governs the widest interval the table shows, so it is the n the
-    header line reports.
-    """
-    counts = [
-        result.get_condition(label).n_replicates
-        or len(result.get_condition(label).get_run(run_label).per_replicate_means)
-        for label in ranking
-    ]
-    return min(counts) if counts else 0
-
-
-def make_section_title(title: str, width: int) -> list[str]:
-    """Build a section title and separator lines."""
-    return ["", title, "=" * width]
-
-
-def make_ranked_table_header(*, mean_label: str) -> list[str]:
-    """Build standard ranked-table headers for text output."""
-    header = f"{'Condition':<18} {mean_label:<15} {'95% CI':<26} {'SEM':<8} {'Rank':<4}"
-    return [header, "-" * len(header)]
-
-
-def make_ranked_markdown_header(*, mean_label: str) -> list[str]:
-    """Build standard ranked-table headers for markdown output."""
-    return [
-        f"| Condition | {mean_label} | 95% CI | SEM | Rank |",
-        "|-----------|---------------|--------|-----|------|",
-    ]
-
-
-def format_pairwise_line(
-    *,
-    condition_a: str,
-    condition_b: str,
-    direction: str,
-    p_value: float,
-    effect_size: float,
-    effect_label: str | None,
-    percent_change: float,
-    significant: bool,
-    prefix: str = "Pairwise",
-) -> str:
-    """Format one standard pairwise comparison line."""
-    from polyzymd.analyses.stats import format_pct
-
-    sig_marker = "*" if significant else ""
-    return (
-        f"{prefix}: {condition_b} vs {condition_a} — "
-        f"Δ={format_pct(percent_change)}, p={p_value:.3f} {sig_marker}, "
-        f"d={effect_size:.2f} ({effect_label or 'effect size not labelled'}), {direction}"
-    )
-
-
-def format_anova_line(*, f_statistic: float, p_value: float, significant: bool) -> str:
-    """Format one standard ANOVA line."""
-    sig_marker = "*" if significant else ""
-    return f"ANOVA: F={f_statistic:.2f}, p={p_value:.3f} {sig_marker}"
-
-
-def format_markdown_bullet(prefix: str, line: str) -> str:
-    """Format a markdown bullet line with consistent prefixing."""
-    return f"- {prefix}: {line}"
-
-
-def make_ranked_rows(
-    ranking: list[str],
-    get_values: Callable[[str], tuple[float, float]],
-) -> list[tuple[str, float, float, int]]:
-    """Build ranked rows as ``(label, mean, sem, rank)`` tuples."""
-    rows: list[tuple[str, float, float, int]] = []
-    for rank, condition_label in enumerate(ranking, 1):
-        mean_value, sem_value = get_values(condition_label)
-        rows.append((condition_label, mean_value, sem_value, rank))
-    return rows
 
 
 def format_interval_from_sem(

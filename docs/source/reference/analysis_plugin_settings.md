@@ -26,7 +26,7 @@ Each plugin's `plot_settings` block inherits this key.
 
 ```yaml
 plugins:
-  rmsd:
+  rmsf:
     plot_settings:
       error_bar: ci95
 ```
@@ -225,39 +225,3 @@ plugin raises `SelectionError` unless `allow_empty_groups` is true. Set
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `partitions` | `dict[str, str]` | `{}` | Named composition partitions as MDAnalysis selections |
-
-## `rg`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `runs` | `list[RgRunSettings]` | `[]` (must be non-empty) | Named Rg runs to compute |
-
-`RgRunSettings` entries in `runs`:
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `label` | `str` | required | Human-readable run label |
-| `selection` | `str` | required | MDAnalysis selection for Rg calculation |
-| `calculation_mode` | `"selection" \| "fragments"` | `"selection"` | Whole-selection vs fragment-reduced Rg mode |
-| `fragment_weighting` | `"equal" \| "mass"` | `"equal"` | Fragment reduction weighting (fragment mode) |
-| `save_fragment_distribution` | `bool` | `true` | Save per-fragment distribution sidecar outputs |
-| `histogram_bins` | `int` | `50` | Histogram bins for fragment distribution summaries |
-| `allow_single_fragment_fallback` | `bool` | `false` | Measure the whole selection as one fragment when the topology has no bonds, instead of raising `TopologyBondsMissingError` |
-
-## `rmsd`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `runs` | `list[RMSDRunSettings]` | `[]` (must be non-empty) | Named RMSD runs to compute |
-
-`RMSDRunSettings` entries in `runs`:
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `label` | `str` | required | Human-readable run label |
-| `selection` | `str` | `"protein and name CA"` | Selection used for RMSD calculation |
-| `alignment_selection` | `str` | `"protein and name CA"` | Selection used for alignment |
-| `reference_mode` | `str` | `"centroid"` | Reference mode: `centroid`, `average`, `frame`, or `external` |
-| `reference_frame` | `int` | `0` | 0-indexed frame index for `reference_mode: frame` |
-| `reference_file` | `str \| null` | `null` | External PDB path for `reference_mode: external` |
-| `centroid_selection` | `str \| null` | `null` | Optional centroid-mode selection (falls back to `alignment_selection`) |

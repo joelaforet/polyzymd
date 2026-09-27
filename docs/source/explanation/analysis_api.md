@@ -109,6 +109,31 @@ Labels are how replicates are lined up. Values are aggregated per label, never
 per position, so residue 57 in one replicate is always compared with residue
 57 in another.
 
+## Compare each frame with a reference structure
+
+Many measurements compare a frame with a reference structure. Pass
+`pz.reference(mode, selection, frame=None, file=None, alignment=None)` where
+your function takes the reference atoms:
+
+```python
+from polyzymd.analyses.functions import rmsd
+
+ca = "protein and name CA"
+deviation = study.timeseries(
+    rmsd, pz.select(ca), pz.reference("external", ca, file="structures/1ISP.pdb"), unit="Å"
+)
+```
+
+The reference is built once per replicate, in a separate universe, so the
+trajectory is never modified. `external` reads `file`; `frame` takes production
+frame `frame`, counted from 1 after the equilibration window; `average` is the
+mean structure after superposing the `alignment` atoms; and `centroid` is the
+production frame closest to the MDAnalysis `align.iterative_average` of the
+`alignment` atoms. The record holds the mode, the selections, the frame the
+reference used and, for a file, its SHA-256 hash. Any argument that names an
+existing file is recorded with its hash the same way, so editing the file
+measures the replicates again.
+
 ## Use an MDAnalysis analysis you already run
 
 Many analyses already exist as MDAnalysis `AnalysisBase` classes, in

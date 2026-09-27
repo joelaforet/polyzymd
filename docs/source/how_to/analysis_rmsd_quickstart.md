@@ -1,17 +1,18 @@
-# RMSD Analysis: Quick Start
+# RMSD analysis: quick start
 
-Compute RMSD timeseries for protein and polymer structures with proper
-statistical handling in under 5 minutes.
+Measure the RMSD of a selection from a reference structure on every production
+frame of every replicate, and compare conditions with the replicate as the
+sampling unit.
 
 ```{versionadded} 1.3.0
-The RMSD analysis plugin was added in PolyzyMD 1.3.0.
+RMSD analysis was added in PolyzyMD 1.3.0.
 ```
 
 ```{note}
 **Want to understand the statistics?** This guide focuses on getting results
-quickly. For proper uncertainty quantification (autocorrelation correction,
-SEM vs. SD) and interpretation of RMSD curves, see the
-{doc}`../explanation/analysis_rmsd_best_practices`.
+quickly. For interpretation of RMSD curves and the choice of reference, see
+{doc}`../explanation/analysis_rmsd_best_practices`. For what each shipped
+function measures, see {doc}`../reference/analysis_functions`.
 ```
 
 :::{admonition} Environment Setup
@@ -27,255 +28,117 @@ pixi shell -e analysis
 Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
-## TL;DR
-
-```bash
-# Configure RMSD runs in comparison.yaml, then run:
-polyzymd compare run rmsd -f comparison.yaml --eq-time 10ns
-
-# Run all enabled analyses in the same workflow
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-
-# Force recompute and machine-readable output
-polyzymd compare run rmsd -f comparison.yaml --eq-time 10ns --recompute --format json
-```
-
-## Prerequisites
-
-Before running RMSD analysis, you need:
-
-1. **Completed production simulation(s)** — at least one replicate
-2. **Comparison config** — `comparison.yaml` with conditions and plugin settings
-3. **Trajectory files** — in the scratch directory specified in config
-
-Verify your setup:
-
-```bash
-# Check that trajectories exist
-ls $(polyzymd info -c config.yaml --scratch-dir)/production_*/
-```
-
-## What RMSD Analysis Provides
-
-The RMSD analysis module computes:
-
-| Feature | Description |
-|---------|-------------|
-| **Mean RMSD** | Average deviation from reference structure (Å) |
-| **SEM** | Autocorrelation-corrected standard error of the mean |
-| **Median RMSD** | Robust central tendency measure |
-| **Min / Max RMSD** | Extremes of conformational deviation |
-| **Final RMSD** | Last-frame RMSD (convergence diagnostic) |
-| **Timeseries** | Full per-frame RMSD saved as NPZ sidecar |
-| **Multi-run** | Multiple named selections in a single analysis |
-| **Convergence Detection** | Sliding-window slope diagnostic; detects when RMSD has plateaued |
-
 ```{tip}
-**RMSD vs RMSF vs Distances — when to use which:**
-- **RMSD**: Global structural deviation over time — "is the protein drifting?"
-- **RMSF**: Per-residue fluctuation around average — "which residues are flexible?"
-- **Distances**: Specific atom-pair distances — "is this H-bond intact?"
+**RMSD vs RMSF vs Distances, when to use which:**
+- **RMSD**: Global structural deviation over time, "is the protein drifting?"
+- **RMSF**: Per-residue fluctuation around average, "which residues are flexible?"
+- **Distances**: Specific atom-pair distances, "is this H-bond intact?"
 ```
 
-## Basic Usage
-
-`````{tab-set}
-
-````{tab-item} YAML (Recommended)
-For reproducible analysis, define RMSD runs in `comparison.yaml`:
-
-```yaml
-# comparison.yaml
-name: "rmsd_quickstart"
-control: "no_polymer"
-
-conditions:
-  - label: "no_polymer"
-    config: "configs/no_polymer.yaml"
-    replicates: [1, 2, 3]
-  - label: "with_polymer"
-    config: "configs/with_polymer.yaml"
-    replicates: [1, 2, 3]
-
-plugins:
-  rmsd:
-    runs:
-      - label: "Protein Backbone"
-        selection: "protein and name CA"
-        alignment_selection: "protein and name CA"
-        reference_mode: "centroid"
-```
-
-Then run:
+## From the command line
 
 ```bash
-# Run RMSD analysis only
-polyzymd compare run rmsd -f comparison.yaml --eq-time 10ns
-
-# Run all enabled plugins in comparison.yaml
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-
-# Force recompute
-polyzymd compare run rmsd -f comparison.yaml --eq-time 10ns --recompute
+polyzymd analyze rmsd -c noPoly/config.yaml -c SBMA50/config.yaml \
+  --label "No polymer" --label "SBMA 50%" --eq 200ns
 ```
 
-**Benefits:**
-- Version-controlled, reproducible
-- Self-documenting experiment setup
-- Easy to re-run with different parameters
-````
+The first `-c` is the control. For each replicate, every production frame of
+the `protein and name CA` atoms is superposed on a reference structure and its
+RMSD is measured. The replicate means are then summarised per condition, and
+every other condition is compared with the control by Welch's t test with the
+Benjamini-Hochberg correction.
 
-````{tab-item} CLI
-### Single analysis run
+Change what is measured and what it is measured against with `--set`:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `selection` | `protein and name CA` | Atoms whose RMSD is measured; each frame is superposed on these atoms |
+| `alignment_selection` | `protein and name CA` | Atoms superposed to build the `average` and `centroid` references |
+| `reference_mode` | `centroid` | `centroid`, `average`, `frame` or `external` |
+| `reference_frame` | `1` | Production frame used by `frame` mode, counted from 1 after the equilibration window |
+| `reference_file` | none | Structure file used by `external` mode |
+
+For example, to measure deviation from a crystal structure:
 
 ```bash
-polyzymd compare run rmsd -f comparison.yaml --eq-time 10ns
-```
-
-**Expected behavior:**
-
-```text
-Loading comparison config from: comparison.yaml
-Running plugin: rmsd
-  Equilibration: 10ns
-  Conditions: no_polymer, with_polymer
-  Runs: Protein Backbone
-RMSD comparison complete
-```
-
-### All enabled analyses
-
-Run RMSD plus any other enabled plugins:
-
-```bash
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-```
-````
-
-`````
-
-## Multi-Run Configuration
-
-The RMSD plugin uses a **runs** list, where each run defines a named RMSD
-calculation with its own selection, alignment, and reference settings. This
-lets you track multiple structural metrics in a single analysis pass.
-
-```yaml
-plugins:
-  rmsd:
-    runs:
-      - label: "Protein Backbone"
-        selection: "protein and name CA"
-        alignment_selection: "protein and name CA"
-        reference_mode: "centroid"
-
-      - label: "Active Site"
-        selection: "protein and (resid 77 or resid 133 or resid 156) and name CA"
-        alignment_selection: "protein and name CA"
-        reference_mode: "centroid"
-
-      - label: "Polymer Core"
-        selection: "chainid C and not name H*"
-        alignment_selection: "protein and name CA"
-        reference_mode: "average"
-```
-
-Each run produces an independent RMSD timeseries. During comparison, each run
-is ranked and tested separately — averaging RMSD from different selections is
-not meaningful.
-
-```{important}
-**Runs ≠ Replicates.** A "run" is a named RMSD selection (e.g., "Protein
-Backbone" vs "Active Site"). A "replicate" is an independent simulation repeat
-(run_1, run_2, run_3). All configured runs are computed for every replicate.
-```
-
-## External Reference Mode
-
-Use `reference_mode: "external"` when you want to measure deviation from a
-specific known structure, such as a crystal structure representing the
-catalytically competent geometry.
-
-```yaml
-plugins:
-  rmsd:
-    runs:
-      - label: "Crystal Deviation"
-        selection: "protein and name CA"
-        alignment_selection: "protein and name CA"
-        reference_mode: "external"
-        reference_file: "/path/to/crystal_structure.pdb"
+polyzymd analyze rmsd -c noPoly/config.yaml -c SBMA50/config.yaml --eq 200ns \
+  --set reference_mode=external --set reference_file=structures/1ISP.pdb
 ```
 
 ```{note}
-When using `external` reference mode, the external PDB must contain atoms
-matching the `selection` string. PolyzyMD validates that atom counts match
-between the trajectory and external reference and raises an error on mismatch.
+When using `external` reference mode, the structure file must contain atoms
+matching the `selection` string. PolyzyMD checks that the atom counts match
+between the trajectory and the file and raises an error on a mismatch. The
+file's SHA-256 hash is recorded with the result, so editing the file measures
+the replicates again.
 ```
 
-**When to use external reference:**
+**Which reference to use:**
 
-| Mode | Question Answered |
+| Mode | Question answered |
 |------|-------------------|
-| `centroid` (default) | How much does the structure deviate from its most populated conformation? |
+| `centroid` (default) | How much does the structure deviate from its most representative production frame? |
 | `average` | How much does the structure deviate from its time-averaged conformation? |
-| `frame` | How much does the structure deviate from a specific frame? |
+| `frame` | How much does the structure deviate from a specific production frame? |
 | `external` | How much does the structure deviate from a known functional geometry? |
 
+The `centroid` reference is the production frame closest to the mean
+structure, where the mean comes from MDAnalysis `align.iterative_average` on
+the `alignment_selection` atoms. The `average` and `centroid` references are
+built separately for every replicate from its own production frames.
+
 ```{tip}
-For enzyme studies, consider running **two RMSD runs**: one with `centroid`
-mode (overall stability) and one with `external` mode pointing to a crystal
+For enzyme studies, consider running RMSD twice: once with `centroid` mode
+(overall stability) and once with `external` mode pointing to a crystal
 structure (catalytic competence). These answer complementary questions.
 ```
 
-## Comparing RMSD Across Conditions
+Add `--format json` for the full report, `--replicates 1-3` to use only some
+replicates, and `--recompute` to ignore stored results. The line format and the
+verdict words are described under {ref}`polyzymd analyze <cli-analyze>`.
 
-To statistically compare RMSD across multiple simulation conditions (e.g.,
-different polymer compositions), use the `compare run rmsd` command:
-
-```bash
-# Add rmsd section to comparison.yaml, then:
-polyzymd compare run rmsd -f comparison.yaml --eq-time 10ns
+```{note}
+In the plugin used before this version, `reference_frame` counted trajectory
+frames from 0, including the equilibration window. It now counts production
+frames from 1, so a value copied from an old `comparison.yaml` points at a
+different frame.
 ```
 
-This provides **per-run**:
-- **Ranking**: Conditions sorted by mean RMSD (lowest = most stable)
-- **Pairwise t-tests**: With p-values, Cohen's d, percent change
-- **Direction labels**: `stabilizing` (lower RMSD), `destabilizing` (higher), or `unchanged`
-- **ANOVA**: Omnibus test when 3+ conditions are present
+## From Python
 
-**Example output:**
+```python
+import polyzymd as pz
+from polyzymd.analyses.functions import rmsd
 
-```text
-RMSD Comparison — Protein Backbone
-===================================
-Ranking: With Polymer > No Polymer (lower RMSD = more stable)
-
-No Polymer:   1.856 ± 0.034 Å
-With Polymer: 1.612 ± 0.028 Å
-
-With Polymer vs No Polymer:
-  Change: -13.1% (stabilizing)
-  p-value: 0.0089 *
-  Cohen's d: 2.41 (large)
+study = pz.Study.from_configs(
+    {"No polymer": "noPoly/config.yaml", "SBMA 50%": "SBMA50/config.yaml"},
+    equilibration="200ns",
+)
+ca = "protein and name CA"
+values = study.timeseries(
+    rmsd, pz.select(ca), pz.reference("centroid", ca, alignment=ca), unit="Å"
+)
+print(values.reduce("mean").compare(control="No polymer").to_agent_text())
 ```
 
-See {doc}`analysis_compare_conditions` for the full multi-plugin comparison
-workflow.
+`pz.reference(mode, selection, frame=None, file=None, alignment=None)` stands
+for the reference atoms. It is built once per replicate in a separate
+universe, so the trajectory itself is never modified. The record of each
+replicate holds the mode, the selections, the frame the reference used and,
+for `external`, the file's hash.
 
-## Reference and Troubleshooting
+## Before interpreting the numbers
 
-For the full list of configuration fields, default values, output file
-structure, plotting options, convergence details, CLI options, and
-troubleshooting fixes, see {doc}`../reference/analysis_rmsd_reference`.
+Check the per-replicate time series before choosing the equilibration window;
+RMSD that is still rising after the window means the replicate has not
+relaxed. {doc}`../explanation/analysis_rmsd_best_practices` covers how to read
+RMSD curves and choose a reference, and
+{doc}`../explanation/convergence_detection` covers the equilibration
+diagnostic in the report.
 
-For deeper interpretation guidance, see {doc}`../explanation/analysis_rmsd_best_practices`
-and {doc}`../explanation/convergence_detection`.
-
-## Next Steps
+## Next steps
 
 - **Understand RMSD interpretation**: {doc}`../explanation/analysis_rmsd_best_practices`
-- **Compare conditions**: {doc}`analysis_compare_conditions`
 - **RMSF analysis**: {doc}`analysis_rmsf_quickstart`
 - **Understand statistics**: {doc}`../explanation/analysis_statistics_best_practices`
 - **Distance analysis**: {doc}`analysis_distances_quickstart`
