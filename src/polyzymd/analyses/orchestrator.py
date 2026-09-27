@@ -21,10 +21,10 @@ Usage
     from polyzymd.analyses.orchestrator import run_analysis, run_comparison
 
     # Run a single analysis for one condition
-    run_analysis("rmsf", condition, settings, equilibration="10ns")
+    run_analysis("sasa", condition, settings, equilibration="10ns")
 
     # Run full comparison pipeline
-    run_comparison("rmsf", comparison_config)
+    run_comparison("sasa", comparison_config)
 """
 
 from __future__ import annotations

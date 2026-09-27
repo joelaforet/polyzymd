@@ -10,7 +10,6 @@ from polyzymd.analyses import get_analysis, list_analyses
 from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
 
 MDA_ARTIFACT_PLUGINS = {
-    "rmsf",
     "secondary_structure",
     "contacts",
     "sasa",

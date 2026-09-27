@@ -14,10 +14,8 @@ Sub-modules
 -----------
 loader
     Trajectory loading, time parsing, frame conversion.
-alignment
-    Trajectory alignment (centroid/average/frame/external).
 centroid
-    K-Means centroid frame finding, reference mode dispatch.
+    The frame closest to the iterative average structure, for centroid references.
 statistics
     SEM, per-residue/region aggregation, weighted mean.
 autocorrelation
@@ -35,14 +33,8 @@ plotting
 from __future__ import annotations
 
 # Re-export the most commonly used symbols for convenience.
-# Plugins can do:  from polyzymd.analyses.shared import TrajectoryLoader, AlignmentConfig
+# Plugins can do:  from polyzymd.analyses.shared import TrajectoryLoader
 # or import specific sub-modules directly.
-from polyzymd.analyses.shared.alignment import (
-    AlignmentConfig,
-    ReferenceMode,
-    align_trajectory,
-    get_alignment_description,
-)
 from polyzymd.analyses.shared.autocorrelation import (
     MIN_RECOMMENDED_N_INDEPENDENT,
     ACFResult,
@@ -110,11 +102,6 @@ __all__ = [
     "TrajectoryWindow",
     "resolve_trajectory_window",
     "resolve_replicate_trajectory_window",
-    # Alignment
-    "AlignmentConfig",
-    "ReferenceMode",
-    "align_trajectory",
-    "get_alignment_description",
     # Statistics
     "CI_METHOD_STUDENT_T",
     "UNCERTAINTY_KIND_REPLICATE_SEM",

@@ -110,7 +110,7 @@ class TestValidateName:
             assert "reserved" in err
 
     def test_reject_existing_plugin(self):
-        err = validate_name("rmsf", check_existing=True)
+        err = validate_name("sasa", check_existing=True)
         assert err is not None
         assert "already exists" in err
 
@@ -767,7 +767,7 @@ class TestNewAnalysisCLI:
         assert "snake_case" in result.output
 
     def test_existing_plugin_rejected(self, runner: CliRunner, cli):
-        result = runner.invoke(cli, ["rmsf", "--project-root", str(self.root)])
+        result = runner.invoke(cli, ["sasa", "--project-root", str(self.root)])
         assert result.exit_code != 0
         assert "already exists" in result.output
 
@@ -868,7 +868,7 @@ class TestNewAnalysisCLI:
     def test_force_rejects_registered_builtin_name(self, runner: CliRunner, cli):
         result = runner.invoke(
             cli,
-            ["rmsf", "--project-root", str(self.root), "--force"],
+            ["sasa", "--project-root", str(self.root), "--force"],
         )
         assert result.exit_code != 0
         assert "registered analysis plugin" in result.output
