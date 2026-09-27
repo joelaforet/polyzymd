@@ -56,3 +56,73 @@ def rmsd(atoms: Any, reference: Any) -> float:
     from MDAnalysis.analysis.rms import rmsd as _rmsd
 
     return float(_rmsd(atoms.positions, reference.positions, center=True, superposition=True))
+
+
+def pair_distance(
+    atoms_a: Any, atoms_b: Any, mode_a: str = "single", mode_b: str = "single", pbc: bool = True
+) -> float:
+    """Return the distance in Å between one point of ``atoms_a`` and one of ``atoms_b``.
+
+    Each point is the position of the only atom for mode ``"single"``, the
+    center of geometry for ``"midpoint"`` or ``"centroid"``, and the center
+    of mass for ``"com"``, from
+    :func:`polyzymd.analyses.shared.selections.get_position`, as the legacy
+    distances plugin wrote them as ``midpoint(...)`` and ``com(...)``. The
+    distance comes from ``MDAnalysis.lib.distances.calc_bonds``, with the
+    minimum image of the current box when ``pbc`` is true and the box has
+    finite, positive lengths, and without periodic images otherwise.
+
+    Parameters
+    ----------
+    atoms_a, atoms_b : MDAnalysis.core.groups.AtomGroup
+        Atoms of the two points.
+    mode_a, mode_b : {"single", "midpoint", "centroid", "com"}, optional
+        How each point is taken from its atoms.
+    pbc : bool, optional
+        Use the minimum image of the current box.
+
+    Returns
+    -------
+    float
+        Distance in Å.
+
+    Raises
+    ------
+    ValueError
+        If mode ``"single"`` is given more than one atom.
+    """
+    import numpy as np
+    from MDAnalysis.lib.distances import calc_bonds
+
+    from polyzymd.analyses.shared.selections import SelectionMode, get_position
+
+    box = atoms_a.dimensions if pbc else None
+    if box is not None:
+        box = np.asarray(box, dtype=np.float32)[:6]
+        if not np.all(np.isfinite(box)) or np.any(box[:3] <= 0):
+            box = None
+    a = get_position(atoms_a, SelectionMode(mode_a))[np.newaxis]
+    b = get_position(atoms_b, SelectionMode(mode_b))[np.newaxis]
+    return float(calc_bonds(a, b, box=box)[0])
+
+
+def all_below(*distances: Any, thresholds: Any) -> Any:
+    """Return 1 for each frame in which every distance is below its threshold, else 0.
+
+    Parameters
+    ----------
+    *distances : numpy.ndarray
+        One series per pair, with one distance per frame.
+    thresholds : sequence of float
+        One threshold per series, in the same unit. A distance counts as
+        below only when it is strictly less than its threshold.
+
+    Returns
+    -------
+    numpy.ndarray
+        1.0 or 0.0 per frame, for :meth:`~polyzymd.analyses.timeseries.Timeseries.transform`.
+    """
+    import numpy as np
+
+    below = [np.asarray(d) < t for d, t in zip(distances, thresholds, strict=True)]
+    return np.logical_and.reduce(below).astype(np.float64)

@@ -76,7 +76,13 @@ FUNCTION_ANALYSES = {
         "reference_frame": 1,
         "reference_file": None,
     },
+    "distances": {"pairs": None, "threshold": 3.5, "use_pbc": True},
+    "catalytic_triad": {"pairs": None, "threshold": 3.5, "use_pbc": True},
 }
+
+#: Name of the catalytic triad result that holds the simultaneous contact fraction,
+#: as --run takes it.
+SIMULTANEOUS_RUN = "simultaneous"
 
 __all__ = [
     "FUNCTION_ANALYSES",
@@ -257,8 +263,8 @@ def analyze(
         Run or pair label to report, for a plugin that measures one metric on
         several selections. Defaults to the first one.
     eq_check : bool, optional
-        For ``rg`` and ``rmsd``, report the pymbar detected start of the
-        equilibrated region of each replicate. ``False`` skips it. It changes
+        For the analyses in :data:`FUNCTION_ANALYSES`, report the pymbar
+        detected start of the equilibrated region of each replicate. ``False`` skips it. It changes
         no value either way.
 
     Returns
@@ -274,8 +280,8 @@ def analyze(
 
     Notes
     -----
-    ``"rg"`` and ``"rmsd"`` run through :func:`_analyze_function` instead of
-    a plugin.
+    The analyses in :data:`FUNCTION_ANALYSES` run through
+    :func:`_analyze_function` instead of a plugin.
     """
     if name in FUNCTION_ANALYSES:
         return _analyze_function(
@@ -438,22 +444,33 @@ def _analyze_function(
     to :func:`~polyzymd.analyses.reference.reference`. Settings left out take
     the defaults in :data:`FUNCTION_ANALYSES`. With one config the report
     summarises it; with several it compares each one with the first by
-    Welch's t test. Raises ``ProtocolError`` for a ``run`` or a setting the
-    analysis does not take.
+    Welch's t test. ``distances`` and ``catalytic_triad`` go to
+    :func:`_analyze_pairs`. Raises ``ProtocolError`` for a setting the
+    analysis does not take, or a ``run`` for ``rg`` or ``rmsd``.
     """
     from polyzymd.analyses import functions
     from polyzymd.analyses.reference import reference
-    from polyzymd.analyses.study import Study
     from polyzymd.analyses.timeseries import select
-    from polyzymd.config.comparison import AnalysisDefaults
 
     unknown = set(settings or {}) - set(FUNCTION_ANALYSES[name])
-    if run is not None or unknown:
+    pairs = name in ("distances", "catalytic_triad")
+    if unknown or (run is not None and not pairs):
         raise ProtocolError(
-            f"{name} measures one selection and takes no run and no setting other than "
+            f"{name} takes {'' if pairs else 'no run and '}no setting other than "
             f"{', '.join(FUNCTION_ANALYSES[name])}.",
             hint=f"Run polyzymd analyze {name} -c A/config.yaml "
-            "--set selection='protein and name CA'.",
+            + ("--set pairs=pairs.yaml." if pairs else "--set selection='protein and name CA'."),
+        )
+    study = _study(configs, labels, equilibration, replicates)
+    if pairs:
+        return _analyze_pairs(
+            name,
+            study,
+            settings,
+            run,
+            recompute=recompute,
+            output_dir=output_dir,
+            eq_check=eq_check,
         )
     settings = {**FUNCTION_ANALYSES[name], **(settings or {})}
     arguments = [select(str(settings["selection"]))]
@@ -467,12 +484,6 @@ def _analyze_function(
                 alignment=str(settings["alignment_selection"]),
             )
         )
-    paths = [Path(item).expanduser().resolve() for item in configs]
-    study = Study.from_configs(
-        dict(zip(_labels(paths, labels), paths, strict=True)),
-        equilibration=equilibration or AnalysisDefaults().equilibration_time,
-        replicates=replicates,
-    )
     function = functions.rmsd if name == "rmsd" else functions.radius_of_gyration
     values = study.timeseries(
         function,
@@ -483,6 +494,128 @@ def _analyze_function(
         output_dir=output_dir,
     ).reduce("mean", detect_equilibration=eq_check)
     return values.compare() if len(study) > 1 else values.summary()
+
+
+def _study(
+    configs: Sequence[Path | str],
+    labels: Sequence[str] | None,
+    equilibration: str | None,
+    replicates: Sequence[int] | None,
+) -> Any:
+    """Build the Study of ``configs``, with the package default equilibration window."""
+    from polyzymd.analyses.study import Study
+    from polyzymd.config.comparison import AnalysisDefaults
+
+    paths = [Path(item).expanduser().resolve() for item in configs]
+    return Study.from_configs(
+        dict(zip(_labels(paths, labels), paths, strict=True)),
+        equilibration=equilibration or AnalysisDefaults().equilibration_time,
+        replicates=replicates,
+    )
+
+
+def _analyze_pairs(
+    name: str,
+    study: Any,
+    settings: dict | None,
+    run: str | None,
+    *,
+    recompute: bool,
+    output_dir: Path | None,
+    eq_check: bool,
+) -> ProtocolReport:
+    """Measure every pair of ``distances`` or ``catalytic_triad`` and report one result.
+
+    ``pairs`` is a list of mappings with ``label``, ``selection_a``,
+    ``selection_b`` and optionally ``threshold``, ``below_label`` and
+    ``above_label``, or the path of a YAML or JSON file holding that list. A
+    selection may be wrapped in ``midpoint(...)`` or ``com(...)``. Each pair
+    is measured once with :func:`~polyzymd.analyses.functions.pair_distance`,
+    and its results are named ``<label>`` for the mean distance and
+    ``<label> <below_label>`` for the fraction of frames strictly below the
+    pair's threshold, which defaults to ``threshold``. The catalytic triad
+    adds ``simultaneous``, the fraction of frames in which every pair is
+    below its threshold, computed from the stored distances with
+    :func:`~polyzymd.analyses.functions.all_below`, and reports it first.
+    ``run`` picks the result to report, by default the first, and
+    ``all_runs`` lists them all.
+    """
+    import yaml
+
+    from polyzymd.analyses import functions
+    from polyzymd.analyses.shared.selections import parse_selection_string
+    from polyzymd.analyses.timeseries import select
+
+    settings = {**FUNCTION_ANALYSES[name], **(settings or {})}
+    pairs = settings["pairs"]
+    if isinstance(pairs, (str, Path)):
+        try:
+            pairs = yaml.safe_load(Path(pairs).expanduser().read_text())
+        except (OSError, yaml.YAMLError) as exc:
+            raise ProtocolError(
+                f"{name}: cannot read the pairs file {pairs}: {exc}",
+                hint="Give a YAML or JSON list of pairs.",
+            ) from exc
+    keys = {"label", "selection_a", "selection_b", "threshold", "below_label", "above_label"}
+    if (
+        not isinstance(pairs, list)
+        or not pairs
+        or not all(
+            isinstance(pair, dict) and {"label", "selection_a", "selection_b"} <= set(pair) <= keys
+            for pair in pairs
+        )
+    ):
+        raise ProtocolError(
+            f"{name} needs pairs, a list of mappings with label, selection_a and selection_b, "
+            f"and optionally threshold, below_label and above_label; got {pairs!r}.",
+            hint="Write the list to pairs.yaml and pass --set pairs=pairs.yaml.",
+        )
+    results, distances, thresholds = {}, [], []
+    for pair in pairs:
+        a, b = (parse_selection_string(str(pair[key])) for key in ("selection_a", "selection_b"))
+        threshold = float(
+            settings["threshold"] if pair.get("threshold") is None else pair["threshold"]
+        )
+        distance = study.timeseries(
+            functions.pair_distance,
+            select(a.selection),
+            select(b.selection),
+            mode_a=a.mode.value,
+            mode_b=b.mode.value,
+            pbc=bool(settings["use_pbc"]),
+            unit="A",
+            name=f"{name}_{pair['label']}",
+            recompute=recompute,
+            output_dir=output_dir,
+        )
+        below = pair.get("below_label") or f"below {threshold:g} A"
+        fraction = distance.transform(
+            functions.all_below, unit=None, name=f"{distance.name}_{below}", thresholds=[threshold]
+        )
+        results[str(pair["label"])] = (distance, "mean", "mean_distance")
+        results[f"{pair['label']} {below}"] = (fraction, "fraction", "fraction_below_threshold")
+        distances.append(distance)
+        thresholds.append(threshold)
+    if name == "catalytic_triad":
+        both = distances[0].transform(
+            functions.all_below,
+            *distances[1:],
+            unit=None,
+            name=f"{name}_{SIMULTANEOUS_RUN}",
+            thresholds=thresholds,
+        )
+        simultaneous = (both, "fraction", "simultaneous_contact_fraction")
+        results = {SIMULTANEOUS_RUN: simultaneous, **results}
+    run = next(iter(results)) if run is None else run
+    if run not in results:
+        raise ProtocolError(
+            f"{name}: no result named {run!r}.", hint=f"Use --run with one of {list(results)}."
+        )
+    series, how, metric = results[run]
+    values = series.reduce(how, detect_equilibration=eq_check)
+    values.metric = metric
+    report = values.compare() if len(study) > 1 else values.summary()
+    return report.model_copy(update={"analysis": name, "run": run, "all_runs": list(results)})
 
 
 # Config construction
