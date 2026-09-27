@@ -400,6 +400,103 @@ class Timeseries:
     ) -> None:
         self.name, self.unit, self.study, self.series, self.path = name, unit, study, series, path
 
+    def transform(
+        self,
+        function: Callable,
+        *others: Timeseries,
+        unit: Any = ...,
+        name: str | None = None,
+        **kwargs: Any,
+    ) -> Timeseries:
+        """Compute a new series from the stored values, without reading a trajectory.
+
+        For every replicate, ``function`` receives the values of this series
+        and of each series in ``others`` as NumPy arrays with one entry per
+        frame, followed by ``kwargs``, and returns one value per frame, for
+        example ``lambda d: d < 3.5``. Each replicate's result goes to
+        ``series.npz`` and ``record.json`` in
+        ``polyzymd_results/<name>/<condition>/replicate_<n>/``, next to this
+        series. The record holds the function's name, module and source hash,
+        ``kwargs``, the unit, and the path and SHA-256 hash of the record of
+        every input series. It is written again on every call. A value that
+        ``function`` reads from an enclosing scope is not recorded, so pass
+        such values in ``kwargs``.
+
+        Parameters
+        ----------
+        function : callable
+            Called per replicate as ``function(values, *other_values, **kwargs)``.
+        *others : Timeseries
+            Further series of the same study with the same frames per replicate.
+        unit : str or None, optional
+            Unit of the new values. Defaults to the unit of this series.
+        name : str, optional
+            Result name. Defaults to the function's ``__name__`` and this name.
+        **kwargs
+            Keyword arguments of ``function``, recorded with the result.
+
+        Returns
+        -------
+        Timeseries
+            The new per-frame values of every replicate.
+
+        Raises
+        ------
+        ProtocolError
+            If a series in ``others`` lacks a replicate or has other frames,
+            or ``function`` returns other than one value per frame.
+        """
+        import numpy as np
+
+        name = name or f"{getattr(function, '__name__', 'transform').strip('<>')}_{self.name}"
+        unit = self.unit if unit is ... else unit
+        root = self.path.parent / _safe(name)
+        base = {
+            "name": name,
+            "transform": _function_record(function),
+            "kwargs": {key: _argument_record(value) for key, value in kwargs.items()},
+            "unit": unit,
+        }
+        series: dict[str, list[ReplicateSeries]] = {}
+        for condition, items in self.series.items():
+            series[condition] = []
+            for index, item in enumerate(items):
+                inputs = [item]
+                for other in others:
+                    match = other.series.get(condition, [])[index : index + 1]
+                    if not match or not np.array_equal(match[0].frames, item.frames):
+                        raise ProtocolError(
+                            f"{name}: {other.name} has no series with the frames of {self.name} "
+                            f"for condition {condition} replicate {item.replicate}.",
+                            hint="Transform series measured on the same study and window.",
+                        )
+                    inputs.append(match[0])
+                values = function(*(entry.values for entry in inputs), **kwargs)
+                values = np.asarray(values, dtype=np.float64)
+                if values.shape != item.values.shape:
+                    raise ProtocolError(
+                        f"{name}: {function!r} returned shape {values.shape} for "
+                        f"{len(item.values)} frames.",
+                        hint="Return one value per frame, for example lambda d: d < 3.5.",
+                    )
+                folder = root / _safe(condition) / f"replicate_{item.replicate}"
+                folder.mkdir(parents=True, exist_ok=True)
+                np.savez(folder / "series.npz", values=values, frames=item.frames, times=item.times)
+                record = {
+                    **base,
+                    "condition": condition,
+                    "replicate": item.replicate,
+                    "inputs": [_file_record(entry.path / "record.json") for entry in inputs],
+                    "versions": _versions(),
+                }
+                (folder / "record.json").write_text(json.dumps(record, indent=1))
+                series[condition].append(
+                    ReplicateSeries(
+                        condition, item.replicate, values, item.frames, item.times, folder
+                    )
+                )
+        return Timeseries(name, unit, self.study, series, root)
+
     def reduce(
         self, how: str | Callable = "mean", *, unit: Any = ..., detect_equilibration: bool = True
     ) -> ReplicateValues:

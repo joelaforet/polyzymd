@@ -7,6 +7,7 @@ radius of gyration is ``scales[k]`` and its time is ``k * 0.1`` ns.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import sys
@@ -211,6 +212,65 @@ class TestTimeseries:
 
         series = study.timeseries(n_atoms, pz.universe(), unit=None, output_dir=tmp_path)
         assert series.series["A"][0].values.tolist() == [4.0] * 7
+
+
+def below(values, threshold):
+    """1 where ``values`` is below ``threshold``."""
+    return values < threshold
+
+
+class TestTransform:
+    """A stored series transformed frame by frame, without reading a trajectory."""
+
+    def test_fraction_below_comes_from_the_stored_values(self, study, tmp_path, monkeypatch):
+        rg = _run(study, tmp_path)
+        monkeypatch.setattr(
+            "MDAnalysis.analysis.base.AnalysisFromFunction.run",
+            lambda *args, **kwargs: pytest.fail("a transform read the trajectory"),
+        )
+        # Replicate A1 has Rg 1.13 to 1.19 over the production frames.
+        fraction = rg.transform(below, unit=None, threshold=1.155).reduce("fraction")
+        assert fraction.values["A"][0] == pytest.approx(3 / 7)
+        assert fraction.values["B"] == [0.0, 0.0, 0.0]
+        assert fraction.unit is None and fraction.metric == "fraction_below_rg"
+
+    def test_record_holds_the_transform_its_arguments_and_inputs(self, study, tmp_path):
+        rg = _run(study, tmp_path)
+        doubled = rg.transform(lambda d: 2 * d, name="double")
+        record = json.loads(
+            (tmp_path / "polyzymd_results/double/A/replicate_1/record.json").read_text()
+        )
+        assert doubled.unit == "A" and doubled.series["A"][0].frames.tolist() == FRAMES
+        assert doubled.series["A"][0].values == pytest.approx(2 * rg.series["A"][0].values)
+        assert record["transform"]["qualname"].endswith("<lambda>")
+        assert record["transform"]["hash_of"] == "source"
+        source = tmp_path / "polyzymd_results/rg/A/replicate_1/record.json"
+        assert record["inputs"] == [
+            {"path": str(source), "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
+        ]
+        kwargs = rg.transform(below, threshold=1.155).series["A"][0].path / "record.json"
+        assert json.loads(kwargs.read_text())["kwargs"] == {"threshold": 1.155}
+
+    def test_several_series_combine_frame_by_frame(self, study, tmp_path):
+        rg = _run(study, tmp_path)
+        other = study.timeseries(
+            radius_of_gyration,
+            pz.select("name C1 C2"),
+            unit="A",
+            name="rg12",
+            output_dir=tmp_path,
+        )
+        both = rg.transform(lambda a, b: (a < 1.155) & (b < 1.145), other, unit=None)
+        assert both.reduce("fraction").values["A"][0] == pytest.approx(2 / 7)
+
+    def test_mismatched_frames_and_shapes_are_rejected(self, study, configs, tmp_path):
+        rg = _run(study, tmp_path)
+        short = pz.Study.from_configs(configs, equilibration="0.5ns")
+        other = _run(short, tmp_path / "short")
+        with pytest.raises(ProtocolError, match="has no series with the frames"):
+            rg.transform(lambda a, b: a + b, other)
+        with pytest.raises(ProtocolError, match="returned shape"):
+            rg.transform(lambda d: d[:2])
 
 
 class TestReduce:
