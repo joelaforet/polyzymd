@@ -311,6 +311,9 @@ def test_cli_rmsf_reports_mean_rmsf_and_draws_the_profile(configs, tmp_path, fig
         "offset_profile.png",
         "rms_decomposition.png",
         "rmsf_comparison.png",
+        "rmsf_difference.png",
+        "rms_deviation_difference.png",
+        "offset_difference.png",
     }
     decomposition = figures["rms_decomposition"].axes
     assert [ax.get_title() for ax in decomposition] == ["A (n = 3)", "B (n = 3)"]
@@ -321,8 +324,8 @@ def test_cli_rmsf_reports_mean_rmsf_and_draws_the_profile(configs, tmp_path, fig
     ]
     per_residue = CliRunner().invoke(analyze_command, [*arguments, "--run", "rmsf"])
     assert per_residue.exit_code == 0, per_residue.output
-    rows = [line for line in per_residue.stdout.split("\n") if "  A vs B  " in line]
-    assert [row.split()[0] for row in rows] == ["1", "2", "3"] and "family 3" in rows[0]
+    rows = [line for line in per_residue.stdout.split("\n") if line.startswith("A vs B  ")]
+    assert rows[0].startswith("A vs B  labels 3  tested 3  family 3  test welch_t")
     stored = _profile(pz.Study.from_configs(configs, equilibration=EQUILIBRATION), tmp_path)
     summary = stored.summary()
     ax = figures["rmsf_profile"].axes[0]
@@ -472,3 +475,89 @@ def test_bounds_warn_per_label_and_carry_to_the_mean(study, tmp_path) -> None:
         "the 95 percent interval of condition A at 1 extends past the bounds 0 to inf of rmsf, "
         "where a t interval is not reliable"
     ]
+
+
+class _StoredStudy:
+    """The parts of a Study that ReplicateValues and the figures read."""
+
+    labels, control = ["A", "B", "C"], "A"
+
+    def __getitem__(self, label):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(equilibration="10ns", config_hash="stored")
+
+
+def _synthetic_profile(tmp_path):
+    """Five replicates of residues 10, 11, 12: B is lower at 10 and higher at 12, C is A."""
+    from polyzymd.analyses.timeseries import ReplicateValues, Source
+
+    noise = np.array([0.00, 0.01, -0.01, 0.02, -0.02])
+    shift = {"A": (0.0, 0.0, 0.0), "B": (-1.0, 0.0, 1.0), "C": (0.0, 0.0, 0.0)}
+    rows = {
+        label: [
+            (
+                i + 1,
+                np.array([1.0, 2.0 + n * (i % 2 * 2 - 1), 3.0]) + np.add(d, n),
+                None,
+                None,
+                10,
+                None,
+                None,
+            )
+            for i, n in enumerate(noise)
+        ]
+        for label, d in shift.items()
+    }
+    source = Source("rmsf", "A", _StoredStudy(), {k: [] for k in rows}, tmp_path / "results")
+    return ReplicateValues(source, "rmsf", "A", False, rows, [10, 11, 12])
+
+
+def test_per_label_agent_text_counts_and_lists_the_significant_labels(tmp_path) -> None:
+    """The text gives counts and the significant labels; the JSON keeps every row."""
+    from polyzymd.analyses.protocols import ProtocolReport
+
+    report = _synthetic_profile(tmp_path).compare()
+    text = report.to_agent_text().strip().split("\n")
+    assert text[1] == (
+        "A vs B  labels 3  tested 3  family 6  test welch_t  correction BH  lower 1  higher 1"
+    )
+    lower = next(row for row in report.pairwise if row.b == "B" and row.entry == "10")
+    higher = next(row for row in report.pairwise if row.b == "B" and row.entry == "12")
+    assert text[2] == f"A vs B  lower: 10 delta -1 p_adj {lower.p_adjusted:.4g}"
+    assert text[3] == f"A vs B  higher: 12 delta +1 p_adj {higher.p_adjusted:.4g}"
+    assert (
+        text[4].startswith("A vs C  labels 3  tested 3  family 6")
+        and "lower 0  higher 0" in text[4]
+    )
+    assert (
+        text[5]
+        == "note: the 9 per-label condition rows and 6 per-label comparison rows are in the JSON report"
+    )
+    assert not any(line.startswith("11  ") for line in text)
+    restored = ProtocolReport.model_validate_json(report.model_dump_json())
+    assert len(restored.conditions) == 9 and len(restored.pairwise) == 6
+
+
+def test_difference_figure_draws_the_report_deltas_intervals_and_marks(tmp_path, figures) -> None:
+    from polyzymd.analyses.figures import plot_differences
+
+    values = _synthetic_profile(tmp_path)
+    report = values.compare()
+    plot_differences(values, report, tmp_path, "rmsf_difference", None, None, "Residue")
+    axes = figures["rmsf_difference"].axes
+    assert [ax.get_title() for ax in axes] == ["B minus A (n = 5 vs 5)", "C minus A (n = 5 vs 5)"]
+    assert axes[0].get_shared_y_axes().joined(axes[0], axes[1])
+    for ax, label in zip(axes, ("B", "C")):
+        rows = [row for row in report.pairwise if row.b == label]
+        line = next(line for line in ax.get_lines() if line.get_label() == "difference")
+        assert list(line.get_xdata()) == [10, 11, 12]
+        assert line.get_ydata() == pytest.approx([row.delta for row in rows])
+        band = ax.collections[0].get_paths()[0].vertices
+        for x, row in zip((10, 11, 12), rows):
+            edge = sorted(band[np.isclose(band[:, 0], x), 1])
+            assert (edge[0], edge[-1]) == pytest.approx(tuple(row.delta_ci95))
+        marked = ax.collections[1].get_offsets()
+        assert [float(x) for x in marked[:, 0]] == [
+            float(row.entry) for row in rows if row.significant
+        ]

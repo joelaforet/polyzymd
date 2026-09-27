@@ -533,6 +533,85 @@ def plot_decomposition(
     return _save(fig, output_dir, name, settings)
 
 
+def plot_differences(
+    values: ReplicateValues,
+    report: Any,
+    output_dir: str | Path,
+    name: str,
+    title: str | None = None,
+    plot_settings: PlotSettings | None = None,
+    xlabel: str = "label",
+) -> Path:
+    """Draw each condition's per-label difference from the control, one panel per condition.
+
+    ``report`` is the ``compare()`` report of the labelled ``values``. Each
+    panel draws, along the labels, ``delta`` of every comparison row, the
+    mean of the condition minus the mean of the control, with a band of its
+    95 percent interval from the report's test, Welch's by default, and a
+    point on each label that is significant after the Benjamini-Hochberg
+    correction. The panels share the y axis, and a label with no interval
+    leaves a gap in the band.
+
+    Returns
+    -------
+    Path
+        The saved figure file.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from polyzymd.analyses.shared.plotting import apply_axis_style
+
+    settings, _, colors = _setup(values.source, plot_settings)
+    try:
+        where = {str(k): float(k) for k in values.labels}
+    except (TypeError, ValueError):
+        where = {str(k): float(i) for i, k in enumerate(values.labels)}
+    conditions = list(dict.fromkeys(row.b for row in report.pairwise))
+    fig, axes = plt.subplots(
+        len(conditions),
+        1,
+        figsize=(14, 2.6 * len(conditions) + 1),
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+    )
+    for ax, label in zip(axes[:, 0], conditions, strict=True):
+        rows = [row for row in report.pairwise if row.b == label]
+        x = np.array([where[row.entry] for row in rows])
+        delta = np.array([row.delta for row in rows])
+        low, high = (
+            np.array([row.delta_ci95[i] if row.delta_ci95 else np.nan for row in rows])
+            for i in (0, 1)
+        )
+        color = colors[label]
+        ax.axhline(0.0, color="0.5", linewidth=0.8)
+        ax.plot(x, delta, color=color, linewidth=1.5, label="difference")
+        ax.fill_between(x, low, high, color=color, alpha=0.25, label="95% interval")
+        marked = [row.significant for row in rows]
+        ax.scatter(x[marked], delta[marked], color="red", s=14, zorder=3, label="significant")
+        n = f"n = {len(values.values[label])} vs {len(values.values[rows[0].a])}"
+        apply_axis_style(
+            ax,
+            settings,
+            title=f"{label} minus {rows[0].a} ({n})",
+            ylabel=_label(f"delta {values.metric}", values.unit),
+        )
+    axes[0, 0].legend(loc="upper right", fontsize=8)
+    apply_axis_style(axes[-1, 0], settings, xlabel=xlabel)
+    if title:
+        fig.suptitle(title)
+    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    family = next((row.family_size for row in report.pairwise if row.family_size), None)
+    _note(
+        fig,
+        f"Band: 95% interval of the difference ({report.pairwise[0].test}); points: significant "
+        f"after Benjamini-Hochberg over a family of {family}; production window t >= "
+        f"{report.equilibration}.",
+    )
+    return _save(fig, output_dir, name, settings)
+
+
 def plot_values(
     results: Sequence[ReplicateValues],
     labels: Sequence[str] | None = None,

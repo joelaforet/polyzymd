@@ -231,8 +231,14 @@ class ProtocolReport(BaseModel):
     def to_agent_text(self) -> str:
         """Render the report as fixed-vocabulary text, one line per item.
 
-        Every condition, comparison, warning and verdict gets its own line. The
-        output has no table borders, no colour and no blank lines.
+        Every condition, comparison, warning and verdict gets its own line. A
+        comparison of labelled values, such as residues, gets instead, per
+        compared condition, one line with the number of labels tested, the
+        family size and the number significantly lower and higher than the
+        control, and one line each listing those labels with their difference
+        and adjusted p value; every per-label row stays in the JSON form of
+        the report. The output has no table borders, no colour and no blank
+        lines.
         """
         run = f"  run {self.run}" if self.run else ""
         counts = {item.label: item.n_replicates for item in self.conditions}
@@ -243,10 +249,20 @@ class ProtocolReport(BaseModel):
             f"  replicates {','.join(str(n) for n in counts.values()) or 'none'}"
             f"  protocol {self.analysis}/{self.protocol_version}"
         )
+        if any(pair.entry is not None for pair in self.pairwise):
+            body = [
+                *_labelled_pairwise_lines(self.pairwise),
+                f"note: the {len(self.conditions)} per-label condition rows and "
+                f"{len(self.pairwise)} per-label comparison rows are in the JSON report",
+            ]
+        else:
+            body = [
+                *(_condition_line(item) for item in self.conditions),
+                *(_pairwise_line(item) for item in self.pairwise),
+            ]
         lines = [
             header,
-            *(_condition_line(item) for item in self.conditions),
-            *(_pairwise_line(item) for item in self.pairwise),
+            *body,
             *(f"warning: {text}" for text in self.warnings),
             *(f"verdict: {text}" for text in self.verdict),
         ]
@@ -595,13 +611,15 @@ def _analyze_rmsf(
     residues of the core and of each region are stored in
     ``provenance.settings``. With ``plots``, ``<part>_profile`` draws each
     profile with ``highlight_residues`` marked, ``rms_decomposition`` the
-    three profiles of each condition together and ``rmsf_comparison`` the
-    three core values, into ``<output_dir>/figures/<name>/``.
+    three profiles of each condition together, ``rmsf_comparison`` the three
+    core values, and with several conditions ``<part>_difference`` each
+    condition's per-residue difference from the control with its interval
+    and significant residues, into ``<output_dir>/figures/<name>/``.
     """
     import numpy as np
 
     from polyzymd.analyses import functions
-    from polyzymd.analyses.figures import plot_decomposition, plot_values
+    from polyzymd.analyses.figures import plot_decomposition, plot_differences, plot_values
     from polyzymd.analyses.reference import reference
     from polyzymd.analyses.timeseries import select
 
@@ -669,6 +687,10 @@ def _analyze_rmsf(
         for part, profile in profiles.items():
             title = f"Per-residue {part.replace('_', ' ')}"
             profile.plot(folder, f"{part}_profile", title, None, highlight, "Residue")
+            if len(study) > 1:
+                compared = report if run == part else profile.compare()
+                figure = f"{part}_difference"
+                plot_differences(profile, compared, folder, figure, None, None, "Residue")
         plot_decomposition(profiles, folder, "rms_decomposition", None, None, "Residue")
         core = [results[f"core_{part}"] for part in functions.RMS_PARTS]
         labels = [part.replace("_", " ") for part in functions.RMS_PARTS]
@@ -1499,3 +1521,29 @@ def _pairwise_line(pair: PairwiseReport) -> str:
         f"  p {_num(pair.p)}  p_adj {_num(pair.p_adjusted)}  test {pair.test}"
         f"  correction {pair.correction}{family}  d {_num(pair.cohens_d)}  {flag}"
     )
+
+
+def _labelled_pairwise_lines(pairwise: Sequence[PairwiseReport]) -> list[str]:
+    """Summarise per-label comparisons: counts per condition, then the significant labels."""
+    lines = []
+    for b in dict.fromkeys(pair.b for pair in pairwise):
+        rows = [pair for pair in pairwise if pair.b == b]
+        tested = [pair for pair in rows if pair.p_adjusted is not None]
+        family = tested[0].family_size if tested else None
+        found = {
+            "lower": [pair for pair in tested if pair.significant and pair.delta < 0],
+            "higher": [pair for pair in tested if pair.significant and pair.delta > 0],
+        }
+        lines.append(
+            f"{rows[0].a} vs {b}  labels {len(rows)}  tested {len(tested)}  family "
+            f"{family if family is not None else 'na'}  test {rows[0].test}  correction "
+            f"{rows[0].correction}  lower {len(found['lower'])}  higher {len(found['higher'])}"
+        )
+        for side, items in found.items():
+            if items:
+                listed = ", ".join(
+                    f"{pair.entry} delta {_signed(pair.delta)} p_adj {_num(pair.p_adjusted)}"
+                    for pair in items
+                )
+                lines.append(f"{rows[0].a} vs {b}  {side}: {listed}")
+    return lines
