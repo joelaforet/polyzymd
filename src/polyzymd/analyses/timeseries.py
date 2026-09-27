@@ -417,8 +417,9 @@ def run_per_replicate(
     recompute: bool = False,
     output_dir: str | Path | None = None,
     bounds: tuple[float | None, float | None] = (None, None),
+    parts: Sequence[str] | None = None,
     **kwargs: Any,
-) -> ReplicateValues:
+) -> ReplicateValues | dict[str, ReplicateValues]:
     """Compute one value, or one labelled array, per replicate with ``function``.
 
     ``function`` is called once per replicate with the built ``args``, the
@@ -456,13 +457,18 @@ def run_per_replicate(
         Lowest and highest value the quantity can take, ``None`` for no
         limit, used to warn when a 95 percent interval extends past them.
         They change no value and are not part of the record.
+    parts : sequence of str, optional
+        Names of the rows of a two-dimensional array that ``function``
+        returns with one column per label, for several quantities measured
+        in one pass. Each row becomes its own result, named by its part.
     **kwargs
         Keyword arguments of ``function``, recorded like ``args``.
 
     Returns
     -------
-    ReplicateValues
-        One value or one labelled array per replicate.
+    ReplicateValues or dict of str to ReplicateValues
+        One value or one labelled array per replicate, or with ``parts`` one
+        such result per part, sharing one record per replicate.
 
     Raises
     ------
@@ -505,7 +511,9 @@ def run_per_replicate(
                     ),
                     dtype=np.float64,
                 )
-                if values.shape != (() if given is None else (len(given),)):
+                expected = () if given is None else (len(given),)
+                expected = expected if parts is None else (len(parts), *expected)
+                if values.shape != expected:
                     raise ProtocolError(
                         f"{name}: {function!r} returned shape {values.shape} for "
                         f"{'no labels' if given is None else f'{len(given)} labels'}.",
@@ -516,8 +524,12 @@ def run_per_replicate(
                 (folder / "record.json").write_text(
                     json.dumps({**record, "chosen": chosen, "versions": _versions()}, indent=1)
                 )
-            value = float(values) if given is None else dict(zip(given, values.tolist()))
-            if given is not None and len(value) != len(given):
+            if given is None:
+                value = float(values) if parts is None else values.tolist()
+            else:
+                pairs = [dict(zip(given, row)) for row in np.atleast_2d(values).tolist()]
+                value = pairs[0] if parts is None else pairs
+            if given is not None and len(pairs[0]) != len(given):
                 raise ProtocolError(
                     f"{name}: condition {condition.label} replicate {replicate.index} repeats "
                     "a label.",
@@ -527,10 +539,22 @@ def run_per_replicate(
                 (replicate.index, value, None, None, len(replicate.frames), None, None)
             )
             found[condition.label].append(folder)
-    order = None if labels is None else _label_order(rows, missing, name)
-    values = ReplicateValues(Source(name, unit, study, found, root), name, unit, False, rows, order)
-    values.bounds = tuple(bounds)
-    return values
+    source = Source(name, unit, study, found, root)
+
+    def result(table: dict[str, list[tuple]], metric: str) -> ReplicateValues:
+        order = None if labels is None else _label_order(table, missing, metric)
+        values = ReplicateValues(source, metric, unit, False, table, order)
+        values.bounds = tuple(bounds)
+        return values
+
+    if parts is None:
+        return result(rows, name)
+    return {
+        part: result(
+            {c: [(r[0], r[1][i], *r[2:]) for r in items] for c, items in rows.items()}, part
+        )
+        for i, part in enumerate(parts)
+    }
 
 
 def _label_order(rows: dict[str, list[tuple]], missing: float | None, name: str) -> list:
@@ -885,7 +909,7 @@ class ReplicateValues:
             label: [(row[0], float(function(row[1])), *row[2:]) for row in items]
             for label, items in self.rows.items()
         }
-        metric = metric or f"{name}_{self.source.name}"
+        metric = metric or f"{name}_{self.metric}"
         values = ReplicateValues(self.source, metric, self.unit, False, rows)
         values.bounds = self.bounds if how == "mean" else (None, None)
         return values
