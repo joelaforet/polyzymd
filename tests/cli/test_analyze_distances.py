@@ -71,7 +71,8 @@ def test_pair_distance_points_and_minimum_image() -> None:
     assert pair_distance(pair, last, mode_a="midpoint") == pytest.approx(3.0)
     assert pair_distance(pair, last, mode_a="com", pbc=False) == pytest.approx(6.5)
     universe.dimensions = None
-    assert pair_distance(first, last) == pytest.approx(8.0)
+    with pytest.warns(UserWarning, match="no valid box"):
+        assert pair_distance(first, last) == pytest.approx(8.0)
     with pytest.raises(ValueError, match="exactly one atom"):
         pair_distance(pair, last)
 

@@ -7,6 +7,7 @@ and returns one number, so it runs through
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 
@@ -70,7 +71,9 @@ def pair_distance(
     distances plugin wrote them as ``midpoint(...)`` and ``com(...)``. The
     distance comes from ``MDAnalysis.lib.distances.calc_bonds``, with the
     minimum image of the current box when ``pbc`` is true and the box has
-    finite, positive lengths, and without periodic images otherwise.
+    finite, positive lengths, and without periodic images otherwise. A
+    frame with ``pbc`` true and no valid box raises a warning, as the legacy
+    plugin did.
 
     Parameters
     ----------
@@ -101,6 +104,11 @@ def pair_distance(
         box = np.asarray(box, dtype=np.float32)[:6]
         if not np.all(np.isfinite(box)) or np.any(box[:3] <= 0):
             box = None
+    if pbc and box is None:
+        warnings.warn(
+            "pair_distance: the frame has no valid box, so its distance uses no periodic image.",
+            stacklevel=2,
+        )
     a = get_position(atoms_a, SelectionMode(mode_a))[np.newaxis]
     b = get_position(atoms_b, SelectionMode(mode_b))[np.newaxis]
     return float(calc_bonds(a, b, box=box)[0])
