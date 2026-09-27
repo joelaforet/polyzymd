@@ -91,46 +91,6 @@ field records which one was read rather than leaving it implied by a filename.
 | `alignment_selection` | `str` | `"protein and name CA"` | Selection used for trajectory alignment |
 | `centroid_selection` | `str` | `"protein"` | Selection used to find centroid frame |
 
-## `catalytic_triad`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `name` | `str` | `"catalytic_triad"` | Name of the triad/active-site definition |
-| `pairs` | `list[TriadPairSettings]` | required | Distance pairs to monitor |
-| `threshold` | `float` | `3.5` | Contact threshold in Å |
-| `description` | `str \| null` | `null` | Optional human-readable description |
-
-`TriadPairSettings` entries in `pairs`:
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `label` | `str` | required | Human-readable pair name |
-| `selection_a` | `str` | required | First atom/point selection |
-| `selection_b` | `str` | required | Second atom/point selection |
-
-## `distances`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `threshold` | `float \| null` | `3.5` | Global distance threshold (Å) for contact-style state analysis |
-| `pairs` | `list[DistancePairSettings]` | `[]` (must be non-empty) | Distance pairs to monitor |
-| `use_pbc` | `bool` | `true` | Use minimum-image PBC-aware distances |
-| `align_trajectory` | `bool` | `false` | Deprecated and ignored since 1.3.0; setting it to `true` raises a `DeprecationWarning` |
-| `alignment_selection` | `str` | `"protein and name CA"` | Deprecated and ignored since 1.3.0 |
-| `alignment_mode` | `str` | `"centroid"` | Deprecated and ignored since 1.3.0; still validated as `centroid`, `average`, or `frame` |
-| `alignment_frame` | `int \| null` | `null` | Deprecated and ignored since 1.3.0 |
-
-`DistancePairSettings` entries in `pairs`:
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `label` | `str` | required | Human-readable pair name |
-| `selection_a` | `str` | required | First atom/point selection |
-| `selection_b` | `str` | required | Second atom/point selection |
-| `threshold` | `float \| null` | `null` | Per-pair threshold override (falls back to global `threshold`) |
-| `below_label` | `str \| null` | `null` | Display label for below-threshold state |
-| `above_label` | `str \| null` | `null` | Display label for above-threshold state |
-
 ## `contacts`
 
 | Key | Type | Default | Description |

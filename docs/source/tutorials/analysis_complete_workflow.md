@@ -110,23 +110,6 @@ plugins:
     selection: "protein and name CA"
     reference_mode: "average"
 
-  catalytic_triad:
-    name: "Ser-His-Asp"
-    threshold: 3.5
-    pairs:
-      - label: "Ser77-His156"
-        selection_a: "protein and resid 77 and name OG"
-        selection_b: "protein and resid 156 and name NE2"
-      - label: "His156-Asp133"
-        selection_a: "protein and resid 156 and name ND1"
-        selection_b: "midpoint(protein and resid 133 and name OD1 OD2)"
-
-  distances:
-    pairs:
-      - label: "Substrate-Ser77"
-        selection_a: "resname SUB and name C1"
-        selection_b: "protein and resid 77 and name OG"
-
   contacts:
     polymer_selection: "chainid C"
     protein_selection: "chainid A"
@@ -218,19 +201,12 @@ polymer_stabilization_study/
 ├── comparison/
 │   ├── rmsf/
 │   │   └── result.json                # cross-condition comparison output
-│   ├── contacts/
-│   │   └── result.json                # cross-condition comparison output
-│   ├── distances/
-│   │   └── result.json                # cross-condition comparison output
-│   └── catalytic_triad/
+│   └── contacts/
 │       └── result.json                # cross-condition comparison output
 └── figures/
     ├── rmsf/
     │   ├── rmsf_comparison.png
     │   └── rmsf_profile.png
-    ├── catalytic_triad/
-    │   ├── triad_kde_panel.png
-    │   └── triad_threshold_bars.png
     └── ...
 ```
 

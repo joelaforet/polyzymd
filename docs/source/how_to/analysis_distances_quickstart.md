@@ -1,13 +1,15 @@
-# Distance Analysis: Quick Start
+# Distance analysis: quick start
 
-Compute inter-atomic distances with proper statistical handling in under
-5 minutes.
+Measure the distance between named atom pairs on every production frame of
+every replicate, report each pair's mean distance and the fraction of frames
+below a threshold, and compare conditions with the replicate as the sampling
+unit.
 
 ```{note}
 **Want to understand the statistics?** This guide focuses on getting results
-quickly. For proper uncertainty quantification (autocorrelation correction,
-SEM vs. SD), see
-{doc}`../explanation/analysis_statistics_best_practices`.
+quickly. For uncertainty and replicate-level comparison, see
+{doc}`../explanation/analysis_statistics_best_practices`. For what each shipped
+function measures, see {doc}`../reference/analysis_functions`.
 ```
 
 :::{admonition} Environment Setup
@@ -23,46 +25,6 @@ pixi shell -e analysis
 Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
-## TL;DR
-
-```bash
-# Configure distance pairs in comparison.yaml, then run:
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns
-
-# Run all enabled analyses in the same workflow
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-
-# Force recompute and machine-readable output
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns --recompute --format json
-```
-
-## Prerequisites
-
-Before running distance analysis, you need:
-
-1. **Completed production simulation(s)** — at least one replicate
-2. **Comparison config** — `comparison.yaml` with conditions and plugin settings
-3. **Trajectory files** — in the scratch directory specified in config
-
-Verify your setup:
-
-```bash
-# Check that trajectories exist
-ls $(polyzymd info -c config.yaml --scratch-dir)/production_*/
-```
-
-## What Distance Analysis Provides
-
-The distance analysis module computes:
-
-| Feature | Description |
-|---------|-------------|
-| **Mean distance** | Average distance over trajectory (equilibrated portion) |
-| **SEM** | Autocorrelation-corrected standard error of the mean |
-| **Mode (KDE peak)** | Most probable distance from kernel density estimation |
-| **Contact fraction** | % of frames below a distance threshold |
-| **Distribution** | Full histogram and KDE for visualization |
-
 ```{tip}
 **When to use distances vs. contacts vs. triad:**
 - **Distances**: Specific atom pairs with continuous distance values
@@ -70,93 +32,42 @@ The distance analysis module computes:
 - **Triad**: Pre-defined catalytic geometry with simultaneous contact analysis
 ```
 
-## Basic Usage
+## Define the pairs
 
-`````{tab-set}
-
-````{tab-item} YAML (Recommended)
-Define distance pairs in `comparison.yaml`:
+Write the pairs to a YAML (or JSON) file, for example `pairs.yaml`:
 
 ```yaml
-# comparison.yaml
-name: "distance_quickstart"
-control: "no_polymer"
-
-conditions:
-  - label: "no_polymer"
-    config: "configs/no_polymer.yaml"
-    replicates: [1, 2, 3]
-  - label: "with_polymer"
-    config: "configs/with_polymer.yaml"
-    replicates: [1, 2, 3]
-
-plugins:
-  distances:
-    pairs:
-      - label: "Ser77-His156"
-        selection_a: "protein and resid 77 and name OG"
-        selection_b: "protein and resid 156 and name NE2"
-      - label: "His156-Asp133"
-        selection_a: "protein and resid 156 and name ND1"
-        selection_b: "midpoint(protein and resid 133 and name OD1 OD2)"
+- label: "Ser77(OG)-Substrate(carbonyl C)"
+  selection_a: "protein and resid 76 and name OG"
+  selection_b: "resname RBY and name C13x"
+  threshold: 10.0
+  below_label: "Within 10 Angstrom"
+- label: "Met78(N)-Substrate(carbonyl C)"
+  selection_a: "protein and resid 77 and name N"
+  selection_b: "resname RBY and name C13x"
 ```
 
-Run analysis:
+Each pair needs `label`, `selection_a` and `selection_b`. `threshold` sets the
+cutoff for that pair's fraction of frames below it; pairs without one use the
+analysis threshold, 3.5 Å unless you set `--set threshold=...`. `below_label`
+names that fraction in the report.
+
+## Run it
 
 ```bash
-# Run distances only
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns
-
-# Run all enabled analyses
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-
-# Force recompute
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns --recompute
-```
-````
-
-````{tab-item} CLI
-```bash
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns
+polyzymd analyze distances -c noPoly/config.yaml -c SBMA50/config.yaml \
+  --label "No polymer" --label "SBMA 50%" --eq 200ns --set pairs=pairs.yaml
 ```
 
-Expected behavior:
-
-```text
-Loading comparison config from: comparison.yaml
-Running plugin: distances
-  Equilibration: 10ns
-  Conditions: no_polymer, with_polymer
-Distance comparison complete
-```
-
-Run all enabled analyses:
-
-```bash
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-```
-````
-
-`````
-
-## Add Contact-Style Thresholds
-
-Set a threshold to report the fraction of frames below a cutoff (useful for
-hydrogen-bond-style geometry checks).
-
-```yaml
-plugins:
-  distances:
-    threshold: 3.5
-    pairs:
-      - label: "Ser77-His156"
-        selection_a: "protein and resid 77 and name OG"
-        selection_b: "protein and resid 156 and name NE2"
-```
-
-```bash
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns
-```
+The first `-c` is the control. Every pair is measured on every production frame
+of every replicate, and two results are reported per pair: `<label>`, the mean
+distance, and `<label> <below_label>` (or `<label> below <threshold> A`), the
+fraction of frames below the threshold. The report shows the first pair's mean
+distance; pick another result with `--run`, for example
+`--run "Ser77(OG)-Substrate(carbonyl C) Within 10 Angstrom"`. The measured
+distances are stored, so a second `--run` does not read the trajectory again.
+Conditions are compared by Welch's t test with the Benjamini-Hochberg
+correction across the conditions compared.
 
 ## Write Robust Selections
 
@@ -196,48 +107,44 @@ selection_a: "protein and resid 77 and name OG"
 selection_a: "pdbindex 2740"
 ```
 
+A plain selection must match exactly one atom.
+
 ## Keep PBC on
 
-Distance analysis applies the minimum image convention by default
-(`use_pbc: true`), using the box stored in each frame. Leave it on unless you
-know your trajectory is already unwrapped, because it is what keeps a pair from
-being measured the long way around the box.
+Distances use the minimum image convention by default (`use_pbc`), with the
+box stored in each frame. Leave it on unless you know your trajectory is
+already unwrapped, because it is what keeps a pair from being measured the
+long way around the box. A frame with no valid box is measured without the
+minimum image, and a warning says so. Distances are never aligned: a distance
+does not change when the whole system is rotated or translated.
 
-Distances are not aligned. `align_trajectory` now defaults to `false`, is
-ignored, and setting it raises a `DeprecationWarning`. A distance does not
-change when the whole system is rotated or translated, so alignment could only
-cost time, and the in-memory alignment PolyzyMD used to run rotated the
-coordinates without rotating the box, which broke the minimum image convention
-for long pairs.
+## From Python
 
-To override PBC, see {doc}`../reference/analysis_distances_reference`.
+```python
+import polyzymd as pz
+from polyzymd.analyses.functions import pair_distance
 
-## Compare Distances Across Conditions
-
-Use the same command after defining conditions and pairs in `comparison.yaml`:
-
-```bash
-polyzymd compare run distances -f comparison.yaml --eq-time 10ns
+study = pz.Study.from_configs(
+    {"No polymer": "noPoly/config.yaml", "SBMA 50%": "SBMA50/config.yaml"},
+    equilibration="200ns",
+)
+d = study.timeseries(
+    pair_distance,
+    pz.select("protein and resid 76 and name OG"),
+    pz.select("resname RBY and name C13x"),
+    unit="Å",
+)
+print(d.reduce("mean").compare(control="No polymer").to_agent_text())
+below = d.transform(lambda x, cutoff: x < cutoff, cutoff=10.0, unit=None)
+print(below.reduce("fraction").compare(control="No polymer").to_agent_text())
 ```
 
-This provides:
-
-- Pair-level summaries across conditions
-- Ranking by mean distance (primary) and fraction below threshold (secondary)
-- Statistical tests (t-tests, effect sizes, ANOVA)
-
-For broader multi-plugin workflows, see
-{doc}`analysis_compare_conditions`.
-
-## Reference and Troubleshooting
-
-For full field tables, output JSON schemas, plot types, CLI options, and
-troubleshooting fixes, see
-{doc}`../reference/analysis_distances_reference`.
+`transform` builds the per-frame fraction from the stored distances without
+reading the trajectory again. Pass values such as the cutoff as keyword
+arguments, as above, so they are recorded with the result.
 
 ## Next Steps
 
-- Compare multiple analyses: {doc}`analysis_compare_conditions`
-- Catalytic triad workflow: {doc}`analysis_triad_quickstart`
-- Statistical interpretation: {doc}`../explanation/analysis_statistics_best_practices`
-- Contacts workflow: {doc}`analysis_contacts_quickstart`
+- **Catalytic triad analysis**: {doc}`analysis_triad_quickstart`
+- **Understand statistics**: {doc}`../explanation/analysis_statistics_best_practices`
+- **Contact analysis**: {doc}`analysis_contacts_quickstart`

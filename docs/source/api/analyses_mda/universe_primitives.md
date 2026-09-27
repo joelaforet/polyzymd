@@ -16,12 +16,6 @@ frame-selection, artifact, and store objects above.
    :show-inheritance:
    :no-index:
 
-.. automodule:: polyzymd.analyses.mda.pair_distance
-   :members: PairDistanceSpec, build_pair_distance_analysis, pair_distance_version
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
 .. automodule:: polyzymd.analyses.mda.base
    :members:
    :undoc-members:

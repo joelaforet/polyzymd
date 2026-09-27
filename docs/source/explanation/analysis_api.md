@@ -189,7 +189,11 @@ mean_distance = distance.reduce("mean")
 below_4 = distance.transform(lambda d: d < 4.0, unit=None).reduce("fraction")
 ```
 
-The transform is recorded with the result like any other function.
+The transform is recorded with the result like any other function. It also
+takes further stored series, `a.transform(f, b)`, whose values reach `f` frame by
+frame after those of `a`, and keyword arguments, which are recorded; pass
+values such as a threshold as keyword arguments rather than through a closure,
+so they appear in the record.
 
 Besides the named reductions, any function that takes the per-frame values and
 times of one replicate and returns a number or a labelled array works as a

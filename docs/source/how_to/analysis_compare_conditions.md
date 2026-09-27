@@ -150,20 +150,6 @@ plugins:
     protein_selection: "chainid A"
     cutoff: 4.5
 
-  catalytic_triad:
-    name: "Ser-His-Asp"
-    threshold: 3.5
-    pairs:
-      - label: "Ser77-His156"
-        selection_a: "protein and resid 77 and name OG"
-        selection_b: "protein and resid 156 and name NE2"
-
-  distances:
-    pairs:
-      - label: "Substrate-Ser77"
-        selection_a: "resname SUB and name C1"
-        selection_b: "protein and resid 77 and name OG"
-
   rmsd:
     runs:
       - label: "Protein Backbone"
