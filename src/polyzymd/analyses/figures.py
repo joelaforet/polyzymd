@@ -450,9 +450,9 @@ def plot_profile(
     apply_axis_style(
         ax,
         settings,
-        title=title or values.source.name,
+        title=title or values.metric,
         xlabel=xlabel,
-        ylabel=_label(values.source.name, values.unit),
+        ylabel=_label(values.metric, values.unit),
     )
     apply_legend(ax, settings, loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0)
     fig.tight_layout(rect=[0, 0.04, 0.84, 1])
@@ -462,6 +462,73 @@ def plot_profile(
         values.source.study[labels[0]].equilibration,
         drawn="Band",
         points="Thin lines are per-replicate values; the thick line is their mean",
+    )
+    return _save(fig, output_dir, name, settings)
+
+
+def plot_decomposition(
+    parts: dict[str, ReplicateValues],
+    output_dir: str | Path,
+    name: str,
+    title: str | None = None,
+    plot_settings: PlotSettings | None = None,
+    xlabel: str = "label",
+) -> Path:
+    """Draw several labelled results of one study together, one panel per condition.
+
+    Each panel holds one line per result, its mean over the condition's
+    replicates at every label, with the band of its 95 percent Student t
+    interval, the values that ``summary()`` reports. For
+    :func:`~polyzymd.analyses.functions.rms_decomposition` the lines are the
+    RMS deviation from the reference, the RMSF and the offset of the mean
+    position from the reference. The results must share one unit.
+
+    Returns
+    -------
+    Path
+        The saved figure file.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from polyzymd.analyses.shared.plotting import (
+        apply_axis_style,
+        apply_legend,
+        band_half_widths,
+        get_palette_colors,
+    )
+
+    results = list(parts.values())
+    unit = _one_unit(results, "Results")
+    settings, labels, _ = _setup(results[0].source, plot_settings)
+    colors = get_palette_colors(len(parts), settings)
+    x = np.asarray(results[0].labels, dtype=float)
+    fig, axes = plt.subplots(
+        len(labels), 1, figsize=(14, 2.6 * len(labels) + 1), sharex=True, squeeze=False
+    )
+    counts = set()
+    for ax, label in zip(axes[:, 0], labels, strict=True):
+        for (part, values), color in zip(parts.items(), colors, strict=True):
+            matrix = np.vstack(values.values[label])
+            counts.add(len(matrix))
+            mean, band = matrix.mean(axis=0), band_half_widths(matrix)
+            ax.plot(x, mean, color=color, linewidth=1.5, label=part.replace("_", " "))
+            if band is not None:
+                ax.fill_between(x, mean - band, mean + band, color=color, alpha=0.2)
+        apply_axis_style(
+            ax, settings, title=f"{label} (n = {len(matrix)})", ylabel=_label("value", unit)
+        )
+        apply_legend(ax, settings, loc="center left", bbox_to_anchor=(1.01, 0.5), borderaxespad=0)
+    apply_axis_style(axes[-1, 0], settings, xlabel=xlabel)
+    if title:
+        fig.suptitle(title)
+    fig.tight_layout(rect=[0, 0.04, 0.86, 1])
+    _footnote(
+        fig,
+        counts,
+        results[0].source.study[labels[0]].equilibration,
+        drawn="Band",
+        points="Lines are condition means over replicates",
     )
     return _save(fig, output_dir, name, settings)
 

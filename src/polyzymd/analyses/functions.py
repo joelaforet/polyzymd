@@ -136,44 +136,18 @@ def all_below(*distances: Any, thresholds: Any) -> Any:
     return np.logical_and.reduce(below).astype(np.float64)
 
 
-def rmsf(atoms: Any, fit: Any, reference: Any, frames: Any, about_reference: bool = False) -> Any:
-    """Return the RMSF in Å of each residue of ``atoms`` over ``frames``.
+def _superposed_deviations(atoms: Any, fit: Any, reference: Any, frames: Any) -> tuple:
+    """Superpose every frame on the reference and return the per-atom deviation, RMSF and offset.
 
     Every frame is superposed on the reference by its ``fit`` atoms with
     :func:`~polyzymd.analyses.reference.superpose`, which rotates as
     ``MDAnalysis.analysis.align.AlignTraj`` does, without moving the
-    trajectory. ``MDAnalysis.analysis.rms.RMSF`` then gives each atom's
-    root mean square fluctuation about its mean position over the frames.
-    With ``about_reference`` true, each atom's root mean square deviation
-    from its reference position is taken instead, as the legacy rmsf plugin
-    did in external mode. Each residue's value is the mean over its atoms in
-    ``atoms``, in the order of ``atoms.residues``.
-
-    Parameters
-    ----------
-    atoms : MDAnalysis.core.groups.AtomGroup
-        Atoms to measure.
-    fit : MDAnalysis.core.groups.AtomGroup
-        Atoms that are superposed on the reference.
-    reference : MDAnalysis.core.groups.AtomGroup
-        Reference positions of ``atoms | fit`` in index order, from
-        :func:`polyzymd.analyses.reference.reference` with the selection
-        ``"(<atoms>) or (<fit>)"``.
-    frames : numpy.ndarray
-        Trajectory frame indices to use.
-    about_reference : bool, optional
-        Measure deviations from the reference positions instead of
-        fluctuations about the mean.
-
-    Returns
-    -------
-    numpy.ndarray
-        One value per residue of ``atoms``.
-
-    Raises
-    ------
-    ProtocolError
-        If ``reference`` does not hold one position per atom of ``atoms | fit``.
+    trajectory. The superposed positions of ``atoms`` are then read once to
+    give, per atom, the root mean square deviation from the reference
+    position, ``MDAnalysis.analysis.rms.RMSF`` (the fluctuation about the
+    mean position), and the distance of the mean position from the
+    reference position. The squared deviation equals the squared RMSF plus
+    the squared offset for every atom.
     """
     import MDAnalysis as mda
     import numpy as np
@@ -195,11 +169,89 @@ def rmsf(atoms: Any, fit: Any, reference: Any, frames: Any, about_reference: boo
     coordinates = np.array([group.positions for _ in atoms.universe.trajectory[frames]], float)
     target = reference.positions.astype(float)
     moved = superpose(coordinates, where_fit, target[where_fit])[:, where]
-    if about_reference:
-        per_atom = np.sqrt(np.mean(np.sum((moved - target[where]) ** 2, axis=2), axis=0))
-    else:
-        copy = mda.Merge(atoms)
-        copy.load_new(moved.astype(np.float32), format=MemoryReader)
-        per_atom = RMSF(copy.atoms).run().results.rmsf
+    deviation = np.sqrt(np.mean(np.sum((moved - target[where]) ** 2, axis=2), axis=0))
+    copy = mda.Merge(atoms)
+    copy.load_new(moved.astype(np.float32), format=MemoryReader)
+    fluctuation = RMSF(copy.atoms).run().results.rmsf
+    offset = np.linalg.norm(moved.mean(axis=0) - target[where], axis=1)
+    return deviation, fluctuation, offset
+
+
+def _per_residue(atoms: Any, per_atom: Any) -> Any:
+    """Average per-atom values over the atoms of each residue, in the order of ``atoms.residues``."""
+    import numpy as np
+
     _, residue = np.unique(atoms.resindices, return_inverse=True)
     return np.bincount(residue, weights=per_atom) / np.bincount(residue)
+
+
+def rmsf(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
+    """Return the RMSF in Å of each residue of ``atoms`` over ``frames``.
+
+    Every frame is superposed on the reference by its ``fit`` atoms, and
+    ``MDAnalysis.analysis.rms.RMSF`` gives each atom's root mean square
+    fluctuation about its mean position over the frames, as ``gmx rmsf -o``
+    does. The reference only decides what the frames are superposed on.
+    Each residue's value is the mean over its atoms in ``atoms``, in the
+    order of ``atoms.residues``.
+
+    Parameters
+    ----------
+    atoms : MDAnalysis.core.groups.AtomGroup
+        Atoms to measure.
+    fit : MDAnalysis.core.groups.AtomGroup
+        Atoms that are superposed on the reference.
+    reference : MDAnalysis.core.groups.AtomGroup
+        Reference positions of ``atoms | fit`` in index order, from
+        :func:`polyzymd.analyses.reference.reference` with the selection
+        ``"(<atoms>) or (<fit>)"``.
+    frames : numpy.ndarray
+        Trajectory frame indices to use.
+
+    Returns
+    -------
+    numpy.ndarray
+        One value per residue of ``atoms``.
+
+    Raises
+    ------
+    ProtocolError
+        If ``reference`` does not hold one position per atom of ``atoms | fit``.
+    """
+    return _per_residue(atoms, _superposed_deviations(atoms, fit, reference, frames)[1])
+
+
+def rms_deviation(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
+    """Return each residue's root mean square deviation in Å from the reference over ``frames``.
+
+    After the superposition of :func:`rmsf`, each atom's value is
+    ``sqrt(<|x(t) - x_ref|^2>)``, as ``gmx rmsf -od`` gives, and the legacy
+    rmsf plugin gave in external mode. Each residue's value is the mean over
+    its atoms. The arguments are those of :func:`rmsf`.
+    """
+    return _per_residue(atoms, _superposed_deviations(atoms, fit, reference, frames)[0])
+
+
+#: Names of the rows that :func:`rms_decomposition` returns, in order.
+RMS_PARTS = ("rms_deviation", "rmsf", "offset")
+
+
+def rms_decomposition(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
+    """Return each residue's RMS deviation, RMSF and offset from one pass over ``frames``.
+
+    The rows, named in :data:`RMS_PARTS`, are the values of
+    :func:`rms_deviation` and :func:`rmsf`, and the offset, the distance in
+    Å of each atom's mean position from its reference position. For every
+    atom the squared deviation is the squared RMSF plus the squared offset.
+    Each residue's value is the mean over its atoms. The arguments are those
+    of :func:`rmsf`.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(3, n_residues)``.
+    """
+    import numpy as np
+
+    parts = _superposed_deviations(atoms, fit, reference, frames)
+    return np.vstack([_per_residue(atoms, values) for values in parts])
