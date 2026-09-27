@@ -364,12 +364,11 @@ place only comparison-wide references in this directory.
         click.echo("Next steps:")
         click.echo(f"  1. Edit {_display_path(config_path)}")
         click.echo("     - Add your simulation conditions (paths to config.yaml files)")
-        click.echo("     - Define catalytic_triad for active site analysis")
+        click.echo("     - Define contacts for polymer-protein contact analysis")
         click.echo()
         click.echo(f"  2. cd {_display_path(project_dir)}")
         click.echo("  3. Run comparisons:")
         click.echo("     polyzymd compare run rmsf      # Compare flexibility")
-        click.echo("     polyzymd compare run catalytic_triad  # Compare triad geometry")
         click.echo("     polyzymd compare run contacts  # Compare polymer-protein contacts")
         click.echo()
         click.echo("  On an HPC cluster, submit as SLURM jobs instead:")
@@ -512,6 +511,8 @@ def _exit_retired(name: str, config_file: Path, eq_time: str | None) -> None:
     """Exit 1 with the polyzymd analyze command that replaces compare run for ``name``."""
     import shlex
 
+    from polyzymd.config.comparison import PAIR_ANALYSES
+
     config = load_comparison_config(config_file)
     command = [f"polyzymd analyze {name}"]
     for condition in config.conditions:
@@ -522,6 +523,8 @@ def _exit_retired(name: str, config_file: Path, eq_time: str | None) -> None:
     if len({tuple(condition.replicates) for condition in config.conditions}) == 1:
         command.append(f"--replicates {','.join(map(str, config.conditions[0].replicates))}")
     command.append(f"--eq {eq_time or config.defaults.equilibration_time}")
+    if name in PAIR_ANALYSES:
+        command.append("--set pairs=<pairs.yaml>")
     click.echo(f"Error: {name} no longer runs through 'polyzymd compare run'.", err=True)
     click.echo(f"fix: {' '.join(command)}", err=True)
     sys.exit(1)
@@ -569,7 +572,7 @@ def run_comparison(
     \b
     Examples:
         polyzymd compare run rmsf
-        polyzymd compare run catalytic_triad --eq-time 10ns
+        polyzymd compare run contacts --eq-time 10ns
         polyzymd compare run contacts --format markdown
         polyzymd compare run rmsf --format agent
         polyzymd compare run --list
@@ -713,7 +716,7 @@ def run_comparison(
     "analysis_type",
     type=str,
     default=None,
-    help="Generate plots for specific analysis type only (e.g., 'rmsf', 'catalytic_triad').",
+    help="Generate plots for specific analysis type only (e.g., 'rmsf', 'contacts').",
 )
 @click.option(
     "--list-available",
@@ -749,7 +752,7 @@ def plot_all(
     \b
     Examples:
         polyzymd compare plot-all -f comparison.yaml
-        polyzymd compare plot-all -f comparison.yaml -a catalytic_triad
+        polyzymd compare plot-all -f comparison.yaml -a contacts
         polyzymd compare plot-all --list-available
     """
     warn_if_wrong_pixi_env("compare plot-all", ANALYSIS_PIXI_ENVS)

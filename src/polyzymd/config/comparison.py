@@ -122,12 +122,20 @@ class ConditionConfig(BaseModel):
 #: Analyses that left the plugin system, with the function in
 #: polyzymd.analyses.functions that measures each one. A comparison.yaml block
 #: for one of them is ignored with :data:`RETIRED_PLUGIN_WARNING` instead of failing.
-RETIRED_PLUGINS = {"rg": "radius_of_gyration", "rmsd": "rmsd"}
+RETIRED_PLUGINS = {
+    "rg": "radius_of_gyration",
+    "rmsd": "rmsd",
+    "distances": "pair_distance",
+    "catalytic_triad": "pair_distance",
+}
+
+#: Retired analyses that measure pairs, whose command needs the pairs list.
+PAIR_ANALYSES = ("distances", "catalytic_triad")
 
 RETIRED_PLUGIN_WARNING = (
     "comparison.yaml has a {section}.{name} block, which is ignored: {name} no longer runs "
-    "through compare. Run polyzymd analyze {name} -c <config.yaml> --eq <time>, or in Python "
-    "study.timeseries with polyzymd.analyses.functions.{function}."
+    "through compare. Run polyzymd analyze {name} -c <config.yaml> --eq <time>{pairs}, or in "
+    "Python study.timeseries with polyzymd.analyses.functions.{function}."
 )
 
 
@@ -136,7 +144,12 @@ def _warn_retired(section: str, name: str) -> None:
     import warnings
 
     warnings.warn(
-        RETIRED_PLUGIN_WARNING.format(section=section, name=name, function=RETIRED_PLUGINS[name]),
+        RETIRED_PLUGIN_WARNING.format(
+            section=section,
+            name=name,
+            function=RETIRED_PLUGINS[name],
+            pairs=" --set pairs=<pairs.yaml>" if name in PAIR_ANALYSES else "",
+        ),
         UserWarning,
         stacklevel=3,
     )
@@ -532,9 +545,6 @@ class PlotSettings(BaseModel):
 
           rmsf:
             highlight_residues: [77, 133, 156]
-
-          catalytic_triad:
-            generate_2d_kde: true
     """
 
     model_config = {"extra": "allow"}
