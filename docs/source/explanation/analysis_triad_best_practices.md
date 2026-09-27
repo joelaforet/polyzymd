@@ -187,7 +187,9 @@ experimental activity or other mechanistic validation.
 `polyzymd analyze catalytic_triad` draws, for each pair, the distribution of its
 per-frame distance in every condition, pooled over replicates with one thin
 curve per replicate and the threshold marked (`triad_kde_<pair>`), and a bar
-chart of each fraction with every replicate value shown (`triad_fraction_<result>`).
+chart of each fraction with every replicate value shown (`triad_fraction_<result>`),
+plus `triad_threshold_bars`, every pair's fraction and the all-pairs fraction in one
+chart, and `triad_kde_panel`, one distribution panel per pair.
 Use the distributions to see whether a difference in a fraction comes from a
 broad shift, a small subpopulation, or one limiting pair. The figures are
 interpretive aids; they do not replace statistical uncertainty or structural

@@ -46,5 +46,5 @@ and records the folder under `output_paths.figures` in the JSON report;
 |---|---|
 | `rg` | `rg_timeseries` (every replicate against time), `rg_comparison` (condition means with every replicate value), `rg_distribution` (per-frame distribution) |
 | `rmsd` | `rmsd_timeseries`, `rmsd_comparison` |
-| `distances` | `distance_kde_<pair>` for each pair with its threshold, and `distance_fraction_<result>` for each fraction below threshold |
-| `catalytic_triad` | `triad_kde_<pair>` for each pair with its threshold, and `triad_fraction_<result>` for `simultaneous` and each pair's fraction |
+| `distances` | `distance_kde_<pair>` for each pair with its threshold, `distance_fraction_<result>` for each fraction below threshold, and the grouped `distance_threshold_bars` (every pair's fraction) and `distance_kde_panel` (one panel per pair) |
+| `catalytic_triad` | `triad_kde_<pair>` for each pair with its threshold, `triad_fraction_<result>` for `simultaneous` and each pair's fraction, and the grouped `triad_threshold_bars` (each pair's fraction, then all pairs) and `triad_kde_panel` (one panel per pair) |

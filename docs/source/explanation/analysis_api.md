@@ -316,6 +316,18 @@ bar at each condition's mean with its 95 percent Student t interval and every
 replicate value as a point. Each figure carries a footnote naming the interval,
 the number of replicates and the production window.
 
+Several results that share a unit can go in one figure:
+
+```python
+pz.plot_values([ser_his_below, his_asp_below, simultaneous], labels=["Ser-His", "His-Asp", "All pairs"])
+pz.plot_distributions([ser_his, his_asp], thresholds=[3.5, 3.5])
+```
+
+`pz.plot_values` draws one group of bars per result, one bar per condition, with
+the same intervals, replicate points and footnote. `pz.plot_distributions` draws
+one panel per series with a shared axis and each panel's own threshold. Results
+with different units are refused, because they cannot share an axis.
+
 The figures are drawn from the stored results, so no trajectory is read. They
 are written to a `figures/` folder next to `polyzymd_results/`, or to
 `output_dir=`, in the format and style of the `PlotSettings` passed as
