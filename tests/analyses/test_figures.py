@@ -53,6 +53,15 @@ def rg(atoms):
     return atoms.radius_of_gyration()
 
 
+CALLS: list[int] = []
+
+
+def counted_rg(atoms):
+    """Mass-weighted radius of gyration of ``atoms``, counting each call in ``CALLS``."""
+    CALLS.append(1)
+    return atoms.radius_of_gyration()
+
+
 @pytest.fixture()
 def configs(tmp_path: Path) -> dict[str, Path]:
     """Two conditions of three replicates, B larger than A by one Å."""
@@ -369,3 +378,22 @@ class TestReflectedKDE:
         assert "corrected by reflection (Schuster 1985; Silverman 1986)" in _footnote(fig)
         series.plot_distribution(output_dir=tmp_path)
         assert "reflection" not in _footnote(figures["rg_distribution"])
+
+
+def test_new_bounds_reuse_the_stored_series_and_update_its_record(configs, tmp_path) -> None:
+    """Bounds change only the drawing, so a stored series is reused and its record updated."""
+    study = pz.Study.from_configs(configs, equilibration=EQUILIBRATION)
+    arguments = (counted_rg, pz.select("all"))
+    CALLS.clear()
+    first = study.timeseries(*arguments, unit="A", name="rg", output_dir=tmp_path)
+    measured = len(CALLS)
+    assert measured == 6 * 7
+    again = study.timeseries(
+        *arguments, unit="A", name="rg", output_dir=tmp_path, bounds=(0.0, None)
+    )
+    assert len(CALLS) == measured and again.bounds == (0.0, None)
+    for label in ("A", "B"):
+        for old, new in zip(first.series[label], again.series[label], strict=True):
+            assert np.array_equal(old.values, new.values)
+            record = json.loads((new.path / "record.json").read_text())
+            assert record["bounds"] == [0, None] and "versions" in record

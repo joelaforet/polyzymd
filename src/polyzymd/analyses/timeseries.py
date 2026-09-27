@@ -250,7 +250,9 @@ def run_timeseries(
     the equilibration window, the frames, the times, the unit and the
     PolyzyMD, MDAnalysis, NumPy and Python versions. A stored series is read
     back instead of measured when every field of its record except the
-    versions equals the new one. A
+    versions and the bounds equals the new one. The bounds change only how
+    a distribution is drawn, so a reused series gets the bounds of this call
+    written into its record. A
     :func:`~polyzymd.analyses.reference.reference` argument is built once per
     replicate before its frames are measured, and the production frame it
     chose, if any, is stored under ``chosen``, which is not compared either.
@@ -305,7 +307,6 @@ def run_timeseries(
             "kwargs": {key: _argument_record(value) for key, value in kwargs.items()},
         },
         "unit": unit,
-        "bounds": list(bounds),
     }
     series: dict[str, list[ReplicateSeries]] = {}
     for condition in study:
@@ -337,9 +338,16 @@ def run_timeseries(
                     frames=replicate.frames,
                     times=replicate.times,
                 )
+                stored = {**record, "bounds": list(bounds), "chosen": chosen}
                 (folder / "record.json").write_text(
-                    json.dumps({**record, "chosen": chosen, "versions": _versions()}, indent=1)
+                    json.dumps({**stored, "versions": _versions()}, indent=1)
                 )
+            else:
+                stored = json.loads((folder / "record.json").read_text())
+                if stored.get("bounds") != list(bounds):
+                    (folder / "record.json").write_text(
+                        json.dumps({**stored, "bounds": list(bounds)}, indent=1)
+                    )
             series[condition.label].append(
                 ReplicateSeries(
                     condition.label,
@@ -366,13 +374,14 @@ def _replicate_record(base: dict[str, Any], replicate: Replicate) -> dict[str, A
 
 
 def _stored_values(folder: Path, record: dict[str, Any]) -> np.ndarray | None:
-    """Return the stored values when the stored record matches, apart from versions and chosen."""
+    """Return the stored values when the stored record matches, apart from versions, chosen and bounds."""
     import numpy as np
 
     try:
         stored = json.loads((folder / "record.json").read_text())
         stored.pop("versions", None)
         stored.pop("chosen", None)
+        stored.pop("bounds", None)
         if stored != record:
             return None
         with np.load(folder / "series.npz") as data:
