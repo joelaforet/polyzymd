@@ -343,6 +343,21 @@ class TestSummaryAndCompare:
         # The untestable row takes no part in the correction.
         assert testable.p_adjusted == pytest.approx(testable.p)
 
+    def test_family_size_counts_the_tests_corrected_together(self) -> None:
+        """Each outcome is one family: the conditions compared with the control."""
+        values = replicate_values(
+            {"A": [0.0, 0.0], "B": [0.0, 0.0], "C": [1.0, 2.0], "D": [3.0, 5.0]}
+        )
+        report = values.compare()
+        untestable, c_row, d_row = report.pairwise
+        assert untestable.family_size is None
+        assert c_row.family_size == d_row.family_size == 2
+        lines = report.to_agent_text().splitlines()
+        assert any(
+            line.startswith("A vs C") and "correction BH  family 2" in line for line in lines
+        )
+        assert not any(line.startswith("A vs B") and "family" in line for line in lines)
+
     def test_conditions_and_control_arguments(self) -> None:
         values = replicate_values({"A": [1.0, 2.0], "B": [3.0, 4.0], "C": [5.0, 6.0]})
         report = values.compare(control="B", conditions=["C"])
