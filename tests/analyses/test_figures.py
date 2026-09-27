@@ -24,6 +24,7 @@ from scipy.stats import gaussian_kde
 
 import polyzymd as pz
 from polyzymd.analyses.exceptions import ProtocolError
+from polyzymd.analyses.figures import reflected_kde
 from polyzymd.analyses.shared import plotting
 from polyzymd.analyses.shared.statistics import mean_sem_ci
 from polyzymd.analyses.timeseries import _safe
@@ -83,7 +84,10 @@ def figures(monkeypatch) -> dict[str, object]:
         return original(fig, output_path, plot_settings, close=False)
 
     monkeypatch.setattr(plotting, "save_figure", keep)
-    return saved
+    yield saved
+    import matplotlib.pyplot as plt
+
+    plt.close("all")
 
 
 def _footnote(fig) -> str:
@@ -317,3 +321,51 @@ def test_importing_polyzymd_does_not_import_matplotlib() -> None:
         "sys.exit('matplotlib' in sys.modules)"
     )
     assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
+
+
+class TestReflectedKDE:
+    """Boundary correction by reflection (Schuster 1985; Silverman 1986, section 2.10)."""
+
+    @staticmethod
+    def _bandwidth(values: np.ndarray) -> float:
+        return gaussian_kde(values).factor * float(np.std(values, ddof=1))
+
+    def test_lower_bound_keeps_the_density_inside_the_support(self) -> None:
+        """A half-normal sample gives a curve from 0 that integrates to 1 and is plain far away."""
+        values = np.abs(np.random.default_rng(1).normal(size=2000))
+        grid, density = reflected_kde(values, (0.0, None), points=20001)
+        assert grid[0] == 0.0 and (density >= 0).all()
+        assert np.trapezoid(density, grid) == pytest.approx(1.0, abs=1e-3)
+        far = grid > values.min() + 8 * self._bandwidth(values)
+        assert np.allclose(density[far], gaussian_kde(values)(grid[far]), rtol=0, atol=1e-12)
+        assert np.trapezoid(gaussian_kde(values)(grid), grid) < 0.99
+
+    def test_upper_bound_and_far_or_missing_bounds(self) -> None:
+        """An upper bound caps the grid; a far bound or no bound leaves the plain KDE."""
+        values = 1.0 - np.abs(np.random.default_rng(2).normal(scale=0.1, size=2000))
+        grid, density = reflected_kde(values, (None, 1.0), points=20001)
+        assert grid[-1] == 1.0 and np.trapezoid(density, grid) == pytest.approx(1.0, abs=1e-3)
+        far = np.random.default_rng(3).normal(loc=20.0, size=500)
+        width = 3 * self._bandwidth(far)
+        plain_grid = np.linspace(far.min() - width, far.max() + width, 200)
+        for bounds in ((0.0, None), (None, None)):
+            grid, density = reflected_kde(far, bounds)
+            assert np.array_equal(grid, plain_grid)
+            assert np.allclose(density, gaussian_kde(far)(plain_grid), rtol=0, atol=1e-12)
+
+    def test_distribution_figure_uses_the_series_bounds(self, series, tmp_path, figures) -> None:
+        """A series with bounds (0, None) is drawn from its reflected KDE with the footnote."""
+        assert series.bounds == (None, None)
+        record = json.loads((series.series["A"][0].path / "record.json").read_text())
+        assert record["bounds"] == [None, None]
+        bounded = series.transform(lambda values: values - 1.0, name="shifted", bounds=(0.0, None))
+        assert bounded.transform(lambda values: values, name="same").bounds == (0.0, None)
+        bounded.plot_distribution(output_dir=tmp_path)
+        fig = figures["shifted_distribution"]
+        pooled = np.concatenate([item.values for item in bounded.series["A"]])
+        thick = next(line for line in fig.axes[0].get_lines() if line.get_label() == "A (n = 3)")
+        grid, density = reflected_kde(pooled, (0.0, None))
+        assert np.array_equal(thick.get_xdata(), grid) and np.allclose(thick.get_ydata(), density)
+        assert "corrected by reflection (Schuster 1985; Silverman 1986)" in _footnote(fig)
+        series.plot_distribution(output_dir=tmp_path)
+        assert "reflection" not in _footnote(figures["rg_distribution"])

@@ -236,6 +236,7 @@ def run_timeseries(
     name: str | None = None,
     recompute: bool = False,
     output_dir: str | Path | None = None,
+    bounds: tuple[float | None, float | None] = (None, None),
     **kwargs: Any,
 ) -> Timeseries:
     """Measure ``function`` on every production frame of every replicate.
@@ -273,6 +274,10 @@ def run_timeseries(
         Measure every replicate even when a matching stored series exists.
     output_dir : str or Path, optional
         Folder that holds ``polyzymd_results``. Defaults to the current directory.
+    bounds : tuple of (float or None, float or None), optional
+        Lowest and highest value the quantity can take, ``None`` for no
+        limit, such as ``(0.0, None)`` for a distance. Recorded with the
+        result and used to correct distribution figures at the limits.
     **kwargs
         Keyword arguments of ``function``, recorded like ``args``.
 
@@ -300,6 +305,7 @@ def run_timeseries(
             "kwargs": {key: _argument_record(value) for key, value in kwargs.items()},
         },
         "unit": unit,
+        "bounds": list(bounds),
     }
     series: dict[str, list[ReplicateSeries]] = {}
     for condition in study:
@@ -344,7 +350,7 @@ def run_timeseries(
                     folder,
                 )
             )
-    return Timeseries(name, unit, study, series, root)
+    return Timeseries(name, unit, study, series, root, tuple(bounds))
 
 
 def _replicate_record(base: dict[str, Any], replicate: Replicate) -> dict[str, Any]:
@@ -388,6 +394,8 @@ class Timeseries:
         Each condition's replicate series, in replicate order.
     path : Path
         Folder the series are stored under.
+    bounds : tuple of (float or None, float or None)
+        Lowest and highest value the quantity can take, ``None`` for no limit.
     """
 
     def __init__(
@@ -397,8 +405,10 @@ class Timeseries:
         study: Study,
         series: dict[str, list[ReplicateSeries]],
         path: Path,
+        bounds: tuple[float | None, float | None] = (None, None),
     ) -> None:
         self.name, self.unit, self.study, self.series, self.path = name, unit, study, series, path
+        self.bounds = bounds
 
     def transform(
         self,
@@ -406,6 +416,7 @@ class Timeseries:
         *others: Timeseries,
         unit: Any = ...,
         name: str | None = None,
+        bounds: Any = ...,
         **kwargs: Any,
     ) -> Timeseries:
         """Compute a new series from the stored values, without reading a trajectory.
@@ -432,6 +443,9 @@ class Timeseries:
             Unit of the new values. Defaults to the unit of this series.
         name : str, optional
             Result name. Defaults to the function's ``__name__`` and this name.
+        bounds : tuple of (float or None, float or None), optional
+            Lowest and highest value of the new quantity. Defaults to the
+            bounds of this series.
         **kwargs
             Keyword arguments of ``function``, recorded with the result.
 
@@ -450,12 +464,14 @@ class Timeseries:
 
         name = name or f"{getattr(function, '__name__', 'transform').strip('<>')}_{self.name}"
         unit = self.unit if unit is ... else unit
+        bounds = self.bounds if bounds is ... else tuple(bounds)
         root = self.path.parent / _safe(name)
         base = {
             "name": name,
             "transform": _function_record(function),
             "kwargs": {key: _argument_record(value) for key, value in kwargs.items()},
             "unit": unit,
+            "bounds": list(bounds),
         }
         series: dict[str, list[ReplicateSeries]] = {}
         for condition, items in self.series.items():
@@ -495,7 +511,7 @@ class Timeseries:
                         condition, item.replicate, values, item.frames, item.times, folder
                     )
                 )
-        return Timeseries(name, unit, self.study, series, root)
+        return Timeseries(name, unit, self.study, series, root, bounds)
 
     def plot(
         self,
