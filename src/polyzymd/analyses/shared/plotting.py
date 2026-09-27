@@ -1493,16 +1493,20 @@ def add_uncertainty_footnote(
     error_bar: str = "ci95",
     n_replicates: int | None = None,
     equilibration: str | None = None,
+    drawn: str = "Error bars",
+    points: str = "Points are per-replicate values",
 ) -> str:
     """Write the sentence saying what a figure's error bars mean, and return it.
 
     Grossfield et al. (2018) ask that every figure describe the meaning and
-    basis of its uncertainties. This is that sentence.
+    basis of its uncertainties. This is that sentence. ``drawn`` names the
+    mark that shows the interval, such as ``"Band"``, and ``points`` says
+    what the per-replicate marks are.
     """
     what = (
-        "Error bars: 1 SEM (not a 95% interval)"
+        f"{drawn}: 1 SEM (not a 95% interval)"
         if error_bar == "sem"
-        else "Error bars: 95% CI (Student t)"
+        else f"{drawn}: 95% CI (Student t)"
     )
     across = (
         f" across n = {n_replicates} replicates"
@@ -1510,7 +1514,7 @@ def add_uncertainty_footnote(
         else " across replicates"
     )
     window = f"; production window t >= {equilibration}" if equilibration else ""
-    text = f"{what}{across}{window}. Points are per-replicate values."
+    text = f"{what}{across}{window}. {points}."
     fig.text(
         0.01,
         0.01,

@@ -497,6 +497,48 @@ class Timeseries:
                 )
         return Timeseries(name, unit, self.study, series, root)
 
+    def plot(
+        self,
+        output_dir: str | Path | None = None,
+        name: str | None = None,
+        plot_settings: Any = None,
+    ) -> Path:
+        """Draw every replicate's series against time, with each condition's mean.
+
+        See :func:`polyzymd.analyses.figures.plot_timeseries`. The figure goes
+        to ``<output_dir>/<name>.<format>``; ``output_dir`` defaults to the
+        ``figures`` folder next to ``polyzymd_results`` and ``name`` to
+        ``<name>_timeseries``. ``plot_settings`` is a
+        :class:`~polyzymd.config.comparison.PlotSettings`, by default its
+        defaults. Returns the path of the figure file.
+        """
+        from polyzymd.analyses.figures import plot_timeseries
+
+        folder = output_dir or self.path.parent.parent / "figures"
+        return plot_timeseries(self, folder, name or f"{self.name}_timeseries", plot_settings)
+
+    def plot_distribution(
+        self,
+        threshold: float | None = None,
+        output_dir: str | Path | None = None,
+        name: str | None = None,
+        title: str | None = None,
+        plot_settings: Any = None,
+    ) -> Path:
+        """Draw the pooled and per-replicate distribution of the values of each condition.
+
+        See :func:`polyzymd.analyses.figures.plot_distribution`. ``threshold``,
+        in the unit of the series, is drawn as a vertical line. ``name``
+        defaults to ``<name>_distribution`` and ``title``, which also labels
+        the x axis, to the series name; the other arguments are those of
+        :meth:`plot`. Returns the path of the figure file.
+        """
+        from polyzymd.analyses.figures import plot_distribution
+
+        folder = output_dir or self.path.parent.parent / "figures"
+        name = name or f"{self.name}_distribution"
+        return plot_distribution(self, folder, name, threshold, title, plot_settings)
+
     def reduce(
         self, how: str | Callable = "mean", *, unit: Any = ..., detect_equilibration: bool = True
     ) -> ReplicateValues:
@@ -586,6 +628,27 @@ class ReplicateValues:
     def values(self) -> dict[str, list[float]]:
         """Each condition's replicate values, in replicate order."""
         return {label: [row[1] for row in rows] for label, rows in self.rows.items()}
+
+    def plot(
+        self,
+        output_dir: str | Path | None = None,
+        name: str | None = None,
+        title: str | None = None,
+        plot_settings: Any = None,
+    ) -> Path:
+        """Draw each condition's mean with its 95 percent interval and every replicate value.
+
+        See :func:`polyzymd.analyses.figures.plot_values`. The figure goes to
+        ``<output_dir>/<name>.<format>``; ``output_dir`` defaults to the
+        ``figures`` folder next to ``polyzymd_results``, ``name`` to
+        ``<source name>_<metric>`` and ``title`` to the source name. Returns
+        the path of the figure file.
+        """
+        from polyzymd.analyses.figures import plot_values
+
+        folder = output_dir or self.source.path.parent.parent / "figures"
+        name = name or f"{self.source.name}_{self.metric}"
+        return plot_values(self, folder, name, title, plot_settings)
 
     def summary(self, conditions: Sequence[str] | None = None) -> ProtocolReport:
         """Give each condition's n, mean, standard error and 95 percent interval.
