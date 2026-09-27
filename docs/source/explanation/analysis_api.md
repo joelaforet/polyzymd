@@ -206,9 +206,14 @@ def mean_lifetime(values, times): ...
 lifetime = contact.reduce(mean_lifetime, unit="ns", bounds=(0.0, None))
 ```
 
-`reduce`, `per_replicate` and the `value=` form of `study.run` all take
-`bounds=(low, high)` for a quantity with a physical limit; use `None` for a
-side with no limit. A reduction named `"fraction"` has the bounds 0 and 1.
+Give a quantity with a physical limit its bounds when you measure it, with
+`study.timeseries(..., bounds=(low, high))`, using `None` for a side with no
+limit; `transform` keeps the bounds of the series it starts from unless you pass
+new ones. The shipped radius of gyration, RMSD and distances are bounded below
+by 0. `reduce` takes the series bounds for `"mean"`, 0 and 1 for `"fraction"`, 0
+and no upper limit for `"std"`, and no bounds for a function of your own, and
+also accepts `bounds=` to set them. Bounds never change a measured value, and
+changing them does not measure a replicate again.
 
 When you want to compute the per-replicate value yourself from the `Universe`,
 use `study.per_replicate`. Your function receives the `Universe` and the
@@ -311,7 +316,10 @@ interval across replicates as a band when the replicates share their frame
 times, and the equilibration window shaded. `Timeseries.plot_distribution`
 draws, for each condition, the Gaussian kernel density estimate of all
 production frames pooled across replicates as a thick line and one thin line
-per replicate, with an optional threshold line. `ReplicateValues.plot` draws a
+per replicate, with an optional threshold line. Near a finite bound of the
+series the estimate is corrected by reflection (Schuster 1985; Silverman 1986,
+section 2.10), so the curve is drawn only within the physical range and still
+integrates to 1. `ReplicateValues.plot` draws a
 bar at each condition's mean with its 95 percent Student t interval and every
 replicate value as a point. Each figure carries a footnote naming the interval,
 the number of replicates and the production window.
@@ -392,6 +400,13 @@ list, with the measurement each one makes and the reduction it uses, is in
 {doc}`../reference/analysis_functions`.
 
 ## References
+
+Schuster, E. F. Incorporating Support Constraints into Nonparametric Estimators
+of Densities. *Commun. Stat. Theory Methods* **1985**, 14 (5), 1123-1136.
+doi:10.1080/03610928508828965
+
+Silverman, B. W. *Density Estimation for Statistics and Data Analysis*; Chapman
+and Hall: London, 1986; Section 2.10.
 
 Bender, R.; Lange, S. Adjusting for Multiple Testing: When and How? *J. Clin.
 Epidemiol.* **2001**, 54 (4), 343-349. doi:10.1016/S0895-4356(00)00314-0

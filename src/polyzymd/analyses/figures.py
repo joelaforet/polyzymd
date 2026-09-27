@@ -148,25 +148,50 @@ def plot_timeseries(
     return _save(fig, output_dir, name, settings)
 
 
-def _density(ax: Any, values: Any, **style: Any) -> None:
-    """Draw a Gaussian KDE of ``values``, or a vertical line when they are all equal.
+def reflected_kde(values: Any, bounds: tuple = (None, None), points: int = 200) -> tuple:
+    """Evaluate a Gaussian KDE of ``values`` that puts no density outside ``bounds``.
 
-    The KDE is ``scipy.stats.gaussian_kde`` with Scott's bandwidth, drawn over
-    the data range extended by three bandwidths, as seaborn's ``kdeplot``
-    draws it.
+    ``f`` is ``scipy.stats.gaussian_kde`` with Scott's bandwidth ``h``. The
+    grid runs from ``min(values) - 3h`` to ``max(values) + 3h``, as seaborn's
+    ``kdeplot`` draws it, cut at each finite bound. At a lower bound ``a``
+    the density is ``f(x) + f(2a - x)``, and at an upper bound ``b`` it gains
+    ``f(2b - x)``, the reflection method of Schuster (1985) and Silverman
+    (1986, section 2.10), so the curve integrates to 1 over the support and
+    equals ``f`` far from a bound.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        The grid and the density on it.
     """
     import numpy as np
     from scipy.stats import gaussian_kde
+
+    values = np.asarray(values, dtype=float)
+    kde = gaussian_kde(values)
+    width = 3.0 * kde.factor * float(np.std(values, ddof=1))
+    low, high = bounds
+    start, stop = values.min() - width, values.max() + width
+    grid = np.linspace(
+        start if low is None else max(low, start), stop if high is None else min(high, stop), points
+    )
+    density = kde(grid)
+    for bound in (low, high):
+        if bound is not None:
+            density += kde(2.0 * bound - grid)
+    return grid, density
+
+
+def _density(ax: Any, values: Any, bounds: tuple, **style: Any) -> None:
+    """Draw :func:`reflected_kde` of ``values``, or a vertical line when they are all equal."""
+    import numpy as np
 
     values = np.asarray(values, dtype=float)
     values = values[np.isfinite(values)]
     if values.size < 2 or np.allclose(values, values[0]):
         ax.axvline(values[0], **style)
         return
-    kde = gaussian_kde(values)
-    width = 3.0 * kde.factor * float(np.std(values, ddof=1))
-    grid = np.linspace(values.min() - width, values.max() + width, 200)
-    ax.plot(grid, kde(grid), **style)
+    ax.plot(*reflected_kde(values, bounds), **style)
 
 
 def plot_distribution(
@@ -205,9 +230,16 @@ def _distribution_axes(ax: Any, source: Timeseries, threshold: float | None, sty
     for label in labels:
         items, color = source.series[label], colors[label]
         for item in items:
-            _density(ax, item.values, color=color, linewidth=0.8, alpha=0.4)
+            _density(ax, item.values, source.bounds, color=color, linewidth=0.8, alpha=0.4)
         pooled = np.concatenate([item.values for item in items])
-        _density(ax, pooled, color=color, linewidth=2.0, label=f"{label} (n = {len(items)})")
+        _density(
+            ax,
+            pooled,
+            source.bounds,
+            color=color,
+            linewidth=2.0,
+            label=f"{label} (n = {len(items)})",
+        )
     if threshold is not None:
         ax.axvline(
             threshold,
@@ -287,7 +319,13 @@ def plot_distributions(
         fig,
         "Thick lines: Gaussian KDE of all replicates' frames pooled; thin lines: each "
         f"replicate; n = replicates; production window t >= "
-        f"{series[0].study[labels[0]].equilibration}.",
+        f"{series[0].study[labels[0]].equilibration}."
+        + (
+            "\nGaussian KDE (Scott bandwidth), evaluated only within the physical support; "
+            "near a bound the estimate is corrected by reflection (Schuster 1985; Silverman 1986)."
+            if any(bound is not None for item in series for bound in item.bounds)
+            else ""
+        ),
     )
     folder = output_dir or series[0].path.parent.parent / "figures"
     return _save(fig, folder, name, settings)

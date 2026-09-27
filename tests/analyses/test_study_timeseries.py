@@ -314,7 +314,22 @@ class TestSummaryAndCompare:
     def test_fraction_interval_past_one_is_flagged(self) -> None:
         report = replicate_values({"A": [1.0, 1.0, 0.0]}, how="fraction").summary()
         assert report.unit is None
-        assert any("fraction bounds" in text for text in report.warnings)
+        assert any("extends past the bounds 0 to 1" in text for text in report.warnings)
+
+    def test_interval_past_the_series_bound_is_flagged(self) -> None:
+        """A mean of a quantity bounded below by 0 warns when its interval crosses 0."""
+        data = {"A": [0.1, 0.1, 3.0]}
+        bounded = replicate_values(data, series_bounds=(0.0, None))
+        assert bounded.bounds == (0.0, None)
+        assert any("extends past the bounds 0 to inf" in t for t in bounded.summary().warnings)
+        assert not any("extends past" in t for t in replicate_values(data).summary().warnings)
+        explicit = replicate_values(data, bounds=(0.0, None))
+        assert any("extends past the bounds 0 to inf" in t for t in explicit.summary().warnings)
+        custom = replicate_values(
+            data, how=lambda values, times: float(values[0]), series_bounds=(0.0, None)
+        )
+        assert custom.bounds == (None, None)
+        assert replicate_values(data, how="std", series_bounds=(0.0, None)).bounds == (0.0, None)
 
     def test_compare_welch_student_bh_and_cohens_d(self) -> None:
         data = {"A": [1.0, 1.2, 1.1], "B": [2.0, 2.4, 2.2], "C": [1.0, 1.3, 1.15]}

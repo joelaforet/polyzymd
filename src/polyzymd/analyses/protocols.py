@@ -523,6 +523,7 @@ def _analyze_function(
         name=name,
         recompute=recompute,
         output_dir=output_dir,
+        bounds=(0.0, None),
     )
     values = series.reduce("mean", detect_equilibration=eq_check)
     report = values.compare() if len(study) > 1 else values.summary()
@@ -706,10 +707,15 @@ def _analyze_pairs(
             name=f"{name}_{pair['label']}",
             recompute=recompute,
             output_dir=output_dir,
+            bounds=(0.0, None),
         )
         below = pair.get("below_label") or f"below {threshold:g} A"
         fraction = distance.transform(
-            functions.all_below, unit=None, name=f"{distance.name}_{below}", thresholds=[threshold]
+            functions.all_below,
+            unit=None,
+            bounds=(0.0, 1.0),
+            name=f"{distance.name}_{below}",
+            thresholds=[threshold],
         )
         results[str(pair["label"])] = (distance, "mean", "mean_distance")
         results[f"{pair['label']} {below}"] = (fraction, "fraction", "fraction_below_threshold")
@@ -720,6 +726,7 @@ def _analyze_pairs(
             functions.all_below,
             *distances[1:],
             unit=None,
+            bounds=(0.0, 1.0),
             name=f"{name}_{SIMULTANEOUS_RUN}",
             thresholds=thresholds,
         )
