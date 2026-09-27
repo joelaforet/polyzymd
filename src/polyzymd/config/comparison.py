@@ -212,7 +212,7 @@ class PluginSettingsContainer(BaseModel):
 # Plot Settings Configuration
 # ============================================================================
 
-# Per-analysis plot settings classes (RMSFPlotSettings, TriadPlotSettings, etc.)
+# Per-analysis plot settings classes (RMSFPlotSettings and others)
 # live in their respective plugin packages at analyses/<name>/_plot_settings.py.
 # Each plugin exposes its plot settings model via
 # Analysis.PlotSettingsModel. PlotSettings.__init__ discovers plugins and

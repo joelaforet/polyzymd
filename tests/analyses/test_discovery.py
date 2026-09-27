@@ -110,9 +110,7 @@ class TestDiscovery:
         analyses = list_analyses()
 
         expected_names = {
-            "catalytic_triad",
             "contacts",
-            "distances",
             "hydrogen_bonds",
             "rmsf",
             "sasa",
@@ -547,5 +545,5 @@ class TestDiscoveryImportCost:
         )
         result = json.loads(completed.stdout.strip().splitlines()[-1])
 
-        assert len(result["names"]) == 7, result["names"]
+        assert len(result["names"]) == 5, result["names"]
         assert result["heavy"] == []

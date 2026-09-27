@@ -3,9 +3,9 @@
 These tests pin three behaviours. Fragment lookups (the shared
 ``require_topology_bonds`` and contacts chain identity) must fail loudly when
 the topology carries no bonds instead of collapsing the selection into a
-single fragment. Pair
-distances must use the minimum image convention against the box of the frame
-they were measured in, which means no rigid-body alignment may run first.
+single fragment. ``functions.pair_distance`` must use the minimum image
+convention against the box of the frame it measures, which is why no
+rigid-body alignment runs first.
 Universe provenance must state which periodic boundary policy was applied.
 """
 
@@ -334,51 +334,16 @@ def _pair_universe() -> Any:
     return universe
 
 
-def _pair_specs(universe: Any) -> list[Any]:
-    """Build one resolved pair specification for the two-atom universe.
-
-    Parameters
-    ----------
-    universe : Any
-        Universe holding the two atoms.
-
-    Returns
-    -------
-    list[Any]
-        Single-element list of pair specifications.
-    """
-
-    from polyzymd.analyses.mda.pair_distance import PairDistanceSpec
-    from polyzymd.analyses.shared.selections import SelectionMode
-
-    return [
-        PairDistanceSpec(
-            label="pair",
-            selection_a="index 0",
-            selection_b="index 1",
-            atoms_a=universe.select_atoms("index 0"),
-            atoms_b=universe.select_atoms("index 1"),
-            mode_a=SelectionMode.SINGLE,
-            mode_b=SelectionMode.SINGLE,
-        )
-    ]
-
-
 @pytest.mark.parametrize(("use_pbc", "expected"), [(True, 2.0), (False, 48.0)])
 def test_pair_distance_minimum_image_matches_known_answer(use_pbc: bool, expected: float) -> None:
     """Minimum image folds the 48 Angstrom separation to 2 Angstrom."""
 
-    from polyzymd.analyses.mda.pair_distance import build_pair_distance_analysis
+    from polyzymd.analyses.functions import pair_distance
 
     universe = _pair_universe()
-    analysis = build_pair_distance_analysis(
-        universe=universe,
-        pairs=_pair_specs(universe),
-        use_pbc=use_pbc,
-    )
-    analysis.run()
+    distance = pair_distance(universe.atoms[[0]], universe.atoms[[1]], pbc=use_pbc)
 
-    np.testing.assert_allclose(analysis.results.distance_matrix[0][0], expected, atol=1e-5)
+    np.testing.assert_allclose(distance, expected, atol=1e-5)
 
 
 def _rotate_about_z(universe: Any, degrees: float) -> None:
@@ -406,115 +371,19 @@ def _rotate_about_z(universe: Any, degrees: float) -> None:
 
 
 def test_rotating_coordinates_breaks_minimum_image_distances() -> None:
-    """A rigid rotation with an unrotated box changes the folded distance."""
+    """A rigid rotation with an unrotated box changes the folded distance.
 
-    from polyzymd.analyses.mda.pair_distance import build_pair_distance_analysis
+    This is why ``functions.pair_distance`` measures the coordinates as loaded,
+    with no alignment step.
+    """
+
+    from polyzymd.analyses.functions import pair_distance
 
     universe = _pair_universe()
     _rotate_about_z(universe, 45.0)
-    analysis = build_pair_distance_analysis(
-        universe=universe,
-        pairs=_pair_specs(universe),
-        use_pbc=True,
-    )
-    analysis.run()
+    distance = pair_distance(universe.atoms[[0]], universe.atoms[[1]])
 
-    assert not math.isclose(float(analysis.results.distance_matrix[0][0]), 2.0, abs_tol=1e-3)
-
-
-def _distance_job_context(universe: Any) -> Any:
-    """Build the minimal replicate context the distance job builder reads.
-
-    Parameters
-    ----------
-    universe : Any
-        Universe to measure.
-
-    Returns
-    -------
-    Any
-        Context object with the attributes ``build_distance_jobs`` uses.
-    """
-
-    from polyzymd.analyses.mda import FrameSelection, MDABackendPolicy
-
-    return SimpleNamespace(
-        universe=universe,
-        replicate=1,
-        frame_selection=FrameSelection(start=0, stop=None, step=1, timestep_ps=1.0),
-        backend_policy=MDABackendPolicy(),
-        universe_policy=SimpleNamespace(metadata={}, provenance=None),
-        replicate_context=SimpleNamespace(condition=SimpleNamespace(label="cond")),
-    )
-
-
-def test_distance_job_does_not_align_and_keeps_minimum_image(monkeypatch) -> None:
-    """The distance job must measure raw coordinates, never aligned ones."""
-
-    from polyzymd.analyses import distances as distances_module
-    from polyzymd.analyses.distances._mda import build_distance_jobs
-    from polyzymd.analyses.shared import alignment as alignment_module
-
-    calls: list[Any] = []
-
-    def _spy(universe: Any, config: Any, **kwargs: Any) -> Any:
-        calls.append(config)
-        _rotate_about_z(universe, 45.0)
-        return universe
-
-    monkeypatch.setattr(alignment_module, "align_trajectory", _spy)
-
-    settings = distances_module.DistancesSettings(
-        pairs=[
-            distances_module.DistancePairSettings(
-                label="pair",
-                selection_a="index 0",
-                selection_b="index 1",
-            )
-        ],
-        use_pbc=True,
-        align_trajectory=True,
-    )
-    universe = _pair_universe()
-
-    with pytest.warns(DeprecationWarning, match="align_trajectory"):
-        jobs = build_distance_jobs(_distance_job_context(universe), settings)
-
-    jobs[0].analysis.run()
-
-    assert calls == []
-    np.testing.assert_allclose(jobs[0].analysis.results.distance_matrix[0][0], 2.0, atol=1e-5)
-
-
-def test_triad_job_does_not_align(monkeypatch) -> None:
-    """The catalytic triad job must not rotate coordinates either."""
-
-    from polyzymd.analyses.catalytic_triad import CatalyticTriadSettings, TriadPairSettings
-    from polyzymd.analyses.catalytic_triad._mda import build_triad_jobs
-    from polyzymd.analyses.shared import alignment as alignment_module
-
-    calls: list[Any] = []
-
-    def _spy(universe: Any, config: Any, **kwargs: Any) -> Any:
-        calls.append(config)
-        return universe
-
-    monkeypatch.setattr(alignment_module, "align_trajectory", _spy)
-
-    universe = _pair_universe()
-    settings = CatalyticTriadSettings(
-        pairs=[
-            TriadPairSettings(
-                label="pair",
-                selection_a="index 0",
-                selection_b="index 1",
-            )
-        ]
-    )
-
-    build_triad_jobs(_distance_job_context(universe), settings)
-
-    assert calls == []
+    assert not math.isclose(distance, 2.0, abs_tol=1e-3)
 
 
 class _ProvenanceLoader:
