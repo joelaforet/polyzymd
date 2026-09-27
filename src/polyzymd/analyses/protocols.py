@@ -139,7 +139,10 @@ class PairwiseReport(BaseModel):
     ``delta`` is ``mean(b) - mean(a)`` and ``cohens_d`` is oriented to match it.
     ``p_adjusted`` of ``None`` means the plugin stored no corrected p value, so
     the row describes a difference rather than deciding it; ``testable`` of
-    ``False`` means a condition has fewer than two replicates.
+    ``False`` means a condition has fewer than two replicates. ``family_size``
+    is the number of tests in the Benjamini-Hochberg family this row was
+    corrected in, one family per outcome, and ``None`` when that is not known
+    or the row was not tested.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -152,6 +155,7 @@ class PairwiseReport(BaseModel):
     p_adjusted: float | None = None
     test: str = "student_t"
     correction: str = "BH"
+    family_size: int | None = None
     cohens_d: float | None = None
     hedges_g: float | None = None
     direction: str = "unchanged"
@@ -1247,8 +1251,9 @@ def _pairwise_line(pair: PairwiseReport) -> str:
         flag = "no_test"
     else:
         flag = "significant" if pair.significant else "not_significant"
+    family = "" if pair.family_size is None else f"  family {pair.family_size}"
     return (
         f"{pair.a} vs {pair.b}  delta {_signed(pair.delta)}  ci95 {_interval(pair.delta_ci95)}"
         f"  p {_num(pair.p)}  p_adj {_num(pair.p_adjusted)}  test {pair.test}"
-        f"  correction {pair.correction}  d {_num(pair.cohens_d)}  {flag}"
+        f"  correction {pair.correction}{family}  d {_num(pair.cohens_d)}  {flag}"
     )

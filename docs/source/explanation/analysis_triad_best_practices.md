@@ -56,6 +56,16 @@ with the Benjamini-Hochberg correction. The per-frame distances of every
 replicate are stored with a record of the selections, thresholds and input
 files, so a second look at another result does not read the trajectory again.
 
+```{tip}
+Decide before looking at the results which outcome carries your conclusion.
+For a claim about catalytic competence, make the simultaneous contact fraction
+the primary outcome and read the individual pairs as supporting evidence. The
+simultaneous fraction already combines the pairs, so it needs no correction
+across them, and each outcome is corrected over its own condition comparisons.
+Reporting whichever outcome happens to give the smallest p value is a form of
+selective reporting that no correction repairs.
+```
+
 ## Thresholds are heuristics, not activity cutoffs
 
 The default threshold of 3.5 Å is a practical heavy-atom cutoff for hydrogen-bond

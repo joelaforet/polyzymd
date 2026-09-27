@@ -270,7 +270,18 @@ quantifying uncertainty in molecular simulations:
 - The 95 percent interval is the mean plus or minus the Student t coverage
   factor for n replicates times the standard error.
 - Tests are Welch's t test by default, or Student's t test, with the
-  Benjamini-Hochberg correction across every test in one comparison.
+  Benjamini-Hochberg correction.
+- The correction family is one outcome: the conditions compared with the
+  control for one quantity, such as one pair's mean distance. A family is the
+  set of tests behind one conclusion (Bender and Lange 2001; Rubin 2021), and a
+  false discovery rate controlled in separate families stays controlled overall
+  (Benjamini and Yekutieli 2001), while pooling unrelated outcomes can hide
+  real effects or inflate weak ones (Efron 2008). Every comparison line gives
+  the raw p value, the adjusted p value and the family size, `family <m>`. If
+  you make one claim from several outcomes together, such as "any of these
+  pairs changed", those outcomes belong in one family; pass their p values to
+  `polyzymd.analyses.shared.inferential_statistics.benjamini_hochberg` yourself
+  and report that family.
 - Grossfield et al. recommend plotting every point when there are fewer than
   10 independent measurements, so every figure shows each replicate value next to
   the mean and interval.
@@ -343,6 +354,20 @@ list, with the measurement each one makes and the reduction it uses, is in
 {doc}`../reference/analysis_functions`.
 
 ## References
+
+Bender, R.; Lange, S. Adjusting for Multiple Testing: When and How? *J. Clin.
+Epidemiol.* **2001**, 54 (4), 343-349. doi:10.1016/S0895-4356(00)00314-0
+
+Benjamini, Y.; Yekutieli, D. The Control of the False Discovery Rate in
+Multiple Testing under Dependency. *Ann. Stat.* **2001**, 29 (4), 1165-1188.
+doi:10.1214/aos/1013699998
+
+Efron, B. Simultaneous Inference: When Should Hypothesis Testing Problems Be
+Combined? *Ann. Appl. Stat.* **2008**, 2 (1), 197-223. doi:10.1214/07-AOAS141
+
+Rubin, M. When to Adjust Alpha during Multiple Testing: A Consideration of
+Disjunction, Conjunction, and Individual Testing. *Synthese* **2021**, 199,
+10969-11000. doi:10.1007/s11229-021-03276-4
 
 Grossfield, A.; Patrone, P. N.; Roe, D. R.; Schultz, A. J.; Siderius, D. W.;
 Zuckerman, D. M. Best Practices for Quantifying Uncertainty and Sampling

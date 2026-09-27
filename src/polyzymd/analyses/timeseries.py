@@ -672,7 +672,13 @@ class ReplicateValues:
                     testable=testable,
                 )
             )
+        # One Benjamini-Hochberg family per outcome: the conditions compared with
+        # the control in this call. A family is the set of tests behind one
+        # conclusion (Bender and Lange 2001), and FDR controlled in separate
+        # families stays controlled overall (Benjamini and Yekutieli 2001).
+        family_size = sum(row.p is not None and math.isfinite(row.p) for row in rows)
         for row, corrected in zip(rows, benjamini_hochberg([row.p for row in rows]), strict=True):
+            row.family_size = family_size if row.p is not None and math.isfinite(row.p) else None
             row.p_adjusted = corrected.adjusted_p_value
             row.significant = corrected.significant
             row.direction = (
