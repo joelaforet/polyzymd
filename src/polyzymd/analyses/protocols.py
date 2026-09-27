@@ -590,6 +590,7 @@ def _analyze_rmsf(
         name="rmsf",
         recompute=recompute,
         output_dir=output_dir,
+        bounds=(0.0, None),
     )
     mean = profile.over_labels("mean")
     values = profile if run == "per_residue" else mean

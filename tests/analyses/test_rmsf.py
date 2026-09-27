@@ -342,3 +342,31 @@ def test_comparison_yaml_rmsf_block_is_retired(tmp_path) -> None:
         PluginSettingsContainer(rmsf={"selection": "name CA"})
     with pytest.warns(UserWarning, match="plot_settings.rmsf block, which is ignored"):
         PlotSettings(rmsf={"highlight_residues": [1]})
+
+
+def test_bounds_warn_per_label_and_carry_to_the_mean(study, tmp_path) -> None:
+    """An interval below the lower bound of one label is flagged at that label only."""
+    from polyzymd.analyses.timeseries import ReplicateValues
+
+    profile = study.per_replicate(
+        _resid_value,
+        pz.universe(),
+        unit="A",
+        labels=lambda u: u.residues.resids,
+        output_dir=tmp_path,
+        bounds=(0.0, None),
+    )
+    assert profile.bounds == (0.0, None) and profile.over_labels().bounds == (0.0, None)
+    rows = {
+        "A": [
+            (1, np.array([0.01, 5.0]), None, None, 7, None, None),
+            (2, np.array([0.5, 5.2]), None, None, 7, None, None),
+        ]
+    }
+    near_zero = ReplicateValues(profile.source, "rmsf", "A", False, rows, [1, 2])
+    near_zero.bounds = (0.0, None)
+    warnings = near_zero.summary(conditions=["A"]).warnings
+    assert [text for text in warnings if "extends past the bounds" in text] == [
+        "the 95 percent interval of condition A at 1 extends past the bounds 0 to inf of rmsf, "
+        "where a t interval is not reliable"
+    ]

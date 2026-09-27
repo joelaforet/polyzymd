@@ -416,6 +416,7 @@ def run_per_replicate(
     name: str | None = None,
     recompute: bool = False,
     output_dir: str | Path | None = None,
+    bounds: tuple[float | None, float | None] = (None, None),
     **kwargs: Any,
 ) -> ReplicateValues:
     """Compute one value, or one labelled array, per replicate with ``function``.
@@ -451,6 +452,10 @@ def run_per_replicate(
         Compute every replicate even when a matching stored result exists.
     output_dir : str or Path, optional
         Folder that holds ``polyzymd_results``. Defaults to the current directory.
+    bounds : tuple of (float or None, float or None), optional
+        Lowest and highest value the quantity can take, ``None`` for no
+        limit, used to warn when a 95 percent interval extends past them.
+        They change no value and are not part of the record.
     **kwargs
         Keyword arguments of ``function``, recorded like ``args``.
 
@@ -523,8 +528,9 @@ def run_per_replicate(
             )
             found[condition.label].append(folder)
     order = None if labels is None else _label_order(rows, missing, name)
-    source = Source(name, unit, study, found, root)
-    return ReplicateValues(source, name, unit, False, rows, order)
+    values = ReplicateValues(Source(name, unit, study, found, root), name, unit, False, rows, order)
+    values.bounds = tuple(bounds)
+    return values
 
 
 def _label_order(rows: dict[str, list[tuple]], missing: float | None, name: str) -> list:
@@ -859,6 +865,7 @@ class ReplicateValues:
             receives one replicate's array in the order of :attr:`labels`.
         metric : str, optional
             Name of the new values. Defaults to ``<how>_<source name>``.
+            ``"mean"`` keeps the bounds of these values, a callable has none.
 
         Returns
         -------
@@ -879,7 +886,9 @@ class ReplicateValues:
             for label, items in self.rows.items()
         }
         metric = metric or f"{name}_{self.source.name}"
-        return ReplicateValues(self.source, metric, self.unit, False, rows)
+        values = ReplicateValues(self.source, metric, self.unit, False, rows)
+        values.bounds = self.bounds if how == "mean" else (None, None)
+        return values
 
     def plot(
         self,
