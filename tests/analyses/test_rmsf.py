@@ -127,7 +127,9 @@ def test_rmsf_deviation_and_offset_equal_aligntraj_and_gmx_definitions() -> None
     )
     assert RMS_PARTS == ("rms_deviation", "rmsf", "offset")
     both = rms_decomposition(atoms, atoms, ref.atoms, frames)
-    assert both == pytest.approx(np.vstack([_residues(e) for e in expected]), abs=1e-5)
+    assert both[:3] == pytest.approx(np.vstack([_residues(e) for e in expected]), abs=1e-5)
+    assert both[3:] == pytest.approx(np.vstack([_residues(e**2) for e in expected]), abs=1e-5)
+    assert np.max(np.abs(both[3] - both[4] - both[5])) < 1e-5
     deviation, fluctuation, offset = _superposed_deviations(atoms, atoms, ref.atoms, frames)
     assert np.max(np.abs(deviation**2 - fluctuation**2 - offset**2)) < 1e-5
     # Fitting on residues 1 and 2 only gives other values than fitting on all atoms.
@@ -300,8 +302,8 @@ def test_cli_rmsf_reports_mean_rmsf_and_draws_the_profile(configs, tmp_path, fig
     result = CliRunner().invoke(analyze_command, arguments)
     assert result.exit_code == 0, result.output
     lines = result.stdout.strip().split("\n")
-    assert lines[0].startswith("# polyzymd analyze rmsf  metric mean_rmsf  unit A  run mean_rmsf")
-    assert lines[-1].startswith("verdict: B larger mean_rmsf than A")
+    assert lines[0].startswith("# polyzymd analyze rmsf  metric core_rmsf  unit A  run core_rmsf")
+    assert lines[-1].startswith("verdict: B larger core_rmsf than A")
     folder = tmp_path / "figures" / "rmsf"
     assert {path.name for path in folder.iterdir()} == {
         "rmsf_profile.png",
@@ -369,16 +371,12 @@ def test_rms_deviation_defaults_to_the_reference_file_and_reports_every_part(
     settings = {"selection": "all", "alignment_selection": "all", "reference_file": str(reference)}
     options = {"equilibration": EQUILIBRATION, "settings": settings, "output_dir": tmp_path}
     report = analyze("rms_deviation", [configs["A"], configs["B"]], plots=False, **options)
-    assert report.analysis == "rms_deviation" and report.metric == "mean_rms_deviation"
-    assert report.all_runs == [
-        "mean_rms_deviation",
-        "mean_rmsf",
-        "mean_offset",
-        "rms_deviation",
-        "rmsf",
-        "offset",
-    ]
-    parts = study.per_replicate(
+    assert report.analysis == "rms_deviation" and report.metric == "core_rms_deviation"
+    parts = ("rms_deviation", "rmsf", "offset")
+    assert report.all_runs == [f"{kind}_{p}" for kind in ("core", "mean") for p in parts] + list(
+        parts
+    )
+    rows = study.per_replicate(
         functions.rms_decomposition,
         pz.select("all"),
         pz.select("all"),
@@ -386,16 +384,55 @@ def test_rms_deviation_defaults_to_the_reference_file_and_reports_every_part(
         unit="A",
         labels=lambda u: u.residues.resids,
         output_dir=tmp_path / "check",
-        parts=functions.RMS_PARTS,
+        parts=functions.RMS_PARTS + functions.MS_PARTS,
     )
-    means = [float(np.mean(v)) for v in parts["rms_deviation"].values["A"]]
-    assert report.conditions[0].replicate_values == pytest.approx(means)
+    core = [float(np.sqrt(np.mean(v))) for v in rows["ms_deviation"].values["A"]]
+    assert report.conditions[0].replicate_values == pytest.approx(core)
+    assert report.provenance.settings["residues"] == {"core": [1, 2, 3]}
+    assert report.provenance.settings["reference_mode"] == "external"
     offset = analyze("rms_deviation", [configs["A"]], plots=False, run="offset", **options)
     assert [row.entry for row in offset.conditions] == ["1", "2", "3"]
-    # Per residue of one-atom residues the identity holds exactly; here residues have two atoms.
-    for label in ("A", "B"):
-        for d, f, o in zip(*(parts[k].values[label] for k in functions.RMS_PARTS)):
-            assert np.all(d**2 >= f**2 + o**2 - 1e-5)
+    mean = analyze("rms_deviation", [configs["A"]], plots=False, run="mean_rmsf", **options)
+    assert mean.conditions[0].replicate_values == pytest.approx(
+        [float(np.mean(v)) for v in rows["rmsf"].values["A"]]
+    )
+
+
+def test_core_values_keep_the_identity_and_follow_core_and_regions(configs, tmp_path) -> None:
+    """core_rms_deviation^2 = core_rmsf^2 + core_offset^2 per replicate, over the chosen residues."""
+    from polyzymd.analyses import analyze
+
+    settings = {"selection": "all", "alignment_selection": "all", "reference_mode": "average"}
+    settings |= {"core": "resid 1 2", "regions": {"tip": "resid 3"}}
+    options = {"equilibration": EQUILIBRATION, "output_dir": tmp_path, "plots": False}
+    got = {
+        run: analyze("rmsf", [configs["A"]], run=run, settings=settings, **options)
+        for run in ("core_rms_deviation", "core_rmsf", "core_offset", "tip_rmsf", "tip_offset")
+    }
+    values = {run: np.array(r.conditions[0].replicate_values) for run, r in got.items()}
+    identity = values["core_rms_deviation"] ** 2 - values["core_rmsf"] ** 2
+    assert np.max(np.abs(identity - values["core_offset"] ** 2)) < 1e-6
+    assert got["tip_rmsf"].provenance.settings["residues"] == {"core": [1, 2], "tip": [3]}
+    study = pz.Study.from_configs({"A": configs["A"]}, equilibration=EQUILIBRATION)
+    rows = study.per_replicate(
+        functions.rms_decomposition,
+        pz.select("all"),
+        pz.select("all"),
+        pz.reference("average", "(all) or (all)", alignment="all"),
+        unit="A",
+        labels=lambda u: u.residues.resids,
+        output_dir=tmp_path / "check",
+        parts=functions.RMS_PARTS + functions.MS_PARTS,
+    )
+    msf = np.array(rows["msf"].values["A"])
+    assert values["core_rmsf"] == pytest.approx(np.sqrt(msf[:, :2].mean(axis=1)))
+    assert values["tip_rmsf"] == pytest.approx(np.sqrt(msf[:, 2]))
+    with pytest.raises(ProtocolError, match="picks no residues"):
+        analyze("rmsf", [configs["A"]], settings={**settings, "core": "resid 9"}, **options)
+    with pytest.raises(ProtocolError, match="regions must map"):
+        analyze(
+            "rmsf", [configs["A"]], settings={**settings, "regions": {"core": "all"}}, **options
+        )
 
 
 def test_comparison_yaml_rmsf_block_is_retired(tmp_path) -> None:

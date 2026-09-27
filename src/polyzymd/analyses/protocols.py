@@ -83,6 +83,8 @@ FUNCTION_ANALYSES = {
         "reference_frame": 1,
         "reference_file": None,
         "highlight_residues": [],
+        "core": None,
+        "regions": {},
     },
     "rms_deviation": {
         "selection": "protein and name CA",
@@ -91,6 +93,8 @@ FUNCTION_ANALYSES = {
         "reference_frame": 1,
         "reference_file": None,
         "highlight_residues": [],
+        "core": None,
+        "regions": {},
     },
     "distances": {"pairs": None, "threshold": 3.5, "use_pbc": True},
     "catalytic_triad": {"pairs": None, "threshold": 3.5, "use_pbc": True},
@@ -184,12 +188,18 @@ class PairwiseReport(BaseModel):
 
 
 class ProtocolProvenance(BaseModel):
-    """Versions, config hashes and output paths of one protocol run."""
+    """Versions, config hashes, output paths and settings of one protocol run.
+
+    ``settings`` holds the analysis settings a function analysis ran with and
+    what they resolved to, such as the residues of an rmsf core, and is empty
+    for a plugin.
+    """
 
     polyzymd_version: str
     mdanalysis_version: str | None = None
     config_hashes: dict[str, str] = Field(default_factory=dict)
     settings_fingerprint: str | None = None
+    settings: dict[str, Any] = Field(default_factory=dict)
     output_paths: dict[str, str] = Field(default_factory=dict)
 
 
@@ -562,18 +572,34 @@ def _analyze_rmsf(
     :func:`~polyzymd.analyses.reference.reference` for both selections
     together, and gives for each residue of ``selection`` its RMS deviation
     from the reference, its RMSF about the mean position and the offset of
-    the mean position from the reference, labelled by residue ID. For
-    ``rms_deviation`` a missing ``reference_mode`` is ``"external"`` when a
-    ``reference_file`` is given and ``"centroid"`` otherwise; ``rmsf``
-    defaults to ``"centroid"``. ``run`` picks the reported result, one of
-    ``mean_rms_deviation``, ``mean_rmsf`` and ``mean_offset``, the mean over
-    residues of each replicate, or ``rms_deviation``, ``rmsf`` and
-    ``offset``, compared residue by residue. It defaults to the mean of the
-    analysis name. With ``plots``, ``<part>_profile`` draws each profile
-    with ``highlight_residues`` marked, ``rms_decomposition`` the three
-    profiles of each condition together, and ``rmsf_comparison`` the three
-    means, into ``<output_dir>/figures/<name>/``.
+    the mean position from the reference, labelled by residue ID, with
+    their mean squares. For ``rms_deviation`` a missing ``reference_mode``
+    is ``"external"`` when a ``reference_file`` is given and ``"centroid"``
+    otherwise; ``rmsf`` defaults to ``"centroid"``.
+
+    Each replicate's headline value of a quantity is the root of its mean
+    square over the core residues, ``core_rms_deviation``, ``core_rmsf`` and
+    ``core_offset``, so ``core_rms_deviation`` squared equals ``core_rmsf``
+    squared plus ``core_offset`` squared (Kuzmanic and Zagrovic 2010,
+    doi:10.1016/j.bpj.2009.11.011). The core is the residues of
+    ``selection`` that the MDAnalysis selection ``core`` also selects, by
+    default all of them, and must be the same in every replicate. Each entry
+    ``region: selection`` of ``regions`` gives ``<region>_rms_deviation``,
+    ``<region>_rmsf`` and ``<region>_offset`` the same way. The frames are
+    superposed by ``alignment_selection`` whatever the core, so fit on the
+    same core atoms to measure motion within that core. ``mean_rmsf`` and
+    the other plain means over every residue are kept for reference, and
+    ``rms_deviation``, ``rmsf`` and ``offset`` are the profiles, compared
+    residue by residue. ``run`` picks the reported result and defaults to
+    ``core_<name>``. The settings, the resolved reference mode and the
+    residues of the core and of each region are stored in
+    ``provenance.settings``. With ``plots``, ``<part>_profile`` draws each
+    profile with ``highlight_residues`` marked, ``rms_decomposition`` the
+    three profiles of each condition together and ``rmsf_comparison`` the
+    three core values, into ``<output_dir>/figures/<name>/``.
     """
+    import numpy as np
+
     from polyzymd.analyses import functions
     from polyzymd.analyses.figures import plot_decomposition, plot_values
     from polyzymd.analyses.reference import reference
@@ -582,13 +608,23 @@ def _analyze_rmsf(
     settings = {**FUNCTION_ANALYSES[name], **(settings or {})}
     atoms, fit = str(settings["selection"]), str(settings["alignment_selection"])
     mode = settings["reference_mode"] or ("external" if settings["reference_file"] else "centroid")
-    runs = [f"mean_{part}" for part in functions.RMS_PARTS] + list(functions.RMS_PARTS)
-    run = run or f"mean_{name}"
+    regions = settings["regions"] or {}
+    if not isinstance(regions, dict) or {"core", "mean"} & set(regions):
+        raise ProtocolError(
+            f"{name}: regions must map names other than core and mean to selections, "
+            f"got {regions!r}.",
+            hint="Pass --set regions='{lid: resid 70-90}'.",
+        )
+    sets = {"core": settings["core"] or "all", **{str(k): str(v) for k, v in regions.items()}}
+    runs = [f"{kind}_{part}" for kind in ("core", *regions, "mean") for part in functions.RMS_PARTS]
+    runs += list(functions.RMS_PARTS)
+    run = run or f"core_{name}"
     if run not in runs:
         raise ProtocolError(
             f"{name}: no result named {run!r}.", hint=f"Use --run with one of {runs}."
         )
-    profiles = study.per_replicate(
+    residues = {key: _residue_ids(study, f"({atoms}) and ({value})") for key, value in sets.items()}
+    rows = study.per_replicate(
         functions.rms_decomposition,
         select(atoms),
         select(fit),
@@ -605,12 +641,28 @@ def _analyze_rmsf(
         recompute=recompute,
         output_dir=output_dir,
         bounds=(0.0, None),
-        parts=functions.RMS_PARTS,
+        parts=functions.RMS_PARTS + functions.MS_PARTS,
     )
-    means = {f"mean_{part}": values.over_labels("mean") for part, values in profiles.items()}
-    results = {**means, **profiles}
+    profiles = {part: rows[part] for part in functions.RMS_PARTS}
+    results = {}
+    for key, labels in residues.items():
+        for part, square in zip(functions.RMS_PARTS, functions.MS_PARTS, strict=True):
+            results[f"{key}_{part}"] = rows[square].over_labels(
+                lambda values: float(np.sqrt(np.mean(values))), f"{key}_{part}", labels
+            )
+            results[f"{key}_{part}"].unit = "A"
+            results[f"{key}_{part}"].bounds = (0.0, None)
+    results.update(
+        {f"mean_{part}": values.over_labels("mean") for part, values in profiles.items()}
+    )
+    results.update(profiles)
     values = results[run]
     report = values.compare() if len(study) > 1 else values.summary()
+    report.provenance.settings = {
+        **settings,
+        "reference_mode": mode,
+        "residues": {key: [int(r) for r in value] for key, value in residues.items()},
+    }
     if plots:
         folder = _figures_dir(output_dir, name)
         highlight = settings["highlight_residues"] or []
@@ -618,10 +670,27 @@ def _analyze_rmsf(
             title = f"Per-residue {part.replace('_', ' ')}"
             profile.plot(folder, f"{part}_profile", title, None, highlight, "Residue")
         plot_decomposition(profiles, folder, "rms_decomposition", None, None, "Residue")
-        labels = [part.replace("_", " ") for part in profiles]
-        plot_values(list(means.values()), labels, folder, "rmsf_comparison", "Mean over residues")
+        core = [results[f"core_{part}"] for part in functions.RMS_PARTS]
+        labels = [part.replace("_", " ") for part in functions.RMS_PARTS]
+        plot_values(core, labels, folder, "rmsf_comparison", "Root mean square over the core")
         report.provenance.output_paths["figures"] = str(folder)
-    return report.model_copy(update={"analysis": name, "run": run, "all_runs": list(results)})
+    return report.model_copy(update={"analysis": name, "run": run, "all_runs": runs})
+
+
+def _residue_ids(study: Any, selection: str) -> list[int]:
+    """Return the residue IDs ``selection`` picks, the same in every replicate of ``study``."""
+    found = {
+        tuple(int(r) for r in replicate.universe().select_atoms(selection).residues.resids)
+        for condition in study
+        for replicate in condition.replicates
+    }
+    if len(found) != 1 or not next(iter(found)):
+        raise ProtocolError(
+            f"The selection {selection!r} picks {'no' if found == {()} else 'different'} "
+            "residues in the replicates.",
+            hint="Choose core and region selections that pick the same residues in every replicate.",
+        )
+    return list(found.pop())
 
 
 def _figures_dir(output_dir: Path | None, name: str) -> Path:

@@ -878,9 +878,12 @@ class ReplicateValues:
         return [(i, str(key)) for i, key in enumerate(self.labels) if str(key) not in skip]
 
     def over_labels(
-        self, how: str | Callable = "mean", metric: str | None = None
+        self,
+        how: str | Callable = "mean",
+        metric: str | None = None,
+        labels: Sequence | None = None,
     ) -> ReplicateValues:
-        """Turn each replicate's labelled array into one number.
+        """Turn each replicate's labelled array, or the entries of some labels, into one number.
 
         Parameters
         ----------
@@ -890,6 +893,9 @@ class ReplicateValues:
         metric : str, optional
             Name of the new values. Defaults to ``<how>_<source name>``.
             ``"mean"`` keeps the bounds of these values, a callable has none.
+        labels : sequence, optional
+            Labels whose entries ``how`` receives, in this order. Defaults to
+            every label.
 
         Returns
         -------
@@ -905,8 +911,17 @@ class ReplicateValues:
                 hint="Use over_labels('mean') on a result computed with labels=.",
             )
         name = how if isinstance(how, str) else getattr(how, "__name__", "reduced")
+        known = {str(key): i for i, key in enumerate(self.labels)}
+        chosen = list(self.labels) if labels is None else list(labels)
+        unknown = [key for key in chosen if str(key) not in known]
+        if unknown or not chosen:
+            raise ProtocolError(
+                f"{self.metric}: labels {unknown or chosen} are not labels of this result.",
+                hint="Pass labels that the result has, such as residue IDs of its selection.",
+            )
+        where = [known[str(key)] for key in chosen]
         rows = {
-            label: [(row[0], float(function(row[1])), *row[2:]) for row in items]
+            label: [(row[0], float(function(row[1][where])), *row[2:]) for row in items]
             for label, items in self.rows.items()
         }
         metric = metric or f"{name}_{self.metric}"

@@ -232,26 +232,33 @@ def rms_deviation(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     return _per_residue(atoms, _superposed_deviations(atoms, fit, reference, frames)[0])
 
 
-#: Names of the rows that :func:`rms_decomposition` returns, in order.
+#: Names of the per-residue means that :func:`rms_decomposition` returns first.
 RMS_PARTS = ("rms_deviation", "rmsf", "offset")
+
+#: Names of the per-residue mean squares that :func:`rms_decomposition` returns after them.
+MS_PARTS = ("ms_deviation", "msf", "ms_offset")
 
 
 def rms_decomposition(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
-    """Return each residue's RMS deviation, RMSF and offset from one pass over ``frames``.
+    """Return each residue's RMS deviation, RMSF and offset, and their mean squares, in one pass.
 
-    The rows, named in :data:`RMS_PARTS`, are the values of
+    The first three rows, named in :data:`RMS_PARTS`, are the values of
     :func:`rms_deviation` and :func:`rmsf`, and the offset, the distance in
-    Å of each atom's mean position from its reference position. For every
-    atom the squared deviation is the squared RMSF plus the squared offset.
-    Each residue's value is the mean over its atoms. The arguments are those
-    of :func:`rmsf`.
+    Å of each atom's mean position from its reference position, each
+    averaged over the residue's atoms. The last three, named in
+    :data:`MS_PARTS`, are the means over the residue's atoms of the squares
+    of the same per-atom values, in Å². For every atom the squared deviation
+    is the squared RMSF plus the squared offset, so ``ms_deviation`` equals
+    ``msf + ms_offset`` for every residue. The arguments are those of
+    :func:`rmsf`.
 
     Returns
     -------
     numpy.ndarray
-        Shape ``(3, n_residues)``.
+        Shape ``(6, n_residues)``.
     """
     import numpy as np
 
     parts = _superposed_deviations(atoms, fit, reference, frames)
-    return np.vstack([_per_residue(atoms, values) for values in parts])
+    means = [_per_residue(atoms, values) for values in parts]
+    return np.vstack(means + [_per_residue(atoms, values**2) for values in parts])
