@@ -565,7 +565,12 @@ class Timeseries:
         return plot_distribution(self, folder, name, threshold, title, plot_settings)
 
     def reduce(
-        self, how: str | Callable = "mean", *, unit: Any = ..., detect_equilibration: bool = True
+        self,
+        how: str | Callable = "mean",
+        *,
+        unit: Any = ...,
+        bounds: Any = ...,
+        detect_equilibration: bool = True,
     ) -> ReplicateValues:
         """Turn each replicate's series into one value.
 
@@ -579,6 +584,11 @@ class Timeseries:
         unit : str or None, optional
             Unit of the reduced value. Defaults to the series unit, or
             ``None`` for ``"fraction"``.
+        bounds : tuple of (float or None, float or None), optional
+            Lowest and highest value the reduced quantity can take, used to
+            warn when a 95 percent interval extends past them. Defaults to
+            the series bounds for ``"mean"``, ``(0, 1)`` for ``"fraction"``,
+            ``(0, None)`` for ``"std"`` and no bounds for a callable.
         detect_equilibration : bool, optional
             Find the start of the equilibrated region of each series with
             pymbar, as a diagnostic that changes no value. ``False`` skips it.
@@ -632,7 +642,12 @@ class Timeseries:
                 )
         if unit is ...:
             unit = None if how == "fraction" else self.unit
-        return ReplicateValues(self, f"{label}_{self.name}", unit, label == "fraction", rows)
+        if bounds is ...:
+            defaults = {"mean": self.bounds, "fraction": (0.0, 1.0), "std": (0.0, None)}
+            bounds = (None, None) if callable(how) else defaults[how]
+        values = ReplicateValues(self, f"{label}_{self.name}", unit, label == "fraction", rows)
+        values.bounds = tuple(bounds)
+        return values
 
 
 class ReplicateValues:
@@ -648,6 +663,7 @@ class ReplicateValues:
     ) -> None:
         self.source, self.metric, self.unit = source, metric, unit
         self.is_fraction, self.rows = is_fraction, rows
+        self.bounds: tuple[float | None, float | None] = (0.0, 1.0) if is_fraction else (None, None)
 
     @property
     def values(self) -> dict[str, list[float]]:
@@ -833,10 +849,18 @@ class ReplicateValues:
                 )
             elif len(rows) < 2:
                 notes.append(f"condition {label} has one replicate, so it has no interval")
-            if self.is_fraction and item.ci95 and (item.ci95[0] < 0 or item.ci95[1] > 1):
+            low, high = self.bounds
+            if item.ci95 and (
+                (low is not None and item.ci95[0] < low)
+                or (high is not None and item.ci95[1] > high)
+            ):
+                # Grossfield et al. (2018): a bounded quantity is not Gaussian,
+                # so a t interval that crosses the bound is not reliable.
                 notes.append(
-                    f"the 95 percent interval of condition {label} extends past the fraction "
-                    "bounds 0 and 1, where a t interval is not reliable"
+                    f"the 95 percent interval of condition {label} extends past the bounds "
+                    f"{'-inf' if low is None else format(low, 'g')} to "
+                    f"{'inf' if high is None else format(high, 'g')} of {self.metric}, where a t "
+                    "interval is not reliable"
                 )
             conditions.append(item)
         for row in pairwise:

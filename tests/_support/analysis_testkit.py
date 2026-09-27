@@ -538,7 +538,12 @@ def write_openmm_replicate(
     return run_dir
 
 
-def replicate_values(per_condition: dict[str, list[float]], how: str = "mean") -> Any:
+def replicate_values(
+    per_condition: dict[str, list[float]],
+    how: Any = "mean",
+    series_bounds: Any = (None, None),
+    **reduce_kwargs: Any,
+) -> Any:
     """Build :class:`~polyzymd.analyses.timeseries.ReplicateValues` without a trajectory.
 
     Each replicate is a constant series of 20 frames, so ``"mean"`` and
@@ -575,4 +580,6 @@ def replicate_values(per_condition: dict[str, list[float]], how: str = "mean") -
         ]
         for label, values in per_condition.items()
     }
-    return Timeseries("rg", "A", _Study(), series, Path()).reduce(how)
+    return Timeseries("rg", "A", _Study(), series, Path(), tuple(series_bounds)).reduce(
+        how, **reduce_kwargs
+    )
