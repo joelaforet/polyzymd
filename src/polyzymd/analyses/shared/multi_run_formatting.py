@@ -55,37 +55,6 @@ def format_sem_value(
     return f"{sem:.{precision}f}{unit}"
 
 
-def format_sem_phrase(
-    sem: float | None,
-    n_replicates: int,
-    *,
-    precision: int = 2,
-    unit: str = "",
-) -> str:
-    """Format a compact ``SEM: ...`` phrase for summaries.
-
-    Parameters
-    ----------
-    sem : float | None
-        SEM value to display when enough replicates are available.
-    n_replicates : int
-        Number of replicates contributing to the summary.
-    precision : int, optional
-        Decimal places for numeric SEM values, by default 2.
-    unit : str, optional
-        Unit suffix appended to numeric SEM values, by default ``""``.
-
-    Returns
-    -------
-    str
-        ``"SEM: n/a (single replicate)"`` for singleton summaries, otherwise
-        a numeric SEM phrase.
-    """
-    if not is_sem_estimable(n_replicates):
-        return "SEM: n/a (single replicate)"
-    return f"SEM: {format_sem_value(sem, n_replicates, precision=precision, unit=unit)}"
-
-
 def format_interval_from_sem(
     mean: float,
     sem: float | None,

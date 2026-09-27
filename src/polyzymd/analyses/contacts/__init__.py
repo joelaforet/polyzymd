@@ -8,7 +8,7 @@ replicates, and performs cross-condition comparison with dual metrics
 Contact computation uses the MDAnalysis-native sparse contact job seam, which
 delegates to MDAnalysis ``capped_distance`` for O(N) neighbour searching.
 
-Unlike single-scalar analyses (RMSF, catalytic_triad), contacts has **two**
+Unlike single-scalar analyses (RMSF), contacts has **two**
 primary metrics — coverage (fraction of residues contacted) and mean
 contact fraction (average per-residue contact fraction).  Therefore
 ``compare()`` is overridden entirely and ``extract_metrics()`` is not used.

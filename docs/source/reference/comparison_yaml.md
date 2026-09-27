@@ -192,43 +192,17 @@ Each entry in `runs`:
 
 ### `plugins.catalytic_triad`
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `name` | string | `"catalytic_triad"` | Display name for the triad analysis |
-| `description` | string | `null` | Optional description of the triad (e.g., `"Ser-His-Asp catalytic triad"`) |
-| `threshold` | float | `3.5` | Distance threshold in Angstroms (H-bond cutoff) |
-| `pairs` | list | **(required)** | List of atom pair definitions |
-
-Each entry in `pairs`:
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `label` | string | **(required)** | Display label (e.g., `"Asp-His"`) |
-| `selection_a` | string | **(required)** | MDAnalysis selection for atom/group A. Supports `midpoint(...)` syntax. |
-| `selection_b` | string | **(required)** | MDAnalysis selection for atom/group B |
+The catalytic triad run through `polyzymd analyze catalytic_triad` or the study API, not through
+`comparison.yaml`. A `plugins.catalytic_triad` block in an existing file still loads, is
+ignored with a warning, and leaves every other plugin in the file working. See
+{doc}`../reference/analysis_functions`.
 
 ### `plugins.distances`
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `threshold` | float | `3.5` | Global default threshold in Angstroms |
-| `pairs` | list | **(required)** | List of distance pair definitions |
-| `use_pbc` | bool | `true` | Apply periodic boundary conditions to distance calculations |
-| `align_trajectory` | bool | `true` | Align trajectory before computing distances |
-| `alignment_selection` | string | `"protein and name CA"` | MDAnalysis selection used for trajectory alignment |
-| `alignment_mode` | string | `"centroid"` | Alignment reference mode: `"centroid"` or `"frame"` |
-| `alignment_frame` | int | `null` | Frame index to use as reference when `alignment_mode` is `"frame"` |
-
-Each entry in `pairs`:
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `label` | string | **(required)** | Display label (e.g., `"Ser77-Substrate"`) |
-| `selection_a` | string | **(required)** | MDAnalysis selection for group A. Supports `com(...)` syntax. |
-| `selection_b` | string | **(required)** | MDAnalysis selection for group B |
-| `threshold` | float | global `threshold` | Per-pair threshold override |
-| `below_label` | string | `"Below {threshold}Å"` | Display text for d ≤ threshold |
-| `above_label` | string | `"Above {threshold}Å"` | Display text for d > threshold |
+Distances run through `polyzymd analyze distances` or the study API, not through
+`comparison.yaml`. A `plugins.distances` block in an existing file still loads, is
+ignored with a warning, and leaves every other plugin in the file working. See
+{doc}`../reference/analysis_functions`.
 
 ### `plugins.contacts`
 

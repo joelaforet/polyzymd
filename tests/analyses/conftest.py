@@ -13,10 +13,8 @@ _PLOTTER_MODULES = tuple(
         "rmsf",
         "sasa",
         "contacts",
-        "distances",
         "hydrogen_bonds",
         "secondary_structure",
-        "catalytic_triad",
     )
 )
 

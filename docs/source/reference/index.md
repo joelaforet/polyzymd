@@ -79,8 +79,6 @@ Shipped analysis functions <analysis_functions>
 Analysis Plugin Settings Reference <analysis_plugin_settings>
 Comparison and Plotting Reference <analysis_comparison_reference>
 RMSF Plugin Reference <analysis_rmsf_reference>
-Catalytic Triad Plugin Reference <analysis_triad_reference>
-Distances Plugin Reference <analysis_distances_reference>
 Contacts Plugin Reference <analysis_contacts_reference>
 Secondary Structure Plugin Reference <analysis_secondary_structure_reference>
 SASA Plugin Reference <analysis_sasa_reference>

@@ -13,7 +13,7 @@ state, and experimental activity data whenever those are available.
 ```{note}
 For command examples and setup steps, see the
 {doc}`../how_to/analysis_triad_quickstart`. For field-level lookup, see
-{doc}`../reference/analysis_triad_reference`.
+{doc}`../reference/analysis_functions`.
 ```
 
 ## What the metric represents
@@ -45,63 +45,16 @@ same frames. In that case, the simultaneous contact fraction is 0%, which is
 often more relevant to an intact triad interpretation than either per-pair
 fraction alone.
 
-## Configuration shape and plugin name
+## Running the analysis
 
-The plugin name is `catalytic_triad`. Use this canonical name in CLI commands
-and `comparison.yaml` configuration.
-
-Current `comparison.yaml` files define triad settings under `plugins:`:
-
-```yaml
-plugins:
-  catalytic_triad:
-    name: "LipA_catalytic_triad"
-    description: "Ser-His-Asp catalytic triad of Lipase A"
-    threshold: 3.5
-    pairs:
-      - label: "Asp133-His156"
-        selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
-        selection_b: "protein and resid 156 and name ND1"
-      - label: "His156-Ser77"
-        selection_a: "protein and resid 156 and name NE2"
-        selection_b: "protein and resid 77 and name OG"
-```
-
-Older examples that used a top-level `catalytic_triad:` block are stale. Keep
-plugin settings under `plugins.catalytic_triad` so the comparison workflow can
-discover and configure the plugin consistently.
-
-## Artifact lifecycle and output interpretation
-
-Catalytic triad analysis uses the current PolyzyMD analysis artifact lifecycle:
-
-1. Per-replicate MDAnalysis jobs compute distance profiles and contact metrics.
-2. Per-replicate artifacts are written for each condition and replicate.
-3. Condition aggregation combines replicate artifacts without re-reading
-   trajectories.
-4. Cross-condition comparison reads condition artifacts and writes a comparison
-   artifact.
-5. Plotting reads cached artifacts and sidecars; it should not rerun the
-   trajectory analysis.
-
-Canonical artifact paths are:
-
-- Per replicate:
-  `analysis/<sanitized_condition_label>/catalytic_triad/run_<N>/result.json`
-- Per condition:
-  `analysis/<sanitized_condition_label>/catalytic_triad/aggregated/result.json`
-- Cross-condition comparison:
-  `comparison/catalytic_triad/result.json`
-
-Condition labels from `comparison.yaml` are sanitized before they become
-filesystem path components. For example, a label such as `75% SBMA / 25% EGMA`
-is written under a filesystem-safe directory name rather than the literal label.
-Use the label stored inside the artifact when you need the human-readable
-condition name.
-
-Large arrays, such as distance time series or aggregated distance profiles, may
-be stored in artifact sidecars below `sidecars/`. Treat `result.json` as the
-entry point and sidecars as validated data referenced by the artifact.
+Run the triad with `polyzymd analyze catalytic_triad` and a file listing its
+pairs; {doc}`../how_to/analysis_triad_quickstart` shows the command and the file
+format. Each replicate contributes one value per result: the simultaneous
+contact fraction, from 0 to 1, and each pair's mean distance and fraction below
+threshold. Conditions are compared by Welch's t test on those replicate values,
+with the Benjamini-Hochberg correction. The per-frame distances of every
+replicate are stored with a record of the selections, thresholds and input
+files, so a second look at another result does not read the trajectory again.
 
 ## Thresholds are heuristics, not activity cutoffs
 
@@ -219,25 +172,12 @@ For example, do not state that a polymer composition "preserves activity" or
 replicate uncertainty, substrate pose consistency, hydrogen-bond geometry, and
 experimental activity or other mechanistic validation.
 
-## Plot behavior
+## Figures
 
-The current plugin plot lifecycle reads existing artifacts and generates
-high-level comparison figures. The primary outputs are:
-
-- `triad_kde_panel.<format>` — per-pair distance distributions across conditions,
-  with the configured threshold shown as a visual reference.
-- `triad_threshold_bars.<format>` — grouped summaries of fractions below threshold,
-  including the simultaneous contact metric and per-pair contact behavior.
-
-The plot file format is configurable through PolyzyMD plot settings. Supported
-formats include `png`, `pdf`, and `svg`; `png` is the default. For example, the
-default filenames are `triad_kde_panel.png` and `triad_threshold_bars.png`, while
-PDF output would use `triad_kde_panel.pdf` and `triad_threshold_bars.pdf`.
-
-Use these plots to understand whether a scalar difference is driven by a broad
-distributional shift, a small subpopulation, or one limiting pair. The plots are
-interpretive aids; they do not replace statistical uncertainty or structural
-validation.
+PolyzyMD does not draw triad figures yet. The stored per-frame distances of
+every replicate are available for your own distribution plots, which help show
+whether a difference in a scalar comes from a broad shift, a small
+subpopulation, or one limiting pair.
 
 ## Common interpretation pitfalls
 
@@ -282,6 +222,6 @@ Springer-Verlag.
 ## See also
 
 - {doc}`../how_to/analysis_triad_quickstart`
-- {doc}`../reference/analysis_triad_reference`
+- {doc}`../reference/analysis_functions`
 - {doc}`analysis_statistics_best_practices`
 - {doc}`../how_to/analysis_compare_conditions`

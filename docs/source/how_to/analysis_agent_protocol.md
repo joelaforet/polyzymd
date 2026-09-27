@@ -57,13 +57,14 @@ pixi run -e analysis polyzymd analyze rmsf \
 
 ## Pick a selection when the analysis measures several
 
-Some analyses report one metric for several selections: sasa measures four
-contexts and distances measures each atom pair. The report covers one of them at a time, names it in `run`, and
-lists the rest in `all_runs`. Pick another with `--run`:
+Some analyses report several results: sasa measures four contexts, and
+distances reports a mean distance and a fraction below threshold for each atom
+pair. The report covers one of them at a time, names it in `run`, and lists the
+rest in `all_runs`. Pick another with `--run`:
 
 ```bash
 pixi run -e analysis polyzymd analyze distances -c A/config.yaml -c B/config.yaml \
-  --run "Substrate-Ser77"
+  --set pairs=pairs.yaml --run "Substrate-Ser77"
 ```
 
 ## Get the full record

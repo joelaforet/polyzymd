@@ -73,48 +73,13 @@ plugins:
   #   n_sphere_points: 960
   #   chunk_size: 100
 
-  # Catalytic Triad / Active Site Distances
-  #
-  # IMPORTANT: Always use "protein and resid X" for protein residues!
-  # Residue numbers restart per chain. Without "protein and", your selection
-  # may match atoms from polymer or water chains, causing incorrect distances.
-  #
-  # catalytic_triad:
-  #   name: "enzyme_catalytic_triad"
-  #   threshold: 3.5  # Angstroms (H-bond cutoff)
-  #   pairs:
-  #     - label: "Asp-His"
-  #       selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
-  #       selection_b: "protein and resid 156 and name ND1"
-  #     - label: "His-Ser"
-  #       selection_a: "protein and resid 156 and name NE2"
-  #       selection_b: "protein and resid 77 and name OG"
-
-  # Distance Analysis (general inter-atomic distances)
-  #
-  # IMPORTANT: Always use "protein and resid X" for protein residues!
-  # See warning above in catalytic_triad section.
-  #
-  # Each pair can have its own threshold and display labels for above/below
-  # states. If threshold is omitted, the global threshold (default 3.5 Å)
-  # is used. If below_label / above_label are omitted, defaults are
-  # "Below {threshold}Å" / "Above {threshold}Å".
-  #
-  # distances:
-  #   threshold: 3.5                         # global default threshold
-  #   pairs:
-  #     - label: "Ser77-Substrate"
-  #       selection_a: "protein and resid 77 and name OG"
-  #       selection_b: "resname RBY and name C1"
-  #       threshold: 3.5                     # per-pair override (optional)
-  #       below_label: "Bound"               # d <= threshold
-  #       above_label: "Unbound"             # d > threshold
-  #     - label: "Lid Domain"
-  #       selection_a: "com(resid 141:148 and chainID A)"
-  #       selection_b: "com(resid 281:289 and chainID A)"
-  #       threshold: 15.0
-  #       below_label: "Closed"
-  #       above_label: "Open"
+  # Catalytic triad and pair distances are not configured here. Write the
+  # pairs to pairs.yaml, a list of label, selection_a, selection_b and
+  # optionally threshold, below_label and above_label, and run
+  #   polyzymd analyze catalytic_triad -c A/config.yaml --set pairs=pairs.yaml
+  #   polyzymd analyze distances -c A/config.yaml --set pairs=pairs.yaml
+  # Always use "protein and resid X" for protein residues, because residue
+  # numbers restart per chain.
 
   # Polymer-Protein Contact Analysis
   # contacts:
@@ -291,17 +256,6 @@ plot_settings:
   #   highlight_residues: []       # residue IDs for vertical reference lines
   #   figsize_profile: [14, 4]     # per-residue profile figure size
   #   figsize_comparison: [8, 6]   # bar comparison figure size
-
-  # catalytic_triad:
-  #   generate_kde_panel: true     # multi-row KDE panel
-  #   generate_bars: true          # threshold bar chart
-  #   generate_2d_kde: false       # 2D joint KDE (specialized)
-  #   kde_xlim: [0, 7]             # x-axis range for KDE panel (Angstroms)
-
-  # distances:
-  #   show_threshold: true         # threshold line on distributions
-  #   use_kde: true                # KDE vs histogram
-  #   generate_state_bars: true    # per-pair above/below threshold bars
 
   # contacts:
   #   generate_contact_fraction_profile: true

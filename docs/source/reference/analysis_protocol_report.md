@@ -13,7 +13,7 @@ reads back exactly what `model_dump_json()` wrote.
 | `protocol_version` | `str` | The plugin's `Analysis.protocol_version`. With `analysis` it identifies the code that defined the metric. Every plugin starts at `"1"` and bumps it when the meaning, unit or estimator of a reported metric changes. |
 | `metric` | `str` | Primary metric key: the first key the plugin's `extract_metrics()` returns. |
 | `unit` | `str \| None` | Unit of `metric`, for example `A` or `%`. `None` marks a dimensionless metric, and also a plugin that declares no unit. |
-| `run` | `str \| None` | Selected run or pair label, for a plugin that measures the same metric on several selections (rg on `Protein` and `Polymer Oligomers`, sasa on four contexts, distances on each atom pair). `None` when the plugin reports one run. |
+| `run` | `str \| None` | Selected result when the analysis reports several: sasa's four contexts, or for distances and catalytic_triad each pair's mean distance (`<label>`) and fraction below threshold, and the triad's `simultaneous`. `None` when the analysis reports one result. |
 | `all_metrics` | `list[str]` | Every metric key the plugin reported, `metric` first. Only `metric` is summarised in `conditions` and `pairwise`. |
 | `all_runs` | `list[str]` | Every run or pair label the plugin reported, `run` first. Empty when the plugin reports one run. Select another with `--run LABEL`. |
 | `equilibration` | `str` | Equilibration window discarded from the start of every replicate, for example `10ns`. Applied uniformly to every replicate of every condition. |

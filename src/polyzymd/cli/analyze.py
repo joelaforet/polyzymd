@@ -160,7 +160,7 @@ def _one_line(text: str) -> str:
     "--no-eq-check",
     "no_eq_check",
     is_flag=True,
-    help="Skip the pymbar detected equilibration start for rg and rmsd. No value changes.",
+    help="Skip the pymbar detected equilibration start of the function analyses. No value changes.",
 )
 def analyze_command(
     name: str,
@@ -188,6 +188,7 @@ def analyze_command(
         polyzymd analyze rg -c A/config.yaml
         polyzymd analyze rg -c A/config.yaml -c B/config.yaml --eq 10ns
         polyzymd analyze rmsd -c A/config.yaml --set reference_mode=average
+        polyzymd analyze catalytic_triad -c A/config.yaml --set pairs=triad.yaml --run simultaneous
         polyzymd analyze rmsf -f comparison.yaml --format json -o rmsf.json
     """
     warn_if_wrong_pixi_env("analyze", ANALYSIS_PIXI_ENVS)

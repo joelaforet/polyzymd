@@ -1,11 +1,13 @@
-# Catalytic Triad Analysis: Quick Start
+# Catalytic triad analysis: quick start
 
-Analyze catalytic triad geometry and integrity in under 5 minutes.
+Measure the distances that define a catalytic triad on every production frame
+of every replicate, and report how often each contact, and the whole triad, is
+formed.
 
 ```{note}
-This guide focuses on running the analysis quickly.
-For interpretation and statistical guidance, see
-{doc}`../explanation/analysis_triad_best_practices`.
+This guide focuses on getting results quickly. For interpretation, see
+{doc}`../explanation/analysis_triad_best_practices`. For what each shipped
+function measures, see {doc}`../reference/analysis_functions`.
 ```
 
 :::{admonition} Environment Setup
@@ -21,150 +23,46 @@ pixi shell -e analysis
 Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
-## TL;DR
+## Define the triad
 
-```bash
-# Run catalytic triad comparison (all conditions in comparison.yaml)
-polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
+Write the pairs to `triad.yaml`:
 
-# Equivalent full plugin name
-polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
-
-# Run all enabled analyses in one workflow
-polyzymd compare run-all -f comparison.yaml --eq-time 100ns
-
-# Force recompute and machine-readable output
-polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns --recompute --format json
+```yaml
+- label: "Ser77-His156"
+  selection_a: "protein and resid 76 and name OG"
+  selection_b: "protein and resid 155 and name NE2"
+- label: "His156-Asp133"
+  selection_a: "protein and resid 155 and name ND1"
+  selection_b: "protein and resid 132 and name OD2"
 ```
 
-## Prerequisites
+## Run it
 
-Before running catalytic triad analysis, you need:
+```bash
+polyzymd analyze catalytic_triad -c noPoly/config.yaml -c SBMA50/config.yaml \
+  --label "No polymer" --label "SBMA 50%" --eq 200ns --set pairs=triad.yaml
+```
 
-1. Completed production simulation output
-2. A `comparison.yaml` file with a `plugins.catalytic_triad` section
-3. One or more replicates per condition; use at least two replicates for SEM
-   and robust inferential comparisons
+For each replicate this reports:
 
-## What Catalytic Triad Analysis Provides
+| Result | Meaning |
+|--------|---------|
+| `simultaneous` | Fraction of frames in which every pair is below its threshold at once |
+| `<label>` | Mean distance of that pair, in Å |
+| `<label> below <threshold> A` | Fraction of frames in which that pair is below its threshold |
 
-The catalytic triad plugin computes:
-
-| Feature | Description |
-|---------|-------------|
-| Per-pair distance | Mean distance for each configured pair |
-| Per-pair contact fraction | Fraction below the configured threshold |
-| Simultaneous contact fraction | Fraction where all pairs are in contact together |
-| SEM | Autocorrelation-aware uncertainty estimates |
-| Replicate aggregation | Condition-level means and SEM across replicates |
-| Condition comparison | Ranking, pairwise tests, and effect sizes |
+The threshold is 3.5 Å unless you set `--set threshold=...` or give a pair its
+own `threshold`. The report shows `simultaneous`; pick another result with
+`--run "<label>"`. The simultaneous fraction is computed from the stored pair
+distances, so the trajectory is read once per pair. Conditions are compared by
+Welch's t test with the Benjamini-Hochberg correction.
 
 ```{important}
 The simultaneous contact fraction is the primary metric.
 It estimates the fraction of analyzed frames where the full triad geometry is
-simultaneously compatible with your contact threshold definition.
+simultaneously compatible with your contact threshold definition. It is a
+fraction from 0 to 1.
 ```
-
-## Basic Usage
-
-`````{tab-set}
-
-````{tab-item} YAML (recommended)
-Define triad settings in `comparison.yaml`:
-
-```yaml
-name: "polymer_triad_study"
-control: "No Polymer"
-
-conditions:
-  - label: "No Polymer"
-    config: "../projects/no_polymer/config.yaml"
-    replicates: [1, 2, 3]
-
-  - label: "With Polymer"
-    config: "../projects/with_polymer/config.yaml"
-    replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "100ns"
-
-plugins:
-  catalytic_triad:
-    name: "LipA_catalytic_triad"
-    description: "Ser-His-Asp catalytic triad"
-    threshold: 3.5
-    pairs:
-      - label: "Asp133-His156"
-        selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
-        selection_b: "protein and resid 156 and name ND1"
-      - label: "His156-Ser77"
-        selection_a: "protein and resid 156 and name NE2"
-        selection_b: "protein and resid 77 and name OG"
-```
-
-Then run:
-
-```bash
-polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
-polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns --recompute
-```
-````
-
-````{tab-item} CLI
-Run the configured comparison:
-
-```bash
-polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
-```
-
-Expected output pattern:
-
-```text
-Comparison: polymer_triad_study
-Type: catalytic_triad
-Conditions: 2
-Equilibration: 100ns
-
-Comparison result: comparison/catalytic_triad/result.json
-
-Condition         Simultaneous Contact   SEM
-------------------------------------------------
-No Polymer        49.9%                  27.3%
-With Polymer      87.3%                   2.2%
-```
-
-Replicates and conditions always come from `comparison.yaml`.
-````
-
-````{tab-item} Python
-Use the API for scripted workflows:
-
-```python
-from polyzymd.analyses.discovery import get_analysis
-from polyzymd.analyses.orchestrator import run_comparison
-from polyzymd.config.comparison import ComparisonConfig
-
-config = ComparisonConfig.from_yaml("comparison.yaml")
-analysis = get_analysis("catalytic_triad")()
-
-pipeline_result = run_comparison(
-    analysis,
-    config,
-    recompute=False,
-    equilibration="100ns",
-)
-
-result = pipeline_result["comparison"]
-print(f"Ranking (best triad first): {result.ranking}")
-
-for condition in result.conditions:
-    contact_pct = condition.mean_simultaneous_contact * 100
-    sem_pct = condition.sem_simultaneous_contact * 100
-    print(f"{condition.label}: {contact_pct:.1f} ± {sem_pct:.1f}%")
-```
-````
-
-`````
 
 ## Selection Rules That Prevent Most Errors
 
@@ -190,34 +88,26 @@ Supported selection forms:
 `midpoint()` is often a good choice for Asp/Glu carboxylate acceptors.
 ```
 
-## Comparing Conditions
+## From Python
 
-Use one `comparison.yaml` with all conditions, then run one command:
+```python
+import polyzymd as pz
+from polyzymd.analyses.functions import all_below, pair_distance
 
-```bash
-polyzymd compare run catalytic_triad -f comparison.yaml --eq-time 100ns
+study = pz.Study.from_configs(
+    {"No polymer": "noPoly/config.yaml", "SBMA 50%": "SBMA50/config.yaml"},
+    equilibration="200ns",
+)
+ser_his = study.timeseries(pair_distance, pz.select("protein and resid 76 and name OG"),
+                           pz.select("protein and resid 155 and name NE2"), unit="Å")
+his_asp = study.timeseries(pair_distance, pz.select("protein and resid 155 and name ND1"),
+                           pz.select("protein and resid 132 and name OD2"), unit="Å")
+both = ser_his.transform(all_below, his_asp, thresholds=[3.5, 3.5], unit=None)
+print(both.reduce("fraction").compare(control="No polymer").to_agent_text())
 ```
-
-The comparison includes:
-- Ranking by simultaneous contact fraction (higher is better)
-- Pairwise tests with p-values and effect sizes
-- Percent change relative to control
-
-For broader comparison workflow guidance, see
-{doc}`analysis_compare_conditions`.
-
-## Reference and Troubleshooting
-
-For full field tables, output file structures, JSON schemas, plot descriptions,
-CLI option lookup, and troubleshooting fixes, see
-{doc}`../reference/analysis_triad_reference`.
-
-For statistical interpretation and best practices, see
-{doc}`../explanation/analysis_triad_best_practices`.
 
 ## Next Steps
 
-- Compare across conditions: {doc}`analysis_compare_conditions`
-- Understand triad statistics: {doc}`../explanation/analysis_triad_best_practices`
-- Run RMSD as a complementary global metric: {doc}`analysis_rmsd_quickstart`
-- Run RMSF for per-residue flexibility: {doc}`analysis_rmsf_quickstart`
+- **Interpret triad results**: {doc}`../explanation/analysis_triad_best_practices`
+- **Measure other atom pairs**: {doc}`analysis_distances_quickstart`
+- **Run RMSD as a complementary global metric**: {doc}`analysis_rmsd_quickstart`
