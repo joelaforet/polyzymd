@@ -283,8 +283,9 @@ quantifying uncertainty in molecular simulations:
   `polyzymd.analyses.shared.inferential_statistics.benjamini_hochberg` yourself
   and report that family.
 - Grossfield et al. recommend plotting every point when there are fewer than
-  10 independent measurements, so every figure shows each replicate value next to
-  the mean and interval.
+  10 independent measurements, so every figure shows each replicate, and
+  `ReplicateValues.plot` draws each replicate value next to the mean and
+  interval.
 - Grossfield et al. point out that a quantity with a strict upper or lower
   limit is not Gaussian, and that a t interval can then extend past the limit.
   They recommend bootstrapping for such quantities, but also caution that
@@ -295,6 +296,31 @@ quantifying uncertainty in molecular simulations:
   every replicate has
   the same value, the interval is reported as not estimable rather than as a
   zero-width interval.
+
+## Draw figures
+
+```python
+rg.plot()                                  # every replicate's series against time
+rg.plot_distribution(threshold=None)       # per-condition distribution of frame values
+mean_rg.plot()                             # condition means with every replicate value
+```
+
+`Timeseries.plot` draws every replicate's per-frame series against simulation
+time, one colour per condition, with each condition's mean and its 95 percent
+interval across replicates as a band when the replicates share their frame
+times, and the equilibration window shaded. `Timeseries.plot_distribution`
+draws, for each condition, the Gaussian kernel density estimate of all
+production frames pooled across replicates as a thick line and one thin line
+per replicate, with an optional threshold line. `ReplicateValues.plot` draws a
+bar at each condition's mean with its 95 percent Student t interval and every
+replicate value as a point. Each figure carries a footnote naming the interval,
+the number of replicates and the production window.
+
+The figures are drawn from the stored results, so no trajectory is read. They
+are written to a `figures/` folder next to `polyzymd_results/`, or to
+`output_dir=`, in the format and style of the `PlotSettings` passed as
+`plot_settings=`. `polyzymd analyze` draws the figures for its analysis by
+default; pass `--no-plots` to skip them.
 
 ## Write your own aggregation or comparison
 

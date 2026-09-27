@@ -184,10 +184,14 @@ experimental activity or other mechanistic validation.
 
 ## Figures
 
-PolyzyMD does not draw triad figures yet. The stored per-frame distances of
-every replicate are available for your own distribution plots, which help show
-whether a difference in a scalar comes from a broad shift, a small
-subpopulation, or one limiting pair.
+`polyzymd analyze catalytic_triad` draws, for each pair, the distribution of its
+per-frame distance in every condition, pooled over replicates with one thin
+curve per replicate and the threshold marked (`triad_kde_<pair>`), and a bar
+chart of each fraction with every replicate value shown (`triad_fraction_<result>`).
+Use the distributions to see whether a difference in a fraction comes from a
+broad shift, a small subpopulation, or one limiting pair. The figures are
+interpretive aids; they do not replace statistical uncertainty or structural
+validation.
 
 ## Common interpretation pitfalls
 
