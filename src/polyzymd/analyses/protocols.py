@@ -572,7 +572,10 @@ def _analyze_pairs(
     distribution with its threshold is drawn as ``<prefix>_kde_<label>`` and
     every fraction as ``<prefix>_fraction_<result>``, with the prefix
     ``distance`` or ``triad`` as in the legacy plugins, into
-    ``<output_dir>/figures/<name>/``.
+    ``<output_dir>/figures/<name>/``. ``<prefix>_kde_panel`` stacks every
+    pair's distribution in one figure and ``<prefix>_threshold_bars`` groups
+    every fraction, with the triad's ``All pairs`` last, as the legacy
+    catalytic triad KDE panel and threshold bar charts did.
     """
     import yaml
 
@@ -653,16 +656,29 @@ def _analyze_pairs(
         folder, prefix = _figures_dir(output_dir, name), (
             "triad" if name == "catalytic_triad" else "distance"
         )
-        for pair, distance, threshold in zip(pairs, distances, thresholds, strict=True):
-            label = pair["label"]
-            distance.plot_distribution(
-                threshold, folder, f"{prefix}_kde_{label}", title=f"{label} distance"
-            )
+        from polyzymd.analyses.figures import plot_distributions, plot_values
+
+        titles = [f"{pair['label']} distance" for pair in pairs]
+        for pair, distance, threshold, title in zip(pairs, distances, thresholds, titles):
+            distance.plot_distribution(threshold, folder, f"{prefix}_kde_{pair['label']}", title)
+        plot_distributions(distances, thresholds, titles, folder, f"{prefix}_kde_panel", "distance")
+        fractions = {}
         for key, (series, how, metric) in results.items():
             if how == "fraction":
-                fraction = series.reduce(how, detect_equilibration=False)
-                fraction.metric = metric
-                fraction.plot(folder, f"{prefix}_fraction_{key}", title=key)
+                fractions[key] = series.reduce(how, detect_equilibration=False)
+                fractions[key].metric = metric
+                fractions[key].plot(folder, f"{prefix}_fraction_{key}", title=key)
+        # The legacy threshold bars put each pair's fraction first and the triad's "All pairs" last.
+        grouped = sorted(fractions, key=lambda key: key == SIMULTANEOUS_RUN)
+        names = ["All pairs" if key == SIMULTANEOUS_RUN else key for key in grouped]
+        title = (
+            "Catalytic triad contact fractions"
+            if prefix == "triad"
+            else "Distance contact fractions"
+        )
+        plot_values(
+            [fractions[key] for key in grouped], names, folder, f"{prefix}_threshold_bars", title
+        )
         report.provenance.output_paths["figures"] = str(folder)
     return report.model_copy(update={"analysis": name, "run": run, "all_runs": list(results)})
 

@@ -638,17 +638,17 @@ class ReplicateValues:
     ) -> Path:
         """Draw each condition's mean with its 95 percent interval and every replicate value.
 
-        See :func:`polyzymd.analyses.figures.plot_values`. The figure goes to
+        See :func:`polyzymd.analyses.figures.plot_condition_values`. The figure goes to
         ``<output_dir>/<name>.<format>``; ``output_dir`` defaults to the
         ``figures`` folder next to ``polyzymd_results``, ``name`` to
         ``<source name>_<metric>`` and ``title`` to the source name. Returns
         the path of the figure file.
         """
-        from polyzymd.analyses.figures import plot_values
+        from polyzymd.analyses.figures import plot_condition_values
 
         folder = output_dir or self.source.path.parent.parent / "figures"
         name = name or f"{self.source.name}_{self.metric}"
-        return plot_values(self, folder, name, title, plot_settings)
+        return plot_condition_values(self, folder, name, title, plot_settings)
 
     def summary(self, conditions: Sequence[str] | None = None) -> ProtocolReport:
         """Give each condition's n, mean, standard error and 95 percent interval.

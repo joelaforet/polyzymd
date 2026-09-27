@@ -1,8 +1,11 @@
 """Draw figures of stored study results with matplotlib, without reading a trajectory.
 
-:func:`plot_timeseries`, :func:`plot_distribution` and :func:`plot_values`
-are reached as ``Timeseries.plot``, ``Timeseries.plot_distribution`` and
-``ReplicateValues.plot``. They read the values already held by those objects,
+:func:`plot_timeseries`, :func:`plot_distribution` and
+:func:`plot_condition_values` are reached as ``Timeseries.plot``,
+``Timeseries.plot_distribution`` and ``ReplicateValues.plot``.
+:func:`plot_values` and :func:`plot_distributions`, reached as
+``pz.plot_values`` and ``pz.plot_distributions``, draw several results in
+one figure. They read the values already held by those objects,
 style each figure through :mod:`polyzymd.analyses.shared.plotting` and a
 :class:`~polyzymd.config.comparison.PlotSettings`, and save it with
 :func:`~polyzymd.analyses.shared.plotting.save_figure`. Every condition and
@@ -12,7 +15,7 @@ every replicate is drawn. matplotlib is imported only when a figure is drawn.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Sequence
 
 if TYPE_CHECKING:
     from polyzymd.analyses.timeseries import ReplicateValues, Timeseries
@@ -187,13 +190,17 @@ def plot_distribution(
     Path
         The saved figure file.
     """
-    import matplotlib.pyplot as plt
+    title = title or source.name
+    return plot_distributions(
+        [source], [threshold], [title], output_dir, name, title, plot_settings
+    )
+
+
+def _distribution_axes(ax: Any, source: Timeseries, threshold: float | None, style: tuple) -> None:
+    """Draw the pooled and per-replicate KDEs of every condition and the threshold on ``ax``."""
     import numpy as np
 
-    from polyzymd.analyses.shared.plotting import apply_axis_style, apply_legend
-
-    settings, labels, colors = _setup(source, plot_settings)
-    fig, ax = plt.subplots(figsize=(10, 6))
+    settings, labels, colors = style
     for label in labels:
         items, color = source.series[label], colors[label]
         for item in items:
@@ -208,20 +215,84 @@ def plot_distribution(
             linewidth=settings.theme.reference_line_width,
             label=f"threshold {threshold:g} {'Å' if source.unit == 'A' else source.unit or ''}",
         )
-    title = title or source.name
-    apply_axis_style(ax, settings, title=title, xlabel=_label(title, source.unit), ylabel="Density")
-    apply_legend(ax, settings, loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0)
+
+
+def _one_unit(results: list, kind: str) -> str | None:
+    """Return the unit shared by ``results``, refusing an empty list or mixed units."""
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    units = {item.unit for item in results}
+    if len(units) != 1:
+        raise ProtocolError(
+            f"{kind} in one figure must share one unit; got {sorted(map(str, units)) or 'none'}.",
+            hint="Plot results with different units in separate figures.",
+        )
+    return units.pop()
+
+
+def plot_distributions(
+    series: Sequence[Timeseries],
+    thresholds: Sequence[float | None] | None = None,
+    titles: Sequence[str] | None = None,
+    output_dir: str | Path | None = None,
+    name: str = "distributions",
+    quantity: str = "value",
+    plot_settings: PlotSettings | None = None,
+) -> Path:
+    """Draw the distribution of each series in its own panel of one figure.
+
+    Each panel shows, for every condition, the Gaussian KDE of every frame
+    of every replicate pooled as a thick line and the KDE of each replicate
+    as a thin line, with the series' threshold from ``thresholds`` as a red
+    dashed line, as the legacy catalytic triad KDE panel stacked its pairs.
+    The panels share the x axis, labelled ``quantity`` and the unit of the
+    series. ``titles`` default to the series names, and ``output_dir`` to
+    the ``figures`` folder next to ``polyzymd_results``.
+
+    Returns
+    -------
+    Path
+        The saved figure file.
+
+    Raises
+    ------
+    ProtocolError
+        If the series do not share one unit.
+    """
+    import matplotlib.pyplot as plt
+
+    from polyzymd.analyses.shared.plotting import apply_axis_style, apply_legend
+
+    series = list(series)
+    unit = _one_unit(series, "Series")
+    thresholds = list(thresholds) if thresholds is not None else [None] * len(series)
+    titles = list(titles) if titles is not None else [item.name for item in series]
+    style = _setup(series[0], plot_settings)
+    settings, labels = style[0], style[1]
+    fig, axes = plt.subplots(
+        len(series),
+        1,
+        figsize=(10, 6 if len(series) == 1 else 3 * len(series)),
+        sharex=True,
+        squeeze=False,
+    )
+    for ax, source, threshold, title in zip(axes[:, 0], series, thresholds, titles, strict=True):
+        _distribution_axes(ax, source, threshold, style)
+        apply_axis_style(ax, settings, title=title, ylabel="Density")
+        apply_legend(ax, settings, loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0)
+    apply_axis_style(axes[-1, 0], settings, xlabel=_label(quantity, unit))
     fig.tight_layout(rect=[0, 0.04, 0.78, 1])
-    equilibration = source.study[labels[0]].equilibration
     _note(
         fig,
         "Thick lines: Gaussian KDE of all replicates' frames pooled; thin lines: each "
-        f"replicate; n = replicates; production window t >= {equilibration}.",
+        f"replicate; n = replicates; production window t >= "
+        f"{series[0].study[labels[0]].equilibration}.",
     )
-    return _save(fig, output_dir, name, settings)
+    folder = output_dir or series[0].path.parent.parent / "figures"
+    return _save(fig, folder, name, settings)
 
 
-def plot_values(
+def plot_condition_values(
     values: ReplicateValues,
     output_dir: str | Path,
     name: str,
@@ -282,3 +353,84 @@ def plot_values(
     fig.tight_layout(rect=[0, 0.04, 1, 1])
     _footnote(fig, {len(entry) for entry in data}, values.source.study[labels[0]].equilibration)
     return _save(fig, output_dir, name, settings)
+
+
+def plot_values(
+    results: Sequence[ReplicateValues],
+    labels: Sequence[str] | None = None,
+    output_dir: str | Path | None = None,
+    name: str = "values",
+    title: str | None = None,
+    plot_settings: PlotSettings | None = None,
+) -> Path:
+    """Draw several results in one figure, one group per result and one bar per condition.
+
+    Each bar is the condition's mean with its 95 percent Student t interval
+    from :func:`~polyzymd.analyses.shared.statistics.mean_sem_ci`, drawn by
+    :func:`~polyzymd.analyses.shared.plotting.grouped_bars` with every
+    replicate value as a point, as the legacy distances and catalytic triad
+    threshold bar charts drew each pair's fraction. ``labels`` name the
+    groups and default to the source names. ``output_dir`` defaults to the
+    ``figures`` folder next to ``polyzymd_results``.
+
+    Returns
+    -------
+    Path
+        The saved figure file.
+
+    Raises
+    ------
+    ProtocolError
+        If the results do not share one unit and one set of conditions.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.shared.plotting import apply_axis_style, apply_legend, grouped_bars
+    from polyzymd.analyses.shared.statistics import mean_sem_ci
+
+    results = list(results)
+    unit = _one_unit(results, "Results")
+    labels = list(labels) if labels is not None else [item.source.name for item in results]
+    settings, conditions, colors = _setup(results[0].source, plot_settings)
+    if len(labels) != len(results) or any(set(item.values) != set(conditions) for item in results):
+        raise ProtocolError(
+            "Results in one figure need one label each and the same conditions.",
+            hint="Plot results of the same study, with one label per result.",
+        )
+    data = [[item.values[label] for item in results] for label in conditions]
+    stats = [[mean_sem_ci(entry) for entry in row] for row in data]
+    series = [
+        (
+            f"{label} (n = {len(row[0])})",
+            [item.mean for item in cells],
+            [item.sem for item in cells],
+        )
+        for label, row, cells in zip(conditions, data, stats, strict=True)
+    ]
+    fig, ax = plt.subplots(figsize=(10, 6))
+    positions = np.arange(len(results))
+    grouped_bars(
+        ax,
+        positions,
+        series,
+        [colors[label] for label in conditions],
+        settings,
+        reference_line=None,
+        replicate_values=data,
+    )
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels, rotation=30, ha="right")
+    metrics = {item.metric for item in results}
+    fraction = all(item.is_fraction for item in results)
+    quantity = metrics.pop() if len(metrics) == 1 else "fraction of frames" if fraction else "value"
+    if fraction:
+        ax.set_ylim(0, 1.05)
+    apply_axis_style(ax, settings, title=title, ylabel=_label(quantity, unit))
+    apply_legend(ax, settings, loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0)
+    fig.tight_layout(rect=[0, 0.04, 0.78, 1])
+    counts = {len(entry) for row in data for entry in row}
+    _footnote(fig, counts, results[0].source.study[conditions[0]].equilibration)
+    folder = output_dir or results[0].source.path.parent.parent / "figures"
+    return _save(fig, folder, name, settings)
