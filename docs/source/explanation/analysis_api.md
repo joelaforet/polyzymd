@@ -63,6 +63,17 @@ for replicate in study["SBMA 50%"].replicates:
 You can use these universes for anything, including analyses PolyzyMD does not
 support, such as a principal component basis fitted on all replicates at once.
 
+```{note}
+`replicate.frames` holds trajectory frame indices, counted from 0 from the first
+loaded frame. A frame you name yourself, such as the `frame` of
+`pz.reference("frame", ...)` or `--set reference_frame=N`, is counted
+differently: it is a production frame counted from 1 after the equilibration
+window, so `1` is the first production frame and the same number points at a
+different structure if you change the window. The trajectory frame actually
+used is stored in each record. To compare with a structure from before the
+window, such as the starting structure, use `external` mode with its file.
+```
+
 ## Measure something on every frame
 
 This follows MDAnalysis

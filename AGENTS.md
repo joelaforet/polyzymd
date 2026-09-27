@@ -213,6 +213,28 @@ def build_mda_jobs(self, ctx):
 5. **Write your plugin** as a simple module or package in `analyses/`; for advanced trajectory-native packages, isolate MDAnalysis job helpers in `_mda.py`, and extract plotting to `_plotters.py` as complexity grows
 6. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
 
+## Frame counting in analyses
+
+The study API (`Study`, `Replicate.frames`, `pz.reference`) counts frames in
+two ways, and mixing them up picks the wrong structure:
+
+- `Replicate.frames` holds trajectory frame indices, counted from 0 from the
+  first loaded frame, for the production frames left after the equilibration
+  window.
+- A frame the user names, such as `pz.reference("frame", ..., frame=N)` or
+  `--set reference_frame=N` for `polyzymd analyze rmsd`, is a production frame
+  counted from 1 after the window. The default, 1, is the first production
+  frame, so the same N points at a different structure when the window
+  changes. Each record stores the trajectory frame actually used under
+  `chosen`.
+- Legacy plugins count differently: the removed rmsd plugin took trajectory
+  frames from 0 (default 0, inside the equilibration window), and the legacy
+  RMSF plugin, until it moves to the study API, takes trajectory frames from 1.
+  Convert an old rmsd value with new = old - (first production frame) + 1.
+- A frame inside the equilibration window, such as the starting structure,
+  cannot be named as a `frame` reference. Use `external` mode with that
+  structure's file, which is also hashed into the record.
+
 ## Code Style
 
 - **Formatter:** Black, line-length=100
