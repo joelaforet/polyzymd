@@ -162,6 +162,13 @@ def _one_line(text: str) -> str:
     is_flag=True,
     help="Skip the pymbar detected equilibration start of the function analyses. No value changes.",
 )
+@click.option(
+    "--no-plots",
+    "no_plots",
+    is_flag=True,
+    help="Draw no figures. By default rg, rmsd, distances and catalytic_triad draw theirs "
+    "into <output-dir>/figures/<name>/.",
+)
 def analyze_command(
     name: str,
     configs: tuple[Path, ...],
@@ -176,6 +183,7 @@ def analyze_command(
     output_dir: Path | None,
     recompute: bool,
     no_eq_check: bool,
+    no_plots: bool,
 ) -> None:
     """Run one analysis and print a validated result.
 
@@ -208,6 +216,7 @@ def analyze_command(
             output_dir=output_dir,
             recompute=recompute,
             eq_check=not no_eq_check,
+            plots=not no_plots,
         )
     except AnalysisError as exc:
         hint = getattr(exc, "hint", None)
@@ -245,6 +254,7 @@ def _run(
     output_dir: Path | None,
     recompute: bool,
     eq_check: bool = True,
+    plots: bool = True,
 ) -> "ProtocolReport":
     """Resolve the options and run the protocol, through -f or through -c configs."""
     from polyzymd.analyses.exceptions import ProtocolError
@@ -291,4 +301,5 @@ def _run(
         recompute=recompute,
         run=run,
         eq_check=eq_check,
+        plots=plots,
     )
