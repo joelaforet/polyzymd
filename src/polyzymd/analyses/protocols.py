@@ -76,6 +76,14 @@ FUNCTION_ANALYSES = {
         "reference_frame": 1,
         "reference_file": None,
     },
+    "rmsf": {
+        "selection": "protein and name CA",
+        "alignment_selection": "protein and name CA",
+        "reference_mode": "centroid",
+        "reference_frame": 1,
+        "reference_file": None,
+        "highlight_residues": [],
+    },
     "distances": {"pairs": None, "threshold": 3.5, "use_pbc": True},
     "catalytic_triad": {"pairs": None, "threshold": 3.5, "use_pbc": True},
 }
@@ -463,16 +471,17 @@ def _analyze_function(
     Welch's t test. With ``plots``, ``rg`` and ``rmsd`` draw
     ``<name>_timeseries`` and ``<name>_comparison``, and ``rg`` also
     ``rg_distribution``, into ``<output_dir>/figures/<name>/``, as the legacy
-    plugins did. ``distances`` and ``catalytic_triad`` go to
-    :func:`_analyze_pairs`. Raises ``ProtocolError`` for a setting the
-    analysis does not take, or a ``run`` for ``rg`` or ``rmsd``.
+    plugins did. ``rmsf`` goes to :func:`_analyze_rmsf`, and ``distances``
+    and ``catalytic_triad`` to :func:`_analyze_pairs`. Raises
+    ``ProtocolError`` for a setting the analysis does not take, or a ``run``
+    for ``rg`` or ``rmsd``.
     """
     from polyzymd.analyses import functions
     from polyzymd.analyses.reference import reference
     from polyzymd.analyses.timeseries import select
 
     unknown = set(settings or {}) - set(FUNCTION_ANALYSES[name])
-    pairs = name in ("distances", "catalytic_triad")
+    pairs = name in ("distances", "catalytic_triad", "rmsf")
     if unknown or (run is not None and not pairs):
         raise ProtocolError(
             f"{name} takes {'' if pairs else 'no run and '}no setting other than "
@@ -481,6 +490,8 @@ def _analyze_function(
             + ("--set pairs=pairs.yaml." if pairs else "--set selection='protein and name CA'."),
         )
     study = _study(configs, labels, equilibration, replicates)
+    if name == "rmsf":
+        return _analyze_rmsf(study, settings, run, recompute, output_dir, plots)
     if pairs:
         return _analyze_pairs(
             name,
@@ -523,6 +534,72 @@ def _analyze_function(
             series.plot_distribution(output_dir=folder, name="rg_distribution")
         report.provenance.output_paths["figures"] = str(folder)
     return report
+
+
+def _analyze_rmsf(
+    study: Any,
+    settings: dict | None,
+    run: str | None,
+    recompute: bool,
+    output_dir: Path | None,
+    plots: bool,
+) -> ProtocolReport:
+    """Measure the per-residue RMSF of every replicate and report ``mean_rmsf`` or the profile.
+
+    :func:`~polyzymd.analyses.functions.rmsf` measures each residue of
+    ``selection`` after superposing ``alignment_selection`` on the reference
+    of ``reference_mode``, ``reference_frame`` and ``reference_file``, built
+    by :func:`~polyzymd.analyses.reference.reference` for both selections
+    together. In external mode each residue's value is its deviation from
+    the reference file, as in the legacy rmsf plugin. The per-residue
+    values are labelled by residue ID. ``run`` is ``"mean_rmsf"`` (default),
+    the mean over residues of each replicate, or ``"per_residue"``, the
+    profile compared residue by residue. With ``plots``, ``rmsf_profile``
+    draws the profile with ``highlight_residues`` marked and
+    ``rmsf_comparison`` the ``mean_rmsf`` bars, into
+    ``<output_dir>/figures/rmsf/``, as the legacy plugin did.
+    """
+    from polyzymd.analyses import functions
+    from polyzymd.analyses.reference import reference
+    from polyzymd.analyses.timeseries import select
+
+    settings = {**FUNCTION_ANALYSES["rmsf"], **(settings or {})}
+    atoms, fit, mode = (
+        str(settings[key]) for key in ("selection", "alignment_selection", "reference_mode")
+    )
+    runs = ["mean_rmsf", "per_residue"]
+    if run not in (None, *runs):
+        raise ProtocolError(
+            f"rmsf: no result named {run!r}.", hint=f"Use --run with one of {runs}."
+        )
+    profile = study.per_replicate(
+        functions.rmsf,
+        select(atoms),
+        select(fit),
+        reference(
+            mode,
+            f"({atoms}) or ({fit})",
+            frame=settings["reference_frame"],
+            file=settings["reference_file"],
+            alignment=fit,
+        ),
+        about_reference=mode == "external",
+        unit="A",
+        labels=lambda u: u.select_atoms(atoms).residues.resids,
+        name="rmsf",
+        recompute=recompute,
+        output_dir=output_dir,
+    )
+    mean = profile.over_labels("mean")
+    values = profile if run == "per_residue" else mean
+    report = values.compare() if len(study) > 1 else values.summary()
+    if plots:
+        folder = _figures_dir(output_dir, "rmsf")
+        highlight = settings["highlight_residues"] or []
+        profile.plot(folder, "rmsf_profile", "Per-residue RMSF", None, highlight, "Residue")
+        mean.plot(folder, "rmsf_comparison", "RMSF comparison")
+        report.provenance.output_paths["figures"] = str(folder)
+    return report.model_copy(update={"analysis": "rmsf", "run": run or runs[0], "all_runs": runs})
 
 
 def _figures_dir(output_dir: Path | None, name: str) -> Path:

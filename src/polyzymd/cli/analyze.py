@@ -166,7 +166,7 @@ def _one_line(text: str) -> str:
     "--no-plots",
     "no_plots",
     is_flag=True,
-    help="Draw no figures. By default rg, rmsd, distances and catalytic_triad draw theirs "
+    help="Draw no figures. By default rg, rmsd, rmsf, distances and catalytic_triad draw theirs "
     "into <output-dir>/figures/<name>/.",
 )
 def analyze_command(
@@ -197,7 +197,8 @@ def analyze_command(
         polyzymd analyze rg -c A/config.yaml -c B/config.yaml --eq 10ns
         polyzymd analyze rmsd -c A/config.yaml --set reference_mode=average
         polyzymd analyze catalytic_triad -c A/config.yaml --set pairs=triad.yaml --run simultaneous
-        polyzymd analyze rmsf -f comparison.yaml --format json -o rmsf.json
+        polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml --eq 10ns --run per_residue
+        polyzymd analyze sasa -f comparison.yaml --format json -o sasa.json
     """
     warn_if_wrong_pixi_env("analyze", ANALYSIS_PIXI_ENVS)
 

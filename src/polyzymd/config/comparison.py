@@ -125,6 +125,7 @@ class ConditionConfig(BaseModel):
 RETIRED_PLUGINS = {
     "rg": "radius_of_gyration",
     "rmsd": "rmsd",
+    "rmsf": "rmsf",
     "distances": "pair_distance",
     "catalytic_triad": "pair_distance",
 }
@@ -135,7 +136,7 @@ PAIR_ANALYSES = ("distances", "catalytic_triad")
 RETIRED_PLUGIN_WARNING = (
     "comparison.yaml has a {section}.{name} block, which is ignored: {name} no longer runs "
     "through compare. Run polyzymd analyze {name} -c <config.yaml> --eq <time>{pairs}, or in "
-    "Python study.timeseries with polyzymd.analyses.functions.{function}."
+    "Python {method} with polyzymd.analyses.functions.{function}."
 )
 
 
@@ -149,6 +150,7 @@ def _warn_retired(section: str, name: str) -> None:
             name=name,
             function=RETIRED_PLUGINS[name],
             pairs=" --set pairs=<pairs.yaml>" if name in PAIR_ANALYSES else "",
+            method="study.per_replicate" if name == "rmsf" else "study.timeseries",
         ),
         UserWarning,
         stacklevel=3,

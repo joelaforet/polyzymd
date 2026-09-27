@@ -134,3 +134,72 @@ def all_below(*distances: Any, thresholds: Any) -> Any:
 
     below = [np.asarray(d) < t for d, t in zip(distances, thresholds, strict=True)]
     return np.logical_and.reduce(below).astype(np.float64)
+
+
+def rmsf(atoms: Any, fit: Any, reference: Any, frames: Any, about_reference: bool = False) -> Any:
+    """Return the RMSF in Å of each residue of ``atoms`` over ``frames``.
+
+    Every frame is superposed on the reference by its ``fit`` atoms with
+    :func:`~polyzymd.analyses.reference.superpose`, which rotates as
+    ``MDAnalysis.analysis.align.AlignTraj`` does, without moving the
+    trajectory. ``MDAnalysis.analysis.rms.RMSF`` then gives each atom's
+    root mean square fluctuation about its mean position over the frames.
+    With ``about_reference`` true, each atom's root mean square deviation
+    from its reference position is taken instead, as the legacy rmsf plugin
+    did in external mode. Each residue's value is the mean over its atoms in
+    ``atoms``, in the order of ``atoms.residues``.
+
+    Parameters
+    ----------
+    atoms : MDAnalysis.core.groups.AtomGroup
+        Atoms to measure.
+    fit : MDAnalysis.core.groups.AtomGroup
+        Atoms that are superposed on the reference.
+    reference : MDAnalysis.core.groups.AtomGroup
+        Reference positions of ``atoms | fit`` in index order, from
+        :func:`polyzymd.analyses.reference.reference` with the selection
+        ``"(<atoms>) or (<fit>)"``.
+    frames : numpy.ndarray
+        Trajectory frame indices to use.
+    about_reference : bool, optional
+        Measure deviations from the reference positions instead of
+        fluctuations about the mean.
+
+    Returns
+    -------
+    numpy.ndarray
+        One value per residue of ``atoms``.
+
+    Raises
+    ------
+    ProtocolError
+        If ``reference`` does not hold one position per atom of ``atoms | fit``.
+    """
+    import MDAnalysis as mda
+    import numpy as np
+    from MDAnalysis.analysis.rms import RMSF
+    from MDAnalysis.coordinates.memory import MemoryReader
+
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.reference import superpose
+
+    group = atoms | fit
+    if len(reference) != len(group):
+        raise ProtocolError(
+            f"rmsf: the reference has {len(reference)} atoms and the selection and fit atoms "
+            f"together have {len(group)}.",
+            hint="Build the reference from the selection '(<selection>) or (<alignment>)'.",
+        )
+    where_fit = np.searchsorted(group.indices, fit.indices)
+    where = np.searchsorted(group.indices, atoms.indices)
+    coordinates = np.array([group.positions for _ in atoms.universe.trajectory[frames]], float)
+    target = reference.positions.astype(float)
+    moved = superpose(coordinates, where_fit, target[where_fit])[:, where]
+    if about_reference:
+        per_atom = np.sqrt(np.mean(np.sum((moved - target[where]) ** 2, axis=2), axis=0))
+    else:
+        copy = mda.Merge(atoms)
+        copy.load_new(moved.astype(np.float32), format=MemoryReader)
+        per_atom = RMSF(copy.atoms).run().results.rmsf
+    _, residue = np.unique(atoms.resindices, return_inverse=True)
+    return np.bincount(residue, weights=per_atom) / np.bincount(residue)
