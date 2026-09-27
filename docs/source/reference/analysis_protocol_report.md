@@ -52,6 +52,7 @@ and verdict. No line is dropped, however many conditions the report holds.
 | `p_adjusted` | `float \| None` | p value after the correction named by `correction`. `None` when the plugin stored no corrected value, which makes the comparison a description rather than a decision; the verdict then reads `no test recorded`. |
 | `test` | `str` | `student_t`, `welch_t` or `tukey_hsd`. |
 | `correction` | `str` | `BH` (Benjamini-Hochberg), `tukey_hsd`, or the configured post-hoc name. |
+| `family_size` | `int \| None` | Number of tests in the Benjamini-Hochberg family this row was corrected in: the conditions compared with the control for this one outcome. `None` for a row that was not tested, or for a stored plugin result that does not record it. Printed as `family <m>` on the comparison line. |
 | `cohens_d` | `float \| None` | Standardised mean difference, oriented like `delta`: positive means `b` is larger. The comparison code computes d as control minus compared, positive when the control is larger. It is negated in the report, together with `hedges_g`, so both have the same sign as `delta`. |
 | `hedges_g` | `float \| None` | Small-sample-corrected standardised mean difference, oriented like `cohens_d`, when the plugin reports one. Otherwise `None`. |
 | `direction` | `str` | The plugin's own direction word, for example `increased`. |
