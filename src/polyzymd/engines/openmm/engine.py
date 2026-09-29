@@ -26,6 +26,32 @@ LOGGER = logging.getLogger(__name__)
 _INCOMPLETE_STATUSES = frozenset({SegmentStatus.RUNNING, SegmentStatus.FAILED})
 
 
+def _dcd_has_no_frames(path: Path) -> bool:
+    """Return True when a DCD file is empty or holds only its header.
+
+    A DCD file starts with an 84-byte record, a title record and a one-integer
+    atom-count record, as written by OpenMM's ``DCDFile``. A file whose size
+    is at most the end of those records holds no frame. A file whose first
+    record marker is not 84 in either byte order is not read here and counts
+    as holding frames, so the trajectory reader reports what is wrong with it.
+    """
+    import struct
+
+    size = path.stat().st_size
+    if size == 0:
+        return True
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(96)
+            for order in ("<", ">"):
+                if len(head) >= 96 and struct.unpack(order + "i", head[:4])[0] == 84:
+                    (title,) = struct.unpack(order + "i", head[92:96])
+                    return size <= 92 + 4 + title + 4 + 12
+    except OSError:
+        return False
+    return False
+
+
 def _topology_format(path: Path | None) -> str:
     """Return the layout format name for a topology path."""
     if path is not None and path.suffix.lower() == ".prmtop":
@@ -199,7 +225,11 @@ class OpenMMEngine(SimulationEngine):
         arbitrary frame; including it would silently shorten the analysis
         window. Such segments are left out unless ``require_complete`` is
         False, and either way the status of every segment is reported on the
-        layout.
+        layout. A segment whose DCD file exists but holds no frame, such as
+        one interrupted at start-up before its first report and resumed by
+        the next segment, is left out with a warning and listed in
+        ``empty_segments``; the loader still checks that the remaining
+        segments form one contiguous time line.
 
         Parameters
         ----------
@@ -218,7 +248,7 @@ class OpenMMEngine(SimulationEngine):
         _ = replicate
 
         topology_path = self._find_openmm_topology(working_dir)
-        trajectory_paths, segment_status, skipped = self._find_openmm_trajectories(
+        trajectory_paths, segment_status, skipped, empty = self._find_openmm_trajectories(
             working_dir, require_complete=require_complete
         )
 
@@ -230,6 +260,7 @@ class OpenMMEngine(SimulationEngine):
             segment_status=segment_status,
             excluded_segments=skipped if require_complete else [],
             incomplete_segments=[] if require_complete else skipped,
+            empty_segments=empty,
         )
 
     @staticmethod
@@ -278,7 +309,7 @@ class OpenMMEngine(SimulationEngine):
         working_dir: Path,
         *,
         require_complete: bool = True,
-    ) -> tuple[list[Path], dict[int, str], list[int]]:
+    ) -> tuple[list[Path], dict[int, str], list[int], list[int]]:
         """Find trajectory DCD files using the canonical OpenMM search order.
 
         Parameters
@@ -292,7 +323,9 @@ class OpenMMEngine(SimulationEngine):
         -------
         tuple
             Ordered trajectory files, the status recorded for each segment
-            index, and the indices of the segments that are not complete.
+            index, the indices of the segments that are not complete, and the
+            indices of the segments left out because their DCD file holds no
+            frame.
         """
         prod_re = re.compile(r"production_(\d+)$")
         segment_dirs = {
@@ -303,7 +336,7 @@ class OpenMMEngine(SimulationEngine):
 
         if segment_dirs:
             max_index = max(segment_dirs)
-            trajectory_paths = []
+            trajectory_paths, empty = [], []
             progress = load_progress(working_dir)
             segments = progress.segments if progress is not None else []
             segment_status = {segment.index: segment.status.value for segment in segments}
@@ -336,8 +369,15 @@ class OpenMMEngine(SimulationEngine):
                     continue
                 if not file_path.is_file():
                     raise ValueError(f"Missing OpenMM trajectory segment: {file_path}")
-                if file_path.stat().st_size == 0:
-                    raise ValueError(f"Empty OpenMM trajectory segment: {file_path}")
+                if _dcd_has_no_frames(file_path):
+                    LOGGER.warning(
+                        "Skipping OpenMM production segment %d: %s holds no frames. The "
+                        "remaining segments must still form one contiguous time line.",
+                        index,
+                        file_path,
+                    )
+                    empty.append(index)
+                    continue
                 trajectory_paths.append(file_path)
             included = {
                 int(path.parent.name.removeprefix("production_")) for path in trajectory_paths
@@ -346,7 +386,7 @@ class OpenMMEngine(SimulationEngine):
                 reported = [index for index in incomplete_segments if index not in included]
             else:
                 reported = [index for index in incomplete_segments if index in included]
-            return trajectory_paths, segment_status, reported
+            return trajectory_paths, segment_status, reported, empty
 
         # Keep exact read-only support for expensive JRL 2025 LipA pre-PolyzyMD data
         single_production = working_dir / "production" / "production_trajectory.dcd"
@@ -355,8 +395,8 @@ class OpenMMEngine(SimulationEngine):
                 raise ValueError(f"OpenMM trajectory path is not a file: {single_production}")
             if single_production.stat().st_size == 0:
                 raise ValueError(f"Empty OpenMM trajectory: {single_production}")
-            return [single_production], {}, []
+            return [single_production], {}, [], []
 
         # Broad recursive globs are intentionally disallowed so old datasets
         # must match approved legacy names instead of accidental local files
-        return [], {}, []
+        return [], {}, [], []

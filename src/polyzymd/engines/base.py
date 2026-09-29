@@ -37,6 +37,9 @@ class TrajectoryLayout(BaseModel):
     incomplete_segments : list[int]
         Segment indices that were included even though they are not complete.
         Non-empty only when the caller asked for incomplete segments.
+    empty_segments : list[int]
+        Segment indices left out of ``trajectory_paths`` because their
+        trajectory file holds no frame.
     """
 
     topology_path: Path | None = None
@@ -46,6 +49,7 @@ class TrajectoryLayout(BaseModel):
     segment_status: dict[int, str] = Field(default_factory=dict)
     excluded_segments: list[int] = Field(default_factory=list)
     incomplete_segments: list[int] = Field(default_factory=list)
+    empty_segments: list[int] = Field(default_factory=list)
 
 
 class EngineSubmitRequest(BaseModel):

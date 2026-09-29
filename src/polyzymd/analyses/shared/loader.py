@@ -611,6 +611,7 @@ def _assert_contiguous_segments(
     *,
     relative_tolerance: float = 1e-3,
     excluded_segments: Sequence[int] = (),
+    empty_segments: Sequence[int] = (),
 ) -> list[_SegmentTiming]:
     """Require daisy-chained segments to form one monotonic, evenly spaced time line.
 
@@ -631,6 +632,10 @@ def _assert_contiguous_segments(
         Segment indices the engine left out because they are not complete.
         They are named in the error, since leaving out a segment that other
         segments continue from is itself a reason the time line has a gap.
+    empty_segments : sequence of int, optional
+        Segment indices the engine left out because their file holds no
+        frame. They are named in the error, since the gap may be where they
+        were.
 
     Returns
     -------
@@ -693,6 +698,13 @@ def _assert_contiguous_segments(
             )
 
     if problems:
+        skipped = (
+            f" Production segment(s) {list(empty_segments)} were skipped because their "
+            "trajectory holds no frames; the segments around them must still join without "
+            "a gap."
+            if empty_segments
+            else ""
+        )
         if excluded_segments:
             cause = (
                 f"Production segment(s) {list(excluded_segments)} were left out of this "
@@ -709,7 +721,7 @@ def _assert_contiguous_segments(
             )
         raise TrajectoryLineageError(
             "Trajectory segments do not form a single contiguous time line; refusing to "
-            f"concatenate them. {cause} Inspect progress.json and the production_N "
+            f"concatenate them. {cause}{skipped} Inspect progress.json and the production_N "
             "directories, quarantine the branched segments, then retry.\n  - "
             + "\n  - ".join(problems)
         )
@@ -958,6 +970,8 @@ class TrajectoryInfo:
         Discovery warnings that should be preserved in downstream provenance.
     excluded_segments : list[int]
         Segment indices the engine left out because they are not complete.
+    empty_segments : list[int]
+        Segment indices the engine left out because their file holds no frame.
     segment_status : dict[int, str]
         Status the engine recorded for each production segment index.
     """
@@ -971,6 +985,7 @@ class TrajectoryInfo:
     trajectory_format: str | None = None
     warnings: list[str] = field(default_factory=list)
     excluded_segments: list[int] = field(default_factory=list)
+    empty_segments: list[int] = field(default_factory=list)
     segment_status: dict[int, str] = field(default_factory=dict)
 
     @property
@@ -1282,6 +1297,14 @@ class TrajectoryLoader:
         if segment_warning is not None:
             warnings.append(segment_warning)
             LOGGER.warning(segment_warning)
+        empty = list(getattr(layout, "empty_segments", []))
+        if empty:
+            # The engine logged each file by name; this keeps the indices in the provenance.
+            warnings.append(
+                f"Skipped production segment(s) {empty} of {working_dir} because their "
+                "trajectory files hold no frames; the remaining segments were checked to "
+                "join without a gap."
+            )
 
         return TrajectoryInfo(
             topology_file=layout.topology_path,
@@ -1293,6 +1316,7 @@ class TrajectoryLoader:
             trajectory_format=layout.trajectory_format,
             warnings=warnings,
             excluded_segments=list(layout.excluded_segments),
+            empty_segments=list(getattr(layout, "empty_segments", [])),
             segment_status=dict(layout.segment_status),
         )
 
@@ -1373,6 +1397,7 @@ class TrajectoryLoader:
                     info.topology_file,
                     info.trajectory_files,
                     excluded_segments=tuple(info.excluded_segments),
+                    empty_segments=tuple(info.empty_segments),
                 )
             u = mda.Universe(
                 str(info.topology_file),
