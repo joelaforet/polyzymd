@@ -72,7 +72,7 @@ def plot_timeseries(
     name: str,
     plot_settings: PlotSettings | None = None,
 ) -> Path:
-    """Draw every replicate's series against simulation time, coloured by condition.
+    """Draw every replicate's series against simulation time, colored by condition.
 
     Each replicate is a thin line. Where every replicate of a condition has
     the same times over its first frames, a thick line gives their mean over
