@@ -162,6 +162,7 @@ class UniverseProvenance:
     engine_override: str | None = None
     warnings: tuple[str, ...] = field(default_factory=tuple)
     excluded_segments: tuple[int, ...] = field(default_factory=tuple)
+    empty_segments: tuple[int, ...] = field(default_factory=tuple)
     segment_status: tuple[tuple[int, str], ...] = field(default_factory=tuple)
     pbc_policy: str = "as_is"
     topology_has_bonds: bool | None = None
@@ -187,6 +188,7 @@ class UniverseProvenance:
             "engine_override": self.engine_override,
             "warnings": list(self.warnings),
             "excluded_segments": list(self.excluded_segments),
+            "empty_segments": list(self.empty_segments),
             "segment_status": {str(index): status for index, status in self.segment_status},
             "pbc_policy": self.pbc_policy,
             "topology_has_bonds": self.topology_has_bonds,
@@ -434,6 +436,7 @@ class UniverseProvider:
             engine_override=self.engine_override,
             warnings=tuple(warnings),
             excluded_segments=tuple(getattr(info, "excluded_segments", ()) or ()),
+            empty_segments=tuple(getattr(info, "empty_segments", ()) or ()),
             segment_status=tuple(sorted((getattr(info, "segment_status", None) or {}).items())),
             pbc_policy=self.pbc_policy,
             trajectory_variant=trajectory_variant(info.trajectory_files),
