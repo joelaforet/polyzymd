@@ -1058,7 +1058,7 @@ with any discovered analysis plugin.
 polyzymd compare run COMPARISON_TYPE [OPTIONS]
 
 Arguments:
-  COMPARISON_TYPE        Analysis plugin name (e.g. contacts, sasa, secondary_structure)
+  COMPARISON_TYPE        Analysis plugin name (e.g. contacts, secondary_structure)
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
@@ -1222,7 +1222,7 @@ already exist on disk (or use `compare submit-all` instead).
 polyzymd compare submit ANALYSIS [OPTIONS]
 
 Arguments:
-  ANALYSIS               Analysis plugin name (e.g. contacts, sasa)
+  ANALYSIS               Analysis plugin name (e.g. contacts, hydrogen_bonds)
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
@@ -1246,21 +1246,21 @@ Options:
 #### Example
 
 ```bash
-# Submit SASA analysis to SLURM
-polyzymd compare submit sasa --partition gpu --account my_alloc
+# Submit contacts analysis to SLURM
+polyzymd compare submit contacts --partition gpu --account my_alloc
 
 # Dry run to inspect generated scripts
 polyzymd compare submit contacts --dry-run
 
 # Use job arrays for efficiency
-polyzymd compare submit sasa --job-arrays --partition aa100
+polyzymd compare submit contacts --job-arrays --partition aa100
 
 # Rely on plugin memory hints and cluster default partition
 polyzymd compare submit secondary_structure --qos normal
 
 # Blanca condo nodes at CU Boulder
 module load slurm/blanca
-polyzymd compare submit sasa \
+polyzymd compare submit contacts \
     -f comparison.yaml \
     --partition blanca-shirts \
     --account blanca-shirts \
@@ -1303,7 +1303,7 @@ Options:
 polyzymd compare submit-all -f comparison.yaml --partition aa100 --qos normal
 
 # Skip selected plugins
-polyzymd compare submit-all -f comparison.yaml --exclude sasa --exclude hydrogen_bonds
+polyzymd compare submit-all -f comparison.yaml --exclude secondary_structure --exclude hydrogen_bonds
 
 # Dry-run planning only
 polyzymd compare submit-all -f comparison.yaml --dry-run
@@ -1329,11 +1329,11 @@ Options:
 #### Example
 
 ```bash
-# Check status of SASA SLURM jobs
-polyzymd compare status sasa
+# Check status of contacts SLURM jobs
+polyzymd compare status contacts
 
 # Reconcile with SLURM scheduler and get JSON output
-polyzymd compare status sasa --reconcile --json
+polyzymd compare status contacts --reconcile --json
 ```
 
 ### polyzymd compare finalize
@@ -1358,7 +1358,7 @@ Options:
 
 ```bash
 # Finalize after SLURM jobs complete
-polyzymd compare finalize sasa
+polyzymd compare finalize contacts
 
 # Allow partial results (some conditions may have failed)
 polyzymd compare finalize contacts --allow-partial

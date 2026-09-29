@@ -26,17 +26,17 @@ Typical local workflow:
 
 ```bash
 pixi run -e analysis polyzymd compare validate -f comparison.yaml
-pixi run -e analysis polyzymd compare run sasa -f comparison.yaml
+pixi run -e analysis polyzymd compare run contacts -f comparison.yaml
 pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
 ```
 
 Typical SLURM workflow:
 
 ```bash
-pixi run -e analysis polyzymd compare submit sasa -f comparison.yaml --dry-run
-pixi run -e analysis polyzymd compare submit sasa -f comparison.yaml --partition <part>
-pixi run -e analysis polyzymd compare status sasa -f comparison.yaml
-pixi run -e analysis polyzymd compare finalize sasa -f comparison.yaml
+pixi run -e analysis polyzymd compare submit contacts -f comparison.yaml --dry-run
+pixi run -e analysis polyzymd compare submit contacts -f comparison.yaml --partition <part>
+pixi run -e analysis polyzymd compare status contacts -f comparison.yaml
+pixi run -e analysis polyzymd compare finalize contacts -f comparison.yaml
 pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
 ```
 
@@ -166,21 +166,10 @@ use CA-only selections such as `protein and name CA`.
 
 ### `plugins.sasa`
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `runs` | list | **(required)** | List of SASA run definitions (see sub-fields) |
-| `probe_radius_nm` | float | `0.14` | MDTraj Shrake-Rupley probe radius in nanometers |
-| `n_sphere_points` | int | `960` | Number of sphere points for MDTraj Shrake-Rupley SASA |
-| `chunk_size` | int | `100` | Frames per chunk for memory management |
-
-Each entry in `runs`:
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `label` | string | **(required)** | Name for this SASA computation |
-| `target_selection` | string | **(required)** | MDAnalysis selection for the target surface |
-| `context_selection` | string | same as `target_selection` | Atoms to include in SASA context (affects shadowing) |
-| `stride` | int | `1` | Frame stride |
+SASA runs through `polyzymd analyze sasa` or the study API, not through
+`comparison.yaml`. A `plugins.sasa` block in an existing file still loads, is
+ignored with a warning, and leaves every other plugin in the file working. See
+{doc}`../how_to/analysis_sasa_quickstart`.
 
 ### `plugins.catalytic_triad`
 

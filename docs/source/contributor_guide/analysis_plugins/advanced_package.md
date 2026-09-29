@@ -36,7 +36,7 @@ change.
 
 ## Use built-in packages as examples, not import targets
 
-Built-in plugins such as `contacts`, `sasa`, `hydrogen_bonds` and
+Built-in plugins such as `contacts`, `hydrogen_bonds` and
 `secondary_structure` show real package shapes. Their private helper modules are useful examples of organization:
 
 - `_mda.py` for trajectory-native job and collector helpers;

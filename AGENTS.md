@@ -81,7 +81,7 @@ src/polyzymd/
 
 | Layer | Files | Role |
 |-------|-------|------|
-| **Plugins** (public) | `contacts/`, `sasa/`, `secondary_structure/`, `hydrogen_bonds/` | One class per analysis type — the **extension point** for contributors |
+| **Plugins** (public) | `contacts/`, `secondary_structure/`, `hydrogen_bonds/` | One class per analysis type — the **extension point** for contributors |
 | **Private modules** | `_framework/`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
 | **Shared utilities** | `shared/loader.py`, `shared/window.py`, etc. | `TrajectoryLoader`, frame windows, statistics, autocorrelation — reusable across plugins |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/` | Stable public facade, auto-discovery, artifact lifecycle, default comparison utilities |
@@ -178,7 +178,7 @@ When writing a new analysis plugin, **study existing implementations first**:
 2. **Start with the scaffold output** — `polyzymd new-analysis <name>` generates a complete working plugin with MDAnalysis jobs, artifacts, aggregation, comparison, plotting, and tests
 3. **Study `analyses/secondary_structure/`** or **`analyses/contacts/`**, which override `compare()` and draw their own plots
 
-For a new measurement, prefer a function run through `Study.timeseries` or `Study.per_replicate` over a new plugin; see `docs/source/explanation/analysis_api.md`. rg, rmsd, rmsf, distances and the catalytic triad are written that way, in `analyses/functions.py` and `analyses/protocols.py`.
+For a new measurement, prefer a function run through `Study.timeseries` or `Study.per_replicate` over a new plugin; see `docs/source/explanation/analysis_api.md`. rg, rmsd, rmsf, distances, the catalytic triad and sasa are written that way, in `analyses/functions.py` and `analyses/protocols.py`.
 
 **Anti-pattern to avoid:**
 ```python

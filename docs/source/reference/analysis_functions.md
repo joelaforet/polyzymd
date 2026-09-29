@@ -14,6 +14,7 @@ functions measure all production frames of one replicate and run through
 | `rmsd` | `atoms` and `reference`, `AtomGroup`s with the same atoms | float, Å | MDAnalysis `rms.rmsd(center=True, superposition=True)`: unweighted, `atoms` superposed on `reference` | `polyzymd analyze rmsd` |
 | `pair_distance` | `atoms_a`, `atoms_b`, `mode_a` and `mode_b` (`single`, `midpoint`, `centroid` or `com`), `pbc` | float, Å | MDAnalysis `lib.distances.calc_bonds` between the two points, with the minimum image of the frame's box when `pbc` is true | `polyzymd analyze distances`, `polyzymd analyze catalytic_triad` |
 | `all_below` | distance series, `thresholds` | 1 or 0 per frame | 1 for each frame in which every distance is strictly below its threshold; used with `Timeseries.transform` | `polyzymd analyze catalytic_triad` |
+| `sasa` | `target` and `context`, `AtomGroup`s with every target atom in the context; `probe_radius_nm` (0.14) and `n_sphere_points` (960) | float, Å² | `mdtraj.shrake_rupley(mode="atom")` on the context atoms in a call of its own, with each atom's radius from MDTraj's element table plus the probe radius, summed over the target atoms; context atoms outside the target cover the target without being counted; periodic images not considered | `polyzymd analyze sasa` |
 
 ## Per-replicate functions
 
@@ -30,6 +31,7 @@ giving one value per residue in the order of `atoms.residues`.
 | `rmsf` | one value per residue, Å | MDAnalysis `rms.RMSF` of the superposed positions: the fluctuation of each atom about its mean position, as `gmx rmsf -o` gives | `polyzymd analyze rmsf` |
 | `rms_deviation` | one value per residue, Å | Root mean square deviation of each atom from its reference position, as `gmx rmsf -od` gives | `polyzymd analyze rms_deviation` |
 | `rms_decomposition` | six rows of one value per residue | Rows `RMS_PARTS = ("rms_deviation", "rmsf", "offset")`, the offset being the distance of each atom's mean position from its reference position, in Å; then rows `MS_PARTS = ("ms_deviation", "msf", "ms_offset")`, the means over each residue's atoms of the squared per-atom values, in Å². `ms_deviation = msf + ms_offset` for every residue | `polyzymd analyze rmsf`, `polyzymd analyze rms_deviation` |
+| `residue_sasa` | `target`, `context` and `frames`, as `sasa` takes them, and the production frames | one value per target residue, Å² | Each frame's per-atom SASA as in `sasa`, one frame per MDTraj call, summed over each residue's target atoms and averaged over the frames | `polyzymd analyze sasa --run <context>_residues` |
 
 The comparison with `gmx rmsf` on real trajectories, and the script that reruns
 it, are in {doc}`../explanation/analysis_rmsf_verification`.
@@ -76,6 +78,16 @@ default result is `core_rmsf` for `rmsf` and `core_rms_deviation` for
 `rms_deviation`. The residues of the core and of each region are recorded
 under `provenance.settings`. See {doc}`../how_to/analysis_rmsf_quickstart`.
 
+`polyzymd analyze sasa` measures `sasa` of `--set target=...` (default
+`protein`) in each context of `--set contexts='{name: selection}'` (default the
+target alone, named `isolated`), with `probe_radius_nm` and `n_sphere_points`.
+`--run <name>` reports the mean over production frames of the total, and
+`--run <name>_residues` runs `residue_sasa` and compares every residue. Only the
+chosen result is measured. The default is the first context's total. See
+{doc}`../how_to/analysis_sasa_quickstart`. MDTraj is given one frame per call
+because MDTraj 1.11.1 returns about 0.1 percent too much area for the later
+frames each thread computes in a call; see {doc}`../explanation/analysis_sasa_verification`.
+
 ## Figures
 
 `polyzymd analyze` writes these figures to `<output-dir>/figures/<analysis>/`
@@ -87,5 +99,6 @@ and records the folder under `output_paths.figures` in the JSON report;
 | `rg` | `rg_timeseries` (every replicate against time), `rg_comparison` (condition means with every replicate value), `rg_distribution` (per-frame distribution) |
 | `rmsd` | `rmsd_timeseries`, `rmsd_comparison` |
 | `rmsf`, `rms_deviation` | `rmsf_profile`, `offset_profile` and `rms_deviation_profile` (each replicate and each condition's mean with its interval, `highlight_residues` marked), `rms_decomposition` (the three profiles of each condition together), `rmsf_comparison` (the three core values), and with several conditions `rmsf_difference`, `offset_difference` and `rms_deviation_difference` (each condition minus the control at every residue, with the interval of the difference and the significant residues marked) |
+| `sasa` | For a total, `sasa_timeseries_<name>`, `sasa_comparison_<name>` and `sasa_distribution_<name>`; for `<name>_residues`, `sasa_profile_<name>` and with several conditions `sasa_difference_<name>` |
 | `distances` | `distance_kde_<pair>` for each pair with its threshold, `distance_fraction_<result>` for each fraction below threshold, and the grouped `distance_threshold_bars` (every pair's fraction) and `distance_kde_panel` (one panel per pair) |
 | `catalytic_triad` | `triad_kde_<pair>` for each pair with its threshold, `triad_fraction_<result>` for `simultaneous` and each pair's fraction, and the grouped `triad_threshold_bars` (each pair's fraction, then all pairs) and `triad_kde_panel` (one panel per pair) |

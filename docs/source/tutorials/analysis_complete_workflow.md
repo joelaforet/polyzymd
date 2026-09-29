@@ -32,8 +32,8 @@ If you have not run a single-condition analysis yet, complete
 {doc}`first_analysis` first.
 
 ```{important}
-This tutorial uses the comparison plugins: contacts, secondary structure, SASA
-and hydrogen bonds. RMSD, Rg, RMSF, distances and the catalytic triad run
+This tutorial uses the comparison plugins: contacts, secondary structure and
+hydrogen bonds. RMSD, Rg, RMSF, distances, the catalytic triad and SASA run
 through `polyzymd analyze` instead; Step 5 shows RMSF for the same study. Experimental workflows are linked at the end, but they are not part of
 the main tutorial path.
 ```
@@ -142,7 +142,7 @@ outputs under `comparison/<analysis>/result.json`.
 **On an HPC cluster?** For large studies, submit each analysis as a SLURM
 job DAG instead of running interactively:
 
-    pixi run -e analysis polyzymd compare submit sasa --partition <part> --mem 8G
+    pixi run -e analysis polyzymd compare submit contacts --partition <part> --mem 8G
 
 This parallelizes across replicates and conditions. See
 {doc}`../how_to/hpc_execution` for the complete HPC workflow.

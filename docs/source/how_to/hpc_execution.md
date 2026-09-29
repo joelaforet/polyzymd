@@ -88,12 +88,34 @@ Exclude one or more analyses with repeatable `--exclude`:
 ```bash
 pixi run -e analysis polyzymd compare submit-all \
     -f comparison.yaml \
-    --exclude sasa \
+    --exclude hydrogen_bonds \
     --partition aa100
 ```
 
 Use `--dry-run` to generate all scripts and print the submission summary table
 without dispatching jobs.
+
+## Analyses that run through `polyzymd analyze`
+
+`rg`, `rmsd`, `rmsf`, `rms_deviation`, `distances`, `catalytic_triad` and
+`sasa` run through `polyzymd analyze` and the study API, not through
+`polyzymd compare submit`. To run one on a cluster, put the command in a batch
+script and submit it; it measures every replicate of every condition in one
+job, and a rerun reuses every stored replicate result:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=sasa
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=16G
+#SBATCH --time=24:00:00
+pixi run -e analysis polyzymd analyze sasa \
+    -c noPoly_CALB_pNPB/config.yaml -c SBMA_100_CALB_pNPB/config.yaml \
+    --label "No Polymer" --label "SBMA-100" --eq 10ns \
+    --set "contexts={isolated: protein, with_polymer: protein or chainid C}" \
+    --run with_polymer --output-dir sasa_results
+```
 
 ## Framework finalize-only mode
 
@@ -128,7 +150,7 @@ calb_study/
 ```
 
 The `comparison.yaml` defines three conditions with three replicates each,
-and enables the SASA analysis plugin:
+and enables the contacts analysis plugin:
 
 ```yaml
 name: "calb_polymer_study"
@@ -152,16 +174,10 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  sasa:
-    runs:
-      - label: "protein_isolated"
-        target_selection: "protein"
-        context_selection: "protein"
-      - label: "protein_with_polymer"
-        target_selection: "protein"
-        context_selection: "protein or chainid C"
-    probe_radius_nm: 0.14
-    n_sphere_points: 960
+  contacts:
+    polymer_selection: "chainid C"
+    protein_selection: "chainid A"
+    cutoff: 4.5
 
 plot_settings:
   format: "png"
@@ -183,7 +199,7 @@ scheduler. This lets you inspect the generated SLURM scripts and verify
 that paths, partition names, and resource requests are correct.
 
 ```bash
-pixi run -e analysis polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit contacts \
     -f comparison.yaml \
     --partition aa100 \
     --mem 8G \
@@ -201,7 +217,7 @@ Dry run only: no jobs were submitted
 The generated scripts are written to the HPC artifact directory:
 
 ```text
-comparison/sasa/_hpc/
+comparison/contacts/_hpc/
 ├── manifest.json          # Snapshot of analysis inputs
 ├── scripts/
 │   ├── replicate__no_polymer__r1.sh
@@ -232,7 +248,7 @@ Open one of the generated `.sh` scripts and check that:
 Once you are satisfied with the dry run, submit for real:
 
 ```bash
-pixi run -e analysis polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit contacts \
     -f comparison.yaml \
     --partition aa100 \
     --mem 8G \
@@ -261,15 +277,15 @@ execution instead.
 Check the status of your submitted DAG at any time:
 
 ```bash
-pixi run -e analysis polyzymd compare status sasa \
+pixi run -e analysis polyzymd compare status contacts \
     -f comparison.yaml
 ```
 
 Sample output:
 
 ```text
-Analysis: sasa
-HPC dir: /path/to/calb_study/comparison/sasa/_hpc
+Analysis: contacts
+HPC dir: /path/to/calb_study/comparison/contacts/_hpc
 States: pending=4 running=2 retrying=0 succeeded=7 failed=0 unknown=0
 ```
 
@@ -288,7 +304,7 @@ are:
 For machine-readable output (useful in scripts), add `--json`:
 
 ```bash
-pixi run -e analysis polyzymd compare status sasa \
+pixi run -e analysis polyzymd compare status contacts \
     -f comparison.yaml --json
 ```
 
@@ -299,7 +315,7 @@ be stale. Use `--reconcile` to query `sacct` and update status files
 atomically:
 
 ```bash
-pixi run -e analysis polyzymd compare status sasa \
+pixi run -e analysis polyzymd compare status contacts \
     -f comparison.yaml --reconcile
 ```
 
@@ -310,7 +326,7 @@ You can also use standard SLURM tools alongside PolyzyMD status:
 
 ```bash
 squeue -u $USER
-tail -f comparison/sasa/_hpc/logs/*.out
+tail -f comparison/contacts/_hpc/logs/*.out
 ```
 
 ## Step 4: Finalize Results
@@ -326,14 +342,14 @@ finalize manually:
 Run finalize manually:
 
 ```bash
-pixi run -e analysis polyzymd compare finalize sasa \
+pixi run -e analysis polyzymd compare finalize contacts \
     -f comparison.yaml
 ```
 
 Output:
 
 ```text
-Saved result: /path/to/calb_study/comparison/sasa/result.json
+Saved result: /path/to/calb_study/comparison/contacts/result.json
 ```
 
 The finalize step runs `compare()` (cross-condition statistics) and `plot()`
@@ -345,7 +361,7 @@ If some conditions failed but you still want partial results, pass
 `--allow-partial`:
 
 ```bash
-pixi run -e analysis polyzymd compare finalize sasa \
+pixi run -e analysis polyzymd compare finalize contacts \
     -f comparison.yaml --allow-partial
 ```
 
@@ -361,7 +377,7 @@ SLURM jobs run in a non-interactive shell that may not have your login-time
 PATH. Use `--pixi-path` to provide the absolute path:
 
 ```bash
-pixi run -e analysis polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit contacts \
     -f comparison.yaml \
     --pixi-path /home/youruser/.pixi/bin/pixi \
     --partition aa100
@@ -373,28 +389,23 @@ Find your pixi path with `which pixi` before submitting.
 
 ### Job fails with OOM (out of memory)
 
-SASA computation on large systems can be memory-intensive. Increase the
+Contact analysis of large systems can be memory-intensive. Increase the
 memory allocation:
 
 ```bash
-pixi run -e analysis polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit contacts \
     -f comparison.yaml \
     --mem 16G \
     --partition aa100
 ```
 
-You can also reduce memory pressure by increasing the `stride` in
-your SASA plugin settings (which analyzes fewer frames), or by
-decreasing `chunk_size` (which processes fewer frames per batch
-at the cost of more I/O overhead). The default `chunk_size` of 100
-is already conservative for most systems.
 
 ### Job times out
 
 Increase the wall-time limit:
 
 ```bash
-pixi run -e analysis polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit contacts \
     -f comparison.yaml \
     --time 04:00:00 \
     --partition aa100
@@ -405,7 +416,7 @@ pixi run -e analysis polyzymd compare submit sasa \
 Check the SLURM log for that replicate:
 
 ```bash
-cat comparison/sasa/_hpc/logs/replicate__sbma_100__r2.*.out
+cat comparison/contacts/_hpc/logs/replicate__sbma_100__r2.*.out
 ```
 
 Common causes: trajectory file not found, selection string matches zero atoms,
@@ -527,7 +538,6 @@ For `--mem`, `--time`, and `--cpus-per-task`, submission precedence is:
 
 Current plugin resource hints:
 
-- `sasa`: `8G`, `02:00:00`
 - `secondary_structure`: `16G`
 - `hydrogen_bonds`: `16G`
 
@@ -542,7 +552,7 @@ of `sbatch` calls and make the SLURM queue easier to manage. Pass
 replicate jobs:
 
 ```bash
-pixi run -e analysis polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit contacts \
     -f comparison.yaml \
     --partition aa100 \
     --mem 8G \
@@ -638,7 +648,7 @@ pixi run -e analysis polyzymd compare submit-all \
 The same flags work with `compare submit` for individual plugins:
 
 ```bash
-pixi run -e analysis polyzymd compare submit sasa \
+pixi run -e analysis polyzymd compare submit contacts \
     -f comparison.yaml \
     --partition blanca-shirts \
     --account blanca-shirts \

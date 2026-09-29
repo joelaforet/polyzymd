@@ -11,12 +11,13 @@ You will:
 - generate figures with `polyzymd compare plot-all`
 
 ```{important}
-RMSD, Rg, RMSF, distances and the catalytic triad run through
+RMSD, Rg, RMSF, distances, the catalytic triad and SASA run through
 `polyzymd analyze` and the study API instead of this workflow; see
 {doc}`analysis_rmsd_quickstart`, {doc}`analysis_rg_quickstart`,
-{doc}`analysis_rmsf_quickstart`, {doc}`analysis_distances_quickstart` and
-{doc}`analysis_triad_quickstart`. This guide covers the analyses that still run
-as comparison plugins: contacts, secondary structure, SASA and hydrogen bonds.
+{doc}`analysis_rmsf_quickstart`, {doc}`analysis_distances_quickstart`,
+{doc}`analysis_triad_quickstart` and {doc}`analysis_sasa_quickstart`. This guide
+covers the analyses that still run as comparison plugins: contacts, secondary
+structure and hydrogen bonds.
 ```
 
 ```{note}
@@ -108,7 +109,7 @@ polymer_stability_study/
 - `comparison.yaml` defines the conditions and enabled plugins
 - `comparison/` stores cached comparison JSON, one subdirectory per analysis
 - `figures/` stores generated plots
-- `structures/` holds shared reference files such as an enzyme PDB for SASA
+- `structures/` holds shared reference files such as an enzyme PDB
 
 ## Step 2: Define a Minimal `comparison.yaml`
 
@@ -190,14 +191,14 @@ This command:
 :::{admonition} Running on an HPC cluster?
 :class: tip
 
-For expensive analyses (SASA, contacts, hydrogen bonds) or large studies with
+For expensive analyses (contacts, hydrogen bonds) or large studies with
 many conditions and replicates, use `polyzymd compare submit` to dispatch
 analysis as SLURM jobs instead of running interactively:
 
 ```bash
-polyzymd compare submit sasa --partition <part> --mem 8G --time 02:00:00
-polyzymd compare status sasa       # monitor progress
-polyzymd compare finalize sasa     # (if needed) re-run compare + plot
+polyzymd compare submit contacts --partition <part> --mem 8G --time 02:00:00
+polyzymd compare status contacts       # monitor progress
+polyzymd compare finalize contacts     # (if needed) re-run compare + plot
 ```
 
 Each replicate runs as an independent job, with automatic dependency wiring
@@ -303,7 +304,6 @@ print(pipeline_result["comparison_path"])
 Common next additions to `comparison.yaml` are:
 
 - `contacts` for polymer coverage and contact fraction
-- `sasa` for solvent-accessible surface area
 - `hydrogen_bonds` for hydrogen-bond occupancy and lifetime summaries
 
 For end-to-end examples, see:
