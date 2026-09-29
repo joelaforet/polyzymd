@@ -148,7 +148,7 @@ def plot_timeseries(
 
 
 def reflected_kde(values: Any, bounds: tuple = (None, None), points: int = 200) -> tuple:
-    """Evaluate a Gaussian KDE of ``values`` that puts no density outside ``bounds``.
+    """Evaluate a Gaussian KDE of ``values`` that does not put density outside ``bounds``.
 
     ``f`` is ``scipy.stats.gaussian_kde`` with Scott's bandwidth ``h``. The
     grid runs from ``min(values) - 3h`` to ``max(values) + 3h``, as seaborn's
