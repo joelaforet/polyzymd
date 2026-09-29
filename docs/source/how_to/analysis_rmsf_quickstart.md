@@ -157,6 +157,13 @@ verdict words are described under {ref}`polyzymd analyze <cli-analyze>`.
 
 ## From Python
 
+`rms_decomposition` returns six rows per replicate. `RMS_PARTS` and `MS_PARTS`
+are the names of those rows: `rms_deviation`, `rmsf` and `offset` in Å, then
+their per-residue mean squares `ms_deviation`, `msf` and `ms_offset` in Å².
+`parts=` gives each row its name, so `rows["rmsf"]` is one result. What the
+three quantities are, and how they add up, is explained in
+[Fluctuation, offset and deviation](../explanation/analysis_rmsf_best_practices.md#fluctuation-offset-and-deviation).
+
 ```python
 import polyzymd as pz
 from polyzymd.analyses.functions import MS_PARTS, RMS_PARTS, rms_decomposition
