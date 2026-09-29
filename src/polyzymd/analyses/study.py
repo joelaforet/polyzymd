@@ -19,6 +19,7 @@ from polyzymd.analyses.exceptions import ProtocolError
 if TYPE_CHECKING:
     import numpy as np
 
+    from polyzymd.analyses.shared.loader import SegmentJoin
     from polyzymd.analyses.shared.window import TrajectoryWindow
 
 
@@ -49,7 +50,8 @@ class Replicate:
         -------
         MDAnalysis.Universe
             Every production frame in segment order, including the
-            equilibration window. Use :attr:`frames` to skip that window.
+            equilibration window and any segment's last frame that the next
+            segment records again. Use :attr:`frames` to skip both.
         """
         if self._universe is None:
             self._universe = self.condition._provider.load_universe(self.index)
@@ -76,25 +78,50 @@ class Replicate:
                 ) from exc
         return self._window
 
+    def _segment_join(self) -> SegmentJoin | None:
+        """Return the boundary repairs found when the universe was loaded, if any."""
+        self.universe()
+        get_join = getattr(self.condition._provider._get_loader(), "segment_join", None)
+        join = get_join(self.index) if callable(get_join) else None
+        return join if join is not None and join.repaired else None
+
     @property
     def frames(self) -> np.ndarray:
         """Indices of the production frames after the equilibration window.
 
         The first index is the first frame whose time is at or after the
-        equilibration time and the last is the trajectory's last frame.
+        equilibration time and the last is the trajectory's last frame. When
+        a segment's last frame is recorded again at the same time by the next
+        segment (see :class:`~polyzymd.analyses.shared.loader.SegmentJoin`),
+        that frame's index is left out.
         """
         import numpy as np
 
+        from polyzymd.analyses.shared.window import FRAME_BOUNDARY_TOLERANCE
+
         window = self._production_window()
-        return np.arange(window.start, window.stop, window.step, dtype=np.int64)
+        join = self._segment_join()
+        if join is None:
+            return np.arange(window.start, window.stop, window.step, dtype=np.int64)
+        cutoff_ps = window.equilibration_ps - FRAME_BOUNDARY_TOLERANCE * window.timestep_ps
+        keep = join.times_ps >= cutoff_ps
+        keep[list(join.dropped_frames)] = False
+        return np.flatnonzero(keep)[:: window.step].astype(np.int64)
 
     @property
     def times(self) -> np.ndarray:
         """Simulation time of each entry of :attr:`frames`, in ns.
 
         Each time is the first frame's timestamp, or zero when the trajectory
-        has none, plus the frame index times the frame interval.
+        has none, plus the frame index times the frame interval. When a
+        segment boundary was repaired, each time is instead the segment's
+        first-frame time plus the frame's index within its segment times the
+        frame interval, so frames after a dropped or missing frame keep their
+        recorded times.
         """
+        join = self._segment_join()
+        if join is not None:
+            return join.times_ps[self.frames] / 1000.0
         window = self._production_window()
         origin_ps = window.first_frame_time_ps or 0.0
         return (origin_ps + self.frames * window.timestep_ps) / 1000.0

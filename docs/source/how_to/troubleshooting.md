@@ -534,9 +534,22 @@ ValueError: System state doesn't match checkpoint
 
 The analysis loader refuses to concatenate production segments whose raw
 timestamps overlap, run backwards, or leave gaps, or whose frame intervals
-differ. This usually means two restart chains wrote into the same run
-directory (for example a duplicated SLURM resubmission) or a segment is
-missing.
+differ. Two boundary defects of the OpenMM restart chain are repaired instead,
+with a warning:
+
+- A segment that starts at the time of the previous segment's last frame. The
+  restart resumed from a state saved shortly before that frame and simulated
+  the step again, so the previous segment's last frame is left out of
+  `Replicate.frames`.
+- A segment that starts two frame intervals after the previous one ends. One
+  frame was never written, and the frames after the gap keep their recorded
+  times in `Replicate.times`.
+
+Both repairs are recorded under `segment_join` in the replicate's provenance.
+What still raises is an overlap or gap of more than one frame, or a change of
+frame interval: a missing segment, two restart chains writing into the same
+run directory (for example a duplicated SLURM resubmission), or a report
+interval changed part way through the chain.
 
 **Solutions:**
 
