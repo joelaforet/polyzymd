@@ -49,21 +49,46 @@ On two local replicates of *B. subtilis* lipase A (Cα of residues 4 to 174,
 against the 1ISP crystal), the identity held to within 3e-7 Å² per atom in all
 four reference modes, and to within 3e-8 Å² for the core and region values.
 
-## Agreement of MDAnalysis RMSF with GROMACS
+## Agreement with GROMACS
 
-Because the fluctuation comes from MDAnalysis `rms.RMSF`, its agreement with
-other programs is that of MDAnalysis. An earlier benchmark on lipase A (171 Cα
-atoms, 2,500 frames of a 1,000 ns NPT run), with every method given the same
-aligned coordinates, found:
+`scripts/benchmarks/rmsf_gromacs_parity.py` compares the per-residue values
+with GROMACS `gmx rmsf`. For each reference mode, PolyzyMD builds the reference
+with `pz.reference` and computes `rmsf`, `rms_deviation` and `offset`. The same
+production frames of the same atoms, not superposed, are written to a TRR file
+and the reference positions to a GROMOS96 file, and `gmx rmsf -res` fits every
+frame to that reference and writes the fluctuation (`-o`) and the deviation
+from the reference (`-od`). The GROMACS offset is
+$\sqrt{\text{deviation}^2 - \text{RMSF}^2}$.
 
-| Comparison | Pearson *r* | Mean \|delta\| (Å) | Max \|delta\| (Å) |
-|---|---|---|---|
-| MDAnalysis `RMSF` vs GROMACS `gmx rmsf` (v2026.0), average-structure alignment | 0.99999998 | 0.000250 | 0.000579 |
-| MDAnalysis `RMSF` vs GROMACS `gmx rmsf` (v2026.0), centroid-frame alignment | 0.99999998 | 0.000249 | 0.000616 |
+Run in September 2026 with GROMACS 2026.0 and MDAnalysis 2.10.0 on two
+*B. subtilis* lipase A replicates at 363 K (Cα of residues 4 to 174, 171
+residues, against the 1ISP crystal for `external`, production frame 50 for
+`frame`):
 
-The GROMACS difference is explained by the GRO coordinate format, which stores
-positions to 0.001 nm. The benchmark script and its inputs are not tracked in
-the repository.
+| Replicate | Mode | Frames | `rmsf` vs `-o`: r, mean \|Δ\|, max \|Δ\| | `rms_deviation` vs `-od`: r, mean \|Δ\|, max \|Δ\| |
+|---|---|---|---|---|
+| No polymer | `external` | 6,418 | 0.99999996, 2.7e-4 Å, 5.0e-4 Å | 0.99999999, 2.4e-4 Å, 5.2e-4 Å |
+| No polymer | `average` | 6,418 | 0.99999996, 2.6e-4 Å, 5.1e-4 Å | 0.99999996, 2.6e-4 Å, 5.1e-4 Å |
+| No polymer | `centroid` | 6,418 | 0.99999996, 2.5e-4 Å, 5.0e-4 Å | 0.99999997, 2.5e-4 Å, 5.4e-4 Å |
+| No polymer | `frame` | 6,418 | 0.99999997, 2.3e-4 Å, 5.0e-4 Å | 0.99999999, 2.6e-4 Å, 5.1e-4 Å |
+| SBMA-EGMA 50:50 | `external` | 716 | 0.99999952, 2.6e-4 Å, 5.0e-4 Å | 0.99999994, 2.5e-4 Å, 5.3e-4 Å |
+| SBMA-EGMA 50:50 | `average` | 716 | 0.99999959, 2.4e-4 Å, 5.0e-4 Å | 0.99999959, 2.4e-4 Å, 5.0e-4 Å |
+| SBMA-EGMA 50:50 | `centroid` | 716 | 0.99999951, 2.6e-4 Å, 5.0e-4 Å | 0.99999970, 2.4e-4 Å, 5.1e-4 Å |
+| SBMA-EGMA 50:50 | `frame` | 716 | 0.99999956, 2.4e-4 Å, 5.0e-4 Å | 0.99999984, 2.6e-4 Å, 5.1e-4 Å |
+
+`gmx rmsf` writes its values to 4 decimals in nm, so it rounds each value by
+up to 0.00005 nm, 5e-4 Å. Every maximum difference is at that rounding, so the
+values agree to the precision GROMACS writes. The offset computed from the
+rounded GROMACS values agrees to within 5e-3 Å in `external`, `centroid` and
+`frame` modes, the larger difference coming from taking the root of a
+difference of two rounded squares. In `average` mode both programs give an
+offset of almost zero (below 1.2e-4 Å), since the reference is the mean
+structure itself.
+
+With one atom per residue, GROMACS fits with equal masses, as PolyzyMD does.
+For selections with several atoms of different masses per residue, GROMACS
+weights its fit by mass and PolyzyMD does not, so the two are not expected to
+match.
 
 ## Scope
 

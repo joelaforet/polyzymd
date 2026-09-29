@@ -50,7 +50,9 @@ structure by the `alignment_selection` atoms. Then, for each atom *i* of
 | `offset` | $\lvert \langle x_i \rangle - x_i^{\mathrm{ref}} \rvert$, how far the mean position sits from the reference | none |
 | `rms_deviation` | $\sqrt{\langle \lvert x_i(t) - x_i^{\mathrm{ref}} \rvert^2 \rangle}$, the deviation from the reference | `gmx rmsf -od` |
 
-The three are exact parts of one another: the squared deviation equals the
+The values agree with `gmx rmsf` to the 4 decimals in nm that GROMACS writes;
+{doc}`../explanation/analysis_rmsf_verification` gives the comparison and the
+script that reruns it. The three are exact parts of one another: the squared deviation equals the
 squared RMSF plus the squared offset for every atom. Each residue's value is
 the mean over its atoms in `selection`. The reference decides what the frames
 are superposed on and what the offset and deviation are measured from; `rmsf`

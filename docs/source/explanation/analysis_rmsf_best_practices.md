@@ -63,7 +63,7 @@ and Ladenstein (2015) review experimental and simulation evidence that
 "thermal tolerance of a protein is not necessarily correlated with the
 suppression of internal fluctuations and mobility". On *B. subtilis* lipase A,
 a network-rigidity measure correlated only fairly with the thermostability of
-16 variants, R² = 0.46 (Rathi, Jaeger and Gohlke 2015). A lower RMSF in one
+16 variants, R² = 0.46 (Rathi, Jaeger and Gohlke 2015, Fig. 4B). A lower RMSF in one
 condition supports "this region moves less". It does not by itself support
 "the protein is more stable".
 

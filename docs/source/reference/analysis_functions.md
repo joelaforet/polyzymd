@@ -31,6 +31,9 @@ giving one value per residue in the order of `atoms.residues`.
 | `rms_deviation` | one value per residue, Å | Root mean square deviation of each atom from its reference position, as `gmx rmsf -od` gives | `polyzymd analyze rms_deviation` |
 | `rms_decomposition` | six rows of one value per residue | Rows `RMS_PARTS = ("rms_deviation", "rmsf", "offset")`, the offset being the distance of each atom's mean position from its reference position, in Å; then rows `MS_PARTS = ("ms_deviation", "msf", "ms_offset")`, the means over each residue's atoms of the squared per-atom values, in Å². `ms_deviation = msf + ms_offset` for every residue | `polyzymd analyze rmsf`, `polyzymd analyze rms_deviation` |
 
+The comparison with `gmx rmsf` on real trajectories, and the script that reruns
+it, are in {doc}`../explanation/analysis_rmsf_verification`.
+
 `polyzymd analyze rg` measures `radius_of_gyration` of `--set selection=...`
 (default `protein`) on every production frame, reduces each replicate to its
 mean, and compares every condition with the first by Welch's t test. See
