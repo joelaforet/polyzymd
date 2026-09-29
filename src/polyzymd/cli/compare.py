@@ -274,11 +274,11 @@ def compare():
 
     \b
     Example (local):
-        polyzymd compare run sasa --eq-time 10ns
+        polyzymd compare run contacts --eq-time 10ns
 
     \b
     Example (HPC):
-        polyzymd compare submit sasa --partition aa100 --mem 8G --time 02:00:00
+        polyzymd compare submit contacts --partition aa100 --mem 8G --time 02:00:00
     """
     pass
 
@@ -368,11 +368,13 @@ place only comparison-wide references in this directory.
         click.echo()
         click.echo(f"  2. cd {_display_path(project_dir)}")
         click.echo("  3. Run comparisons:")
-        click.echo("     polyzymd compare run sasa      # Compare solvent exposure")
-        click.echo("     polyzymd compare run contacts  # Compare polymer-protein contacts")
+        click.echo(
+            "     polyzymd compare run contacts             # Compare polymer-protein contacts"
+        )
+        click.echo("     polyzymd compare run secondary_structure  # Compare secondary structure")
         click.echo()
         click.echo("  On an HPC cluster, submit as SLURM jobs instead:")
-        click.echo("     polyzymd compare submit sasa --partition <part> --mem 8G")
+        click.echo("     polyzymd compare submit contacts --partition <part> --mem 8G")
         click.echo()
 
     except (OSError, IOError) as e:
@@ -571,10 +573,10 @@ def run_comparison(
 
     \b
     Examples:
-        polyzymd compare run sasa
+        polyzymd compare run secondary_structure
         polyzymd compare run contacts --eq-time 10ns
         polyzymd compare run contacts --format markdown
-        polyzymd compare run sasa --format agent
+        polyzymd compare run hydrogen_bonds --format agent
         polyzymd compare run --list
     """
     warn_if_wrong_pixi_env("compare run", ANALYSIS_PIXI_ENVS)
@@ -716,7 +718,7 @@ def run_comparison(
     "analysis_type",
     type=str,
     default=None,
-    help="Generate plots for specific analysis type only (e.g., 'sasa', 'contacts').",
+    help="Generate plots for specific analysis type only (e.g., 'contacts', 'secondary_structure').",
 )
 @click.option(
     "--list-available",

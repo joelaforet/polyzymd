@@ -76,7 +76,7 @@ ARCHIVED_BINDING_PREFERENCE_SETTINGS: frozenset[str] = frozenset(
 ARCHIVE_DIAGNOSTIC = (
     "Contacts binding-preference support is not shipped as an active PolyzyMD "
     "contacts subpipeline. Remove these settings and use the current contacts, "
-    "distances, or SASA plugins for supported comparison workflows."
+    "distances, or SASA analyses for supported comparison workflows."
 )
 
 

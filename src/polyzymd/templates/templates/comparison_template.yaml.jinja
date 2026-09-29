@@ -47,13 +47,6 @@ defaults:
 # Define which analyses to run. Presence of a section enables that analysis.
 
 plugins:
-  # RMSF Analysis
-  rmsf:
-    selection: "protein and name CA"
-    reference_mode: "centroid"  # centroid, average, or frame
-    # reference_frame: 500      # Required if reference_mode is "frame"
-    # reference_file: "structures/enzyme.pdb"  # Crystal/input PDB for SS annotation bar
-
   # Secondary Structure (DSSP) Analysis
   # Per-residue and per-frame secondary structure via mdtraj DSSP.
   # Produces timeline heatmaps, content bar charts, and persistence profiles.
@@ -61,17 +54,12 @@ plugins:
   # secondary_structure:
   #   chain_id: "A"              # chain letter for the protein to analyze
 
-  # SASA (Solvent Accessible Surface Area) Analysis
-  #
-  # sasa:
-  #   runs:
-  #     - label: "protein_total"
-  #       target_selection: "protein"
-  #       context_selection: "protein"  # optional, defaults to target_selection
-  #       stride: 1
-  #   probe_radius_nm: 0.14
-  #   n_sphere_points: 960
-  #   chunk_size: 100
+  # RMSF and SASA are not configured here. Run them per condition, for example
+  #   polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml
+  #   polyzymd analyze sasa -c A/config.yaml -c B/config.yaml \
+  #     --set contexts='{isolated: protein, with_polymer: protein or resname SBM EGM}'
+  # Pick the total SASA with --run <context> and each residue's SASA with
+  # --run <context>_residues.
 
   # Catalytic triad and pair distances are not configured here. Write the
   # pairs to pairs.yaml, a list of label, selection_a, selection_b and
@@ -250,12 +238,6 @@ plot_settings:
   #   legend_bbox: [1.02, 0.5]            # bbox_to_anchor (outside right)
 
   # Per-analysis plot customization (uncomment sections as needed):
-
-  # rmsf:
-  #   show_error: true             # show SEM fill_between bands
-  #   highlight_residues: []       # residue IDs for vertical reference lines
-  #   figsize_profile: [14, 4]     # per-residue profile figure size
-  #   figsize_comparison: [8, 6]   # bar comparison figure size
 
   # contacts:
   #   generate_contact_fraction_profile: true

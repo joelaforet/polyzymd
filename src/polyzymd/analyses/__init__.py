@@ -34,8 +34,8 @@ To see what analyses exist, or to drive one yourself::
         print(f"{name}: {cls.__doc__.splitlines()[0]}")
 
     # Get a specific analysis
-    SASAAnalysis = get_analysis("sasa")
-    analysis = SASAAnalysis()
+    ContactsAnalysis = get_analysis("contacts")
+    analysis = ContactsAnalysis()
 
 Adding a New Analysis
 ---------------------

@@ -332,7 +332,7 @@ def test_load_canonical_plot_artifacts_rejects_condition_model_json(tmp_path) ->
 
 def test_load_canonical_plot_artifacts_rejects_corrupt_result_json(tmp_path) -> None:
     """Corrupt canonical JSON should fail before plotters see payloads."""
-    analysis_dir = tmp_path / "condition" / "sasa"
+    analysis_dir = tmp_path / "condition" / "contacts"
     run_dir = analysis_dir / "run_1"
     run_dir.mkdir(parents=True)
     (run_dir / "result.json").write_text("{not-json", encoding="utf-8")

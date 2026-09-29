@@ -9,21 +9,22 @@ from __future__ import annotations
 
 import pytest
 
-from polyzymd.analyses.mda import MDAAggregationError, ReplicateArtifact
-from polyzymd.analyses.sasa import SASASettings
+from polyzymd.analyses.mda import (
+    MDAAggregationError,
+    ReplicateArtifact,
+    validate_autocorrelation_estimator_version,
+)
 from polyzymd.analyses.shared.autocorrelation import AUTOCORRELATION_ESTIMATOR_VERSION
 
-FINGERPRINT = "fingerprint"
 
-
-def _replicate_artifact(analysis_name: str, *, estimator_version: str | None) -> ReplicateArtifact:
+def _replicate_artifact(*, estimator_version: str | None) -> ReplicateArtifact:
     """Return a replicate artifact stamped with a given estimator version."""
 
-    metadata: dict[str, object] = {"settings_fingerprint": FINGERPRINT}
+    metadata: dict[str, object] = {"settings_fingerprint": "fingerprint"}
     if estimator_version is not None:
         metadata["autocorrelation_estimator_version"] = estimator_version
     return ReplicateArtifact(
-        analysis_name=analysis_name,
+        analysis_name="demo",
         condition_label="Control",
         replicate=1,
         payload={},
@@ -31,54 +32,27 @@ def _replicate_artifact(analysis_name: str, *, estimator_version: str | None) ->
     )
 
 
-def _validator_call(analysis_name: str, artifact: ReplicateArtifact, tmp_path):
-    """Call one plugin's replicate-artifact validator with the given artifact."""
-
-    common = {
-        "condition_label": "Control",
-        "expected_replicates": [1],
-        "settings_fingerprint": FINGERPRINT,
-        "artifacts": [artifact],
-    }
-    if analysis_name == "sasa":
-        from polyzymd.analyses.sasa._mda import _validate_and_order_artifacts as validate
-
-        return validate(settings=SASASettings(), **common)
-    raise AssertionError(f"unhandled analysis {analysis_name}")
-
-
-PLUGINS = ["sasa"]
-
-
-@pytest.mark.parametrize("analysis_name", PLUGINS)
-def test_aggregation_rejects_missing_estimator_version(analysis_name: str, tmp_path) -> None:
+def test_aggregation_rejects_missing_estimator_version() -> None:
     """An artifact from before the fix carries no estimator version."""
 
-    artifact = _replicate_artifact(analysis_name, estimator_version=None)
+    artifact = _replicate_artifact(estimator_version=None)
 
     with pytest.raises(MDAAggregationError, match="no autocorrelation estimator version"):
-        _validator_call(analysis_name, artifact, tmp_path)
+        validate_autocorrelation_estimator_version(artifact, analysis_label="Demo")
 
 
-@pytest.mark.parametrize("analysis_name", PLUGINS)
-def test_aggregation_rejects_superseded_estimator_version(analysis_name: str, tmp_path) -> None:
+def test_aggregation_rejects_superseded_estimator_version() -> None:
     """An artifact stamped with the old estimator must not be aggregated."""
 
-    artifact = _replicate_artifact(analysis_name, estimator_version="1")
+    artifact = _replicate_artifact(estimator_version="1")
 
     with pytest.raises(MDAAggregationError, match="clear stale caches"):
-        _validator_call(analysis_name, artifact, tmp_path)
+        validate_autocorrelation_estimator_version(artifact, analysis_label="Demo")
 
 
-@pytest.mark.parametrize("analysis_name", PLUGINS)
-def test_aggregation_accepts_current_estimator_version(analysis_name: str, tmp_path) -> None:
-    """The current version passes the estimator gate, whatever happens after it."""
+def test_aggregation_accepts_current_estimator_version() -> None:
+    """The current version passes the estimator gate."""
 
-    artifact = _replicate_artifact(
-        analysis_name, estimator_version=AUTOCORRELATION_ESTIMATOR_VERSION
-    )
+    artifact = _replicate_artifact(estimator_version=AUTOCORRELATION_ESTIMATOR_VERSION)
 
-    try:
-        _validator_call(analysis_name, artifact, tmp_path)
-    except Exception as error:  # payload checks downstream of the gate may still fire
-        assert "estimator version" not in str(error)
+    validate_autocorrelation_estimator_version(artifact, analysis_label="Demo")

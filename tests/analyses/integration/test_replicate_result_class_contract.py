@@ -12,7 +12,6 @@ from polyzymd.analyses.mda import ArtifactStore, ReplicateArtifact
 MDA_ARTIFACT_PLUGINS = {
     "secondary_structure",
     "contacts",
-    "sasa",
     "hydrogen_bonds",
 }
 

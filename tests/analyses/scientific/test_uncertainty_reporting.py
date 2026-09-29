@@ -37,7 +37,6 @@ T_FACTOR_N3 = 4.302652729749462
 T_FACTOR_N5 = 2.7764451051977934
 
 PLUGIN_NAMES = (
-    "sasa",
     "contacts",
     "hydrogen_bonds",
     "secondary_structure",
@@ -413,20 +412,6 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
 
     if analysis_name == "contacts":
         return {"coverage": metric_summary_payload("coverage", [0.4], unit="fraction")}
-
-    if analysis_name == "sasa":
-        from polyzymd.analyses.sasa._mda import _condition_metrics as sasa_metrics
-
-        return sasa_metrics(
-            [
-                {
-                    "run_label": "run_1",
-                    "per_replicate_means": [100.0],
-                    "overall_mean": 100.0,
-                    "overall_sem": None,
-                }
-            ]
-        )
 
     if analysis_name == "hydrogen_bonds":
         return {

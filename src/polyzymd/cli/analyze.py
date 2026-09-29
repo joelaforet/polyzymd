@@ -199,7 +199,8 @@ def analyze_command(
         polyzymd analyze catalytic_triad -c A/config.yaml --set pairs=triad.yaml --run simultaneous
         polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml --eq 10ns --run rmsf
         polyzymd analyze rms_deviation -c A/config.yaml --set reference_file=crystal.pdb
-        polyzymd analyze sasa -f comparison.yaml --format json -o sasa.json
+        polyzymd analyze sasa -c A/config.yaml --run isolated_residues
+        polyzymd analyze contacts -f comparison.yaml --format json -o contacts.json
     """
     warn_if_wrong_pixi_env("analyze", ANALYSIS_PIXI_ENVS)
 
