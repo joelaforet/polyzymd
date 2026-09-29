@@ -177,6 +177,10 @@ class ContinuationManager:
         # this process, or None when the runtime is unchanged.  Set by
         # :meth:`_get_previous_paths`; used to explain checkpoint failures.
         self._runtime_change: str | None = None
+        # Resume bookkeeping recorded on this segment in progress.json, and
+        # the reporter that tracks written frames; set by run_segment().
+        self._frame_record: Dict[str, Any] = {}
+        self._tracker: Any = None
 
     @property
     def working_dir(self) -> Path:
@@ -279,17 +283,13 @@ class ContinuationManager:
             return None
         return "; ".join(differences)
 
-    def _find_portable_state(self) -> tuple[Path, Path] | None:
-        """Return the best (state XML, system XML) pair for the previous segment.
+    def _intact_portable_states(self) -> list[tuple[Path, Path]]:
+        """Return every intact (state XML, system XML) pair of the previous segment.
 
-        Portable serialized ``State`` XML reloads under any OpenMM build, so
-        it is always preferred over a binary checkpoint.
-
-        Returns
-        -------
-        tuple of Path or None
-            ``(state_xml, system_xml)``, or ``None`` when the previous
-            segment left no portable state behind.
+        Pairs are listed in the order final state, interrupted state,
+        restart state.  A state XML that is empty or truncated is skipped;
+        a truncated partner system XML is replaced by the segment's own
+        ``production_N_system.xml`` when that one is intact.
         """
         prev_dir = self._working_dir / f"production_{self._prev_segment}"
         default_system = prev_dir / f"production_{self._prev_segment}_system.xml"
@@ -298,6 +298,7 @@ class ContinuationManager:
             (prev_dir / "interrupted_state.xml", prev_dir / "interrupted_system.xml"),
             (prev_dir / "restart_state.xml", prev_dir / "restart_system.xml"),
         )
+        pairs: list[tuple[Path, Path]] = []
         for state, system in candidates:
             if not state.exists():
                 continue
@@ -308,16 +309,81 @@ class ContinuationManager:
                 )
                 continue
             if system.exists() and xml_looks_complete(system, "System"):
-                return state, system
+                pairs.append((state, system))
+                continue
             if system.exists():
                 LOGGER.warning(
                     f"{system.name} is empty or truncated (interrupted mid-write); "
                     f"pairing {state.name} with {default_system.name} instead"
                 )
             if xml_looks_complete(default_system, "System"):
-                return state, default_system
+                pairs.append((state, default_system))
+                continue
             LOGGER.warning(f"No intact system XML for {state.name}; trying the next portable state")
-        return None
+        return pairs
+
+    def _find_portable_state(self) -> tuple[Path, Path] | None:
+        """Return the best (state XML, system XML) pair for the previous segment.
+
+        Portable serialized ``State`` XML reloads under any OpenMM build, so
+        it is always preferred over a binary checkpoint.
+
+        When every intact candidate carries a ``stepCount`` and an earlier
+        segment wrote at least one trajectory frame, the choice follows the
+        steps rather than the file names.  With ``L`` the step of the last
+        written frame and ``I`` the frame interval, a state at step ``s``:
+
+        - with ``s < L`` makes the next segment write frames at steps the
+          trajectory already holds (a re-simulated boundary step);
+        - with ``s >= L + I`` skips the frame at ``L + I``, which was never
+          written (for example, the trajectory write raised and the crash
+          handler saved the context at that step);
+        - with ``L <= s < L + I`` continues the trajectory without overlap
+          or gap.
+
+        The candidate with the highest step below ``L + I`` is chosen.  If
+        every candidate is at or beyond ``L + I``, the lowest one is chosen,
+        since that loses the fewest frames.  Without step counts or frames
+        the order is final state, interrupted state, restart state.
+
+        Returns
+        -------
+        tuple of Path or None
+            ``(state_xml, system_xml)``, or ``None`` when the previous
+            segment left no portable state behind.
+        """
+        from polyzymd.simulation.report_state import last_reported_frame, read_state_step
+
+        pairs = self._intact_portable_states()
+        if not pairs:
+            return None
+
+        frame = last_reported_frame(self._working_dir, self._prev_segment + 1)
+        steps = [read_state_step(state) for state, _ in pairs]
+        if frame is None or frame.report_interval is None or any(s is None for s in steps):
+            return pairs[0]
+
+        limit = frame.last_step + frame.report_interval
+        ranked = list(zip(steps, range(len(pairs)), pairs))
+        continuing = [item for item in ranked if item[0] < limit]
+        if continuing:
+            # Highest step wins; on a tie keep the file-name order.
+            step, _, chosen = max(continuing, key=lambda item: (item[0], -item[1]))
+        else:
+            step, _, chosen = min(ranked, key=lambda item: (item[0], item[1]))
+        for other_step, _, (state, _system) in ranked:
+            if other_step >= limit:
+                LOGGER.warning(
+                    f"Not resuming from {state.name} (step {other_step}): the frame at "
+                    f"step {limit} was never written, so resuming there would skip it"
+                )
+        if chosen is not pairs[0]:
+            LOGGER.warning(
+                f"Resuming from {chosen[0].name} (step {step}) rather than "
+                f"{pairs[0][0].name}: segment {frame.segment_index}'s last frame is at "
+                f"step {frame.last_step}"
+            )
+        return chosen
 
     def _get_previous_paths(self) -> Dict[str, Path]:
         """Get paths to files from the previous segment.
@@ -673,6 +739,7 @@ class ContinuationManager:
             status=SegmentStatus.RUNNING,
         )
 
+        self._apply_frame_fields(record)
         _update_or_append_segment(progress, record)
         progress.status = SimulationStatus.RUNNING
 
@@ -713,6 +780,7 @@ class ContinuationManager:
             if seg.index == self._segment_index and seg.status == SegmentStatus.RUNNING:
                 seg.steps_completed = steps_done
                 seg.duration_ns = (steps_done * timestep_fs) / 1e6
+                self._apply_frame_fields(seg)
                 break
         else:
             # No RUNNING record found — shouldn't happen, but be safe
@@ -767,6 +835,7 @@ class ContinuationManager:
         from polyzymd.simulation.progress import _now_iso
 
         record.finished_at = _now_iso()
+        self._apply_frame_fields(record)
 
         _update_or_append_segment(progress, record)
 
@@ -824,10 +893,11 @@ class ContinuationManager:
             index=self._segment_index,
             steps_completed=steps_done,
             steps_requested=total_steps,
-            samples_written=0,  # Interrupted — samples may be partial
+            samples_written=0,  # Replaced by the tracker's count when known
             status=SegmentStatus.INTERRUPTED,
             duration_ns=actual_duration_ns,
         )
+        self._apply_frame_fields(record)
 
         _update_or_append_segment(progress, record)
         progress.status = SimulationStatus.INTERRUPTED
@@ -837,6 +907,98 @@ class ContinuationManager:
             f"Progress updated (interrupted): {steps_done}/{total_steps} steps "
             f"in segment {self._segment_index}"
         )
+
+    def _apply_frame_fields(self, record: Any) -> None:
+        """Copy the resume and frame bookkeeping onto a progress record.
+
+        Sets ``resumed_from``, ``overlap_frames``, ``gap_frames`` from the
+        resume check and ``report_interval``, ``start_step``,
+        ``last_reported_step`` and ``samples_written`` from the frame tracker.
+        """
+        fields: Dict[str, Any] = dict(self._frame_record)
+        if self._tracker is not None:
+            fields.update(self._tracker.frame_fields())
+        for name, value in fields.items():
+            if value is not None:
+                setattr(record, name, value)
+
+    def _check_resume_alignment(self, start_step: int, report_interval: int) -> Dict[str, int]:
+        """Compare the loaded state's step with the previous segment's last frame.
+
+        The first frame of this segment falls at the first multiple of
+        *report_interval* above *start_step*.  If that step is not after the
+        previous segment's last frame, this segment rewrites steps the
+        trajectory already holds; if it is more than one interval after,
+        report steps in between have no frame.  Both cases are logged as
+        warnings and returned for ``progress.json``.
+
+        Parameters
+        ----------
+        start_step : int
+            Integrator step count after loading the previous state.
+        report_interval : int
+            Steps between frames in this segment.
+
+        Returns
+        -------
+        dict
+            ``overlap_frames`` and ``gap_frames``.
+        """
+        from polyzymd.simulation.report_state import first_report_step, last_reported_frame
+
+        frame = last_reported_frame(self._working_dir, self._segment_index)
+        if frame is None:
+            return {"overlap_frames": 0, "gap_frames": 0}
+        first = first_report_step(start_step, report_interval)
+        overlap = gap = 0
+        if first <= frame.last_step:
+            overlap = (frame.last_step - first) // report_interval + 1
+            LOGGER.warning(
+                f"Segment {self._segment_index} resumes at step {start_step}, before "
+                f"segment {frame.segment_index}'s last frame at step {frame.last_step}: "
+                f"its first {overlap} frame(s) repeat steps already in the trajectory. "
+                f"Keep one frame per step when joining: drop segment "
+                f"{frame.segment_index}'s last {overlap} frame(s)."
+            )
+        elif first > frame.last_step + report_interval:
+            gap = (first - frame.last_step) // report_interval - 1
+            LOGGER.warning(
+                f"Segment {self._segment_index} resumes at step {start_step}; its first "
+                f"frame is at step {first}, so {gap} report step(s) after segment "
+                f"{frame.segment_index}'s last frame at step {frame.last_step} have no frame."
+            )
+        return {"overlap_frames": overlap, "gap_frames": gap}
+
+    def _correct_previous_steps(self, start_step: int) -> None:
+        """Make the previous segment's step count end at the state just loaded.
+
+        ``steps_completed`` of a hard-killed segment is estimated from its
+        state-data CSV, which need not match the step of the state this
+        segment resumed from.  When the previous record knows its own
+        ``start_step``, its ``steps_completed`` is set to
+        ``start_step_of_this_segment - start_step_of_previous`` so the chain's
+        step total counts each integrated step once.
+        """
+        from polyzymd.simulation.progress import load_progress, save_progress
+
+        progress = load_progress(self._working_dir)
+        if progress is None:
+            return
+        for seg in progress.segments:
+            if seg.index != self._prev_segment or seg.start_step is None:
+                continue
+            actual = start_step - seg.start_step
+            if actual >= 0 and actual != seg.steps_completed:
+                LOGGER.warning(
+                    f"Segment {seg.index} recorded {seg.steps_completed} steps but the state "
+                    f"segment {self._segment_index} resumed from lies {actual} steps after its "
+                    f"start; recording {actual}"
+                )
+                seg.steps_completed = actual
+                if progress.timestep_fs:
+                    seg.duration_ns = actual * progress.timestep_fs / 1e6
+                save_progress(self._working_dir, progress)
+            return
 
     def run_segment(
         self,
@@ -937,6 +1099,10 @@ class ContinuationManager:
             # Cases 1/2/3: Portable state XML (normal, interrupted, or restart).
             LOGGER.info(f"Loading state from {paths['state']}")
             self._simulation.loadState(str(paths["state"]))
+        resumed_from = (
+            paths["checkpoint"].name if self._use_checkpoint_recovery else paths["state"].name
+        )
+        start_step = int(self._simulation.context.getStepCount())
 
         # Create output directory
         output_dir = self._working_dir / f"production_{self._segment_index}"
@@ -966,12 +1132,22 @@ class ContinuationManager:
         if checkpoint_interval_s <= 0:
             raise ValueError("checkpoint_interval_s must be positive")
         seg_report_interval = report_interval
+        resume = self._check_resume_alignment(start_step, seg_report_interval)
+        self._frame_record = {"resumed_from": resumed_from, **resume}
 
         # Setup reporters
         self._setup_reporters(seg_report_interval, output_dir)
+        from polyzymd.simulation.report_state import ReportedStateTracker, save_state_after_crash
+
+        tracker = ReportedStateTracker(output_dir, seg_report_interval, start_step)
+        self._simulation.reporters.append(tracker)
+        self._tracker = tracker
 
         # Save parameters for this segment
         if self._param_dict:
+            reporter_params = self._param_dict["__values__"].get("reporter_params")
+            if isinstance(reporter_params, dict) and "__values__" in reporter_params:
+                reporter_params["__values__"]["report_interval"] = seg_report_interval
             param_path = output_dir / f"production_{self._segment_index}_parameters.json"
             with open(param_path, "w") as f:
                 json.dump(self._param_dict, f, indent=2)
@@ -984,7 +1160,6 @@ class ContinuationManager:
             interrupted_state_save_exceptions,
             is_interrupted,
             save_interrupted_state,
-            save_restart_checkpoint,
         )
 
         install_handlers()
@@ -993,6 +1168,7 @@ class ContinuationManager:
         # check-progress can distinguish actively running simulations
         # from interrupted ones.
         self._write_segment_started(total_steps)
+        self._correct_previous_steps(start_step)
 
         # Run simulation with adaptive sub-chunks for interrupt responsiveness
         # and periodic wall-time restart checkpoints for preemption resilience.
@@ -1065,10 +1241,7 @@ class ContinuationManager:
                     (_now - _last_checkpoint_write) >= checkpoint_interval_s
                     and steps_done < total_steps  # skip if we're about to finish
                 ):
-                    save_restart_checkpoint(
-                        simulation=self._simulation,
-                        output_dir=output_dir,
-                    )
+                    tracker.save_restart(self._simulation)
                     _last_checkpoint_write = _now
 
                 if is_interrupted():
@@ -1093,14 +1266,21 @@ class ContinuationManager:
         except GracefulExit:
             raise  # Re-raise so caller can set exit code
         except interrupted_state_save_exceptions():
-            # On unexpected crash, still try to save interrupted state
+            # On unexpected crash (for example a trajectory write raising
+            # OSError), save only a state whose frames were all written.
             try:
-                save_interrupted_state(
+                saved_steps = save_state_after_crash(
                     simulation=self._simulation,
+                    tracker=tracker,
                     output_dir=output_dir,
                     segment_index=self._segment_index,
-                    steps_completed=steps_done,
                     total_steps=total_steps,
+                )
+                self._update_progress_interrupted(
+                    steps_done=saved_steps,
+                    total_steps=total_steps,
+                    duration_ns=duration_ns,
+                    timestep_fs=timestep_fs,
                 )
             except interrupted_state_save_exceptions() as save_exc:
                 LOGGER.exception(
@@ -1112,10 +1292,10 @@ class ContinuationManager:
         # Save final state
         self._save_final_state(output_dir)
 
-        # Update progress tracker
+        # Update progress tracker with the frames this segment actually wrote
         self._update_progress_completed(
             total_steps=total_steps,
-            num_samples=num_samples,
+            num_samples=tracker.frames_written,
             duration_ns=duration_ns,
             timestep_fs=timestep_fs,
         )

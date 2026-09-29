@@ -33,6 +33,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A segment resumes from the state of the last written trajectory frame.**
+  `restart_state.xml` used to be written only on a wall-clock timer, so after
+  a hard kill the next segment resumed from a state up to one timer period
+  older than the last frame and wrote that frame's step a second time from a
+  new trajectory branch (eight CALB 343 K and RML 333 K replicates, September
+  2026).  A new reporter, placed after the DCD, state-data and checkpoint
+  reporters, now rewrites `restart_state.xml` at every frame.  When choosing
+  the state to resume from, `run-segment` reads each candidate's `stepCount`
+  and takes the latest one that does not pass a frame no segment wrote.  The
+  interrupted and restart state files are written through a temporary file
+  and `os.replace`.
+- **A failed trajectory write no longer loses the frame.**  When a DCD write
+  raised (`OSError: [Errno 116] Stale file handle`), the crash handler saved
+  `interrupted_state.xml` at the step whose frame had failed, and the next
+  segment started one frame later (five replicates, 14 September 2026).  The
+  handler now saves the interrupted state only when every frame up to the
+  current step was written; otherwise it writes the `INTERRUPTED` marker
+  alone and the next segment resumes from the report-aligned
+  `restart_state.xml`.  The marker and `progress.json` count the steps up to
+  the state the next segment loads.
+- **`progress.json` records each segment's frames and resume point**:
+  `report_interval`, `start_step`, `last_reported_step`, `samples_written`
+  (frames actually written), `resumed_from`, and `overlap_frames` /
+  `gap_frames` with a warning when a segment's first frame repeats or skips a
+  report step.  A segment's `parameters.json` records the interval it ran
+  with instead of the previous segment's.
+- **`run-segment` refuses to change the frame interval part-way through a
+  chain** (LipA 363 K 50:50 run 1 switched from 40 ps to 400 ps frames after
+  a configuration change).  Pass `--allow-report-interval-change` to accept
+  the change.
 - **The hard-kill guard no longer trusts a truncated `restart_state.xml`.**
   `run-segment` kept a segment whenever `restart_state.xml` existed, so a
   zero-byte file left by a power loss sent the restart down the

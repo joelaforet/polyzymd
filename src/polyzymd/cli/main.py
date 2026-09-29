@@ -1757,11 +1757,20 @@ def submit(
     is_flag=True,
     help="Skip system building (use existing) for initial segment",
 )
+@click.option(
+    "--allow-report-interval-change",
+    is_flag=True,
+    help=(
+        "Continue even if the configuration now gives a different number of "
+        "steps between trajectory frames than earlier segments used"
+    ),
+)
 def run_segment(
     config: str,
     replicate: int,
     scratch_dir: str | None,
     skip_build: bool,
+    allow_report_interval_change: bool,
 ) -> None:
     """Run the next simulation segment (self-resubmitting job entry point).
 
@@ -1839,6 +1848,7 @@ def run_segment(
             working_dir=working_dir,
             replicate=replicate,
             skip_build=skip_build,
+            allow_report_interval_change=allow_report_interval_change,
         )
     finally:
         run_lock.__exit__(None, None, None)
@@ -1850,6 +1860,7 @@ def _run_segment_locked(
     working_dir: Path,
     replicate: int,
     skip_build: bool,
+    allow_report_interval_change: bool = False,
 ) -> None:
     """Run the next production segment while the replicate lock is held.
 
@@ -1868,12 +1879,17 @@ def _run_segment_locked(
         Replicate number (1-based).
     skip_build : bool
         Whether to reuse a pre-built system for the initial segment.
+    allow_report_interval_change : bool, optional
+        Run the segment even if its frame interval differs from the interval
+        earlier segments used.
     """
     from polyzymd.simulation.progress import (
+        ReportIntervalChangeError,
         SegmentStatus,
         SimulationProgress,
         SimulationStatus,
         _derive_overall_status,
+        check_report_interval_unchanged,
         get_next_segment_info,
         load_or_scan_progress,
         save_progress,
@@ -2046,6 +2062,20 @@ def _run_segment_locked(
         f"({duration_ns:.3f} ns, {steps_to_run} steps, {samples_to_write} frames)",
         phase="simulation",
     )
+
+    # Every segment of a chain must write frames at the same interval, or
+    # the segments cannot be joined into one evenly spaced trajectory.
+    try:
+        check_report_interval_unchanged(
+            progress,
+            working_dir,
+            seg_idx,
+            report_interval,
+            allow_change=allow_report_interval_change,
+        )
+    except ReportIntervalChangeError as exc:
+        colored_echo(str(exc), err=True, level=logging.ERROR)
+        sys.exit(1)
 
     try:
         raise_if_interrupted()
