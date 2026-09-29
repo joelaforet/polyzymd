@@ -503,3 +503,57 @@ class TestDetectedEquilibration:
         summary_on = {row.label: (row.mean, row.sem, row.ci95) for row in on.summary().conditions}
         summary_off = {row.label: (row.mean, row.sem, row.ci95) for row in off.summary().conditions}
         assert summary_on == summary_off
+
+
+def _distance_to_reference(atoms, reference):
+    """Root mean square distance of ``atoms`` from ``reference``, without superposition."""
+    return float(np.sqrt(np.mean(np.sum((atoms.positions - reference.positions) ** 2, axis=1))))
+
+
+def _wrap_every_reader(study: pz.Study) -> None:
+    """Wrap each replicate's reader as the loader does for a multi-segment chain."""
+    from polyzymd.analyses.shared.loader import _TimestampPreservingTrajectory
+
+    for condition in study:
+        for replicate in condition.replicates:
+            universe = replicate.universe()
+            universe.trajectory = _TimestampPreservingTrajectory(universe.trajectory)
+
+
+def test_timeseries_hands_mdanalysis_the_reader_behind_the_loader_proxy(
+    configs: dict[str, Path], tmp_path: Path
+) -> None:
+    """Issue #144: a wrapped reader was passed to the function as its first argument."""
+    from polyzymd.analyses.shared.loader import _TimestampPreservingTrajectory, underlying_reader
+
+    plain = pz.Study.from_configs(configs, equilibration=EQUILIBRATION)
+    wrapped = pz.Study.from_configs(configs, equilibration=EQUILIBRATION)
+    _wrap_every_reader(wrapped)
+    reader = wrapped["A"].replicates[0].universe().trajectory
+    assert isinstance(reader, _TimestampPreservingTrajectory)
+    assert not isinstance(underlying_reader(reader), _TimestampPreservingTrajectory)
+    assert underlying_reader(plain["A"].replicates[0].universe().trajectory) is (
+        plain["A"].replicates[0].universe().trajectory
+    )
+
+    arguments = (pz.select("all"), pz.reference("frame", "all", frame=1))
+    two = {
+        name: study.timeseries(
+            _distance_to_reference, *arguments, unit="A", output_dir=tmp_path / name
+        )
+        for name, study in (("plain", plain), ("wrapped", wrapped))
+    }
+    one = {
+        name: study.timeseries(
+            radius_of_gyration, pz.select("all"), unit="A", output_dir=tmp_path / f"rg_{name}"
+        )
+        for name, study in (("plain", plain), ("wrapped", wrapped))
+    }
+    for label in ("A", "B"):
+        for results in (two, one):
+            for got, expected in zip(
+                results["wrapped"].series[label], results["plain"].series[label]
+            ):
+                assert got.values == pytest.approx(expected.values)
+                assert list(got.frames) == FRAMES
+    assert two["wrapped"].series["A"][0].values[0] == pytest.approx(0.0, abs=1e-5)

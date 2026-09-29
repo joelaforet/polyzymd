@@ -297,6 +297,8 @@ def run_timeseries(
     import numpy as np
     from MDAnalysis.analysis.base import AnalysisFromFunction
 
+    from polyzymd.analyses.shared.loader import underlying_reader
+
     name = name or getattr(function, "__name__", "timeseries")
     root = Path(output_dir or Path.cwd()).expanduser().resolve() / RESULTS_DIR / _safe(name)
     base = {
@@ -320,7 +322,9 @@ def run_timeseries(
                 built, chosen = _build_arguments({**dict(enumerate(args)), **kwargs}, replicate)
                 analysis = AnalysisFromFunction(
                     function,
-                    u.trajectory,
+                    # MDAnalysis passes anything that is not its own reader to
+                    # the function as an argument, so hand it the unwrapped one.
+                    underlying_reader(u.trajectory),
                     *(built[index] for index in range(len(args))),
                     **{key: built[key] for key in kwargs},
                 ).run(frames=replicate.frames)

@@ -922,6 +922,34 @@ class _TimestampPreservingTrajectory:
         return self._reader.time
 
 
+def underlying_reader(trajectory: Any) -> Any:
+    """Return the MDAnalysis reader behind a trajectory the loader may have wrapped.
+
+    :meth:`TrajectoryLoader.load_universe` replaces the reader of a
+    multi-segment universe with :class:`_TimestampPreservingTrajectory` when
+    the chained reader hides the raw timestamps. That proxy is not an
+    ``MDAnalysis.coordinates.base.ProtoReader``, and
+    ``MDAnalysis.analysis.base.AnalysisFromFunction`` treats a trajectory
+    argument that is not one as the function's first argument. Pass the
+    result of this function wherever an MDAnalysis analysis class takes a
+    trajectory.
+
+    Parameters
+    ----------
+    trajectory : Any
+        ``universe.trajectory`` of a loaded universe.
+
+    Returns
+    -------
+    Any
+        The wrapped reader for a proxy, otherwise ``trajectory`` itself.
+    """
+
+    if isinstance(trajectory, _TimestampPreservingTrajectory):
+        return object.__getattribute__(trajectory, "_reader")
+    return trajectory
+
+
 def _wrap_timestamp_preserving_trajectory(trajectory: Any) -> Any:
     """Wrap trajectory readers that hide raw source timestamps.
 
