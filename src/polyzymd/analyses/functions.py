@@ -1,8 +1,12 @@
-"""Per-frame measurements shipped with PolyzyMD, as plain functions.
+"""Measurements shipped with PolyzyMD, as plain functions.
 
-Each function takes MDAnalysis ``AtomGroup`` arguments positioned at one frame
-and returns one number, so it runs through
+The per-frame functions take MDAnalysis ``AtomGroup`` arguments positioned at
+one frame and return one number, so they run through
 :meth:`polyzymd.analyses.study.Study.timeseries` like any function you write.
+The per-replicate functions (:func:`rmsf`, :func:`rms_deviation`,
+:func:`rms_decomposition` and :func:`residue_sasa`) also take the production
+frame indices and return one value per residue, and run through
+:meth:`polyzymd.analyses.study.Study.per_replicate`.
 """
 
 from __future__ import annotations
@@ -262,3 +266,161 @@ def rms_decomposition(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     parts = _superposed_deviations(atoms, fit, reference, frames)
     means = [_per_residue(atoms, values) for values in parts]
     return np.vstack(means + [_per_residue(atoms, values**2) for values in parts])
+
+
+#: Probe radius in nm and sphere point count of :func:`sasa` and :func:`residue_sasa`.
+SASA_PROBE_RADIUS_NM = 0.14
+SASA_SPHERE_POINTS = 960
+
+#: MDTraj topologies of SASA contexts and target positions, keyed by universe and atom indices.
+_SASA_TOPOLOGIES: dict[tuple[int, bytes, bytes], tuple[Any, Any, Any]] = {}
+
+
+def _sasa_topology(target: Any, context: Any) -> tuple[Any, Any]:
+    """Return the MDTraj topology of ``context`` and the positions of ``target`` in it.
+
+    The topology holds one MDTraj atom per atom of ``context``, in index
+    order, with its name, residue and element from the MDAnalysis universe;
+    MDTraj's Shrake-Rupley code takes each atom's radius from its element.
+    Residues are split by MDAnalysis residue index. It is built once per
+    universe, context and target and reused for every frame.
+    """
+    import mdtraj as md
+    import numpy as np
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    key = (id(context.universe), context.indices.tobytes(), target.indices.tobytes())
+    cached = _SASA_TOPOLOGIES.get(key)
+    if cached is not None and cached[0] is context.universe:
+        return cached[1], cached[2]
+    ordered = bool(np.all(np.diff(context.indices) > 0))
+    where = np.searchsorted(context.indices, target.indices)
+    inside = (
+        ordered
+        and len(target) > 0
+        and bool(np.all(where < len(context)))
+        and np.array_equal(context.indices[np.minimum(where, len(context) - 1)], target.indices)
+    )
+    if not inside:
+        raise ProtocolError(
+            f"sasa: the target has {len(target)} atoms and must be a non-empty part of the "
+            f"context, which has {len(context)} atoms in index order.",
+            hint="Choose a context selection that contains every target atom, such as "
+            "'protein or resname SBM EGM' for the target 'protein'.",
+        )
+    if not hasattr(context, "elements"):
+        raise ProtocolError(
+            "sasa: the universe has no element for its atoms, and the atomic radii come from them.",
+            hint="Load the replicate with PolyzyMD, which fills in elements from atom types or names.",
+        )
+    topology = md.Topology()
+    chain = topology.add_chain()
+    residues: dict[int, Any] = {}
+    for atom in context:
+        residue = residues.get(atom.resindex)
+        if residue is None:
+            residue = residues[atom.resindex] = topology.add_residue(
+                str(atom.resname), chain, resSeq=int(atom.resid)
+            )
+        symbol = str(atom.element).strip().capitalize()
+        try:
+            element = md.element.get_by_symbol(symbol)
+        except KeyError as exc:
+            raise ProtocolError(
+                f"sasa: atom {atom.index} ({atom.name}) has element {atom.element!r}, which "
+                "MDTraj does not know.",
+                hint="Check the topology's element column or the atom types.",
+            ) from exc
+        topology.add_atom(str(atom.name), element, residue)
+    if len(_SASA_TOPOLOGIES) > 32:
+        _SASA_TOPOLOGIES.clear()
+    _SASA_TOPOLOGIES[key] = (context.universe, topology, where)
+    return topology, where
+
+
+def _atom_sasa(
+    target: Any, context: Any, positions: Any, probe_radius_nm: float, n_sphere_points: int
+) -> Any:
+    """Return the SASA in Å² of each ``target`` atom in each frame of ``positions`` (Å, of ``context``)."""
+    import mdtraj as md
+    import numpy as np
+
+    topology, where = _sasa_topology(target, context)
+    trajectory = md.Trajectory(
+        xyz=np.asarray(positions, dtype=np.float32) / 10.0, topology=topology
+    )
+    atom_nm2 = md.shrake_rupley(
+        trajectory, mode="atom", probe_radius=probe_radius_nm, n_sphere_points=n_sphere_points
+    )
+    return np.asarray(atom_nm2, dtype=np.float64)[:, where] * 100.0
+
+
+def sasa(
+    target: Any,
+    context: Any,
+    probe_radius_nm: float = SASA_PROBE_RADIUS_NM,
+    n_sphere_points: int = SASA_SPHERE_POINTS,
+) -> float:
+    """Return the solvent-accessible surface area in Å² of ``target`` at the current frame.
+
+    ``mdtraj.shrake_rupley`` computes the SASA of every atom of ``context``
+    by the Shrake-Rupley method, with a probe of ``probe_radius_nm`` and
+    ``n_sphere_points`` points per atom and MDTraj's atomic radius for each
+    atom's element, and the values of the ``target`` atoms are summed. Atoms
+    of ``context`` outside ``target``, such as polymer, occlude the target
+    without being counted. Periodic images are not considered, so atoms only
+    occlude each other within the coordinates as loaded.
+
+    The frame is computed in a call of its own, because MDTraj 1.11.1 gives
+    frames after the first in one call about 0.1 percent too much area; see
+    :func:`residue_sasa`.
+
+    Parameters
+    ----------
+    target : MDAnalysis.core.groups.AtomGroup
+        Atoms whose SASA is returned; they must all be in ``context``.
+    context : MDAnalysis.core.groups.AtomGroup
+        Atoms present in the calculation.
+    probe_radius_nm : float, optional
+        Probe radius in nm, 0.14 by default.
+    n_sphere_points : int, optional
+        Points on each atom's sphere, 960 by default.
+
+    Returns
+    -------
+    float
+        SASA of ``target`` in Å².
+    """
+    positions = context.positions[None]
+    return float(_atom_sasa(target, context, positions, probe_radius_nm, n_sphere_points).sum())
+
+
+def residue_sasa(
+    target: Any,
+    context: Any,
+    frames: Any,
+    probe_radius_nm: float = SASA_PROBE_RADIUS_NM,
+    n_sphere_points: int = SASA_SPHERE_POINTS,
+) -> Any:
+    """Return each ``target`` residue's SASA in Å², averaged over ``frames``.
+
+    Each frame's atom SASA is computed as in :func:`sasa` and summed over
+    the atoms of each residue of ``target``. The result has one value per
+    residue, in the order of ``target.residues``.
+
+    Every frame goes to ``mdtraj.shrake_rupley`` in a call of its own. In
+    MDTraj 1.11.1, a frame that follows another in the same call comes out
+    about 0.1 percent larger than the same coordinates alone, and than an
+    independent Shrake-Rupley calculation, so frames are never batched.
+    """
+    import numpy as np
+
+    residue = np.unique(target.resindices, return_inverse=True)[1]
+    total = np.zeros(len(target.residues))
+    for _ in context.universe.trajectory[frames]:
+        atom = _atom_sasa(
+            target, context, context.positions[None], probe_radius_nm, n_sphere_points
+        )
+        total += np.bincount(residue, weights=atom[0], minlength=len(total))
+    return total / len(frames)
