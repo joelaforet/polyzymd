@@ -272,24 +272,6 @@ Common ranges:
 In addition to global settings, plugins can define their own plot options under
 `plot_settings.<plugin_name>`.
 
-### RMSF example
-
-```yaml
-plot_settings:
-  style: "compact"
-  rmsf:
-    show_error: true
-    highlight_residues: [77, 133, 156]
-    figsize_profile: [14, 4]
-    figsize_comparison: [8, 6]
-```
-
-What changes:
-
-- `show_error` turns error shading/bars on or off
-- `highlight_residues` adds vertical markers at selected residue IDs
-- `figsize_*` controls profile and comparison figure sizes
-
 ### Contacts example
 
 ```yaml
@@ -323,11 +305,10 @@ This command re-draws figures from existing comparison results. It does not
 recompute per-replicate or aggregated analysis data.
 
 If a plugin has no cached comparison result yet, run that comparison first
-(for example, `polyzymd compare run rmsf -f comparison.yaml`).
+(for example, `polyzymd compare run contacts -f comparison.yaml`).
 
 ## See Also
 
 - [How to Compare Simulation Conditions](analysis_compare_conditions.md)
 - [Create Custom Plots from Analysis Artifacts](custom_artifact_plotting.md)
 - [Comparison and Plotting Reference](../reference/analysis_comparison_reference.md)
-- [RMSF Analysis Reference](../reference/analysis_rmsf_reference.md)

@@ -12,11 +12,8 @@ Source of truth: {func}`polyzymd.config.comparison.ComparisonConfig` in
 Plugin settings path fields are resolved relative to the directory containing
 `comparison.yaml`.
 
-For example, in:
-
-`plugins.rmsf.reference_file`, condition `config` paths, and other
-plugin-declared path fields, a relative path like `structures/enzyme.pdb` is
-interpreted as:
+For example, in condition `config` paths and plugin-declared path fields, a
+relative path like `structures/enzyme.pdb` is interpreted as:
 
 `<comparison_yaml_parent>/structures/enzyme.pdb`
 ```
@@ -29,7 +26,7 @@ Typical local workflow:
 
 ```bash
 pixi run -e analysis polyzymd compare validate -f comparison.yaml
-pixi run -e analysis polyzymd compare run rmsf -f comparison.yaml
+pixi run -e analysis polyzymd compare run sasa -f comparison.yaml
 pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
 ```
 
@@ -62,8 +59,7 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  rmsf:
-    selection: "protein and name CA"
+  secondary_structure: {}
 ```
 
 ---
@@ -144,19 +140,15 @@ parallelism.
 ## `plugins`
 
 Presence of a key **enables** that analysis. The value is a mapping of that
-plugin's settings. An empty mapping (`rmsf: {}`) enables the plugin with all
+plugin's settings. An empty mapping (`secondary_structure: {}`) enables the plugin with all
 defaults.
 
 ### `plugins.rmsf`
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `selection` | string | `"protein and name CA"` | MDAnalysis selection string for RMSF computation |
-| `reference_mode` | string | `"centroid"` | Reference structure: `"centroid"`, `"average"`, `"frame"`, or `"external"` |
-| `reference_frame` | int | `null` | Required when `reference_mode` is `"frame"` |
-| `reference_file` | path | `null` | Path to external PDB reference structure. Required when `reference_mode` is `"external"`. Also used for secondary structure annotation on profile plots. |
-| `alignment_selection` | string | `"protein and name CA"` | MDAnalysis selection used for trajectory alignment before RMSF calculation |
-| `centroid_selection` | string | `"protein"` | MDAnalysis selection used to compute the centroid reference structure when `reference_mode` is `"centroid"` |
+RMSF runs through `polyzymd analyze rmsf` or `polyzymd analyze rms_deviation`
+and the study API, not through `comparison.yaml`. A `plugins.rmsf` block in an
+existing file still loads, is ignored with a warning, and leaves every other
+plugin in the file working. See {doc}`../how_to/analysis_rmsf_quickstart`.
 
 ### `plugins.secondary_structure`
 
@@ -415,14 +407,9 @@ then any values under `theme:` override individual fields.
 Per-analysis plot customization keys go under `plot_settings:` at the same
 level as `style`, `dpi`, etc.
 
-**`plot_settings.rmsf`:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `show_error` | `true` | Show SEM fill_between bands |
-| `highlight_residues` | `[]` | Residue IDs for vertical reference lines |
-| `figsize_profile` | `[14, 4]` | Per-residue profile figure size |
-| `figsize_comparison` | `[8, 6]` | Bar comparison figure size |
+**`plot_settings.rmsf`:** retired. A block still loads and is ignored with a
+warning; mark residues on the RMSF profiles with
+`polyzymd analyze rmsf --set highlight_residues='[...]'` instead.
 
 **`plot_settings.catalytic_triad`:**
 
@@ -471,7 +458,7 @@ level as `style`, `dpi`, etc.
   before launching a full analysis run.
 - Relative paths in `config:` are resolved from the directory containing
   `comparison.yaml`, not from your working directory.
-- An empty plugin mapping (e.g., `rmsf: {}`) enables the analysis with all
+- An empty plugin mapping (e.g., `secondary_structure: {}`) enables the analysis with all
   default settings — you only need to specify fields you want to override.
 - Set `control:` to match one of your condition labels to get Δ-from-control
   columns in comparison tables and plots.

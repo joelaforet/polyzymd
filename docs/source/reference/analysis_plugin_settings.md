@@ -26,7 +26,7 @@ Each plugin's `plot_settings` block inherits this key.
 
 ```yaml
 plugins:
-  rmsf:
+  contacts:
     plot_settings:
       error_bar: ci95
 ```
@@ -79,17 +79,6 @@ production trajectory with `trjconv -pbc nojump` and then `-center -pbc mol -ur
 compact`, and the engine prefers those files. OpenMM writes no such variant, so
 the same plugin sees different coordinate semantics on the two engines. The
 field records which one was read rather than leaving it implied by a filename.
-
-## `rmsf`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `selection` | `str` | `"protein and name CA"` | MDAnalysis selection used for RMSF calculation |
-| `reference_mode` | `str` | `"centroid"` | Reference mode: `centroid`, `average`, `frame`, or `external` |
-| `reference_frame` | `int \| null` | `null` | Frame number used when `reference_mode: frame` (1-indexed) |
-| `reference_file` | `str \| null` | `null` | External PDB path used when `reference_mode: external` |
-| `alignment_selection` | `str` | `"protein and name CA"` | Selection used for trajectory alignment |
-| `centroid_selection` | `str` | `"protein"` | Selection used to find centroid frame |
 
 ## `contacts`
 

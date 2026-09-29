@@ -81,9 +81,9 @@ src/polyzymd/
 
 | Layer | Files | Role |
 |-------|-------|------|
-| **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the **extension point** for contributors |
+| **Plugins** (public) | `contacts/`, `sasa/`, `secondary_structure/`, `hydrogen_bonds/` | One class per analysis type — the **extension point** for contributors |
 | **Private modules** | `_framework/`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
-| **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics, autocorrelation — reusable across plugins |
+| **Shared utilities** | `shared/loader.py`, `shared/window.py`, etc. | `TrajectoryLoader`, frame windows, statistics, autocorrelation — reusable across plugins |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/` | Stable public facade, auto-discovery, artifact lifecycle, default comparison utilities |
 
 New analysis types may be simple single-file modules or packages under
@@ -176,7 +176,9 @@ When writing a new analysis plugin, **study existing implementations first**:
 
 1. **Read `analyses/base.py`** — it defines the full contract
 2. **Start with the scaffold output** — `polyzymd new-analysis <name>` generates a complete working plugin with MDAnalysis jobs, artifacts, aggregation, comparison, plotting, and tests
-3. **Study `analyses/rmsf/`** for default compare with plots, or **`analyses/catalytic_triad/`** for default-compare lifecycle
+3. **Study `analyses/secondary_structure/`** or **`analyses/contacts/`**, which override `compare()` and draw their own plots
+
+For a new measurement, prefer a function run through `Study.timeseries` or `Study.per_replicate` over a new plugin; see `docs/source/explanation/analysis_api.md`. rg, rmsd, rmsf, distances and the catalytic triad are written that way, in `analyses/functions.py` and `analyses/protocols.py`.
 
 **Anti-pattern to avoid:**
 ```python
@@ -209,7 +211,7 @@ def build_mda_jobs(self, ctx):
 1. **Read the tutorial**: `docs/source/contributor_guide/extending_analyses.md`
 2. **Read `analyses/base.py`** — the class docstring defines the full contract
 3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
-4. **Study a matching example**: start with scaffold output (`polyzymd new-analysis <name>`), then use `rmsf/` for default compare with plots or `contacts/` for custom compare
+4. **Study a matching example**: start with scaffold output (`polyzymd new-analysis <name>`), then use `secondary_structure/` or `contacts/`, both with custom compare
 5. **Write your plugin** as a simple module or package in `analyses/`; for advanced trajectory-native packages, isolate MDAnalysis job helpers in `_mda.py`, and extract plotting to `_plotters.py` as complexity grows
 6. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
 
@@ -227,10 +229,11 @@ two ways, and mixing them up picks the wrong structure:
   frame, so the same N points at a different structure when the window
   changes. Each record stores the trajectory frame actually used under
   `chosen`.
-- Legacy plugins count differently: the removed rmsd plugin took trajectory
-  frames from 0 (default 0, inside the equilibration window), and the legacy
-  RMSF plugin, until it moves to the study API, takes trajectory frames from 1.
-  Convert an old rmsd value with new = old - (first production frame) + 1.
+- The removed plugins counted differently: rmsd took trajectory frames from 0
+  (default 0, inside the equilibration window), and rmsf took trajectory
+  frames from 1. With the first production frame's 0-based trajectory index,
+  convert an old rmsd value with new = old - (first production frame) + 1 and
+  an old rmsf value with new = old - (first production frame).
 - A frame inside the equilibration window, such as the starting structure,
   cannot be named as a `frame` reference. Use `external` mode with that
   structure's file, which is also hashed into the record.

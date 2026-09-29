@@ -29,8 +29,8 @@ Use this site by *need*:
 
    Stable analysis workflows for the `v1.3.0` release are RMSD, Rg, RMSF,
    contacts, distances, catalytic triad, secondary structure, SASA, and
-   hydrogen bonds. RMSD analysis now includes automated convergence detection
-   diagnostics.
+   hydrogen bonds. RMSD, Rg, RMSF, distances and the catalytic triad run
+   through ``polyzymd analyze`` and the study API.
 
 Choose Your Path
 ----------------

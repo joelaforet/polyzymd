@@ -42,7 +42,7 @@ not make setup, analysis, or development harder than necessary.
 | Set up projects, validate configs, prepare systems | `build` | `pixi run -e build polyzymd build -c config.yaml` |
 | Submit OpenMM simulations | `build` | `pixi run -e build polyzymd submit -c config.yaml --preset bridges2 --pixi-env auto` |
 | Run one OpenMM segment directly | site `sim-cuda-*` runtime | `pixi run -e sim-cuda-12-4 polyzymd run-segment -c config.yaml -r 1` |
-| Compare trajectories and make analysis plots | `analysis` | `pixi run -e analysis polyzymd compare run rmsf -f comparison.yaml` |
+| Compare trajectories and make analysis plots | `analysis` | `pixi run -e analysis polyzymd analyze rmsf -c config.yaml --eq 10ns` |
 
 Use `pixi shell -e <env>` if you prefer activating an environment once instead
 of prefixing each command.

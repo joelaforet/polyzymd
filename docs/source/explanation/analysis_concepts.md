@@ -66,8 +66,7 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  rmsf:
-    selection: "protein and name CA"
+  secondary_structure: {}
   contacts: {}
 ```
 
@@ -97,7 +96,7 @@ with units: `"10ns"`, `"5000ps"`, etc. The default is `"10ns"`.
 ### `plugins`
 
 Which analyses to run and their settings. Each key is a plugin name (like
-`rmsf` or `contacts`), and the value is a settings block for that plugin. An
+`secondary_structure` or `contacts`), and the value is a settings block for that plugin. An
 empty block `{}` means "run with defaults." Only plugins listed here are
 executed — if you don't include `sasa`, SASA won't be computed.
 
@@ -143,15 +142,13 @@ The available plugins are:
 
 | Plugin name | What it measures |
 |-------------|-----------------|
-| `rmsd` | Root-mean-square deviation over time |
-| `rg` | Radius of gyration over time |
-| `rmsf` | Root-mean-square fluctuation per residue |
 | `contacts` | Intermolecular contacts between protein and other components |
-| `distances` | Distances between specified atom groups |
-| `catalytic_triad` | Catalytic triad geometry (active-site distances) |
 | `secondary_structure` | Secondary structure content (helix, sheet, coil fractions) |
 | `sasa` | Solvent-accessible surface area |
 | `hydrogen_bonds` | Hydrogen bond occupancy and lifetimes |
+
+RMSD, Rg, RMSF, distances and the catalytic triad run through `polyzymd analyze` and the study API
+instead of plugins; see {doc}`analysis_api`.
 
 Each plugin has a `Settings` model with configurable parameters. Most
 parameters have sensible defaults, so you often just need `plugin_name: {}` in
@@ -165,14 +162,14 @@ PolyzyMD owns artifact storage and orchestration, while plugins own the
 domain-specific measurement and interpretation logic. For a contributor-focused
 walkthrough, see {doc}`../contributor_guide/extending_analyses`.
 
-You configure plugins in the `plugins:` block. For example, to run RMSF with a
-custom selection and contacts with defaults:
+You configure plugins in the `plugins:` block. For example, to run contacts
+with a custom cutoff and secondary structure with defaults:
 
 ```yaml
 plugins:
-  rmsf:
-    selection: "protein and name CA"
-  contacts: {}
+  contacts:
+    cutoff: 4.0
+  secondary_structure: {}
 ```
 
 ## Periodic boundaries, whole molecules, and alignment

@@ -57,9 +57,9 @@ pixi run -e analysis polyzymd analyze rmsf \
 
 ## Pick a selection when the analysis measures several
 
-Some analyses report several results: sasa measures four contexts, and
-distances reports a mean distance and a fraction below threshold for each atom
-pair. The report covers one of them at a time, names it in `run`, and lists the
+Some analyses report several results: sasa measures four contexts, distances
+reports a mean distance and a fraction below threshold for each atom pair, and
+rmsf reports core, region and plain-mean values and the per-residue profiles. The report covers one of them at a time, names it in `run`, and lists the
 rest in `all_runs`. Pick another with `--run`:
 
 ```bash
@@ -98,11 +98,12 @@ repeating its conditions on the command line:
 pixi run -e analysis polyzymd analyze rmsf -f comparison.yaml
 ```
 
-The same summary is available from the full comparison workflow, which also
-writes plots:
+For an analysis that still runs as a comparison plugin, such as sasa, the same
+summary is available from the full comparison workflow, which also writes
+plots:
 
 ```bash
-pixi run -e analysis polyzymd compare run rmsf -f comparison.yaml --format agent
+pixi run -e analysis polyzymd compare run sasa -f comparison.yaml --format agent
 ```
 
 ## Read the result

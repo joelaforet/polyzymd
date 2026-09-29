@@ -34,8 +34,7 @@ defaults:
   fdr_alpha: 0.05
 
 plugins:
-  rmsf:
-    selection: "protein and name CA"
+  secondary_structure: {}
 ```
 
 ## Hypothesis Testing Across Plugins
@@ -110,7 +109,6 @@ plugins:
 
 Stable analysis plugins:
 
-- `rmsf`
 - `contacts`
 - `secondary_structure`
 - `sasa`
@@ -120,7 +118,6 @@ Stable analysis plugins:
 
 | Plugin | Default compare? | Primary metric | Key feature | Statistical method |
 |--------|-----------------|----------------|-------------|-------------------|
-| `rmsf` | Yes | `mean_rmsf` | Per-residue flexibility | FDR-corrected pairwise t-tests + omnibus ANOVA |
 | `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests + omnibus ANOVA |
 | `secondary_structure` | Yes | `helix_fraction` | Secondary structure content | FDR-corrected pairwise t-tests + omnibus ANOVA |
 | `sasa` | No (custom) | Per-run mean SASA | Multi-run target/context model | FDR-corrected per-run pairwise t-tests + omnibus ANOVA |
@@ -161,7 +158,6 @@ All commands below assume you are inside the pixi environment
 (`pixi shell -e analysis`) or are prefixed with `pixi run -e analysis`.
 
 ```bash
-polyzymd compare run rmsf
 polyzymd compare run contacts
 polyzymd compare run sasa
 polyzymd compare run hydrogen_bonds
@@ -186,7 +182,6 @@ polyzymd compare plot-all
 Typical comparison cache paths:
 
 ```text
-comparison/rmsf/result.json
 comparison/contacts/result.json
 comparison/sasa/result.json
 comparison/hydrogen_bonds/result.json

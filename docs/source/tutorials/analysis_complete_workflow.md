@@ -32,9 +32,9 @@ If you have not run a single-condition analysis yet, complete
 {doc}`first_analysis` first.
 
 ```{important}
-This tutorial uses the stable `v1.3.0` comparison stack: RMSD, Rg, RMSF,
-contacts, distances, catalytic triad, secondary structure, SASA, and hydrogen
-bonds. Experimental workflows are linked at the end, but they are not part of
+This tutorial uses the comparison plugins: contacts, secondary structure, SASA
+and hydrogen bonds. RMSD, Rg, RMSF, distances and the catalytic triad run
+through `polyzymd analyze` instead; Step 5 shows RMSF for the same study. Experimental workflows are linked at the end, but they are not part of
 the main tutorial path.
 ```
 
@@ -106,9 +106,7 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  rmsf:
-    selection: "protein and name CA"
-    reference_mode: "average"
+  secondary_structure: {}
 
   contacts:
     polymer_selection: "chainid C"
@@ -153,7 +151,7 @@ This parallelizes across replicates and conditions. See
 If you prefer to inspect one comparison first, a good sanity check is:
 
 ```bash
-pixi run -e analysis polyzymd compare run rmsf
+pixi run -e analysis polyzymd compare run secondary_structure
 ```
 
 ## Step 4: Generate the Figures
@@ -179,7 +177,7 @@ polymer_stabilization_study/
 ├── comparison.yaml
 ├── analysis/
 │   ├── No Polymer/
-│   │   ├── rmsf/
+│   │   ├── secondary_structure/
 │   │   │   ├── run_1/
 │   │   │   │   └── result.json        # ReplicateArtifact
 │   │   │   ├── run_2/
@@ -191,7 +189,7 @@ polymer_stabilization_study/
 │   │   └── contacts/
 │   │       └── ...
 │   ├── 100% SBMA/
-│   │   └── rmsf/
+│   │   └── secondary_structure/
 │   │       ├── run_1/
 │   │       │   └── result.json        # ReplicateArtifact
 │   │       └── aggregated/
@@ -199,14 +197,12 @@ polymer_stabilization_study/
 │   └── 100% EGMA/
 │       └── ...
 ├── comparison/
-│   ├── rmsf/
+│   ├── secondary_structure/
 │   │   └── result.json                # cross-condition comparison output
 │   └── contacts/
 │       └── result.json                # cross-condition comparison output
 └── figures/
-    ├── rmsf/
-    │   ├── rmsf_comparison.png
-    │   └── rmsf_profile.png
+    ├── secondary_structure/
     └── ...
 ```
 
@@ -215,6 +211,19 @@ That is the tutorial success state: canonical `ReplicateArtifact` and
 `comparison/<analysis>/result.json` contains the cross-condition comparison
 artifact or plugin-specific summary output, the figures exist, and
 `polyzymd compare plot-all` completes without error.
+
+## Step 5: Add RMSF for the Same Study
+
+RMSF runs through `polyzymd analyze`, which reads the same conditions from
+`comparison.yaml`:
+
+```bash
+pixi run -e analysis polyzymd analyze rmsf -f comparison.yaml
+```
+
+The report compares each condition's core RMSF with the control, and the
+figures go to `figures/rmsf/`. See {doc}`../how_to/analysis_rmsf_quickstart`
+for the reference, the core and the per-residue comparison.
 
 ## What to Do Next
 

@@ -289,8 +289,7 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  rmsf:
-    selection: "protein and name CA"
+  secondary_structure: {}
   # ... additional analysis plugins
 ```
 

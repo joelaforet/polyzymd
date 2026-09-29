@@ -6,7 +6,7 @@ want a worked example with a clear beginning, middle, and end.
 ## Featured Tutorials
 
 - [Run Your First Analysis](first_analysis.md)
-  Go from finished trajectories to RMSF results in five steps.
+  Go from finished trajectories to RMSF results in three steps.
 - [Prepare a PDB for OpenFF and PolyzyMD](prepare_pdb_for_openff.md)
   Inspect and clean a raw 4CHA crystal structure before simulation setup.
 - [Analyze a Multi-Condition Study](analysis_complete_workflow.md)
