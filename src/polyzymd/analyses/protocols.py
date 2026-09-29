@@ -227,6 +227,7 @@ class ProtocolReport(BaseModel):
     all_metrics: list[str] = Field(default_factory=list)
     all_runs: list[str] = Field(default_factory=list)
     equilibration: str
+    stride: int = 1
     frames_per_replicate: dict[str, int | list[int] | None] = Field(default_factory=dict)
     conditions: list[ConditionReport] = Field(default_factory=list)
     pairwise: list[PairwiseReport] = Field(default_factory=list)
@@ -251,7 +252,8 @@ class ProtocolReport(BaseModel):
         header = (
             f"# polyzymd analyze {self.analysis}  metric {self.metric}"
             f"  unit {self.unit or 'none'}{run}  eq {self.equilibration}"
-            f"  conditions {len(counts)}"
+            + (f"  stride {self.stride}" if self.stride != 1 else "")
+            + f"  conditions {len(counts)}"
             f"  replicates {','.join(str(n) for n in counts.values()) or 'none'}"
             f"  protocol {self.analysis}/{self.protocol_version}"
         )
@@ -291,6 +293,7 @@ def analyze(
     run: str | None = None,
     eq_check: bool = True,
     plots: bool = True,
+    stride: int = 1,
 ) -> ProtocolReport:
     """Run one analysis over one or more simulation conditions.
 
@@ -328,6 +331,11 @@ def analyze(
         For the analyses in :data:`FUNCTION_ANALYSES`, draw the figures into
         ``<output_dir>/figures/<name>/`` and record that folder in
         ``provenance.output_paths["figures"]``. ``False`` draws none.
+    stride : int, optional
+        For the analyses in :data:`FUNCTION_ANALYSES`, measure every
+        ``stride``-th production frame of every replicate, 1 by default; see
+        :meth:`~polyzymd.analyses.study.Study.from_configs`. The plugin
+        analyses take every frame and refuse another stride.
 
     Returns
     -------
@@ -358,6 +366,12 @@ def analyze(
             run=run,
             eq_check=eq_check,
             plots=plots,
+            stride=stride,
+        )
+    if stride != 1:
+        raise ProtocolError(
+            f"{name} runs as a comparison plugin, which measures every production frame.",
+            hint=f"Drop --stride, or use one of {', '.join(FUNCTION_ANALYSES)}.",
         )
     analysis_cls = get_analysis_class(name)
     config = _build_config(
@@ -498,6 +512,7 @@ def _analyze_function(
     run: str | None,
     eq_check: bool = True,
     plots: bool = True,
+    stride: int = 1,
 ) -> ProtocolReport:
     """Measure ``name`` on every production frame and report its per-replicate mean.
 
@@ -529,7 +544,7 @@ def _analyze_function(
             hint=f"Run polyzymd analyze {name} -c A/config.yaml "
             + ("--set pairs=pairs.yaml." if pairs else "--set selection='protein and name CA'."),
         )
-    study = _study(configs, labels, equilibration, replicates)
+    study = _study(configs, labels, equilibration, replicates, stride)
     if name in ("rmsf", "rms_deviation"):
         return _analyze_rmsf(name, study, settings, run, recompute, output_dir, plots)
     if name == "sasa":
@@ -845,6 +860,7 @@ def _study(
     labels: Sequence[str] | None,
     equilibration: str | None,
     replicates: Sequence[int] | None,
+    stride: int = 1,
 ) -> Any:
     """Build the Study of ``configs``, with the package default equilibration window."""
     from polyzymd.analyses.study import Study
@@ -855,6 +871,7 @@ def _study(
         dict(zip(_labels(paths, labels), paths, strict=True)),
         equilibration=equilibration or AnalysisDefaults().equilibration_time,
         replicates=replicates,
+        stride=stride,
     )
 
 

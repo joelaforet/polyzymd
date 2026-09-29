@@ -301,6 +301,19 @@ class TestExitCodes:
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         assert "not both" in result.stderr
 
+    def test_stride_is_refused_with_a_comparison_file_and_below_one(self, tmp_path: Path) -> None:
+        """--stride needs -c configs and a whole number of at least 1."""
+        comparison = tmp_path / "comparison.yaml"
+        comparison.write_text("name: x\n")
+        result = CliRunner().invoke(
+            analyze_command, ["contacts", "-f", str(comparison), "--stride", "2"]
+        )
+        assert result.exit_code == EXIT_ANALYSIS_ERROR
+        assert "--stride cannot be combined with -f" in result.stderr
+        result = CliRunner().invoke(analyze_command, ["rg", "-f", str(comparison), "--stride", "0"])
+        assert result.exit_code != 0
+        assert "--stride" in result.output
+
     def test_missing_comparison_file_exits_two(self, tmp_path: Path) -> None:
         """A missing -f file is reported with the init command as the fix."""
         result = CliRunner().invoke(

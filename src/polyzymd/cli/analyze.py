@@ -154,6 +154,13 @@ def _one_line(text: str) -> str:
     help="Directory for analysis/, comparison/ and figures/. Default: the current directory.",
 )
 @click.option(
+    "--stride",
+    type=click.IntRange(min=1),
+    default=1,
+    show_default=True,
+    help="Measure every N-th production frame of every replicate. Function analyses only.",
+)
+@click.option(
     "--recompute", is_flag=True, help="Recompute replicates instead of reusing cached results."
 )
 @click.option(
@@ -166,7 +173,8 @@ def _one_line(text: str) -> str:
     "--no-plots",
     "no_plots",
     is_flag=True,
-    help="Draw no figures. By default rg, rmsd, rmsf, rms_deviation, distances and catalytic_triad draw theirs "
+    help="Draw no figures. By default rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad and sasa "
+    "draw theirs "
     "into <output-dir>/figures/<name>/.",
 )
 def analyze_command(
@@ -181,6 +189,7 @@ def analyze_command(
     output_format: str,
     output_path: Path | None,
     output_dir: Path | None,
+    stride: int,
     recompute: bool,
     no_eq_check: bool,
     no_plots: bool,
@@ -220,6 +229,7 @@ def analyze_command(
             recompute=recompute,
             eq_check=not no_eq_check,
             plots=not no_plots,
+            stride=stride,
         )
     except AnalysisError as exc:
         hint = getattr(exc, "hint", None)
@@ -258,6 +268,7 @@ def _run(
     recompute: bool,
     eq_check: bool = True,
     plots: bool = True,
+    stride: int = 1,
 ) -> "ProtocolReport":
     """Resolve the options and run the protocol, through -f or through -c configs."""
     from polyzymd.analyses.exceptions import ProtocolError
@@ -273,6 +284,11 @@ def _run(
     if comparison_file is not None:
         from polyzymd.config.comparison import ComparisonConfig
 
+        if stride != 1:
+            raise ProtocolError(
+                "--stride cannot be combined with -f.",
+                hint="Pass the conditions with -c to use a stride.",
+            )
         if settings:
             raise ProtocolError(
                 "--set cannot be combined with -f.",
@@ -305,4 +321,5 @@ def _run(
         run=run,
         eq_check=eq_check,
         plots=plots,
+        stride=stride,
     )

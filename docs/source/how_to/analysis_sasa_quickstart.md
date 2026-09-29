@@ -114,15 +114,15 @@ replicates, and `--recompute` to ignore stored results. The settings, including
 the contexts, are recorded under `provenance.settings` in the JSON report.
 
 ```{note}
-SASA is measured on every production frame, and each frame is a separate
-MDTraj call, so a large context over a long trajectory takes a while. Run it
-inside a SLURM job on a cluster rather than on a login node.
+Each frame is a separate MDTraj call, so a large context over a long trajectory
+takes a while. Pass `--stride 5` to measure every fifth production frame, or
+run the command inside a SLURM job on a cluster rather than on a login node.
 ```
 
 ```{note}
 In the plugin used before this version, each run named its own target and
-context and could take every `stride`-th frame, and `polyzymd compare run sasa`
-computed every run together. Values from it are about 0.1 percent larger than
+context with its own frame stride, and `polyzymd compare run sasa` computed
+every run together. The stride is now `--stride`, shared by every result. Values from it are about 0.1 percent larger than
 these: MDTraj 1.11.1 returns slightly more area for every frame after the
 first one each thread computes in a call, and the plugin passed 100 frames per
 call.

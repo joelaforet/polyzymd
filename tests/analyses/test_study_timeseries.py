@@ -557,3 +557,57 @@ def test_timeseries_hands_mdanalysis_the_reader_behind_the_loader_proxy(
                 assert got.values == pytest.approx(expected.values)
                 assert list(got.frames) == FRAMES
     assert two["wrapped"].series["A"][0].values[0] == pytest.approx(0.0, abs=1e-5)
+
+
+class TestStride:
+    """stride keeps every n-th production frame for every measurement, time and report."""
+
+    def test_frames_times_and_identity_follow_the_stride(self, configs: dict[str, Path]) -> None:
+        study = pz.Study.from_configs(configs, equilibration=EQUILIBRATION, stride=3)
+        replicate = study["A"].replicates[0]
+        assert replicate.frames.tolist() == FRAMES[::3]
+        assert replicate.times == pytest.approx([0.1 * k for k in FRAMES[::3]], abs=1e-6)
+        assert replicate.identity["stride"] == 3
+
+    def test_series_and_report_use_and_record_the_stride(
+        self, configs: dict[str, Path], tmp_path: Path
+    ) -> None:
+        study = pz.Study.from_configs(configs, equilibration=EQUILIBRATION, stride=2)
+        series = study.timeseries(
+            radius_of_gyration, pz.select("all"), unit="A", output_dir=tmp_path
+        )
+        values = series.series["A"][0]
+        assert list(values.frames) == FRAMES[::2]
+        report = series.reduce("mean").compare()
+        assert report.stride == 2
+        assert "  stride 2  " in report.to_agent_text().splitlines()[0]
+        whole = pz.Study.from_configs(configs, equilibration=EQUILIBRATION)
+        again = whole.timeseries(
+            radius_of_gyration, pz.select("all"), unit="A", output_dir=tmp_path
+        )
+        assert list(again.series["A"][0].frames) == FRAMES
+        assert "stride" not in again.reduce("mean").compare().to_agent_text().splitlines()[0]
+
+    @pytest.mark.parametrize("stride", [0, -1, 1.5, True])
+    def test_a_stride_below_one_or_not_whole_is_refused(self, configs, stride) -> None:
+        with pytest.raises(ProtocolError, match="stride must be a whole number"):
+            pz.Study.from_configs(configs, equilibration=EQUILIBRATION, stride=stride)
+
+    def test_analyze_takes_a_stride_for_function_analyses_only(
+        self, configs: dict[str, Path], tmp_path: Path
+    ) -> None:
+        from polyzymd.analyses.protocols import analyze
+
+        report = analyze(
+            "rg",
+            [configs["A"], configs["B"]],
+            equilibration=EQUILIBRATION,
+            settings={"selection": "all"},
+            output_dir=tmp_path,
+            plots=False,
+            stride=2,
+        )
+        assert report.stride == 2
+        assert report.frames_per_replicate["A"] == [len(FRAMES[::2])] * 3
+        with pytest.raises(ProtocolError, match="comparison plugin"):
+            analyze("contacts", [configs["A"]], equilibration=EQUILIBRATION, stride=2)

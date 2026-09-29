@@ -93,7 +93,9 @@ class Replicate:
         equilibration time and the last is the trajectory's last frame. When
         a segment's last frame is recorded again at the same time by the next
         segment (see :class:`~polyzymd.analyses.shared.loader.SegmentJoin`),
-        that frame's index is left out.
+        that frame's index is left out. With the condition's ``stride`` above
+        1, every ``stride``-th of these frames is kept, starting with the
+        first.
         """
         import numpy as np
 
@@ -102,11 +104,13 @@ class Replicate:
         window = self._production_window()
         join = self._segment_join()
         if join is None:
-            return np.arange(window.start, window.stop, window.step, dtype=np.int64)
-        cutoff_ps = window.equilibration_ps - FRAME_BOUNDARY_TOLERANCE * window.timestep_ps
-        keep = join.times_ps >= cutoff_ps
-        keep[list(join.dropped_frames)] = False
-        return np.flatnonzero(keep)[:: window.step].astype(np.int64)
+            frames = np.arange(window.start, window.stop, window.step, dtype=np.int64)
+        else:
+            cutoff_ps = window.equilibration_ps - FRAME_BOUNDARY_TOLERANCE * window.timestep_ps
+            keep = join.times_ps >= cutoff_ps
+            keep[list(join.dropped_frames)] = False
+            frames = np.flatnonzero(keep)[:: window.step].astype(np.int64)
+        return frames[:: self.condition.stride]
 
     @property
     def times(self) -> np.ndarray:
@@ -133,7 +137,7 @@ class Replicate:
         Returns
         -------
         dict
-            ``config_hash``, ``equilibration``, and the ``topology`` and
+            ``config_hash``, ``equilibration``, ``stride``, and the ``topology`` and
             ``trajectories`` file records (path, format, size and modification
             time) from :class:`~polyzymd.analyses.mda.universe.FileIdentity`.
         """
@@ -141,6 +145,7 @@ class Replicate:
         return {
             "config_hash": self.condition.config_hash,
             "equilibration": self.condition.equilibration,
+            "stride": self.condition.stride,
             "topology": provenance.topology.as_dict(),
             "trajectories": [item.as_dict() for item in provenance.trajectories],
         }
@@ -159,6 +164,9 @@ class Condition:
         Window removed from the start of every replicate, for example ``"10ns"``.
     replicates : sequence of int, optional
         Replicate numbers to use. Defaults to every run directory on disk.
+    stride : int, optional
+        Keep every ``stride``-th production frame of every replicate, 1 by
+        default.
     """
 
     def __init__(
@@ -167,6 +175,7 @@ class Condition:
         config_path: Path,
         equilibration: str,
         replicates: Sequence[int] | None = None,
+        stride: int = 1,
     ) -> None:
         from polyzymd.analyses._framework.cache_identity import compute_config_hash
         from polyzymd.analyses.mda.universe import UniverseProvider
@@ -175,6 +184,12 @@ class Condition:
         self.label = label
         self.config_path = config_path
         self.equilibration = equilibration
+        if isinstance(stride, bool) or not isinstance(stride, int) or stride < 1:
+            raise ProtocolError(
+                f"Condition {label!r}: stride must be a whole number of at least 1, got {stride!r}.",
+                hint="Pass stride=5 to keep every fifth production frame.",
+            )
+        self.stride = stride
         try:
             self.config = SimulationConfig.from_yaml(config_path)
             found = sorted(int(index) for index, _ in self.config.discover_replicate_dirs())
@@ -216,6 +231,7 @@ class Study:
         *,
         equilibration: str,
         replicates: Sequence[int] | None = None,
+        stride: int = 1,
     ) -> Study:
         """Build a study from simulation config paths.
 
@@ -230,6 +246,11 @@ class Study:
         replicates : sequence of int, optional
             Replicate numbers for every condition. Defaults to the run
             directories found on disk for each condition.
+        stride : int, optional
+            Keep every ``stride``-th production frame of every replicate,
+            starting with the first after the equilibration window, 1 by
+            default. Every measurement, reference and time then uses those
+            frames only; a ``frame`` reference counts them from 1.
 
         Returns
         -------
@@ -266,7 +287,7 @@ class Study:
             ) from exc
         return cls(
             [
-                Condition(label, path, str(equilibration), replicates)
+                Condition(label, path, str(equilibration), replicates, stride)
                 for label, path in zip(labels, paths, strict=True)
             ]
         )

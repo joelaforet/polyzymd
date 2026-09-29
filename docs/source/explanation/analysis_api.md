@@ -63,6 +63,20 @@ for replicate in study["SBMA 50%"].replicates:
 You can use these universes for anything, including analyses PolyzyMD does not
 support, such as a principal component basis fitted on all replicates at once.
 
+To analyse fewer frames, for example with an expensive measurement such as
+SASA, pass `stride=`:
+
+```python
+study = pz.Study.from_configs(configs, equilibration="100ns", stride=5)
+```
+
+`replicate.frames` then keeps every fifth production frame, starting with the
+first after the equilibration window, and every measurement, reference
+structure, time and report uses those frames only. A `frame` reference counts
+them from 1. The stride is stored in each record, so a stored result from
+another stride is never reused, and a report prints `stride 5` in its header.
+The replicate stays the sampling unit whatever the stride.
+
 ```{note}
 `replicate.frames` holds trajectory frame indices, counted from 0 from the first
 loaded frame. A frame you name yourself, such as the `frame` of

@@ -914,8 +914,9 @@ List the available analysis names with `polyzymd compare run --list`.
 | `--format agent\|json` | No | `agent` (default) prints one line per condition and comparison; `json` prints the full `ProtocolReport`. For a human-readable table of the same comparison, use `polyzymd compare run --format table`. |
 | `-o, --output PATH` | No | Also write the rendered output to this file. |
 | `--output-dir PATH` | No | Directory for `analysis/`, `comparison/` and `figures/`. Default: the current directory. |
+| `--stride N` | No | Measure every `N`-th production frame of every replicate, starting with the first after the window. Default `1`. Function analyses only; refused with `-f` and for comparison plugins. The report header then shows `stride N`. |
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
-| `--no-plots` | No | Do not draw figures for analyses on the study API (rg, rmsd, distances, catalytic_triad). By default they are written to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
+| `--no-plots` | No | Do not draw figures for analyses on the study API (rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa). By default they are written to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
 | `--no-eq-check` | No | Skip the pymbar equilibration diagnostic for analyses on the study API (rg, rmsd). Values and statistics are the same either way. |
 
 ### Agent format
