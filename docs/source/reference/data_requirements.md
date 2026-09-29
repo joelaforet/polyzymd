@@ -108,7 +108,9 @@ that.
 
 When loading multi-segment trajectories, the analysis loader verifies that the
 segments form one contiguous, evenly spaced time line and raises
-`TrajectoryLineageError` otherwise (see {doc}`../how_to/troubleshooting`).
+`TrajectoryLineageError` otherwise. A repeated last frame or one missing frame
+at a segment boundary is repaired with a warning instead (see
+{doc}`../how_to/troubleshooting`).
 
 ---
 

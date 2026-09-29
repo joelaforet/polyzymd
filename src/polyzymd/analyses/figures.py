@@ -73,7 +73,7 @@ def plot_timeseries(
     name: str,
     plot_settings: PlotSettings | None = None,
 ) -> Path:
-    """Draw every replicate's series against simulation time, coloured by condition.
+    """Draw every replicate's series against simulation time, colored by condition.
 
     Each replicate is a thin line. Where every replicate of a condition has
     the same times over its first frames, a thick line gives their mean over
@@ -149,7 +149,7 @@ def plot_timeseries(
 
 
 def reflected_kde(values: Any, bounds: tuple = (None, None), points: int = 200) -> tuple:
-    """Evaluate a Gaussian KDE of ``values`` that puts no density outside ``bounds``.
+    """Evaluate a Gaussian KDE of ``values`` that does not put density outside ``bounds``.
 
     ``f`` is ``scipy.stats.gaussian_kde`` with Scott's bandwidth ``h``. The
     grid runs from ``min(values) - 3h`` to ``max(values) + 3h``, as seaborn's
