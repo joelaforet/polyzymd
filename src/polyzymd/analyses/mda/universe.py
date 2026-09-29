@@ -163,6 +163,7 @@ class UniverseProvenance:
     warnings: tuple[str, ...] = field(default_factory=tuple)
     excluded_segments: tuple[int, ...] = field(default_factory=tuple)
     empty_segments: tuple[int, ...] = field(default_factory=tuple)
+    segment_join: dict[str, Any] | None = None
     segment_status: tuple[tuple[int, str], ...] = field(default_factory=tuple)
     pbc_policy: str = "as_is"
     topology_has_bonds: bool | None = None
@@ -189,6 +190,7 @@ class UniverseProvenance:
             "warnings": list(self.warnings),
             "excluded_segments": list(self.excluded_segments),
             "empty_segments": list(self.empty_segments),
+            "segment_join": self.segment_join,
             "segment_status": {str(index): status for index, status in self.segment_status},
             "pbc_policy": self.pbc_policy,
             "topology_has_bonds": self.topology_has_bonds,
@@ -285,11 +287,19 @@ class UniverseProvider:
         if provenance is None:
             return
         has_bonds, bond_source = topology_bond_source(universe)
+        warnings = list(provenance.warnings)
+        get_join = getattr(self._get_loader(), "segment_join", None)
+        join = get_join(replicate) if callable(get_join) else None
+        repaired = join is not None and join.repaired
+        if repaired:
+            warnings.extend(text for text in join.warnings() if text not in warnings)
         self._provenance_cache[replicate] = replace(
             provenance,
             pbc_policy=policy,
             topology_has_bonds=has_bonds,
             bond_source=bond_source,
+            warnings=tuple(warnings),
+            segment_join=join.as_dict() if repaired else provenance.segment_join,
         )
 
     def provenance_for(self, replicate: int, *, refresh: bool = False) -> UniverseProvenance:
@@ -422,6 +432,11 @@ class UniverseProvider:
         if gro_warning is not None:
             if gro_warning not in warnings:
                 warnings.append(gro_warning)
+        # The join is found when the universe is loaded, so a refresh keeps it.
+        get_join = getattr(loader, "segment_join", None)
+        join = get_join(info.replicate) if callable(get_join) else None
+        if join is not None and join.repaired:
+            warnings.extend(join.warnings())
 
         return UniverseProvenance(
             replicate=info.replicate,
@@ -437,6 +452,7 @@ class UniverseProvider:
             warnings=tuple(warnings),
             excluded_segments=tuple(getattr(info, "excluded_segments", ()) or ()),
             empty_segments=tuple(getattr(info, "empty_segments", ()) or ()),
+            segment_join=join.as_dict() if join is not None and join.repaired else None,
             segment_status=tuple(sorted((getattr(info, "segment_status", None) or {}).items())),
             pbc_policy=self.pbc_policy,
             trajectory_variant=trajectory_variant(info.trajectory_files),

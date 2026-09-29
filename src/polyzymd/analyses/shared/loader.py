@@ -552,11 +552,13 @@ class TrajectoryLineageError(ValueError):
     """Raised when daisy-chained trajectory segments do not form one time line.
 
     Consecutive production segments written by a healthy restart chain start
-    exactly one frame interval after the previous segment ends.  Overlapping,
-    backwards-jumping or gapped segments mean two chains wrote into the same
-    run directory (for example a duplicated SLURM resubmission) or a segment is
-    missing; concatenating them silently would corrupt every time-dependent
-    analysis.
+    exactly one frame interval after the previous segment ends. Two boundary
+    defects of the OpenMM restart chain are repaired instead of raised (see
+    :func:`_assert_contiguous_segments`): a segment that starts at the time of
+    the previous segment's last frame, and a segment that starts two frame
+    intervals after it. Any other overlap or gap, or a change of frame
+    interval, raises, because concatenating such segments would put frames at
+    the wrong times in every time-dependent analysis.
     """
 
 
@@ -569,6 +571,97 @@ class _SegmentTiming:
     first_time: float | None
     last_time: float | None
     dt: float | None
+    drop_last: bool = False
+    missing_before: bool = False
+
+
+@dataclass(frozen=True)
+class SegmentJoin:
+    """Frame times and boundary repairs of one replicate's concatenated segments.
+
+    Attributes
+    ----------
+    times_ps : numpy.ndarray
+        Time of every frame of the concatenated trajectory in ps, computed as
+        each segment's first-frame time plus the frame index within the
+        segment times the frame interval.
+    dropped_frames : tuple of int
+        Indices, in the concatenated trajectory, of each segment's last frame
+        that the next segment records again at the same time. They are left
+        out of the production frames.
+    missing_before : tuple of int
+        Indices of each segment's first frame when that segment starts two
+        frame intervals after the previous segment ends, so one frame is
+        missing just before it.
+    segment_paths : tuple of Path
+        The segments in chain order.
+    """
+
+    times_ps: NDArray[np.float64]
+    dropped_frames: tuple[int, ...] = ()
+    missing_before: tuple[int, ...] = ()
+    segment_paths: tuple[Path, ...] = ()
+
+    @property
+    def repaired(self) -> bool:
+        """Whether any boundary frame was dropped or found missing."""
+        return bool(self.dropped_frames or self.missing_before)
+
+    def warnings(self) -> list[str]:
+        """Describe each repair, naming the frame index and its time in ps."""
+        messages = [
+            f"Left out frame {index} (t={self.times_ps[index]:.6g} ps), the last frame of "
+            "a segment, because the next segment starts at the same time step: the "
+            "restart resumed from a state saved before that frame and simulated it again."
+            for index in self.dropped_frames
+        ]
+        messages += [
+            f"One frame is missing before frame {index} (t={self.times_ps[index]:.6g} ps): "
+            "the segment starts two frame intervals after the previous one ends."
+            for index in self.missing_before
+        ]
+        return messages
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the repairs as JSON-compatible values for provenance."""
+        return {
+            "dropped_frames": list(self.dropped_frames),
+            "dropped_frame_times_ps": [float(self.times_ps[i]) for i in self.dropped_frames],
+            "missing_before": list(self.missing_before),
+            "missing_before_times_ps": [float(self.times_ps[i]) for i in self.missing_before],
+        }
+
+
+def _segment_join(timings: Sequence[_SegmentTiming], reference_dt: float) -> SegmentJoin:
+    """Build the frame times and repair indices of checked segment timings.
+
+    Parameters
+    ----------
+    timings : sequence of _SegmentTiming
+        Timings returned by :func:`_assert_contiguous_segments`, whose
+        ``drop_last`` and ``missing_before`` flags mark the repairs.
+    reference_dt : float
+        Frame interval shared by every segment, in ps.
+    """
+
+    times: list[NDArray[np.float64]] = []
+    dropped: list[int] = []
+    missing: list[int] = []
+    offset = 0
+    for timing in timings:
+        assert timing.first_time is not None
+        times.append(timing.first_time + reference_dt * np.arange(timing.n_frames))
+        if timing.missing_before:
+            missing.append(offset)
+        offset += timing.n_frames
+        if timing.drop_last:
+            dropped.append(offset - 1)
+    return SegmentJoin(
+        times_ps=np.concatenate(times) if times else np.zeros(0),
+        dropped_frames=tuple(dropped),
+        missing_before=tuple(missing),
+        segment_paths=tuple(t.path for t in timings),
+    )
 
 
 def _probe_segment_timing(universe: Any, trajectory_file: Path) -> _SegmentTiming:
@@ -616,8 +709,20 @@ def _assert_contiguous_segments(
     """Require daisy-chained segments to form one monotonic, evenly spaced time line.
 
     Each segment's raw first and last times and frame interval are read from
-    the files themselves.  Every segment must use the same frame interval, and
-    segment *k* must start exactly one interval after segment *k-1* ends.
+    the files themselves. Every segment must use the same frame interval, and
+    segment *k* must start one interval after segment *k-1* ends, except in
+    two cases that the OpenMM restart chain produces and that are repaired:
+
+    * Segment *k* starts at the time of segment *k-1*'s last frame. The
+      restart resumed from a state saved shortly before that frame and wrote
+      the same time step again. Segment *k-1*'s last frame is marked
+      ``drop_last``, because segment *k* continues from the resumed state and
+      not from that frame.
+    * Segment *k* starts two intervals after segment *k-1* ends. One frame was
+      never written, for example because a file-system error interrupted the
+      write, and segment *k* is marked ``missing_before``.
+
+    Each repair is logged as a warning.
 
     Parameters
     ----------
@@ -640,13 +745,14 @@ def _assert_contiguous_segments(
     Returns
     -------
     list[_SegmentTiming]
-        Timing metadata per segment, in order.
+        Timing metadata per segment, in order, with the repair flags set.
 
     Raises
     ------
     TrajectoryLineageError
-        If frame intervals differ between segments, or any segment does not
-        start one interval after its predecessor ends.
+        If frame intervals differ between segments, or a segment starts
+        anywhere other than zero, one or two intervals after its predecessor
+        ends.
     """
 
     if len(trajectory_files) < 2:
@@ -686,7 +792,25 @@ def _assert_contiguous_segments(
     for previous, current in zip(timings, timings[1:]):
         assert previous.last_time is not None and current.first_time is not None
         gap = current.first_time - previous.last_time
-        if abs(gap - reference_dt) > tolerance:
+        if abs(gap) <= tolerance:
+            previous.drop_last = True
+            LOGGER.warning(
+                "%s starts at t=%.6g, the time of the last frame of %s; leaving that "
+                "frame out, since the restart simulated the step again from an earlier state.",
+                current.path,
+                current.first_time,
+                previous.path,
+            )
+        elif abs(gap - 2 * reference_dt) <= tolerance:
+            current.missing_before = True
+            LOGGER.warning(
+                "%s starts at t=%.6g, two frame intervals after %s ends; one frame is "
+                "missing between them.",
+                current.path,
+                current.first_time,
+                previous.path,
+            )
+        elif abs(gap - reference_dt) > tolerance:
             if gap <= 0:
                 kind = "overlaps or runs backwards relative to"
             else:
@@ -716,14 +840,17 @@ def _assert_contiguous_segments(
             )
         else:
             cause = (
-                "This usually means two restart chains wrote into the same run directory "
-                "(duplicate SLURM resubmission) or a segment is missing."
+                "A repeated last frame or one missing frame at a boundary is repaired, so "
+                "these segments overlap by more than one frame, skip more than one frame, or "
+                "change the frame interval. Possible causes are a missing segment, two "
+                "restart chains writing into the same run directory, or a report interval "
+                "changed part way through the chain."
             )
         raise TrajectoryLineageError(
             "Trajectory segments do not form a single contiguous time line; refusing to "
             f"concatenate them. {cause}{skipped} Inspect progress.json and the production_N "
-            "directories, quarantine the branched segments, then retry.\n  - "
-            + "\n  - ".join(problems)
+            "directories, move aside the segments that do not belong to the chain, then "
+            "retry.\n  - " + "\n  - ".join(problems)
         )
 
     LOGGER.debug(
@@ -1065,6 +1192,7 @@ class TrajectoryLoader:
         self._engine_override = engine_override
         self._engine: SimulationEngine | None = None
         self._universe_cache: dict[tuple[int, str, bool], "Universe"] = {}
+        self._segment_joins: dict[int, SegmentJoin] = {}
 
     # ------------------------------------------------------------------
     # Engine delegation helpers
@@ -1393,12 +1521,15 @@ class TrajectoryLoader:
             # Multiple segments - use ChainReader, but only after checking
             # that the segments actually chain (no branched/duplicate chains).
             if verify_lineage:
-                _assert_contiguous_segments(
+                timings = _assert_contiguous_segments(
                     info.topology_file,
                     info.trajectory_files,
                     excluded_segments=tuple(info.excluded_segments),
                     empty_segments=tuple(info.empty_segments),
                 )
+                reference_dt = next((t.dt for t in timings if t.dt is not None and t.dt > 0), None)
+                if reference_dt is not None and all(t.first_time is not None for t in timings):
+                    self._segment_joins[replicate] = _segment_join(timings, reference_dt)
             u = mda.Universe(
                 str(info.topology_file),
                 [str(f) for f in info.trajectory_files],
@@ -1411,6 +1542,24 @@ class TrajectoryLoader:
             self._universe_cache[cache_key] = u
 
         return u
+
+    def segment_join(self, replicate: int) -> SegmentJoin | None:
+        """Return the frame times and boundary repairs of the last loaded universe.
+
+        Parameters
+        ----------
+        replicate : int
+            Replicate number.
+
+        Returns
+        -------
+        SegmentJoin or None
+            The join found when :meth:`load_universe` last checked this
+            replicate's segments. ``None`` when the replicate has one segment,
+            the check was skipped, the segments carry no time metadata, or no
+            universe has been loaded yet.
+        """
+        return self._segment_joins.get(replicate)
 
     def iter_replicates(
         self,
