@@ -163,6 +163,9 @@ class SimulationRunner:
         self._current_step_count = 0
         self._current_time = None
         self._history: Dict[str, Any] = {}
+        # Reporter that tracks the frames written by the running production
+        # segment; set by run_production().
+        self._production_tracker: Any = None
 
         # Ensure working directory exists
         self._working_dir.mkdir(parents=True, exist_ok=True)
@@ -1547,6 +1550,16 @@ class SimulationRunner:
         prod_chk_path = phase_dir / f"{phase_name}_checkpoint.chk"
         self._simulation.reporters.append(CheckpointReporter(str(prod_chk_path), report_interval))
 
+        # Last reporter: rewrites restart_state.xml after each frame has been
+        # written by the reporters above, and records the step of that frame.
+        from polyzymd.simulation.report_state import ReportedStateTracker, save_state_after_crash
+
+        tracker = ReportedStateTracker(
+            phase_dir, report_interval, int(self._simulation.context.getStepCount())
+        )
+        self._simulation.reporters.append(tracker)
+        self._production_tracker = tracker
+
         # Save topology
         with open(pdb_path, "w") as f:
             PDBFile.writeFile(
@@ -1635,7 +1648,6 @@ class SimulationRunner:
             interrupted_state_save_exceptions,
             is_interrupted,
             save_interrupted_state,
-            save_restart_checkpoint,
         )
 
         install_handlers()
@@ -1721,10 +1733,7 @@ class SimulationRunner:
                     (_now - _last_checkpoint_write) >= checkpoint_interval_s
                     and steps_done < total_steps  # skip if we're about to finish
                 ):
-                    save_restart_checkpoint(
-                        simulation=self._simulation,
-                        output_dir=phase_dir,
-                    )
+                    tracker.save_restart(self._simulation)
                     _last_checkpoint_write = _now
                 if is_interrupted():
                     LOGGER.warning(f"Interrupt detected at step {steps_done}/{total_steps}")
@@ -1749,14 +1758,22 @@ class SimulationRunner:
         except GracefulExit:
             raise  # Re-raise so caller can handle exit code
         except interrupted_state_save_exceptions():
-            # On unexpected crash, still try to save interrupted state
+            # On unexpected crash (for example a trajectory write raising
+            # OSError), save only a state whose frames were all written.
             try:
-                save_interrupted_state(
+                saved_steps = save_state_after_crash(
                     simulation=self._simulation,
+                    tracker=tracker,
                     output_dir=phase_dir,
                     segment_index=segment_index,
-                    steps_completed=steps_done,
                     total_steps=total_steps,
+                )
+                self._update_progress_interrupted(
+                    segment_index=segment_index,
+                    steps_done=saved_steps,
+                    total_steps=total_steps,
+                    duration_ns=duration_ns,
+                    timestep_fs=timestep_fs,
                 )
             except interrupted_state_save_exceptions() as save_exc:
                 LOGGER.exception(
@@ -1795,7 +1812,7 @@ class SimulationRunner:
         self._update_progress_completed(
             segment_index=segment_index,
             total_steps=total_steps,
-            num_samples=num_samples,
+            num_samples=tracker.frames_written,
             duration_ns=duration_ns,
             timestep_fs=timestep_fs,
         )
@@ -1819,6 +1836,19 @@ class SimulationRunner:
         LOGGER.info(f"Production segment {segment_index} complete")
 
         return results
+
+    def _apply_frame_fields(self, record: Any) -> None:
+        """Copy the production tracker's frame bookkeeping onto a progress record.
+
+        Sets ``report_interval``, ``start_step``, ``last_reported_step`` and
+        ``samples_written``; does nothing before :meth:`run_production` has
+        attached a tracker.
+        """
+        if self._production_tracker is None:
+            return
+        for name, value in self._production_tracker.frame_fields().items():
+            if value is not None:
+                setattr(record, name, value)
 
     def _write_segment_started(
         self,
@@ -1862,6 +1892,7 @@ class SimulationRunner:
             status=SegmentStatus.RUNNING,
             **record_provenance(),
         )
+        self._apply_frame_fields(record)
 
         _update_or_append_segment(progress, record)
         progress.status = SimulationStatus.RUNNING
@@ -1907,6 +1938,7 @@ class SimulationRunner:
             if seg.index == segment_index and seg.status == SegmentStatus.RUNNING:
                 seg.steps_completed = steps_done
                 seg.duration_ns = (steps_done * timestep_fs) / 1e6
+                self._apply_frame_fields(seg)
                 break
         else:
             # No RUNNING record found — shouldn't happen, but be safe
@@ -1964,6 +1996,7 @@ class SimulationRunner:
             **record_provenance(),
         )
         record.finished_at = _now_iso()
+        self._apply_frame_fields(record)
 
         _update_or_append_segment(progress, record)
 
@@ -2024,11 +2057,12 @@ class SimulationRunner:
             index=segment_index,
             steps_completed=steps_done,
             steps_requested=total_steps,
-            samples_written=0,  # Interrupted — samples may be partial
+            samples_written=0,  # Replaced by the tracker's count when known
             status=SegmentStatus.INTERRUPTED,
             duration_ns=actual_duration_ns,
             **record_provenance(),
         )
+        self._apply_frame_fields(record)
 
         _update_or_append_segment(progress, record)
         progress.status = SimulationStatus.INTERRUPTED

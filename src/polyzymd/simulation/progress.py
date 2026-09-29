@@ -132,6 +132,23 @@ class SegmentRecord(BaseModel):
         for records written by PolyzyMD versions that predate these fields.
         A change between consecutive segments means the restart chain
         switched environment (see the CUDA-driver routing history).
+    report_interval : int | None
+        Integrator steps between trajectory frames in this segment.
+    start_step : int | None
+        Integrator step count of the state the segment started from.
+    last_reported_step : int | None
+        Step of the last frame the segment wrote to its trajectory and
+        state-data files.
+    resumed_from : str | None
+        File name of the portable state or checkpoint the segment loaded.
+    overlap_frames : int
+        Frames at the start of this segment whose steps the previous segment
+        had already written, because the state it resumed from predates the
+        previous segment's last frame.  To join the segments with one frame
+        per step, drop the previous segment's copies of these steps.
+    gap_frames : int
+        Report steps between the previous segment's last frame and this
+        segment's first frame that no segment wrote.
     """
 
     index: int
@@ -145,6 +162,25 @@ class SegmentRecord(BaseModel):
     polyzymd_version: str | None = None
     openmm_version: str | None = None
     pixi_environment: str | None = None
+    report_interval: int | None = None
+    start_step: int | None = None
+    last_reported_step: int | None = None
+    resumed_from: str | None = None
+    overlap_frames: int = 0
+    gap_frames: int = 0
+
+
+#: SegmentRecord fields that describe trajectory frames and the resume point.
+#: The segment's own process writes them; a filesystem scan cannot recover
+#: them, so reconciliation keeps the progress file's values.
+SEGMENT_FRAME_FIELDS = (
+    "report_interval",
+    "start_step",
+    "last_reported_step",
+    "resumed_from",
+    "overlap_frames",
+    "gap_frames",
+)
 
 
 class SimulationProgress(BaseModel):
@@ -951,6 +987,139 @@ def get_next_segment_info(
     }
 
 
+class ReportIntervalChangeError(ValueError):
+    """Raised when a segment would write frames at a different interval.
+
+    A chain whose frame spacing changes part-way cannot be joined into one
+    evenly spaced trajectory, so resuming with a new interval is refused
+    unless the caller overrides the check.
+    """
+
+
+def previous_report_interval(
+    progress: SimulationProgress,
+    working_dir: str | Path,
+    segment_index: int,
+) -> tuple[int, int] | None:
+    """Return the frame interval used by the segments before *segment_index*.
+
+    The interval recorded in ``progress.json`` is used when present.
+    Segments written before that field existed fall back to the interval
+    stored in the DCD header of the most recent earlier segment that wrote a
+    frame.  The state-data CSV is not used here: its step spacing is only a
+    proxy for the trajectory's.
+
+    Parameters
+    ----------
+    progress : SimulationProgress
+        Current progress state.
+    working_dir : str or Path
+        Replicate working directory.
+    segment_index : int
+        Segment about to run.
+
+    Returns
+    -------
+    tuple of int or None
+        ``(segment, report_interval)`` for the segment that supplied the
+        interval, or ``None`` when no earlier segment records or shows one.
+    """
+    from polyzymd.simulation.report_state import dcd_frame_info
+
+    earlier = sorted(
+        (seg for seg in progress.segments if seg.index < segment_index),
+        key=lambda seg: seg.index,
+        reverse=True,
+    )
+    for seg in earlier:
+        if seg.report_interval:
+            return seg.index, seg.report_interval
+        dcd = dcd_frame_info(
+            Path(working_dir) / f"production_{seg.index}" / f"production_{seg.index}_trajectory.dcd"
+        )
+        if dcd is not None and dcd[0] > 0 and dcd[2] > 1:
+            return seg.index, dcd[2]
+    return None
+
+
+def check_report_interval_unchanged(
+    progress: SimulationProgress,
+    working_dir: str | Path,
+    segment_index: int,
+    report_interval: int,
+    *,
+    allow_change: bool = False,
+) -> None:
+    """Refuse to resume a chain at a different trajectory frame interval.
+
+    Parameters
+    ----------
+    progress : SimulationProgress
+        Current progress state.
+    working_dir : str or Path
+        Replicate working directory.
+    segment_index : int
+        Segment about to run.
+    report_interval : int
+        Interval, in steps, derived from the current configuration.
+    allow_change : bool, optional
+        Log a warning instead of raising when the interval differs.
+
+    Raises
+    ------
+    ReportIntervalChangeError
+        If an earlier segment wrote frames at another interval and
+        *allow_change* is False.
+    """
+    previous = previous_report_interval(progress, working_dir, segment_index)
+    if previous is None or previous[1] == report_interval:
+        return
+    source_segment, previous_interval = previous
+    message = (
+        f"Segment {segment_index} would write a frame every {report_interval} steps, "
+        f"but segment {source_segment} wrote one every {previous_interval} steps. "
+        f"Changing production duration or samples part-way through a chain changes "
+        f"the frame spacing, and the segments can then no longer be joined into one "
+        f"evenly spaced trajectory. Restore the configuration that started the chain, "
+        f"or pass --allow-report-interval-change to run-segment to accept the change."
+    )
+    if not allow_change:
+        raise ReportIntervalChangeError(message)
+    LOGGER.warning(message + " Continuing because the change was explicitly allowed.")
+
+
+def update_segment_fields(
+    working_dir: str | Path,
+    segment_index: int,
+    **fields: Any,
+) -> None:
+    """Set fields on one segment record in ``progress.json`` and save it.
+
+    Used to add the frame bookkeeping (see :data:`SEGMENT_FRAME_FIELDS`) after
+    a lifecycle update replaced the record.  ``None`` values are skipped so a
+    caller can pass everything it knows.
+
+    Parameters
+    ----------
+    working_dir : str or Path
+        Replicate working directory.
+    segment_index : int
+        Segment to update.
+    **fields
+        ``SegmentRecord`` attribute names and values.
+    """
+    progress = load_progress(working_dir)
+    if progress is None:
+        return
+    for seg in progress.segments:
+        if seg.index == segment_index:
+            for name, value in fields.items():
+                if value is not None:
+                    setattr(seg, name, value)
+            save_progress(working_dir, progress)
+            return
+
+
 def validate_progress(
     working_dir: str | Path,
     progress: SimulationProgress,
@@ -1017,6 +1186,7 @@ def validate_progress(
                 polyzymd_version=file_rec.polyzymd_version or fs_rec.polyzymd_version,
                 openmm_version=file_rec.openmm_version or fs_rec.openmm_version,
                 pixi_environment=file_rec.pixi_environment or fs_rec.pixi_environment,
+                **{name: getattr(file_rec, name) for name in SEGMENT_FRAME_FIELDS},
             )
             reconciled.append(merged)
         elif fs_rec is not None:
