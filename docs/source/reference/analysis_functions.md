@@ -35,3 +35,16 @@ which every pair is below its threshold, computed from the stored distances,
 and reports it first. Pick a result with `--run`. See
 {doc}`../how_to/analysis_distances_quickstart` and
 {doc}`../how_to/analysis_triad_quickstart`.
+
+## Figures
+
+`polyzymd analyze` writes these figures to `<output-dir>/figures/<analysis>/`
+and records the folder under `output_paths.figures` in the JSON report;
+`--no-plots`, or `plots=False` in `analyze`, skips them.
+
+| Analysis | Figures |
+|---|---|
+| `rg` | `rg_timeseries` (every replicate against time), `rg_comparison` (condition means with every replicate value), `rg_distribution` (per-frame distribution) |
+| `rmsd` | `rmsd_timeseries`, `rmsd_comparison` |
+| `distances` | `distance_kde_<pair>` for each pair with its threshold, `distance_fraction_<result>` for each fraction below threshold, and the grouped `distance_threshold_bars` (every pair's fraction) and `distance_kde_panel` (one panel per pair) |
+| `catalytic_triad` | `triad_kde_<pair>` for each pair with its threshold, `triad_fraction_<result>` for `simultaneous` and each pair's fraction, and the grouped `triad_threshold_bars` (each pair's fraction, then all pairs) and `triad_kde_panel` (one panel per pair) |

@@ -915,6 +915,7 @@ List the available analysis names with `polyzymd compare run --list`.
 | `-o, --output PATH` | No | Also write the rendered output to this file. |
 | `--output-dir PATH` | No | Directory for `analysis/`, `comparison/` and `figures/`. Default: the current directory. |
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
+| `--no-plots` | No | Do not draw figures for analyses on the study API (rg, rmsd, distances, catalytic_triad). By default they are written to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
 | `--no-eq-check` | No | Skip the pymbar equilibration diagnostic for analyses on the study API (rg, rmsd). Values and statistics are the same either way. |
 
 ### Agent format

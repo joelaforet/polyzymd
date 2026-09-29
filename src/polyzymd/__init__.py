@@ -43,6 +43,8 @@ __all__ = [
     "select",
     "universe",
     "reference",
+    "plot_values",
+    "plot_distributions",
     # Building (requires OpenFF - lazy loaded)
     "SystemBuilder",
     # Simulation (requires OpenMM - lazy loaded)
@@ -85,6 +87,11 @@ def __getattr__(name: str):
         from polyzymd.analyses import timeseries
 
         return getattr(timeseries, name)
+
+    if name in ("plot_values", "plot_distributions"):
+        from polyzymd.analyses import figures
+
+        return getattr(figures, name)
 
     if name == "reference":
         from polyzymd.analyses.reference import reference

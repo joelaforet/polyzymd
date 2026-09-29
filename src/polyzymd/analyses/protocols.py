@@ -237,6 +237,7 @@ def analyze(
     recompute: bool = False,
     run: str | None = None,
     eq_check: bool = True,
+    plots: bool = True,
 ) -> ProtocolReport:
     """Run one analysis over one or more simulation conditions.
 
@@ -270,6 +271,10 @@ def analyze(
         For the analyses in :data:`FUNCTION_ANALYSES`, report the pymbar
         detected start of the equilibrated region of each replicate. ``False`` skips it. It changes
         no value either way.
+    plots : bool, optional
+        For the analyses in :data:`FUNCTION_ANALYSES`, draw the figures into
+        ``<output_dir>/figures/<name>/`` and record that folder in
+        ``provenance.output_paths["figures"]``. ``False`` draws none.
 
     Returns
     -------
@@ -299,6 +304,7 @@ def analyze(
             recompute=recompute,
             run=run,
             eq_check=eq_check,
+            plots=plots,
         )
     analysis_cls = get_analysis_class(name)
     config = _build_config(
@@ -438,6 +444,7 @@ def _analyze_function(
     recompute: bool,
     run: str | None,
     eq_check: bool = True,
+    plots: bool = True,
 ) -> ProtocolReport:
     """Measure ``name`` on every production frame and report its per-replicate mean.
 
@@ -448,7 +455,10 @@ def _analyze_function(
     to :func:`~polyzymd.analyses.reference.reference`. Settings left out take
     the defaults in :data:`FUNCTION_ANALYSES`. With one config the report
     summarises it; with several it compares each one with the first by
-    Welch's t test. ``distances`` and ``catalytic_triad`` go to
+    Welch's t test. With ``plots``, ``rg`` and ``rmsd`` draw
+    ``<name>_timeseries`` and ``<name>_comparison``, and ``rg`` also
+    ``rg_distribution``, into ``<output_dir>/figures/<name>/``, as the legacy
+    plugins did. ``distances`` and ``catalytic_triad`` go to
     :func:`_analyze_pairs`. Raises ``ProtocolError`` for a setting the
     analysis does not take, or a ``run`` for ``rg`` or ``rmsd``.
     """
@@ -475,6 +485,7 @@ def _analyze_function(
             recompute=recompute,
             output_dir=output_dir,
             eq_check=eq_check,
+            plots=plots,
         )
     settings = {**FUNCTION_ANALYSES[name], **(settings or {})}
     arguments = [select(str(settings["selection"]))]
@@ -489,15 +500,30 @@ def _analyze_function(
             )
         )
     function = functions.rmsd if name == "rmsd" else functions.radius_of_gyration
-    values = study.timeseries(
+    series = study.timeseries(
         function,
         *arguments,
         unit="A",
         name=name,
         recompute=recompute,
         output_dir=output_dir,
-    ).reduce("mean", detect_equilibration=eq_check)
-    return values.compare() if len(study) > 1 else values.summary()
+        bounds=(0.0, None),
+    )
+    values = series.reduce("mean", detect_equilibration=eq_check)
+    report = values.compare() if len(study) > 1 else values.summary()
+    if plots:
+        folder = _figures_dir(output_dir, name)
+        series.plot(folder, f"{name}_timeseries")
+        values.plot(folder, f"{name}_comparison")
+        if name == "rg":
+            series.plot_distribution(output_dir=folder, name="rg_distribution")
+        report.provenance.output_paths["figures"] = str(folder)
+    return report
+
+
+def _figures_dir(output_dir: Path | None, name: str) -> Path:
+    """Return ``<output_dir>/figures/<name>``, with the current directory by default."""
+    return Path(output_dir or Path.cwd()).expanduser().resolve() / "figures" / name
 
 
 def _study(
@@ -527,6 +553,7 @@ def _analyze_pairs(
     recompute: bool,
     output_dir: Path | None,
     eq_check: bool,
+    plots: bool = True,
 ) -> ProtocolReport:
     """Measure every pair of ``distances`` or ``catalytic_triad`` and report one result.
 
@@ -542,7 +569,14 @@ def _analyze_pairs(
     below its threshold, computed from the stored distances with
     :func:`~polyzymd.analyses.functions.all_below`, and reports it first.
     ``run`` picks the result to report, by default the first, and
-    ``all_runs`` lists them all.
+    ``all_runs`` lists them all. With ``plots``, every pair's distance
+    distribution with its threshold is drawn as ``<prefix>_kde_<label>`` and
+    every fraction as ``<prefix>_fraction_<result>``, with the prefix
+    ``distance`` or ``triad`` as in the legacy plugins, into
+    ``<output_dir>/figures/<name>/``. ``<prefix>_kde_panel`` stacks every
+    pair's distribution in one figure and ``<prefix>_threshold_bars`` groups
+    every fraction, with the triad's ``All pairs`` last, as the legacy
+    catalytic triad KDE panel and threshold bar charts did.
     """
     import yaml
 
@@ -591,10 +625,15 @@ def _analyze_pairs(
             name=f"{name}_{pair['label']}",
             recompute=recompute,
             output_dir=output_dir,
+            bounds=(0.0, None),
         )
         below = pair.get("below_label") or f"below {threshold:g} A"
         fraction = distance.transform(
-            functions.all_below, unit=None, name=f"{distance.name}_{below}", thresholds=[threshold]
+            functions.all_below,
+            unit=None,
+            bounds=(0.0, 1.0),
+            name=f"{distance.name}_{below}",
+            thresholds=[threshold],
         )
         results[str(pair["label"])] = (distance, "mean", "mean_distance")
         results[f"{pair['label']} {below}"] = (fraction, "fraction", "fraction_below_threshold")
@@ -605,6 +644,7 @@ def _analyze_pairs(
             functions.all_below,
             *distances[1:],
             unit=None,
+            bounds=(0.0, 1.0),
             name=f"{name}_{SIMULTANEOUS_RUN}",
             thresholds=thresholds,
         )
@@ -619,6 +659,34 @@ def _analyze_pairs(
     values = series.reduce(how, detect_equilibration=eq_check)
     values.metric = metric
     report = values.compare() if len(study) > 1 else values.summary()
+    if plots:
+        folder, prefix = _figures_dir(output_dir, name), (
+            "triad" if name == "catalytic_triad" else "distance"
+        )
+        from polyzymd.analyses.figures import plot_distributions, plot_values
+
+        titles = [f"{pair['label']} distance" for pair in pairs]
+        for pair, distance, threshold, title in zip(pairs, distances, thresholds, titles):
+            distance.plot_distribution(threshold, folder, f"{prefix}_kde_{pair['label']}", title)
+        plot_distributions(distances, thresholds, titles, folder, f"{prefix}_kde_panel", "distance")
+        fractions = {}
+        for key, (series, how, metric) in results.items():
+            if how == "fraction":
+                fractions[key] = series.reduce(how, detect_equilibration=False)
+                fractions[key].metric = metric
+                fractions[key].plot(folder, f"{prefix}_fraction_{key}", title=key)
+        # The legacy threshold bars put each pair's fraction first and the triad's "All pairs" last.
+        grouped = sorted(fractions, key=lambda key: key == SIMULTANEOUS_RUN)
+        names = ["All pairs" if key == SIMULTANEOUS_RUN else key for key in grouped]
+        title = (
+            "Catalytic triad contact fractions"
+            if prefix == "triad"
+            else "Distance contact fractions"
+        )
+        plot_values(
+            [fractions[key] for key in grouped], names, folder, f"{prefix}_threshold_bars", title
+        )
+        report.provenance.output_paths["figures"] = str(folder)
     return report.model_copy(update={"analysis": name, "run": run, "all_runs": list(results)})
 
 

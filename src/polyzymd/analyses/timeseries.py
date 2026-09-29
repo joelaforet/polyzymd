@@ -236,6 +236,7 @@ def run_timeseries(
     name: str | None = None,
     recompute: bool = False,
     output_dir: str | Path | None = None,
+    bounds: tuple[float | None, float | None] = (None, None),
     **kwargs: Any,
 ) -> Timeseries:
     """Measure ``function`` on every production frame of every replicate.
@@ -249,7 +250,9 @@ def run_timeseries(
     the equilibration window, the frames, the times, the unit and the
     PolyzyMD, MDAnalysis, NumPy and Python versions. A stored series is read
     back instead of measured when every field of its record except the
-    versions equals the new one. A
+    versions and the bounds equals the new one. The bounds change only how
+    a distribution is drawn, so a reused series gets the bounds of this call
+    written into its record. A
     :func:`~polyzymd.analyses.reference.reference` argument is built once per
     replicate before its frames are measured, and the production frame it
     chose, if any, is stored under ``chosen``, which is not compared either.
@@ -273,6 +276,10 @@ def run_timeseries(
         Measure every replicate even when a matching stored series exists.
     output_dir : str or Path, optional
         Folder that holds ``polyzymd_results``. Defaults to the current directory.
+    bounds : tuple of (float or None, float or None), optional
+        Lowest and highest value the quantity can take, ``None`` for no
+        limit, such as ``(0.0, None)`` for a distance. Recorded with the
+        result and used to correct distribution figures at the limits.
     **kwargs
         Keyword arguments of ``function``, recorded like ``args``.
 
@@ -331,9 +338,16 @@ def run_timeseries(
                     frames=replicate.frames,
                     times=replicate.times,
                 )
+                stored = {**record, "bounds": list(bounds), "chosen": chosen}
                 (folder / "record.json").write_text(
-                    json.dumps({**record, "chosen": chosen, "versions": _versions()}, indent=1)
+                    json.dumps({**stored, "versions": _versions()}, indent=1)
                 )
+            else:
+                stored = json.loads((folder / "record.json").read_text())
+                if stored.get("bounds") != list(bounds):
+                    (folder / "record.json").write_text(
+                        json.dumps({**stored, "bounds": list(bounds)}, indent=1)
+                    )
             series[condition.label].append(
                 ReplicateSeries(
                     condition.label,
@@ -344,7 +358,7 @@ def run_timeseries(
                     folder,
                 )
             )
-    return Timeseries(name, unit, study, series, root)
+    return Timeseries(name, unit, study, series, root, tuple(bounds))
 
 
 def _replicate_record(base: dict[str, Any], replicate: Replicate) -> dict[str, Any]:
@@ -360,13 +374,14 @@ def _replicate_record(base: dict[str, Any], replicate: Replicate) -> dict[str, A
 
 
 def _stored_values(folder: Path, record: dict[str, Any]) -> np.ndarray | None:
-    """Return the stored values when the stored record matches, apart from versions and chosen."""
+    """Return the stored values when the stored record matches, apart from versions, chosen and bounds."""
     import numpy as np
 
     try:
         stored = json.loads((folder / "record.json").read_text())
         stored.pop("versions", None)
         stored.pop("chosen", None)
+        stored.pop("bounds", None)
         if stored != record:
             return None
         with np.load(folder / "series.npz") as data:
@@ -388,6 +403,8 @@ class Timeseries:
         Each condition's replicate series, in replicate order.
     path : Path
         Folder the series are stored under.
+    bounds : tuple of (float or None, float or None)
+        Lowest and highest value the quantity can take, ``None`` for no limit.
     """
 
     def __init__(
@@ -397,8 +414,10 @@ class Timeseries:
         study: Study,
         series: dict[str, list[ReplicateSeries]],
         path: Path,
+        bounds: tuple[float | None, float | None] = (None, None),
     ) -> None:
         self.name, self.unit, self.study, self.series, self.path = name, unit, study, series, path
+        self.bounds = bounds
 
     def transform(
         self,
@@ -406,6 +425,7 @@ class Timeseries:
         *others: Timeseries,
         unit: Any = ...,
         name: str | None = None,
+        bounds: Any = ...,
         **kwargs: Any,
     ) -> Timeseries:
         """Compute a new series from the stored values, without reading a trajectory.
@@ -432,6 +452,9 @@ class Timeseries:
             Unit of the new values. Defaults to the unit of this series.
         name : str, optional
             Result name. Defaults to the function's ``__name__`` and this name.
+        bounds : tuple of (float or None, float or None), optional
+            Lowest and highest value of the new quantity. Defaults to the
+            bounds of this series.
         **kwargs
             Keyword arguments of ``function``, recorded with the result.
 
@@ -450,12 +473,14 @@ class Timeseries:
 
         name = name or f"{getattr(function, '__name__', 'transform').strip('<>')}_{self.name}"
         unit = self.unit if unit is ... else unit
+        bounds = self.bounds if bounds is ... else tuple(bounds)
         root = self.path.parent / _safe(name)
         base = {
             "name": name,
             "transform": _function_record(function),
             "kwargs": {key: _argument_record(value) for key, value in kwargs.items()},
             "unit": unit,
+            "bounds": list(bounds),
         }
         series: dict[str, list[ReplicateSeries]] = {}
         for condition, items in self.series.items():
@@ -495,10 +520,57 @@ class Timeseries:
                         condition, item.replicate, values, item.frames, item.times, folder
                     )
                 )
-        return Timeseries(name, unit, self.study, series, root)
+        return Timeseries(name, unit, self.study, series, root, bounds)
+
+    def plot(
+        self,
+        output_dir: str | Path | None = None,
+        name: str | None = None,
+        plot_settings: Any = None,
+    ) -> Path:
+        """Draw every replicate's series against time, with each condition's mean.
+
+        See :func:`polyzymd.analyses.figures.plot_timeseries`. The figure goes
+        to ``<output_dir>/<name>.<format>``; ``output_dir`` defaults to the
+        ``figures`` folder next to ``polyzymd_results`` and ``name`` to
+        ``<name>_timeseries``. ``plot_settings`` is a
+        :class:`~polyzymd.config.comparison.PlotSettings`, by default its
+        defaults. Returns the path of the figure file.
+        """
+        from polyzymd.analyses.figures import plot_timeseries
+
+        folder = output_dir or self.path.parent.parent / "figures"
+        return plot_timeseries(self, folder, name or f"{self.name}_timeseries", plot_settings)
+
+    def plot_distribution(
+        self,
+        threshold: float | None = None,
+        output_dir: str | Path | None = None,
+        name: str | None = None,
+        title: str | None = None,
+        plot_settings: Any = None,
+    ) -> Path:
+        """Draw the pooled and per-replicate distribution of the values of each condition.
+
+        See :func:`polyzymd.analyses.figures.plot_distribution`. ``threshold``,
+        in the unit of the series, is drawn as a vertical line. ``name``
+        defaults to ``<name>_distribution`` and ``title``, which also labels
+        the x axis, to the series name; the other arguments are those of
+        :meth:`plot`. Returns the path of the figure file.
+        """
+        from polyzymd.analyses.figures import plot_distribution
+
+        folder = output_dir or self.path.parent.parent / "figures"
+        name = name or f"{self.name}_distribution"
+        return plot_distribution(self, folder, name, threshold, title, plot_settings)
 
     def reduce(
-        self, how: str | Callable = "mean", *, unit: Any = ..., detect_equilibration: bool = True
+        self,
+        how: str | Callable = "mean",
+        *,
+        unit: Any = ...,
+        bounds: Any = ...,
+        detect_equilibration: bool = True,
     ) -> ReplicateValues:
         """Turn each replicate's series into one value.
 
@@ -512,6 +584,11 @@ class Timeseries:
         unit : str or None, optional
             Unit of the reduced value. Defaults to the series unit, or
             ``None`` for ``"fraction"``.
+        bounds : tuple of (float or None, float or None), optional
+            Lowest and highest value the reduced quantity can take, used to
+            warn when a 95 percent interval extends past them. Defaults to
+            the series bounds for ``"mean"``, ``(0, 1)`` for ``"fraction"``,
+            ``(0, None)`` for ``"std"`` and no bounds for a callable.
         detect_equilibration : bool, optional
             Find the start of the equilibrated region of each series with
             pymbar, as a diagnostic that changes no value. ``False`` skips it.
@@ -565,7 +642,12 @@ class Timeseries:
                 )
         if unit is ...:
             unit = None if how == "fraction" else self.unit
-        return ReplicateValues(self, f"{label}_{self.name}", unit, label == "fraction", rows)
+        if bounds is ...:
+            defaults = {"mean": self.bounds, "fraction": (0.0, 1.0), "std": (0.0, None)}
+            bounds = (None, None) if callable(how) else defaults[how]
+        values = ReplicateValues(self, f"{label}_{self.name}", unit, label == "fraction", rows)
+        values.bounds = tuple(bounds)
+        return values
 
 
 class ReplicateValues:
@@ -581,11 +663,33 @@ class ReplicateValues:
     ) -> None:
         self.source, self.metric, self.unit = source, metric, unit
         self.is_fraction, self.rows = is_fraction, rows
+        self.bounds: tuple[float | None, float | None] = (0.0, 1.0) if is_fraction else (None, None)
 
     @property
     def values(self) -> dict[str, list[float]]:
         """Each condition's replicate values, in replicate order."""
         return {label: [row[1] for row in rows] for label, rows in self.rows.items()}
+
+    def plot(
+        self,
+        output_dir: str | Path | None = None,
+        name: str | None = None,
+        title: str | None = None,
+        plot_settings: Any = None,
+    ) -> Path:
+        """Draw each condition's mean with its 95 percent interval and every replicate value.
+
+        See :func:`polyzymd.analyses.figures.plot_condition_values`. The figure goes to
+        ``<output_dir>/<name>.<format>``; ``output_dir`` defaults to the
+        ``figures`` folder next to ``polyzymd_results``, ``name`` to
+        ``<source name>_<metric>`` and ``title`` to the source name. Returns
+        the path of the figure file.
+        """
+        from polyzymd.analyses.figures import plot_condition_values
+
+        folder = output_dir or self.source.path.parent.parent / "figures"
+        name = name or f"{self.source.name}_{self.metric}"
+        return plot_condition_values(self, folder, name, title, plot_settings)
 
     def summary(self, conditions: Sequence[str] | None = None) -> ProtocolReport:
         """Give each condition's n, mean, standard error and 95 percent interval.
@@ -745,10 +849,18 @@ class ReplicateValues:
                 )
             elif len(rows) < 2:
                 notes.append(f"condition {label} has one replicate, so it has no interval")
-            if self.is_fraction and item.ci95 and (item.ci95[0] < 0 or item.ci95[1] > 1):
+            low, high = self.bounds
+            if item.ci95 and (
+                (low is not None and item.ci95[0] < low)
+                or (high is not None and item.ci95[1] > high)
+            ):
+                # Grossfield et al. (2018): a bounded quantity is not Gaussian,
+                # so a t interval that crosses the bound is not reliable.
                 notes.append(
-                    f"the 95 percent interval of condition {label} extends past the fraction "
-                    "bounds 0 and 1, where a t interval is not reliable"
+                    f"the 95 percent interval of condition {label} extends past the bounds "
+                    f"{'-inf' if low is None else format(low, 'g')} to "
+                    f"{'inf' if high is None else format(high, 'g')} of {self.metric}, where a t "
+                    "interval is not reliable"
                 )
             conditions.append(item)
         for row in pairwise:
