@@ -38,11 +38,9 @@ Package Structure
     │   ├── _framework/   # Private/internal lifecycle and artifact internals
     │   ├── mda/          # Public MDAnalysis job and artifact layer
     │   ├── shared/       # Reusable utilities (TrajectoryLoader, alignment, etc.)
-    │   ├── rmsd/         # RMSD plugin package
-    │   ├── rg/           # Rg plugin package
-    │   ├── rmsf/         # RMSF plugin package
+    │   ├── study.py      # Study API: replicates as MDAnalysis universes
+    │   ├── functions.py  # Shipped analysis functions (rg, rmsd, rmsf, distances)
     │   ├── contacts/     # Contacts plugin package
-    │   ├── distances/    # Distance analysis plugin package
     │   ├── secondary_structure/  # Secondary structure plugin package
     │   └── ...           # Single-file or package plugins for each analysis type
     └── cli/              # Command-line interface

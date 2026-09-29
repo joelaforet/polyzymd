@@ -76,6 +76,26 @@ FUNCTION_ANALYSES = {
         "reference_frame": 1,
         "reference_file": None,
     },
+    "rmsf": {
+        "selection": "protein and name CA",
+        "alignment_selection": "protein and name CA",
+        "reference_mode": "centroid",
+        "reference_frame": 1,
+        "reference_file": None,
+        "highlight_residues": [],
+        "core": None,
+        "regions": {},
+    },
+    "rms_deviation": {
+        "selection": "protein and name CA",
+        "alignment_selection": "protein and name CA",
+        "reference_mode": None,
+        "reference_frame": 1,
+        "reference_file": None,
+        "highlight_residues": [],
+        "core": None,
+        "regions": {},
+    },
     "distances": {"pairs": None, "threshold": 3.5, "use_pbc": True},
     "catalytic_triad": {"pairs": None, "threshold": 3.5, "use_pbc": True},
 }
@@ -114,12 +134,14 @@ class ConditionReport(BaseModel):
     the equilibrated region that pymbar ``detect_equilibration`` finds in the
     production series, as a production frame index from 0 and as simulation
     time. They are diagnostics and change no value. All are empty for a result
-    read from a plugin artifact.
+    read from a plugin artifact. ``entry`` is the label of this row in a
+    labelled result, such as a residue ID, and ``None`` otherwise.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
 
     label: str
+    entry: str | None = None
     n_replicates: int
     mean: float
     sem: float | None = None
@@ -142,13 +164,15 @@ class PairwiseReport(BaseModel):
     ``False`` means a condition has fewer than two replicates. ``family_size``
     is the number of tests in the Benjamini-Hochberg family this row was
     corrected in, one family per outcome, and ``None`` when that is not known
-    or the row was not tested.
+    or the row was not tested. ``entry`` is the label compared in a labelled
+    result, such as a residue ID, and ``None`` otherwise.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
 
     a: str
     b: str
+    entry: str | None = None
     delta: float
     delta_ci95: tuple[float, float] | None = None
     p: float | None = None
@@ -164,12 +188,18 @@ class PairwiseReport(BaseModel):
 
 
 class ProtocolProvenance(BaseModel):
-    """Versions, config hashes and output paths of one protocol run."""
+    """Versions, config hashes, output paths and settings of one protocol run.
+
+    ``settings`` holds the analysis settings a function analysis ran with and
+    what they resolved to, such as the residues of an rmsf core, and is empty
+    for a plugin.
+    """
 
     polyzymd_version: str
     mdanalysis_version: str | None = None
     config_hashes: dict[str, str] = Field(default_factory=dict)
     settings_fingerprint: str | None = None
+    settings: dict[str, Any] = Field(default_factory=dict)
     output_paths: dict[str, str] = Field(default_factory=dict)
 
 
@@ -201,21 +231,38 @@ class ProtocolReport(BaseModel):
     def to_agent_text(self) -> str:
         """Render the report as fixed-vocabulary text, one line per item.
 
-        Every condition, comparison, warning and verdict gets its own line. The
-        output has no table borders, no colour and no blank lines.
+        Every condition, comparison, warning and verdict gets its own line. A
+        comparison of labelled values, such as residues, gets instead, per
+        compared condition, one line with the number of labels tested, the
+        family size and the number significantly lower and higher than the
+        control, and one line each listing those labels with their difference
+        and adjusted p value; every per-label row stays in the JSON form of
+        the report. The output has no table borders, no colour and no blank
+        lines.
         """
         run = f"  run {self.run}" if self.run else ""
+        counts = {item.label: item.n_replicates for item in self.conditions}
         header = (
             f"# polyzymd analyze {self.analysis}  metric {self.metric}"
             f"  unit {self.unit or 'none'}{run}  eq {self.equilibration}"
-            f"  conditions {len(self.conditions)}"
-            f"  replicates {','.join(str(c.n_replicates) for c in self.conditions) or 'none'}"
+            f"  conditions {len(counts)}"
+            f"  replicates {','.join(str(n) for n in counts.values()) or 'none'}"
             f"  protocol {self.analysis}/{self.protocol_version}"
         )
+        if any(pair.entry is not None for pair in self.pairwise):
+            body = [
+                *_labelled_pairwise_lines(self.pairwise),
+                f"note: the {len(self.conditions)} per-label condition rows and "
+                f"{len(self.pairwise)} per-label comparison rows are in the JSON report",
+            ]
+        else:
+            body = [
+                *(_condition_line(item) for item in self.conditions),
+                *(_pairwise_line(item) for item in self.pairwise),
+            ]
         lines = [
             header,
-            *(_condition_line(item) for item in self.conditions),
-            *(_pairwise_line(item) for item in self.pairwise),
+            *body,
             *(f"warning: {text}" for text in self.warnings),
             *(f"verdict: {text}" for text in self.verdict),
         ]
@@ -458,16 +505,17 @@ def _analyze_function(
     Welch's t test. With ``plots``, ``rg`` and ``rmsd`` draw
     ``<name>_timeseries`` and ``<name>_comparison``, and ``rg`` also
     ``rg_distribution``, into ``<output_dir>/figures/<name>/``, as the legacy
-    plugins did. ``distances`` and ``catalytic_triad`` go to
-    :func:`_analyze_pairs`. Raises ``ProtocolError`` for a setting the
-    analysis does not take, or a ``run`` for ``rg`` or ``rmsd``.
+    plugins did. ``rmsf`` and ``rms_deviation`` go to :func:`_analyze_rmsf`, and ``distances``
+    and ``catalytic_triad`` to :func:`_analyze_pairs`. Raises
+    ``ProtocolError`` for a setting the analysis does not take, or a ``run``
+    for ``rg`` or ``rmsd``.
     """
     from polyzymd.analyses import functions
     from polyzymd.analyses.reference import reference
     from polyzymd.analyses.timeseries import select
 
     unknown = set(settings or {}) - set(FUNCTION_ANALYSES[name])
-    pairs = name in ("distances", "catalytic_triad")
+    pairs = name in ("distances", "catalytic_triad", "rmsf", "rms_deviation")
     if unknown or (run is not None and not pairs):
         raise ProtocolError(
             f"{name} takes {'' if pairs else 'no run and '}no setting other than "
@@ -476,6 +524,8 @@ def _analyze_function(
             + ("--set pairs=pairs.yaml." if pairs else "--set selection='protein and name CA'."),
         )
     study = _study(configs, labels, equilibration, replicates)
+    if name in ("rmsf", "rms_deviation"):
+        return _analyze_rmsf(name, study, settings, run, recompute, output_dir, plots)
     if pairs:
         return _analyze_pairs(
             name,
@@ -519,6 +569,150 @@ def _analyze_function(
             series.plot_distribution(output_dir=folder, name="rg_distribution")
         report.provenance.output_paths["figures"] = str(folder)
     return report
+
+
+def _analyze_rmsf(
+    name: str,
+    study: Any,
+    settings: dict | None,
+    run: str | None,
+    recompute: bool,
+    output_dir: Path | None,
+    plots: bool,
+) -> ProtocolReport:
+    """Measure the per-residue RMS deviation, RMSF and offset of every replicate in one pass.
+
+    :func:`~polyzymd.analyses.functions.rms_decomposition` superposes
+    ``alignment_selection`` on the reference of ``reference_mode``,
+    ``reference_frame`` and ``reference_file``, built by
+    :func:`~polyzymd.analyses.reference.reference` for both selections
+    together, and gives for each residue of ``selection`` its RMS deviation
+    from the reference, its RMSF about the mean position and the offset of
+    the mean position from the reference, labelled by residue ID, with
+    their mean squares. For ``rms_deviation`` a missing ``reference_mode``
+    is ``"external"`` when a ``reference_file`` is given and ``"centroid"``
+    otherwise; ``rmsf`` defaults to ``"centroid"``.
+
+    Each replicate's headline value of a quantity is the root of its mean
+    square over the core residues, ``core_rms_deviation``, ``core_rmsf`` and
+    ``core_offset``, so ``core_rms_deviation`` squared equals ``core_rmsf``
+    squared plus ``core_offset`` squared (Kuzmanic and Zagrovic 2010,
+    doi:10.1016/j.bpj.2009.11.011). The core is the residues of
+    ``selection`` that the MDAnalysis selection ``core`` also selects, by
+    default all of them, and must be the same in every replicate. Each entry
+    ``region: selection`` of ``regions`` gives ``<region>_rms_deviation``,
+    ``<region>_rmsf`` and ``<region>_offset`` the same way. The frames are
+    superposed by ``alignment_selection`` whatever the core, so fit on the
+    same core atoms to measure motion within that core. ``mean_rmsf`` and
+    the other plain means over every residue are kept for reference, and
+    ``rms_deviation``, ``rmsf`` and ``offset`` are the profiles, compared
+    residue by residue. ``run`` picks the reported result and defaults to
+    ``core_<name>``. The settings, the resolved reference mode and the
+    residues of the core and of each region are stored in
+    ``provenance.settings``. With ``plots``, ``<part>_profile`` draws each
+    profile with ``highlight_residues`` marked, ``rms_decomposition`` the
+    three profiles of each condition together, ``rmsf_comparison`` the three
+    core values, and with several conditions ``<part>_difference`` each
+    condition's per-residue difference from the control with its interval
+    and significant residues, into ``<output_dir>/figures/<name>/``.
+    """
+    import numpy as np
+
+    from polyzymd.analyses import functions
+    from polyzymd.analyses.figures import plot_decomposition, plot_differences, plot_values
+    from polyzymd.analyses.reference import reference
+    from polyzymd.analyses.timeseries import select
+
+    settings = {**FUNCTION_ANALYSES[name], **(settings or {})}
+    atoms, fit = str(settings["selection"]), str(settings["alignment_selection"])
+    mode = settings["reference_mode"] or ("external" if settings["reference_file"] else "centroid")
+    regions = settings["regions"] or {}
+    if not isinstance(regions, dict) or {"core", "mean"} & set(regions):
+        raise ProtocolError(
+            f"{name}: regions must map names other than core and mean to selections, "
+            f"got {regions!r}.",
+            hint="Pass --set regions='{lid: resid 70-90}'.",
+        )
+    sets = {"core": settings["core"] or "all", **{str(k): str(v) for k, v in regions.items()}}
+    runs = [f"{kind}_{part}" for kind in ("core", *regions, "mean") for part in functions.RMS_PARTS]
+    runs += list(functions.RMS_PARTS)
+    run = run or f"core_{name}"
+    if run not in runs:
+        raise ProtocolError(
+            f"{name}: no result named {run!r}.", hint=f"Use --run with one of {runs}."
+        )
+    residues = {key: _residue_ids(study, f"({atoms}) and ({value})") for key, value in sets.items()}
+    rows = study.per_replicate(
+        functions.rms_decomposition,
+        select(atoms),
+        select(fit),
+        reference(
+            str(mode),
+            f"({atoms}) or ({fit})",
+            frame=settings["reference_frame"],
+            file=settings["reference_file"],
+            alignment=fit,
+        ),
+        unit="A",
+        labels=lambda u: u.select_atoms(atoms).residues.resids,
+        name="rms_decomposition",
+        recompute=recompute,
+        output_dir=output_dir,
+        bounds=(0.0, None),
+        parts=functions.RMS_PARTS + functions.MS_PARTS,
+    )
+    profiles = {part: rows[part] for part in functions.RMS_PARTS}
+    results = {}
+    for key, labels in residues.items():
+        for part, square in zip(functions.RMS_PARTS, functions.MS_PARTS, strict=True):
+            results[f"{key}_{part}"] = rows[square].over_labels(
+                lambda values: float(np.sqrt(np.mean(values))), f"{key}_{part}", labels
+            )
+            results[f"{key}_{part}"].unit = "A"
+            results[f"{key}_{part}"].bounds = (0.0, None)
+    results.update(
+        {f"mean_{part}": values.over_labels("mean") for part, values in profiles.items()}
+    )
+    results.update(profiles)
+    values = results[run]
+    report = values.compare() if len(study) > 1 else values.summary()
+    report.provenance.settings = {
+        **settings,
+        "reference_mode": mode,
+        "residues": {key: [int(r) for r in value] for key, value in residues.items()},
+    }
+    if plots:
+        folder = _figures_dir(output_dir, name)
+        highlight = settings["highlight_residues"] or []
+        for part, profile in profiles.items():
+            title = f"Per-residue {part.replace('_', ' ')}"
+            profile.plot(folder, f"{part}_profile", title, None, highlight, "Residue")
+            if len(study) > 1:
+                compared = report if run == part else profile.compare()
+                figure = f"{part}_difference"
+                plot_differences(profile, compared, folder, figure, None, None, "Residue")
+        plot_decomposition(profiles, folder, "rms_decomposition", None, None, "Residue")
+        core = [results[f"core_{part}"] for part in functions.RMS_PARTS]
+        labels = [part.replace("_", " ") for part in functions.RMS_PARTS]
+        plot_values(core, labels, folder, "rmsf_comparison", "Root mean square over the core")
+        report.provenance.output_paths["figures"] = str(folder)
+    return report.model_copy(update={"analysis": name, "run": run, "all_runs": runs})
+
+
+def _residue_ids(study: Any, selection: str) -> list[int]:
+    """Return the residue IDs ``selection`` picks, the same in every replicate of ``study``."""
+    found = {
+        tuple(int(r) for r in replicate.universe().select_atoms(selection).residues.resids)
+        for condition in study
+        for replicate in condition.replicates
+    }
+    if len(found) != 1 or not next(iter(found)):
+        raise ProtocolError(
+            f"The selection {selection!r} picks {'no' if found == {()} else 'different'} "
+            "residues in the replicates.",
+            hint="Choose core and region selections that pick the same residues in every replicate.",
+        )
+    return list(found.pop())
 
 
 def _figures_dir(output_dir: Path | None, name: str) -> Path:
@@ -1295,8 +1489,9 @@ def _interval(limits: Sequence[float] | None) -> str:
 def _condition_line(condition: ConditionReport) -> str:
     """Render one condition on a single line."""
     shown = ", ".join(_num(value) for value in condition.replicate_values)
+    entry = "" if condition.entry is None else f"{condition.entry}  "
     line = (
-        f"{condition.label}  n {condition.n_replicates}  mean {_num(condition.mean)}"
+        f"{entry}{condition.label}  n {condition.n_replicates}  mean {_num(condition.mean)}"
         f"  sem {_num(condition.sem)}  ci95 {_interval(condition.ci95)}"
         f"  values {shown or 'none'}"
     )
@@ -1320,8 +1515,35 @@ def _pairwise_line(pair: PairwiseReport) -> str:
     else:
         flag = "significant" if pair.significant else "not_significant"
     family = "" if pair.family_size is None else f"  family {pair.family_size}"
+    entry = "" if pair.entry is None else f"{pair.entry}  "
     return (
-        f"{pair.a} vs {pair.b}  delta {_signed(pair.delta)}  ci95 {_interval(pair.delta_ci95)}"
+        f"{entry}{pair.a} vs {pair.b}  delta {_signed(pair.delta)}  ci95 {_interval(pair.delta_ci95)}"
         f"  p {_num(pair.p)}  p_adj {_num(pair.p_adjusted)}  test {pair.test}"
         f"  correction {pair.correction}{family}  d {_num(pair.cohens_d)}  {flag}"
     )
+
+
+def _labelled_pairwise_lines(pairwise: Sequence[PairwiseReport]) -> list[str]:
+    """Summarise per-label comparisons: counts per condition, then the significant labels."""
+    lines = []
+    for b in dict.fromkeys(pair.b for pair in pairwise):
+        rows = [pair for pair in pairwise if pair.b == b]
+        tested = [pair for pair in rows if pair.p_adjusted is not None]
+        family = tested[0].family_size if tested else None
+        found = {
+            "lower": [pair for pair in tested if pair.significant and pair.delta < 0],
+            "higher": [pair for pair in tested if pair.significant and pair.delta > 0],
+        }
+        lines.append(
+            f"{rows[0].a} vs {b}  labels {len(rows)}  tested {len(tested)}  family "
+            f"{family if family is not None else 'na'}  test {rows[0].test}  correction "
+            f"{rows[0].correction}  lower {len(found['lower'])}  higher {len(found['higher'])}"
+        )
+        for side, items in found.items():
+            if items:
+                listed = ", ".join(
+                    f"{pair.entry} delta {_signed(pair.delta)} p_adj {_num(pair.p_adjusted)}"
+                    for pair in items
+                )
+                lines.append(f"{rows[0].a} vs {b}  {side}: {listed}")
+    return lines

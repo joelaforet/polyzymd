@@ -306,3 +306,13 @@ class Study:
         from polyzymd.analyses.timeseries import run_timeseries
 
         return run_timeseries(self, function, *args, **kwargs)
+
+    def per_replicate(self, function: Any, *args: Any, **kwargs: Any) -> Any:
+        """Compute one value, or one labelled array, per replicate with ``function``.
+
+        See :func:`polyzymd.analyses.timeseries.run_per_replicate` for the
+        arguments and what is stored.
+        """
+        from polyzymd.analyses.timeseries import run_per_replicate
+
+        return run_per_replicate(self, function, *args, **kwargs)

@@ -59,8 +59,6 @@ You can enable multiple plugins in the same `comparison.yaml` file:
 
 ```yaml
 plugins:
-  rmsf:
-    selection: "protein and name CA"
   contacts: {}
   secondary_structure: {}
 ```

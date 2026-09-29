@@ -228,6 +228,31 @@ values = study.per_replicate(my_quantity, pz.universe(), unit="kcal/mol")
 PolyzyMD cannot check how such a value was computed. It records the function
 and its arguments like any other result.
 
+A function can return one value per label instead, such as one value per
+residue. Pass `labels=`, a list or a function of the replicate's `Universe`
+that returns them, and the replicates are lined up by label, never by
+position. A label that one replicate lacks is an error unless you pass
+`missing=` with the value to give it. A function that measures several
+quantities in one pass can return one row per quantity; name the rows with
+`parts=`, and each becomes its own result:
+
+```python
+from polyzymd.analyses.functions import RMS_PARTS, rms_decomposition
+
+ca = "protein and name CA"
+rows = study.per_replicate(
+    rms_decomposition, pz.select(ca), pz.select(ca), pz.reference("average", ca),
+    unit="A", labels=lambda u: u.select_atoms(ca).residues.resids, parts=RMS_PARTS,
+)
+rmsf = rows["rmsf"]                                     # one value per residue
+mean_rmsf = rmsf.over_labels("mean")                    # one value per replicate
+loop = rmsf.over_labels("mean", "loop_rmsf", labels=range(40, 51))
+```
+
+`over_labels(how, metric, labels)` turns each replicate's labelled array into
+one number, with `"mean"` or a function that receives the replicate's array
+for the chosen labels, over every label or only the ones in `labels`.
+
 ## Compare conditions
 
 ```python
@@ -281,7 +306,14 @@ quantifying uncertainty in molecular simulations:
   set of tests behind one conclusion (Bender and Lange 2001; Rubin 2021), and a
   false discovery rate controlled in separate families stays controlled overall
   (Benjamini and Yekutieli 2001), while pooling unrelated outcomes can hide
-  real effects or inflate weak ones (Efron 2008). Every comparison line gives
+  real effects or inflate weak ones (Efron 2008). For a labelled result, such
+  as a per-residue profile, the family is every label of every compared
+  condition: scanning a profile for the labels that changed is a search over
+  that whole set, and a false discovery rate holds for the discoveries of a
+  search only when the family is the set searched (Benjamini 2010). The text
+  report then gives, for each condition, how many labels are significantly
+  lower and higher and lists them, and the JSON report keeps every row. Every
+  comparison line gives
   the raw p value, the adjusted p value and the family size, `family <m>`. If
   you make one claim from several outcomes together, such as "any of these
   pairs changed", those outcomes belong in one family; pass their p values to
@@ -321,7 +353,10 @@ series the estimate is corrected by reflection (Schuster 1985; Silverman 1986,
 section 2.10), so the curve is drawn only within the physical range and still
 integrates to 1. `ReplicateValues.plot` draws a
 bar at each condition's mean with its 95 percent Student t interval and every
-replicate value as a point. Each figure carries a footnote naming the interval,
+replicate value as a point. For a labelled result it draws a profile instead:
+each replicate's value at every label as a thin line and each condition's mean
+with its interval as a thick line and band, numeric labels such as residue IDs
+placed at their value, and `highlight=` labels marked. Each figure carries a footnote naming the interval,
 the number of replicates and the production window.
 
 Several results that share a unit can go in one figure:
@@ -335,6 +370,15 @@ pz.plot_distributions([ser_his, his_asp], thresholds=[3.5, 3.5])
 the same intervals, replicate points and footnote. `pz.plot_distributions` draws
 one panel per series with a shared axis and each panel's own threshold. Results
 with different units are refused, because they cannot share an axis.
+
+For labelled results, `polyzymd.analyses.figures.plot_differences(values,
+report, output_dir, name)` draws one panel per condition with its difference
+from the control at every label, the 95 percent interval of the difference
+from the `compare()` report's test, and a point on each label that is
+significant after the correction, so the figure shows the numbers of the
+report. `plot_decomposition(parts, output_dir, name)` draws several labelled
+results of one unit together, one panel per condition, such as the deviation,
+RMSF and offset of every residue.
 
 The figures are drawn from the stored results, so no trajectory is read. They
 are written to a `figures/` folder next to `polyzymd_results/`, or to
@@ -414,6 +458,9 @@ Epidemiol.* **2001**, 54 (4), 343-349. doi:10.1016/S0895-4356(00)00314-0
 Benjamini, Y.; Yekutieli, D. The Control of the False Discovery Rate in
 Multiple Testing under Dependency. *Ann. Stat.* **2001**, 29 (4), 1165-1188.
 doi:10.1214/aos/1013699998
+
+Benjamini, Y. Discovering the False Discovery Rate. *J. R. Stat. Soc. B*
+**2010**, 72 (4), 405-416. doi:10.1111/j.1467-9868.2010.00746.x
 
 Efron, B. Simultaneous Inference: When Should Hypothesis Testing Problems Be
 Combined? *Ann. Appl. Stat.* **2008**, 2 (1), 197-223. doi:10.1214/07-AOAS141

@@ -122,9 +122,7 @@ After simulations finish, switch to the analysis environment:
 
 ```bash
 pixi install -e analysis
-pixi run -e analysis polyzymd compare validate -f comparison.yaml
-pixi run -e analysis polyzymd compare run rmsf -f comparison.yaml
-pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
+pixi run -e analysis polyzymd analyze rmsf -c config.yaml --eq 10ns
 ```
 
 ### Choose the CUDA Environment

@@ -37,7 +37,6 @@ T_FACTOR_N3 = 4.302652729749462
 T_FACTOR_N5 = 2.7764451051977934
 
 PLUGIN_NAMES = (
-    "rmsf",
     "sasa",
     "contacts",
     "hydrogen_bonds",
@@ -403,11 +402,6 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
     dict
         Metric summaries keyed by metric name.
     """
-    if analysis_name == "rmsf":
-        from polyzymd.analyses.rmsf._mda import MEAN_RMSF_METRIC
-
-        return {MEAN_RMSF_METRIC: metric_summary_payload(MEAN_RMSF_METRIC, [1.5], unit="A")}
-
     if analysis_name == "secondary_structure":
         from polyzymd.analyses.secondary_structure._mda import HELIX_FRACTION_METRIC
 

@@ -13,13 +13,13 @@ reads back exactly what `model_dump_json()` wrote.
 | `protocol_version` | `str` | The plugin's `Analysis.protocol_version`. With `analysis` it identifies the code that defined the metric. Every plugin starts at `"1"` and bumps it when the meaning, unit or estimator of a reported metric changes. |
 | `metric` | `str` | Primary metric key: the first key the plugin's `extract_metrics()` returns. |
 | `unit` | `str \| None` | Unit of `metric`, for example `A` or `%`. `None` marks a dimensionless metric, and also a plugin that declares no unit. |
-| `run` | `str \| None` | Selected result when the analysis reports several: sasa's four contexts, or for distances and catalytic_triad each pair's mean distance (`<label>`) and fraction below threshold, and the triad's `simultaneous`. `None` when the analysis reports one result. |
+| `run` | `str \| None` | Selected result when the analysis reports several: sasa's four contexts; for distances and catalytic_triad each pair's mean distance (`<label>`) and fraction below threshold, and the triad's `simultaneous`; for rmsf and rms_deviation the core, region and plain-mean values and the per-residue profiles. `None` when the analysis reports one result. |
 | `all_metrics` | `list[str]` | Every metric key the plugin reported, `metric` first. Only `metric` is summarised in `conditions` and `pairwise`. |
 | `all_runs` | `list[str]` | Every run or pair label the plugin reported, `run` first. Empty when the plugin reports one run. Select another with `--run LABEL`. |
 | `equilibration` | `str` | Equilibration window discarded from the start of every replicate, for example `10ns`. Applied uniformly to every replicate of every condition. |
 | `frames_per_replicate` | `dict[str, int \| None]` | Frames each replicate of a condition contributed, keyed by condition label, from the condition artifact's frame-selection provenance. `None` for a plugin that records no frame selection. |
-| `conditions` | `list[ConditionReport]` | One entry per condition, in the order the configs were given. |
-| `pairwise` | `list[PairwiseReport]` | One entry per comparison of the primary metric. Empty for a single condition. |
+| `conditions` | `list[ConditionReport]` | One entry per condition, in the order the configs were given; for a labelled result such as a per-residue profile, one entry per condition and label. |
+| `pairwise` | `list[PairwiseReport]` | One entry per comparison of the primary metric, or per comparison and label for a labelled result. Empty for a single condition. |
 | `warnings` | `list[str]` | Sampling warnings first, then warnings carried by the comparison and condition artifacts. Deduplicated. |
 | `provenance` | `ProtocolProvenance` | Versions, config hashes and output paths. |
 | `verdict` | `list[str]` | One sentence per pairwise comparison, or one sentence describing the single condition. |
@@ -27,12 +27,18 @@ reads back exactly what `model_dump_json()` wrote.
 `ProtocolReport.to_agent_text()` renders the report as plain text with no
 borders and no blank lines, one line for each condition, comparison, warning
 and verdict. No line is dropped, however many conditions the report holds.
+For a labelled result the comparisons are summarised instead: one line per
+compared condition gives the number of labels, the number tested, the family
+size and how many labels are significantly lower and higher, followed by lines
+listing each significant label. A final `note:` line says how many per-label
+rows the JSON form holds; every one of them is kept there.
 
 ## ConditionReport
 
 | Field | Type | Meaning |
 |---|---|---|
 | `label` | `str` | Condition label, from `--label` or the config's parent directory name. |
+| `entry` | `str \| None` | Label of this row in a labelled result, such as a residue ID. `None` for a result with one value per replicate. |
 | `n_replicates` | `int` | Number of replicates behind `mean`. This is the sample size for every test. |
 | `mean` | `float` | Mean of the primary metric across replicates. |
 | `sem` | `float \| None` | Standard error of that mean across replicates, `s / sqrt(n)` with `ddof = 1`. `None` for one replicate, where it does not exist. |
@@ -46,13 +52,14 @@ and verdict. No line is dropped, however many conditions the report holds.
 |---|---|---|
 | `a` | `str` | Control condition label. |
 | `b` | `str` | Compared condition label. |
+| `entry` | `str \| None` | Label compared in a labelled result, such as a residue ID. `None` for a result with one value per replicate. |
 | `delta` | `float` | `mean(b) - mean(a)`, in the metric's unit. |
 | `delta_ci95` | `tuple[float, float] \| None` | 95 percent Student t interval on `delta`, uncorrected for multiplicity. Pooled variance with `n_a + n_b - 2` degrees of freedom for `student_t`, separate variances with Welch-Satterthwaite degrees of freedom (passed to the quantile unrounded) for `welch_t`. `None` for `tukey_hsd`, whose simultaneous intervals are not computed by the report, when a condition has fewer than two replicate values, or when the plugin stored no replicate values. |
 | `p` | `float \| None` | Unadjusted p value of the two-sample test. |
 | `p_adjusted` | `float \| None` | p value after the correction named by `correction`. `None` when the plugin stored no corrected value, which makes the comparison a description rather than a decision; the verdict then reads `no test recorded`. |
 | `test` | `str` | `student_t`, `welch_t` or `tukey_hsd`. |
 | `correction` | `str` | `BH` (Benjamini-Hochberg), `tukey_hsd`, or the configured post-hoc name. |
-| `family_size` | `int \| None` | Number of tests in the Benjamini-Hochberg family this row was corrected in: the conditions compared with the control for this one outcome. `None` for a row that was not tested, or for a stored plugin result that does not record it. Printed as `family <m>` on the comparison line. |
+| `family_size` | `int \| None` | Number of tests in the Benjamini-Hochberg family this row was corrected in: the conditions compared with the control for this one outcome, or for a labelled result every tested label of every compared condition. `None` for a row that was not tested, or for a stored plugin result that does not record it. Printed as `family <m>` on the comparison line. |
 | `cohens_d` | `float \| None` | Standardised mean difference, oriented like `delta`: positive means `b` is larger. The comparison code computes d as control minus compared, positive when the control is larger. It is negated in the report, together with `hedges_g`, so both have the same sign as `delta`. |
 | `hedges_g` | `float \| None` | Small-sample-corrected standardised mean difference, oriented like `cohens_d`, when the plugin reports one. Otherwise `None`. |
 | `direction` | `str` | The plugin's own direction word, for example `increased`. |
@@ -67,6 +74,7 @@ and verdict. No line is dropped, however many conditions the report holds.
 | `mdanalysis_version` | `str \| None` | Installed MDAnalysis version, `None` when it cannot be determined. |
 | `config_hashes` | `dict[str, str]` | SHA-256 of each simulation config file, keyed by condition label. |
 | `settings_fingerprint` | `str \| None` | Fingerprint of the resolved plugin settings, the same one the aggregate cache is validated against. |
+| `settings` | `dict` | Settings a study-API analysis ran with. For rmsf and rms_deviation: every setting, the resolved `reference_mode`, and under `residues` the residue IDs of the core and of each region. Empty for other analyses. |
 | `output_paths` | `dict[str, str]` | `comparison_result` is the cached comparison JSON; `figures` is the directory holding the generated plots. Either may be absent. |
 
 ## Verdict vocabulary

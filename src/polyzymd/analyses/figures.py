@@ -2,7 +2,8 @@
 
 :func:`plot_timeseries`, :func:`plot_distribution` and
 :func:`plot_condition_values` are reached as ``Timeseries.plot``,
-``Timeseries.plot_distribution`` and ``ReplicateValues.plot``.
+``Timeseries.plot_distribution`` and ``ReplicateValues.plot``, and
+:func:`plot_profile` as ``ReplicateValues.plot`` of labelled values.
 :func:`plot_values` and :func:`plot_distributions`, reached as
 ``pz.plot_values`` and ``pz.plot_distributions``, draw several results in
 one figure. They read the values already held by those objects,
@@ -390,6 +391,224 @@ def plot_condition_values(
     )
     fig.tight_layout(rect=[0, 0.04, 1, 1])
     _footnote(fig, {len(entry) for entry in data}, values.source.study[labels[0]].equilibration)
+    return _save(fig, output_dir, name, settings)
+
+
+def plot_profile(
+    values: ReplicateValues,
+    output_dir: str | Path,
+    name: str,
+    title: str | None = None,
+    plot_settings: PlotSettings | None = None,
+    highlight: Sequence = (),
+    xlabel: str = "label",
+) -> Path:
+    """Draw a labelled result along its labels, one line per replicate and per condition.
+
+    Each replicate's value at every label is a thin line. A thick line gives
+    each condition's mean at every label, with a band of the 95 percent
+    Student t interval across replicates, the values that ``summary()``
+    reports, as the legacy rmsf profile drew each condition's mean and band.
+    Numeric labels, such as residue IDs, are placed at their value on the x
+    axis and other labels in order. Each ``highlight`` label is marked with a
+    red dashed vertical line.
+
+    Returns
+    -------
+    Path
+        The saved figure file.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from polyzymd.analyses.shared.plotting import apply_axis_style, apply_legend, band_half_widths
+
+    settings, labels, colors = _setup(values.source, plot_settings)
+    try:
+        x = np.asarray(values.labels, dtype=float)
+        ticks = None
+    except (TypeError, ValueError):
+        x, ticks = np.arange(len(values.labels), dtype=float), [str(k) for k in values.labels]
+    fig, ax = plt.subplots(figsize=(14, 5))
+    counts = set()
+    for label in labels:
+        matrix, color = np.vstack(values.values[label]), colors[label]
+        counts.add(len(matrix))
+        for row in matrix:
+            ax.plot(x, row, color=color, linewidth=0.6, alpha=0.35, zorder=1)
+        mean, band = matrix.mean(axis=0), band_half_widths(matrix)
+        ax.plot(x, mean, color=color, linewidth=1.8, zorder=3, label=f"{label} (n = {len(matrix)})")
+        if band is not None:
+            ax.fill_between(x, mean - band, mean + band, color=color, alpha=0.2, zorder=2)
+    where = {str(k): position for k, position in zip(values.labels, x, strict=True)}
+    for key in highlight:
+        if str(key) in where:
+            ax.axvline(where[str(key)], color="red", linestyle="--", linewidth=1, alpha=0.6)
+    if ticks is not None:
+        ax.set_xticks(x)
+        ax.set_xticklabels(ticks, rotation=90)
+    apply_axis_style(
+        ax,
+        settings,
+        title=title or values.metric,
+        xlabel=xlabel,
+        ylabel=_label(values.metric, values.unit),
+    )
+    apply_legend(ax, settings, loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0)
+    fig.tight_layout(rect=[0, 0.04, 0.84, 1])
+    _footnote(
+        fig,
+        counts,
+        values.source.study[labels[0]].equilibration,
+        drawn="Band",
+        points="Thin lines are per-replicate values; the thick line is their mean",
+    )
+    return _save(fig, output_dir, name, settings)
+
+
+def plot_decomposition(
+    parts: dict[str, ReplicateValues],
+    output_dir: str | Path,
+    name: str,
+    title: str | None = None,
+    plot_settings: PlotSettings | None = None,
+    xlabel: str = "label",
+) -> Path:
+    """Draw several labelled results of one study together, one panel per condition.
+
+    Each panel holds one line per result, its mean over the condition's
+    replicates at every label, with the band of its 95 percent Student t
+    interval, the values that ``summary()`` reports. For
+    :func:`~polyzymd.analyses.functions.rms_decomposition` the lines are the
+    RMS deviation from the reference, the RMSF and the offset of the mean
+    position from the reference. The results must share one unit.
+
+    Returns
+    -------
+    Path
+        The saved figure file.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from polyzymd.analyses.shared.plotting import (
+        apply_axis_style,
+        apply_legend,
+        band_half_widths,
+        get_palette_colors,
+    )
+
+    results = list(parts.values())
+    unit = _one_unit(results, "Results")
+    settings, labels, _ = _setup(results[0].source, plot_settings)
+    colors = get_palette_colors(len(parts), settings)
+    x = np.asarray(results[0].labels, dtype=float)
+    fig, axes = plt.subplots(
+        len(labels), 1, figsize=(14, 2.6 * len(labels) + 1), sharex=True, squeeze=False
+    )
+    counts = set()
+    for ax, label in zip(axes[:, 0], labels, strict=True):
+        for (part, values), color in zip(parts.items(), colors, strict=True):
+            matrix = np.vstack(values.values[label])
+            counts.add(len(matrix))
+            mean, band = matrix.mean(axis=0), band_half_widths(matrix)
+            ax.plot(x, mean, color=color, linewidth=1.5, label=part.replace("_", " "))
+            if band is not None:
+                ax.fill_between(x, mean - band, mean + band, color=color, alpha=0.2)
+        apply_axis_style(
+            ax, settings, title=f"{label} (n = {len(matrix)})", ylabel=_label("value", unit)
+        )
+        apply_legend(ax, settings, loc="center left", bbox_to_anchor=(1.01, 0.5), borderaxespad=0)
+    apply_axis_style(axes[-1, 0], settings, xlabel=xlabel)
+    if title:
+        fig.suptitle(title)
+    fig.tight_layout(rect=[0, 0.04, 0.86, 1])
+    _footnote(
+        fig,
+        counts,
+        results[0].source.study[labels[0]].equilibration,
+        drawn="Band",
+        points="Lines are condition means over replicates",
+    )
+    return _save(fig, output_dir, name, settings)
+
+
+def plot_differences(
+    values: ReplicateValues,
+    report: Any,
+    output_dir: str | Path,
+    name: str,
+    title: str | None = None,
+    plot_settings: PlotSettings | None = None,
+    xlabel: str = "label",
+) -> Path:
+    """Draw each condition's per-label difference from the control, one panel per condition.
+
+    ``report`` is the ``compare()`` report of the labelled ``values``. Each
+    panel draws, along the labels, ``delta`` of every comparison row, the
+    mean of the condition minus the mean of the control, with a band of its
+    95 percent interval from the report's test, Welch's by default, and a
+    point on each label that is significant after the Benjamini-Hochberg
+    correction. The panels share the y axis, and a label with no interval
+    leaves a gap in the band.
+
+    Returns
+    -------
+    Path
+        The saved figure file.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from polyzymd.analyses.shared.plotting import apply_axis_style
+
+    settings, _, colors = _setup(values.source, plot_settings)
+    try:
+        where = {str(k): float(k) for k in values.labels}
+    except (TypeError, ValueError):
+        where = {str(k): float(i) for i, k in enumerate(values.labels)}
+    conditions = list(dict.fromkeys(row.b for row in report.pairwise))
+    fig, axes = plt.subplots(
+        len(conditions),
+        1,
+        figsize=(14, 2.6 * len(conditions) + 1),
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+    )
+    for ax, label in zip(axes[:, 0], conditions, strict=True):
+        rows = [row for row in report.pairwise if row.b == label]
+        x = np.array([where[row.entry] for row in rows])
+        delta = np.array([row.delta for row in rows])
+        low, high = (
+            np.array([row.delta_ci95[i] if row.delta_ci95 else np.nan for row in rows])
+            for i in (0, 1)
+        )
+        color = colors[label]
+        ax.axhline(0.0, color="0.5", linewidth=0.8)
+        ax.plot(x, delta, color=color, linewidth=1.5, label="difference")
+        ax.fill_between(x, low, high, color=color, alpha=0.25, label="95% interval")
+        marked = [row.significant for row in rows]
+        ax.scatter(x[marked], delta[marked], color="red", s=14, zorder=3, label="significant")
+        n = f"n = {len(values.values[label])} vs {len(values.values[rows[0].a])}"
+        apply_axis_style(
+            ax,
+            settings,
+            title=f"{label} minus {rows[0].a} ({n})",
+            ylabel=_label(f"delta {values.metric}", values.unit),
+        )
+    axes[0, 0].legend(loc="upper right", fontsize=8)
+    apply_axis_style(axes[-1, 0], settings, xlabel=xlabel)
+    if title:
+        fig.suptitle(title)
+    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    family = next((row.family_size for row in report.pairwise if row.family_size), None)
+    _note(
+        fig,
+        f"Band: 95% interval of the difference ({report.pairwise[0].test}); points: significant "
+        f"after Benjamini-Hochberg over a family of {family}; production window t >= "
+        f"{report.equilibration}.",
+    )
     return _save(fig, output_dir, name, settings)
 
 

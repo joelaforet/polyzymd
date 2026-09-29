@@ -538,6 +538,50 @@ def write_openmm_replicate(
     return run_dir
 
 
+def write_openmm_frames(
+    config_path: Path,
+    replicate: int,
+    coordinates: Any,
+    atom_resindex: Sequence[int],
+    *,
+    resids: Sequence[int] | None = None,
+    dt_ps: float = 100.0,
+) -> Path:
+    """Write an OpenMM run directory whose DCD holds ``coordinates`` frame by frame.
+
+    Atom ``i`` is named ``C<i>`` and belongs to residue ``atom_resindex[i]``,
+    whose residue ID is ``resids[atom_resindex[i]]``, by default that index
+    plus one, and whose name is ``ALA``. The topology holds the first frame.
+
+    Returns
+    -------
+    Path
+        The run directory.
+    """
+    mda = importlib.import_module("MDAnalysis")
+
+    coordinates = np.asarray(coordinates, dtype=np.float32)
+    n_atoms, n_residues = coordinates.shape[1], max(atom_resindex) + 1
+    run_dir = SimulationConfig.from_yaml(config_path).get_working_directory(replicate)
+    segment = run_dir / "production_0"
+    segment.mkdir(parents=True, exist_ok=True)
+    universe = mda.Universe.empty(
+        n_atoms, n_residues=n_residues, atom_resindex=list(atom_resindex), trajectory=True
+    )
+    universe.add_TopologyAttr("names", [f"C{i}" for i in range(n_atoms)])
+    universe.add_TopologyAttr("resnames", ["ALA"] * n_residues)
+    universe.add_TopologyAttr("resids", list(resids or range(1, n_residues + 1)))
+    universe.add_TopologyAttr("masses", [1.0] * n_atoms)
+    universe.atoms.positions = coordinates[0]
+    universe.atoms.write(str(run_dir / "solvated_system.pdb"))
+    path = segment / "production_0_trajectory.dcd"
+    with mda.Writer(str(path), n_atoms=n_atoms, dt=dt_ps, istart=0, nsavc=1) as writer:
+        for frame in coordinates:
+            universe.atoms.positions = frame
+            writer.write(universe.atoms)
+    return run_dir
+
+
 def replicate_values(
     per_condition: dict[str, list[float]],
     how: Any = "mean",

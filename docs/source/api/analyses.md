@@ -104,7 +104,6 @@ shared-utility autodoc blocks.
 |-------------|----------------|-------------------------|------------------|
 | `contacts` | `polyzymd.analyses.contacts` | Contact-event artifacts and sidecars | Custom comparison |
 | `hydrogen_bonds` | `polyzymd.analyses.hydrogen_bonds` | Hydrogen-bond event artifacts | Custom comparison |
-| `rmsf` | `polyzymd.analyses.rmsf` | Per-residue profile artifacts | Default scalar comparison |
 | `sasa` | `polyzymd.analyses.sasa` | SASA artifacts and sidecars | Custom multi-run comparison |
 | `secondary_structure` | `polyzymd.analyses.secondary_structure` | Secondary-structure matrix artifacts | Default scalar comparison |
 

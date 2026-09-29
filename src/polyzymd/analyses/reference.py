@@ -174,19 +174,39 @@ def build_reference(
 
 
 def _fitted_mean(coordinates: np.ndarray, fit: np.ndarray, target: np.ndarray) -> np.ndarray:
-    """Average the frames after superposing each frame's ``fit`` atoms on ``target``.
+    """Average the frames after superposing each frame's ``fit`` atoms on ``target``."""
+    return superpose(coordinates, fit, target).mean(axis=0)
+
+
+def superpose(coordinates: np.ndarray, fit: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """Superpose every frame's ``fit`` atoms on ``target`` and return the moved frames.
 
     Each frame is centred on the centre of geometry of its ``fit`` atoms,
     rotated by ``MDAnalysis.analysis.align.rotation_matrix`` onto ``target``
-    and moved to the centre of ``target``, as ``AlignTraj`` does.
+    and moved to the centre of ``target``, as ``AlignTraj`` does. The input
+    array is not changed.
+
+    Parameters
+    ----------
+    coordinates : numpy.ndarray
+        Positions of shape ``(n_frames, n_atoms, 3)``.
+    fit : numpy.ndarray
+        Indices into the atom axis of the atoms that are superposed.
+    target : numpy.ndarray
+        Positions of the ``fit`` atoms to superpose on, of shape ``(len(fit), 3)``.
+
+    Returns
+    -------
+    numpy.ndarray
+        The moved positions, in float64, of the shape of ``coordinates``.
     """
     import numpy as np
     from MDAnalysis.analysis.align import rotation_matrix
 
     center = target.mean(axis=0)
-    total = np.zeros(coordinates.shape[1:])
-    for frame in coordinates:
+    moved = np.empty(coordinates.shape)
+    for index, frame in enumerate(coordinates):
         origin = frame[fit].mean(axis=0)
         rotation, _ = rotation_matrix(frame[fit] - origin, target - center)
-        total += (frame - origin) @ rotation.T + center
-    return total / len(coordinates)
+        moved[index] = (frame - origin) @ rotation.T + center
+    return moved

@@ -11,9 +11,12 @@ You will:
 - generate figures with `polyzymd compare plot-all`
 
 ```{important}
-For the `v1.3.0` release, the stable comparison stack is RMSD, Rg, RMSF,
-contacts, distances, catalytic triad, secondary structure, SASA, and hydrogen
-bonds.
+RMSD, Rg, RMSF, distances and the catalytic triad run through
+`polyzymd analyze` and the study API instead of this workflow; see
+{doc}`analysis_rmsd_quickstart`, {doc}`analysis_rg_quickstart`,
+{doc}`analysis_rmsf_quickstart`, {doc}`analysis_distances_quickstart` and
+{doc}`analysis_triad_quickstart`. This guide covers the analyses that still run
+as comparison plugins: contacts, secondary structure, SASA and hydrogen bonds.
 ```
 
 ```{note}
@@ -109,8 +112,8 @@ polymer_stability_study/
 
 ## Step 2: Define a Minimal `comparison.yaml`
 
-Start with one stable analysis. RMSF is a good first comparison because it has
-few extra inputs.
+Start with one analysis. Secondary structure is a good first comparison because
+it needs few extra inputs.
 
 ```yaml
 name: "polymer_stability_study"
@@ -134,32 +137,19 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  rmsf:
-    selection: "protein and name CA"
+  secondary_structure: {}
 ```
 
 To enable more analyses, add more sections under `plugins:`:
 
 ```yaml
 plugins:
-  rmsf:
-    selection: "protein and name CA"
+  secondary_structure: {}
 
   contacts:
     polymer_selection: "chainid C"
     protein_selection: "chainid A"
     cutoff: 4.5
-
-  rmsd:
-    runs:
-      - label: "Protein Backbone"
-        selection: "protein and name CA"
-        alignment_selection: "protein and name CA"
-        reference_mode: "centroid"
-      - label: "Active Site"
-        selection: "protein and (resid 77 or resid 133 or resid 156) and name CA"
-        alignment_selection: "protein and name CA"
-        reference_mode: "centroid"
 ```
 
 :::{admonition} Statistical settings for pairwise comparisons
@@ -186,15 +176,15 @@ enabled plugin sections.
 ## Step 4: Run One Comparison
 
 ```bash
-polyzymd compare run rmsf
+polyzymd compare run secondary_structure
 ```
 
 This command:
 
-- resolves `plugins.rmsf` from `comparison.yaml`
-- computes or reloads per-condition RMSF data
+- resolves `plugins.secondary_structure` from `comparison.yaml`
+- computes or reloads per-condition secondary-structure data
 - performs the cross-condition comparison
-- writes the canonical cache file to `comparison/rmsf/result.json`
+- writes the canonical cache file to `comparison/secondary_structure/result.json`
 - prints a formatted summary to the terminal
 
 :::{admonition} Running on an HPC cluster?
@@ -218,7 +208,7 @@ workflow, including dry-run previews and job arrays.
 You can save the formatted report separately with `-o`:
 
 ```bash
-polyzymd compare run rmsf --format markdown -o reports/rmsf.md
+polyzymd compare run secondary_structure --format markdown -o reports/secondary_structure.md
 ```
 
 ## Step 5: Run All Enabled Comparisons
@@ -256,7 +246,7 @@ polymer_stability_study/
 ├── comparison.yaml
 ├── analysis/
 │   ├── no_polymer/
-│   │   └── rmsf/
+│   │   └── secondary_structure/
 │   │       ├── run_1/
 │   │       │   └── result.json
 │   │       ├── run_2/
@@ -264,21 +254,15 @@ polymer_stability_study/
 │   │       └── aggregated/
 │   │           └── result.json
 │   └── 100_sbma/
-│       └── rmsf/
+│       └── secondary_structure/
 │           └── ...
 ├── comparison/
-│   ├── rmsf/
+│   ├── secondary_structure/
 │   │   └── result.json
-│   ├── contacts/
-│   │   └── result.json
-│   ├── distances/
-│   │   └── result.json
-│   └── catalytic_triad/
+│   └── contacts/
 │       └── result.json
 └── figures/
-    ├── rmsf/
-    │   ├── rmsf_comparison.png
-    │   └── rmsf_profile.png
+    ├── secondary_structure/
     └── ...
 ```
 
@@ -301,7 +285,7 @@ from polyzymd.analyses.orchestrator import run_comparison
 from polyzymd.config.comparison import ComparisonConfig
 
 config = ComparisonConfig.from_yaml(Path("comparison.yaml"))
-analysis = get_analysis("rmsf")()
+analysis = get_analysis("secondary_structure")()
 
 pipeline_result = run_comparison(
     analysis,
@@ -318,11 +302,8 @@ print(pipeline_result["comparison_path"])
 
 Common next additions to `comparison.yaml` are:
 
-- `rmsd` for RMSD timeseries and structural stability comparison
 - `contacts` for polymer coverage and contact fraction
-- `distances` for custom atom-pair distances
-- `catalytic_triad` for active-site geometry
-- `secondary_structure` for helix/strand persistence and content
+- `sasa` for solvent-accessible surface area
 - `hydrogen_bonds` for hydrogen-bond occupancy and lifetime summaries
 
 For end-to-end examples, see:

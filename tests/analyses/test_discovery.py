@@ -104,7 +104,7 @@ class TestDiscovery:
         """Discovery should find shipped plugins and register analysis classes."""
         from polyzymd.analyses.contacts import ContactsAnalysis
         from polyzymd.analyses.discovery import clear_cache, list_analyses
-        from polyzymd.analyses.rmsf import RMSFAnalysis
+        from polyzymd.analyses.sasa import SASAAnalysis
 
         clear_cache()
         analyses = list_analyses()
@@ -112,7 +112,6 @@ class TestDiscovery:
         expected_names = {
             "contacts",
             "hydrogen_bonds",
-            "rmsf",
             "sasa",
             "secondary_structure",
         }
@@ -121,7 +120,7 @@ class TestDiscovery:
         for name, cls in analyses.items():
             assert issubclass(cls, Analysis), f"{name} is not an Analysis subclass"
 
-        assert analyses["rmsf"] is RMSFAnalysis
+        assert analyses["sasa"] is SASAAnalysis
         assert analyses["contacts"] is ContactsAnalysis
 
     def test_discovery_excludes_removed_plugins(self):
@@ -157,7 +156,7 @@ class TestDiscovery:
             with pytest.raises(KeyError, match="Unknown analysis"):
                 get_analysis(name)
 
-        for name in ("contacts", "rmsf", "sasa"):
+        for name in ("contacts", "hydrogen_bonds", "sasa"):
             assert name in active_plugins
 
     def test_get_analysis_unknown_raises(self):
@@ -237,7 +236,7 @@ class TestDiscoveryRobustness:
         assert _should_skip_module("polyzymd.analyses.mda", package_prefix) is True
         assert _should_skip_module("polyzymd.analyses.mda.base", package_prefix) is True
 
-        assert _should_skip_module("polyzymd.analyses.rmsf", package_prefix) is False
+        assert _should_skip_module("polyzymd.analyses.sasa", package_prefix) is False
         assert _should_skip_module("polyzymd.analyses.contacts", package_prefix) is False
 
     def test_top_level_module_detection(self):
@@ -545,5 +544,5 @@ class TestDiscoveryImportCost:
         )
         result = json.loads(completed.stdout.strip().splitlines()[-1])
 
-        assert len(result["names"]) == 5, result["names"]
+        assert len(result["names"]) == 4, result["names"]
         assert result["heavy"] == []

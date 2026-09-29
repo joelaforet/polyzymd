@@ -943,6 +943,9 @@ Line shapes:
 | header | `# polyzymd analyze <analysis>  metric <key>  unit <unit or none>[  run <label>]  eq <window>  conditions <count>  replicates <n,n,...>  protocol <analysis>/<protocol_version>` |
 | condition | `<label>  n <count>  mean <value>  sem <value>  ci95 <low> to <high>  values <per-replicate values>[  replicates <numbers>  g <value>  n_eff <value>  eq_detected <ns>]`; the bracketed fields appear when the per-frame series is stored; `g` and `n_eff` are the statistical inefficiency and effective sample size of each replicate's series, and `eq_detected` is the latest start of an equilibrated region that pymbar detects among the replicates (see {doc}`../explanation/convergence_detection`) |
 | comparison | `<a> vs <b>  delta <signed>  ci95 <low> to <high>  p <value>  p_adj <value>  test <name>  correction <name>[  family <m>]  d <value>  significant\|not_significant\|no_test\|not_testable` |
+| per-label comparison | For a labelled result such as a per-residue profile, one line per compared condition in place of one line per label: `<a> vs <b>  labels <count>  tested <count>  family <m>  test <name>  correction <name>  lower <count>  higher <count>`, where `family` counts every tested label of every compared condition |
+| per-label hits | `<a> vs <b>  lower: <label> delta <signed> p_adj <value>, ...` and the same with `higher:`, listing every label that differs significantly; printed only when there is one |
+| note | `note: the <n> per-label condition rows and <m> per-label comparison rows are in the JSON report` |
 | warning | `warning: <text>` |
 | verdict | `verdict: <sentence>` |
 
@@ -1055,7 +1058,7 @@ with any discovered analysis plugin.
 polyzymd compare run COMPARISON_TYPE [OPTIONS]
 
 Arguments:
-  COMPARISON_TYPE        Analysis plugin name (e.g. rmsf, contacts, distances)
+  COMPARISON_TYPE        Analysis plugin name (e.g. contacts, sasa, secondary_structure)
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
@@ -1077,17 +1080,17 @@ rules that apply to the other commands.
 #### Example
 
 ```bash
-# Run RMSF comparison (uses plugins.rmsf from comparison.yaml)
-polyzymd compare run rmsf
+# Run the secondary-structure comparison (uses plugins.secondary_structure)
+polyzymd compare run secondary_structure
 
 # Override equilibration time
-polyzymd compare run rmsf --eq-time 20ns
+polyzymd compare run secondary_structure --eq-time 20ns
 
 # Run contacts comparison with markdown output
 polyzymd compare run contacts --format markdown -o report.md
 
 # Print the compact agent report instead of the plugin's table
-polyzymd compare run rmsf --format agent
+polyzymd compare run secondary_structure --format agent
 
 # List all available analysis types
 polyzymd compare run --list
@@ -1147,7 +1150,7 @@ Validating: /path/to/comparison.yaml
   Conditions: 3
     - WT, PEG, SBMA
   Control: WT
-  Analysis sections: rmsf, catalytic_triad
+  Analysis sections: contacts, secondary_structure
 ```
 
 **Output (errors):**
@@ -1171,7 +1174,7 @@ Validating: /path/to/comparison.yaml
     "conditions_count": 3,
     "condition_labels": ["WT", "PEG", "SBMA"],
     "control": "WT",
-    "sections_configured": ["rmsf", "catalytic_triad"]
+    "sections_configured": ["contacts", "secondary_structure"]
   }
 }
 ```
@@ -1202,7 +1205,7 @@ polyzymd compare plot-all
 polyzymd compare plot-all --list-available
 
 # One analysis only
-polyzymd compare plot-all -a rmsf
+polyzymd compare plot-all -a contacts
 ```
 
 ### polyzymd compare submit
@@ -1219,7 +1222,7 @@ already exist on disk (or use `compare submit-all` instead).
 polyzymd compare submit ANALYSIS [OPTIONS]
 
 Arguments:
-  ANALYSIS               Analysis plugin name (e.g. rmsf, contacts)
+  ANALYSIS               Analysis plugin name (e.g. contacts, sasa)
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
@@ -1243,14 +1246,14 @@ Options:
 #### Example
 
 ```bash
-# Submit RMSF analysis to SLURM
-polyzymd compare submit rmsf --partition gpu --account my_alloc
+# Submit SASA analysis to SLURM
+polyzymd compare submit sasa --partition gpu --account my_alloc
 
 # Dry run to inspect generated scripts
 polyzymd compare submit contacts --dry-run
 
 # Use job arrays for efficiency
-polyzymd compare submit rmsf --job-arrays --partition aa100
+polyzymd compare submit sasa --job-arrays --partition aa100
 
 # Rely on plugin memory hints and cluster default partition
 polyzymd compare submit secondary_structure --qos normal
@@ -1326,11 +1329,11 @@ Options:
 #### Example
 
 ```bash
-# Check status of RMSF SLURM jobs
-polyzymd compare status rmsf
+# Check status of SASA SLURM jobs
+polyzymd compare status sasa
 
 # Reconcile with SLURM scheduler and get JSON output
-polyzymd compare status rmsf --reconcile --json
+polyzymd compare status sasa --reconcile --json
 ```
 
 ### polyzymd compare finalize
@@ -1355,7 +1358,7 @@ Options:
 
 ```bash
 # Finalize after SLURM jobs complete
-polyzymd compare finalize rmsf
+polyzymd compare finalize sasa
 
 # Allow partial results (some conditions may have failed)
 polyzymd compare finalize contacts --allow-partial
@@ -1389,8 +1392,8 @@ polyzymd compare plot-all
 # Show available plots
 polyzymd compare plot-all --list-available
 
-# Plot only RMSF
-polyzymd compare plot-all -a rmsf
+# Plot only contacts
+polyzymd compare plot-all -a contacts
 ```
 
 ---

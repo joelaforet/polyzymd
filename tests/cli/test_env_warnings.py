@@ -231,7 +231,7 @@ def test_compare_status_json_skips_environment_warning(monkeypatch, tmp_path) ->
     monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "build")
     runner = CliRunner()
 
-    result = runner.invoke(compare, ["status", "rmsf", "-f", str(config_path), "--json"])
+    result = runner.invoke(compare, ["status", "sasa", "-f", str(config_path), "--json"])
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
