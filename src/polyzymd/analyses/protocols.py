@@ -743,10 +743,12 @@ def _analyze_sasa(
     target = str(settings["target"])
     contexts = settings["contexts"] or {"isolated": target}
     if not isinstance(contexts, dict) or not all(
-        isinstance(key, str) and isinstance(value, str) for key, value in contexts.items()
+        isinstance(key, str) and isinstance(value, str) and not key.endswith("_residues")
+        for key, value in contexts.items()
     ):
         raise ProtocolError(
-            f"sasa: contexts must map names to selections, got {contexts!r}.",
+            f"sasa: contexts must map names, none ending in _residues, to selections, "
+            f"got {contexts!r}.",
             hint="Pass --set contexts='{isolated: protein, with_polymer: protein or resname SBM EGM}'.",
         )
     runs = [key for name in contexts for key in (name, f"{name}_residues")]
@@ -757,9 +759,16 @@ def _analyze_sasa(
         )
     residues = run.endswith("_residues") and run[: -len("_residues")] in contexts
     context = contexts[run[: -len("_residues")] if residues else run]
+    # Pass only non-default options, so the stored record equals that of a
+    # study.timeseries(functions.sasa, ...) call left at the defaults.
+    defaults = {
+        "probe_radius_nm": functions.SASA_PROBE_RADIUS_NM,
+        "n_sphere_points": functions.SASA_SPHERE_POINTS,
+    }
     options = {
-        "probe_radius_nm": float(settings["probe_radius_nm"]),
-        "n_sphere_points": int(settings["n_sphere_points"]),
+        key: kind(settings[key])
+        for key, kind in (("probe_radius_nm", float), ("n_sphere_points", int))
+        if kind(settings[key]) != defaults[key]
     }
     folder = _figures_dir(output_dir, "sasa") if plots else None
     if residues:

@@ -288,8 +288,10 @@ def test_analyze_sasa_refuses_an_unknown_run_and_a_bad_context(configs) -> None:
             "sasa", [configs["A"]], equilibration=EQUILIBRATION, settings=settings, run="crowded"
         )
     assert "['alone', 'alone_residues']" in info.value.hint
-    with pytest.raises(ProtocolError, match="contexts must map names to selections"):
+    with pytest.raises(ProtocolError, match="contexts must map names"):
         analyze("sasa", [configs["A"]], settings={"contexts": ["all"]}, plots=False)
+    with pytest.raises(ProtocolError, match="none ending in _residues"):
+        analyze("sasa", [configs["A"]], settings={"contexts": {"x_residues": "all"}}, plots=False)
     with pytest.raises(ProtocolError, match="non-empty part of the context"):
         analyze(
             "sasa",
@@ -320,3 +322,31 @@ def test_cli_sasa_draws_the_documented_figures(configs, tmp_path) -> None:
         "sasa_profile_crowded.png",
         "sasa_difference_crowded.png",
     }
+
+
+def test_study_timeseries_at_the_defaults_reuses_what_analyze_sasa_stored(
+    configs, tmp_path
+) -> None:
+    """analyze passes only non-default options, so a plain Python call finds its records."""
+    analyze(
+        "sasa",
+        [configs["A"]],
+        labels=["A"],
+        equilibration=EQUILIBRATION,
+        settings={"target": "all"},
+        output_dir=tmp_path,
+        plots=False,
+    )
+    stored = sorted((tmp_path / "polyzymd_results" / "sasa_isolated").rglob("series.npz"))
+    assert stored
+    before = [path.stat().st_mtime_ns for path in stored]
+    study = pz.Study.from_configs({"A": configs["A"]}, equilibration=EQUILIBRATION)
+    study.timeseries(
+        functions.sasa,
+        pz.select("all"),
+        pz.select("all"),
+        unit="A^2",
+        name="sasa_isolated",
+        output_dir=tmp_path,
+    )
+    assert [path.stat().st_mtime_ns for path in stored] == before

@@ -373,7 +373,8 @@ def sasa(
     occlude each other within the coordinates as loaded.
 
     The frame is computed in a call of its own, because MDTraj 1.11.1 gives
-    frames after the first in one call about 0.1 percent too much area; see
+    every frame after the first that each OpenMP thread computes in one call
+    about 0.1 percent too much area; see
     :func:`residue_sasa`.
 
     Parameters
@@ -410,8 +411,9 @@ def residue_sasa(
     residue, in the order of ``target.residues``.
 
     Every frame goes to ``mdtraj.shrake_rupley`` in a call of its own. In
-    MDTraj 1.11.1, a frame that follows another in the same call comes out
-    about 0.1 percent larger than the same coordinates alone, and than an
+    MDTraj 1.11.1, a frame that follows another on the same OpenMP thread in
+    one call comes out about 0.1 percent larger than the same coordinates
+    alone, and than an
     independent Shrake-Rupley calculation, so frames are never batched.
     """
     import numpy as np
