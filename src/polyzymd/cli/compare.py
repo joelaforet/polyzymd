@@ -512,32 +512,25 @@ def _output_validation_result(result: dict, output_format: str) -> None:
 
 def _exit_retired(name: str, config_file: Path, eq_time: str | None) -> None:
     """Exit 1 with the polyzymd analyze command that replaces compare run for ``name``."""
-    import shlex
-
-    from polyzymd.config.comparison import PAIR_ANALYSES, TRIAD_ROUTINE_URL
+    from polyzymd.cli._compare_utils import analyze_command_for
+    from polyzymd.config.comparison import ANALYZE_PROTOCOL_URL, TRIAD_ROUTINE_URL
 
     config = load_comparison_config(config_file)
-    triad = name == "catalytic_triad"
-    command = ["polyzymd analyze distances" if triad else f"polyzymd analyze {name}"]
-    for condition in config.conditions:
-        command += [
-            f"-c {shlex.quote(str(condition.config))}",
-            f"--label {shlex.quote(condition.label)}",
-        ]
-    if len({tuple(condition.replicates) for condition in config.conditions}) == 1:
-        command.append(f"--replicates {','.join(map(str, config.conditions[0].replicates))}")
-    command.append(f"--eq {eq_time or config.defaults.equilibration_time}")
-    if triad or name in PAIR_ANALYSES:
-        command.append("--set pairs=<pairs.yaml>")
+    command = analyze_command_for(name, config, eq_time)
     click.echo(f"Error: {name} no longer runs through 'polyzymd compare run'.", err=True)
-    if triad:
+    if name == "catalytic_triad":
         click.echo(
             "The catalytic triad is now a routine on the study API, which counts each triad "
             f"hydrogen bond with functions.hbond_count: follow {TRIAD_ROUTINE_URL}. "
             "The command below measures the triad distances.",
             err=True,
         )
-    click.echo(f"fix: {' '.join(command)}", err=True)
+    click.echo(f"fix: {command}", err=True)
+    click.echo(
+        f"docs: {ANALYZE_PROTOCOL_URL}; an agent can be pointed at "
+        ".claude/skills/polyzymd-analyze/SKILL.md or that page to learn the protocol.",
+        err=True,
+    )
     sys.exit(1)
 
 

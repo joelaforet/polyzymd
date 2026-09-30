@@ -408,7 +408,9 @@ class TestUnknownAnalysisDiagnostics:
 
         message = str(excinfo.value)
         assert f"Unknown analysis plugin '{analysis_name}'" in message
-        assert "Available plugins:" in message
+        assert "Registered plugins:" in message
+        assert "polyzymd analyze NAME -c <config.yaml>" in message
+        assert "how_to/analysis_agent_protocol.html" in message
         assert "feature/mda-analysis-migration" not in message
 
     @pytest.mark.parametrize(

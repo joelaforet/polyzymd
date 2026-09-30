@@ -436,8 +436,8 @@ def run_protocol(
     """Run the pipeline for an existing comparison config and report it.
 
     ``analysis`` is a plugin instance or a canonical analysis name. This is what
-    ``polyzymd analyze -f comparison.yaml`` calls, and what :func:`analyze`
-    calls once it has built a config in memory. Raises ``ProtocolError`` if the
+    :func:`analyze` calls for a registered plugin once it has built a config in
+    memory. Raises ``ProtocolError`` if the
     name is unknown or the pipeline produced no comparable result.
     """
     from polyzymd.analyses.orchestrator import run_comparison

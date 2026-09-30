@@ -125,6 +125,35 @@ def load_comparison_config(config_file: Path) -> ComparisonConfig:
     return config
 
 
+def analyze_command_for(name: str, config: ComparisonConfig, eq_time: str | None = None) -> str:
+    """Return the ``polyzymd analyze`` command that runs ``name`` on the conditions of ``config``.
+
+    The command has one ``-c <config> --label <label>`` pair per condition in
+    the file's order, ``--replicates`` when every condition lists the same
+    replicates, ``--eq`` with ``eq_time`` or the file's default
+    equilibration, and ``--set pairs=<pairs.yaml>`` for a pair analysis.
+    ``catalytic_triad`` becomes ``distances``, which measures the triad
+    distances.
+    """
+    import shlex
+
+    from polyzymd.config.comparison import PAIR_ANALYSES
+
+    triad = name == "catalytic_triad"
+    command = ["polyzymd analyze distances" if triad else f"polyzymd analyze {name}"]
+    for condition in config.conditions:
+        command += [
+            f"-c {shlex.quote(str(condition.config))}",
+            f"--label {shlex.quote(condition.label)}",
+        ]
+    if len({tuple(condition.replicates) for condition in config.conditions}) == 1:
+        command.append(f"--replicates {','.join(map(str, config.conditions[0].replicates))}")
+    command.append(f"--eq {eq_time or config.defaults.equilibration_time}")
+    if triad or name in PAIR_ANALYSES:
+        command.append("--set pairs=<pairs.yaml>")
+    return " ".join(command)
+
+
 def validate_and_report(config) -> bool:
     """Validate config and print errors if any.
 

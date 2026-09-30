@@ -48,7 +48,10 @@ def _settings(raw: tuple[str, ...]) -> dict[str, Any]:
         if "." in key:
             raise ProtocolError(
                 f"Setting {key!r} is nested, and --set takes only top-level settings.",
-                hint="Put nested settings in a comparison.yaml and pass it with -f.",
+                hint=(
+                    "Give the whole top-level setting as a YAML mapping, for example "
+                    "--set groups='{protein: chainid A, polymer: chainid C}'."
+                ),
             )
         settings[key] = parsed
     return settings
@@ -99,7 +102,7 @@ def _one_line(text: str) -> str:
     "comparison_file",
     type=click.Path(path_type=Path),
     default=None,
-    help="Existing comparison.yaml to analyze instead of -c configs.",
+    help="Retired: prints the -c command that replaces a comparison.yaml, and exits 2.",
 )
 @click.option(
     "--replicates",
@@ -128,7 +131,7 @@ def _one_line(text: str) -> str:
     "--set",
     "setting_overrides",
     multiple=True,
-    help="Top-level plugin setting as key=value. Repeatable.",
+    help="Top-level analysis setting as key=value, the value read as YAML. Repeatable.",
 )
 @click.option(
     "--format",
@@ -244,9 +247,7 @@ def analyze_command(
             click.echo(f"fix: {_one_line(hint)}", err=True)
         sys.exit(EXIT_ANALYSIS_ERROR)
     except (FileNotFoundError, ValueError, OSError) as exc:
-        wrapped = ProtocolError(
-            str(exc), hint="Check the -c or -f paths and the replicate directories."
-        )
+        wrapped = ProtocolError(str(exc), hint="Check the -c paths and the replicate directories.")
         click.echo(f"error: {_one_line(str(wrapped))}", err=True)
         click.echo(f"fix: {wrapped.hint}", err=True)
         sys.exit(EXIT_ANALYSIS_ERROR)
@@ -276,44 +277,16 @@ def _run(
     plots: bool = True,
     stride: int = 1,
 ) -> "ProtocolReport":
-    """Resolve the options and run the protocol, through -f or through -c configs."""
-    from polyzymd.analyses.exceptions import ProtocolError
-    from polyzymd.analyses.protocols import analyze, run_protocol
+    """Resolve the options and run the protocol on the -c configs.
 
-    if configs and comparison_file is not None:
-        raise ProtocolError(
-            "Give either -c simulation configs or -f comparison.yaml, not both.",
-            hint="Drop -f to build the comparison from the -c configs.",
-        )
-    settings = _settings(setting_overrides)
+    ``comparison_file`` is retired: :func:`_refuse_comparison_file` raises
+    ``ProtocolError`` with the equivalent ``-c`` command.
+    """
+    from polyzymd.analyses.protocols import analyze
 
     if comparison_file is not None:
-        from polyzymd.config.comparison import ComparisonConfig
-
-        if stride != 1:
-            raise ProtocolError(
-                "--stride cannot be combined with -f.",
-                hint="Pass the conditions with -c to use a stride.",
-            )
-        if settings:
-            raise ProtocolError(
-                "--set cannot be combined with -f.",
-                hint="Put plugin settings in the comparison.yaml plugins section.",
-            )
-        path = Path(comparison_file).expanduser().resolve()
-        if not path.is_file():
-            raise ProtocolError(
-                f"Comparison config not found: {path}",
-                hint="Run 'polyzymd compare init -n <name>' to create one.",
-            )
-        try:
-            config = ComparisonConfig.from_yaml(path)
-        except (ValueError, OSError) as exc:
-            raise ProtocolError(
-                f"Could not load {path}: {exc}",
-                hint="Fix the comparison.yaml, or use -c config.yaml instead.",
-            ) from exc
-        return run_protocol(name, config, equilibration=equilibration, recompute=recompute, run=run)
+        _refuse_comparison_file(name, comparison_file, equilibration)
+    settings = _settings(setting_overrides)
 
     return analyze(
         name,
@@ -328,4 +301,37 @@ def _run(
         eq_check=eq_check,
         plots=plots,
         stride=stride,
+    )
+
+
+def _refuse_comparison_file(name: str, path: Path, equilibration: str | None) -> None:
+    """Raise ``ProtocolError`` saying -f is retired, with the ``-c`` command built from ``path``.
+
+    The command comes from
+    :func:`~polyzymd.cli._compare_utils.analyze_command_for`. A file that
+    cannot be read gives the command with placeholders instead.
+    """
+    import warnings
+
+    import yaml
+
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.cli._compare_utils import analyze_command_for
+    from polyzymd.config.comparison import RETIRED_DOCS_POINTER, ComparisonConfig
+
+    command = (
+        f"polyzymd analyze {name} -c <config.yaml> --label <label> ... "
+        "--replicates <range> --eq <time>"
+    )
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            config = ComparisonConfig.from_yaml(Path(path).expanduser().resolve())
+        command = analyze_command_for(name, config, equilibration)
+    except (OSError, ValueError, TypeError, yaml.YAMLError):
+        pass  # An unreadable file still gets the command with placeholders.
+    raise ProtocolError(
+        "comparison.yaml is no longer read by polyzymd analyze: every analysis reads the "
+        "simulation configs given with -c, control first.",
+        hint=f"Run {command}. {RETIRED_DOCS_POINTER}",
     )
