@@ -550,6 +550,7 @@ def write_openmm_frames(
     elements: Sequence[str] | None = None,
     chain_ids: Sequence[str] | None = None,
     dimensions: Sequence[float] | None = None,
+    bonds: Sequence[tuple[int, int]] | None = None,
     dt_ps: float = 100.0,
 ) -> Path:
     """Write an OpenMM run directory whose DCD holds ``coordinates`` frame by frame.
@@ -561,7 +562,10 @@ def write_openmm_frames(
     and ``chain_ids``, one per atom, fill the PDB's element and chain ID
     columns when given. ``dimensions``, the box as ``[a, b, c, alpha, beta,
     gamma]`` in Å and degrees, is written on every frame and in the PDB when
-    given; without it the DCD holds no box. The topology holds the first frame.
+    given; without it the DCD holds no box. ``bonds``, pairs of atom indices,
+    are written as CONECT records, so the loaded topology has bonds and
+    bonded fragments; without it the loaded topology has no bonds. The
+    topology holds the first frame.
 
     Returns
     -------
@@ -588,8 +592,10 @@ def write_openmm_frames(
         universe.add_TopologyAttr("chainIDs", list(chain_ids))
     if dimensions is not None:
         universe.dimensions = np.asarray(dimensions, dtype=np.float32)
+    if bonds is not None:
+        universe.add_TopologyAttr("bonds", [tuple(pair) for pair in bonds])
     universe.atoms.positions = coordinates[0]
-    universe.atoms.write(str(run_dir / "solvated_system.pdb"))
+    universe.atoms.write(str(run_dir / "solvated_system.pdb"), bonds="all")
     path = segment / "production_0_trajectory.dcd"
     with mda.Writer(str(path), n_atoms=n_atoms, dt=dt_ps, istart=0, nsavc=1) as writer:
         for frame in coordinates:
