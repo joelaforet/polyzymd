@@ -1,10 +1,16 @@
-"""Tests for the residue_contacts function and ``polyzymd analyze contacts``.
+"""Tests for the residue_contacts function and ``polyzymd analyze contacts method=distance``.
 
 The system is four protein residues of two atoms in chain A (LYS 1, ARG 2,
 ALA 3 and ASP 4, 20 Å apart along x) and two polymer residues of one atom in
 chain C (SBM 5 and EGM 6). On each frame a schedule puts each polymer atom
 3.04 Å from both atoms of one protein residue, or 100 Å away from every
 residue, so the expected contact fractions follow from the schedule alone.
+Every atom is carbon or nitrogen, so the default ``heavy_atoms`` selection
+keeps them all, and 3.04 Å is inside both the default 4.0 Å cutoff and the
+4.5 Å of the legacy plugin. The study tests pass ``method=distance``, since
+``occlusion`` is the default; tests/analyses/test_residue_occlusion.py covers
+occlusion. On frames where both polymer atoms sit at the same point, SASA
+cannot be computed, so this system is only for the distance method.
 The unit tests build MDAnalysis universes in memory; the study tests write
 OpenMM run directories of the same system.
 """
@@ -176,19 +182,29 @@ def test_any_atom_of_a_residue_in_range_puts_it_in_contact() -> None:
 
 
 def test_the_cutoff_includes_a_pair_at_exactly_the_cutoff() -> None:
-    """capped_distance keeps pairs with distance <= max_cutoff; 4.5 Å is exact in float32."""
-    assert CONTACT_CUTOFF == 4.5
+    """capped_distance keeps pairs with distance <= max_cutoff; 4.0 and 4.5 Å are exact in float32."""
+    assert CONTACT_CUTOFF == 4.0
     coordinates = np.array(
-        [[[0.0, 0.0, 0.0], [4.5, 0.0, 0.0]], [[0.0, 0.0, 0.0], [4.5001, 0.0, 0.0]]],
+        [
+            [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0], [4.0001, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0], [4.5, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0], [4.5001, 0.0, 0.0]],
+        ],
         dtype=np.float32,
     )
     universe = _universe(coordinates)
     protein, polymer = universe.select_atoms("chainid A"), universe.select_atoms("chainid C")
 
-    assert residue_contacts(protein, polymer, [0], pbc=False)[0] == pytest.approx([1.0])
-    assert residue_contacts(protein, polymer, [1], pbc=False)[0] == pytest.approx([0.0])
-    assert residue_contacts(protein, polymer, [1], cutoff=4.6, pbc=False)[0] == pytest.approx([1.0])
-    assert residue_contacts(protein, polymer, [0], cutoff=4.4, pbc=False)[0] == pytest.approx([0.0])
+    def contact(frame, **kwargs):
+        return residue_contacts(protein, polymer, [frame], pbc=False, **kwargs)[0]
+
+    assert contact(0) == pytest.approx([1.0])
+    assert contact(1) == pytest.approx([0.0])
+    assert contact(1, cutoff=4.1) == pytest.approx([1.0])
+    assert contact(0, cutoff=3.9) == pytest.approx([0.0])
+    assert contact(2, cutoff=4.5) == pytest.approx([1.0])
+    assert contact(3, cutoff=4.5) == pytest.approx([0.0])
 
 
 def test_pbc_counts_a_pair_that_is_close_only_across_the_box_boundary() -> None:
@@ -269,11 +285,22 @@ def _by_label(report) -> dict[str, list[float]]:
     return {row.label: row.replicate_values for row in report.conditions}
 
 
-def _options(tmp_path: Path, **extra):
-    return {"equilibration": EQUILIBRATION, "output_dir": tmp_path, "plots": False, **extra}
+#: Settings that pick the distance method, which these study tests cover.
+DISTANCE = {"method": "distance"}
 
 
-def test_analyze_reports_coverage_by_default(configs, schedules, tmp_path) -> None:
+def _options(tmp_path: Path, settings: dict | None = None, **extra):
+    """Options of :func:`analyze` for the distance method, with ``settings`` added."""
+    return {
+        "equilibration": EQUILIBRATION,
+        "output_dir": tmp_path,
+        "plots": False,
+        "settings": {**DISTANCE, **(settings or {})},
+        **extra,
+    }
+
+
+def test_analyze_distance_reports_coverage_by_default(configs, schedules, tmp_path) -> None:
     report = analyze("contacts", [configs["A"], configs["B"]], **_options(tmp_path))
 
     assert (report.analysis, report.run) == ("contacts", "coverage")
@@ -282,8 +309,14 @@ def test_analyze_reports_coverage_by_default(configs, schedules, tmp_path) -> No
         expected = [float(np.mean(_expected(schedules[(label, r)])["any"] > 0)) for r in (1, 2, 3)]
         assert values == pytest.approx(expected, abs=1e-12)
     settings = report.provenance.settings
-    assert settings["polymer_selection"] == "chainid C"
+    assert settings["method"] == "distance"
+    assert (settings["cutoff"], settings["heavy_atoms"]) == (4.0, True)
+    assert settings["protein_selection"] == "(chainid A) and not element H"
+    assert settings["polymer_selection"] == "(chainid C) and not element H"
     assert settings["polymer_types_found"] == ["EGM", "SBM"]
+    assert settings["unmeasured_residues"] == []
+    assert not {"threshold", "max_asa", "probe_radius_nm", "n_sphere_points"} & set(settings)
+    assert not any("maximum ASA" in warning for warning in report.warnings)
     assert settings["residues"] == {
         "classes": {"charged_positive": [1, 2], "nonpolar": [3], "charged_negative": [4]}
     }
@@ -314,11 +347,7 @@ def test_analyze_one_value_results_equal_the_hand_computed_means(
 def test_analyze_regions_average_their_residues(configs, schedules, tmp_path) -> None:
     settings = {"regions": {"lid": "resid 1 3"}}
     report = analyze(
-        "contacts",
-        [configs["A"]],
-        run="lid_contact_fraction",
-        settings=settings,
-        **_options(tmp_path),
+        "contacts", [configs["A"]], run="lid_contact_fraction", **_options(tmp_path, settings)
     )
 
     assert report.all_runs == [*ALL_RUNS[:7], "lid_contact_fraction", *ALL_RUNS[7:]]
@@ -343,12 +372,10 @@ def test_analyze_residue_runs_are_labelled_by_resid(configs, schedules, tmp_path
 
 
 def test_polymer_types_narrow_the_polymer_selection(configs, schedules, tmp_path) -> None:
-    report = analyze(
-        "contacts", [configs["A"]], settings={"polymer_types": "SBM"}, **_options(tmp_path)
-    )
+    report = analyze("contacts", [configs["A"]], **_options(tmp_path, {"polymer_types": "SBM"}))
 
     settings = report.provenance.settings
-    assert settings["polymer_selection"] == "(chainid C) and (resname SBM)"
+    assert settings["polymer_selection"] == "((chainid C) and (resname SBM)) and not element H"
     assert settings["polymer_types_found"] == ["SBM"]
     assert "EGM_contact_fraction" not in report.all_runs
     assert "SBM_contact_fraction_residues" in report.all_runs
@@ -370,25 +397,34 @@ def test_analyze_refuses_an_unknown_run_with_the_list(configs, tmp_path) -> None
         {"polymer_types": ["XYZ"]},
     ],
 )
-def test_an_empty_selection_is_refused(configs, settings) -> None:
+@pytest.mark.parametrize("method", ["distance", "occlusion"])
+def test_an_empty_selection_is_refused(configs, settings, method) -> None:
+    """The selections are checked before any frame is measured, for either method."""
     with pytest.raises(ProtocolError, match=r"picks 0\b"):
-        analyze("contacts", [configs["A"]], equilibration=EQUILIBRATION, settings=settings)
+        analyze(
+            "contacts",
+            [configs["A"]],
+            equilibration=EQUILIBRATION,
+            settings={"method": method, **settings},
+        )
 
 
-@pytest.mark.parametrize("region", ["coverage", "mean", "classes", "SBM", "nonpolar"])
+@pytest.mark.parametrize(
+    "region", ["coverage", "mean", "classes", "occluded", "occlusion", "SBM", "nonpolar"]
+)
 def test_a_region_with_a_reserved_name_is_refused(configs, region) -> None:
     with pytest.raises(ProtocolError, match="regions must map names other than"):
         analyze(
             "contacts",
             [configs["A"]],
             equilibration=EQUILIBRATION,
-            settings={"regions": {region: "resid 1"}},
+            settings={**DISTANCE, "regions": {region: "resid 1"}},
         )
 
 
 def test_cli_contacts_draws_the_documented_figures(configs, tmp_path) -> None:
     arguments = ["contacts", "-c", str(configs["A"]), "-c", str(configs["B"])]
-    arguments += ["--eq", EQUILIBRATION, "--output-dir", str(tmp_path)]
+    arguments += ["--eq", EQUILIBRATION, "--output-dir", str(tmp_path), "--set", "method=distance"]
 
     total = CliRunner().invoke(analyze_command, arguments)
     per_residue = CliRunner().invoke(
@@ -440,11 +476,7 @@ def test_use_pbc_follows_the_box_of_the_trajectory(tmp_path) -> None:
 
     wrapped = analyze("contacts", [config], labels=["box"], **_options(tmp_path / "1"))
     direct = analyze(
-        "contacts",
-        [config],
-        labels=["box"],
-        settings={"use_pbc": False},
-        **_options(tmp_path / "2"),
+        "contacts", [config], labels=["box"], **_options(tmp_path / "2", {"use_pbc": False})
     )
 
     assert _by_label(wrapped)["box"] == pytest.approx([1.0, 1.0, 1.0])
@@ -482,18 +514,23 @@ def test_study_per_replicate_with_the_function_matches_analyze(configs, tmp_path
 def test_study_per_replicate_at_the_defaults_reuses_what_analyze_contacts_stored(
     configs, tmp_path
 ) -> None:
-    """analyze passes only non-default options, so a plain Python call finds its records."""
+    """analyze passes only non-default options, so a plain Python call finds its records.
+
+    The default ``heavy_atoms`` narrows both selections, so the plain call
+    selects heavy atoms in the same words.
+    """
     analyze("contacts", [configs["A"]], labels=["A"], **_options(tmp_path))
     stored = sorted((tmp_path / "polyzymd_results" / "residue_contacts").rglob("*.npz"))
     assert stored
     before = [path.stat().st_mtime_ns for path in stored]
     study = pz.Study.from_configs({"A": configs["A"]}, equilibration=EQUILIBRATION)
+    protein = "(chainid A) and not element H"
     study.per_replicate(
         functions.residue_contacts,
-        pz.select("chainid A"),
-        pz.select("chainid C"),
+        pz.select(protein),
+        pz.select("(chainid C) and not element H"),
         unit=None,
-        labels=lambda u: u.select_atoms("chainid A").residues.resids,
+        labels=lambda u: u.select_atoms(protein).residues.resids,
         name="residue_contacts",
         output_dir=tmp_path,
         bounds=(0.0, 1.0),
@@ -501,3 +538,94 @@ def test_study_per_replicate_at_the_defaults_reuses_what_analyze_contacts_stored
         types=["EGM", "SBM"],
     )
     assert [path.stat().st_mtime_ns for path in stored] == before
+
+
+# ---------------------------------------------------------------------------
+# heavy_atoms and the legacy cutoff
+# ---------------------------------------------------------------------------
+
+#: Protein ALA 1 and ALA 2, one carbon each 50 Å apart; SBM 3 a hydrogen 4.2 Å
+#: from ALA 1, and EGM 4 a carbon 4.3 Å from ALA 2.
+LEGACY_COORDINATES = np.array(
+    [[[0.0, 0.0, 0.0], [50.0, 0.0, 0.0], [0.0, 4.2, 0.0], [50.0, 4.3, 0.0]]] * 2,
+    dtype=np.float32,
+)
+
+
+@pytest.fixture()
+def legacy_config(tmp_path: Path) -> Path:
+    config = write_simulation_config(tmp_path / "legacy", scratch=tmp_path / "legacy" / "scratch")
+    for replicate in (1, 2, 3):
+        write_openmm_frames(
+            config,
+            replicate,
+            LEGACY_COORDINATES,
+            [0, 1, 2, 3],
+            names=["CA", "CA", "H1", "C1"],
+            resnames=["ALA", "ALA", "SBM", "EGM"],
+            elements=["C", "C", "H", "C"],
+            chain_ids=["A", "A", "C", "C"],
+        )
+    return config
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected"),
+    [
+        ({}, [0.0, 0.0]),
+        ({"cutoff": 4.5}, [0.0, 1.0]),
+        ({"heavy_atoms": False}, [0.0, 0.0]),
+        ({"cutoff": 4.5, "heavy_atoms": False}, [1.0, 1.0]),
+    ],
+)
+def test_cutoff_and_heavy_atoms_pick_the_pairs_compared(
+    legacy_config, tmp_path, settings, expected
+) -> None:
+    """The defaults leave out the hydrogen and the 4.3 Å pair; cutoff=4.5 heavy_atoms=false counts both.
+
+    ``cutoff=4.5, heavy_atoms=false`` is the legacy plugin's 4.5 Å between all atoms.
+    """
+    report = analyze(
+        "contacts",
+        [legacy_config],
+        labels=["L"],
+        run="contact_fraction_residues",
+        **_options(tmp_path, settings),
+    )
+
+    by_entry = {row.entry: row.replicate_values for row in report.conditions}
+    assert sorted(by_entry, key=int) == ["1", "2"]
+    for entry, value in zip(("1", "2"), expected, strict=True):
+        assert by_entry[entry] == pytest.approx([value] * 3), entry
+
+
+def test_legacy_settings_reproduce_the_all_atom_function_at_4_5(legacy_config, tmp_path) -> None:
+    """cutoff=4.5 heavy_atoms=false equals residue_contacts(cutoff=4.5) on every atom."""
+    study = pz.Study.from_configs({"L": legacy_config}, equilibration=EQUILIBRATION)
+    rows = study.per_replicate(
+        functions.residue_contacts,
+        pz.select("chainid A"),
+        pz.select("chainid C"),
+        unit=None,
+        labels=lambda u: u.select_atoms("chainid A").residues.resids,
+        output_dir=tmp_path / "plain",
+        bounds=(0.0, 1.0),
+        parts=["contact_fraction", "EGM_contact_fraction", "SBM_contact_fraction"],
+        types=["EGM", "SBM"],
+        cutoff=4.5,
+    )
+    report = analyze(
+        "contacts",
+        [legacy_config],
+        labels=["L"],
+        run="SBM_contact_fraction_residues",
+        **_options(tmp_path / "analyze", {"cutoff": 4.5, "heavy_atoms": False}),
+    )
+
+    assert report.provenance.settings["protein_selection"] == "chainid A"
+    for row in report.conditions:
+        expected = [
+            float(values[int(row.entry) - 1]) for values in rows["SBM_contact_fraction"].values["L"]
+        ]
+        assert row.replicate_values == pytest.approx(expected, abs=1e-12)
+    assert [row.replicate_values for row in report.conditions] == [[1.0] * 3, [0.0] * 3]
