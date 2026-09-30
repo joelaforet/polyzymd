@@ -327,9 +327,9 @@ If you run GROMACS on Blanca, use `--constraint` to request hardware that is
 compatible with the site GROMACS build. See {doc}`gromacs_export`.
 
 :::{tip}
-If you are also running analysis jobs via `polyzymd compare submit-all`, see
-{doc}`hpc_execution` for detailed CU Boulder cluster configuration including
-partition tables and troubleshooting.
+If you are also running analysis jobs, see {doc}`hpc_execution` for a batch
+script that runs `polyzymd analyze`, with the CU Boulder partition, account
+and QoS flags.
 :::
 
 ## What the generated scripts do

@@ -130,13 +130,10 @@ measures the replicates again.
 ```
 
 ```{note}
-In the plugin used before this version, `external` mode reported each
-residue's deviation from the reference under the name RMSF; that quantity is
-now `rms_deviation`, and `rmsf` is always the fluctuation about the mean. The
-plugin's `reference_frame` also counted trajectory frames from 1, including the
-equilibration window, where it now counts production frames from 1. Its
-`centroid` and `frame` modes superposed every frame on trajectory frame 0,
-whatever the setting, so values from them are not comparable with these.
+`rmsf` is always the fluctuation about each atom's mean position; each
+residue's deviation from a reference structure is `rms_deviation`.
+`reference_frame` counts production frames from 1, after the equilibration
+window.
 ```
 
 Add `--format json` for the full report, `--replicates 1-3` to use only some

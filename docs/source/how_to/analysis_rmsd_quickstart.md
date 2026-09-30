@@ -98,10 +98,8 @@ replicates, and `--recompute` to ignore stored results. The line format and the
 verdict words are described under {ref}`polyzymd analyze <cli-analyze>`.
 
 ```{note}
-In the plugin used before this version, `reference_frame` counted trajectory
-frames from 0, including the equilibration window. It now counts production
-frames from 1, so a value copied from an old `comparison.yaml` points at a
-different frame.
+`reference_frame` counts production frames from 1, after the equilibration
+window, not trajectory frames from 0.
 ```
 
 ## From Python

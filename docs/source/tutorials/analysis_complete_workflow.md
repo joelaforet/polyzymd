@@ -3,18 +3,18 @@
 This tutorial walks through one complete PolyzyMD analysis story:
 
 - three simulation conditions already exist
-- you create one `comparison.yaml`
-- you compare the conditions
-- you finish with `polyzymd compare plot-all` as the smoke test
+- you compare the protein-polymer hydrogen bonds with one `polyzymd analyze` command
+- you read the result and find the stored values and figures
+- you add RMSF and polymer-protein contacts for the same conditions
 
-By the end, you will have a working comparison workspace with JSON results and
-figures for a small three-condition study.
+By the end, you will have validated comparisons, stored per-replicate results
+and figures for a small three-condition study.
 
 ## What You Will Learn
 
-- How to initialize a comparison workspace with `polyzymd compare init`
-- How to write a `comparison.yaml` that defines conditions and analysis plugins
-- How to run cross-condition comparisons and generate figures
+- How to compare conditions with `polyzymd analyze NAME -c ... -c ...`
+- How to read the per-condition values and the comparisons against the control
+- How to pick another result of the same analysis with `--run`
 - What the output directory structure looks like after a successful run
 
 ## Prerequisites
@@ -32,22 +32,10 @@ If you have not run a single-condition analysis yet, complete
 {doc}`first_analysis` first.
 
 ```{important}
-This tutorial uses the comparison plugin, hydrogen bonds. RMSD, Rg, RMSF,
-distances, the catalytic triad, secondary structure, SASA and polymer-protein
-contacts run through `polyzymd analyze` instead; Step 5 shows RMSF and contacts
-for the same study.
-Experimental workflows are linked at the end, but they are not part of the main
-tutorial path.
-```
-
-```{important}
-**Resource requirements:** Workspace setup and validation commands are
-lightweight. Commands that load trajectories, such as `polyzymd compare run`,
-`run-all`, and plotting over large cached results, can require substantial RAM,
-CPU/GPU time, and scratch I/O. On shared HPC systems, run them inside an
-allocated job or interactive compute session, not on a login node. If a command
-is killed or runs out of memory, request more resources or use
-`polyzymd compare submit`.
+**Resource requirements:** `polyzymd analyze` loads trajectories and can
+require substantial RAM, CPU time, and scratch I/O. On shared HPC systems, run
+it inside an allocated job or interactive compute session, not on a login
+node; {doc}`../how_to/hpc_execution` shows a batch script.
 ```
 
 ## The Study We Will Analyze
@@ -71,147 +59,90 @@ The `scratch/` directories may be symlinks to large trajectory storage on your
 cluster. PolyzyMD resolves those paths through each condition's `config.yaml`.
 
 <!-- IMAGE OPPORTUNITY: Add a campaign directory-tree diagram showing the three
-conditions plus the later comparison workspace. -->
+conditions plus the results folder. -->
 
-## Step 1: Create the Comparison Workspace
+## Step 1: Compare the Hydrogen Bonds
 
-From the study root, initialize a comparison project and move into it:
+From the study root, make a folder for the results and run the comparison
+there. Protein-polymer hydrogen bonds exist only in the two conditions with a
+polymer, so compare those two; the first `-c` is the control, and `--label`
+names the conditions in the same order:
 
 ```bash
 cd my_enzyme_study
-pixi run -e analysis polyzymd compare init -n polymer_stabilization_study
+mkdir polymer_stabilization_study
 cd polymer_stabilization_study
+pixi run -e analysis polyzymd analyze hydrogen_bonds \
+  -c ../SBMA_100_enzyme_DMSO/config.yaml \
+  -c ../EGMA_100_enzyme_DMSO/config.yaml \
+  --label "100% SBMA" --label "100% EGMA" \
+  --replicates 1-3 --eq 10ns --set d_a_cutoff=3.0
 ```
 
-Now edit `comparison.yaml` to point at the three conditions and define the
-analysis settings:
+The command discards the first 10 ns of every replicate and, on every
+production frame, counts the hydrogen bonds between the protein (`chainid A`)
+and the polymer (`chainid C`) with MDAnalysis `HydrogenBondAnalysis`, a donor
+within 3.0 Å of the acceptor and a donor-hydrogen-acceptor angle of at least
+150°. It prints one line per condition with the mean number of hydrogen bonds
+per frame over the replicates, its 95% interval and every replicate value,
+one line comparing 100% EGMA with 100% SBMA by Welch's t test, and a
+`verdict:` line. Every `warning:` line is part of the result.
 
-```yaml
-name: "polymer_stabilization_study"
-description: "Effect of SBMA vs EGMA polymer conjugation on enzyme stability"
-control: "No Polymer"
+## Step 2: Pick Another Result
 
-conditions:
-  - label: "No Polymer"
-    config: "../noPoly_enzyme_DMSO/config.yaml"
-    replicates: [1, 2, 3]
-
-  - label: "100% SBMA"
-    config: "../SBMA_100_enzyme_DMSO/config.yaml"
-    replicates: [1, 2, 3]
-
-  - label: "100% EGMA"
-    config: "../EGMA_100_enzyme_DMSO/config.yaml"
-    replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "10ns"
-
-plugins:
-  hydrogen_bonds:
-    groups:
-      protein: "chainid A"
-      polymer: "chainid C"
-    distance_cutoff: 3.0
-```
-
-## Step 2: Validate the Comparison Config
+`all_runs` in the JSON report (`--format json`) lists every result of the
+analysis. Pick the per-residue occupancy, the fraction of frames in which
+each protein residue has a hydrogen bond to the polymer:
 
 ```bash
-pixi run -e analysis polyzymd compare validate
+pixi run -e analysis polyzymd analyze hydrogen_bonds \
+  -c ../SBMA_100_enzyme_DMSO/config.yaml \
+  -c ../EGMA_100_enzyme_DMSO/config.yaml \
+  --label "100% SBMA" --label "100% EGMA" \
+  --replicates 1-3 --eq 10ns --set d_a_cutoff=3.0 \
+  --run protein_polymer_residues
 ```
 
-You should see a passing summary that lists the three conditions and the
-enabled analyses.
+The comparison is made at every residue, with the Benjamini-Hochberg
+correction over all of them; see {doc}`../how_to/hydrogen_bonds` for every
+result and its figures.
 
-## Step 3: Run the Cross-Condition Comparison
-
-For the tutorial, use the batch runner:
-
-```bash
-pixi run -e analysis polyzymd compare run-all
-```
-
-This runs each enabled analysis through its replicate, aggregate, and
-cross-condition comparison stages. Successful runs write canonical
-per-replicate `ReplicateArtifact` files under `analysis/`, per-condition
-`ConditionArtifact` files under `analysis/`, and cross-condition comparison
-outputs under `comparison/<analysis>/result.json`.
-
-```{tip}
-**On an HPC cluster?** For large studies, submit each analysis as a SLURM
-job DAG instead of running interactively:
-
-    pixi run -e analysis polyzymd compare submit hydrogen_bonds --partition <part> --mem 16G
-
-This parallelizes across replicates and conditions. See
-{doc}`../how_to/hpc_execution` for the complete HPC workflow.
-```
-
-If you prefer to inspect one comparison first, a good sanity check is:
-
-```bash
-pixi run -e analysis polyzymd compare run hydrogen_bonds
-```
-
-## Step 4: Generate the Figures
-
-Now run the plotting smoke test:
-
-```bash
-pixi run -e analysis polyzymd compare plot-all --list-available
-pixi run -e analysis polyzymd compare plot-all
-```
-
-If those commands succeed, your comparison workspace is in good shape.
-
-<!-- IMAGE OPPORTUNITY: Add one example comparison figure here so the tutorial
-has a visual payoff immediately before the final success state. -->
-
-## What Success Looks Like
+## Step 3: Check the Outputs
 
 At this point you should have:
 
 ```text
 polymer_stabilization_study/
-├── comparison.yaml
-├── analysis/
-│   ├── No Polymer/
-│   │   └── hydrogen_bonds/
-│   │       ├── run_1/
-│   │       │   └── result.json        # ReplicateArtifact
-│   │       ├── run_2/
-│   │       │   └── result.json        # ReplicateArtifact
-│   │       ├── run_3/
-│   │       │   └── result.json        # ReplicateArtifact
-│   │       └── aggregated/
-│   │           └── result.json        # ConditionArtifact
-│   ├── 100% SBMA/
-│   │   └── hydrogen_bonds/
-│   │       ├── run_1/
-│   │       │   └── result.json        # ReplicateArtifact
-│   │       └── aggregated/
-│   │           └── result.json        # ConditionArtifact
-│   └── 100% EGMA/
+├── polyzymd_results/
+│   ├── hydrogen_bonds_protein_polymer/
+│   │   ├── 100_SBMA/
+│   │   │   ├── replicate_1/
+│   │   │   │   ├── record.json
+│   │   │   │   └── values.npz
+│   │   │   └── ...
+│   │   └── 100_EGMA/
+│   └── residue_hbond_occupancy_protein_polymer/
 │       └── ...
-├── comparison/
-│   └── hydrogen_bonds/
-│       └── result.json                # cross-condition comparison output
 └── figures/
-    ├── hydrogen_bonds/
-    └── ...
+    └── hydrogen_bonds/
+        ├── hbonds_protein_polymer_mean_hbonds_comparison.png
+        ├── hbonds_protein_polymer_residues_profile.png
+        └── hbonds_protein_polymer_residues_difference.png
 ```
 
-That is the tutorial success state: canonical `ReplicateArtifact` and
-`ConditionArtifact` files exist under `analysis/`, each
-`comparison/<analysis>/result.json` contains the cross-condition comparison
-artifact or plugin-specific summary output, the figures exist, and
-`polyzymd compare plot-all` completes without error.
+Each folder name is the result or condition label with every run of
+characters other than letters, digits, `.`, `+` and `-` replaced by `_`.
+`record.json` holds what was measured and on which inputs, and `values.npz`
+the replicate's values. A later run with the same settings reads them back
+instead of loading the trajectories again.
 
-## Step 5: Add RMSF and Contacts for the Same Study
+<!-- IMAGE OPPORTUNITY: Add one example comparison figure here so the tutorial
+has a visual payoff immediately before the final success state. -->
 
-RMSF runs through `polyzymd analyze`, which reads the simulation configs of the
-same conditions, the first one being the control:
+## Step 4: Add RMSF and Contacts for the Same Study
+
+RMSF takes all three conditions, with the no-polymer condition as the
+control:
 
 ```bash
 pixi run -e analysis polyzymd analyze rmsf \
@@ -247,13 +178,13 @@ distance method.
 
 - Use [How to Compare Simulation Conditions](../how_to/analysis_compare_conditions.md) for
   a shorter operational version of this workflow
-- Use [Comparison and Plotting Reference](../reference/analysis_comparison_reference.md)
-  for CLI, config, and output lookup
+- Use [Get a validated number with one command](../how_to/analysis_agent_protocol.md)
+  to read every line of the report
 - Explore metric-specific guides:
   - [Run RMSF Analysis](../how_to/analysis_rmsf_quickstart.md)
   - [Run Contacts Analysis](../how_to/analysis_contacts_quickstart.md)
   - [Run Distance Analysis](../how_to/analysis_distances_quickstart.md)
-  - [Run Catalytic Triad Analysis](../how_to/analysis_triad_quickstart.md)
+  - [Measure a Catalytic Triad on the Analysis API](../how_to/analysis_triad_quickstart.md)
 - For removed experimental analyses, see
   [Experimental analyses](../reference/experimental_analyses_archive.md); they
   are not active v1.3 workflows.

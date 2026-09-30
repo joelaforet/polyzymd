@@ -30,7 +30,7 @@ Diagnose OpenFF PDB ingestion failures before running a PolyzyMD build.
 :link: analysis_chooser
 :link-type: doc
 
-Pick the right analysis plugin and get results in a few commands.
+Pick the right analysis and get results in a few commands.
 :::
 
 :::{grid-item-card} HPC & Job Submission
@@ -74,12 +74,13 @@ Run on SLURM clusters — from individual jobs to daisy-chained workflows.
 Run Simulations on SLURM Clusters <hpc_slurm>
 Monitor a Simulation Campaign <monitor_simulations>
 Run OpenMM on Other Hardware <hardware_platforms>
-Submit Analysis Jobs to SLURM <hpc_execution>
+Run Analysis Jobs on SLURM <hpc_execution>
 ```
 
 ## Stable Analysis Workflows
 
-These analysis plugins are well-tested and recommended for production use.
+These analyses are well-tested and recommended for production use. Each runs
+with `polyzymd analyze NAME -c <config.yaml>` and on the study API in Python.
 See also {doc}`../tutorials/sasa_analysis` for a guided SASA walkthrough.
 
 ```{toctree}
@@ -97,7 +98,7 @@ Run SASA Analysis <analysis_sasa_quickstart>
 Run Secondary Structure Analysis <analysis_secondary_structure_quickstart>
 Run Native Contacts Analysis <analysis_native_contacts_quickstart>
 Analyze Hydrogen Bonds <hydrogen_bonds>
-Run Catalytic Triad Analysis <analysis_triad_quickstart>
+Measure a Catalytic Triad on the Analysis API <analysis_triad_quickstart>
 ```
 
 ## Plots & Troubleshooting
@@ -105,17 +106,17 @@ Run Catalytic Triad Analysis <analysis_triad_quickstart>
 Customize publication-quality figures and debug common issues.
 
 ```{tip}
-Want to use the PolyzyMD artifacts to make your own plots? See
-{doc}`custom_artifact_plotting` for a post-processing workflow that reads cached
-analysis artifacts and sidecars. Start with {doc}`publication_plots` if you want
-to customize PolyzyMD's standard analysis plots.
+Want a figure PolyzyMD does not draw? See {doc}`custom_artifact_plotting` for
+plotting per-replicate values measured with the study API. Start with
+{doc}`publication_plots` if you want to customize PolyzyMD's standard analysis
+plots.
 ```
 
 ```{toctree}
 :maxdepth: 1
 
 Customizing Plots for Publication <publication_plots>
-Create Custom Plots from Analysis Artifacts <custom_artifact_plotting>
+Create Custom Plots from Study Results <custom_artifact_plotting>
 Broken Molecule Debugging <broken_molecules_debugging>
 Troubleshoot Common Problems <troubleshooting>
 ```

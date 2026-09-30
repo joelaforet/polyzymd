@@ -29,7 +29,8 @@ Alternatively, prefix each command with `pixi run -e analysis`.
 **When to use distances vs. contacts vs. triad:**
 - **Distances**: Specific atom pairs with continuous distance values
 - **Contacts**: All residue-residue contacts at an interface (binary count)
-- **Triad**: Pre-defined catalytic geometry with simultaneous contact analysis
+- **Triad**: a routine on the analysis API, {doc}`analysis_triad_quickstart`, that
+  counts the triad's hydrogen bonds on every frame and combines them with these distances
 ```
 
 ## Define the pairs
