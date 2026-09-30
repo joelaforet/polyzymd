@@ -34,16 +34,15 @@ defaults:
   fdr_alpha: 0.05
 
 plugins:
-  contacts: {}
+  hydrogen_bonds: {}
 ```
 
 ## Hypothesis Testing Across Plugins
 
 `ttest_method`, `posthoc_method` and `fdr_alpha` from the `defaults:` block
-reach every plugin's comparison step, including the plugins listed below as
-"custom" in the plugin summary table. Asking for `ttest_method: "welch"` runs
-Welch's unequal-variance t-test in `contacts` and the default scalar
-pipeline alike.
+reach every plugin's comparison step. Asking for `ttest_method: "welch"` runs
+Welch's unequal-variance t-test in `hydrogen_bonds` and in any plugin that uses
+the default scalar pipeline.
 
 The multiple-comparison family is defined once for the whole package:
 
@@ -65,58 +64,19 @@ The multiple-comparison family is defined once for the whole package:
 
 Full field tables are in {doc}`posthoc_testing`.
 
-## Per-Plugin Statistical Settings
-
-Some plugins support per-plugin statistical settings configured under the
-`plugins:` block in `comparison.yaml`. These control false discovery rate
-correction, effect-size filtering, and output truncation for cross-condition
-comparisons.
-
-### Canonical YAML Example
-
-```yaml
-plugins:
-  contacts:
-    cutoff: 4.5
-    fdr_alpha: 0.05
-    min_effect_size: 0.5
-    top_residues: 10
-```
-
-### Settings Support Matrix
-
-| Setting | contacts | Default |
-|---------|----------|---------|
-| `fdr_alpha` | ✓ | 0.05 |
-| `min_effect_size` | ✓ | 0.5 |
-| `top_residues` | ✓ | 10 |
-
-### Setting Descriptions
-
-- **`fdr_alpha`** — Significance threshold for pairwise comparisons. When
-  `posthoc_method` is `"ttest_bh"`, this controls the Benjamini-Hochberg false
-  discovery rate. When `posthoc_method` is `"tukey_hsd"`, this is the
-  family-wise alpha threshold. Also used as the ANOVA significance threshold.
-  Lower values are more conservative.
-- **`min_effect_size`** — Minimum Cohen's d required for practical
-  significance. Pairs that meet or exceed this threshold are highlighted with
-  "†" in formatted output; all pairs are shown regardless.
-- **`top_residues`** — Maximum number of contacted residues shown per
-  condition, ranked by aggregated `contact_fraction_mean`. Affects both saved
-  JSON and CLI output.
-
 ## Stable Plugin Keys
 
 Stable analysis plugins:
 
-- `contacts`
 - `hydrogen_bonds`
+
+Polymer-protein contacts run through `polyzymd analyze contacts`, not through
+`polyzymd compare`; see {doc}`../how_to/analysis_contacts_quickstart`.
 
 ## Plugin Summary Table
 
 | Plugin | Default compare? | Primary metric | Key feature | Statistical method |
 |--------|-----------------|----------------|-------------|-------------------|
-| `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests + omnibus ANOVA |
 | `hydrogen_bonds` | Custom loader with default-style scalar statistics | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA per configured summary |
 
 ## Path Rules
@@ -154,7 +114,6 @@ All commands below assume you are inside the pixi environment
 (`pixi shell -e analysis`) or are prefixed with `pixi run -e analysis`.
 
 ```bash
-polyzymd compare run contacts
 polyzymd compare run hydrogen_bonds
 polyzymd compare run-all
 polyzymd compare plot-all
@@ -177,7 +136,6 @@ polyzymd compare plot-all
 Typical comparison cache paths:
 
 ```text
-comparison/contacts/result.json
 comparison/hydrogen_bonds/result.json
 ```
 

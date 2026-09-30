@@ -11,13 +11,14 @@ You will:
 - generate figures with `polyzymd compare plot-all`
 
 ```{important}
-RMSD, Rg, RMSF, distances, the catalytic triad, secondary structure and SASA
-run through `polyzymd analyze` and the study API instead of this workflow; see
-{doc}`analysis_rmsd_quickstart`, {doc}`analysis_rg_quickstart`,
-{doc}`analysis_rmsf_quickstart`, {doc}`analysis_distances_quickstart`,
-{doc}`analysis_triad_quickstart`, {doc}`analysis_secondary_structure_quickstart`
-and {doc}`analysis_sasa_quickstart`. This guide covers the analyses that still
-run as comparison plugins: contacts and hydrogen bonds.
+RMSD, Rg, RMSF, distances, the catalytic triad, secondary structure, SASA and
+polymer-protein contacts run through `polyzymd analyze` and the study API
+instead of this workflow; see {doc}`analysis_rmsd_quickstart`,
+{doc}`analysis_rg_quickstart`, {doc}`analysis_rmsf_quickstart`,
+{doc}`analysis_distances_quickstart`, {doc}`analysis_triad_quickstart`,
+{doc}`analysis_secondary_structure_quickstart`, {doc}`analysis_sasa_quickstart`
+and {doc}`analysis_contacts_quickstart`. This guide covers the analysis that
+still runs as a comparison plugin: hydrogen bonds.
 ```
 
 ```{note}
@@ -113,7 +114,7 @@ polymer_stability_study/
 
 ## Step 2: Define a Minimal `comparison.yaml`
 
-Start with one analysis, contacts between polymer and protein.
+Start with one analysis, hydrogen bonds between polymer and protein.
 
 ```yaml
 name: "polymer_stability_study"
@@ -137,25 +138,24 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  contacts:
-    polymer_selection: "chainid C"
-    protein_selection: "chainid A"
-    cutoff: 4.5
+  hydrogen_bonds:
+    groups:
+      protein: "chainid A"
+      polymer: "chainid C"
+    distance_cutoff: 3.0
 ```
 
-To enable more analyses, add more sections under `plugins:`, for example
-`hydrogen_bonds` (see {doc}`hydrogen_bonds`).
+{doc}`hydrogen_bonds` lists the other `hydrogen_bonds` settings, such as named
+summaries and composition partitions.
 
 :::{admonition} Statistical settings for pairwise comparisons
 :class: tip
 
-Plugins that perform cross-condition statistical tests support per-plugin
-settings in the `plugins:` block. For example, contacts supports `fdr_alpha`,
-`min_effect_size`, and `top_residues`. See the
-[Comparison Reference](../reference/analysis_comparison_reference.md#per-plugin-statistical-settings)
-for the full settings table. For post-hoc method details (BH t-tests, Tukey
-HSD, Cohen's d, and significance markers), see the
-[Post-Hoc Testing Reference](../reference/posthoc_testing.md).
+`ttest_method`, `posthoc_method` and `fdr_alpha` in the `defaults:` block set
+the pairwise tests of every plugin; see the
+[Comparison Reference](../reference/analysis_comparison_reference.md#hypothesis-testing-across-plugins).
+For post-hoc method details (BH t-tests, Tukey HSD, Cohen's d, and significance
+markers), see the [Post-Hoc Testing Reference](../reference/posthoc_testing.md).
 :::
 
 ## Step 3: Validate the Config
@@ -170,28 +170,28 @@ enabled plugin sections.
 ## Step 4: Run One Comparison
 
 ```bash
-polyzymd compare run contacts
+polyzymd compare run hydrogen_bonds
 ```
 
 This command:
 
-- resolves `plugins.contacts` from `comparison.yaml`
-- computes or reloads per-condition contact data
+- resolves `plugins.hydrogen_bonds` from `comparison.yaml`
+- computes or reloads per-condition hydrogen-bond data
 - performs the cross-condition comparison
-- writes the canonical cache file to `comparison/contacts/result.json`
+- writes the canonical cache file to `comparison/hydrogen_bonds/result.json`
 - prints a formatted summary to the terminal
 
 :::{admonition} Running on an HPC cluster?
 :class: tip
 
-For expensive analyses (contacts, hydrogen bonds) or large studies with
+For expensive analyses such as hydrogen bonds, or large studies with
 many conditions and replicates, use `polyzymd compare submit` to dispatch
 analysis as SLURM jobs instead of running interactively:
 
 ```bash
-polyzymd compare submit contacts --partition <part> --mem 8G --time 02:00:00
-polyzymd compare status contacts       # monitor progress
-polyzymd compare finalize contacts     # (if needed) re-run compare + plot
+polyzymd compare submit hydrogen_bonds --partition <part> --mem 8G --time 02:00:00
+polyzymd compare status hydrogen_bonds       # monitor progress
+polyzymd compare finalize hydrogen_bonds     # (if needed) re-run compare + plot
 ```
 
 Each replicate runs as an independent job, with automatic dependency wiring
@@ -202,12 +202,13 @@ workflow, including dry-run previews and job arrays.
 You can save the formatted report separately with `-o`:
 
 ```bash
-polyzymd compare run contacts --format markdown -o reports/contacts.md
+polyzymd compare run hydrogen_bonds --format markdown -o reports/hydrogen_bonds.md
 ```
 
 ## Step 5: Run All Enabled Comparisons
 
-Once you have multiple plugin sections configured, run them together:
+When several plugin sections are configured, for example `hydrogen_bonds` and a
+plugin of your own, run them together:
 
 ```bash
 polyzymd compare run-all
@@ -240,7 +241,7 @@ polymer_stability_study/
 ├── comparison.yaml
 ├── analysis/
 │   ├── no_polymer/
-│   │   └── contacts/
+│   │   └── hydrogen_bonds/
 │   │       ├── run_1/
 │   │       │   └── result.json
 │   │       ├── run_2/
@@ -248,13 +249,13 @@ polymer_stability_study/
 │   │       └── aggregated/
 │   │           └── result.json
 │   └── 100_sbma/
-│       └── contacts/
+│       └── hydrogen_bonds/
 │           └── ...
 ├── comparison/
-│   └── contacts/
+│   └── hydrogen_bonds/
 │       └── result.json
 └── figures/
-    ├── contacts/
+    ├── hydrogen_bonds/
     └── ...
 ```
 
@@ -277,7 +278,7 @@ from polyzymd.analyses.orchestrator import run_comparison
 from polyzymd.config.comparison import ComparisonConfig
 
 config = ComparisonConfig.from_yaml(Path("comparison.yaml"))
-analysis = get_analysis("contacts")()
+analysis = get_analysis("hydrogen_bonds")()
 
 pipeline_result = run_comparison(
     analysis,
@@ -292,12 +293,10 @@ print(pipeline_result["comparison_path"])
 
 ## Adding More Stable Analyses
 
-Common next additions to `comparison.yaml` are:
-
-- `contacts` for polymer coverage and contact fraction
-- `hydrogen_bonds` for hydrogen-bond occupancy and lifetime summaries
-
-For end-to-end examples, see:
+`hydrogen_bonds` is the only shipped comparison plugin. The other stable
+analyses run through `polyzymd analyze`, for example
+`polyzymd analyze contacts -c A/config.yaml -c B/config.yaml` for polymer
+coverage and contact fraction. For end-to-end examples, see:
 
 - [Run RMSD Analysis](analysis_rmsd_quickstart.md)
 - [Run Rg Analysis](analysis_rg_quickstart.md)

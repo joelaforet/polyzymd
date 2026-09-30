@@ -49,13 +49,13 @@ about 0.1 percent too much area for the later frames of a call (see
 exactly, so the two implementations compute the same quantity, and
 `residue_occlusion` gives the values without that bias.
 
-## Agreement with the distance plugin used before this version
+## Agreement with the distance count used before this version
 
-On 716 production frames of the same replicate, `--set method=distance --set
-cutoff=4.5 --set heavy_atoms=false` gave a coverage of 0.9217877094972067 and
-a mean contact fraction of 0.5482974938360227, and every residue's contact
-fraction and per-monomer-type fractions, exactly equal to the plugin used
-before this version, which counts contacts on all atoms within 4.5 Å.
+Before this version contacts were counted by distance, on all atoms within
+4.5 Å. On 716 production frames of the same replicate, `--set method=distance
+--set cutoff=4.5 --set heavy_atoms=false` gave a coverage of 0.9217877094972067
+and a mean contact fraction of 0.5482974938360227, and every residue's contact
+fraction and per-monomer-type fraction came out exactly equal to that count.
 
 ## What the tests check
 

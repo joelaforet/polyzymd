@@ -62,6 +62,7 @@ import argparse
 import json
 import logging
 import re
+import shlex
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -419,11 +420,11 @@ def discover_files(sim_dir: Path, metadata: SimMetadata) -> None:
         if missing_paths:
             missing = _format_missing_paths(missing_paths)
             raise FileNotFoundError(
-                "Missing required contiguous daisy-chain production path(s):\n" f"{missing}"
+                f"Missing required contiguous daisy-chain production path(s):\n{missing}"
             )
         if empty_trajectories:
             empty = _format_missing_paths(empty_trajectories)
-            raise ValueError("Empty daisy-chain trajectory file(s):\n" f"{empty}")
+            raise ValueError(f"Empty daisy-chain trajectory file(s):\n{empty}")
 
         metadata.production_dirs = expected_dirs
         metadata.n_segments = len(expected_dirs)
@@ -485,7 +486,7 @@ def discover_files(sim_dir: Path, metadata: SimMetadata) -> None:
         if missing_trajectories:
             missing = "\n".join(f"  - {path}" for path in missing_trajectories)
             raise FileNotFoundError(
-                "Missing expected daisy-chain segment trajectory file(s):\n" f"{missing}"
+                f"Missing expected daisy-chain segment trajectory file(s):\n{missing}"
             )
     else:
         # Single production: production/production_trajectory.dcd
@@ -1585,6 +1586,7 @@ def generate_comparison_yaml(
         logger.info(f"    - {entry['label']}: replicates {entry['replicates']}")
         logger.info(f"      config: {entry['config']}")
 
+    contacts_configs = " ".join(f"-c {shlex.quote(entry['config'])}" for entry in conditions_yaml)
     logger.info(
         f"\n  Next steps:"
         f"\n    1. Review and edit {comparison_yaml_path} if needed"
@@ -1594,7 +1596,7 @@ def generate_comparison_yaml(
         f"\n    4. Run analyses:"
         f"\n       polyzymd compare run rmsf -f {comparison_yaml_path}"
         f"\n       polyzymd compare run catalytic_triad -f {comparison_yaml_path}"
-        f"\n       polyzymd compare run contacts -f {comparison_yaml_path}"
+        f"\n       cd {comparison_dir} && polyzymd analyze contacts {contacts_configs} --eq 10ns"
         f"\n    5. Generate all plots:"
         f"\n       polyzymd compare plot-all -f {comparison_yaml_path}"
     )
@@ -1641,17 +1643,6 @@ def _build_plugin_settings(enzyme_pdb_rel: str | None) -> dict:
                 },
             ],
         },
-        # Contacts: polymer-protein contacts
-        "contacts": {
-            "polymer_selection": "chainid C",
-            "protein_selection": "chainid A",
-            "cutoff": 4.5,
-            "grouping": "aa_class",
-            "compute_residence_times": True,
-            "protein_groups": {
-                "catalytic_triad": [77, 133, 156],
-            },
-        },
     }
 
     return settings
@@ -1681,9 +1672,6 @@ def _build_plot_settings() -> dict:
             "generate_kde_panel": True,
             "generate_bars": True,
             "figsize_bars": [10, 6],
-        },
-        "contacts": {
-            "figsize": [10, 8],
         },
     }
 

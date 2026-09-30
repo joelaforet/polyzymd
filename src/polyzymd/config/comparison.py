@@ -130,6 +130,15 @@ RETIRED_PLUGINS = {
     "secondary_structure": "dssp_occupancy",
     "distances": "pair_distance",
     "catalytic_triad": "pair_distance",
+    "contacts": "residue_occlusion",
+}
+
+#: Other functions the warning names for a retired analysis that has several.
+RETIRED_PLUGIN_ALSO = {
+    "contacts": (
+        " (residue_contacts for --set method=distance, and contact_lifetimes for how long "
+        "contacts last)"
+    ),
 }
 
 #: Retired analyses that measure pairs, whose command needs the pairs list.
@@ -137,12 +146,12 @@ PAIR_ANALYSES = ("distances", "catalytic_triad")
 
 #: Retired analyses whose function returns one value per replicate, which
 #: study.per_replicate measures; the others are per-frame study.timeseries functions.
-PER_REPLICATE_ANALYSES = ("rmsf", "secondary_structure")
+PER_REPLICATE_ANALYSES = ("rmsf", "secondary_structure", "contacts")
 
 RETIRED_PLUGIN_WARNING = (
     "comparison.yaml has a {section}.{name} block, which is ignored: {name} no longer runs "
     "through compare. Run polyzymd analyze {name} -c <config.yaml> --eq <time>{pairs}, or in "
-    "Python {method} with polyzymd.analyses.functions.{function}."
+    "Python {method} with polyzymd.analyses.functions.{function}{also}."
 )
 
 
@@ -155,6 +164,7 @@ def _warn_retired(section: str, name: str) -> None:
             section=section,
             name=name,
             function=RETIRED_PLUGINS[name],
+            also=RETIRED_PLUGIN_ALSO.get(name, ""),
             pairs=" --set pairs=<pairs.yaml>" if name in PAIR_ANALYSES else "",
             method="study.per_replicate" if name in PER_REPLICATE_ANALYSES else "study.timeseries",
         ),
@@ -808,9 +818,9 @@ class ComparisonConfig(BaseModel):
     >>> for cond in config.conditions:
     ...     print(f"{cond.label}: {cond.config}")
     >>> print("Enabled analyses:", config.plugins.get_enabled_plugins())
-    >>> contacts_settings = config.plugins.get("contacts")
-    >>> if contacts_settings:
-    ...     print(f"Contact cutoff: {contacts_settings.cutoff}")
+    >>> hbond_settings = config.plugins.get("hydrogen_bonds")
+    >>> if hbond_settings:
+    ...     print(f"Donor-acceptor cutoff: {hbond_settings.distance_cutoff}")
     """
 
     model_config = {"extra": "forbid"}

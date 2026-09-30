@@ -1,9 +1,8 @@
 """A comparison.yaml that still configures a retired plugin keeps working for the others.
 
-rg, rmsd, rmsf, sasa, secondary_structure, distances and catalytic_triad left the plugin system for
-``polyzymd analyze``. Each of their ``plugins`` blocks is ignored with one
-warning, and ``compare run <name>`` prints the equivalent ``polyzymd analyze``
-command.
+rg, rmsd, rmsf, sasa, secondary_structure, distances, catalytic_triad and contacts left the
+plugin system for ``polyzymd analyze``. Each of their ``plugins`` blocks is ignored with one
+warning, and ``compare run <name>`` prints the equivalent ``polyzymd analyze`` command.
 """
 
 from __future__ import annotations
@@ -27,6 +26,7 @@ RETIRED = {
     "secondary_structure": "dssp_occupancy",
     "distances": "pair_distance",
     "catalytic_triad": "pair_distance",
+    "contacts": "residue_occlusion",
 }
 
 
@@ -50,6 +50,7 @@ def comparison_file(tmp_path: Path) -> Path:
             "rmsf": {"selection": "name CA"},
             "sasa": {"runs": [{"label": "Protein", "target_selection": "protein"}]},
             "secondary_structure": {"chain_id": "B"},
+            "contacts": {"cutoff": 4.5, "polymer_selection": "resname SBM"},
             "hydrogen_bonds": {"distance_cutoff": 3.2},
         },
         "plot_settings": {
@@ -58,6 +59,7 @@ def comparison_file(tmp_path: Path) -> Path:
             "rmsf": {},
             "sasa": {},
             "secondary_structure": {},
+            "contacts": {"enrichment_error_bar": "sem"},
         },
     }
     path = tmp_path / "comparison.yaml"
@@ -74,12 +76,18 @@ def test_retired_blocks_are_ignored_with_one_warning_each(comparison_file: Path)
     for name, function in RETIRED.items():
         (message,) = [text for text in messages if f"plugins.{name} block" in text]
         assert f"polyzymd analyze {name} " in message
-        assert f"polyzymd.analyses.functions.{function}." in message
+        ending = " (" if name == "contacts" else "."
+        assert f"polyzymd.analyses.functions.{function}{ending}" in message
         assert ("--set pairs=" in message) == (function == "pair_distance")
-        per_replicate = name in ("rmsf", "secondary_structure")
+        per_replicate = name in ("rmsf", "secondary_structure", "contacts")
         method = "study.per_replicate" if per_replicate else "study.timeseries"
         assert f"in Python {method} with" in message
-    assert sum("plot_settings." in text for text in messages) == 5
+    (contacts,) = [text for text in messages if "plugins.contacts block" in text]
+    assert (
+        "functions.residue_occlusion (residue_contacts for --set method=distance, and "
+        "contact_lifetimes for how long contacts last)." in contacts
+    )
+    assert sum("plot_settings." in text for text in messages) == 6
     assert config.plugins.get_enabled_plugins() == ["hydrogen_bonds"]
     assert config.plugins.get("hydrogen_bonds").distance_cutoff == 3.2
     assert config.validate_config() == []

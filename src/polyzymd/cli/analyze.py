@@ -196,8 +196,10 @@ def analyze_command(
     """Run one analysis and print a validated result.
 
     Give one -c config.yaml for a single-condition summary, or several for a
-    comparison with the first config as the control. List the analysis names
-    with 'polyzymd compare run --list'.
+    comparison with the first config as the control. NAME is rg, rmsd, rmsf,
+    rms_deviation, sasa, secondary_structure, contacts, distances or
+    catalytic_triad, or a comparison plugin from 'polyzymd compare run --list',
+    such as hydrogen_bonds, which reads -f comparison.yaml.
 
     \b
     Examples:

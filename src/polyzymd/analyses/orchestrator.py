@@ -21,10 +21,10 @@ Usage
     from polyzymd.analyses.orchestrator import run_analysis, run_comparison
 
     # Run a single analysis for one condition
-    run_analysis("contacts", condition, settings, equilibration="10ns")
+    run_analysis("hydrogen_bonds", condition, settings, equilibration="10ns")
 
     # Run full comparison pipeline
-    run_comparison("contacts", comparison_config)
+    run_comparison("hydrogen_bonds", comparison_config)
 """
 
 from __future__ import annotations
@@ -642,7 +642,7 @@ def _validate_dependencies(analyses: list[Analysis], satisfied: set[str] | None 
     """Validate that declared dependencies are discoverable and scheduled.
 
     This catches configuration errors early — e.g. a plugin declares
-    ``dependencies = ("contacts",)`` but ``contacts`` isn't in the run list
+    ``dependencies = ("hydrogen_bonds",)`` but ``hydrogen_bonds`` isn't in the run list
     or doesn't exist.
 
     Parameters

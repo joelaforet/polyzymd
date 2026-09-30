@@ -117,6 +117,10 @@ Pick another result with `--run`:
 | `contact_fraction_residues` | Each residue's contact fraction, compared residue by residue |
 | `<type>_contact_fraction_residues` | Each residue's contact fraction with one monomer type, compared residue by residue |
 | `occluded_area_residues` | Occlusion only: each residue's mean occluded area in Å², compared residue by residue |
+| `mean_lifetime` | Kaplan-Meier restricted mean duration of a contact event, in ns; see [How long contacts last](#how-long-contacts-last) |
+| `<type>_mean_lifetime` | The same for contacts with one monomer type |
+| `lifetime_events` | Number of contact events |
+| `censored_fraction` | Fraction of contact events cut off by the first or last production frame |
 
 A per-residue comparison is corrected over every residue of every compared
 condition, and the text report gives, for each condition, how many residues
@@ -138,6 +142,7 @@ Settings, passed with `--set`:
 | `max_asa` | `theoretical` | Occlusion only: the column of Tien et al. (2013) Table 1, `theoretical` (which the authors recommend) or `empirical` |
 | `probe_radius_nm` | `0.14` | Occlusion only: SASA probe radius in nm |
 | `n_sphere_points` | `960` | Occlusion only: points on each atom's sphere |
+| `tolerance_ps` | `0` | Lifetime results only: absences of at most this many ps between two contacts do not end an event |
 | `cutoff` | `4.0` | Distance only: contact distance in Å |
 | `heavy_atoms` | `true` | Distance only: compare heavy atoms only |
 
@@ -163,14 +168,28 @@ the residues of each amino-acid class and region are recorded under
 report, `--replicates 1-3` to use only some replicates, and `--recompute` to
 ignore stored results.
 
-```{note}
-Contact residence times, and the `comparison.yaml` workflow, still run through
-`polyzymd compare run contacts` in this version, which counts contacts by
-distance on all atoms within 4.5 Å; see
-{doc}`../reference/analysis_contacts_reference`. `--set method=distance
---set cutoff=4.5 --set heavy_atoms=false` gives the same coverage and contact
-fractions for the same frames.
+## How long contacts last
+
+An event is a run of consecutive production frames in which one residue is in
+contact, by the chosen method. `--run mean_lifetime` reports, for each
+replicate, the Kaplan-Meier restricted mean duration of the events of all
+measured residues, in ns: the estimate treats an event under way at the first
+or last frame as lasting at least as long as observed, instead of counting it
+as finished. `lifetime_events` and `censored_fraction` report how many events
+there were and how many were cut off. The lifetime results need a pass over
+the frames of their own and are measured only when chosen:
+
+```bash
+polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml --eq 200ns \
+  --set method=distance --run mean_lifetime
 ```
+
+The result depends on the spacing of the frames, since a contact or a break
+shorter than the spacing is not seen, so compare conditions at the same frame
+spacing and `--stride` only. `--set tolerance_ps=40` lets breaks of up to
+40 ps continue an event; a tolerance changes the result strongly and should be
+reported with it. {doc}`../explanation/analysis_contact_lifetimes` explains
+the estimator, the censoring and these choices, with references.
 
 ## Figures
 
@@ -183,6 +202,12 @@ fractions for the same frames.
 | `contacts_<run>_comparison` | For a one-value result: each condition's mean with its interval and every replicate value |
 | `contacts_<name>_profile` | For a residue result: each residue's value per replicate and each condition's mean with its interval |
 | `contacts_<name>_difference` | For a residue result with several conditions: each condition minus the control at every residue, with the interval of the difference and the significant residues marked |
+
+```{note}
+Before this version contacts were counted by distance on all atoms within
+4.5 Å. `--set method=distance --set cutoff=4.5 --set heavy_atoms=false` gives
+the same coverage and contact fractions for the same frames.
+```
 
 ## From Python
 
@@ -223,6 +248,14 @@ per residue name in `types`, with one column per residue; pass heavy-atom
 selections, such as `pz.select("chainid A and not element H")`, for the
 default of `polyzymd analyze contacts --set method=distance`.
 
+`contact_lifetimes(protein, polymer, frames, method="occlusion", types=(),
+tolerance_ps=0.0, **options)` returns the rows of `LIFETIME_PARTS`,
+`mean_lifetime`, `n_events` and `censored_fraction`, with one column for the
+polymer and one per residue name in `types`; `options` are the settings of the
+method, such as `cutoff` or `buried_threshold`. Run it with
+`study.per_replicate(contact_lifetimes, ..., labels=["polymer", *types],
+parts=list(LIFETIME_PARTS), types=types)`.
+
 ## References
 
 **Tien MZ, Meyer AG, Sydykova DK, Spielman SJ, Wilke CO.** (2013) "Maximum
@@ -233,6 +266,6 @@ allowed solvent accessibilities of residues in proteins." *PLoS ONE*
 
 - **What each function measures**: {doc}`../reference/analysis_functions`
 - **How the occlusion values were checked**: {doc}`../explanation/analysis_contacts_verification`
+- **How long contacts last**: {doc}`../explanation/analysis_contact_lifetimes`
 - **Understand statistics**: {doc}`../explanation/analysis_statistics_best_practices`
 - **SASA analysis**: {doc}`analysis_sasa_quickstart`
-- **Residence times and the comparison workflow**: {doc}`../reference/analysis_contacts_reference`

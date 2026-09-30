@@ -36,14 +36,15 @@ change.
 
 ## Use built-in packages as examples, not import targets
 
-Built-in plugins such as `contacts` and `hydrogen_bonds` show real package shapes. Their private helper modules are useful examples of organization:
+The built-in `hydrogen_bonds` plugin shows a real package shape. Its private helper modules are useful examples of organization:
 
 - `_mda.py` for trajectory-native job and collector helpers;
-- `_plotters.py` for artifact-only plotting helpers;
-- `_models.py` for domain schemas that validate artifact payload entries;
-- `_formatters.py` for substantial CLI formatting; and
-- plugin-specific modules such as `_comparison.py` or `_filters.py` only when a
-  plugin has a genuine need.
+- `_plotters.py` for artifact-only plotting helpers; and
+- `_models.py` for domain schemas that validate artifact payload entries.
+
+Add further modules, such as `_formatters.py` for substantial CLI formatting or
+`_comparison.py` for a custom comparison, only when a plugin has a genuine
+need.
 
 Do not import private modules from another plugin. For contributor plugins, use
 the public facades only:

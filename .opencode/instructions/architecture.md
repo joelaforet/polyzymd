@@ -10,9 +10,9 @@ src/polyzymd/
 ├── simulation/   # OpenMM simulation execution
 ├── workflow/     # Orchestration layer
 ├── core/         # Shared base classes and types
-├── analyses/     # ★ Study API (functions over replicate universes) and the remaining plugins
+├── analyses/     # ★ Study API (functions over replicate universes) and the remaining plugin
 │   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
-│   └── <name>/   #   The remaining plugins: contacts/, hydrogen_bonds/
+│   └── <name>/   #   The remaining plugin: hydrogen_bonds/
 ├── exporters/    # Format converters (GROMACS, etc.)
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
@@ -24,7 +24,7 @@ src/polyzymd/
 | Layer | Files | Role |
 |-------|-------|------|
 | **Study API** (public) | `study.py`, `timeseries.py`, `functions.py`, `reference.py`, `figures.py`, `protocols.py` | Replicates as MDAnalysis universes, shipped measurement functions, statistics, reports and `polyzymd analyze`; where new measurements go |
-| **Plugins** (public) | `contacts/`, `hydrogen_bonds/` | The two analyses not yet ported to the study API |
+| **Plugins** (public) | `hydrogen_bonds/` | The one analysis not yet ported to the study API |
 | **Private modules** | `_framework/`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
 | **Shared utilities** | `shared/loader.py`, `shared/window.py`, etc. | `TrajectoryLoader`, frame windows, statistics |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/` | Stable public facade, auto-discovery, artifact lifecycle |
@@ -45,10 +45,12 @@ modules such as `compare.py`, `io.py`, `contract.py`, `contexts.py`, and
 import these private modules from contributor plugins; import public symbols
 from `polyzymd.analyses.base`.
 
-`polyzymd.analyses.contacts` follows the same facade pattern. The public
-`ContactsAnalysis` class remains in `contacts/__init__.py`; artifact handling,
-condition filtering, custom comparison, plotting orchestration, result models,
-and MDAnalysis helpers live in private `contacts/_*.py` modules.
+`polyzymd.analyses.hydrogen_bonds` follows the same facade pattern. The public
+`HydrogenBondsAnalysis` class is in `hydrogen_bonds/__init__.py`; MDAnalysis
+helpers, result models and plotting live in the private `_mda.py`,
+`_models.py` and `_plotters.py`. Polymer-protein contacts are functions in
+`functions.py` (`residue_occlusion`, `residue_contacts`, `contact_lifetimes`),
+run by `polyzymd analyze contacts` through `protocols._analyze_contacts`.
 
 ## Chain Convention (Critical)
 
@@ -71,28 +73,24 @@ All major classes support construction from config objects or YAML files:
 
 ```python
 # From config object
-analyzer = ContactAnalyzer.from_config(config)
+engine = OpenMMEngine.from_config(config)
 
 # From YAML file
 config = SimulationConfig.from_yaml("config.yaml")
 ```
 
 ### ABC + Strategy Pattern
-Analysis criteria and molecular selectors use abstract base classes:
+Molecular selectors and molecule chargers use abstract base classes:
 
 ```python
-# Abstract base
-class ContactCriteria(ABC):
+# Abstract base (analyses/shared/selectors/base.py)
+class MolecularSelector(ABC):
     @abstractmethod
-    def is_contact(self, distance: float) -> bool: ...
+    def select(self, universe: Universe) -> SelectionResult: ...
 
-# Concrete strategy
-class DistanceCutoffCriteria(ContactCriteria):
-    def __init__(self, cutoff: float = 4.5):
-        self.cutoff = cutoff
-
-    def is_contact(self, distance: float) -> bool:
-        return distance <= self.cutoff
+# Concrete strategy (analyses/shared/selectors/polymer.py)
+class PolymerChains(MolecularSelector):
+    def select(self, universe: Universe) -> SelectionResult: ...
 ```
 
 ### Plugin Discovery Pattern
@@ -106,7 +104,7 @@ for name, cls in list_analyses().items():
     print(f"{name}: {cls.__doc__.splitlines()[0]}")
 
 # Get a specific plugin
-ContactsAnalysis = get_analysis("contacts")
+HydrogenBondsAnalysis = get_analysis("hydrogen_bonds")
 ```
 
 No registries, no decorators, no explicit imports needed — just create a module

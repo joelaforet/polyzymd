@@ -20,8 +20,12 @@ Environment: only the `analysis` and `sim-cuda-12-4` pixi envs have the CLI. The
 bare `polyzymd` on PATH points at a system Python without click. Always go
 through `pixi run -e analysis`.
 
-List the nine analysis names with
-`pixi run -e analysis polyzymd compare run --list`.
+`pixi run -e analysis polyzymd analyze --help` lists the analysis names: rg,
+rmsd, rmsf, rms_deviation, sasa, secondary_structure, contacts, distances and
+catalytic_triad read `-c config.yaml` (they are the keys of
+`polyzymd.analyses.protocols.FUNCTION_ANALYSES`), and hydrogen_bonds, the only shipped
+comparison plugin, also reads `-f comparison.yaml`. For contacts, `--run
+mean_lifetime` reports how long contacts last.
 
 ## 2. Reading the output
 

@@ -7,13 +7,7 @@ from typing import Any
 
 import pytest
 
-_PLOTTER_MODULES = tuple(
-    f"polyzymd.analyses.{name}._plotters"
-    for name in (
-        "contacts",
-        "hydrogen_bonds",
-    )
-)
+_PLOTTER_MODULES = tuple(f"polyzymd.analyses.{name}._plotters" for name in ("hydrogen_bonds",))
 
 
 def figure_draws_uncertainty(fig: Any) -> bool:

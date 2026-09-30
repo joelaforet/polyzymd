@@ -229,6 +229,14 @@ def test_pbc_counts_a_pair_that_is_close_only_across_the_box_boundary() -> None:
 N_FRAMES = 8
 CLASS_RUNS = ["charged_positive_contact_fraction", "charged_negative_contact_fraction"]
 CLASS_RUNS.append("nonpolar_contact_fraction")
+#: Lifetime runs, which follow the contact fractions in ``all_runs``.
+LIFETIME_RUNS = [
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction",
+]
 ALL_RUNS = [
     "coverage",
     "mean_contact_fraction",
@@ -238,6 +246,7 @@ ALL_RUNS = [
     "contact_fraction_residues",
     "EGM_contact_fraction_residues",
     "SBM_contact_fraction_residues",
+    *LIFETIME_RUNS,
 ]
 
 
@@ -393,6 +402,32 @@ def test_analyze_refuses_an_unknown_run_with_the_list(configs, tmp_path) -> None
     with pytest.raises(ProtocolError, match="no result named 'occupancy'") as info:
         analyze("contacts", [configs["A"]], run="occupancy", **_options(tmp_path))
     assert str(ALL_RUNS) in info.value.hint
+
+
+@pytest.mark.parametrize("method", ["distance", "occlusion"])
+def test_an_unknown_run_is_refused_before_any_frame_is_measured(
+    configs, tmp_path, monkeypatch, method
+) -> None:
+    def measured(*args, **kwargs):
+        raise AssertionError("a frame was measured before the run was checked")
+
+    for name in (
+        "residue_contacts",
+        "residue_occlusion",
+        "contact_lifetimes",
+        "_distance_frames",
+        "_occlusion_frames",
+    ):
+        monkeypatch.setattr(functions, name, measured)
+
+    with pytest.raises(ProtocolError, match="no result named 'occupancy'"):
+        analyze(
+            "contacts",
+            [configs["A"]],
+            run="occupancy",
+            **_options(tmp_path, {"method": method}),
+        )
+    assert not (tmp_path / "polyzymd_results").exists()
 
 
 @pytest.mark.parametrize(

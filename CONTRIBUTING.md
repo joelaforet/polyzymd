@@ -84,9 +84,9 @@ to core code**.
 
 2. **Prefer a function to a plugin**: new measurements are functions in
    `src/polyzymd/analyses/functions.py` run through the study API (see
-   `docs/source/explanation/analysis_api.md`). To extend one of the remaining
-   plugins, study `src/polyzymd/analyses/contacts/` or
-   `src/polyzymd/analyses/hydrogen_bonds/`, which use the custom comparison path.
+   `docs/source/explanation/analysis_api.md`). To extend the remaining
+   plugin, study `src/polyzymd/analyses/hydrogen_bonds/`, which uses the custom
+   comparison path.
 
 3. **Create your plugin package**: Use `polyzymd new-analysis <name>` to
    scaffold automatically, or create `src/polyzymd/analyses/<name>/` with an

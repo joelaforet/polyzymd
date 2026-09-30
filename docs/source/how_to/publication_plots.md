@@ -269,29 +269,13 @@ Common ranges:
 
 ## Per-plugin plot settings
 
-In addition to global settings, plugins can define their own plot options under
-`plot_settings.<plugin_name>`.
-
-### Contacts example
-
-```yaml
-plot_settings:
-  style: "compact"
-  contacts:
-    generate_contact_fraction_profile: true
-    generate_residence_time_profile: true
-    generate_cf_by_aa_class_bars: true
-    generate_cf_by_partition_bars: true
-    figsize_contact_fraction_profile: [16, 5]
-    show_contact_fraction_profile_error: true
-    highlight_residues: [77, 133, 156]
-```
-
-What changes:
-
-- `generate_*` flags turn specific plot families on/off
-- `figsize_contact_fraction_profile` sets profile dimensions
-- `show_contact_fraction_profile_error` toggles profile error bands
+In addition to global settings, a plugin can define its own plot options under
+`plot_settings.<plugin_name>` when it declares a plot settings model.
+`hydrogen_bonds`, the only shipped comparison plugin, declares none, so its
+figures follow the global settings above. The analyses that run through
+`polyzymd analyze` read no `plot_settings`: `--no-plots` turns their figures
+off, and a few take figure options with `--set`, such as `highlight_residues`
+for `rmsf`.
 
 ## Re-generating plots after changing settings
 
@@ -305,7 +289,7 @@ This command re-draws figures from existing comparison results. It does not
 recompute per-replicate or aggregated analysis data.
 
 If a plugin has no cached comparison result yet, run that comparison first
-(for example, `polyzymd compare run contacts -f comparison.yaml`).
+(for example, `polyzymd compare run hydrogen_bonds -f comparison.yaml`).
 
 ## See Also
 

@@ -897,7 +897,11 @@ polyzymd analyze NAME -c config.yaml [-c other/config.yaml ...] [OPTIONS]
 polyzymd analyze NAME -f comparison.yaml [OPTIONS]
 ```
 
-List the available analysis names with `polyzymd compare run --list`.
+`NAME` is one of `rg`, `rmsd`, `rmsf`, `rms_deviation`, `sasa`,
+`secondary_structure`, `contacts`, `distances` and `catalytic_triad`, which read
+simulation configs given with `-c`, or a comparison plugin listed by
+`polyzymd compare run --list`, such as `hydrogen_bonds`, which also reads
+`-f comparison.yaml`. An unknown name is refused with the list of all of them.
 
 ### Options
 
@@ -1062,7 +1066,7 @@ with any discovered analysis plugin.
 polyzymd compare run COMPARISON_TYPE [OPTIONS]
 
 Arguments:
-  COMPARISON_TYPE        Analysis plugin name (e.g. contacts, hydrogen_bonds)
+  COMPARISON_TYPE        Analysis plugin name (e.g. hydrogen_bonds)
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
@@ -1084,17 +1088,17 @@ rules that apply to the other commands.
 #### Example
 
 ```bash
-# Run the contacts comparison (uses plugins.contacts)
-polyzymd compare run contacts
+# Run the hydrogen-bond comparison (uses plugins.hydrogen_bonds)
+polyzymd compare run hydrogen_bonds
 
 # Override equilibration time
-polyzymd compare run contacts --eq-time 20ns
+polyzymd compare run hydrogen_bonds --eq-time 20ns
 
-# Run contacts comparison with markdown output
-polyzymd compare run contacts --format markdown -o report.md
+# Run the hydrogen-bond comparison with markdown output
+polyzymd compare run hydrogen_bonds --format markdown -o report.md
 
 # Print the compact agent report instead of the plugin's table
-polyzymd compare run contacts --format agent
+polyzymd compare run hydrogen_bonds --format agent
 
 # List all available analysis types
 polyzymd compare run --list
@@ -1154,7 +1158,7 @@ Validating: /path/to/comparison.yaml
   Conditions: 3
     - WT, PEG, SBMA
   Control: WT
-  Analysis sections: contacts, hydrogen_bonds
+  Analysis sections: hydrogen_bonds
 ```
 
 **Output (errors):**
@@ -1178,7 +1182,7 @@ Validating: /path/to/comparison.yaml
     "conditions_count": 3,
     "condition_labels": ["WT", "PEG", "SBMA"],
     "control": "WT",
-    "sections_configured": ["contacts", "hydrogen_bonds"]
+    "sections_configured": ["hydrogen_bonds"]
   }
 }
 ```
@@ -1209,7 +1213,7 @@ polyzymd compare plot-all
 polyzymd compare plot-all --list-available
 
 # One analysis only
-polyzymd compare plot-all -a contacts
+polyzymd compare plot-all -a hydrogen_bonds
 ```
 
 ### polyzymd compare submit
@@ -1226,7 +1230,7 @@ already exist on disk (or use `compare submit-all` instead).
 polyzymd compare submit ANALYSIS [OPTIONS]
 
 Arguments:
-  ANALYSIS               Analysis plugin name (e.g. contacts, hydrogen_bonds)
+  ANALYSIS               Analysis plugin name (e.g. hydrogen_bonds)
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
@@ -1250,21 +1254,21 @@ Options:
 #### Example
 
 ```bash
-# Submit contacts analysis to SLURM
-polyzymd compare submit contacts --partition gpu --account my_alloc
+# Submit the hydrogen-bond analysis to SLURM
+polyzymd compare submit hydrogen_bonds --partition gpu --account my_alloc
 
 # Dry run to inspect generated scripts
-polyzymd compare submit contacts --dry-run
+polyzymd compare submit hydrogen_bonds --dry-run
 
 # Use job arrays for efficiency
-polyzymd compare submit contacts --job-arrays --partition aa100
+polyzymd compare submit hydrogen_bonds --job-arrays --partition aa100
 
 # Rely on plugin memory hints and cluster default partition
 polyzymd compare submit hydrogen_bonds --qos normal
 
 # Blanca condo nodes at CU Boulder
 module load slurm/blanca
-polyzymd compare submit contacts \
+polyzymd compare submit hydrogen_bonds \
     -f comparison.yaml \
     --partition blanca-shirts \
     --account blanca-shirts \
@@ -1333,11 +1337,11 @@ Options:
 #### Example
 
 ```bash
-# Check status of contacts SLURM jobs
-polyzymd compare status contacts
+# Check status of hydrogen-bond SLURM jobs
+polyzymd compare status hydrogen_bonds
 
 # Reconcile with SLURM scheduler and get JSON output
-polyzymd compare status contacts --reconcile --json
+polyzymd compare status hydrogen_bonds --reconcile --json
 ```
 
 ### polyzymd compare finalize
@@ -1362,10 +1366,10 @@ Options:
 
 ```bash
 # Finalize after SLURM jobs complete
-polyzymd compare finalize contacts
+polyzymd compare finalize hydrogen_bonds
 
 # Allow partial results (some conditions may have failed)
-polyzymd compare finalize contacts --allow-partial
+polyzymd compare finalize hydrogen_bonds --allow-partial
 ```
 
 ---
@@ -1396,8 +1400,8 @@ polyzymd compare plot-all
 # Show available plots
 polyzymd compare plot-all --list-available
 
-# Plot only contacts
-polyzymd compare plot-all -a contacts
+# Plot only hydrogen bonds
+polyzymd compare plot-all -a hydrogen_bonds
 ```
 
 ---

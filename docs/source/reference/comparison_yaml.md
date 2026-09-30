@@ -26,17 +26,17 @@ Typical local workflow:
 
 ```bash
 pixi run -e analysis polyzymd compare validate -f comparison.yaml
-pixi run -e analysis polyzymd compare run contacts -f comparison.yaml
+pixi run -e analysis polyzymd compare run hydrogen_bonds -f comparison.yaml
 pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
 ```
 
 Typical SLURM workflow:
 
 ```bash
-pixi run -e analysis polyzymd compare submit contacts -f comparison.yaml --dry-run
-pixi run -e analysis polyzymd compare submit contacts -f comparison.yaml --partition <part>
-pixi run -e analysis polyzymd compare status contacts -f comparison.yaml
-pixi run -e analysis polyzymd compare finalize contacts -f comparison.yaml
+pixi run -e analysis polyzymd compare submit hydrogen_bonds -f comparison.yaml --dry-run
+pixi run -e analysis polyzymd compare submit hydrogen_bonds -f comparison.yaml --partition <part>
+pixi run -e analysis polyzymd compare status hydrogen_bonds -f comparison.yaml
+pixi run -e analysis polyzymd compare finalize hydrogen_bonds -f comparison.yaml
 pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
 ```
 
@@ -59,7 +59,7 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  contacts: {}
+  hydrogen_bonds: {}
 ```
 
 ---
@@ -140,8 +140,8 @@ parallelism.
 ## `plugins`
 
 Presence of a key **enables** that analysis. The value is a mapping of that
-plugin's settings. An empty mapping (`contacts: {}`) enables the plugin with all
-defaults.
+plugin's settings. An empty mapping (`hydrogen_bonds: {}`) enables the plugin with
+all defaults.
 
 ### `plugins.rmsf`
 
@@ -181,19 +181,10 @@ ignored with a warning, and leaves every other plugin in the file working. See
 
 ### `plugins.contacts`
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `polymer_selection` | string | `"chainid C"` | MDAnalysis selection for polymer atoms |
-| `protein_selection` | string | `"chainid A"` | MDAnalysis selection for protein atoms |
-| `cutoff` | float | `4.5` | Contact distance cutoff in Angstroms |
-| `grouping` | string | `"aa_class"` | Residue grouping: `"aa_class"`, `"secondary_structure"`, or `"none"` |
-| `compute_residence_times` | bool | `true` | Whether to compute aggregate residence-time summaries and plots. When `false`, per-replicate contact events are still stored and the canonical artifact identity changes. |
-| `protein_groups` | mapping | `null` | Custom residue groups: `{group_name: [resid, ...]}` |
-| `protein_partitions` | mapping | `null` | Mutually exclusive partitions for contact-fraction and residence-time plots: `{partition_name: [group_name, ...]}` |
-| `polymer_types` | list of string | `null` | Explicit polymer type labels. If `null`, types are auto-detected from topology. |
-| `fdr_alpha` | float | `0.05` | Per-plugin FDR threshold |
-| `min_effect_size` | float | `0.5` | Minimum Cohen's d for practical significance |
-| `top_residues` | int | `10` | Max residues shown per condition in formatted output |
+Polymer-protein contacts run through `polyzymd analyze contacts` or the study
+API, not through `comparison.yaml`. A `plugins.contacts` block in an existing
+file still loads, is ignored with a warning, and leaves every other plugin in
+the file working. See {doc}`../how_to/analysis_contacts_quickstart`.
 
 ### `plugins.rmsd`
 
@@ -387,50 +378,17 @@ then any values under `theme:` override individual fields.
 
 ### Per-Analysis Plot Settings
 
-Per-analysis plot customization keys go under `plot_settings:` at the same
-level as `style`, `dpi`, etc.
+`hydrogen_bonds`, the only shipped comparison plugin, has no per-analysis plot
+settings; its figures use the keys above.
 
 **`plot_settings.rmsf`:** retired. A block still loads and is ignored with a
 warning; mark residues on the RMSF profiles with
 `polyzymd analyze rmsf --set highlight_residues='[...]'` instead.
 
-**`plot_settings.catalytic_triad`:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `generate_kde_panel` | `true` | Multi-row KDE panel |
-| `generate_bars` | `true` | Threshold bar chart |
-| `generate_2d_kde` | `false` | 2D joint KDE |
-| `kde_xlim` | `[0, 7]` | X-axis range for KDE (Angstroms) |
-
-**`plot_settings.distances`:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `show_threshold` | `true` | Threshold line on distributions |
-| `use_kde` | `true` | KDE vs histogram |
-| `generate_state_bars` | `true` | Above/below threshold bars |
-
-**`plot_settings.contacts`:**
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `generate_contact_fraction_profile` | `true` | Per-residue contact fraction profile |
-| `generate_residence_time_profile` | `true` | Per-residue residence time profile |
-| `generate_cf_by_aa_class_bars` | `true` | Contact fraction by amino acid class bar chart |
-| `generate_cf_by_partition_bars` | `true` | Contact fraction by user partition bar charts |
-| `generate_rt_by_aa_class_bars` | `true` | Residence time by amino acid class bar chart |
-| `generate_rt_by_partition_bars` | `true` | Residence time by user partition bar charts |
-
-**`plot_settings.secondary_structure`:** retired. A block still loads and is
-ignored with a warning.
-
--------|---------|-------------|
-| `generate_timeline` | `true` | Residue × time SS heatmap |
-| `generate_content_bars` | `true` | Helix/strand/coil fraction bars |
-| `generate_individual_bars` | `true` | One bar chart per SS type |
-| `generate_diff_heatmap` | `true` | Δ(helix persistence) vs control |
-| `diff_colormap` | `"RdBu_r"` | Diverging colormap for diff heatmap |
+**`plot_settings.catalytic_triad`, `plot_settings.distances`,
+`plot_settings.contacts` and `plot_settings.secondary_structure`:** retired.
+A block still loads and is ignored with a warning; `polyzymd analyze` draws
+the figures of these analyses.
 
 ---
 
@@ -441,8 +399,8 @@ ignored with a warning.
   before launching a full analysis run.
 - Relative paths in `config:` are resolved from the directory containing
   `comparison.yaml`, not from your working directory.
-- An empty plugin mapping (e.g., `contacts: {}`) enables the analysis with all
-  default settings — you only need to specify fields you want to override.
+- An empty plugin mapping (e.g., `hydrogen_bonds: {}`) enables the analysis with
+  all default settings — you only need to specify fields you want to override.
 - Set `control:` to match one of your condition labels to get Δ-from-control
   columns in comparison tables and plots.
 ```
