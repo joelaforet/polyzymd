@@ -40,9 +40,13 @@ twice, with MDTraj's Shrake-Rupley code as in {doc}`analysis_sasa_quickstart`:
 with the protein alone, and with the protein and the polymer, whose atoms
 cover the protein without being counted. A residue's relative SASA is its SASA
 divided by its maximum accessible surface area from Tien et al. (2013). The
-residue is in contact on a frame when its relative SASA is at least
-`threshold` (0.2) with the protein alone and below it with the polymer: the
-polymer buries a residue that would otherwise be exposed. The polymer's SASA
+residue is **exposed** on a frame when its relative SASA with the protein
+alone is at least `exposed_threshold` (0.2), and in contact when it is exposed
+and the polymer **buries** it: its relative SASA with the polymer is below
+`buried_threshold` (0.2) and lower than without the polymer.
+`exposed_threshold=0` counts every residue as exposed, so any residue the
+polymer brings below `buried_threshold` is in contact, including one the
+protein itself already partly buries. The polymer's SASA
 loss on each residue, `max(0, alone - with)`, is also reported in Å².
 
 Before the SASA with the polymer is computed, each polymer molecule (each
@@ -129,7 +133,8 @@ Settings, passed with `--set`:
 | `polymer_types` | none | Residue names to keep in the polymer selection, such as `[SBM]` |
 | `use_pbc` | `true` | Use the frame's box: the minimum image for `distance`, and for `occlusion` each polymer molecule moved to its image nearest the protein |
 | `regions` | none | Mapping of region names to selections, each reported as `<region>_contact_fraction`; a region cannot be named `coverage`, `mean`, `contact`, `classes`, `occluded`, `occlusion`, a monomer type or an amino-acid class |
-| `threshold` | `0.2` | Occlusion only: relative SASA separating an exposed residue from a buried one |
+| `exposed_threshold` | `0.2` | Occlusion only: relative SASA with the protein alone at or above which a residue is exposed; 0 counts every residue as exposed |
+| `buried_threshold` | `0.2` | Occlusion only: relative SASA with the polymer below which an exposed residue is buried, and so in contact; above 0 |
 | `max_asa` | `theoretical` | Occlusion only: the column of Tien et al. (2013) Table 1, `theoretical` (which the authors recommend) or `empirical` |
 | `probe_radius_nm` | `0.14` | Occlusion only: SASA probe radius in nm |
 | `n_sphere_points` | `960` | Occlusion only: points on each atom's sphere |
@@ -208,8 +213,8 @@ print(profile.over_labels("mean", "mean_contact_fraction").compare(control="SBMA
 print(profile.compare(control="SBMA 50%").to_agent_text())  # residue by residue
 ```
 
-`residue_occlusion(protein, occluder, frames, threshold=0.2, types=(),
-max_asa="theoretical", pbc=True)` returns the rows of `OCCLUSION_PARTS`,
+`residue_occlusion(protein, occluder, frames, exposed_threshold=0.2,
+buried_threshold=0.2, types=(), max_asa="theoretical", pbc=True)` returns the rows of `OCCLUSION_PARTS`,
 `contact_fraction`, `exposed_fraction`, `occluded_area` and `exposed_area`, then
 one contact-fraction row per residue name in `types`, with one column per
 residue that has a maximum ASA. `residue_contacts(protein, polymer, frames,

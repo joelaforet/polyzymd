@@ -315,7 +315,13 @@ def test_analyze_distance_reports_coverage_by_default(configs, schedules, tmp_pa
     assert settings["polymer_selection"] == "(chainid C) and not element H"
     assert settings["polymer_types_found"] == ["EGM", "SBM"]
     assert settings["unmeasured_residues"] == []
-    assert not {"threshold", "max_asa", "probe_radius_nm", "n_sphere_points"} & set(settings)
+    assert not {
+        "exposed_threshold",
+        "buried_threshold",
+        "max_asa",
+        "probe_radius_nm",
+        "n_sphere_points",
+    } & set(settings)
     assert not any("maximum ASA" in warning for warning in report.warnings)
     assert settings["residues"] == {
         "classes": {"charged_positive": [1, 2], "nonpolar": [3], "charged_negative": [4]}
