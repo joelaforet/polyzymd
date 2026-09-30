@@ -116,6 +116,7 @@ FUNCTION_ANALYSES = {
         "max_asa": "theoretical",
         "probe_radius_nm": 0.14,
         "n_sphere_points": 960,
+        "tolerance_ps": 0.0,
     },
     "distances": {"pairs": None, "threshold": 3.5, "use_pbc": True},
     "catalytic_triad": {"pairs": None, "threshold": 3.5, "use_pbc": True},
@@ -1133,6 +1134,88 @@ def _analyze_contacts(
             "n_sphere_points": functions.SASA_SPHERE_POINTS,
         }
         options |= {key: settings[key] for key, value in defaults.items() if settings[key] != value}
+    occlusion = method == "occlusion"
+    fraction_runs = [
+        "coverage",
+        "mean_contact_fraction",
+        *(f"{name}_contact_fraction" for name in [*types, *classes, *region_ids]),
+        *(["occluded_area", "occlusion_fraction"] if occlusion else []),
+        "contact_fraction_residues",
+        *(f"{name}_contact_fraction_residues" for name in types),
+        *(["occluded_area_residues"] if occlusion else []),
+    ]
+    lifetime_runs = {
+        "mean_lifetime": ("mean_lifetime", "polymer"),
+        **{f"{name}_mean_lifetime": ("mean_lifetime", name) for name in types},
+        "lifetime_events": ("n_events", "polymer"),
+        "censored_fraction": ("censored_fraction", "polymer"),
+    }
+    all_runs = [*fraction_runs, *lifetime_runs]
+    run = run or "coverage"
+    if run not in all_runs:
+        raise ProtocolError(
+            f"contacts: no result named {run!r}.", hint=f"Use --run with one of {all_runs}."
+        )
+    if run in lifetime_runs:
+        tolerance = float(settings["tolerance_ps"])
+        if tolerance < 0:
+            raise ProtocolError(
+                f"contacts: tolerance_ps must be at least 0, got {tolerance}.",
+                hint="Pass --set tolerance_ps=0 for events that end at the first absent frame.",
+            )
+        life = {key: value for key, value in options.items() if key != "types"}
+        if not occlusion:
+            life["method"] = method
+        if tolerance > 0:
+            life["tolerance_ps"] = tolerance
+        table = study.per_replicate(
+            functions.contact_lifetimes,
+            select(protein),
+            select(polymer),
+            unit=None,
+            labels=["polymer", *types],
+            name="contact_lifetimes",
+            recompute=recompute,
+            output_dir=output_dir,
+            parts=list(functions.LIFETIME_PARTS),
+            types=types,
+            **life,
+        )
+        part, group = lifetime_runs[run]
+        values = table[part].over_labels(lambda v: float(v[0]), run, labels=[group])
+        values.unit, values.bounds = {
+            "mean_lifetime": ("ns", (0.0, None)),
+            "n_events": (None, (0.0, None)),
+            "censored_fraction": (None, (0.0, 1.0)),
+        }[part]
+        report = values.compare() if len(study) > 1 else values.summary()
+        empty = [
+            f"{label} replicate {row[0]}"
+            for label, table_rows in values.rows.items()
+            for row in table_rows
+            if not np.isfinite(row[1])
+        ]
+        if empty:
+            report.warnings.append(
+                f"contacts: {', '.join(empty)} have no contact event for {group}, so {run} is "
+                "undefined (nan) there."
+            )
+        report.provenance.settings = {
+            **{
+                key: value
+                for key, value in settings.items()
+                if key not in CONTACT_METHOD_SETTINGS[other]
+            },
+            "protein_selection": protein,
+            "polymer_selection": polymer,
+            "polymer_types_found": types,
+            "unmeasured_residues": unmeasured,
+        }
+        if plots:
+            folder = _figures_dir(output_dir, "contacts")
+            values.plot(folder, f"contacts_{run}_comparison", title=run.replace("_", " "))
+            report.provenance.output_paths["figures"] = str(folder)
+        return report.model_copy(update={"analysis": "contacts", "run": run, "all_runs": all_runs})
     rows = study.per_replicate(
         function,
         select(protein),
@@ -1195,12 +1278,9 @@ def _analyze_contacts(
             area.source, "occlusion_fraction", None, True, ratio
         )
         residue_runs["occluded_area_residues"] = area
-    runs = [*totals, *residue_runs]
-    run = run or "coverage"
-    if run not in runs:
-        raise ProtocolError(
-            f"contacts: no result named {run!r}.", hint=f"Use --run with one of {runs}."
-        )
+    if [*totals, *residue_runs] != fraction_runs:
+        raise RuntimeError("contacts: the planned results differ from the computed ones.")
+    runs = all_runs
     values = residue_runs[run] if run in residue_runs else totals[run]
     report = values.compare() if len(study) > 1 else values.summary()
     if unmeasured:
