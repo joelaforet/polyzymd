@@ -460,27 +460,6 @@ def test_provenance_refresh_keeps_bond_facts(tmp_path: Path) -> None:
     assert refreshed.bond_source == "conect"
 
 
-def test_every_condition_failing_the_same_way_is_reported(tmp_path: Path) -> None:
-    """A typed error shared by every condition reaches the raised message."""
-
-    from polyzymd.analyses._framework.lifecycle import _no_conditions_message
-    from polyzymd.analyses.exceptions import TopologyBondsMissingError
-
-    error = TopologyBondsMissingError(
-        context="contacts polymer chain detection",
-        n_atoms=512000,
-        topology=tmp_path / "solvated_system.pdb",
-    )
-    message = _no_conditions_message("contacts", [("no_polymer", error), ("sbma", error)])
-
-    assert "TopologyBondsMissingError" in message
-    assert "guess bonds" in message
-    assert "512000 atoms" in message
-
-    mixed = _no_conditions_message("contacts", [("a", error), ("b", ValueError("other"))])
-    assert mixed == "contacts: no conditions succeeded analysis."
-
-
 def test_loader_make_whole_requires_bonds(tmp_path: Path) -> None:
     """``make_whole`` on a bond-free topology raises the typed error."""
 

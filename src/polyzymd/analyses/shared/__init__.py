@@ -1,40 +1,37 @@
-"""Reusable shared utilities for analysis plugins.
-
-This package provides contributor-facing utilities that are broadly reusable
-across analysis plugins. Framework internals, CLI helpers, and plugin-private
-artifact helpers live with their owning packages.
-
-In particular, selectors and custom selections are not re-exported from this
-package root and should be imported from:
-
-- ``polyzymd.analyses.shared.selectors``
-- ``polyzymd.analyses.shared.selections``
+"""Building blocks the analyses are made of: loading, windows, statistics and plotting.
 
 Sub-modules
 -----------
 loader
     Trajectory loading, time parsing, frame conversion.
-centroid
-    The frame closest to the iterative average structure, for centroid references.
-statistics
-    SEM, per-residue/region aggregation, weighted mean.
-autocorrelation
-    ACF, correlation time, statistical inefficiency.
+window
+    The production window of a replicate after the equilibration time.
 selections
     Extended selection syntax (midpoint, COM), position retrieval.
 diagnostics
     Selection diagnostics, equilibration validation.
-window
-    Centralized trajectory window resolution for MDAnalysis job lifecycles.
+centroid
+    The frame closest to the iterative average structure, for centroid references.
+topology
+    Checks that a topology carries the bonds an analysis needs.
+statistics
+    Mean, standard error and Student t interval of replicate values.
+inferential_statistics
+    t tests, effect sizes and the Benjamini-Hochberg correction.
+autocorrelation
+    Statistical inefficiency, effective sample size and detected equilibration.
+aa_classification
+    Maximum accessible surface area of each amino acid.
+groupings
+    Physicochemical classes of amino acids.
 plotting
-    Shared plotting helpers (axis styling, figure saving, grouped bars, etc.).
+    Axis styling, condition colours, grouped bars, uncertainty bands, figure saving.
 """
 
 from __future__ import annotations
 
-# Re-export the most commonly used symbols for convenience.
-# Plugins can do:  from polyzymd.analyses.shared import TrajectoryLoader
-# or import specific sub-modules directly.
+# Re-export the most commonly used symbols, so that
+# ``from polyzymd.analyses.shared import TrajectoryLoader`` works.
 from polyzymd.analyses.shared.autocorrelation import (
     MIN_RECOMMENDED_N_INDEPENDENT,
     ACFResult,
@@ -55,36 +52,22 @@ from polyzymd.analyses.shared.loader import (
 )
 from polyzymd.analyses.shared.plotting import (
     add_uncertainty_footnote,
-    annotate_cells,
     apply_axis_style,
     apply_legend,
     band_half_widths,
     error_bar_half_widths,
     get_condition_color_map,
-    get_condition_colors,
     get_output_path,
     get_palette_colors,
-    get_theme,
     grouped_bars,
     order_condition_labels,
-    plugin_plot_settings,
-    resolve_error_bar,
     save_figure,
-    symmetric_clim,
 )
 from polyzymd.analyses.shared.statistics import (
     CI_METHOD_STUDENT_T,
-    UNCERTAINTY_KIND_REPLICATE_SEM,
     MeanSemCI,
-    PerResidueStats,
-    StatResult,
-    aggregate_per_residue_stats,
-    aggregate_region_stats,
-    compute_sem,
     mean_sem_ci,
     student_t_coverage_factor,
-    uncertainty_block,
-    weighted_mean_with_sem,
 )
 from polyzymd.analyses.shared.window import (
     TrajectoryWindow,
@@ -104,17 +87,9 @@ __all__ = [
     "resolve_replicate_trajectory_window",
     # Statistics
     "CI_METHOD_STUDENT_T",
-    "UNCERTAINTY_KIND_REPLICATE_SEM",
     "MeanSemCI",
-    "StatResult",
-    "PerResidueStats",
-    "compute_sem",
     "mean_sem_ci",
     "student_t_coverage_factor",
-    "uncertainty_block",
-    "aggregate_per_residue_stats",
-    "aggregate_region_stats",
-    "weighted_mean_with_sem",
     # Autocorrelation
     "ACFResult",
     "CorrelationTimeResult",
@@ -126,23 +101,17 @@ __all__ = [
     "n_effective",
     "check_statistical_reliability",
     # Plotting
-    "get_theme",
     "apply_axis_style",
     "apply_legend",
     "get_palette_colors",
     "order_condition_labels",
-    "get_condition_colors",
     "get_condition_color_map",
     "add_uncertainty_footnote",
     "band_half_widths",
     "error_bar_half_widths",
-    "plugin_plot_settings",
-    "resolve_error_bar",
     "get_output_path",
     "save_figure",
     "grouped_bars",
-    "annotate_cells",
-    "symmetric_clim",
     # Plot settings (lazily re-exported from config.analysis_settings)
     "PlotSettings",
 ]

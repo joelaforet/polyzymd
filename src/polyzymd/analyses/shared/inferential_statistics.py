@@ -3,8 +3,8 @@
 This module provides statistical functions for comparing analysis results
 across multiple conditions, including t-tests, ANOVA, and effect sizes.
 
-It is the canonical home for inferential statistics used by analysis plugins
-and comparison utilities.
+:meth:`~polyzymd.analyses.timeseries.ReplicateValues.compare` takes its t
+tests, effect sizes and Benjamini-Hochberg correction from here.
 
 All functions use SciPy for statistical calculations.
 

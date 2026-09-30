@@ -1419,8 +1419,8 @@ class TrajectoryLoader:
         """Build the chain-ID warning for GRO topology layouts.
 
         GRO files do not reliably preserve chain identifiers, which can
-        break chain-based selections (``chainid A/B/C``) used by many
-        analysis plugins.
+        break chain-based selections (``chainid A/B/C``) in analysis
+        settings.
 
         Parameters
         ----------
@@ -1437,8 +1437,8 @@ class TrajectoryLoader:
             return None
         return (
             f"Using GRO topology {layout.topology_path} — GRO files may not preserve "
-            "chain identifiers. Chain-based selections (chainid A/B/C) used by "
-            "analysis plugins may be unreliable. Prefer a PDB topology when available."
+            "chain identifiers. Chain-based selections (chainid A/B/C) in "
+            "analysis selections may be unreliable. Prefer a PDB topology when available."
         )
 
     def _warn_gro_topology(self, layout: "TrajectoryLayout") -> str | None:
@@ -1978,8 +1978,8 @@ class TrajectoryLoader:
         applies its own search order (e.g. PDB preference for GROMACS,
         ``solvated_system.pdb`` preference for OpenMM).
 
-        This method is used by several plugins that pass an explicit
-        ``working_dir`` unrelated to the current replicate.  The
+        A caller may pass a ``working_dir`` unrelated to the current
+        replicate.  The
         replicate index is inferred from the directory name when
         possible (``run_<N>``), falling back to ``1``.
 

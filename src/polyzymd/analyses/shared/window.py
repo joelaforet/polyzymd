@@ -1,8 +1,7 @@
 """Trajectory window helpers for trajectory-backed analyses.
 
-This module centralizes the frame-window logic shared by analysis plugins that
-need to combine equilibration skipping with MDAnalysis ``run()`` slice
-arguments. The helpers return a validated window that can be passed directly to
+The helpers turn an equilibration time into the first production frame of a
+replicate and combine it with MDAnalysis ``run()`` slice arguments. The helpers return a validated window that can be passed directly to
 trajectory-native runners without PolyzyMD re-owning the frame loop.
 """
 

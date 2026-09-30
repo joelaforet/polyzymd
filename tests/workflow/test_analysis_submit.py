@@ -581,7 +581,7 @@ def test_the_task_options(configs, tmp_path) -> None:
 
 
 def test_the_task_options_resolve_the_default_equilibration(configs, tmp_path) -> None:
-    from polyzymd.config.comparison import AnalysisDefaults
+    from polyzymd.config.analysis_settings import AnalysisDefaults
 
     arguments = ["rg", "-c", str(configs["A"]), "--output-dir", str(tmp_path / "out")]
     result = CliRunner().invoke(analyze_command, [*arguments, "--submit", "--dry-run"])

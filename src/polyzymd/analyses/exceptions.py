@@ -1,13 +1,12 @@
-"""Structured exceptions for the analysis orchestration lifecycle.
+"""Typed errors of the analyses, each with a message and an optional one-line fix hint.
 
-These exceptions provide explicit failure categories while preserving
-the existing behavior where expected per-condition failures can be
-handled gracefully by higher-level orchestration.
+``polyzymd analyze`` prints the message and the hint of an
+:class:`AnalysisError` on one line each and exits with status 2.
 """
 
 
 class AnalysisError(Exception):
-    """Base class for analysis lifecycle errors.
+    """Base class of the analysis errors.
 
     Parameters
     ----------
@@ -28,34 +27,6 @@ class AnalysisError(Exception):
         self.hint = hint
 
 
-class PluginContractError(AnalysisError):
-    """Raised when a plugin violates the Analysis contract."""
-
-
-class ReplicateSkippedError(AnalysisError):
-    """Raised when a replicate is skipped for a known recoverable reason."""
-
-
-class ReplicateError(AnalysisError):
-    """Raised when per-replicate computation fails unexpectedly."""
-
-
-class AggregationError(AnalysisError):
-    """Raised when condition-level aggregation fails unexpectedly."""
-
-
-class ComparisonError(AnalysisError):
-    """Raised when cross-condition comparison fails."""
-
-
-class PlotError(AnalysisError):
-    """Raised when plot generation fails."""
-
-
-class DependencyError(AnalysisError):
-    """Raised when declared analysis dependencies are invalid or missing."""
-
-
 class StatisticsError(AnalysisError, ValueError):
     """Raised when a statistical estimator is given an input it cannot use.
 
@@ -63,6 +34,7 @@ class StatisticsError(AnalysisError, ValueError):
     silently degraded zero. It also subclasses ``ValueError`` so that callers
     written before the typed error existed keep working.
     """
+
 
 class TopologyBondsMissingError(AnalysisError):
     """Raised when an analysis needs topology bonds and the topology has none.
@@ -105,17 +77,6 @@ class TopologyBondsMissingError(AnalysisError):
             message = f"{message} {detail}"
         super().__init__(message)
 
-class StaleCacheError(AnalysisError):
-    """Raised when a cached result no longer matches the inputs it records.
-
-    The message names the input files that changed and points at
-    ``--recompute``, which is the only way forward when the command that hit
-    the stale cache cannot recompute the result itself.
-    """
-
 
 class ProtocolError(AnalysisError):
     """Raised when an agent-facing protocol run cannot be set up or reported."""
-
-class SelectionError(AnalysisError):
-    """Raised when an analysis selection is empty or cannot be resolved."""

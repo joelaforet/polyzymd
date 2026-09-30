@@ -1,12 +1,6 @@
 """Configuration management with YAML support and validation."""
 
 from polyzymd.config.analysis_settings import PlotSettings, PlotTheme
-from polyzymd.config.comparison import (
-    ComparisonConfig,
-    ConditionConfig,
-    PluginSettingsContainer,
-    generate_comparison_template,
-)
 from polyzymd.config.loader import load_config, save_config
 from polyzymd.config.schema import (
     EnzymeConfig,
@@ -30,12 +24,8 @@ __all__ = [
     "ThermodynamicsConfig",
     "SimulationPhaseConfig",
     "OutputConfig",
-    "ComparisonConfig",
-    "ConditionConfig",
     "PlotSettings",
     "PlotTheme",
-    "PluginSettingsContainer",
-    "generate_comparison_template",
     "load_config",
     "save_config",
 ]

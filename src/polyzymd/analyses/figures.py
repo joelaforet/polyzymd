@@ -78,7 +78,7 @@ def plot_timeseries(
     Each replicate is a thin line. Where every replicate of a condition has
     the same times over its first frames, a thick line gives their mean over
     those frames, with a band of the 95 percent Student t interval across
-    replicates at each time, as the legacy rg and rmsd plugins drew it. The
+    replicates at each time. The
     equilibration window, which is not stored, is shaded from the start of
     each trajectory, found from the frame indices and times, to the end of
     the window.
@@ -205,8 +205,7 @@ def plot_distribution(
     """Draw the distribution of the per-frame values of each condition.
 
     For each condition, a thick line is the Gaussian KDE of every production
-    frame of every replicate pooled, as the legacy distances and catalytic
-    triad plugins drew it, and a thin line of the same colour is the KDE of
+    frame of every replicate pooled, and a thin line of the same colour is the KDE of
     each replicate alone, so the spread between replicates shows. A
     ``threshold`` is drawn as a red dashed vertical line. ``title``, by
     default the series name, also names the quantity on the x axis.
@@ -277,7 +276,7 @@ def plot_distributions(
     Each panel shows, for every condition, the Gaussian KDE of every frame
     of every replicate pooled as a thick line and the KDE of each replicate
     as a thin line, with the series' threshold from ``thresholds`` as a red
-    dashed line, as the legacy catalytic triad KDE panel stacked its pairs.
+    dashed line.
     The panels share the x axis, labelled ``quantity`` and the unit of the
     series. ``titles`` default to the series names, and ``output_dir`` to
     the ``figures`` folder next to ``polyzymd_results``.
@@ -409,7 +408,7 @@ def plot_profile(
     Each replicate's value at every label is a thin line. A thick line gives
     each condition's mean at every label, with a band of the 95 percent
     Student t interval across replicates, the values that ``summary()``
-    reports, as the legacy rmsf profile drew each condition's mean and band.
+    reports.
     Numeric labels, such as residue IDs, are placed at their value on the x
     axis and other labels in order. Each ``highlight`` label is marked with a
     red dashed vertical line.
@@ -627,8 +626,7 @@ def plot_values(
     Each bar is the condition's mean with its 95 percent Student t interval
     from :func:`~polyzymd.analyses.shared.statistics.mean_sem_ci`, drawn by
     :func:`~polyzymd.analyses.shared.plotting.grouped_bars` with every
-    replicate value as a point, as the legacy distances and catalytic triad
-    threshold bar charts drew each pair's fraction. ``labels`` name the
+    replicate value as a point. ``labels`` name the
     groups and default to the source names. ``output_dir`` defaults to the
     ``figures`` folder next to ``polyzymd_results``.
 
