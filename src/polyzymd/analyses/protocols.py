@@ -48,6 +48,28 @@ if TYPE_CHECKING:
     from polyzymd.analyses.base import Analysis
     from polyzymd.config.comparison import ComparisonConfig
 
+#: Published page of the polyzymd analyze protocol.
+ANALYZE_PROTOCOL_URL = (
+    "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html"
+)
+
+#: Agent skill that teaches the polyzymd analyze protocol.
+ANALYZE_AGENT_SKILL = ".claude/skills/polyzymd-analyze/SKILL.md"
+
+#: Published page on writing an analysis as a function for the study API.
+ANALYSIS_API_URL = "https://polyzymd.readthedocs.io/en/latest/explanation/analysis_api.html"
+
+#: Published page of the catalytic triad routine on the study API.
+TRIAD_ROUTINE_URL = (
+    "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html"
+)
+
+#: Where a retirement message sends a reader, and what to point an agent at.
+RETIRED_DOCS_POINTER = (
+    f"Read {ANALYZE_PROTOCOL_URL}, or point an agent at {ANALYZE_AGENT_SKILL} or that page "
+    "to learn the protocol."
+)
+
 # Verdict vocabulary. Kept small so a caller can branch on it without parsing
 # the rest of the sentence.
 VERDICT_LARGER = "larger"
@@ -527,8 +549,6 @@ def build_report(
 def _refuse_retired(name: str) -> None:
     """Raise ``ProtocolError`` for ``catalytic_triad``, which is now a routine on the study API."""
     if name == "catalytic_triad":
-        from polyzymd.config.comparison import TRIAD_ROUTINE_URL
-
         raise ProtocolError(
             "catalytic_triad is no longer a polyzymd analyze analysis: the triad is now a "
             "routine on the study API, which counts each triad hydrogen bond with "

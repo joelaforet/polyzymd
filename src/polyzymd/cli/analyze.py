@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Sequence
 
 import click
 
@@ -489,31 +489,75 @@ def _run(
 def _refuse_comparison_file(name: str, path: Path, equilibration: str | None) -> None:
     """Raise ``ProtocolError`` saying -f is retired, with the ``-c`` command built from ``path``.
 
-    The command comes from
-    :func:`~polyzymd.cli._compare_utils.analyze_command_for`. A file that
+    The command comes from :func:`_command_from_comparison_file`. A file that
     cannot be read gives the command with placeholders instead.
     """
-    import warnings
-
-    import yaml
-
     from polyzymd.analyses.exceptions import ProtocolError
-    from polyzymd.cli._compare_utils import analyze_command_for
-    from polyzymd.config.comparison import RETIRED_DOCS_POINTER, ComparisonConfig
+    from polyzymd.analyses.protocols import RETIRED_DOCS_POINTER
 
-    command = (
+    command = _command_from_comparison_file(name, Path(path), equilibration) or (
         f"polyzymd analyze {name} -c <config.yaml> --label <label> ... "
         "--replicates <range> --eq <time>"
     )
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            config = ComparisonConfig.from_yaml(Path(path).expanduser().resolve())
-        command = analyze_command_for(name, config, equilibration)
-    except (OSError, ValueError, TypeError, yaml.YAMLError):
-        pass  # An unreadable file still gets the command with placeholders.
     raise ProtocolError(
         "comparison.yaml is no longer read by polyzymd analyze: every analysis reads the "
         "simulation configs given with -c, control first.",
         hint=f"Run {command}. {RETIRED_DOCS_POINTER}",
     )
+
+
+def _command_from_comparison_file(name: str, path: Path, equilibration: str | None) -> str | None:
+    """Return the ``polyzymd analyze`` command that runs ``name`` on the conditions of a comparison.yaml.
+
+    Only ``conditions`` (``label``, ``config``, ``replicates``) and
+    ``defaults.equilibration_time`` are read, with ``yaml.safe_load``; each
+    config is resolved against the file's folder. ``--eq`` is
+    ``equilibration``, else the file's window, else ``10ns``. See
+    :func:`analyze_command_for` for the rest. Returns ``None`` when the file
+    cannot be read or lists no condition.
+    """
+    import yaml
+
+    try:
+        resolved = path.expanduser().resolve()
+        data = yaml.safe_load(resolved.read_text())
+        conditions = [
+            (str(item["label"]), resolved.parent / str(item["config"]), item.get("replicates"))
+            for item in data["conditions"]
+        ]
+        window = equilibration or (data.get("defaults") or {}).get("equilibration_time") or "10ns"
+    except (OSError, yaml.YAMLError, KeyError, TypeError, AttributeError):
+        return None
+    return analyze_command_for(name, conditions, window) if conditions else None
+
+
+def analyze_command_for(
+    name: str,
+    conditions: Sequence[tuple[str, Path, int | Sequence[int] | None]],
+    equilibration: str,
+) -> str:
+    """Return the ``polyzymd analyze`` command that runs ``name`` on ``conditions``.
+
+    ``conditions`` holds one ``(label, config path, replicates)`` per
+    condition, control first. The command has one ``-c <config> --label
+    <label>`` pair per condition in that order; ``--replicates`` when every
+    condition lists the same replicates; ``--eq equilibration``; and ``--set
+    pairs=<pairs.yaml>`` for ``distances``. ``catalytic_triad`` becomes
+    ``distances``, which measures the triad distances.
+    """
+    import shlex
+
+    pairs = name in ("distances", "catalytic_triad")
+    command = ["polyzymd analyze distances" if pairs else f"polyzymd analyze {name}"]
+    for label, config, _ in conditions:
+        command += [f"-c {shlex.quote(str(config))}", f"--label {shlex.quote(label)}"]
+    replicate_sets = {
+        tuple([replicates] if isinstance(replicates, int) else replicates or ())
+        for *_, replicates in conditions
+    }
+    if len(replicate_sets) == 1 and (only := next(iter(replicate_sets))):
+        command.append(f"--replicates {','.join(map(str, only))}")
+    command.append(f"--eq {equilibration}")
+    if pairs:
+        command.append("--set pairs=<pairs.yaml>")
+    return " ".join(command)
