@@ -44,7 +44,7 @@ def rmsd(atoms: Any, reference: Any) -> float:
     centres of geometry, rotates ``atoms`` onto ``reference`` and returns the
     square root of the mean squared distance per atom, in Å, with every atom
     weighted equally. This is what ``MDAnalysis.analysis.rms.RMSD`` computes
-    for one selection.
+    for one selection, as the legacy rmsd plugin did.
 
     Parameters
     ----------
@@ -72,12 +72,13 @@ def pair_distance(
     Each point is the position of the only atom for mode ``"single"``, the
     center of geometry for ``"midpoint"`` or ``"centroid"``, and the center
     of mass for ``"com"``, from
-    :func:`polyzymd.analyses.shared.selections.get_position`, which reads
-    them as ``midpoint(...)`` and ``com(...)``. The
+    :func:`polyzymd.analyses.shared.selections.get_position`, as the legacy
+    distances plugin wrote them as ``midpoint(...)`` and ``com(...)``. The
     distance comes from ``MDAnalysis.lib.distances.calc_bonds``, with the
     minimum image of the current box when ``pbc`` is true and the box has
     finite, positive lengths, and without periodic images otherwise. A
-    frame with ``pbc`` true and no valid box raises a warning.
+    frame with ``pbc`` true and no valid box raises a warning, as the legacy
+    plugin did.
 
     Parameters
     ----------
