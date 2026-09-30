@@ -547,6 +547,14 @@ CLASS_RUNS = [
     "charged_negative_contact_fraction",
     "nonpolar_contact_fraction",
 ]
+#: Lifetime runs, which follow the contact fractions in ``all_runs``.
+LIFETIME_RUNS = [
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction",
+]
 ALL_RUNS = [
     "coverage",
     "mean_contact_fraction",
@@ -559,6 +567,7 @@ ALL_RUNS = [
     "EGM_contact_fraction_residues",
     "SBM_contact_fraction_residues",
     "occluded_area_residues",
+    *LIFETIME_RUNS,
 ]
 
 
