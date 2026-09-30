@@ -346,11 +346,25 @@ def _atom_sasa(
     """Return the SASA in Å² of each ``target`` atom in each frame of ``positions`` (Å, of ``context``)."""
     import mdtraj as md
     import numpy as np
+    from scipy.spatial import cKDTree
+
+    from polyzymd.analyses.exceptions import ProtocolError
 
     topology, where = _sasa_topology(target, context)
-    trajectory = md.Trajectory(
-        xyz=np.asarray(positions, dtype=np.float32) / 10.0, topology=topology
-    )
+    xyz = np.asarray(positions, dtype=np.float32) / 10.0
+    # MDTraj's Shrake-Rupley code ends the process, without raising, when two
+    # atoms are closer than 1e-5 nm, so such frames are refused here first.
+    for frame in xyz:
+        close = cKDTree(frame).query_pairs(1e-5, output_type="ndarray")
+        if len(close):
+            first, second = context.indices[close[0]]
+            raise ProtocolError(
+                f"sasa: atoms {first} and {second} are at the same position, and MDTraj's "
+                "Shrake-Rupley code cannot compute SASA with two atoms on top of each other.",
+                hint="Check the coordinates of those atoms, or leave one of them out of the "
+                "selection.",
+            )
+    trajectory = md.Trajectory(xyz=xyz, topology=topology)
     atom_nm2 = md.shrake_rupley(
         trajectory, mode="atom", probe_radius=probe_radius_nm, n_sphere_points=n_sphere_points
     )

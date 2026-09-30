@@ -495,11 +495,6 @@ def test_nearest_images_follow_every_axis_of_the_box() -> None:
     assert moved - atoms.positions == pytest.approx(np.array([[-60.0, 60.0, -60.0]] * 2), abs=1e-4)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="src bug: MDTraj's shrake_rupley calls exit() on two atoms at the same point, "
-    "which ends the Python process instead of raising; residue_occlusion does not check first.",
-)
 def test_atoms_at_the_same_point_raise_instead_of_ending_the_process() -> None:
     """Two occluder atoms at one point: residue_occlusion should raise ProtocolError.
 
