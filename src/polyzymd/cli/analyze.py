@@ -180,6 +180,40 @@ def _one_line(text: str) -> str:
     "secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs into "
     "<output-dir>/figures/<name>/.",
 )
+@click.option(
+    "--submit",
+    is_flag=True,
+    help="Submit to SLURM instead of running here: one array task per condition and replicate, "
+    "then a report job that reuses their stored results.",
+)
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    help="With --submit, write the SLURM scripts and print the sbatch commands without submitting.",
+)
+@click.option(
+    "--preset",
+    default=None,
+    help="SLURM settings of a cluster for --submit: alpine-cpu, blanca-shirts, blanca-chbe-rdi "
+    "or bridges2-rm.",
+)
+@click.option("--partition", default=None, help="SLURM partition for --submit, over the preset.")
+@click.option("--account", default=None, help="SLURM account for --submit, over the preset.")
+@click.option("--qos", default=None, help="SLURM QoS for --submit, over the preset.")
+@click.option(
+    "--time",
+    "time_limit",
+    default=None,
+    help="Time limit of each job for --submit. Default 12:00:00.",
+)
+@click.option("--mem", default=None, help="Memory of each job for --submit. Default 16G.")
+@click.option(
+    "--cpus",
+    type=click.IntRange(min=1),
+    default=None,
+    help="CPUs of each job for --submit. Default 2.",
+)
 def analyze_command(
     name: str,
     configs: tuple[Path, ...],
@@ -196,6 +230,15 @@ def analyze_command(
     recompute: bool,
     no_eq_check: bool,
     no_plots: bool,
+    submit: bool,
+    dry_run: bool,
+    preset: str | None,
+    partition: str | None,
+    account: str | None,
+    qos: str | None,
+    time_limit: str | None,
+    mem: str | None,
+    cpus: int | None,
 ) -> None:
     """Run one analysis and print a validated result.
 
@@ -219,10 +262,48 @@ def analyze_command(
         polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --set method=distance
         polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --format json -o hbonds.json
         polyzymd analyze native_contacts -c A/config.yaml -c B/config.yaml --set reference_file=crystal.pdb
+        polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --submit --preset blanca-shirts
     """
     warn_if_wrong_pixi_env("analyze", ANALYSIS_PIXI_ENVS)
 
     from polyzymd.analyses.exceptions import AnalysisError, ProtocolError
+
+    if submit or dry_run:
+        try:
+            _submit(
+                name=name,
+                configs=configs,
+                comparison_file=comparison_file,
+                replicate_spec=replicate_spec,
+                equilibration=equilibration,
+                labels=labels,
+                run=run,
+                setting_overrides=setting_overrides,
+                output_format=output_format,
+                output_path=output_path,
+                output_dir=output_dir,
+                stride=stride,
+                recompute=recompute,
+                no_eq_check=no_eq_check,
+                no_plots=no_plots,
+                dry_run=dry_run or not submit,
+                preset=preset,
+                overrides={
+                    "partition": partition,
+                    "account": account,
+                    "qos": qos,
+                    "time": time_limit,
+                    "mem": mem,
+                    "cpus": cpus,
+                },
+            )
+        except AnalysisError as exc:
+            hint = getattr(exc, "hint", None)
+            click.echo(f"error: {_one_line(str(exc))}", err=True)
+            if hint:
+                click.echo(f"fix: {_one_line(hint)}", err=True)
+            sys.exit(EXIT_ANALYSIS_ERROR)
+        return
 
     try:
         report = _run(
@@ -259,6 +340,107 @@ def analyze_command(
             Path(output_path).write_text(rendered.rstrip("\n") + "\n")
         except OSError as exc:
             raise click.ClickException(f"Could not write output file: {exc}") from exc
+
+
+def _submit(
+    *,
+    name: str,
+    configs: tuple[Path, ...],
+    comparison_file: Path | None,
+    replicate_spec: str | None,
+    equilibration: str | None,
+    labels: tuple[str, ...],
+    run: str | None,
+    setting_overrides: tuple[str, ...],
+    output_format: str,
+    output_path: Path | None,
+    output_dir: Path | None,
+    stride: int,
+    recompute: bool,
+    no_eq_check: bool,
+    no_plots: bool,
+    dry_run: bool,
+    preset: str | None,
+    overrides: dict,
+) -> None:
+    """Write, and unless ``dry_run`` submit, the SLURM jobs of one ``polyzymd analyze`` command."""
+    import shlex
+
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.protocols import FUNCTION_ANALYSES, _study
+    from polyzymd.workflow.analysis_submit import (
+        Resources,
+        polyzymd_command,
+        submit,
+        write_submission,
+    )
+
+    if comparison_file is not None:
+        _refuse_comparison_file(name, comparison_file, equilibration)
+    if name not in FUNCTION_ANALYSES:
+        raise ProtocolError(
+            f"No analysis named {name!r}.", hint=f"Use one of {', '.join(FUNCTION_ANALYSES)}."
+        )
+    if not configs:
+        raise ProtocolError(
+            "--submit needs the simulation configs.", hint="Give them with -c config.yaml."
+        )
+    _settings(setting_overrides)
+    resources = Resources.from_preset(preset, **overrides)
+    command, environment = polyzymd_command()
+    study = _study(
+        list(configs), list(labels) or None, equilibration, _replicates(replicate_spec), stride
+    )
+    tasks = [
+        (condition.config_path, condition.label, replicate.index)
+        for condition in study
+        for replicate in condition.replicates
+    ]
+    first = next(iter(study))
+    target = Path(output_dir or Path.cwd()).expanduser().resolve()
+    common = ["--eq", first.equilibration, "--stride", str(stride), "--output-dir", str(target)]
+    for setting in setting_overrides:
+        common += ["--set", setting]
+    if run is not None:
+        common += ["--run", run]
+    if no_eq_check:
+        common.append("--no-eq-check")
+    task_options = [*common, "--no-plots", *(["--recompute"] if recompute else [])]
+    report_arguments = []
+    for condition in study:
+        report_arguments += ["-c", str(condition.config_path), "--label", condition.label]
+    if replicate_spec is not None:
+        report_arguments += ["--replicates", replicate_spec]
+    report_arguments += [*common, "--format", output_format]
+    if no_plots:
+        report_arguments.append("--no-plots")
+    submission = write_submission(
+        name,
+        tasks,
+        task_options,
+        report_arguments,
+        resources,
+        target,
+        command,
+        Path.cwd().resolve(),
+        report_output=output_path,
+        json_report=output_format == "json",
+        environment=environment,
+    )
+    click.echo(f"wrote {submission.folder}: {submission.n_tasks} replicate tasks and a report job")
+    if dry_run:
+        click.echo(f"submit with: array=$(sbatch --parsable {shlex.quote(str(submission.array))})")
+        click.echo(
+            f"             sbatch --dependency=afterany:$array {shlex.quote(str(submission.report))}"
+        )
+        return
+    submit(submission)
+    click.echo(
+        f"submitted array {submission.array_id} ({submission.n_tasks} tasks) and report job "
+        f"{submission.report_id}, which starts once every task has ended"
+    )
+    click.echo(f"report: {submission.report_output}")
+    click.echo(f"logs: {submission.folder / 'logs'}")
 
 
 def _run(
