@@ -351,21 +351,6 @@ For the same reason, a direction label such as "stabilizing" or "increased" is
 attached only when the corrected test is significant. A direction read off a
 one percent shift in two means is a description of the noise, not a finding.
 
-### Tukey HSD as an alternative
-
-When `posthoc_method` is `"tukey_hsd"`, PolyzyMD uses Tukey's Honestly
-Significant Difference test. Tukey HSD compares all pairs simultaneously and
-controls the family-wise error rate. It is most appropriate for balanced designs
-with similar replicate counts and approximately equal variance across
-conditions.
-
-Choose the post-hoc method based on the scientific question:
-
-- Use BH-corrected t-tests when specific pairs are of interest or sample sizes
-  are heterogeneous.
-- Use Tukey HSD when all pairwise contrasts are part of one balanced comparison
-  family.
-
 ### Within-trajectory uncertainty and multiple testing are separate
 
 Autocorrelation handling and multiple-comparison correction address different

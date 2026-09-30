@@ -716,7 +716,8 @@ def residue_contacts(
     follow ``protein.residues``.
 
     The atoms compared are the atoms given; select heavy atoms, such as
-    ``chainid A and not element H``, to leave hydrogens out.
+    ``chainid A and not element H``, to leave hydrogens out. With no
+    ``polymer`` atoms every value is ``nan``.
 
     Returns
     -------
@@ -853,6 +854,7 @@ def residue_occlusion(
     occluder atoms of that residue name are present. Columns follow the
     residues of ``protein`` that have a maximum ASA; residues without one,
     such as terminal caps, still cover their neighbours but are not measured.
+    With no ``occluder`` atoms every value is ``nan``.
 
     Returns
     -------
@@ -1062,7 +1064,8 @@ def contact_lifetimes(
     An event is a run of consecutive frames in which one residue is in
     contact, found by :func:`contact_events`; absences of at most
     ``tolerance_ps`` ps are filled first. A run of ``k`` frames lasts ``k``
-    times the frame spacing. Events of all residues are pooled.
+    times the frame spacing. Events of all residues are pooled. With no
+    ``polymer`` atoms every value is ``nan``.
 
     The columns are the polymer, then each residue name in ``types``, whose
     contacts are those of its atoms alone. The rows, named in
@@ -1369,7 +1372,9 @@ def hydrogen_bonds(
     degrees; see :func:`_hbond_events`. Donors, hydrogens and acceptors come
     from :func:`hbond_atoms` unless given. With ``group_b``, only bonds with
     one partner in each group count, in either direction; without it, bonds
-    within ``group_a``. Bonds within one residue are left out.
+    within ``group_a``. Bonds within one residue are left out. When a group
+    holds no atoms every value is ``nan``, as for the other hydrogen-bond
+    functions, and :func:`residue_pair_hbond_occupancy` returns no pairs.
 
     The rows, named in :data:`HBOND_PARTS`, are the mean number of hydrogen
     bonds per frame, each donor-hydrogen-acceptor counted once; the mean

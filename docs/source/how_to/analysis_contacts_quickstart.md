@@ -94,9 +94,12 @@ The first `-c` is the control. One pass over each replicate gives every result.
 By default the report shows `coverage`: for each replicate, the fraction of
 measured residues in contact on at least one production frame. The replicate
 values are summarised per condition, and every other condition is compared with
-the control by Welch's t test with the Benjamini-Hochberg correction. Every
-condition needs a polymer: the selections are checked on the first replicate of
-the control, and a selection that picks no atoms is refused.
+the control by Welch's t test with the Benjamini-Hochberg correction. A
+replicate where `protein_selection` or `polymer_selection` matches no atoms,
+such as every replicate of a no-polymer control, is left out of the statistics
+with a warning; when the control is left out, the other conditions are
+summarised and not compared. A selection that matches no atoms in any replicate
+is refused.
 
 Occlusion computes the SASA of the whole protein twice per frame, plus once
 more per monomer type, so it takes about 2 s per frame for a 180-residue

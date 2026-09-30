@@ -219,11 +219,13 @@ Relative `-c` paths are resolved from your current shell directory.
 The replicates given with `--replicates` have no run directory for that
 config. Leave out `--replicates` to use every replicate found on disk.
 
-### `hydrogen_bonds: the selection 'chainid C' of summary 'protein_polymer' picks no atoms`
+### `the control ... has no replicate where every selection matches atoms`
 
-The selections are checked on the first condition, and a condition without a
-polymer has no `chainid C`. Put a condition with a polymer first, or compare
-a group that every condition has, such as `--set "summaries={protein: {within: protein}}"`.
+A condition without a polymer has no `chainid C`, so `hydrogen_bonds` and
+`contacts` leave its replicates out, and when it is the control the other
+conditions are only summarised. Put a condition with a polymer first to compare
+against it, or compare a group that every condition has, such as
+`--set "summaries={protein: {within: protein}}"`.
 
 ## See Also
 
