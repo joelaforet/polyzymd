@@ -550,7 +550,11 @@ def _analyze_function(
             f"{name} takes {'' if pairs else 'no run and '}no setting other than "
             f"{', '.join(FUNCTION_ANALYSES[name])}.",
             hint=f"Run polyzymd analyze {name} -c A/config.yaml "
-            + ("--set pairs=pairs.yaml." if pairs else "--set selection='protein and name CA'."),
+            + (
+                "--set pairs=pairs.yaml."
+                if name in ("distances", "catalytic_triad")
+                else f"--set {next(iter(FUNCTION_ANALYSES[name]))}=..., one of the settings above."
+            ),
         )
     study = _study(configs, labels, equilibration, replicates, stride)
     if name in ("rmsf", "rms_deviation"):
