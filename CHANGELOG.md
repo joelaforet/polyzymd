@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hydrogen-bond functions on the study API.**  `polyzymd.analyses.functions`
+  gains `hbond_atoms` (the hydrogens bonded to N, O or S that can be donated,
+  and the acceptors: every O, and N or S bonded to at most two atoms),
+  `hydrogen_bonds` (MDAnalysis `HydrogenBondAnalysis` with those selections,
+  3.5 Å and 150° by default, giving per replicate the mean hydrogen bonds and
+  hydrogen-bonded residue pairs per frame and the fraction of frames with
+  any), `hbond_lifetimes` (the Kaplan-Meier lifetime of each residue pair's or
+  atom pair's hydrogen bonds, with `tolerance_ps`), `residue_hbond_occupancy`
+  (each residue's fraction of frames with a hydrogen bond),
+  `residue_pair_hbond_occupancy` (every residue pair joined by a hydrogen bond
+  and its fraction of frames) and `hbond_count` (the hydrogen bonds at the
+  current frame, for `Study.timeseries`).  `polyzymd analyze hydrogen_bonds -c
+  A/config.yaml -c B/config.yaml` runs them for the `groups` and `summaries`
+  settings, with `--run <summary>_mean_hbonds`, `_mean_residue_pairs`,
+  `_any_fraction`, `_mean_lifetime`, `_lifetime_events`, `_censored_fraction`,
+  `_residues` and `_pairs`, and draws `hbonds_<run>_comparison`, `_profile` and
+  `_difference`.
+
+- **Force-field charges and bonds in the analysis loader.**  The loader reads
+  the OpenMM system XML that PolyzyMD saves beside each run's first segment
+  (`production_0/production_0_system.xml`) and gives the universe its partial
+  charges and replaces its bonds with the system's bonds and constraints,
+  without the H-H constraint of rigid water, when the system has one particle
+  per atom.  The topology PDB records bonds only for non-standard residues,
+  so hydrogen-bond donors can now be found from the bonds of every residue.
+
+- **`Study.per_replicate(..., labels="returned")`.**  For a function that
+  returns `(labels, values)`, such as `residue_pair_hbond_occupancy`, whose
+  entries are known only once measured.  Each replicate's labels are stored in
+  `labels.json` beside its values, the labels of every replicate are lined up
+  in order of first appearance, and `missing=` fills a label a replicate
+  lacks; without `missing`, replicates with different labels are refused.
+
 - **`system.prmtop`, a bond-complete analysis topology.**  `polyzymd build`
   now writes `system.prmtop` beside `solvated_system.pdb` and `system.xml`,
   built from the OpenMM topology and System together with ParmEd.  It carries
@@ -362,6 +395,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that `polyzymd analyze` runs from functions, such as `contacts`.
   `polyzymd.analyses.protocols.build_report` still reads comparison results
   the plugin stored.
+
+- **The `hydrogen_bonds` comparison plugin (`polyzymd.analyses.hydrogen_bonds`,
+  `HydrogenBondsAnalysis`).**  `polyzymd analyze hydrogen_bonds -c
+  A/config.yaml -c B/config.yaml` measures hydrogen bonds instead, through the
+  functions listed under Added.  Given the plugin's donor and acceptor atoms
+  and a 3.0 Å cutoff, it reproduces the plugin's 8.849 bonds per frame on a
+  real replicate.  A `plugins.hydrogen_bonds` or `plot_settings.hydrogen_bonds`
+  block in `comparison.yaml` is ignored with a warning naming the command and
+  the functions, and `polyzymd compare run hydrogen_bonds` exits with the
+  command for the file's conditions.  No shipped analysis is a comparison
+  plugin any more; the plugin framework is being removed.
+
+- **`polyzymd analyze catalytic_triad`.**  The catalytic triad is a routine on
+  the study API: count each triad hydrogen bond with `functions.hbond_count`
+  and combine them with `Timeseries.transform`, as
+  https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html
+  shows, and measure the triad distances with `polyzymd analyze distances
+  --set pairs=pairs.yaml`.  `polyzymd analyze catalytic_triad` and
+  `analyze("catalytic_triad", ...)` raise a `ProtocolError` pointing to both,
+  a `catalytic_triad` block in `comparison.yaml` warns with the same pointers,
+  and `polyzymd compare run catalytic_triad` prints the distances command.
+
+- **`polyzymd analyze -f comparison.yaml`.**  Every analysis reads the
+  simulation configs given with `-c`, control first.  `-f` now exits 2 with a
+  message that says `comparison.yaml` is no longer read, prints the equivalent
+  `polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq
+  ...` command built from the file, and points to
+  https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html
+  and to `.claude/skills/polyzymd-analyze/SKILL.md` for an agent.  The
+  `plugins` and `plot_settings` sections of `comparison.yaml` are retired: the
+  warning for a retired block gives the same pointers, `polyzymd compare init`
+  writes neither section, and `scripts/convert_legacy.py --generate-comparison`
+  writes the CalB triad pairs to `triad_pairs.yaml` and prints `polyzymd
+  analyze -c` commands.
 
 ## [1.3.0] - 2026-04-09 — Analysis Plugin System & OCP Compliance
 
