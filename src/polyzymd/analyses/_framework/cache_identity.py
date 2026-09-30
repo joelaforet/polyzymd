@@ -29,86 +29,9 @@ if TYPE_CHECKING:
     from polyzymd.config.schema import SimulationConfig
 
 
+from polyzymd.analyses.identity import compute_config_hash  # noqa: E402,F401
+
 SETTINGS_FINGERPRINT_PATTERN = re.compile(r"_s(?P<fp>[0-9a-f]{8})(?:_|\.)")
-
-
-def compute_config_hash(config: "SimulationConfig") -> str:
-    """Compute hash of config parameters relevant to analysis.
-
-    Includes parameters that affect trajectory interpretation:
-
-    - enzyme configuration
-    - substrate configuration
-    - polymer configuration
-    - thermodynamics (temperature, pressure)
-    - output paths (for trajectory location)
-
-    Excludes parameters that don't affect analysis of completed trajectories:
-
-    - simulation_phases (equilibration_stages/production settings)
-    - force_field (already baked into trajectory)
-
-    Parameters
-    ----------
-    config : SimulationConfig
-        PolyzyMD simulation configuration
-
-    Returns
-    -------
-    str
-        Hex digest of SHA-256 hash (first 16 characters for brevity)
-
-    Examples
-    --------
-    >>> from polyzymd.config import load_config
-    >>> config = load_config("config.yaml")
-    >>> hash_val = compute_config_hash(config)
-    >>> print(f"Config hash: {hash_val}")
-    Config hash: a3b2c1d4e5f67890
-    """
-    # Extract relevant config sections
-    hash_data = {
-        "name": config.name,
-        "enzyme": {
-            "name": config.enzyme.name,
-            "pdb_path": str(config.enzyme.pdb_path),
-        },
-        "thermodynamics": {
-            "temperature": config.thermodynamics.temperature,
-            "pressure": config.thermodynamics.pressure,
-        },
-        "output": {
-            "projects_directory": str(config.output.projects_directory),
-            "scratch_directory": str(config.output.effective_scratch_directory),
-            "naming_template": config.output.naming_template,
-        },
-    }
-
-    # Add substrate if present
-    if config.substrate is not None:
-        hash_data["substrate"] = {
-            "name": config.substrate.name,
-            "sdf_path": str(config.substrate.sdf_path),
-        }
-
-    # Add polymer config if enabled
-    if config.polymers is not None and config.polymers.enabled:
-        hash_data["polymers"] = {
-            "type_prefix": config.polymers.type_prefix,
-            "length": config.polymers.length,
-            "count": config.polymers.count,
-            "monomers": [
-                {"label": m.label, "probability": m.probability, "name": m.name}
-                for m in config.polymers.monomers
-            ],
-        }
-
-    # Serialize and hash
-    json_str = json.dumps(hash_data, sort_keys=True, default=str)
-    hash_obj = hashlib.sha256(json_str.encode())
-
-    # Return first 16 chars for brevity
-    return hash_obj.hexdigest()[:16]
 
 
 def settings_fingerprint(settings: BaseModel) -> str:
@@ -280,7 +203,7 @@ def verify_input_identity(
 
     Each recorded entry is a mapping or an object with ``path``, ``size_bytes``
     and ``mtime_ns`` attributes, as written by
-    :class:`polyzymd.analyses.mda.universe.FileIdentity`. A relative recorded
+    :class:`polyzymd.analyses.universe.FileIdentity`. A relative recorded
     path is resolved against ``root``.
 
     Parameters

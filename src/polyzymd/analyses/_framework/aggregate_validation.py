@@ -194,7 +194,7 @@ def _validate_config_hash(
     if stored_hash in _UNKNOWN_VALUES or condition is None:
         return
 
-    from polyzymd.analyses._framework.cache_identity import compute_config_hash
+    from polyzymd.analyses.identity import compute_config_hash
 
     if str(stored_hash) != compute_config_hash(condition.sim_config):
         raise _validation_error(

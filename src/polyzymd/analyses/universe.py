@@ -1,4 +1,11 @@
-"""Universe loading and provenance helpers for the MDAnalysis extension layer."""
+"""Load one MDAnalysis universe per replicate and record which files it read.
+
+:class:`UniverseProvider` builds a trajectory loader from a simulation config,
+loads a replicate's universe from its topology and production segments, and
+records a :class:`UniverseProvenance` that lists each input file's path, size
+and modification time (:class:`FileIdentity`). :class:`~polyzymd.analyses.study.Study`
+uses one provider per condition.
+"""
 
 from __future__ import annotations
 
@@ -57,7 +64,7 @@ LoaderFactory = Callable[..., _TrajectoryLoaderLike]
 
 GRO_CHAIN_ID_WARNING_TEMPLATE = (
     "Using GRO topology {path} — GRO files may not preserve chain identifiers. "
-    "Chain-based selections (chainid A/B/C) used by analysis plugins may be unreliable. "
+    "Chain-based selections (chainid A/B/C) in analysis selections may be unreliable. "
     "Prefer a PDB topology when available."
 )
 

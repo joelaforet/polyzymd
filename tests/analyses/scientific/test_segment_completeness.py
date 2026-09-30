@@ -244,8 +244,8 @@ class TestLoaderRecordsExcludedSegments:
 
         from unittest.mock import MagicMock
 
-        from polyzymd.analyses.mda.universe import UniverseProvider
         from polyzymd.analyses.shared.loader import TrajectoryLoader
+        from polyzymd.analyses.universe import UniverseProvider
 
         run_dir = tmp_path / "run_1"
         run_dir.mkdir()

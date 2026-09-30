@@ -143,7 +143,7 @@ __all__ = [
     "grouped_bars",
     "annotate_cells",
     "symmetric_clim",
-    # Plot settings (lazily re-exported from config.comparison)
+    # Plot settings (lazily re-exported from config.analysis_settings)
     "PlotSettings",
 ]
 
@@ -151,7 +151,7 @@ __all__ = [
 def __getattr__(name: str):
     """Lazily expose ``PlotSettings`` without creating an import cycle."""
     if name == "PlotSettings":
-        from polyzymd.config.comparison import PlotSettings
+        from polyzymd.config.analysis_settings import PlotSettings
 
         return PlotSettings
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

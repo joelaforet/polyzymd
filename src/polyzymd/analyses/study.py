@@ -3,7 +3,7 @@
 :class:`Study` maps condition labels to simulation ``config.yaml`` files.
 ``study[label]`` gives a :class:`Condition`, whose replicates are the run
 directories found on disk. Each :class:`Replicate` loads its production
-trajectory through :class:`~polyzymd.analyses.mda.universe.UniverseProvider`
+trajectory through :class:`~polyzymd.analyses.universe.UniverseProvider`
 and gives the frame indices and times left after the equilibration window,
 found by :func:`~polyzymd.analyses.shared.window.resolve_replicate_trajectory_window`.
 """
@@ -139,7 +139,7 @@ class Replicate:
         dict
             ``config_hash``, ``equilibration``, ``stride``, and the ``topology`` and
             ``trajectories`` file records (path, format, size and modification
-            time) from :class:`~polyzymd.analyses.mda.universe.FileIdentity`.
+            time) from :class:`~polyzymd.analyses.universe.FileIdentity`.
         """
         provenance = self.condition._provider.provenance_for(self.index, refresh=True)
         return {
@@ -177,8 +177,8 @@ class Condition:
         replicates: Sequence[int] | None = None,
         stride: int = 1,
     ) -> None:
-        from polyzymd.analyses._framework.cache_identity import compute_config_hash
-        from polyzymd.analyses.mda.universe import UniverseProvider
+        from polyzymd.analyses.identity import compute_config_hash
+        from polyzymd.analyses.universe import UniverseProvider
         from polyzymd.config.schema import SimulationConfig
 
         self.label = label

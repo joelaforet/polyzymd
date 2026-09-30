@@ -8,7 +8,7 @@
 ``pz.plot_values`` and ``pz.plot_distributions``, draw several results in
 one figure. They read the values already held by those objects,
 style each figure through :mod:`polyzymd.analyses.shared.plotting` and a
-:class:`~polyzymd.config.comparison.PlotSettings`, and save it with
+:class:`~polyzymd.config.analysis_settings.PlotSettings`, and save it with
 :func:`~polyzymd.analyses.shared.plotting.save_figure`. Every condition and
 every replicate is drawn. matplotlib is imported only when a figure is drawn.
 """
@@ -20,13 +20,13 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 if TYPE_CHECKING:
     from polyzymd.analyses.timeseries import ReplicateValues, Timeseries
-    from polyzymd.config.comparison import PlotSettings
+    from polyzymd.config.analysis_settings import PlotSettings
 
 
 def _setup(source: Timeseries, plot_settings: PlotSettings | None) -> tuple[Any, list, dict]:
     """Return the plot settings, the condition labels in plot order and their colours."""
     from polyzymd.analyses.shared.plotting import get_condition_color_map, order_condition_labels
-    from polyzymd.config.comparison import PlotSettings
+    from polyzymd.config.analysis_settings import PlotSettings
 
     settings = plot_settings or PlotSettings()
     labels = list(source.series)

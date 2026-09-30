@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from polyzymd.analyses.mda import FileIdentity, UniverseProvenance, UniverseProvider
 from polyzymd.analyses.shared.loader import TrajectoryInfo
+from polyzymd.analyses.universe import FileIdentity, UniverseProvenance, UniverseProvider
 
 
 class FakeConfig:
@@ -311,7 +311,7 @@ def test_gro_topology_warning_is_recorded_without_provider_logging(
     messages = [
         record.message
         for record in caplog.records
-        if record.name == "polyzymd.analyses.mda.universe" and "GRO topology" in record.message
+        if record.name == "polyzymd.analyses.universe" and "GRO topology" in record.message
     ]
     assert messages == []
     assert any("GRO topology" in warning for warning in first.warnings)

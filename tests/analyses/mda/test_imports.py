@@ -58,7 +58,7 @@ def test_public_facade_reexports_primitives() -> None:
         strict_json_payload,
     )
     from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
-    from polyzymd.analyses.mda.universe import FileIdentity, UniverseProvenance, UniverseProvider
+    from polyzymd.analyses.universe import FileIdentity, UniverseProvenance, UniverseProvider
 
     assert mda.MDA_EXTENSION_API_VERSION == MDA_EXTENSION_API_VERSION == "1"
     assert mda.MDA_ARTIFACT_SCHEMA_VERSION == MDA_ARTIFACT_SCHEMA_VERSION == "1"

@@ -307,7 +307,7 @@ class Analysis(ABC):
             Universe-provider class for the current simulation configuration.
         """
 
-        from polyzymd.analyses.mda import UniverseProvider
+        from polyzymd.analyses.universe import UniverseProvider
 
         return UniverseProvider
 

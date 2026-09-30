@@ -52,7 +52,7 @@ from polyzymd.analyses.mda.plugin import (
     strict_json_payload,
 )
 from polyzymd.analyses.mda.store import ArtifactStore, ArtifactStoreError
-from polyzymd.analyses.mda.universe import FileIdentity, UniverseProvenance, UniverseProvider
+from polyzymd.analyses.universe import FileIdentity, UniverseProvenance, UniverseProvider
 
 __all__ = [
     "MDA_EXTENSION_API_VERSION",

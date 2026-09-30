@@ -1,10 +1,9 @@
 """Configuration management with YAML support and validation."""
 
+from polyzymd.config.analysis_settings import PlotSettings, PlotTheme
 from polyzymd.config.comparison import (
     ComparisonConfig,
     ConditionConfig,
-    PlotSettings,
-    PlotTheme,
     PluginSettingsContainer,
     generate_comparison_template,
 )

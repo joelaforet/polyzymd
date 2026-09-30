@@ -27,7 +27,7 @@ from polyzymd.analyses.shared.plotting import (
     scatter_stacked_segment_replicates,
     suppress_singleton_errors,
 )
-from polyzymd.config.comparison import PlotSettings, PlotTheme
+from polyzymd.config.analysis_settings import PlotSettings, PlotTheme
 
 matplotlib.use("Agg")
 

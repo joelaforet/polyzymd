@@ -1836,7 +1836,7 @@ def _study(
 ) -> Any:
     """Build the Study of ``configs``, with the package default equilibration window."""
     from polyzymd.analyses.study import Study
-    from polyzymd.config.comparison import AnalysisDefaults
+    from polyzymd.config.analysis_settings import AnalysisDefaults
 
     paths = [Path(item).expanduser().resolve() for item in configs]
     return Study.from_configs(
