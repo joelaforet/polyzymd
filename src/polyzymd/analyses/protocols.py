@@ -111,6 +111,8 @@ FUNCTION_ANALYSES = {
         "donors": None,
         "hydrogens": None,
         "acceptors": None,
+        "lifetime_key": "residue",
+        "tolerance_ps": 0.0,
     },
     "native_contacts": {
         "selection": "protein and not element H",
@@ -825,6 +827,23 @@ def _hbond_summaries(settings: dict) -> dict[str, tuple[str, str | None]]:
     return resolved
 
 
+def _hbond_residue_labels(universe: Any, selection: str) -> list:
+    """Return labels for the residues of ``selection``: residue IDs, or ``chain:resid`` if IDs repeat."""
+    residues = universe.select_atoms(selection).residues
+    ids = [int(r.resid) for r in residues]
+    if len(set(ids)) == len(ids):
+        return ids
+    labels = [f"{r.atoms[0].chainID}:{int(r.resid)}" for r in residues]
+    if len(set(labels)) != len(labels):
+        raise ProtocolError(
+            f"hydrogen_bonds: the residues of {selection!r} repeat residue IDs even within a "
+            "chain, so they cannot be told apart for the per-residue result.",
+            hint="Make the summary's first group a selection of distinct residues, such as "
+            "'chainid A'.",
+        )
+    return labels
+
+
 def _analyze_hydrogen_bonds(
     study: Any,
     settings: dict | None,
@@ -852,21 +871,35 @@ def _analyze_hydrogen_bonds(
     from collections import Counter
 
     from polyzymd.analyses import functions
+    from polyzymd.analyses.figures import plot_differences
     from polyzymd.analyses.timeseries import select
 
     settings = {**FUNCTION_ANALYSES["hydrogen_bonds"], **(settings or {})}
     summaries = _hbond_summaries(settings)
     parts = list(functions.HBOND_PARTS)
-    runs = [f"{name}_{part}" for name in summaries for part in parts]
+    life = {"mean_lifetime": 0, "lifetime_events": 1, "censored_fraction": 2}
+    kinds = [*parts, *life, "residues"]
+    runs = [f"{name}_{kind}" for name in summaries for kind in kinds]
     run = run or runs[0]
     if run not in runs:
         raise ProtocolError(
             f"hydrogen_bonds: no result named {run!r}.", hint=f"Use --run with one of {runs}."
         )
     summary = next(
-        name for name in summaries if run.startswith(f"{name}_") and run[len(name) + 1 :] in parts
+        name for name in summaries if run.startswith(f"{name}_") and run[len(name) + 1 :] in kinds
     )
     part = run[len(summary) + 1 :]
+    if settings["lifetime_key"] not in ("residue", "atom"):
+        raise ProtocolError(
+            f"hydrogen_bonds: lifetime_key must be 'residue' or 'atom', got "
+            f"{settings['lifetime_key']!r}.",
+            hint="Pass --set lifetime_key=residue for residue pairs, or atom for atom pairs.",
+        )
+    if float(settings["tolerance_ps"]) < 0:
+        raise ProtocolError(
+            f"hydrogen_bonds: tolerance_ps must be at least 0, got {settings['tolerance_ps']}.",
+            hint="Pass --set tolerance_ps=0 for bonds that end at the first absent frame.",
+        )
     first, second = summaries[summary]
     both = first if second is None else f"({first}) or ({second})"
     universe = next(iter(study)).replicates[0].universe()
@@ -907,20 +940,67 @@ def _analyze_hydrogen_bonds(
     if float(settings["d_h_a_angle_cutoff"]) != functions.HBOND_ANGLE:
         options["d_h_a_angle_cutoff"] = float(settings["d_h_a_angle_cutoff"])
     arguments = [select(first)] + ([] if second is None else [select(second)])
-    rows = study.per_replicate(
-        functions.hydrogen_bonds,
-        *arguments,
-        unit=None,
-        name=f"hydrogen_bonds_{summary}",
-        recompute=recompute,
-        output_dir=output_dir,
-        parts=parts,
-        **options,
-    )
-    values = rows[part]
+    if part in parts:
+        rows = study.per_replicate(
+            functions.hydrogen_bonds,
+            *arguments,
+            unit=None,
+            name=f"hydrogen_bonds_{summary}",
+            recompute=recompute,
+            output_dir=output_dir,
+            parts=parts,
+            **options,
+        )
+        values = rows[part]
+        values.bounds = (0.0, 1.0) if part == "any_fraction" else (0.0, None)
+    elif part in life:
+        lifetime_options = dict(options)
+        if settings["lifetime_key"] != "residue":
+            lifetime_options["key"] = settings["lifetime_key"]
+        if float(settings["tolerance_ps"]) > 0:
+            lifetime_options["tolerance_ps"] = float(settings["tolerance_ps"])
+        rows = study.per_replicate(
+            functions.hbond_lifetimes,
+            *arguments,
+            unit=None,
+            name=f"hbond_lifetimes_{summary}",
+            recompute=recompute,
+            output_dir=output_dir,
+            parts=list(functions.LIFETIME_PARTS),
+            **lifetime_options,
+        )
+        values = rows[functions.LIFETIME_PARTS[life[part]]]
+        values.unit, values.bounds = {
+            "mean_lifetime": ("ns", (0.0, None)),
+            "lifetime_events": (None, (0.0, None)),
+            "censored_fraction": (None, (0.0, 1.0)),
+        }[part]
+    else:
+        values = study.per_replicate(
+            functions.residue_hbond_occupancy,
+            *arguments,
+            unit=None,
+            labels=lambda u: _hbond_residue_labels(u, first),
+            name=f"residue_hbond_occupancy_{summary}",
+            recompute=recompute,
+            output_dir=output_dir,
+            bounds=(0.0, 1.0),
+            **options,
+        )
     values.metric = run
-    values.bounds = (0.0, 1.0) if part == "any_fraction" else (0.0, None)
     report = values.compare() if len(study) > 1 else values.summary()
+    if part in life:
+        empty = [
+            f"{label} replicate {row[0]}"
+            for label, table in values.rows.items()
+            for row in table
+            if row[1] != row[1]
+        ]
+        if empty:
+            report.warnings.append(
+                f"hydrogen_bonds: {', '.join(empty)} have no hydrogen bond in summary "
+                f"{summary!r}, so {run} is undefined (nan) there."
+            )
     report.provenance.settings = {
         **settings,
         "summary": {"name": summary, "groups": [first] if second is None else [first, second]},
@@ -932,7 +1012,16 @@ def _analyze_hydrogen_bonds(
     }
     if plots:
         folder = _figures_dir(output_dir, "hydrogen_bonds")
-        values.plot(folder, f"hbonds_{run}_comparison", title=run.replace("_", " "))
+        if part == "residues":
+            values.plot(
+                folder, f"hbonds_{run}_profile", f"H-bond occupancy, {summary}", None, [], "Residue"
+            )
+            if len(study) > 1:
+                plot_differences(
+                    values, report, folder, f"hbonds_{run}_difference", None, None, "Residue"
+                )
+        else:
+            values.plot(folder, f"hbonds_{run}_comparison", title=run.replace("_", " "))
         report.provenance.output_paths["figures"] = str(folder)
     return report.model_copy(update={"analysis": "hydrogen_bonds", "run": run, "all_runs": runs})
 

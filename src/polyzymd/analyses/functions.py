@@ -1137,31 +1137,66 @@ def contact_lifetimes(
         times.append(time)
         masks.append(contact)
     if len(times) < 2:
+        return event_lifetimes(np.zeros((len(times), 0)), times, tolerance_ps, "contact_lifetimes")
+    masks = np.asarray(masks)  # frames, groups, residues
+    return np.stack(
+        [
+            event_lifetimes(masks[:, group, :], times, tolerance_ps, "contact_lifetimes")
+            for group in range(masks.shape[1])
+        ],
+        axis=1,
+    )
+
+
+def event_lifetimes(mask: Any, times: Any, tolerance_ps: float, name: str = "lifetimes") -> Any:
+    """Return the :data:`LIFETIME_PARTS` of the events in ``mask``, one row per frame at ``times`` ps.
+
+    Each column of ``mask`` is one series, such as one residue or one
+    residue pair; :func:`contact_events` finds its events after filling
+    absences of at most ``tolerance_ps``, converted to whole frames of the
+    spacing. A run of ``k`` frames lasts ``k`` spacings. The events of all
+    columns are pooled: the Kaplan-Meier restricted mean lifetime in ns up
+    to the time the frames span (:func:`restricted_mean_lifetime`), ``nan``
+    without events, the number of events and the fraction censored.
+    Frames must be evenly spaced.
+    """
+    import numpy as np
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    times = np.asarray(times, dtype=float)
+    if len(times) < 2:
         raise ProtocolError(
-            f"contact_lifetimes: {len(times)} frame, and a lifetime needs at least two.",
+            f"{name}: {len(times)} frame, and a lifetime needs at least two.",
             hint="Use more production frames, or a smaller stride.",
+        )
+    if tolerance_ps < 0:
+        raise ProtocolError(
+            f"{name}: tolerance_ps must be at least 0, got {tolerance_ps}.",
+            hint="Pass tolerance_ps=0 for events that end at the first absent frame.",
         )
     spacing = np.diff(times)
     step = float(np.median(spacing))
     if step <= 0 or np.max(np.abs(spacing - step)) > 1e-3 * step:
         raise ProtocolError(
-            f"contact_lifetimes: the frames are not evenly spaced in time (from "
+            f"{name}: the frames are not evenly spaced in time (from "
             f"{spacing.min():.6g} to {spacing.max():.6g} ps apart), so a run of frames has no "
             "single duration.",
             hint="Check the trajectory's time axis for missing or repeated frames.",
         )
     # Frame times carry float rounding, so 40 ps at a 40.0000001 ps spacing is one frame.
     gap = int(np.floor(tolerance_ps / step * (1 + 1e-6))) if tolerance_ps > 0 else 0
-    masks = np.asarray(masks)  # frames, groups, residues
     horizon = len(times) * step / 1000.0
-    result = np.zeros((len(LIFETIME_PARTS), masks.shape[1]))
-    for group in range(masks.shape[1]):
-        lengths, censored = contact_events(masks[:, group, :], gap)
-        durations = lengths * step / 1000.0
-        result[0, group] = restricted_mean_lifetime(durations, censored, horizon)
-        result[1, group] = len(lengths)
-        result[2, group] = float(np.mean(censored)) if len(lengths) else float("nan")
-    return result
+    mask = np.asarray(mask, dtype=bool).reshape(len(times), -1)
+    lengths, censored = contact_events(mask, gap)
+    durations = lengths * step / 1000.0
+    return np.array(
+        [
+            restricted_mean_lifetime(durations, censored, horizon),
+            len(lengths),
+            float(np.mean(censored)) if len(lengths) else float("nan"),
+        ]
+    )
 
 
 #: Default hydrogen-bond geometry: donor-acceptor distance in Å and
@@ -1344,3 +1379,109 @@ def hydrogen_bonds(
     second = resindex[events[:, 3].astype(int)]
     pairs = {(f, min(a, b), max(a, b)) for f, a, b in zip(frame, first, second)}
     return np.array([len(events) / n, len(pairs) / n, len(np.unique(frame)) / n], dtype=np.float64)
+
+
+def _frame_times(universe: Any, frames: Any) -> Any:
+    """Return the time in ps of each of ``frames``."""
+    import numpy as np
+
+    return np.array([float(ts.time) for ts in universe.trajectory[list(frames)]])
+
+
+def hbond_lifetimes(
+    group_a: Any,
+    group_b: Any = None,
+    frames: Any = None,
+    key: str = "residue",
+    tolerance_ps: float = 0.0,
+    d_a_cutoff: float = HBOND_DISTANCE,
+    d_h_a_angle_cutoff: float = HBOND_ANGLE,
+    donors: Any = None,
+    hydrogens: Any = None,
+    acceptors: Any = None,
+) -> Any:
+    """Return how long the hydrogen bonds of :func:`hydrogen_bonds` last.
+
+    The bonds are found as in :func:`hydrogen_bonds`. With ``key``
+    ``"residue"``, a pair is two residues, present on a frame when any
+    hydrogen bond joins them, so a hydrogen switching partners inside the
+    two residues does not end the event; with ``"atom"``, a pair is one donor
+    atom and one acceptor atom. Each pair's runs of frames are events, and
+    :func:`event_lifetimes` pools them: the Kaplan-Meier restricted mean
+    lifetime in ns, the number of events and the fraction censored by the
+    first or last frame, the rows of :data:`LIFETIME_PARTS`.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(3,)``.
+    """
+    import numpy as np
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    if key not in ("residue", "atom"):
+        raise ProtocolError(
+            f"hbond_lifetimes: key must be 'residue' or 'atom', got {key!r}.",
+            hint="Pass key='residue' for residue pairs or key='atom' for donor-acceptor atoms.",
+        )
+    events, frames = _hbond_events(
+        group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
+    )
+    universe = group_a.universe
+    times = _frame_times(universe, frames)
+    position = {frame: i for i, frame in enumerate(frames)}
+    if len(events) == 0:
+        return event_lifetimes(np.zeros((len(frames), 0)), times, tolerance_ps, "hbond_lifetimes")
+    donor = events[:, 1].astype(int)
+    acceptor = events[:, 3].astype(int)
+    if key == "residue":
+        resindex = universe.atoms.resindices
+        first, second = resindex[donor], resindex[acceptor]
+        pair = np.stack([np.minimum(first, second), np.maximum(first, second)], axis=1)
+    else:
+        pair = np.stack([donor, acceptor], axis=1)
+    unique, column = np.unique(pair, axis=0, return_inverse=True)
+    mask = np.zeros((len(frames), len(unique)), dtype=bool)
+    mask[[position[int(f)] for f in events[:, 0]], np.ravel(column)] = True
+    return event_lifetimes(mask, times, tolerance_ps, "hbond_lifetimes")
+
+
+def residue_hbond_occupancy(
+    group_a: Any,
+    group_b: Any = None,
+    frames: Any = None,
+    d_a_cutoff: float = HBOND_DISTANCE,
+    d_h_a_angle_cutoff: float = HBOND_ANGLE,
+    donors: Any = None,
+    hydrogens: Any = None,
+    acceptors: Any = None,
+) -> Any:
+    """Return, for each residue of ``group_a``, the fraction of ``frames`` it has a hydrogen bond.
+
+    The bonds are those of :func:`hydrogen_bonds`: with ``group_b``, those
+    joining the two groups; without it, those within ``group_a``. A residue
+    counts on a frame when one of its atoms is the donor or acceptor of at
+    least one. Columns follow ``group_a.residues``.
+
+    Returns
+    -------
+    numpy.ndarray
+        One value per residue of ``group_a``.
+    """
+    import numpy as np
+
+    events, frames = _hbond_events(
+        group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
+    )
+    column = {residue.resindex: i for i, residue in enumerate(group_a.residues)}
+    occupied = np.zeros((len(frames), len(column)), dtype=bool)
+    if len(events):
+        position = {frame: i for i, frame in enumerate(frames)}
+        resindex = group_a.universe.atoms.resindices
+        rows = np.array([position[int(f)] for f in events[:, 0]])
+        for atom_column in (1, 3):
+            owners = resindex[events[:, atom_column].astype(int)]
+            keep = np.array([owner in column for owner in owners], dtype=bool)
+            occupied[rows[keep], [column[o] for o in owners[keep]]] = True
+    return occupied.mean(axis=0)
