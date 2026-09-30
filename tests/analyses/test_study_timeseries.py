@@ -386,52 +386,6 @@ class TestSummaryAndCompare:
         assert "values 1, 2, 4" in text and "g 1, 1, 1" in text and "A vs B" in text
 
 
-def test_statistics_match_the_stored_legacy_rg_comparison() -> None:
-    """Replicate means of a real legacy rg comparison give its SEM, intervals and p values.
-
-    ``tests/data/comparison_artifacts/rg.json`` is the comparison the legacy rg
-    plugin stored for a LipA campaign, with Student t tests and one
-    Benjamini-Hochberg family over the 15 comparisons of its two runs.
-    """
-    from tests.analyses.test_protocols_real_artifacts import _report
-
-    stored = json.loads(
-        (Path(__file__).parent.parent / "data/comparison_artifacts/rg.json").read_text()
-    )
-    raw: dict[tuple[str, str, str], float] = {}
-    for run in stored["run_labels"]:
-        per_condition = {
-            condition["label"]: summary["per_replicate_means"]
-            for condition in stored["conditions"]
-            for summary in condition["run_summaries"]
-            if summary["label"] == run
-        }
-        sems = {
-            condition["label"]: summary["sem_rg"]
-            for condition in stored["conditions"]
-            for summary in condition["run_summaries"]
-            if summary["label"] == run
-        }
-        legacy = {row.label: row for row in _report("rg", run=run).conditions}
-        values = replicate_values(per_condition)
-        for row in values.summary().conditions:
-            assert row.sem == pytest.approx(sems[row.label], rel=1e-12)
-            assert row.mean == pytest.approx(legacy[row.label].mean, rel=1e-12)
-            assert row.ci95 == pytest.approx(legacy[row.label].ci95, rel=1e-12)
-        labels = list(per_condition)
-        for position, control in enumerate(labels):
-            report = values.compare(control=control, conditions=labels[position:], test="student")
-            raw.update({(run, row.a, row.b): row.p for row in report.pairwise})
-    rows = stored["pairwise_comparisons"]
-    family = benjamini_hochberg(
-        [raw[(r["run_label"], r["condition_a"], r["condition_b"])] for r in rows]
-    )
-    for row, corrected in zip(rows, family, strict=True):
-        key = (row["run_label"], row["condition_a"], row["condition_b"])
-        assert raw[key] == pytest.approx(row["p_value"], rel=1e-9)
-        assert corrected.adjusted_p_value == pytest.approx(row["p_value_adjusted"], rel=1e-9)
-
-
 class TestDetectedEquilibration:
     """pymbar detect_equilibration is reported per replicate and changes nothing.
 
@@ -593,13 +547,8 @@ class TestStride:
         with pytest.raises(ProtocolError, match="stride must be a whole number"):
             pz.Study.from_configs(configs, equilibration=EQUILIBRATION, stride=stride)
 
-    def test_analyze_takes_a_stride_for_function_analyses_only(
-        self, configs: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_analyze_takes_a_stride(self, configs: dict[str, Path], tmp_path: Path) -> None:
         from polyzymd.analyses.protocols import analyze
-        from tests.analyses.test_protocols import _install_toy
-
-        _install_toy(monkeypatch)
 
         report = analyze(
             "rg",
@@ -612,5 +561,3 @@ class TestStride:
         )
         assert report.stride == 2
         assert report.frames_per_replicate["A"] == [len(FRAMES[::2])] * 3
-        with pytest.raises(ProtocolError, match="comparison plugin"):
-            analyze("toy_protocol", [configs["A"]], equilibration=EQUILIBRATION, stride=2)

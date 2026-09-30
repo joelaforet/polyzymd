@@ -1144,7 +1144,7 @@ class ReplicateValues:
             values = self._column(position)
             for label in chosen:
                 rows = self.rows[label]
-                item = _condition(label, values[label], {}, self.metric)
+                item = _condition(label, values[label])
                 item.entry = entry
                 item.replicates = [row[0] for row in rows]
                 if rows and rows[0][2] is not None:

@@ -161,7 +161,7 @@ def _one_line(text: str) -> str:
     type=click.IntRange(min=1),
     default=1,
     show_default=True,
-    help="Measure every N-th production frame of every replicate. Function analyses only.",
+    help="Measure every N-th production frame of every replicate.",
 )
 @click.option(
     "--recompute", is_flag=True, help="Recompute replicates instead of reusing cached results."
@@ -170,7 +170,7 @@ def _one_line(text: str) -> str:
     "--no-eq-check",
     "no_eq_check",
     is_flag=True,
-    help="Skip the pymbar detected equilibration start of the function analyses. No value changes.",
+    help="Skip the pymbar detected equilibration start of each replicate. No value changes.",
 )
 @click.option(
     "--no-plots",
@@ -367,7 +367,7 @@ def _submit(
     import shlex
 
     from polyzymd.analyses.exceptions import ProtocolError
-    from polyzymd.analyses.protocols import FUNCTION_ANALYSES, _study
+    from polyzymd.analyses.protocols import _require_known, _study
     from polyzymd.workflow.analysis_submit import (
         Resources,
         polyzymd_command,
@@ -377,10 +377,7 @@ def _submit(
 
     if comparison_file is not None:
         _refuse_comparison_file(name, comparison_file, equilibration)
-    if name not in FUNCTION_ANALYSES:
-        raise ProtocolError(
-            f"No analysis named {name!r}.", hint=f"Use one of {', '.join(FUNCTION_ANALYSES)}."
-        )
+    _require_known(name)
     if not configs:
         raise ProtocolError(
             "--submit needs the simulation configs.", hint="Give them with -c config.yaml."

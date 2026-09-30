@@ -1,9 +1,8 @@
 """Tests for the ``polyzymd analyze`` command.
 
-No shipped analysis runs through the plugin protocol any more, so these tests
-register the toy plugin of ``tests/analyses/test_protocols.py`` and invoke it,
-most of them with the protocol replaced by a stub. ``polyzymd analyze rg`` runs
-on the function path and is tested in ``tests/analyses/test_study_timeseries.py``.
+Most of these tests replace :func:`polyzymd.analyses.protocols.analyze` with a
+stub, so they check option parsing, rendering and exit codes only. The
+analyses themselves are tested in ``tests/analyses/``.
 """
 
 from __future__ import annotations
@@ -21,13 +20,6 @@ from polyzymd.analyses.protocols import (
     ProtocolReport,
 )
 from polyzymd.cli.analyze import EXIT_ANALYSIS_ERROR, analyze_command
-from tests.analyses.test_protocols import _install_toy
-
-
-@pytest.fixture(autouse=True)
-def toy_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Register the toy plugin so that the plugin path of ``analyze`` is taken."""
-    _install_toy(monkeypatch)
 
 
 def _report() -> ProtocolReport:
@@ -154,7 +146,7 @@ class TestSuccess:
         """Without --format the command prints the agent report."""
         result = CliRunner().invoke(
             analyze_command,
-            ["toy_protocol", "-c", str(config_paths[0]), "-c", str(config_paths[1])],
+            ["rg", "-c", str(config_paths[0]), "-c", str(config_paths[1])],
         )
 
         assert result.exit_code == 0
@@ -168,7 +160,7 @@ class TestSuccess:
         """--format json prints a document the report model validates."""
         result = CliRunner().invoke(
             analyze_command,
-            ["toy_protocol", "-c", str(config_paths[0]), "--format", "json"],
+            ["rg", "-c", str(config_paths[0]), "--format", "json"],
         )
 
         assert result.exit_code == 0
@@ -182,7 +174,7 @@ class TestSuccess:
         result = CliRunner().invoke(
             analyze_command,
             [
-                "toy_protocol",
+                "rg",
                 "-c",
                 str(config_paths[0]),
                 "-c",
@@ -204,7 +196,7 @@ class TestSuccess:
         )
 
         assert result.exit_code == 0
-        assert stub_analyze["name"] == "toy_protocol"
+        assert stub_analyze["name"] == "rg"
         assert stub_analyze["replicates"] == [1, 2, 3]
         assert stub_analyze["equilibration"] == "20ns"
         assert stub_analyze["labels"] == ["control", "treated"]
@@ -219,7 +211,7 @@ class TestSuccess:
         result = CliRunner().invoke(
             analyze_command,
             [
-                "toy_protocol",
+                "rg",
                 "-c",
                 str(config_paths[0]),
                 "--format",
@@ -248,7 +240,7 @@ class TestExitCodes:
             )
 
         monkeypatch.setattr("polyzymd.analyses.protocols.analyze", _raise)
-        result = CliRunner().invoke(analyze_command, ["toy_protocol", "-c", str(config_paths[0])])
+        result = CliRunner().invoke(analyze_command, ["rg", "-c", str(config_paths[0])])
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         error_lines = [line for line in result.stderr.strip().split("\n") if line]
@@ -262,13 +254,14 @@ class TestExitCodes:
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
-        assert "error: Unknown analysis" in result.stderr
-        assert "fix: Use one of:" in result.stderr
+        assert "error: No analysis named 'definitely_not_an_analysis'." in result.stderr
+        assert "fix: Use one of rg, rmsd, rmsf" in result.stderr
+        assert "explanation/analysis_api.html" in result.stderr
 
     def test_missing_config_exits_two(self, tmp_path: Path) -> None:
         """A config path that does not exist is reported before any work."""
         result = CliRunner().invoke(
-            analyze_command, ["toy_protocol", "-c", str(tmp_path / "missing" / "config.yaml")]
+            analyze_command, ["rg", "-c", str(tmp_path / "missing" / "config.yaml")]
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
@@ -277,7 +270,7 @@ class TestExitCodes:
     def test_bad_setting_exits_two(self, config_paths: list[Path]) -> None:
         """A --set entry without an equals sign is a typed error."""
         result = CliRunner().invoke(
-            analyze_command, ["toy_protocol", "-c", str(config_paths[0]), "--set", "broken"]
+            analyze_command, ["rg", "-c", str(config_paths[0]), "--set", "broken"]
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
@@ -287,7 +280,7 @@ class TestExitCodes:
         """A dotted --set key is rejected with the YAML mapping to give instead."""
         result = CliRunner().invoke(
             analyze_command,
-            ["toy_protocol", "-c", str(config_paths[0]), "--set", "composition.partitions={}"],
+            ["rg", "-c", str(config_paths[0]), "--set", "composition.partitions={}"],
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
@@ -297,7 +290,7 @@ class TestExitCodes:
     def test_bad_replicate_range_exits_two(self, config_paths: list[Path]) -> None:
         """An unparsable --replicates value is a typed error."""
         result = CliRunner().invoke(
-            analyze_command, ["toy_protocol", "-c", str(config_paths[0]), "--replicates", "3-1"]
+            analyze_command, ["rg", "-c", str(config_paths[0]), "--replicates", "3-1"]
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
