@@ -1,14 +1,21 @@
-# Analyses Plugin System API
+# Analysis Plugin Framework API
 
-This reference page summarizes the public `polyzymd.analyses` API surface for
-plugin discovery, orchestration, statistics, the base facade, the public
-MDAnalysis layer, and built-in analysis plugin packages.
+This reference page summarizes the `polyzymd.analyses` API of the analysis
+plugin framework: plugin discovery, orchestration, statistics, the base facade
+and the public MDAnalysis layer.
 
-PolyzyMD analyses run trajectory-native work at the replicate level and lift the
-outputs into condition and comparison artifacts. The stable contributor import
-surfaces are `polyzymd.analyses.base`, `polyzymd.analyses.mda`, selected
-`polyzymd.analyses.shared` utilities, and the built-in plugin packages listed
-below.
+```{note}
+No shipped analysis is a plugin any more, and the framework is being removed.
+Every analysis that `polyzymd analyze` offers is a function in
+`polyzymd.analyses.functions`, run through `polyzymd.analyses.study.Study`; see
+{doc}`../explanation/analysis_api` and {doc}`../reference/analysis_functions`.
+`list_analyses()` returns only the plugins you register yourself.
+```
+
+The framework runs trajectory-native work at the replicate level and lifts the
+outputs into condition and comparison artifacts. Its import surfaces are
+`polyzymd.analyses.base`, `polyzymd.analyses.mda` and selected
+`polyzymd.analyses.shared` utilities.
 
 ```{eval-rst}
 .. currentmodule:: polyzymd.analyses
@@ -70,8 +77,8 @@ For the complete class and context reference, see {doc}`analyses_base`.
 At a high level, compute-stage plugins implement `build_mda_jobs()` and
 `build_mda_collector()`. Collectors produce `ReplicateArtifact` objects;
 aggregation combines those into `ConditionArtifact` objects; comparison produces
-`ComparisonArtifact` outputs or an active custom comparison contract for plugins
-that still need specialized comparison models.
+`ComparisonArtifact` outputs or a custom comparison contract for a plugin that
+needs specialized comparison models.
 
 The detailed autodoc for this facade lives on {doc}`analyses_base`.
 
@@ -98,16 +105,12 @@ Reusable plugin utilities live in `polyzymd.analyses.shared`. They are documente
 separately on {doc}`analyses_shared`; this overview intentionally omits detailed
 shared-utility autodoc blocks.
 
-## Built-in plugin packages
+## Plugin packages
 
-| Plugin name | Public package | Primary output contract | Comparison style |
-|-------------|----------------|-------------------------|------------------|
-| `hydrogen_bonds` | `polyzymd.analyses.hydrogen_bonds` | Hydrogen-bond event artifacts | Custom comparison |
-
-Built-in plugin packages expose their public `Analysis` subclass and supported
-settings/result contracts from the package root. Helper modules with leading
-underscores inside those packages are implementation details unless a page
-explicitly labels them as internal developer reference.
+PolyzyMD ships no plugin package. A plugin package you write exposes its
+public `Analysis` subclass and its settings and result contracts from the
+package root; helper modules with leading underscores inside it are
+implementation details.
 
 ## Private framework internals
 

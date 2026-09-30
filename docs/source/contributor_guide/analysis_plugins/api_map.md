@@ -6,9 +6,8 @@ reviewing analysis plugins.
 
 ```{warning}
 `polyzymd.analyses._framework` is private implementation infrastructure, not a
-contributor import surface. Leading-underscore helper modules inside built-in
-plugin packages are examples of package organization only; they are not public
-APIs for contributor plugins.
+contributor import surface. Leading-underscore helper modules inside a plugin
+package are private to that package; they are not public APIs for other plugins.
 ```
 
 ## Public API map
@@ -147,8 +146,8 @@ Replace `solvent_shell` with the desired plugin name.
 
 - See {ref}`CLI new-analysis reference <polyzymd-new-analysis>` for command
   options.
-- See {doc}`../../reference/analysis_plugin_settings` for built-in
-  `comparison.yaml` plugin settings under `plugins.<plugin_name>`.
+- See {doc}`../../reference/analysis_plugin_settings` for the `plugins` section
+  of `comparison.yaml`, which configures no shipped analysis any more.
 
 ## Stable import boundaries
 
@@ -158,10 +157,9 @@ Replace `solvent_shell` with the desired plugin name.
   artifacts, sidecars, stores, aggregation, and comparison.
 - Use only utilities documented on {doc}`../../api/analyses_shared` from
   `polyzymd.analyses.shared`.
-- Treat built-in plugin package roots, such as
-  `polyzymd.analyses.hydrogen_bonds`, as public locations for their documented analysis classes and settings. Treat
-  their leading-underscore helper modules as implementation examples, not
-  contributor dependencies.
+- Treat a plugin package root as the public location of its documented
+  analysis class and settings, and its leading-underscore helper modules as
+  private to it.
 
 ## Related contributor pages
 

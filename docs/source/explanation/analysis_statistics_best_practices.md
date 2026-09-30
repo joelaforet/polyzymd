@@ -34,8 +34,8 @@ non-stationary trajectories as provisional unless independent replicates and
 convergence diagnostics support the conclusion.
 ```
 
-PolyzyMD analyses may account for correlation directly where a plugin supports
-it. A generalized metric-type system for automatic correlation handling is a
+PolyzyMD analyses may account for correlation directly where an analysis
+supports it. A generalized metric-type system for automatic correlation handling is a
 planned design direction, not a universal implemented contract.
 
 ## Key concepts
@@ -146,10 +146,9 @@ it as a diagnostic and the uncertainty taken from the spread across replicates.
 
 ## How to interpret PolyzyMD analysis results
 
-PolyzyMD's analysis plugins are responsible for choosing statistically
-appropriate handling for the quantities they report. Current plugins may use
-plugin-specific logic for correlation-aware uncertainty and replicate
-aggregation. The details can differ because contact fractions,
+Each shipped analysis chooses how one replicate's frames become one value, and
+the intervals and tests are then computed from one value per replicate. The
+reduction can differ between analyses because contact fractions,
 distances, RMSF, secondary structure, and other observables answer different
 scientific questions.
 
@@ -291,39 +290,26 @@ thresholds, and marks discoveries only up to the largest rank that satisfies the
 threshold. Adjusted p-values and CLI significance markers are based on this
 correction rather than on raw p-values alone.
 
-### Why the family is one analysis run
+### Why the family is one comparison
 
 A correction only means something if you can say what it corrected over. The
-package draws the boundary at one analysis run: every pairwise test that run
-produced, across all of its metrics and all of its condition pairs, is one
-Benjamini-Hochberg family.
+package draws the boundary at one comparison: every tested row that one
+`polyzymd analyze` command, or one `compare()` call in Python, produced is one
+Benjamini-Hochberg family. For one number per replicate that is every
+condition compared with the control. For a per-residue result, such as
+`polyzymd analyze rmsf`, it is every residue of every condition compared.
 
-That boundary matches how the results are read. When you run `polyzymd compare
-run rmsd` over four conditions with two named runs, you look at the whole table
-at once and pick out the rows that stand out. The number of chances you gave
-yourself to find something is the size of that table, not the size of one
-column. Correcting each metric separately would let the error rate grow with
-the number of metrics you happened to configure, which is a property of the
-YAML file rather than of the science.
+That boundary matches how the results are read. When you look at a per-residue
+profile over four conditions, you scan the whole table at once and pick out the
+residues that stand out. The number of chances you gave yourself to find
+something is the size of that table, not the size of one column, and a false
+discovery rate holds for the discoveries of a search only when the family is
+the set searched (Benjamini 2010).
 
 Drawing the family wider would be worse in a different way. Pooling across
-separate runs, or across analyses, would make the significance of an RMSD
+separate commands, or across analyses, would make the significance of an RMSD
 comparison depend on whether somebody also ran SASA that afternoon. A
 comparison should not change its verdict because of an unrelated command.
-
-### Why the ANOVA is reported uncorrected
-
-The one-way ANOVA answers a different question from the pairwise tests: it asks
-whether any condition differs at all, without naming a pair. Putting it in the
-same family would mix a statement about the whole design with statements about
-individual contrasts, and adjusting it against them has no interpretation.
-
-PolyzyMD therefore reports the ANOVA p-value raw, labels it omnibus, and gates
-nothing on it. In particular the pairwise tests run whether or not the ANOVA
-reaches significance. The classical protected-LSD reasoning, in which a
-significant omnibus test licenses the pairwise ones, is a family-wise argument
-and does not transfer to false discovery rate control. Treat the ANOVA as a
-summary of whether the conditions look separable at all, not as a gate.
 
 ### Why Welch is the sensible default at three replicates
 
@@ -345,10 +331,9 @@ Student p-value is too small. The cost when the variances happen to be equal is
 a small loss of power; the cost of the Student test when they are not is a
 false positive rate above the nominal alpha.
 
-`ttest_method` still defaults to `"student"` for backwards compatibility with
-existing comparison projects. Set `ttest_method: "welch"` in the `defaults:`
-block of `comparison.yaml` for any comparison where the conditions could
-plausibly differ in their spread, which is most of them.
+PolyzyMD therefore uses Welch's t-test by default. In Python,
+`compare(test="student")` gives Student's test for a comparison where equal
+variances are known on other grounds.
 
 ### Effect sizes at small replicate counts
 
@@ -448,6 +433,10 @@ follows the GUM.
 > **Benjamini, Y., & Hochberg, Y.** (1995). "Controlling the false discovery
 > rate: a practical and powerful approach to multiple testing." *Journal of the
 > Royal Statistical Society B*, 57(1), 289-300.
+
+> **Benjamini, Y.** (2010). "Discovering the false discovery rate." *Journal of
+> the Royal Statistical Society B*, 72(4), 405-416.
+> [DOI: 10.1111/j.1467-9868.2010.00746.x](https://doi.org/10.1111/j.1467-9868.2010.00746.x)
 
 > [DOI: 10.1063/1.457480](https://doi.org/10.1063/1.457480). Block averaging is
 > an alternative route to the statistical inefficiency. PolyzyMD does not

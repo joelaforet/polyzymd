@@ -26,8 +26,8 @@ packages that provide them are cited as methods rather than as dependencies.
   (2019). On the interaction of hyaluronic acid with synovial fluid lipid
   membranes. Physical Chemistry Chemical Physics 21:9845-9857.
   doi:10.1039/C9CP01532A (we do not build on this paper. MDAnalysis asks that
-  users of its HydrogenBondAnalysis cite it, and the hydrogen bonds plugin uses
-  that class.)
+  users of its HydrogenBondAnalysis cite it, and `functions.hydrogen_bonds` and
+  `functions.hbond_count` use that class.)
 - McGibbon, R. T., Beauchamp, K. A., Harrigan, M. P., Klein, C., Swails, J. M.,
   Hernandez, C. X., Schwantes, C. R., Wang, L.-P., Lane, T. J., and
   Pande, V. S. (2015). MDTraj: a modern open library for the analysis of

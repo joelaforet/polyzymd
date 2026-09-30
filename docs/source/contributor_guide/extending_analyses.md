@@ -1,5 +1,15 @@
 # Extend PolyzyMD with MDAnalysis-native analyses
 
+```{note}
+No shipped analysis uses the plugin framework any more, and the framework is
+being removed. A new analysis is a plain function of MDAnalysis atom groups or
+a `Universe`, which `Study.timeseries` runs on every production frame and
+`Study.per_replicate` once per replicate. See
+{doc}`../explanation/analysis_api` for how, and
+{doc}`../reference/analysis_functions` for the shipped functions, which
+are written the same way.
+```
+
 This guide shows the supported contributor workflow for adding a new analysis
 plugin. PolyzyMD treats each trajectory-native analysis as an MDAnalysis-style
 analysis, then lifts it from one trajectory to condition/replicate ensembles.
@@ -8,8 +18,7 @@ MDAnalysis owns the per-trajectory `Universe`, `AtomGroup`, frame iteration,
 replicate artifacts, condition aggregation, cross-condition statistics, CLI
 wiring, and plotting from cached artifacts.
 
-Start with the scaffold unless you are updating a built-in analysis. The
-generated code matches the current MDAnalysis-native extension layer and is the
+Start with the scaffold. The generated code matches the current MDAnalysis-native extension layer and is the
 smallest working example of the contract.
 
 ## What you will build

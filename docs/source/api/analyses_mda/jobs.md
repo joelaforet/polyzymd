@@ -12,8 +12,9 @@ subclass.
 
 `MDABackendPolicy` controls optional MDAnalysis internal backends. The default
 policy forwards no backend kwargs so PolyzyMD-level parallelism remains the
-default. In `comparison.yaml`, the top-level `mda_backend_policy` section maps
-to this object and is intentionally opt-in:
+default. For a plugin run through `polyzymd compare`, the top-level
+`mda_backend_policy` section of `comparison.yaml` maps to this object and is
+intentionally opt-in:
 
 ```yaml
 mda_backend_policy:

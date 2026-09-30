@@ -34,9 +34,10 @@ The goal is not abstraction for its own sake. The goal is a smaller public
 facade in `__init__.py` plus private modules that each have one reason to
 change.
 
-## Use built-in packages as examples, not import targets
+## A package shape
 
-The built-in `hydrogen_bonds` plugin shows a real package shape. Its private helper modules are useful examples of organization:
+PolyzyMD ships no plugin package, so there is no package in the tree to copy.
+A plugin package usually splits its private helpers as:
 
 - `_mda.py` for trajectory-native job and collector helpers;
 - `_plotters.py` for artifact-only plotting helpers; and

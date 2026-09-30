@@ -28,10 +28,10 @@ Use this site by *need*:
 .. note::
 
    Stable analysis workflows for the `v1.3.0` release are RMSD, Rg, RMSF,
-   contacts, distances, catalytic triad, secondary structure, SASA, and
-   hydrogen bonds. RMSD, Rg, RMSF, contacts, distances, the catalytic triad,
-   secondary structure and SASA run through ``polyzymd analyze`` and the study
-   API.
+   contacts, native contacts, distances, secondary structure, SASA, and
+   hydrogen bonds, which run through ``polyzymd analyze NAME -c config.yaml``
+   and the study API. The catalytic triad is a routine on the study API; see
+   :doc:`how_to/analysis_triad_quickstart`.
 
 Choose Your Path
 ----------------

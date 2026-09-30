@@ -1,8 +1,18 @@
 # New Analysis Contributor Path
 
-This landing page is for contributors who want to add a new PolyzyMD analysis
-plugin or make a safe change to an existing plugin. It is a map of the
-contributor path, not the tutorial itself.
+```{note}
+No shipped analysis uses the plugin framework any more, and the framework is
+being removed. A new analysis is a plain function of MDAnalysis atom groups or
+a `Universe`, which `Study.timeseries` runs on every production frame and
+`Study.per_replicate` once per replicate. See
+{doc}`../../explanation/analysis_api` for how, and
+{doc}`../../reference/analysis_functions` for the shipped functions, which
+are written the same way.
+```
+
+This landing page is for contributors who maintain the analysis plugin
+framework or a plugin of their own until the framework is removed. It is a map
+of the contributor path, not the tutorial itself.
 
 Use it if you know Python and molecular simulation concepts, but are still
 learning how PolyzyMD connects MDAnalysis trajectory work to replicate
@@ -71,7 +81,7 @@ Use these lookup pages when you need exact import paths, commands, or settings.
   reference directly.
 - [CLI reference](../../reference/cli_reference.md) and
   [analysis plugin settings reference](../../reference/analysis_plugin_settings.md)
-  — look up commands and `comparison.yaml` plugin options.
+  — look up commands and the retired `comparison.yaml` plugin options.
 
 ## Public and private import guardrails
 

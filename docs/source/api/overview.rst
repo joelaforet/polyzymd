@@ -30,27 +30,27 @@ Package Structure
     ├── core/             # Core utilities
     │   ├── parameters.py # Simulation parameters
     │   └── restraints.py # Restraint definitions
-    ├── analyses/         # ★ Plugin system — unified analysis lifecycle
-    │   ├── base.py       # Public facade, contexts, result models
-    │   ├── discovery.py  # pkgutil-based auto-discovery
-    │   ├── orchestrator.py  # Framework engine
-    │   ├── stats.py      # Shared statistical utilities
-    │   ├── _framework/   # Private/internal lifecycle and artifact internals
-    │   ├── mda/          # Public MDAnalysis job and artifact layer
-    │   ├── shared/       # Reusable utilities (TrajectoryLoader, alignment, etc.)
+    ├── analyses/         # ★ Study API, analysis functions and `polyzymd analyze`
     │   ├── study.py      # Study API: replicates as MDAnalysis universes
-    │   ├── functions.py  # Shipped analysis functions (rg, rmsd, rmsf, distances, contacts)
-    │   ├── protocols.py  # `polyzymd analyze` for the function analyses
-    │   ├── hydrogen_bonds/  # Hydrogen-bond plugin package
-    │   └── ...           # Single-file or package plugins for each analysis type
+    │   ├── timeseries.py # study.timeseries / per_replicate, summaries and tests
+    │   ├── functions.py  # Shipped analysis functions (rg, rmsd, rmsf, sasa, contacts,
+    │   │                 # hydrogen bonds, distances, ...)
+    │   ├── figures.py    # Figures drawn from stored values
+    │   ├── protocols.py  # `polyzymd analyze` and the ProtocolReport
+    │   ├── mda/          # MDAnalysis loading, file identity, job and artifact layer
+    │   ├── shared/       # Reusable utilities (TrajectoryLoader, alignment, etc.)
+    │   ├── base.py, discovery.py, orchestrator.py, stats.py, _framework/
+    │   │                 # Analysis plugin framework: no shipped analysis is a
+    │   │                 # plugin any more, and it is being removed
     └── cli/              # Command-line interface
+        ├── analyze.py    # `polyzymd analyze`
         ├── compare.py    # `polyzymd compare` subcommands
         └── main.py       # Click CLI
 
-The ``analyses/_framework/`` package is private/internal implementation detail.
-Contributor plugins should import public lifecycle symbols from
-``polyzymd.analyses.base`` and MDAnalysis job/artifact utilities from
-``polyzymd.analyses.mda``.
+No shipped analysis is a plugin: every analysis that ``polyzymd analyze``
+offers is a function in ``polyzymd.analyses.functions`` run through
+``polyzymd.analyses.study.Study``. The ``analyses/_framework/`` package is
+private implementation detail of the plugin framework.
 
 
 Key Classes
@@ -94,7 +94,10 @@ Restraints
 Analysis
 ~~~~~~~~
 
-- :py:class:`~polyzymd.analyses.base.Analysis` - Plugin base class for all analyses
+- :py:class:`~polyzymd.analyses.study.Study` - Every replicate of every condition as MDAnalysis universes
+- :py:func:`~polyzymd.analyses.functions.hydrogen_bonds` - Hydrogen-bond counts between two groups
+- :py:func:`~polyzymd.analyses.functions.residue_occlusion` - Polymer-protein contacts by occluded SASA
+- :py:class:`~polyzymd.analyses.base.Analysis` - Base class of the plugin framework, which no shipped analysis uses
 - :py:class:`~polyzymd.analyses.mda.job.MDAAnalysisJob` - Unit of trajectory-native MDAnalysis work
 - :py:class:`~polyzymd.analyses.mda.frame_selection.FrameSelection` - Frame selection and equilibration-window descriptor
 - :py:class:`~polyzymd.analyses.mda.artifacts.ReplicateArtifact` - Validated output for one replicate
@@ -102,12 +105,11 @@ Analysis
 - :py:class:`~polyzymd.analyses.mda.artifacts.ComparisonArtifact` - Canonical comparison output for cross-condition results
 - :py:class:`~polyzymd.analyses.mda.store.ArtifactStore` - Canonical artifact persistence and loading helper
 - :py:class:`~polyzymd.analyses.base.MetricValue` - Scalar metric descriptor for default comparisons
-- :py:func:`~polyzymd.analyses.functions.residue_occlusion` - Polymer-protein contacts by occluded SASA
 
 Comparison
 ~~~~~~~~~~
 
-- :py:class:`~polyzymd.analyses.base.Analysis` - Plugin base class for all analyses
+- :py:class:`~polyzymd.analyses.protocols.ProtocolReport` - The report of ``polyzymd analyze`` and of ``summary()`` and ``compare()``
 - :py:class:`~polyzymd.analyses.base.ComparisonResult` - Universal comparison result model
 - :py:class:`~polyzymd.analyses.base.MetricValue` - Scalar metric descriptor
 - :py:class:`~polyzymd.analyses.base.ReplicateContext` - Context for per-replicate computation
