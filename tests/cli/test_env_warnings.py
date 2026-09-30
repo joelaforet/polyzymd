@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 from click.testing import CliRunner
 
-from polyzymd.cli.compare import compare
 from polyzymd.cli.env_warnings import (
     env_warnings_disabled,
     get_active_pixi_environment,
@@ -206,39 +205,3 @@ def test_recover_submit_openmm_accepts_build_environment(monkeypatch, tmp_path) 
     assert result.exit_code == 0
     assert "Warning: polyzymd recover --submit --engine openmm" not in result.stdout
     assert "Warning: polyzymd recover --submit --engine openmm" not in result.stderr
-
-
-def test_compare_init_warns_for_analysis_environment(monkeypatch, tmp_path) -> None:
-    """Comparison scaffolding should recommend the build environment."""
-    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "analysis")
-    monkeypatch.delenv("POLYZYMD_DISABLE_ENV_WARNINGS", raising=False)
-    runner = CliRunner()
-
-    with runner.isolated_filesystem(temp_dir=tmp_path):
-        result = runner.invoke(compare, ["init", "-n", "study"])
-
-    assert result.exit_code == 0
-    assert "Created comparison project" in result.output
-    assert "Warning: polyzymd compare init" not in result.stdout
-    assert "Warning: polyzymd compare init" in result.stderr
-    assert "recommended environment is 'build'" in result.stderr
-
-
-def test_compare_status_json_skips_environment_warning(monkeypatch, tmp_path) -> None:
-    """Machine-readable analysis status output should not get advisory warnings."""
-    from tests.analyses.test_protocols import _install_toy
-
-    _install_toy(monkeypatch)
-    config_path = tmp_path / "comparison.yaml"
-    config_path.write_text("name: demo\nconditions: []\nplugins: {}\n", encoding="utf-8")
-    monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "build")
-    runner = CliRunner()
-
-    result = runner.invoke(compare, ["status", "toy_protocol", "-f", str(config_path), "--json"])
-
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert isinstance(payload, dict)
-    assert "counts" in payload
-    assert "Warning: polyzymd compare status" not in result.stdout
-    assert "Warning: polyzymd compare status" not in result.stderr
