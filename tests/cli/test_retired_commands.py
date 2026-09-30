@@ -35,10 +35,29 @@ def test_compare_names_the_analyze_commands_docs_and_skill(arguments: list[str])
     assert SKILL in result.stderr
 
 
+@pytest.mark.parametrize(
+    "arguments",
+    [["new-analysis"], ["new-analysis", "solvent_shell", "--advanced", "--force"]],
+)
+def test_new_analysis_names_the_study_api_docs_and_skill(arguments: list[str]) -> None:
+    """Any new-analysis invocation exits 2 pointing at the study API page and the skill."""
+    result = CliRunner().invoke(cli, arguments)
+
+    assert result.exit_code == 2
+    assert "polyzymd new-analysis is retired" in result.stderr
+    assert "Study.per_replicate" in result.stderr and "Study.timeseries" in result.stderr
+    assert (
+        "https://polyzymd.readthedocs.io/en/latest/explanation/analysis_api.html" in result.stderr
+    )
+    assert "docs/source/explanation/analysis_api.md" in result.stderr
+    assert SKILL in result.stderr
+
+
 def test_retired_commands_are_hidden_from_help() -> None:
-    """polyzymd --help does not list compare."""
+    """polyzymd --help lists neither retired command."""
     result = CliRunner().invoke(cli, ["--help"])
 
     assert result.exit_code == 0
     commands = [line.split()[0] for line in result.output.splitlines() if line.startswith("  ")]
     assert "compare" not in commands
+    assert "new-analysis" not in commands
