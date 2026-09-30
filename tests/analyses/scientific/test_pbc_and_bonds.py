@@ -1,9 +1,8 @@
 """Known-answer tests for periodic boundary handling and bond requirements.
 
-These tests pin three behaviours. Fragment lookups (the shared
-``require_topology_bonds`` and contacts chain identity) must fail loudly when
-the topology carries no bonds instead of collapsing the selection into a
-single fragment. ``functions.pair_distance`` must use the minimum image
+These tests pin three behaviours. The shared fragment lookup
+``require_topology_bonds`` must fail loudly when the topology carries no bonds
+instead of collapsing the selection into a single fragment. ``functions.pair_distance`` must use the minimum image
 convention against the box of the frame it measures, which is why no
 rigid-body alignment runs first.
 Universe provenance must state which periodic boundary policy was applied.
@@ -80,50 +79,6 @@ def test_fragment_lookup_without_bonds_raises_typed_error() -> None:
     assert "bond" in message.lower()
 
 
-def test_single_fragment_fallback_is_opt_in() -> None:
-    """The old single-fragment fallback stays reachable behind a flag."""
-
-    from polyzymd.analyses.contacts._events import identify_polymer_chains
-
-    universe = _two_chain_universe()
-    universe.del_TopologyAttr("bonds")
-
-    chain_indices, warnings = identify_polymer_chains(
-        universe.atoms, allow_single_fragment_fallback=True
-    )
-
-    assert chain_indices.tolist() == [0, 0]
-    assert warnings
-
-
-def test_identify_polymer_chains_without_bonds_raises_typed_error() -> None:
-    """Contacts chain identity must refuse a topology with no bonds."""
-
-    from polyzymd.analyses.contacts._events import identify_polymer_chains
-    from polyzymd.analyses.exceptions import TopologyBondsMissingError
-
-    universe = _two_chain_universe()
-    universe.del_TopologyAttr("bonds")
-
-    with pytest.raises(TopologyBondsMissingError) as excinfo:
-        identify_polymer_chains(universe.atoms)
-
-    assert "6 atoms" in str(excinfo.value)
-
-
-def test_identify_polymer_chains_uses_fragments_when_bonds_exist() -> None:
-    """Chain identity should assign one chain index per bonded fragment."""
-
-    from polyzymd.analyses.contacts._events import identify_polymer_chains
-
-    universe = _two_chain_universe()
-
-    chain_indices, warnings = identify_polymer_chains(universe.atoms)
-
-    assert chain_indices.tolist() == [0, 1]
-    assert warnings == []
-
-
 def _partially_bonded_universe() -> Any:
     """Build a universe where only the protein carries bonds.
 
@@ -192,18 +147,6 @@ def test_partially_bonded_topology_is_detected_as_unbonded_selection() -> None:
         )
 
     assert "3 atoms" in str(excinfo.value)
-
-
-def test_partially_bonded_topology_rejects_polymer_chain_identity() -> None:
-    """Contacts chain identity fails on a polymer selection with no bonds."""
-
-    from polyzymd.analyses.contacts._events import identify_polymer_chains
-    from polyzymd.analyses.exceptions import TopologyBondsMissingError
-
-    universe = _partially_bonded_universe()
-
-    with pytest.raises(TopologyBondsMissingError):
-        identify_polymer_chains(universe.select_atoms("resname SBM"))
 
 
 def test_partially_bonded_topology_allows_the_bonded_selection() -> None:

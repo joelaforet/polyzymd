@@ -36,10 +36,7 @@ from polyzymd.analyses.shared.statistics import (
 T_FACTOR_N3 = 4.302652729749462
 T_FACTOR_N5 = 2.7764451051977934
 
-PLUGIN_NAMES = (
-    "contacts",
-    "hydrogen_bonds",
-)
+PLUGIN_NAMES = ("hydrogen_bonds",)
 
 
 def _frame_selection() -> dict[str, int]:
@@ -400,9 +397,6 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
     dict
         Metric summaries keyed by metric name.
     """
-    if analysis_name == "contacts":
-        return {"coverage": metric_summary_payload("coverage", [0.4], unit="fraction")}
-
     if analysis_name == "hydrogen_bonds":
         return {
             "mean_hbonds_all": metric_summary_payload(

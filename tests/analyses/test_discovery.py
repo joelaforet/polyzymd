@@ -102,7 +102,6 @@ class TestDiscovery:
 
     def test_discovery_finds_all_shipped_plugins(self):
         """Discovery should find shipped plugins and register analysis classes."""
-        from polyzymd.analyses.contacts import ContactsAnalysis
         from polyzymd.analyses.discovery import clear_cache, list_analyses
         from polyzymd.analyses.hydrogen_bonds import HydrogenBondsAnalysis
 
@@ -110,7 +109,6 @@ class TestDiscovery:
         analyses = list_analyses()
 
         expected_names = {
-            "contacts",
             "hydrogen_bonds",
         }
         assert set(analyses) == expected_names
@@ -119,7 +117,6 @@ class TestDiscovery:
             assert issubclass(cls, Analysis), f"{name} is not an Analysis subclass"
 
         assert analyses["hydrogen_bonds"] is HydrogenBondsAnalysis
-        assert analyses["contacts"] is ContactsAnalysis
 
     def test_discovery_excludes_removed_plugins(self):
         """Removed plugins and aliases should not be discoverable as active code."""
@@ -135,6 +132,7 @@ class TestDiscovery:
         active_names = list_all_names()
 
         for name in (
+            "contacts",
             "binding_preference",
             "contacts_binding_preference",
             "contact_binding_preference",
@@ -154,7 +152,7 @@ class TestDiscovery:
             with pytest.raises(KeyError, match="Unknown analysis"):
                 get_analysis(name)
 
-        for name in ("contacts", "hydrogen_bonds"):
+        for name in ("hydrogen_bonds",):
             assert name in active_plugins
 
     def test_get_analysis_unknown_raises(self):
@@ -235,15 +233,17 @@ class TestDiscoveryRobustness:
         assert _should_skip_module("polyzymd.analyses.mda.base", package_prefix) is True
 
         assert _should_skip_module("polyzymd.analyses.hydrogen_bonds", package_prefix) is False
-        assert _should_skip_module("polyzymd.analyses.contacts", package_prefix) is False
 
     def test_top_level_module_detection(self):
         """Only direct children of analyses are top-level modules."""
         from polyzymd.analyses.discovery import _is_top_level_module
 
         package_prefix = "polyzymd.analyses."
-        assert _is_top_level_module("polyzymd.analyses.contacts", package_prefix) is True
-        assert _is_top_level_module("polyzymd.analyses.contacts._runner", package_prefix) is False
+        assert _is_top_level_module("polyzymd.analyses.hydrogen_bonds", package_prefix) is True
+        assert (
+            _is_top_level_module("polyzymd.analyses.hydrogen_bonds._runner", package_prefix)
+            is False
+        )
 
     def test_realistic_top_level_module_and_package_discovery(self, monkeypatch, tmp_path):
         """Discovery should import real top-level modules and package plugins."""
@@ -542,5 +542,5 @@ class TestDiscoveryImportCost:
         )
         result = json.loads(completed.stdout.strip().splitlines()[-1])
 
-        assert result["names"] == ["contacts", "hydrogen_bonds"]
+        assert result["names"] == ["hydrogen_bonds"]
         assert result["heavy"] == []

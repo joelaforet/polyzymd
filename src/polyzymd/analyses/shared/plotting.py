@@ -1430,27 +1430,6 @@ def band_half_widths(
     return sem * float(student_t_coverage_factor(n) or 1.0)
 
 
-def shared_count_half_widths(
-    sems: "Sequence[float] | np.ndarray",
-    n_replicates: int,
-    *,
-    error_bar: str = "ci95",
-) -> "np.ndarray":
-    """Return bar or band half widths for a series with one shared replicate count.
-
-    Use it where the per-point replicate values are not available but the count
-    behind every point is the same. Returns zeros when fewer than two
-    replicates make the interval inestimable, so the caller can draw nothing.
-    """
-    import numpy as np
-
-    array = np.asarray(sems, dtype=float)
-    half_widths = error_bar_half_widths(list(array), error_bar=error_bar, n_replicates=n_replicates)
-    if half_widths is None:
-        return np.zeros_like(array)
-    return np.asarray(half_widths, dtype=float)
-
-
 def annotate_uncertainty(
     fig: "Figure",
     plot_settings: Any,

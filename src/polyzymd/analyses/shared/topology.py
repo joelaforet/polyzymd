@@ -1,7 +1,7 @@
 """Topology bond checks shared by fragment-based observables.
 
-Rg in fragment mode and contacts chain identity mean nothing unless the atoms
-they measure are bonded. A topology can carry no bonds at all, which is what
+Rg in fragment mode and unwrapping molecules split across a periodic boundary
+mean nothing unless the atoms they measure are bonded. A topology can carry no bonds at all, which is what
 MDAnalysis produces for a PDB whose atom serials run above 99999, or bonds for
 some molecules and not others, which is what happens when only the standard
 residues have usable CONECT records. The second case raises nothing inside

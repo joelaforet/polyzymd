@@ -26,7 +26,6 @@ from polyzymd.analyses.shared.plotting import (  # noqa: E402
     add_uncertainty_footnote,
     band_half_widths,
     error_bar_half_widths,
-    plugin_plot_settings,
     resolve_error_bar,
 )
 from tests.analyses.conftest import (  # noqa: E402
@@ -35,8 +34,6 @@ from tests.analyses.conftest import (  # noqa: E402
 )
 
 T_FACTOR_N3 = 4.302652729749462
-
-PLUGINS_WITH_PLOT_SETTINGS = ("contacts",)
 
 
 def _footnote_texts(fig: "plt.Figure") -> list[str]:
@@ -164,19 +161,6 @@ class TestErrorBarSetting:
 
         assert resolve_error_bar(None, object()) == "ci95"
 
-    @pytest.mark.parametrize("analysis_name", PLUGINS_WITH_PLOT_SETTINGS)
-    def test_every_plugin_setting_is_reachable_from_the_global_object(
-        self, analysis_name: str
-    ) -> None:
-        """The global plot settings expose each plugin's error_bar choice."""
-
-        from polyzymd.config.comparison import PlotSettings
-
-        settings = plugin_plot_settings(PlotSettings(), analysis_name)
-
-        assert settings is not None, f"{analysis_name} settings not reachable"
-        assert getattr(settings, "error_bar", None) == "ci95"
-
 
 class TestFootnote:
     """Every figure that draws an uncertainty says what it is."""
@@ -264,7 +248,7 @@ class TestEveryPluginFigureIsAudited:
                 "a test in this session replaced it"
             )
 
-    @pytest.mark.parametrize("analysis_name", PLUGINS_WITH_PLOT_SETTINGS + ("hydrogen_bonds",))
+    @pytest.mark.parametrize("analysis_name", ("hydrogen_bonds",))
     def test_plotter_module_annotates_every_uncertainty_figure(
         self, analysis_name: str, tmp_path: "Path"
     ) -> None:
