@@ -209,11 +209,16 @@ artifact or plugin-specific summary output, the figures exist, and
 
 ## Step 5: Add RMSF for the Same Study
 
-RMSF runs through `polyzymd analyze`, which reads the same conditions from
-`comparison.yaml`:
+RMSF runs through `polyzymd analyze`, which reads the simulation configs of the
+same conditions, the first one being the control:
 
 ```bash
-pixi run -e analysis polyzymd analyze rmsf -f comparison.yaml
+pixi run -e analysis polyzymd analyze rmsf \
+  -c ../noPoly_enzyme_DMSO/config.yaml \
+  -c ../SBMA_100_enzyme_DMSO/config.yaml \
+  -c ../EGMA_100_enzyme_DMSO/config.yaml \
+  --label "No Polymer" --label "100% SBMA" --label "100% EGMA" \
+  --replicates 1-3 --eq 10ns
 ```
 
 The report compares each condition's core RMSF with the control, and the

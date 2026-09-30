@@ -1,7 +1,19 @@
-# Polymer-Protein Contacts Analysis: Quick Start
+# Polymer-protein contacts analysis: quick start
 
-Analyze polymer-protein contact frequencies and coverage for one or more
-conditions using the `contacts` plugin.
+Measure how often each protein residue touches the polymer on the production
+frames of every replicate, and compare how much of the protein the polymer
+covers, overall, per monomer type, per amino-acid class, per region or residue
+by residue, with the replicate as the sampling unit.
+
+```{versionadded} 1.3.0
+Contacts analysis was added in PolyzyMD 1.3.0.
+```
+
+```{note}
+**Want to understand the measurement?** For what each shipped function
+measures, see {doc}`../reference/analysis_functions`; for the statistics, see
+{doc}`../explanation/analysis_statistics_best_practices`.
+```
 
 :::{admonition} Environment Setup
 :class: tip
@@ -16,29 +28,18 @@ pixi shell -e analysis
 Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
-## TL;DR
+## What is measured
 
-```bash
-# Configure plugins.contacts in comparison.yaml, then run:
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
+On every production frame, MDAnalysis `lib.distances.capped_distance` finds
+every pair of a polymer atom and a protein atom closer than the cutoff, 4.5 Å
+by default, using the minimum image of the frame's box. A protein residue is in
+contact on a frame when any of its atoms is in such a pair. Each residue's
+**contact fraction** is the fraction of production frames it is in contact, and
+the same is measured for each polymer residue name, such as each monomer type.
+A residue can touch several monomer types on one frame, so the per-type
+fractions do not add up to the total.
 
-# Run all enabled analyses in the same workflow
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-
-# Force recompute
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns --recompute
-```
-
-## Prerequisites
-
-Before running contacts analysis, make sure you have:
-
-1. Completed production trajectories for each replicate
-2. A `comparison.yaml` with conditions and `plugins.contacts`
-3. Topology with valid chain IDs and polymer atoms
-4. At least 2 replicates per condition if you want robust comparison stats
-
-## Chain convention used by contacts
+PolyzyMD topologies put the protein on chain A and the polymer on chain C:
 
 | Chain | Contents |
 |-------|----------|
@@ -47,275 +48,119 @@ Before running contacts analysis, make sure you have:
 | C | Polymer |
 | D+ | Solvent and ions |
 
-The default contacts setup expects polymer on chain C and protein on chain A.
+The default selections, `chainid A` and `chainid C`, follow that convention and
+include hydrogen atoms.
 
-## Basic usage
+## From the command line
 
-### 1) Configure `comparison.yaml`
+```bash
+polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml \
+  --label "SBMA 50%" --label "SBMA 100%" --eq 200ns
+```
 
-```yaml
-# comparison.yaml
-name: "contacts_study"
-control: "No Polymer"
+The first `-c` is the control. One pass over each replicate gives every result.
+By default the report shows `coverage`: for each replicate, the fraction of
+protein residues in contact on at least one production frame. The replicate
+values are summarised per condition, and every other condition is compared with
+the control by Welch's t test with the Benjamini-Hochberg correction. Every
+condition needs a polymer: the selections are checked on the first replicate of
+the control, and a selection that picks no atoms is refused. Pick another result
+with `--run`:
 
+| `--run` | One value per replicate |
+|---|---|
+| `coverage` (default) | Fraction of residues in contact on at least one frame |
+| `mean_contact_fraction` | Mean over residues of each residue's contact fraction |
+| `<type>_contact_fraction` | The same, counting only polymer residues named `<type>`, for each type in the polymer, such as `SBM` or `EGM` |
+| `<class>_contact_fraction` | Mean contact fraction of the residues of one amino-acid class: `aromatic`, `charged_positive`, `charged_negative`, `polar` or `nonpolar`, for the classes present |
+| `<region>_contact_fraction` | Mean contact fraction of the residues of one region of `regions` |
+| `contact_fraction_residues` | Each residue's contact fraction, compared residue by residue |
+| `<type>_contact_fraction_residues` | Each residue's contact fraction with one monomer type, compared residue by residue |
+
+A per-residue comparison is corrected over every residue of every compared
+condition, and the text report gives, for each condition, how many residues
+are significantly lower and higher than in the control and lists them. Every
+per-residue row is kept in the JSON report.
+
+Settings, passed with `--set`:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `protein_selection` | `chainid A` | Protein atoms whose residues are measured |
+| `polymer_selection` | `chainid C` | Polymer atoms |
+| `cutoff` | `4.5` | Contact distance in Å |
+| `polymer_types` | none | Residue names to keep in the polymer selection, such as `[SBM]` |
+| `use_pbc` | `true` | Use the minimum image of each frame's box |
+| `regions` | none | Mapping of region names to selections, each reported as `<region>_contact_fraction`; a region cannot be named `coverage`, `mean`, `contact`, `classes`, a monomer type or an amino-acid class |
+
+For example, to compare how much SBMA covers the active site of two polymer
 conditions:
-  - label: "No Polymer"
-    config: "../no_polymer/config.yaml"
-    replicates: [1, 2, 3]
-
-  - label: "SBMA"
-    config: "../sbma_100/config.yaml"
-    replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "10ns"
-
-plugins:
-  contacts:
-    polymer_selection: "chainid C"
-    protein_selection: "chainid A"
-    cutoff: 4.5
-    grouping: "aa_class"
-    compute_residence_times: true
-```
-
-### 2) Run contacts
 
 ```bash
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
+polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml --eq 200ns \
+  --set "regions={active_site: resid 77 or resid 133 or resid 156}" \
+  --run active_site_contact_fraction
 ```
 
-Expected output includes per-replicate progress and aggregated summary metrics
-(coverage and mean contact fraction).
+The resolved polymer selection, the monomer types found, and the residues of
+each amino-acid class and region are recorded under `provenance.settings` in
+the JSON report. Add `--stride 5` to measure every fifth production frame,
+`--format json` for the full report, `--replicates 1-3` to use only some
+replicates, and `--recompute` to ignore stored results.
 
-### 3) Run all enabled plugins (optional)
-
-```bash
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
+```{note}
+Contact residence times, and the `comparison.yaml` workflow, still run through
+`polyzymd compare run contacts` in this version; see
+{doc}`../reference/analysis_contacts_reference`. Its coverage and contact
+fractions equal these for the same frames and settings.
 ```
 
-## Key metrics to check first
+## Figures
 
-- **Coverage**: fraction of protein residues contacted at least once
-- **Mean contact fraction**: average per-residue fraction of frames in contact
-- **Residence time (optional)**: average duration of individual contact events
+`polyzymd analyze contacts` writes these figures to
+`<output-dir>/figures/contacts/`; `--no-plots` skips them.
 
-## Common tasks
+| Figure | What it shows |
+|---|---|
+| `contacts_class_bars` | The mean contact fraction of each amino-acid class for every condition, with every replicate value |
+| `contacts_<run>_comparison` | For a one-value result: each condition's mean with its interval and every replicate value |
+| `contacts_<name>_profile` | For a residue result: each residue's contact fraction per replicate and each condition's mean with its interval |
+| `contacts_<name>_difference` | For a residue result with several conditions: each condition minus the control at every residue, with the interval of the difference and the significant residues marked |
 
-### Enable residence time statistics
-
-Residence times are enabled by default, but it is fine to set this explicitly:
-
-```yaml
-plugins:
-  contacts:
-    compute_residence_times: true
-```
-
-Then run:
-
-```bash
-polyzymd compare run contacts -f comparison.yaml
-```
-
-Set `compute_residence_times: false` when you only need contact fractions or
-downstream contacts-derived analyses. This skips aggregate residence-time
-summaries and residence-time plots, but still stores per-replicate contact
-events. Changing the setting changes the canonical contacts artifact identity,
-so recompute contacts after toggling it.
-
-### Analyze one polymer type only
-
-```yaml
-plugins:
-  contacts:
-    polymer_selection: "chainid C and resname SBM"
-    protein_selection: "chainid A"
-```
-
-For EGMA-only analysis, switch to `resname EGM`.
-
-### Restrict analysis to a protein region
-
-```yaml
-plugins:
-  contacts:
-    polymer_selection: "chainid C"
-    protein_selection: "chainid A and (resname TRP PHE TYR)"
-```
-
-For an active-site slice, use a residue range selection such as:
-
-```yaml
-protein_selection: "chainid A and (resid 75-80 or resid 130-140)"
-```
-
-### Run with reproducible cache behavior
-
-```bash
-# Use cache if present
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
-
-# Ignore cache and recompute
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns --recompute
-```
-
-### Use a fuller contacts configuration
-
-If you want one place to set the most common contacts options:
-
-```yaml
-plugins:
-  contacts:
-    polymer_selection: "chainid C"
-    protein_selection: "chainid A"
-    cutoff: 4.5
-    polymer_types: ["SBM", "EGM"]
-    grouping: "aa_class"
-    compute_residence_times: true
-    fdr_alpha: 0.05
-    min_effect_size: 0.5
-    top_residues: 10
-```
-
-This is usually enough for cross-condition comparison without extra tuning.
-
-### Add user-defined protein groups and partitions
-
-Use this when you want plots and summaries for specific regions:
-
-```yaml
-plugins:
-  contacts:
-    protein_groups:
-      active_site: [77, 133, 156]
-      binding_patch: [45, 46, 47, 82, 84]
-      distal_surface: [12, 13, 14, 190, 191, 192]
-    protein_partitions:
-      functional_regions: [active_site, binding_patch, distal_surface]
-```
-
-After running, these partitions are used in partition-level contacts plots.
-
-### Generate contacts plots after running
-
-```bash
-polyzymd compare plot-all -f comparison.yaml
-```
-
-You will get contact-fraction profiles and grouped bar plots for AA classes and
-(if configured) user partitions. Residence-time profiles are generated only
-when `compute_residence_times` is enabled and residence-time data exists.
-
-For the full list of plot outputs and plot settings, see
-{doc}`../reference/analysis_contacts_reference`.
-
-### Run only contacts in a multi-plugin config
-
-If your `comparison.yaml` enables several plugins, you can run only contacts:
-
-```bash
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
-```
-
-Later, run all enabled plugins:
-
-```bash
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-```
-
-## Quick output checks
-
-After a run, verify these two things first:
-
-1. **Coverage and mean contact fraction** in the aggregated result
-2. **Replicate count used** in aggregation
-
-Minimal check pattern:
-
-```bash
-ls analysis/<condition>/contacts/aggregated/
-```
-
-Then inspect key values programmatically:
+## From Python
 
 ```python
-import json
-from pathlib import Path
+import numpy as np
+import polyzymd as pz
+from polyzymd.analyses.functions import residue_contacts
 
-agg = json.loads(Path("analysis/<condition>/contacts/aggregated/result.json").read_text())
-print(f"n_replicates={agg['n_replicates']}")
-print(f"coverage={agg['coverage_mean']:.3f} ± {agg['coverage_sem']:.3f}")
-print(
-    "mean_contact_fraction="
-    f"{agg['mean_contact_fraction']:.3f} ± {agg['mean_contact_fraction_sem']:.3f}"
+study = pz.Study.from_configs(
+    {"SBMA 50%": "SBMA50/config.yaml", "SBMA 100%": "SBMA100/config.yaml"},
+    equilibration="200ns",
 )
+rows = study.per_replicate(
+    residue_contacts,
+    pz.select("chainid A"),
+    pz.select("chainid C"),
+    unit=None,
+    labels=lambda u: u.select_atoms("chainid A").residues.resids,
+    parts=["contact_fraction", "SBM_contact_fraction"],
+    bounds=(0.0, 1.0),
+    types=["SBM"],
+)
+profile = rows["contact_fraction"]
+coverage = profile.over_labels(lambda v: float(np.mean(np.asarray(v) > 0)), "coverage")
+print(coverage.compare(control="SBMA 50%").to_agent_text())
+print(profile.compare(control="SBMA 50%").to_agent_text())  # residue by residue
 ```
 
-If residence times were enabled, also check:
-
-```python
-for ptype, stats in agg.get("residence_time_by_polymer_type", {}).items():
-    print(f"{ptype}: mean={stats[0]:.2f} frames, sem={stats[1]:.2f}")
-```
-
-## Programmatic post-processing (JSON)
-
-After CLI execution, load result files directly:
-
-```python
-import json
-from pathlib import Path
-
-replicate_result = json.loads(
-    Path("analysis/<condition>/contacts/run_1/result.json").read_text()
-)
-print(f"Coverage: {replicate_result['coverage_fraction']:.1%}")
-
-aggregated_result = json.loads(
-    Path("analysis/<condition>/contacts/aggregated/result.json").read_text()
-)
-print(
-    "Mean contact fraction: "
-    f"{aggregated_result['mean_contact_fraction']:.1%} "
-    f"± {aggregated_result['mean_contact_fraction_sem']:.1%}"
-)
-```
-
-For complete contacts configuration, output, plotting, and troubleshooting
-details, use {doc}`../reference/analysis_contacts_reference`.
-
-## Compare conditions
-
-Use the same comparison workflow as other stable analyses:
-
-```bash
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
-```
-
-The plugin compares conditions with dual primary metrics:
-
-- coverage
-- mean contact fraction
-
-For multi-plugin comparison workflow details, see
-{doc}`analysis_compare_conditions`.
-
-## Reference and troubleshooting
-
-For complete lookup documentation, including:
-
-- full configuration field tables
-- output directory structure and JSON schemas
-- full plot catalog and `plot_settings.contacts` options
-- common CLI options
-- troubleshooting fixes
-
-see {doc}`../reference/analysis_contacts_reference`.
+`residue_contacts(protein, polymer, frames, cutoff=4.5, types=(), pbc=True)`
+returns one row of contact fractions per residue, then one row per residue name
+in `types`.
 
 ## Next steps
 
-- {doc}`analysis_compare_conditions`
-- {doc}`analysis_rmsf_quickstart`
-- {doc}`analysis_triad_quickstart`
-- {doc}`../reference/analysis_contacts_reference`
+- **What each function measures**: {doc}`../reference/analysis_functions`
+- **Understand statistics**: {doc}`../explanation/analysis_statistics_best_practices`
+- **SASA analysis**: {doc}`analysis_sasa_quickstart`
+- **Residence times and the comparison workflow**: {doc}`../reference/analysis_contacts_reference`
