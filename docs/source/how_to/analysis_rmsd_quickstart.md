@@ -12,7 +12,9 @@ RMSD analysis was added in PolyzyMD 1.3.0.
 **Want to understand the statistics?** This guide focuses on getting results
 quickly. For interpretation of RMSD curves and the choice of reference, see
 {doc}`../explanation/analysis_rmsd_best_practices`. For what each shipped
-function measures, see {doc}`../reference/analysis_functions`.
+function measures, see {doc}`../reference/analysis_functions`. `rmsd` is one
+number per frame; for how it differs from the per-residue `rmsd_per_residue`,
+`rmsf` and `offset`, and which to report, see {ref}`Fluctuation, offset and deviation <rmsf-fluctuation-offset-deviation>`.
 ```
 
 :::{admonition} Environment Setup
@@ -98,10 +100,8 @@ replicates, and `--recompute` to ignore stored results. The line format and the
 verdict words are described under {ref}`polyzymd analyze <cli-analyze>`.
 
 ```{note}
-In the plugin used before this version, `reference_frame` counted trajectory
-frames from 0, including the equilibration window. It now counts production
-frames from 1, so a value copied from an old `comparison.yaml` points at a
-different frame.
+`reference_frame` counts production frames from 1, after the equilibration
+window, not trajectory frames from 0.
 ```
 
 ## From Python

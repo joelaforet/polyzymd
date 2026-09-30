@@ -120,14 +120,10 @@ run the command inside a SLURM job on a cluster rather than on a login node.
 ```
 
 ```{note}
-In the plugin used before this version, each run named its own target and
-context with its own frame stride, and `polyzymd compare run sasa` computed
-every run together. The stride is now `--stride`, shared by every result. Values from it are about 0.1 percent larger than
-these: MDTraj 1.11.1 returns slightly more area for every frame after the
-first one each thread computes in a call, and the plugin passed 100 frames per
-call.
-This version passes one frame per call. See
-{doc}`../explanation/analysis_sasa_verification`.
+`--stride` applies to every result of the command. PolyzyMD passes one frame
+per call to MDTraj's Shrake-Rupley SASA, because MDTraj 1.11.1 returns about
+0.1 percent more area for every frame after the first one each thread
+computes in a call. See {doc}`../explanation/analysis_sasa_verification`.
 ```
 
 ## Figures

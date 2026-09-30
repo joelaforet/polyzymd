@@ -103,7 +103,7 @@ atoms and add a systematic offset to every value.
 | Question | Mode |
 |---|---|
 | Which residues are flexible in this condition? | Any mode; read `rmsf`. `average` or `centroid` keep the reference inside the sampled ensemble |
-| How far does each condition's structure drift from a known structure? | `external`; read `offset` and `rms_deviation` |
+| How far does each condition's structure drift from a known structure? | `external`; read `offset` and `rmsd_per_residue` |
 | Does a condition keep a specific sampled geometry? | `frame`, with the frame's meaning stated |
 
 When comparing conditions, a common `external` reference makes differences in

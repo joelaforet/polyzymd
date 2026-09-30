@@ -848,6 +848,14 @@ Example configs: polyzymd/templates/examples/
 
 Scaffold an analysis plugin and matching tests.
 
+```{note}
+No shipped analysis uses the plugin framework any more: every analysis of
+`polyzymd analyze` runs on the study API, and the framework is being removed.
+To measure something of your own, write a function of an MDAnalysis
+`Universe` and run it with `Study.timeseries` or `Study.per_replicate`; see
+{doc}`../explanation/analysis_api`.
+```
+
 ```bash
 polyzymd new-analysis NAME [OPTIONS]
 
@@ -887,41 +895,44 @@ pixi run -e build pytest tests/analyses/plugins/test_solvent_shell.py -v
 
 Run one analysis and print a validated result. One `-c` gives a per-condition
 summary; two or more give pairwise comparisons with the first config as the
-control. The command builds the comparison in memory, so no `comparison.yaml`
-has to be written first.
+control. The command reads the simulation configs given with `-c`; it reads
+no `comparison.yaml`.
 
 ### Usage
 
 ```bash
 polyzymd analyze NAME -c config.yaml [-c other/config.yaml ...] [OPTIONS]
-polyzymd analyze NAME -f comparison.yaml [OPTIONS]
 ```
 
-`NAME` is one of `rg`, `rmsd`, `rmsf`, `rms_deviation`, `sasa`,
-`secondary_structure`, `contacts`, `distances` and `catalytic_triad`, which read
-simulation configs given with `-c`, or a comparison plugin listed by
-`polyzymd compare run --list`, such as `hydrogen_bonds`, which also reads
-`-f comparison.yaml`. An unknown name is refused with the list of all of them.
+`NAME` is one of `rg`, `rmsd`, `rmsf`, `rmsd_per_residue`, `sasa`,
+`secondary_structure`, `contacts`, `native_contacts`, `hydrogen_bonds` and
+`distances`. `rmsd` is one value per frame, the root mean square over atoms
+of their distance from the reference; `rmsd_per_residue` is one value per residue,
+the root mean square over frames of each atom's distance from the reference,
+as `gmx rmsf -od` reports. An unknown name is refused with the list of all of them.
+`catalytic_triad` is refused with a pointer to the triad routine on the study
+API, {doc}`../how_to/analysis_triad_quickstart`, and to `polyzymd analyze
+distances --set pairs=...` for the triad distances.
 
 ### Options
 
 | Option | Required | Description |
 |--------|----------|-------------|
 | `NAME` | Yes | Canonical analysis name, for example `rg`. |
-| `-c, --config PATH` | One of `-c`/`-f` | Simulation `config.yaml`. Repeatable; the first one is the control. |
-| `-f, --file PATH` | One of `-c`/`-f` | Existing `comparison.yaml` to analyze instead of `-c` configs, for the comparison plugins only (hydrogen_bonds); the analyses on the study API refuse it. Cannot be combined with `-c` or `--set`. |
+| `-c, --config PATH` | Yes | Simulation `config.yaml`. Repeatable; the first one is the control. |
+| `-f, --file PATH` | No | Retired. With a `comparison.yaml`, the command runs nothing and exits 2: the `error:` line says that `comparison.yaml` is no longer read by `polyzymd analyze`, and the `fix:` line gives the equivalent `polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq ...` command built from the file's conditions, replicates and equilibration (or `--eq`), followed by the address of {doc}`../how_to/analysis_agent_protocol` and `.claude/skills/polyzymd-analyze/SKILL.md`, the skill to point an agent at. A file that cannot be read gives the command with placeholders. |
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
 | `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default: the comparison default, `10ns`. |
 | `--label TEXT` | No | Condition label, one per `-c` in the same order. Default: the name of the directory holding the config. |
-| `--run LABEL` | No | Run or pair label to report when the analysis measures one metric on several selections, for example one atom pair for distances. Default: the first one the plugin lists; the rest appear in `all_runs`. |
-| `--set KEY=VALUE` | No | Top-level plugin setting. Repeatable. The value is read as YAML, so `--set n_bins=50` gives an integer. Nested settings go in a comparison.yaml passed with `-f`. |
-| `--format agent\|json` | No | `agent` (default) prints one line per condition and comparison; `json` prints the full `ProtocolReport`. For a human-readable table of the same comparison, use `polyzymd compare run --format table`. |
+| `--run LABEL` | No | Run or pair label to report when the analysis measures one metric on several selections, for example one atom pair for distances. Default: the first one the analysis lists; the rest appear in `all_runs`. |
+| `--set KEY=VALUE` | No | Top-level analysis setting. Repeatable. The value is read as YAML, so `--set threshold=3.0` gives a number and `--set groups='{protein: chainid A, polymer: chainid C}'` a mapping. A dotted key such as `groups.protein` is refused; give the whole top-level setting as a mapping instead. |
+| `--format agent\|json` | No | `agent` (default) prints one line per condition and comparison; `json` prints the full `ProtocolReport`. |
 | `-o, --output PATH` | No | Also write the rendered output to this file. |
-| `--output-dir PATH` | No | Directory for `analysis/`, `comparison/` and `figures/`. Default: the current directory. |
-| `--stride N` | No | Measure every `N`-th production frame of every replicate, starting with the first after the window. Default `1`. Function analyses only; refused with `-f` and for comparison plugins. The report header then shows `stride N`. |
+| `--output-dir PATH` | No | Directory for `polyzymd_results/`, where the measured values are stored, and `figures/`. Default: the current directory. |
+| `--stride N` | No | Measure every `N`-th production frame of every replicate, starting with the first after the window. Default `1`. The report header then shows `stride N`. |
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
-| `--no-plots` | No | Do not draw figures for analyses on the study API (rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa, secondary_structure, contacts, native_contacts). By default they are written to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
-| `--no-eq-check` | No | Skip the pymbar equilibration diagnostic for analyses on the study API (rg, rmsd, native_contacts). Values and statistics are the same either way. |
+| `--no-plots` | No | Do not draw figures. By default rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
+| `--no-eq-check` | No | Skip the pymbar equilibration diagnostic, which rg, rmsd, native_contacts, distances and the totals of sasa report for each replicate's per-frame series. Values and statistics are the same either way. |
 
 ### Agent format
 
@@ -965,7 +976,7 @@ The verdict vocabulary is fixed so a caller can branch on it:
 | `larger` | The second condition differs from the control after correction and the difference is positive |
 | `smaller` | The second condition differs from the control after correction and the difference is negative |
 | `no significant difference` | The test ran and the adjusted p value did not clear alpha |
-| `no test recorded` | The plugin stored no multiplicity-corrected p value, so the comparison describes a difference without deciding it |
+| `no test recorded` | The comparison stored no multiplicity-corrected p value, so the comparison describes a difference without deciding it |
 | `changed` | The difference is significant but the two means are equal at the stored precision |
 | `not testable` | A condition has fewer than two replicates, so the test is undefined |
 
@@ -977,7 +988,7 @@ The verdict vocabulary is fixed so a caller can branch on it:
 | Code | Meaning |
 |------|---------|
 | 0 | The analysis ran and the report was printed |
-| 2 | A typed analysis error: unknown analysis name, missing config, bad `--replicates` or `--set`, conflicting `-c` and `-f`, or a pipeline failure. The message is printed on one line prefixed `error:` and the fix on the next prefixed `fix:`, both on stderr |
+| 2 | A typed analysis error: unknown or retired analysis name, missing config, bad `--replicates` or `--set`, a `-f comparison.yaml`, or a pipeline failure. The message is printed on one line prefixed `error:` and the fix on the next prefixed `fix:`, both on stderr |
 
 ### Example
 
@@ -996,8 +1007,8 @@ polyzymd analyze sasa -c A/config.yaml -c B/config.yaml \
 # Fraction of frames the polymer buries each residue, compared residue by residue
 polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --stride 10 --run contact_fraction_residues
 
-# An existing comparison project, for a comparison plugin
-polyzymd analyze hydrogen_bonds -f comparison.yaml
+# Hydrogen bonds between the protein and the polymer, compared residue pair by residue pair
+polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --eq 10ns --run protein_polymer_pairs
 
 # Measure the protein backbone instead of all protein atoms
 polyzymd analyze rg -c A/config.yaml -c B/config.yaml --set selection='protein and name CA'
@@ -1009,17 +1020,32 @@ polyzymd analyze rg -c A/config.yaml -c B/config.yaml --set selection='protein a
   `polyzymd`.
 - The replicate is the sampling unit. Every interval and every test uses the
   replicate count as its sample size.
-- The run writes and reuses the same cached artifacts as
-  `polyzymd compare run`, so the two commands share results. `rg` is the
-  exception: it runs through the study API, stores its per-frame values under
-  `polyzymd_results/` in the output directory, and takes only `--set
-  selection=...`.
+- Every analysis runs through the study API and stores what it measures,
+  per condition and replicate, under `polyzymd_results/` in the output
+  directory, so a second run with the same inputs and settings reads the
+  stored values back; `--recompute` measures again.
 
 ---
 
 ## polyzymd compare
 
-Compare analysis results across multiple simulation conditions with statistical testing.
+Run analysis plugins that you register yourself over the conditions of a
+`comparison.yaml`, with statistical testing.
+
+```{note}
+No shipped analysis runs through `polyzymd compare` any more: every shipped
+analysis runs with {ref}`polyzymd analyze <cli-analyze>` on the `-c`
+simulation configs, and the plugin framework behind these commands is being
+removed. `polyzymd compare run NAME` for a shipped name, such as `rmsf` or
+`my_analysis`, exits 1 and prints the equivalent `polyzymd analyze NAME -c
+<config> --label <label> ... --replicates ... --eq ...` command built from the
+file, the address of {doc}`../how_to/analysis_agent_protocol` and the agent
+skill `.claude/skills/polyzymd-analyze/SKILL.md`; for `catalytic_triad` it
+also names the triad routine, {doc}`../how_to/analysis_triad_quickstart`, and
+prints the `polyzymd analyze distances` command. `polyzymd compare init` and
+`polyzymd compare validate` still write and check the conditions of a
+`comparison.yaml`.
+```
 
 ```bash
 polyzymd compare COMMAND [OPTIONS]
@@ -1057,6 +1083,8 @@ cd polymer_study
 # Edit comparison.yaml to add your conditions
 ```
 
+The command prints the `polyzymd analyze -c` commands to run next.
+
 ### polyzymd compare run
 
 Run a single analysis comparison by type. This is a generic command that works
@@ -1066,7 +1094,7 @@ with any discovered analysis plugin.
 polyzymd compare run COMPARISON_TYPE [OPTIONS]
 
 Arguments:
-  COMPARISON_TYPE        Analysis plugin name (e.g. hydrogen_bonds)
+  COMPARISON_TYPE        Registered analysis plugin name (e.g. my_analysis)
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
@@ -1088,17 +1116,17 @@ rules that apply to the other commands.
 #### Example
 
 ```bash
-# Run the hydrogen-bond comparison (uses plugins.hydrogen_bonds)
-polyzymd compare run hydrogen_bonds
+# Run a registered plugin (uses plugins.my_analysis)
+polyzymd compare run my_analysis
 
 # Override equilibration time
-polyzymd compare run hydrogen_bonds --eq-time 20ns
+polyzymd compare run my_analysis --eq-time 20ns
 
-# Run the hydrogen-bond comparison with markdown output
-polyzymd compare run hydrogen_bonds --format markdown -o report.md
+# Markdown output
+polyzymd compare run my_analysis --format markdown -o report.md
 
 # Print the compact agent report instead of the plugin's table
-polyzymd compare run hydrogen_bonds --format agent
+polyzymd compare run my_analysis --format agent
 
 # List all available analysis types
 polyzymd compare run --list
@@ -1158,7 +1186,6 @@ Validating: /path/to/comparison.yaml
   Conditions: 3
     - WT, PEG, SBMA
   Control: WT
-  Analysis sections: hydrogen_bonds
 ```
 
 **Output (errors):**
@@ -1182,7 +1209,7 @@ Validating: /path/to/comparison.yaml
     "conditions_count": 3,
     "condition_labels": ["WT", "PEG", "SBMA"],
     "control": "WT",
-    "sections_configured": ["hydrogen_bonds"]
+    "sections_configured": []
   }
 }
 ```
@@ -1213,7 +1240,7 @@ polyzymd compare plot-all
 polyzymd compare plot-all --list-available
 
 # One analysis only
-polyzymd compare plot-all -a hydrogen_bonds
+polyzymd compare plot-all -a my_analysis
 ```
 
 ### polyzymd compare submit
@@ -1230,7 +1257,7 @@ already exist on disk (or use `compare submit-all` instead).
 polyzymd compare submit ANALYSIS [OPTIONS]
 
 Arguments:
-  ANALYSIS               Analysis plugin name (e.g. hydrogen_bonds)
+  ANALYSIS               Registered analysis plugin name (e.g. my_analysis)
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
@@ -1254,21 +1281,21 @@ Options:
 #### Example
 
 ```bash
-# Submit the hydrogen-bond analysis to SLURM
-polyzymd compare submit hydrogen_bonds --partition gpu --account my_alloc
+# Submit a registered plugin to SLURM
+polyzymd compare submit my_analysis --partition gpu --account my_alloc
 
 # Dry run to inspect generated scripts
-polyzymd compare submit hydrogen_bonds --dry-run
+polyzymd compare submit my_analysis --dry-run
 
 # Use job arrays for efficiency
-polyzymd compare submit hydrogen_bonds --job-arrays --partition aa100
+polyzymd compare submit my_analysis --job-arrays --partition aa100
 
 # Rely on plugin memory hints and cluster default partition
-polyzymd compare submit hydrogen_bonds --qos normal
+polyzymd compare submit my_analysis --qos normal
 
 # Blanca condo nodes at CU Boulder
 module load slurm/blanca
-polyzymd compare submit hydrogen_bonds \
+polyzymd compare submit my_analysis \
     -f comparison.yaml \
     --partition blanca-shirts \
     --account blanca-shirts \
@@ -1311,7 +1338,7 @@ Options:
 polyzymd compare submit-all -f comparison.yaml --partition aa100 --qos normal
 
 # Skip selected plugins
-polyzymd compare submit-all -f comparison.yaml --exclude hydrogen_bonds
+polyzymd compare submit-all -f comparison.yaml --exclude my_analysis
 
 # Dry-run planning only
 polyzymd compare submit-all -f comparison.yaml --dry-run
@@ -1337,11 +1364,11 @@ Options:
 #### Example
 
 ```bash
-# Check status of hydrogen-bond SLURM jobs
-polyzymd compare status hydrogen_bonds
+# Check status of the plugin's SLURM jobs
+polyzymd compare status my_analysis
 
 # Reconcile with SLURM scheduler and get JSON output
-polyzymd compare status hydrogen_bonds --reconcile --json
+polyzymd compare status my_analysis --reconcile --json
 ```
 
 ### polyzymd compare finalize
@@ -1366,10 +1393,10 @@ Options:
 
 ```bash
 # Finalize after SLURM jobs complete
-polyzymd compare finalize hydrogen_bonds
+polyzymd compare finalize my_analysis
 
 # Allow partial results (some conditions may have failed)
-polyzymd compare finalize hydrogen_bonds --allow-partial
+polyzymd compare finalize my_analysis --allow-partial
 ```
 
 ---
@@ -1400,8 +1427,8 @@ polyzymd compare plot-all
 # Show available plots
 polyzymd compare plot-all --list-available
 
-# Plot only hydrogen bonds
-polyzymd compare plot-all -a hydrogen_bonds
+# Plot one plugin only
+polyzymd compare plot-all -a my_analysis
 ```
 
 ---

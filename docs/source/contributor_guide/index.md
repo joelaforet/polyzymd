@@ -12,8 +12,13 @@ PolyzyMD, understand the codebase, or add new capabilities.
 
 ## New Analysis Contributor Path
 
-Use the [New Analysis Contributor Path](analysis_plugins/index.md) if you want
-to add a new analysis plugin or modify an existing one. It gives new analysis
+No shipped analysis uses the plugin framework any more, and the framework is
+being removed: a new analysis is a plain function of MDAnalysis atom groups or a
+`Universe` run through `Study.timeseries` or `Study.per_replicate`; see
+[Analysing a set of simulations](../explanation/analysis_api.md).
+
+Use the [New Analysis Contributor Path](analysis_plugins/index.md) if you
+maintain the plugin framework or a plugin of your own. It gives new analysis
 contributors a recommended reading order, points to the current full extension
 guide, and highlights the public APIs to use before you start editing plugin
 code.

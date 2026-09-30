@@ -2,7 +2,7 @@
 
 This reference page documents contributor-facing utilities in
 `polyzymd.analyses.shared`. These modules provide reusable building blocks for
-analysis plugins; framework internals and plugin-private helpers are documented
+the shipped analysis functions and your own; framework internals are documented
 with their owning packages.
 
 The package root re-exports common helpers for convenience. Import specialized
@@ -30,7 +30,7 @@ trajectory window passed into MDAnalysis job lifecycles.
 ## Alignment and representative frames
 
 Alignment helpers in `polyzymd.analyses.shared.alignment` standardize
-reference-mode handling. Centroid helpers support plugins that need
+reference-mode handling. Centroid helpers support analyses that need
 representative frames or structures.
 
 ```{eval-rst}
@@ -44,8 +44,8 @@ representative frames or structures.
 ## Time-series statistics and convergence
 
 These modules provide statistical summaries, autocorrelation-aware estimates,
-and inferential tests used by built-in and contributor
-plugins.
+and inferential tests used by the study API's summaries and comparisons and by
+the analysis functions.
 
 ```{eval-rst}
 .. automodule:: polyzymd.analyses.shared.autocorrelation
@@ -86,7 +86,7 @@ grouped bars, and matrix annotations.
 
 Selection helpers extend MDAnalysis selections. Selector and grouping packages
 provide reusable abstractions for selecting molecules or classifying residues in
-plugin settings and analysis code.
+analysis settings and analysis code.
 
 ```{eval-rst}
 .. automodule:: polyzymd.analyses.shared.selections
@@ -148,7 +148,7 @@ plugin settings and analysis code.
 
 Diagnostics helpers validate selections and analysis inputs. The module is
 `polyzymd.analyses.shared.diagnostics`. Path helpers standardize
-artifact-oriented file locations used by analysis plugins.
+artifact-oriented file locations used by the plugin framework.
 
 ```{eval-rst}
 .. automodule:: polyzymd.analyses.shared.paths

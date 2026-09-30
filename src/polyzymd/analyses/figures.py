@@ -363,6 +363,7 @@ def plot_condition_values(
     from polyzymd.analyses.shared.statistics import mean_sem_ci
 
     settings, labels, colors = _setup(values.source, plot_settings)
+    labels = [label for label in labels if values.values.get(label)]
     data = [values.values[label] for label in labels]
     stats = [mean_sem_ci(entry) for entry in data]
     positions, theme = np.arange(len(labels)), settings.theme
@@ -424,6 +425,7 @@ def plot_profile(
     from polyzymd.analyses.shared.plotting import apply_axis_style, apply_legend, band_half_widths
 
     settings, labels, colors = _setup(values.source, plot_settings)
+    labels = [label for label in labels if values.values.get(label)]
     try:
         x = np.asarray(values.labels, dtype=float)
         ticks = None

@@ -47,7 +47,7 @@ polyzymd/
 │   ├── contributor_guide/    # Contributor documentation
 │   └── api/                  # Autodoc API pages
 ├── src/polyzymd/
-│   ├── analyses/             # Analysis plugin system and built-in plugins
+│   ├── analyses/             # Study API, analysis functions, analyze protocol
 │   ├── builders/             # Molecular system construction
 │   ├── cli/                  # Click command-line interface
 │   ├── config/               # Pydantic configuration schema and loading

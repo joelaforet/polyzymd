@@ -1,10 +1,10 @@
-# Create Custom Plots from Analysis Artifacts
+# Create Custom Plots from Study Results
 
-Want to use the PolyzyMD artifacts to make your own plots? Use this guide when
-you already have cached analysis artifacts and sidecars and want to make your
-own matplotlib plots from those existing results. The example loads cached
-hydrogen-bond aggregate artifacts and combines the `ser_his` and `asp_his`
-summaries on one graph without rerunning the analysis.
+Use this guide when you want a figure that PolyzyMD does not draw, from values
+measured with the study API. The example measures, for each protein residue,
+the fraction of production frames in which it has a hydrogen bond to the
+polymer, and draws chosen residues side by side for every condition, with each
+condition's 95% interval and every replicate value.
 
 This workflow is intended for JupyterLab, Jupyter Notebook, VS Code notebooks,
 or an IPython session.
@@ -19,331 +19,159 @@ pixi run -e analysis jupyter lab
 ::::
 
 ```{important}
-This is a post-processing workflow for existing artifacts and sidecars. It does
-not customize a plugin's `plot()` method, load trajectories, or rerun
-MDAnalysis. To adjust PolyzyMD's standard analysis plots, start with
-{doc}`publication_plots` instead.
+The first run of the measurement loads the trajectories. Each replicate's
+values and their record are stored under `polyzymd_results/` in the current
+directory, and a later call with the same function, selections and settings
+reads them back instead of measuring again. To change PolyzyMD's standard
+figures instead, start with {doc}`publication_plots`.
 ```
-
-The code below reads small JSON artifacts from
-`analysis/<condition-directory>/hydrogen_bonds/aggregated/result.json`.
-
-## Prepare a notebook context cell
-
-Add a short Markdown cell at the top of the notebook so exported notebooks keep
-the intent of the figure clear.
-
-````markdown
-## Custom hydrogen-bond occupancy plot
-
-This notebook loads existing PolyzyMD hydrogen-bond aggregate artifacts and
-plots the `ser_his` and `asp_his` summaries together. It does not rerun the
-hydrogen-bond analysis.
-````
 
 ## Import notebook dependencies
 
 ```python
-from pathlib import Path
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from polyzymd.analyses.mda import ArtifactStore
+import polyzymd as pz
+from polyzymd.analyses.functions import residue_hbond_occupancy
+from polyzymd.analyses.shared.plotting import add_uncertainty_footnote
 ```
 
-## Set the project paths and summaries
+## Measure per-residue occupancy
 
-Edit `project_dir`, `conditions`, and `condition_dirs` to match the directory
-that contains your `comparison.yaml` and `analysis/` tree. The condition labels
-should match the labels in `comparison.yaml`. The directory values should match
-the corresponding directories under `analysis/`.
+Give each condition its simulation `config.yaml`, control first.
+`residue_hbond_occupancy` returns one value per residue of its first group, so
+`labels` names each entry by its residue ID:
 
 ```python
-project_dir = Path("/path/to/polyzymd/project").expanduser().resolve()
-
-conditions = [
-    "No Polymer",
-    "100% SBMA",
-    "100% EGMA",
-    "1% EGPMA",
-    "2% EGPMA",
-    "5% EGPMA",
-    "10% EGPMA",
-]
-
-condition_dirs = {
-    "No Polymer": "no_polymer",
-    "100% SBMA": "100_sbma",
-    "100% EGMA": "100_egma",
-    "1% EGPMA": "1_egpma",
-    "2% EGPMA": "2_egpma",
-    "5% EGPMA": "5_egpma",
-    "10% EGPMA": "10_egpma",
-    # Edit these to match directories under analysis/
-}
-
-summary_names = ["ser_his", "asp_his"]
+study = pz.Study.from_configs(
+    {"No polymer": "noPoly/config.yaml", "SBMA 50%": "SBMA50/config.yaml"},
+    equilibration="200ns",
+)
+occupancy = study.per_replicate(
+    residue_hbond_occupancy,
+    pz.select("chainid A"),
+    pz.select("chainid C"),
+    unit=None,
+    labels=lambda u: [int(resid) for resid in u.select_atoms("chainid A").residues.resids],
+    bounds=(0.0, 1.0),
+)
 ```
 
-If you are unsure how labels map to directories, list the available analysis
-directories and update `condition_dirs` to match them.
-
-```python
-for path in sorted((project_dir / "analysis").iterdir()):
-    if path.is_dir():
-        print(path.name)
-```
-
-This example is useful when the built-in hydrogen-bond plot for
-`within: catalytic_triad` includes an unwanted Ser-Asp component. Loading the
-named summaries directly lets you plot only Ser-His and Asp-His occupancy.
-
-## Validate that expected artifacts exist
-
-```python
-artifact_paths = {
-    condition: project_dir
-    / "analysis"
-    / condition_dirs[condition]
-    / "hydrogen_bonds"
-    / "aggregated"
-    / "result.json"
-    for condition in conditions
-}
-
-missing = [path for path in artifact_paths.values() if not path.exists()]
-if missing:
-    raise FileNotFoundError(
-        "Missing hydrogen-bond aggregate artifacts:\n"
-        + "\n".join(str(path) for path in missing)
-    )
-```
-
-## Load and validate hydrogen-bond artifacts
-
-```python
-condition_artifacts = {}
-
-for condition, artifact_path in artifact_paths.items():
-    artifact_dir = artifact_path.parent
-    artifact = ArtifactStore(artifact_dir).read_condition_result("result.json")
-
-    if artifact.analysis_name != "hydrogen_bonds":
-        raise ValueError(
-            f"Expected a hydrogen_bonds artifact for {condition!r}, "
-            f"got {artifact.analysis_name!r}"
-        )
-
-    summaries = artifact.payload.get("summaries")
-    if not isinstance(summaries, list):
-        raise TypeError(
-            f"Expected artifact.payload['summaries'] to be a list for {condition!r}"
-        )
-
-    condition_artifacts[condition] = artifact
-```
+`occupancy.values` holds each condition's replicate arrays, in the order of
+`occupancy.labels`. `occupancy.compare()` tests every residue of every
+condition against the control, with the Benjamini-Hochberg correction over
+all of them; print `occupancy.compare().to_agent_text()` before choosing the
+residues to plot.
 
 ## Extract a tidy DataFrame
 
-This cell extracts one row per condition and summary. The occupancy fields mean:
-
-- `mean_fraction_with_any`: mean across replicates of the fraction of analyzed
-  frames with at least one H-bond matching that summary.
-- `sem_fraction_with_any`: SEM across replicates.
-- `per_replicate_fraction_with_any`: one occupancy value per replicate.
-
-For this example, `ser_his` is the fraction of frames with at least one Ser-His
-H-bond, and `asp_his` is the fraction of frames with at least one Asp-His
-H-bond.
-
-```{note}
-Artifact payload shapes are plugin- and version-specific. This example uses the
-current hydrogen-bond artifact summary fields. Inspect `artifact.payload` and
-the plugin documentation for your PolyzyMD version before adapting the field
-names.
-```
+`occupancy.summary()` gives one row per condition and residue, with the mean,
+its Student t 95% interval and every replicate value. Keep the residues to
+plot:
 
 ```python
-rows = []
-
-for condition, artifact in condition_artifacts.items():
-    summaries_by_name = {
-        summary["name"]: summary
-        for summary in artifact.payload["summaries"]
-        if isinstance(summary, dict) and "name" in summary
+residues = ["77", "133", "156"]
+rows = [row for row in occupancy.summary().conditions if row.entry in residues]
+frame = pd.DataFrame(
+    {
+        "condition": row.label,
+        "residue": row.entry,
+        "mean": row.mean,
+        "ci_low": row.ci95[0] if row.ci95 else np.nan,
+        "ci_high": row.ci95[1] if row.ci95 else np.nan,
+        "values": row.replicate_values,
+        "n": row.n_replicates,
     }
-
-    missing_summaries = [
-        summary_name
-        for summary_name in summary_names
-        if summary_name not in summaries_by_name
-    ]
-    if missing_summaries:
-        available = sorted(summaries_by_name)
-        raise KeyError(
-            f"Missing summaries for {condition!r}: {missing_summaries}. "
-            f"Available summaries: {available}"
-        )
-
-    for summary_name in summary_names:
-        summary = summaries_by_name[summary_name]
-        replicate_values = summary["per_replicate_fraction_with_any"]
-
-        rows.append(
-            {
-                "condition": condition,
-                "summary": summary_name,
-                "mean_fraction_with_any": summary["mean_fraction_with_any"],
-                "sem_fraction_with_any": summary["sem_fraction_with_any"],
-                "per_replicate_fraction_with_any": replicate_values,
-            }
-        )
-
-df = pd.DataFrame(rows)
-df
+    for row in rows
+)
+frame
 ```
 
-## Plot grouped bars with SEM and replicate dots
+`entry` holds the label as text. When no interval can be estimated, for a
+condition with one replicate or with the same value in every replicate,
+`ci95` is `None`, so `ci_low` and `ci_high` are `NaN` and no error bar is
+drawn. An interval can also reach below 0 or above 1; the `warning:` lines of
+`occupancy.compare().to_agent_text()` name those residues.
 
-The bars show mean occupancy, error bars show SEM across replicates, and black
-dots show per-replicate occupancy values.
+## Plot grouped bars with 95% intervals and replicate dots
 
 ```python
-fig, ax = plt.subplots(figsize=(10, 5))
+conditions = study.labels
+x = np.arange(len(residues))
+width = 0.8 / len(conditions)
 
-x = np.arange(len(conditions))
-width = 0.8 / len(summary_names)
-colors = dict(zip(summary_names, plt.get_cmap("tab10").colors))
+fig, ax = plt.subplots(figsize=(7, 4))
+for i, condition in enumerate(conditions):
+    part = frame[frame["condition"] == condition].set_index("residue").loc[residues]
+    positions = x + (i - (len(conditions) - 1) / 2) * width
+    errors = np.array([part["mean"] - part["ci_low"], part["ci_high"] - part["mean"]])
+    ax.bar(positions, part["mean"], width, yerr=errors, capsize=3, label=condition, alpha=0.8)
+    for position, values in zip(positions, part["values"]):
+        ax.scatter(np.full(len(values), position), values, color="black", s=12, zorder=3)
 
-for idx, summary_name in enumerate(summary_names):
-    offset = (idx - (len(summary_names) - 1) / 2) * width
-    bar_x = x + offset
-
-    means = []
-    sems = []
-    replicate_series = []
-
-    for condition in conditions:
-        row = df[(df["condition"] == condition) & (df["summary"] == summary_name)].iloc[0]
-        means.append(row["mean_fraction_with_any"])
-        sems.append(row["sem_fraction_with_any"])
-        replicate_series.append(row["per_replicate_fraction_with_any"])
-
-    ax.bar(
-        bar_x,
-        means,
-        width=width,
-        yerr=sems,
-        capsize=4,
-        label=summary_name,
-        color=colors[summary_name],
-        edgecolor="black",
-        linewidth=0.6,
-        alpha=0.85,
-    )
-
-    for xpos, values in zip(bar_x, replicate_series):
-        values = np.asarray(values, dtype=float)
-        jitter = np.linspace(-width * 0.25, width * 0.25, num=len(values))
-        ax.scatter(
-            np.full_like(values, xpos) + jitter,
-            values,
-            color="black",
-            s=24,
-            zorder=3,
-            alpha=0.8,
-        )
-
-ax.set_xticks(x)
-ax.set_xticklabels(conditions, rotation=35, ha="right")
-ax.set_ylabel("Fraction of analyzed frames with ≥1 H-bond")
-ax.set_title("Catalytic triad hydrogen-bond occupancy")
-ax.set_ylim(bottom=0)
-ax.legend(title="Summary")
-ax.grid(axis="y", alpha=0.25)
-fig.tight_layout()
+ax.set_xticks(x, [f"Residue {residue}" for residue in residues])
+ax.set_ylabel("Fraction of frames with a hydrogen bond to the polymer")
+ax.set_ylim(0, 1.05)
+ax.legend(frameon=False)
+add_uncertainty_footnote(
+    fig, n_replicates=int(frame["n"].min()), equilibration=study[conditions[0]].equilibration
+)
+fig.tight_layout(rect=(0, 0.05, 1, 1))
 ```
 
-## Save outside the canonical analysis tree
+`add_uncertainty_footnote` writes a sentence at the bottom of the figure
+saying that the error bars are Student t 95% intervals across the replicates
+and that the points are the per-replicate values, as on every PolyzyMD figure.
 
-Save notebook-generated figures under a separate directory such as
-`figures/custom/`. Avoid writing custom outputs inside the canonical `analysis/`
-tree, which PolyzyMD owns.
+## Save outside the results folder
+
+Keep custom figures apart from `polyzymd_results/`, so the stored values and
+their records stay as PolyzyMD wrote them:
 
 ```python
-output_dir = project_dir / "figures" / "custom"
-output_dir.mkdir(parents=True, exist_ok=True)
+from pathlib import Path
 
-figure_path = output_dir / "hbond_ser_his_asp_his_occupancy.png"
-fig.savefig(figure_path, dpi=300, bbox_inches="tight")
-figure_path
+output_dir = Path("custom_figures")
+output_dir.mkdir(exist_ok=True)
+fig.savefig(output_dir / "hbond_occupancy_selected_residues.png", dpi=300, bbox_inches="tight")
 ```
 
 ## Adapt this pattern
 
-- Change condition labels and order by editing the `conditions` list. Use the
-  display labels from `comparison.yaml`.
-- Change artifact directory names by editing `condition_dirs` to match the
-  directories under `analysis/`.
-- Change which hydrogen-bond summaries appear by editing `summary_names`.
-- Summary names must match the names configured in `comparison.yaml`.
-- If artifacts live on an HPC filesystem, copy the small JSON artifact files to
-  local storage before opening the notebook to improve responsiveness.
-- Use the same `ArtifactStore(...).read_condition_result("result.json")` pattern
-  for other condition-level artifacts, then inspect `artifact.payload` for the
-  fields you want to plot.
+- Any function measured with `study.per_replicate` or `study.timeseries`
+  gives values of the same kind; `series.reduce("mean")` turns a time series
+  into one value per replicate before `summary()`.
+- For one number per replicate, such as the `mean_hbonds` row of
+  `functions.hydrogen_bonds` in {doc}`hydrogen_bonds`, each summary row has
+  `entry` set to `None`: plot one bar per condition.
+- `occupancy.over_labels("mean", labels=[77, 133, 156])` averages the chosen
+  residues into one value per replicate, which `compare()` then tests as one
+  quantity.
 
 ## Troubleshoot common notebook issues
 
 ### `ImportError: No module named polyzymd`
 
-Start the notebook server from the analysis pixi environment:
+Start the notebook from the analysis environment, or select a kernel created
+from it:
 
 ```bash
 pixi run -e analysis jupyter lab
 ```
 
-If you use VS Code or an existing Jupyter server, select the kernel associated
-with the PolyzyMD `analysis` environment.
+### `KeyError` for a residue
 
-### `FileNotFoundError` for `result.json`
-
-Check that the hydrogen-bond analysis has been run and that `project_dir` points
-to the directory containing `analysis/`:
-
-```bash
-pixi run -e analysis polyzymd compare run hydrogen_bonds -f comparison.yaml
-```
-
-Also list the directories under `analysis/` and compare them with
-`condition_dirs`:
-
-```python
-for path in sorted((project_dir / "analysis").iterdir()):
-    if path.is_dir():
-        print(path.name)
-```
-
-### `KeyError` for a summary name
-
-Print the available summary names from each artifact and compare them with the
-`summaries` section of `comparison.yaml`.
-
-```python
-for condition, artifact in condition_artifacts.items():
-    available = [summary.get("name") for summary in artifact.payload["summaries"]]
-    print(condition, available)
-```
+The residues in `residues` must be labels of `occupancy`, written as text.
+Print `occupancy.labels` to see them, and check that the residue is in the
+first selection passed to `study.per_replicate`.
 
 ## See also
 
+- {doc}`hydrogen_bonds` for the hydrogen-bond functions and the
+  `polyzymd analyze hydrogen_bonds` command.
 - {doc}`publication_plots` for settings that control PolyzyMD's standard
   analysis plots.
-- {doc}`hydrogen_bonds` for configuring hydrogen-bond summaries.
-- {doc}`../reference/analysis_hydrogen_bonds_reference` for hydrogen-bond
-  settings and the generated output files and plots.
-- {doc}`../reference/comparison_yaml` for `comparison.yaml` schema details.
-- {doc}`../reference/analysis_comparison_reference` for comparison output paths
-  and plotting behavior.
+- {doc}`../reference/analysis_functions` for every shipped function and what
+  it returns.

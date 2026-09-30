@@ -7,8 +7,17 @@
 
 ## Overview
 
-PolyzyMD performs post-hoc pairwise comparisons automatically during
-`polyzymd compare run`. Two methods are available: BH-corrected t-tests
+```{note}
+This page describes the comparison step of the plugin framework, which
+`polyzymd compare run` runs for analysis plugins you register yourself. No
+shipped analysis is a plugin any more, and the framework is being removed.
+`polyzymd analyze` compares every condition with the first `-c` by Welch's t
+test with the Benjamini-Hochberg correction, and does not read
+`comparison.yaml`; see {doc}`analysis_protocol_report`.
+```
+
+The plugin framework performs post-hoc pairwise comparisons automatically
+during `polyzymd compare run`. Two methods are available: BH-corrected t-tests
 (default) and Tukey's HSD. Both methods compute effect sizes and
 percent-change for every pair.
 

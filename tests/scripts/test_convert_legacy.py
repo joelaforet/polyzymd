@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import warnings
 from pathlib import Path
 from types import ModuleType
 
@@ -304,10 +305,10 @@ def test_generate_config_yaml_includes_engine_and_loads(
     assert config.engine == "openmm"
 
 
-def test_generate_comparison_yaml_uses_canonical_plot_key(
+def test_generate_comparison_yaml_configures_no_retired_plugin(
     convert_legacy: ModuleType, tmp_path: Path
 ) -> None:
-    """Generated comparison config should use catalytic_triad plot settings."""
+    """comparison.yaml lists the conditions only; the triad pairs go to triad_pairs.yaml."""
     converted = tmp_path / "converted"
     sim_dir = converted / (
         "10A_RESTRAINT_LipA_Resorufin-Butyrate_363.0K_0.5ns-NVT_1000.0ns-NPT_run1"
@@ -323,9 +324,13 @@ def test_generate_comparison_yaml_uses_canonical_plot_key(
     )
 
     data = yaml.safe_load(comparison_yaml.read_text(encoding="utf-8"))
-    assert "catalytic_triad" in data["plot_settings"]
-    assert "triad" not in data["plot_settings"]
-    config = ComparisonConfig.from_yaml(comparison_yaml)
+    assert "plugins" not in data
+    assert set(data["plot_settings"]) == {"output_dir", "format", "dpi", "style", "color_palette"}
+    pairs = yaml.safe_load((comparison_yaml.parent / "triad_pairs.yaml").read_text())
+    assert [pair["label"] for pair in pairs] == ["Ser77-His156", "His156-Asp133"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        config = ComparisonConfig.from_yaml(comparison_yaml)
     assert config.validate_config() == []
 
 
@@ -918,8 +923,11 @@ def test_conversion_guidance_uses_canonical_compare_commands(
 
     guidance = caplog.text
     assert "polyzymd compare validate -f" in guidance
-    assert "polyzymd compare run rmsf -f" in guidance
-    assert "polyzymd compare plot-all -f" in guidance
-    assert "polyzymd analyze contacts -c " in guidance
-    assert "polyzymd compare run contacts" not in guidance
+    for name in ("rmsf", "distances", "contacts"):
+        assert f"polyzymd analyze {name} -c " in guidance
+    assert "triad_pairs.yaml" in guidance
+    assert "how_to/analysis_triad_quickstart.html" in guidance
+    assert "compare run" not in guidance
+    assert "plot-all" not in guidance
+    assert "catalytic_triad" not in guidance
     assert "analysis.yaml" not in guidance

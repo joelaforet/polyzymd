@@ -594,9 +594,12 @@ class TestStride:
             pz.Study.from_configs(configs, equilibration=EQUILIBRATION, stride=stride)
 
     def test_analyze_takes_a_stride_for_function_analyses_only(
-        self, configs: dict[str, Path], tmp_path: Path
+        self, configs: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from polyzymd.analyses.protocols import analyze
+        from tests.analyses.test_protocols import _install_toy
+
+        _install_toy(monkeypatch)
 
         report = analyze(
             "rg",
@@ -610,4 +613,4 @@ class TestStride:
         assert report.stride == 2
         assert report.frames_per_replicate["A"] == [len(FRAMES[::2])] * 3
         with pytest.raises(ProtocolError, match="comparison plugin"):
-            analyze("hydrogen_bonds", [configs["A"]], equilibration=EQUILIBRATION, stride=2)
+            analyze("toy_protocol", [configs["A"]], equilibration=EQUILIBRATION, stride=2)

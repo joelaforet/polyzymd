@@ -60,101 +60,76 @@ before a PR can merge.
 Commit messages use imperative mood with a 50-character subject line:
 
 ```
-Add radius of gyration analysis plugin
+Add a radius of gyration analysis function
 
-Implement build_mda_jobs and artifact aggregation for the MDAnalysis-native
-trajectory lifecycle. Aggregate with SEM across replicates. Wire into default
-scalar comparison path via extract_metrics.
+Measure the radius of gyration of an atom group at one frame with
+MDAnalysis, run it per replicate through Study.timeseries, and add it to
+polyzymd analyze with its figures.
 
 Closes #42
 ```
 
 Never force-push to `main` or `dev`.
 
-## How to Contribute a New Analysis Plugin
+## How to Contribute a New Analysis
 
-This is the most common type of contribution. PolyzyMD's plugin system is
-designed so that adding a new analysis requires **one package** and **no changes
-to core code**.
+This is the most common type of contribution. A new analysis is a function of
+MDAnalysis atom groups; the study API supplies the replicate universes, the
+production frames, the stored records and the cross-replicate statistics, so
+adding one needs **one function** and **no changes to the study code**.
 
 ### Step-by-Step
 
-1. **Read the tutorial**: `docs/source/contributor_guide/extending_analyses.md` — it
-   walks through every component of a plugin and has a complete working example.
+1. **Read** `docs/source/explanation/analysis_api.md` and
+   `docs/source/reference/analysis_functions.md`, which lists every shipped
+   function and what it measures.
 
-2. **Prefer a function to a plugin**: new measurements are functions in
-   `src/polyzymd/analyses/functions.py` run through the study API (see
-   `docs/source/explanation/analysis_api.md`). To extend the remaining
-   plugin, study `src/polyzymd/analyses/hydrogen_bonds/`, which uses the custom
-   comparison path.
+2. **Write the function** in `src/polyzymd/analyses/functions.py`:
+   - a per-frame function takes atom groups at the current frame and returns
+     one number, and runs through `Study.timeseries`;
+   - a per-replicate function also takes `frames` and returns a number or one
+     value per label (such as per residue), and runs through
+     `Study.per_replicate`.
+   Call MDAnalysis, MDTraj or another package for the measurement; do not
+   reimplement it. The docstring says concretely what is measured and in which
+   unit.
 
-3. **Create your plugin package**: Use `polyzymd new-analysis <name>` to
-   scaffold automatically, or create `src/polyzymd/analyses/<name>/` with an
-   `__init__.py` manually
+3. **Test it** in `tests/analyses/test_<name>.py`: a known answer on a small
+   universe with placed atoms, then a run through the study on the synthetic
+   OpenMM run directories of `tests/_support/analysis_testkit.py`.
 
-4. **Subclass `Analysis`** and implement the required pieces:
-   - `name` — unique lowercase string identifier
-   - `Settings` — Pydantic v2 `BaseModel` with sensible defaults
-   - Choose the lifecycle mode that matches your plugin:
-      - **MDAnalysis-native plugin**: implement `build_mda_jobs()` and, when
-        needed, `build_mda_collector()` when `has_compute_stage=True`
-      - **Compare-only / no-compute plugin**: set `has_compute_stage=False`
-   - Implement `aggregate(ctx, results)` only when `has_aggregate_stage=True`
+4. **To ship it in `polyzymd analyze`**, add its settings to
+   `FUNCTION_ANALYSES` and an `_analyze_<name>` in
+   `src/polyzymd/analyses/protocols.py`, with its figures, and document it in
+   `docs/source/reference/analysis_functions.md` and a how-to page.
 
-5. **Choose your comparison path**:
-   - **Default (recommended)**: Implement `extract_metrics()` returning
-     `MetricValue` objects. The framework handles t-tests, Cohen's d, ANOVA,
-     and ranking automatically.
-   - **Custom**: Override `compare()` entirely for multi-metric or entry-table
-     analyses.
+5. **Run the test suite**: `pixi run -e build pytest tests/ -v`
 
-6. **Write tests**: Create `tests/analyses/plugins/test_<name>.py` following the
-   pattern of existing plugin tests. The standard test structure covers:
-   - Discovery and class attributes
-   - Settings validation
-   - `build_mda_jobs()` and collector behavior for MDAnalysis-native plugins
-   - `aggregate` with sample data when `has_aggregate_stage=True`
-   - `extract_metrics` (if applicable)
-   - Plot generation
-   - Full lifecycle integration
-
-7. **Run the test suite**: `pixi run -e build pytest tests/ -v`
+The plugin framework (`Analysis`, `polyzymd new-analysis`, `polyzymd compare`)
+still exists, but no shipped analysis uses it and it is being removed. Do not
+add plugins.
 
 ### Key Rules
 
-- **Use `TrajectoryLoader`** from `analyses/shared/` for trajectory loading —
-  it handles topology and trajectory discovery, segment daisy-chaining, and
-  timestep access. Equilibration-aware frame slicing belongs in the shared
-  window helpers.
+- **Use the study API** for trajectories: `Study.from_configs` resolves the
+  topology and trajectory files, joins restart segments and applies the
+  equilibration window. Do not build a `Universe` by hand in an analysis.
 
-- **Import rules**: Import framework utilities (TrajectoryLoader, etc.) at
-  module level. Import heavy third-party packages (MDAnalysis, matplotlib,
-  mdtraj) lazily inside methods. This matters for testability — `@patch`
-  targets must be importable at the module level.
+- **Import rules**: Import heavy third-party packages (MDAnalysis, matplotlib,
+  mdtraj) lazily inside functions.
 
-- **Use the context objects**: `ReplicateContext` and `AggregateContext` provide
-  everything you need (sim config, settings, output paths). Never construct
-  configs manually.
-
-- **Result serialization**: If your aggregated result is a Pydantic model that
-  inherits from `BaseAnalysisResult`, set `AggregatedResultClass = YourModel`
-  on the plugin class. The framework handles serialization automatically. For
-  dict results, the framework falls back to `json.loads()`.
+- **The replicate is the sampling unit** for every uncertainty and every
+  comparison; frames never are.
 
 - **Chain convention**: A=protein, B=substrate, C=polymer, D+=solvent.
 
 ### Checklist Before Opening a PR
 
-- [ ] Plugin package in `src/polyzymd/analyses/<name>/`
-- [ ] `name` class variable set (lowercase, unique)
-- [ ] `Settings` inner class with default values for all fields
-- [ ] Lifecycle mode chosen and implemented correctly:
-  - `build_mda_jobs()` and any needed collector for MDAnalysis-native plugins, or
-  - `has_compute_stage=False` for compare-only / no-compute plugins
-- [ ] `aggregate` implemented when `has_aggregate_stage=True`
-- [ ] `extract_metrics` implemented (or `compare` overridden for custom path)
-- [ ] `AggregatedResultClass` set if using a Pydantic result model
-- [ ] Test file in `tests/analyses/plugins/test_<name>.py`
+- [ ] Function in `src/polyzymd/analyses/functions.py` with a docstring that
+  says what it measures and in which unit
+- [ ] Known-answer test and a study test in `tests/analyses/test_<name>.py`
+- [ ] For a shipped analysis: `FUNCTION_ANALYSES` entry, `_analyze_<name>`,
+  figures and docs
 - [ ] `ruff check src/polyzymd/` passes
 - [ ] `black src/ --check` passes
 - [ ] `pixi run -e build pytest tests/ -v` passes
@@ -205,22 +180,23 @@ src/polyzymd/
 ├── simulation/   # OpenMM simulation runners
 ├── workflow/     # Orchestration (build, simulate, analyze)
 ├── core/         # Base classes, shared types
-├── analyses/     # Plugin system + comparison framework — primary extension point
-│   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics)
-│   └── <name>/   #   One sub-package per analysis type (all plugins are packages)
+├── analyses/     # Study API and analysis functions — primary extension point
+│   └── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics)
 ├── exporters/    # GROMACS/other format exporters
 ├── data/         # Bundled data files (force fields, templates)
 └── utils/        # Shared utilities
 ```
 
-The `analyses/` directory is the primary extension point. Each sub-package
-(`<name>/`) is one analysis plugin. Private `_*.py` modules inside each package
-are internal implementation details (calculators, result models, formatters).
+The `analyses/` directory is the primary extension point: `functions.py` holds
+the shipped measurements, `study.py` and `timeseries.py` the study API, and
+`protocols.py` the `polyzymd analyze` analyses. `base.py`, `orchestrator.py`,
+`discovery.py`, `mda/` and `_framework/` are the plugin framework, which no
+shipped analysis uses and which is being removed.
 
 ## Getting Help
 
-- **Tutorial**: `docs/source/contributor_guide/extending_analyses.md`
-- **Plugin contract**: `src/polyzymd/analyses/base.py` (class docstring)
+- **Study API**: `docs/source/explanation/analysis_api.md`
+- **Shipped functions**: `docs/source/reference/analysis_functions.md`
 - **Issues**: https://github.com/joelaforet/polyzymd/issues
 
 ## License

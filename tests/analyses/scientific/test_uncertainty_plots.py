@@ -247,38 +247,3 @@ class TestEveryPluginFigureIsAudited:
                 f"{module_name} save_figure is not wrapped by the footnote audit; "
                 "a test in this session replaced it"
             )
-
-    @pytest.mark.parametrize("analysis_name", ("hydrogen_bonds",))
-    def test_plotter_module_annotates_every_uncertainty_figure(
-        self, analysis_name: str, tmp_path: "Path"
-    ) -> None:
-        """Rendering a bar chart through a plugin's save_figure must be audited.
-
-        Builds a minimal figure that draws an error bar, routes it through that
-        plugin's own ``save_figure`` reference, and checks that the audit
-        rejects it without a footnote and accepts it with one.
-        """
-
-        import importlib
-
-        module = importlib.import_module(f"polyzymd.analyses.{analysis_name}._plotters")
-
-        from polyzymd.config.comparison import PlotSettings
-
-        settings = PlotSettings(output_dir=tmp_path)
-
-        fig, ax = plt.subplots()
-        try:
-            ax.bar([0], [1.0], yerr=[0.1])
-            with pytest.raises(AssertionError, match="without a footnote"):
-                module.save_figure(
-                    fig, tmp_path / f"{analysis_name}_bad.png", settings, close=False
-                )
-
-            add_uncertainty_footnote(fig, error_bar="ci95", n_replicates=3)
-            module.save_figure(fig, tmp_path / f"{analysis_name}_good.png", settings, close=False)
-        finally:
-            plt.close(fig)
-
-        assert (tmp_path / f"{analysis_name}_good.png").exists()
-        assert not (tmp_path / f"{analysis_name}_bad.png").exists()

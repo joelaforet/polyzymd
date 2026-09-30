@@ -1434,6 +1434,7 @@ def generate_comparison_yaml(
 
         <comparison_dir>/
         ├── comparison.yaml
+        ├── triad_pairs.yaml
         ├── structures/
         │   └── enzyme.pdb  (copied if enzyme_pdb_path provided)
         ├── results/
@@ -1459,6 +1460,14 @@ def generate_comparison_yaml(
     -------
     Path
         Path to the generated comparison.yaml file.
+
+    Notes
+    -----
+    comparison.yaml lists the conditions and the equilibration window; it
+    configures no analysis. ``triad_pairs.yaml`` holds the CalB catalytic
+    triad distance pairs for ``polyzymd analyze distances --set pairs=...``,
+    and the next steps logged at the end are the ``polyzymd analyze -c``
+    commands to run.
     """
     import shutil
 
@@ -1485,7 +1494,6 @@ def generate_comparison_yaml(
     (comparison_dir / "figures").mkdir(exist_ok=True)
 
     # --- Copy enzyme PDB if provided ---
-    enzyme_pdb_rel = None
     if enzyme_pdb_path is not None:
         dest = comparison_dir / "structures" / "enzyme.pdb"
         if not dest.exists():
@@ -1493,7 +1501,6 @@ def generate_comparison_yaml(
             logger.info(f"  Copied enzyme PDB to {dest}")
         else:
             logger.info(f"  Enzyme PDB already exists at {dest}")
-        enzyme_pdb_rel = "structures/enzyme.pdb"
 
     # --- Build conditions list for YAML ---
     # Config paths are relative to comparison_dir
@@ -1543,7 +1550,6 @@ def generate_comparison_yaml(
         "defaults": {
             "equilibration_time": "10ns",
         },
-        "plugins": _build_plugin_settings(enzyme_pdb_rel),
         "plot_settings": _build_plot_settings(),
     }
 
@@ -1571,7 +1577,12 @@ def generate_comparison_yaml(
             allow_unicode=True,
         )
 
-    from polyzymd.config.comparison import ComparisonConfig
+    pairs_path = comparison_dir / "triad_pairs.yaml"
+    with open(pairs_path, "w") as f:
+        yaml.dump(TRIAD_PAIRS, f, default_flow_style=False, sort_keys=False)
+
+    from polyzymd.cli._compare_utils import analyze_command_for
+    from polyzymd.config.comparison import TRIAD_ROUTINE_URL, ComparisonConfig
 
     comparison = ComparisonConfig.from_yaml(comparison_yaml_path)
     errors = comparison.validate_config()
@@ -1586,66 +1597,42 @@ def generate_comparison_yaml(
         logger.info(f"    - {entry['label']}: replicates {entry['replicates']}")
         logger.info(f"      config: {entry['config']}")
 
-    contacts_configs = " ".join(f"-c {shlex.quote(entry['config'])}" for entry in conditions_yaml)
+    rmsf = analyze_command_for("rmsf", comparison)
+    distances = analyze_command_for("distances", comparison).replace(
+        "<pairs.yaml>", shlex.quote(str(pairs_path))
+    )
+    contacts = analyze_command_for("contacts", comparison)
     logger.info(
         f"\n  Next steps:"
         f"\n    1. Review and edit {comparison_yaml_path} if needed"
-        f"\n    2. Ensure enzyme PDB is at {comparison_dir}/structures/enzyme.pdb"
-        f"\n    3. Validate the comparison configuration:"
+        f"\n    2. Validate the conditions:"
         f"\n       polyzymd compare validate -f {comparison_yaml_path}"
-        f"\n    4. Run analyses:"
-        f"\n       polyzymd compare run rmsf -f {comparison_yaml_path}"
-        f"\n       polyzymd compare run catalytic_triad -f {comparison_yaml_path}"
-        f"\n       cd {comparison_dir} && polyzymd analyze contacts {contacts_configs} --eq 10ns"
-        f"\n    5. Generate all plots:"
-        f"\n       polyzymd compare plot-all -f {comparison_yaml_path}"
+        f"\n    3. Run the analyses on the simulation configs, control first:"
+        f"\n       {rmsf} --set reference_mode=average --set 'highlight_residues=[77,133,156]'"
+        f"\n       {distances}"
+        f"\n       {contacts}"
+        f"\n    4. For the triad hydrogen bonds, follow {TRIAD_ROUTINE_URL}"
     )
 
     return comparison_yaml_path
 
 
-def _build_plugin_settings(enzyme_pdb_rel: str | None) -> dict:
-    """Build the plugins section of comparison.yaml.
-
-    Parameters
-    ----------
-    enzyme_pdb_rel : str or None
-        Relative path to enzyme PDB retained for backward-compatible calls.
-
-    Returns
-    -------
-    dict
-        Plugin settings configuration.
-    """
-    del enzyme_pdb_rel
-
-    settings: dict = {
-        # RMSF: per-residue fluctuations (backbone CA atoms)
-        "rmsf": {
-            "selection": "protein and name CA",
-            "reference_mode": "average",
-        },
-        # Catalytic triad: Ser77-His156-Asp133 distances
-        "catalytic_triad": {
-            "name": "CalB Catalytic Triad",
-            "description": "Ser77(OG)-His156(NE2) and His156(ND1)-Asp133(OD2) distances",
-            "threshold": 3.5,
-            "pairs": [
-                {
-                    "label": "Ser77-His156",
-                    "selection_a": "resid 77 and name OG",
-                    "selection_b": "resid 156 and name NE2",
-                },
-                {
-                    "label": "His156-Asp133",
-                    "selection_a": "resid 156 and name ND1",
-                    "selection_b": "resid 133 and name OD2",
-                },
-            ],
-        },
-    }
-
-    return settings
+#: CalB catalytic triad distance pairs, Ser77(OG)-His156(NE2) and
+#: His156(ND1)-Asp133(OD2), for polyzymd analyze distances --set pairs=...
+TRIAD_PAIRS = [
+    {
+        "label": "Ser77-His156",
+        "selection_a": "protein and resid 77 and name OG",
+        "selection_b": "protein and resid 156 and name NE2",
+        "threshold": 3.5,
+    },
+    {
+        "label": "His156-Asp133",
+        "selection_a": "protein and resid 156 and name ND1",
+        "selection_b": "protein and resid 133 and name OD2",
+        "threshold": 3.5,
+    },
+]
 
 
 def _build_plot_settings() -> dict:
@@ -1662,17 +1649,6 @@ def _build_plot_settings() -> dict:
         "dpi": 300,
         "style": "compact",
         "color_palette": "tab10",
-        "rmsf": {
-            "show_error": True,
-            "highlight_residues": [77, 133, 156],
-            "figsize_profile": [14, 4],
-            "figsize_comparison": [8, 6],
-        },
-        "catalytic_triad": {
-            "generate_kde_panel": True,
-            "generate_bars": True,
-            "figsize_bars": [10, 6],
-        },
     }
 
 
@@ -2001,12 +1977,11 @@ def main():
                 "\n  Next steps:"
                 "\n    1. Re-run with --generate-comparison <dir> to create comparison.yaml"
                 "\n    2. Review comparison.yaml and point each condition to its config.yaml"
-                "\n    3. Validate the comparison configuration:"
+                "\n    3. Validate the conditions:"
                 "\n       polyzymd compare validate -f comparison.yaml"
-                "\n    4. Run analyses by canonical plugin name:"
-                "\n       polyzymd compare run <analysis_type> -f comparison.yaml"
-                "\n    5. Generate figures:"
-                "\n       polyzymd compare plot-all -f comparison.yaml"
+                "\n    4. Run each analysis on the converted configs, control first:"
+                "\n       polyzymd analyze <name> -c <control>/config.yaml"
+                " -c <other>/config.yaml --eq 10ns"
             )
 
     # Exit code: success if no conversion was done, or all conversions passed

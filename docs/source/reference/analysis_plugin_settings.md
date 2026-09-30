@@ -1,38 +1,51 @@
-# Analysis Plugin Settings Reference
+# Analysis Settings Reference
 
-This page is a complete YAML key reference for plugin settings under
-`comparison.yaml`:
+Every shipped analysis takes its settings on the command line, as
+`polyzymd analyze NAME -c <config.yaml> --set key=value`, the value read as
+YAML, or as the `settings=` mapping of `polyzymd.analyses.analyze` in Python.
+The settings each analysis takes, and their defaults, are listed in
+`FUNCTION_ANALYSES` in `src/polyzymd/analyses/protocols.py`; a setting an
+analysis does not take is refused with the list of the ones it does. The
+`plugins:` section of `comparison.yaml` is retired: a block for a shipped
+analysis is ignored with a warning, as {ref}`comparison-yaml-retired` lists.
 
-```yaml
-plugins:
-  <plugin_name>:
-    ...settings...
-```
+| Analysis | Settings |
+|---|---|
+| `rg` | {doc}`../how_to/analysis_rg_quickstart` |
+| `rmsd` | {doc}`../how_to/analysis_rmsd_quickstart` |
+| `rmsf`, `rmsd_per_residue` | {doc}`../how_to/analysis_rmsf_quickstart` |
+| `sasa` | {doc}`../how_to/analysis_sasa_quickstart` |
+| `secondary_structure` | {doc}`../how_to/analysis_secondary_structure_quickstart` |
+| `contacts` | {doc}`../how_to/analysis_contacts_quickstart` |
+| `native_contacts` | {doc}`../how_to/analysis_native_contacts_quickstart` |
+| `hydrogen_bonds` | {doc}`../how_to/hydrogen_bonds` |
+| `distances` | {doc}`../how_to/analysis_distances_quickstart` |
 
-Use this as a lookup table for field names, types, defaults, and meanings.
+What each setting changes in the measurement is described with the function
+it is passed to in {doc}`analysis_functions`. The catalytic triad is a routine
+on the study API rather than an analysis; see
+{doc}`../how_to/analysis_triad_quickstart`.
 
-FDR thresholds for comparison workflows are configured through top-level
-`defaults.fdr_alpha` in `comparison.yaml` where supported, not through
-plugin-local settings unless a plugin explicitly lists its own `fdr_alpha` field
-below.
+## Error bars in figures
 
-## Error bars in plugin figures
-
-A plugin whose plot settings model declares `error_bar` (`"ci95"` or `"sem"`)
-lets `plot_settings.<plugin>.error_bar` choose the interval its figures draw.
-`hydrogen_bonds` has no plot settings model, so its figures always draw the 95
-percent Student t confidence interval across replicates. Every figure that draws
-an interval carries a footnote naming it, the number of replicates and the
-production window, and per-replicate points stay overlaid on the bars.
+The figures of `polyzymd analyze` that draw each condition's mean draw its 95
+percent Student t confidence interval across replicates, with the
+per-replicate values overlaid, and a footnote naming the interval, the number
+of replicates and the production window; with one replicate per condition the
+footnote says no interval is drawn. The difference figures draw the 95 percent
+interval of each difference from the control, named in their footnote with
+the test and the Benjamini-Hochberg family size. No setting changes the
+interval.
 
 ## Universe loading (`pbc_policy`)
 
-Every plugin reads its coordinates through `TrajectoryLoader.load_universe()`
-and `UniverseProvider.load_universe()`. Both accept a `pbc_policy` argument.
+Every analysis reads its coordinates through `UniverseProvider.load_universe()`,
+which `Study` calls once per replicate, or `TrajectoryLoader.load_universe()`.
+Both accept a `pbc_policy` argument.
 
 ```{important}
-`pbc_policy` is a Python argument, not yet a `comparison.yaml` key. Running
-`polyzymd compare run` always loads with the default `"as_is"`. Code that calls
+`pbc_policy` is a Python argument, not a `polyzymd analyze` setting. Running
+`polyzymd analyze` always loads with the default `"as_is"`. Code that calls
 the loader or the universe provider directly can pass `"make_whole"` today, and
 the policy in force is recorded in provenance either way.
 ```
@@ -53,8 +66,9 @@ that is not solvent or a monatomic ion.
 
 ### Universe provenance fields
 
-`UniverseProvenance` (serialized into every MDAnalysis replicate artifact under
-`universe_policy.provenance`) records how the coordinates were produced.
+`UniverseProvenance` records how the coordinates were produced; the plugin
+framework serializes it into every MDAnalysis replicate artifact under
+`universe_policy.provenance`.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -66,57 +80,5 @@ that is not solvent or a monatomic ion.
 `trajectory_variant` matters because the GROMACS job script post-processes the
 production trajectory with `trjconv -pbc nojump` and then `-center -pbc mol -ur
 compact`, and the engine prefers those files. OpenMM writes no such variant, so
-the same plugin sees different coordinate semantics on the two engines. The
+the same analysis sees different coordinate semantics on the two engines. The
 field records which one was read rather than leaving it implied by a filename.
-
-## `contacts`
-
-`contacts` is not a comparison plugin. A `plugins.contacts` block is ignored
-with a warning; run `polyzymd analyze contacts`, whose settings are listed in
-{doc}`../how_to/analysis_contacts_quickstart`.
-
-## `hydrogen_bonds`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `groups` | `dict[str, str]` | `{protein: "chainid A", polymer: "chainid C"}` | Named MDAnalysis selections used by summaries |
-| `summaries` | `list[HydrogenBondSummarySettings]` | `[{name: protein_polymer, between: [protein, polymer]}]` | Summary definitions to compute |
-| `distance_cutoff` | `float` | `3.0` | Donor-acceptor cutoff (Å) |
-| `angle_cutoff` | `float` | `150.0` | D-H...A angle cutoff (degrees) |
-| `update_selections` | `bool` | `true` | Re-evaluate selections each frame |
-| `top_n_pairs` | `int` | `15` | Number of top residue pairs reported |
-| `allow_empty_groups` | `bool` | `false` | Raise `SelectionError` on an empty group; set `true` to warn and skip instead |
-| `donor_acceptor_elements` | `tuple[str, ...]` | `["N", "O"]` | Elements allowed to act as donors and acceptors |
-| `allow_overlapping_composition` | `bool` | `false` | Allow overlapping composition partitions (otherwise raise) |
-| `composition` | `HydrogenBondCompositionSettings \| null` | `null` | Optional partitioning for composition analysis |
-| `hydrogens_selection` | `str \| null` | `null` | Advanced explicit-hydrogen selection override for unusual atom names |
-| `timestep_ps` | `float \| null` | `null` | Optional timestep override (ps) for time-axis plots |
-
-Time-axis plots assume uniformly saved frames. PolyzyMD maps frame index to time
-as `frame_index * timestep_ps`; variable-timestep concatenated trajectories are
-not supported.
-
-`HydrogenBondSummarySettings` entries in `summaries`:
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `name` | `str` | required | Unique summary name |
-| `between` | `tuple[str, str] \| null` | `null` | Cross-group summary mode |
-| `within` | `str \| null` | `null` | Intra-group summary mode |
-
-Exactly one of `between` or `within` must be set for each summary.
-
-Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` and requires explicit
-hydrogens and element metadata. Donors and acceptors are
-`(<group union>) and element <donor_acceptor_elements>` and hydrogens are
-`(<group union>) and (element H)`. PolyzyMD infers missing elements for GRO-like
-topologies when atom types or atom names are conservative enough. If elements
-remain unavailable, or if the donor and acceptor selection matches no atoms, the
-plugin raises `SelectionError` unless `allow_empty_groups` is true. Set
-`hydrogens_selection` only for unusual explicit-hydrogen naming schemes.
-
-`HydrogenBondCompositionSettings`:
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `partitions` | `dict[str, str]` | `{}` | Named composition partitions as MDAnalysis selections |

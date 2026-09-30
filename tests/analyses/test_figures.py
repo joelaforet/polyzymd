@@ -204,32 +204,30 @@ def test_cli_rg_writes_the_legacy_figures_and_records_them(configs, tmp_path) ->
     assert "figures" not in json.loads(quiet.stdout)["provenance"]["output_paths"]
 
 
-def test_cli_triad_draws_each_pair_with_its_threshold(configs, tmp_path, figures) -> None:
-    """The triad draws each pair's distribution and every fraction, with each pair's threshold."""
+def test_cli_distances_draws_each_pair_with_its_threshold(configs, tmp_path, figures) -> None:
+    """distances draws each pair's distribution and every fraction, with each pair's threshold."""
     pairs = tmp_path / "pairs.yaml"
     pairs.write_text(yaml.safe_dump(PAIRS))
-    arguments = ["catalytic_triad", "-c", str(configs["A"]), "-c", str(configs["B"])]
+    arguments = ["distances", "-c", str(configs["A"]), "-c", str(configs["B"])]
     arguments += ["--eq", EQUILIBRATION, "--set", f"pairs={pairs}", "--set", "threshold=1.135"]
     arguments += ["--output-dir", str(tmp_path)]
     result = CliRunner().invoke(analyze_command, arguments)
     assert result.exit_code == 0, result.output
-    folder = tmp_path / "figures" / "catalytic_triad"
+    folder = tmp_path / "figures" / "distances"
     assert sorted(path.name for path in folder.iterdir()) == [
-        "triad_fraction_C1-C2_below_2.31_A.png",
-        "triad_fraction_mid-C3_below_1.135_A.png",
-        "triad_fraction_simultaneous.png",
-        "triad_kde_C1-C2.png",
-        "triad_kde_mid-C3.png",
-        "triad_kde_panel.png",
-        "triad_threshold_bars.png",
+        "distance_fraction_C1-C2_below_2.31_A.png",
+        "distance_fraction_mid-C3_below_1.135_A.png",
+        "distance_kde_C1-C2.png",
+        "distance_kde_mid-C3.png",
+        "distance_kde_panel.png",
+        "distance_threshold_bars.png",
     ]
-    for stem, threshold in (("triad_kde_C1-C2", 2.31), ("triad_kde_mid-C3", 1.135)):
+    for stem, threshold in (("distance_kde_C1-C2", 2.31), ("distance_kde_mid-C3", 1.135)):
         lines = figures[stem].axes[0].get_lines()
         assert list(lines[-1].get_xdata()) == [threshold, threshold]
-    stored = np.load(
-        tmp_path / "polyzymd_results/catalytic_triad_simultaneous/A/replicate_1/series.npz"
-    )
-    ax = figures["triad_fraction_simultaneous"].axes[0]
+    name = _safe("distances_C1-C2_below 2.31 A")
+    stored = np.load(tmp_path / f"polyzymd_results/{name}/A/replicate_1/series.npz")
+    ax = figures["distance_fraction_C1-C2_below_2.31_A"].axes[0]
     dots = [item for item in ax.collections if isinstance(item, PathCollection)]
     assert dots[0].get_offsets()[0, 1] == pytest.approx(stored["values"].mean())
     assert ax.get_ylim() == (0, 1.05)
@@ -255,22 +253,18 @@ def _bars(ax) -> list[tuple[list[float], list[tuple[float, float]], np.ndarray]]
     return rows
 
 
-def test_cli_triad_grouped_figures_hold_the_stored_values(configs, tmp_path, figures) -> None:
-    """The threshold bars hold every pair's fraction and All pairs; the panel holds each threshold."""
+def test_cli_distances_grouped_figures_hold_the_stored_values(configs, tmp_path, figures) -> None:
+    """The threshold bars hold every pair's fraction; the panel holds each threshold."""
     pairs = tmp_path / "pairs.yaml"
     pairs.write_text(yaml.safe_dump(PAIRS))
-    arguments = ["catalytic_triad", "-c", str(configs["A"]), "-c", str(configs["B"])]
+    arguments = ["distances", "-c", str(configs["A"]), "-c", str(configs["B"])]
     arguments += ["--eq", EQUILIBRATION, "--set", f"pairs={pairs}", "--set", "threshold=2.2"]
     arguments += ["--output-dir", str(tmp_path)]
     assert CliRunner().invoke(analyze_command, arguments).exit_code == 0
-    names = [
-        "catalytic_triad_C1-C2_below 2.31 A",
-        "catalytic_triad_mid-C3_below 2.2 A",
-        "catalytic_triad_simultaneous",
-    ]
-    ax = figures["triad_threshold_bars"].axes[0]
+    names = ["distances_C1-C2_below 2.31 A", "distances_mid-C3_below 2.2 A"]
+    ax = figures["distance_threshold_bars"].axes[0]
     ticks = [text.get_text() for text in ax.get_xticklabels()]
-    assert ticks == ["C1-C2 below 2.31 A", "mid-C3 below 2.2 A", "All pairs"]
+    assert ticks == ["C1-C2 below 2.31 A", "mid-C3 below 2.2 A"]
     rows = _bars(ax)
     assert len(rows) == 2
     for label, (heights, ends, points) in zip(["A", "B"], rows, strict=True):
@@ -281,8 +275,8 @@ def test_cli_triad_grouped_figures_hold_the_stored_values(configs, tmp_path, fig
             if stats.sem:
                 assert ends[group] == pytest.approx((stats.ci_low, stats.ci_high))
             assert sorted(points[group]) == pytest.approx(sorted(means))
-    assert "across n = 3 replicates" in _footnote(figures["triad_threshold_bars"])
-    panel = figures["triad_kde_panel"].axes
+    assert "across n = 3 replicates" in _footnote(figures["distance_threshold_bars"])
+    panel = figures["distance_kde_panel"].axes
     assert [ax.get_title() for ax in panel] == ["C1-C2 distance", "mid-C3 distance"]
     for ax, threshold in zip(panel, (2.31, 2.2), strict=True):
         assert list(ax.get_lines()[-1].get_xdata()) == [threshold, threshold]

@@ -183,7 +183,7 @@ docs/source/
 ├── how_to/              # Task-oriented practical guides
 ├── reference/           # Lookup-oriented factual docs
 │   ├── data_requirements.md    # Data & directory layout reference
-│   ├── comparison_yaml.md      # comparison.yaml schema reference
+│   ├── comparison_yaml.md      # comparison.yaml schema (conditions; plugins retired)
 │   └── cli_reference.md        # CLI command reference
 ├── explanation/         # Conceptual "why" discussions
 ├── contributor_guide/   # Contributor landing page and setup
@@ -193,7 +193,7 @@ docs/source/
 │   ├── workflow.md      # workflow/ (has :no-index: for dataclasses)
 │   ├── core.md          # core/ (has :no-index: for dataclasses)
 │   ├── builders.md      # builders/ (solvent has :no-index:)
-│   ├── analyses.md      # analyses/ plugin system
+│   ├── analyses.md      # analyses/: study API, functions and the plugin framework being removed
 │   └── *.rst            # Per-module stubs
 └── _static/             # Static assets (CSS, images)
 ```

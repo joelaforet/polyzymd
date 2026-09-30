@@ -2,7 +2,7 @@
 
 ## Current State
 
-The test suite covers the full analysis plugin system and core infrastructure:
+The test suite covers the study API, the shipped analysis functions, the plugin framework (being removed) and core infrastructure:
 
 - **Test directory:** `tests/` with subdirectories mirroring the source tree
 - **Test count:** run `pytest tests --collect-only -q | tail -1`; do not copy a number here
@@ -21,23 +21,24 @@ tests/
 │   ├── test_figures.py          # figures.py
 │   ├── test_protocols.py        # protocols.py: polyzymd analyze, ProtocolReport
 │   ├── test_protocols_real_artifacts.py  # reports from stored real-data artifacts
-│   ├── test_rmsf.py             # rmsf, rms_deviation, rms_decomposition
+│   ├── test_rmsf.py             # rmsf, rmsd_per_residue, rms_decomposition
 │   ├── test_sasa.py             # sasa, residue_sasa
 │   ├── test_secondary_structure.py  # dssp_occupancy
 │   ├── test_residue_contacts.py     # residue_contacts, polyzymd analyze contacts
 │   ├── test_residue_occlusion.py    # residue_occlusion
 │   ├── test_contact_lifetimes.py    # contact_events, contact_lifetimes, --run mean_lifetime
 │   ├── test_native_contacts.py      # native_contacts, polyzymd analyze native_contacts
+│   ├── test_hydrogen_bonds_functions.py  # hbond_atoms, hydrogen_bonds, lifetimes, occupancies, hbond_count
+│   ├── test_hydrogen_bonds_analyze.py    # polyzymd analyze hydrogen_bonds on OpenMM run directories
 │   ├── test_segment_join.py     # loader repairs of restart-chain boundaries
 │   ├── test_empty_segments.py   # loader skips of empty segments
 │   ├── test_base.py             # analyses/base.py
-│   ├── test_discovery.py        # analyses/discovery.py
-│   ├── test_orchestrator*.py    # analyses/orchestrator.py (plugin path)
+│   ├── test_discovery.py        # analyses/discovery.py (no shipped plugin is found)
+│   ├── test_orchestrator*.py    # analyses/orchestrator.py (plugin framework, with fake plugins)
 │   ├── test_stats.py            # analyses/stats.py
 │   ├── mda/                     # analyses/mda/
 │   ├── shared/                  # analyses/shared/ utilities (loader, window, statistics, ...)
 │   ├── scientific/              # statistical and uncertainty contract tests
-│   ├── plugins/                 # The remaining plugin: hydrogen_bonds
 │   └── integration/             # Cross-analysis integration tests
 ├── cli/                         # Tests for cli/ source tree
 │   ├── test_main.py
@@ -78,7 +79,7 @@ pixi run -e build pytest tests/analyses/test_sasa.py -v
 # Run tests matching a pattern
 pixi run -e build pytest tests/ -v -k "rmsf"
 
-# Run tests for the remaining plugin
+# Run the hydrogen-bond tests
 pixi run -e build pytest tests/ -v -k "hydrogen_bonds"
 ```
 
@@ -86,142 +87,32 @@ pixi run -e build pytest tests/ -v -k "hydrogen_bonds"
 
 When adding tests:
 
-1. Place tests in the subdirectory matching the source module (e.g., `tests/analyses/` for study API functions, `tests/analyses/plugins/` for the remaining plugins)
+1. Place tests in the subdirectory matching the source module (e.g., `tests/analyses/` for study API functions)
 2. Name files `test_<source_module>.py` with 1:1 correspondence to source files
 3. Use pytest conventions (`test_` prefix for functions/methods)
 4. Mock heavy dependencies (OpenMM, MDAnalysis) for unit tests
 5. Use `@pytest.mark.slow` for tests requiring simulation data
 6. Use existing fixtures from `tests/conftest.py`
 
-### Testing an Analysis Plugin
+### Testing an analysis function
 
-When adding a new analysis plugin in `analyses/`, write tests that cover:
+No shipped analysis is a plugin any more. A new analysis is a function in
+`analyses/functions.py`; test it in `tests/analyses/test_<name>.py`:
 
-1. **Discovery**: Plugin is found by `list_analyses()` and `get_analysis()`
-2. **Class variables**: `name` and `Settings` are set correctly
-3. **Settings validation**: Pydantic model validates/rejects correctly
-4. **MDAnalysis job stage**: `build_mda_jobs()` constructs `MDAAnalysisJob`
-   objects using `FrameSelection` and fake `AnalysisBase`-compatible work.
-5. **Collector artifacts**: `build_mda_collector()` maps completed jobs to a
-   valid `ReplicateArtifact` without serializing raw MDAnalysis `Results`.
-6. **Artifact aggregation**: `aggregate()` or the default artifact aggregator
-   combines replicate artifacts into a `ConditionArtifact` without loading
-   trajectories.
-7. **Comparison metrics**: `extract_metrics()` or custom `compare()` consumes
-   condition artifacts and uses replicate-level statistics.
-8. **Artifact-only plots**: `plot()` reads cached artifacts/sidecars only.
-9. **format()**: Generates readable CLI output from comparison artifacts/results.
+1. **Known answer on placed geometry**: build a small `MDAnalysis.Universe`
+   with atoms at chosen positions and check the function's value by hand
+   arithmetic, as `test_hydrogen_bonds_functions.py` does.
+2. **Through the study**: write OpenMM run directories with
+   `tests/_support/analysis_testkit.py` (`write_simulation_config`,
+   `write_openmm_replicate`, `write_openmm_frames`), run
+   `Study.timeseries` or `Study.per_replicate`, and check the replicate values
+   and the record under `polyzymd_results/`.
+3. **polyzymd analyze**: for a shipped analysis, run `analyze(name, configs)` or
+   the CLI and check `metric`, `unit`, `all_runs`, the replicate values and the
+   figures written.
 
-Example test structure for a plugin:
-
-```python
-from pathlib import Path
-from unittest.mock import MagicMock
-
-from polyzymd.analyses import get_analysis, list_analyses
-from polyzymd.analyses.base import (
-    AggregateContext,
-    Condition,
-    MDAReplicateJobContext,
-    MetricValue,
-)
-
-
-class TestMyPluginDiscovery:
-    """Tests for discovery and class-level attributes."""
-
-    def test_discovered(self):
-        """Plugin should be discovered automatically."""
-        analyses = list_analyses()
-        assert "my_analysis" in analyses
-
-    def test_class_variables(self):
-        cls = get_analysis("my_analysis")
-        assert cls.name == "my_analysis"
-        assert hasattr(cls, "Settings")
-
-    def test_settings_defaults(self):
-        cls = get_analysis("my_analysis")
-        settings = cls.Settings()
-        assert settings.selection == "protein and name CA"
-
-
-class TestMyPluginMDAJobs:
-    """Test the MDAnalysis job stage with small fakes."""
-
-    class FakeTrajectory:
-        def __len__(self) -> int:
-            return 50
-
-    class FakeUniverse:
-        trajectory = FakeTrajectory()
-
-    def test_builds_mda_jobs(self, tmp_path):
-        cls = get_analysis("my_analysis")
-        analysis = cls()
-        condition = Condition(
-            label="Test",
-            config_path=Path("/fake/config.yaml"),
-            replicates=(1,),
-            sim_config=object(),
-        )
-        ctx = MDAReplicateJobContext(
-            condition=condition,
-            replicate=1,
-            sim_config=condition.sim_config,
-            output_dir=tmp_path / "run_1",
-            equilibration="0ns",
-            recompute=True,
-            settings=cls.Settings(),
-        )
-
-        jobs = analysis.build_mda_jobs(ctx)
-        assert jobs
-        assert all(job.name for job in jobs)
-
-
-class TestMyPluginArtifacts:
-    """Test artifact aggregation — no trajectory mocks needed."""
-
-    def test_aggregate(self, tmp_path):
-        cls = get_analysis("my_analysis")
-        analysis = cls()
-        condition = Condition(
-            label="Test",
-            config_path=Path("/fake/config.yaml"),
-            replicates=(1, 2, 3),
-            sim_config=MagicMock(),
-        )
-        ctx = AggregateContext(
-            condition=condition,
-            replicates=(1, 2, 3),
-            output_dir=tmp_path / "aggregated",
-            equilibration="10ns",
-            settings=cls.Settings(),
-        )
-
-        results = [
-            {"my_metric": 15.0, "replicate": 1},
-            {"my_metric": 15.5, "replicate": 2},
-            {"my_metric": 14.8, "replicate": 3},
-        ]
-
-        agg = analysis.aggregate(ctx, results)
-        assert "replicate_values" in agg
-
-
-class TestMyPluginMetrics:
-    """Test metric extraction for default comparison."""
-
-    def test_extract_metrics(self):
-        cls = get_analysis("my_analysis")
-        analysis = cls()
-        summary = {"mean_value": 1.5, "sem_value": 0.1, "replicate_values": [1.4, 1.6]}
-        metrics = analysis.extract_metrics(summary)
-        assert isinstance(metrics, dict)
-        for v in metrics.values():
-            assert isinstance(v, MetricValue)
-```
+Framework tests that need a registered plugin use `_install_toy` from
+`tests/analyses/test_protocols.py` instead of a shipped plugin.
 
 ## Test Data
 

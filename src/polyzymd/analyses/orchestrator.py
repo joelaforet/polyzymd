@@ -21,10 +21,14 @@ Usage
     from polyzymd.analyses.orchestrator import run_analysis, run_comparison
 
     # Run a single analysis for one condition
-    run_analysis("hydrogen_bonds", condition, settings, equilibration="10ns")
+    run_analysis("my_analysis", condition, settings, equilibration="10ns")
 
     # Run full comparison pipeline
-    run_comparison("hydrogen_bonds", comparison_config)
+    run_comparison("my_analysis", comparison_config)
+
+No shipped analysis runs through this pipeline any more: every analysis that
+``polyzymd analyze`` offers runs on :class:`~polyzymd.analyses.study.Study`.
+The plugin framework is being removed.
 """
 
 from __future__ import annotations
@@ -642,7 +646,7 @@ def _validate_dependencies(analyses: list[Analysis], satisfied: set[str] | None 
     """Validate that declared dependencies are discoverable and scheduled.
 
     This catches configuration errors early — e.g. a plugin declares
-    ``dependencies = ("hydrogen_bonds",)`` but ``hydrogen_bonds`` isn't in the run list
+    ``dependencies = ("my_upstream",)`` but ``my_upstream`` isn't in the run list
     or doesn't exist.
 
     Parameters

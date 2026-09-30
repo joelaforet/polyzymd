@@ -73,8 +73,8 @@ four. State the factor you used.
 ## Citation convention
 
 Every module that implements or adapts a published method carries a NumPy-style
-`References` section in its module docstring, and the plugin `__init__.py` also
-carries a one-line statement of the method it runs. Format each entry as
+`References` section in its module docstring, and each analysis function's
+docstring also carries a one-line statement of the method it runs. Format each entry as
 author, year, title, journal, volume and page, then the DOI.
 
 ```

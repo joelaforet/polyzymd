@@ -1,7 +1,7 @@
 # Reference
 
 Reference pages are for lookup. Use this section when you need commands,
-configuration fields, plugin settings, API signatures, or benchmark data.
+configuration fields, analysis settings, API signatures, or benchmark data.
 
 ```{tip}
 For a guided walkthrough, go to {doc}`../tutorials/index`.
@@ -32,11 +32,11 @@ Every key in `config.yaml` — types, defaults, and constraints.
 OpenFF chemistry requirements and PolyzyMD chain conventions for enzyme PDBs.
 :::
 
-:::{grid-item-card} Analysis Plugin Reference
-:link: analysis_plugin_settings
+:::{grid-item-card} Analysis Reference
+:link: analysis_functions
 :link-type: doc
 
-Per-plugin settings, comparison YAML schema, and post-hoc testing options.
+Shipped analysis functions, analysis settings, the report schema, comparison YAML schema, and post-hoc testing options.
 :::
 
 :::{grid-item-card} API Documentation
@@ -68,7 +68,7 @@ OpenFF PDB Ingestion Reference <openff_pdb_ingestion>
 Benchmarks <benchmarks>
 ```
 
-## Analysis Plugin Reference
+## Analysis Reference
 
 ```{toctree}
 :maxdepth: 1
@@ -76,9 +76,8 @@ Benchmarks <benchmarks>
 Comparison YAML Schema <comparison_yaml>
 ProtocolReport Schema <analysis_protocol_report>
 Shipped analysis functions <analysis_functions>
-Analysis Plugin Settings Reference <analysis_plugin_settings>
+Analysis Settings Reference <analysis_plugin_settings>
 Comparison and Plotting Reference <analysis_comparison_reference>
-Hydrogen Bonds Plugin Reference <analysis_hydrogen_bonds_reference>
 Post-Hoc Testing Reference <posthoc_testing>
 Experimental Analyses Archive <experimental_analyses_archive>
 ```

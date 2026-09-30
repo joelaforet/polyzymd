@@ -69,7 +69,7 @@ PolyzyMD uses a consistent chain convention in generated topology files:
 | D and later | Solvent, ions, and remaining molecules. |
 
 The convention is intentionally simple. It gives contributors, analysis
-plugins, and visualization workflows a shared vocabulary for referring to major
+functions, and visualization workflows a shared vocabulary for referring to major
 system components without needing to infer component roles from atom names or
 force-field metadata.
 

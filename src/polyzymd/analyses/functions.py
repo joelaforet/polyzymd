@@ -3,7 +3,7 @@
 The per-frame functions take MDAnalysis ``AtomGroup`` arguments positioned at
 one frame and return one number, so they run through
 :meth:`polyzymd.analyses.study.Study.timeseries` like any function you write.
-The per-replicate functions (:func:`rmsf`, :func:`rms_deviation`,
+The per-replicate functions (:func:`rmsf`, :func:`rmsd_per_residue`,
 :func:`rms_decomposition`, :func:`residue_sasa`, :func:`dssp_occupancy` and
 :func:`residue_contacts` and :func:`residue_occlusion`) also take the production
 frame indices and return one value per residue, and run through
@@ -314,6 +314,18 @@ def _per_residue(atoms: Any, per_atom: Any) -> Any:
     return np.bincount(residue, weights=per_atom) / np.bincount(residue)
 
 
+def _rms_per_residue(atoms: Any, per_atom: Any) -> Any:
+    """Return each residue's root mean square of per-atom RMS values: ``sqrt(mean(value**2))``.
+
+    This is the square root of the mean over the residue's atoms of each
+    atom's mean square, as ``gmx rmsf -res`` combines atoms, which weights
+    them by mass where PolyzyMD weights them equally.
+    """
+    import numpy as np
+
+    return np.sqrt(_per_residue(atoms, np.asarray(per_atom) ** 2))
+
+
 def rmsf(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     """Return the RMSF in Å of each residue of ``atoms`` over ``frames``.
 
@@ -321,8 +333,9 @@ def rmsf(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     ``MDAnalysis.analysis.rms.RMSF`` gives each atom's root mean square
     fluctuation about its mean position over the frames, as ``gmx rmsf -o``
     does. The reference only decides what the frames are superposed on.
-    Each residue's value is the mean over its atoms in ``atoms``, in the
-    order of ``atoms.residues``.
+    Each residue's value is the square root of the mean over its atoms in
+    ``atoms`` of their squared RMSF, in the order of ``atoms.residues``, as
+    ``gmx rmsf -o -res`` combines the atoms of a residue with equal masses.
 
     Parameters
     ----------
@@ -347,22 +360,29 @@ def rmsf(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     ProtocolError
         If ``reference`` does not hold one position per atom of ``atoms | fit``.
     """
-    return _per_residue(atoms, _superposed_deviations(atoms, fit, reference, frames)[1])
+    return _rms_per_residue(atoms, _superposed_deviations(atoms, fit, reference, frames)[1])
 
 
-def rms_deviation(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
+def rmsd_per_residue(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     """Return each residue's root mean square deviation in Å from the reference over ``frames``.
 
     After the superposition of :func:`rmsf`, each atom's value is
-    ``sqrt(<|x(t) - x_ref|^2>)``, as ``gmx rmsf -od`` gives, and the legacy
-    rmsf plugin gave in external mode. Each residue's value is the mean over
-    its atoms. The arguments are those of :func:`rmsf`.
+    ``sqrt(<|x(t) - x_ref|^2>)``, the root mean square over frames of its
+    distance from the reference, as ``gmx rmsf -od`` gives ("root mean
+    square deviation with respect to the reference structure", written to
+    ``rmsdev.xvg``). Each residue's value is the square root of the mean over
+    its atoms of their squared values, so ``rmsd_per_residue**2 = rmsf**2 +
+    offset**2`` for every residue as for every atom. Unlike :func:`rmsd`, one
+    number per frame (the root mean square over atoms), this is one number
+    per residue for all frames together; tools such as cpptraj call a
+    per-frame series of per-residue values "per-residue RMSD". The arguments
+    are those of :func:`rmsf`.
     """
-    return _per_residue(atoms, _superposed_deviations(atoms, fit, reference, frames)[0])
+    return _rms_per_residue(atoms, _superposed_deviations(atoms, fit, reference, frames)[0])
 
 
-#: Names of the per-residue means that :func:`rms_decomposition` returns first.
-RMS_PARTS = ("rms_deviation", "rmsf", "offset")
+#: Names of the per-residue root mean squares that :func:`rms_decomposition` returns first.
+RMS_PARTS = ("rmsd_per_residue", "rmsf", "offset")
 
 #: Names of the per-residue mean squares that :func:`rms_decomposition` returns after them.
 MS_PARTS = ("ms_deviation", "msf", "ms_offset")
@@ -372,13 +392,14 @@ def rms_decomposition(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     """Return each residue's RMS deviation, RMSF and offset, and their mean squares, in one pass.
 
     The first three rows, named in :data:`RMS_PARTS`, are the values of
-    :func:`rms_deviation` and :func:`rmsf`, and the offset, the distance in
-    Å of each atom's mean position from its reference position, each
-    averaged over the residue's atoms. The last three, named in
-    :data:`MS_PARTS`, are the means over the residue's atoms of the squares
-    of the same per-atom values, in Å². For every atom the squared deviation
-    is the squared RMSF plus the squared offset, so ``ms_deviation`` equals
-    ``msf + ms_offset`` for every residue. The arguments are those of
+    :func:`rmsd_per_residue` and :func:`rmsf`, and the offset, the distance in
+    Å of each atom's mean position from its reference position, each the
+    square root of the mean over the residue's atoms of the squared per-atom
+    values. The last three, named in :data:`MS_PARTS`, are those means of
+    squares, in Å². For every atom the squared deviation is the squared RMSF
+    plus the squared offset, the mean square being the variance plus the
+    squared bias, so ``ms_deviation`` equals ``msf + ms_offset`` and
+    ``rmsd_per_residue**2 = rmsf**2 + offset**2`` for every residue. The arguments are those of
     :func:`rmsf`.
 
     Returns
@@ -389,8 +410,8 @@ def rms_decomposition(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     import numpy as np
 
     parts = _superposed_deviations(atoms, fit, reference, frames)
-    means = [_per_residue(atoms, values) for values in parts]
-    return np.vstack(means + [_per_residue(atoms, values**2) for values in parts])
+    squares = [_per_residue(atoms, values**2) for values in parts]
+    return np.vstack([np.sqrt(square) for square in squares] + squares)
 
 
 #: Probe radius in nm and sphere point count of :func:`sasa` and :func:`residue_sasa`.
@@ -716,7 +737,8 @@ def residue_contacts(
     follow ``protein.residues``.
 
     The atoms compared are the atoms given; select heavy atoms, such as
-    ``chainid A and not element H``, to leave hydrogens out.
+    ``chainid A and not element H``, to leave hydrogens out. With no
+    ``polymer`` atoms every value is ``nan``.
 
     Returns
     -------
@@ -725,6 +747,8 @@ def residue_contacts(
     """
     import numpy as np
 
+    if len(polymer) == 0:
+        return np.full((1 + len(types), len(protein.residues)), np.nan)
     counts = np.zeros((1 + len(types), len(protein.residues)))
     for _, touched in _distance_frames(protein, polymer, frames, cutoff, types, pbc):
         counts += touched
@@ -851,6 +875,7 @@ def residue_occlusion(
     occluder atoms of that residue name are present. Columns follow the
     residues of ``protein`` that have a maximum ASA; residues without one,
     such as terminal caps, still cover their neighbours but are not measured.
+    With no ``occluder`` atoms every value is ``nan``.
 
     Returns
     -------
@@ -860,6 +885,8 @@ def residue_occlusion(
     import numpy as np
 
     n_measured = len(_measured_residues(protein, max_asa))
+    if len(occluder) == 0:
+        return np.full((len(OCCLUSION_PARTS) + len(types), n_measured), np.nan)
     sums = np.zeros((len(OCCLUSION_PARTS) + len(types), n_measured))
     for _, contact, exposed, alone, covered in _occlusion_frames(
         protein,
@@ -1010,6 +1037,8 @@ def contact_events(mask: Any, gap: int = 0) -> tuple[Any, Any]:
         ends = np.flatnonzero(change[:, column] == -1)
         lengths.append(ends - starts)
         censored.append((starts == 0) | (ends == mask.shape[0]))
+    if not lengths:
+        return np.zeros(0, dtype=int), np.zeros(0, dtype=bool)
     return np.concatenate(lengths).astype(int), np.concatenate(censored).astype(bool)
 
 
@@ -1056,7 +1085,8 @@ def contact_lifetimes(
     An event is a run of consecutive frames in which one residue is in
     contact, found by :func:`contact_events`; absences of at most
     ``tolerance_ps`` ps are filled first. A run of ``k`` frames lasts ``k``
-    times the frame spacing. Events of all residues are pooled.
+    times the frame spacing. Events of all residues are pooled. With no
+    ``polymer`` atoms every value is ``nan``.
 
     The columns are the polymer, then each residue name in ``types``, whose
     contacts are those of its atoms alone. The rows, named in
@@ -1112,6 +1142,8 @@ def contact_lifetimes(
             hint=f"Pass only {', '.join(sorted(known))}.",
         )
     settings.update(options)
+    if len(polymer) == 0:
+        return np.full((len(LIFETIME_PARTS), 1 + len(types)), np.nan)
     if method == "occlusion":
         stream = (
             (time, contact)
@@ -1137,28 +1169,477 @@ def contact_lifetimes(
         times.append(time)
         masks.append(contact)
     if len(times) < 2:
+        return event_lifetimes(np.zeros((len(times), 0)), times, tolerance_ps, "contact_lifetimes")
+    masks = np.asarray(masks)  # frames, groups, residues
+    return np.stack(
+        [
+            event_lifetimes(masks[:, group, :], times, tolerance_ps, "contact_lifetimes")
+            for group in range(masks.shape[1])
+        ],
+        axis=1,
+    )
+
+
+def event_lifetimes(mask: Any, times: Any, tolerance_ps: float, name: str = "lifetimes") -> Any:
+    """Return the :data:`LIFETIME_PARTS` of the events in ``mask``, one row per frame at ``times`` ps.
+
+    Each column of ``mask`` is one series, such as one residue or one
+    residue pair; :func:`contact_events` finds its events after filling
+    absences of at most ``tolerance_ps``, converted to whole frames of the
+    spacing. A run of ``k`` frames lasts ``k`` spacings. The events of all
+    columns are pooled: the Kaplan-Meier restricted mean lifetime in ns up
+    to the time the frames span (:func:`restricted_mean_lifetime`), ``nan``
+    without events, the number of events and the fraction censored.
+    Frames must be evenly spaced.
+    """
+    import numpy as np
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    times = np.asarray(times, dtype=float)
+    if len(times) < 2:
         raise ProtocolError(
-            f"contact_lifetimes: {len(times)} frame, and a lifetime needs at least two.",
+            f"{name}: {len(times)} frame, and a lifetime needs at least two.",
             hint="Use more production frames, or a smaller stride.",
+        )
+    if tolerance_ps < 0:
+        raise ProtocolError(
+            f"{name}: tolerance_ps must be at least 0, got {tolerance_ps}.",
+            hint="Pass tolerance_ps=0 for events that end at the first absent frame.",
         )
     spacing = np.diff(times)
     step = float(np.median(spacing))
     if step <= 0 or np.max(np.abs(spacing - step)) > 1e-3 * step:
         raise ProtocolError(
-            f"contact_lifetimes: the frames are not evenly spaced in time (from "
+            f"{name}: the frames are not evenly spaced in time (from "
             f"{spacing.min():.6g} to {spacing.max():.6g} ps apart), so a run of frames has no "
             "single duration.",
             hint="Check the trajectory's time axis for missing or repeated frames.",
         )
     # Frame times carry float rounding, so 40 ps at a 40.0000001 ps spacing is one frame.
     gap = int(np.floor(tolerance_ps / step * (1 + 1e-6))) if tolerance_ps > 0 else 0
-    masks = np.asarray(masks)  # frames, groups, residues
     horizon = len(times) * step / 1000.0
-    result = np.zeros((len(LIFETIME_PARTS), masks.shape[1]))
-    for group in range(masks.shape[1]):
-        lengths, censored = contact_events(masks[:, group, :], gap)
-        durations = lengths * step / 1000.0
-        result[0, group] = restricted_mean_lifetime(durations, censored, horizon)
-        result[1, group] = len(lengths)
-        result[2, group] = float(np.mean(censored)) if len(lengths) else float("nan")
-    return result
+    mask = np.asarray(mask, dtype=bool).reshape(len(times), -1)
+    lengths, censored = contact_events(mask, gap)
+    durations = lengths * step / 1000.0
+    return np.array(
+        [
+            restricted_mean_lifetime(durations, censored, horizon),
+            len(lengths),
+            float(np.mean(censored)) if len(lengths) else float("nan"),
+        ]
+    )
+
+
+#: Default hydrogen-bond geometry: donor-acceptor distance in Å and
+#: donor-hydrogen-acceptor angle in degrees.
+HBOND_DISTANCE = 3.5
+HBOND_ANGLE = 150.0
+
+#: Rows of :func:`hydrogen_bonds`.
+HBOND_PARTS = ("mean_hbonds", "mean_residue_pairs", "any_fraction")
+
+#: Hydrogen bonds found by MDAnalysis, keyed by universe, groups, frames and criteria.
+_HBOND_EVENTS: dict[tuple, tuple[Any, Any]] = {}
+
+
+def hbond_atoms(atoms: Any) -> tuple[Any, Any]:
+    """Return the hydrogens that can be donated and the acceptors among ``atoms``.
+
+    A donor is an N, O or S atom covalently bonded to at least one hydrogen,
+    and its hydrogens are those bonded to it. An acceptor is any O, or an N
+    or S bonded to at most two atoms, so that it keeps a lone pair: this
+    leaves out amide, guanidinium, protonated amine and quaternary nitrogens
+    and keeps unprotonated histidine nitrogens and thioether sulfur. The
+    rule reads the universe's bonds, which PolyzyMD takes from the run's
+    OpenMM system, so every hydrogen of ``atoms`` must be bonded.
+
+    Returns
+    -------
+    tuple of MDAnalysis.core.groups.AtomGroup
+        The donatable hydrogens and the acceptors.
+    """
+    import numpy as np
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    elements = np.asarray([str(e).strip().upper() for e in atoms.elements])
+    hydrogens = atoms[elements == "H"]
+    polar = {"N", "O", "S"}
+    bonded = hasattr(atoms.universe, "bonds")
+    donated, orphans = [], 0 if bonded else len(hydrogens)
+    for hydrogen in hydrogens if bonded else []:
+        partners = hydrogen.bonded_atoms
+        if len(partners) == 0:
+            orphans += 1
+        elif str(partners[0].element).strip().upper() in polar:
+            donated.append(hydrogen.index)
+    if orphans:
+        raise ProtocolError(
+            f"hydrogen bonds: {orphans} of the {len(hydrogens)} hydrogens have no bonded atom, "
+            "so donors cannot be told apart.",
+            hint="Keep the run's <segment>_system.xml beside its trajectory, which PolyzyMD "
+            "reads for bonds, or give donors, hydrogens and acceptors explicitly.",
+        )
+    candidates = atoms[np.isin(elements, sorted(polar))]
+    acceptors = [
+        atom.index
+        for atom in candidates
+        if str(atom.element).strip().upper() == "O" or (bonded and len(atom.bonded_atoms) <= 2)
+    ]
+    universe = atoms.universe
+    return universe.atoms[np.asarray(donated, dtype=int)], universe.atoms[
+        np.asarray(acceptors, dtype=int)
+    ]
+
+
+def _index_selection(atoms: Any) -> str:
+    """Return an MDAnalysis selection string for exactly ``atoms``, by index."""
+    return "index " + " ".join(str(i) for i in atoms.indices) if len(atoms) else "index -1"
+
+
+def _hbond_events(
+    group_a: Any,
+    group_b: Any,
+    frames: Any,
+    d_a_cutoff: float,
+    d_h_a_angle_cutoff: float,
+    donors: Any,
+    hydrogens: Any,
+    acceptors: Any,
+) -> tuple[Any, Any]:
+    """Return every hydrogen bond MDAnalysis finds between or within the groups, and the frames.
+
+    ``MDAnalysis.analysis.hydrogenbonds.HydrogenBondAnalysis`` runs on
+    ``frames`` with the hydrogens and acceptors of :func:`hbond_atoms`, or
+    those given, and pairs each hydrogen with its donor through the bonds,
+    or by distance within 1.2 Å when ``donors`` is given. With ``group_b``,
+    only bonds with one partner in each group are kept. Bonds between two
+    atoms of one residue are dropped. The rows are MDAnalysis's: frame,
+    donor, hydrogen and acceptor index, distance and angle.
+    """
+    import numpy as np
+    from MDAnalysis.analysis.hydrogenbonds import HydrogenBondAnalysis
+
+    both = group_a if group_b is None else group_a | group_b
+    universe = both.universe
+    frames = [int(f) for f in (range(len(universe.trajectory)) if frames is None else frames)]
+    key = (
+        id(universe),
+        group_a.indices.tobytes(),
+        None if group_b is None else group_b.indices.tobytes(),
+        tuple(frames),
+        float(d_a_cutoff),
+        float(d_h_a_angle_cutoff),
+        *(None if g is None else g.indices.tobytes() for g in (donors, hydrogens, acceptors)),
+    )
+    cached = _HBOND_EVENTS.get(key)
+    if cached is not None and cached[0] is universe:
+        return cached[1], frames
+    if hydrogens is None or acceptors is None:
+        found_hydrogens, found_acceptors = hbond_atoms(both)
+        hydrogens = found_hydrogens if hydrogens is None else hydrogens
+        acceptors = found_acceptors if acceptors is None else acceptors
+    if len(hydrogens) == 0 or len(acceptors) == 0:
+        events = np.zeros((0, 6))
+    else:
+        analysis = HydrogenBondAnalysis(
+            universe,
+            donors_sel=None if donors is None else _index_selection(donors),
+            hydrogens_sel=_index_selection(hydrogens),
+            acceptors_sel=_index_selection(acceptors),
+            between=None
+            if group_b is None
+            else [_index_selection(group_a), _index_selection(group_b)],
+            d_a_cutoff=d_a_cutoff,
+            d_h_a_angle_cutoff=d_h_a_angle_cutoff,
+            update_selections=False,
+        )
+        current = int(universe.trajectory.ts.frame)
+        analysis.run(frames=frames)
+        # MDAnalysis leaves the trajectory elsewhere; put it back on the caller's frame.
+        universe.trajectory[current]
+        events = np.asarray(analysis.results.hbonds, dtype=float).reshape(-1, 6)
+    if len(events):
+        resindex = universe.atoms.resindices
+        events = events[resindex[events[:, 1].astype(int)] != resindex[events[:, 3].astype(int)]]
+    if len(_HBOND_EVENTS) > 8:
+        _HBOND_EVENTS.clear()
+    _HBOND_EVENTS[key] = (universe, events)
+    return events, frames
+
+
+def _empty(group_a: Any, group_b: Any) -> bool:
+    """Return whether ``group_a``, or ``group_b`` when given, holds no atoms."""
+    return len(group_a) == 0 or (group_b is not None and len(group_b) == 0)
+
+
+def hydrogen_bonds(
+    group_a: Any,
+    group_b: Any = None,
+    frames: Any = None,
+    d_a_cutoff: float = HBOND_DISTANCE,
+    d_h_a_angle_cutoff: float = HBOND_ANGLE,
+    donors: Any = None,
+    hydrogens: Any = None,
+    acceptors: Any = None,
+) -> Any:
+    """Return how many hydrogen bonds join ``group_a`` and ``group_b``, or form within ``group_a``.
+
+    MDAnalysis ``HydrogenBondAnalysis`` finds, on every frame, each hydrogen
+    of a donor within ``d_a_cutoff`` Å of an acceptor (donor-acceptor
+    distance, with the minimum image of the frame's box) with a
+    donor-hydrogen-acceptor angle of at least ``d_h_a_angle_cutoff``
+    degrees; see :func:`_hbond_events`. Donors, hydrogens and acceptors come
+    from :func:`hbond_atoms` unless given. With ``group_b``, only bonds with
+    one partner in each group count, in either direction; without it, bonds
+    within ``group_a``. Bonds within one residue are left out. When a group
+    holds no atoms every value is ``nan``, as for the other hydrogen-bond
+    functions, and :func:`residue_pair_hbond_occupancy` returns no pairs.
+
+    The rows, named in :data:`HBOND_PARTS`, are the mean number of hydrogen
+    bonds per frame, each donor-hydrogen-acceptor counted once; the mean
+    number of distinct residue pairs joined by at least one hydrogen bond
+    per frame; and the fraction of frames with at least one.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(3,)``.
+    """
+    import numpy as np
+
+    if _empty(group_a, group_b):
+        return np.full(len(HBOND_PARTS), np.nan)
+    events, frames = _hbond_events(
+        group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
+    )
+    n = len(frames)
+    if len(events) == 0:
+        return np.zeros(len(HBOND_PARTS))
+    position = {frame: i for i, frame in enumerate(frames)}
+    frame = np.array([position[int(f)] for f in events[:, 0]])
+    resindex = group_a.universe.atoms.resindices
+    first = resindex[events[:, 1].astype(int)]
+    second = resindex[events[:, 3].astype(int)]
+    pairs = {(f, min(a, b), max(a, b)) for f, a, b in zip(frame, first, second)}
+    return np.array([len(events) / n, len(pairs) / n, len(np.unique(frame)) / n], dtype=np.float64)
+
+
+def _frame_times(universe: Any, frames: Any) -> Any:
+    """Return the time in ps of each of ``frames``."""
+    import numpy as np
+
+    return np.array([float(ts.time) for ts in universe.trajectory[list(frames)]])
+
+
+def hbond_lifetimes(
+    group_a: Any,
+    group_b: Any = None,
+    frames: Any = None,
+    key: str = "residue",
+    tolerance_ps: float = 0.0,
+    d_a_cutoff: float = HBOND_DISTANCE,
+    d_h_a_angle_cutoff: float = HBOND_ANGLE,
+    donors: Any = None,
+    hydrogens: Any = None,
+    acceptors: Any = None,
+) -> Any:
+    """Return how long the hydrogen bonds of :func:`hydrogen_bonds` last.
+
+    The bonds are found as in :func:`hydrogen_bonds`. With ``key``
+    ``"residue"``, a pair is two residues, present on a frame when any
+    hydrogen bond joins them, so a hydrogen switching partners inside the
+    two residues does not end the event; with ``"atom"``, a pair is one donor
+    atom and one acceptor atom. Each pair's runs of frames are events, and
+    :func:`event_lifetimes` pools them: the Kaplan-Meier restricted mean
+    lifetime in ns, the number of events and the fraction censored by the
+    first or last frame, the rows of :data:`LIFETIME_PARTS`.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(3,)``.
+    """
+    import numpy as np
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    if key not in ("residue", "atom"):
+        raise ProtocolError(
+            f"hbond_lifetimes: key must be 'residue' or 'atom', got {key!r}.",
+            hint="Pass key='residue' for residue pairs or key='atom' for donor-acceptor atoms.",
+        )
+    if _empty(group_a, group_b):
+        return np.full(len(LIFETIME_PARTS), np.nan)
+    events, frames = _hbond_events(
+        group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
+    )
+    universe = group_a.universe
+    times = _frame_times(universe, frames)
+    position = {frame: i for i, frame in enumerate(frames)}
+    if len(events) == 0:
+        return event_lifetimes(np.zeros((len(frames), 0)), times, tolerance_ps, "hbond_lifetimes")
+    donor = events[:, 1].astype(int)
+    acceptor = events[:, 3].astype(int)
+    if key == "residue":
+        resindex = universe.atoms.resindices
+        first, second = resindex[donor], resindex[acceptor]
+        pair = np.stack([np.minimum(first, second), np.maximum(first, second)], axis=1)
+    else:
+        pair = np.stack([donor, acceptor], axis=1)
+    unique, column = np.unique(pair, axis=0, return_inverse=True)
+    mask = np.zeros((len(frames), len(unique)), dtype=bool)
+    mask[[position[int(f)] for f in events[:, 0]], np.ravel(column)] = True
+    return event_lifetimes(mask, times, tolerance_ps, "hbond_lifetimes")
+
+
+def residue_hbond_occupancy(
+    group_a: Any,
+    group_b: Any = None,
+    frames: Any = None,
+    d_a_cutoff: float = HBOND_DISTANCE,
+    d_h_a_angle_cutoff: float = HBOND_ANGLE,
+    donors: Any = None,
+    hydrogens: Any = None,
+    acceptors: Any = None,
+) -> Any:
+    """Return, for each residue of ``group_a``, the fraction of ``frames`` it has a hydrogen bond.
+
+    The bonds are those of :func:`hydrogen_bonds`: with ``group_b``, those
+    joining the two groups; without it, those within ``group_a``. A residue
+    counts on a frame when one of its atoms is the donor or acceptor of at
+    least one. Columns follow ``group_a.residues``.
+
+    Returns
+    -------
+    numpy.ndarray
+        One value per residue of ``group_a``.
+    """
+    import numpy as np
+
+    if _empty(group_a, group_b):
+        return np.full(len(group_a.residues), np.nan)
+    events, frames = _hbond_events(
+        group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
+    )
+    column = {residue.resindex: i for i, residue in enumerate(group_a.residues)}
+    occupied = np.zeros((len(frames), len(column)), dtype=bool)
+    if len(events):
+        position = {frame: i for i, frame in enumerate(frames)}
+        resindex = group_a.universe.atoms.resindices
+        rows = np.array([position[int(f)] for f in events[:, 0]])
+        for atom_column in (1, 3):
+            owners = resindex[events[:, atom_column].astype(int)]
+            keep = np.array([owner in column for owner in owners], dtype=bool)
+            occupied[rows[keep], [column[o] for o in owners[keep]]] = True
+    return occupied.mean(axis=0)
+
+
+def _residue_names(residues: Any) -> dict[int, str]:
+    """Return each residue's label in :func:`residue_pair_hbond_occupancy`.
+
+    A standard amino acid, one with a maximum ASA, is labelled by its residue
+    ID, or ``chain:resid`` when IDs repeat among them; any other residue, such
+    as a monomer or a ligand, by its residue name.
+    """
+    from polyzymd.analyses.shared.aa_classification import get_max_asa
+
+    amino = [r for r in residues if get_max_asa(str(r.resname)) is not None]
+    ids = [int(r.resid) for r in amino]
+    by_chain = len(set(ids)) != len(ids)
+    names = {}
+    for residue in residues:
+        if get_max_asa(str(residue.resname)) is None:
+            names[residue.resindex] = str(residue.resname)
+        elif by_chain:
+            names[residue.resindex] = f"{residue.atoms[0].chainID}:{int(residue.resid)}"
+        else:
+            names[residue.resindex] = str(int(residue.resid))
+    return names
+
+
+def residue_pair_hbond_occupancy(
+    group_a: Any,
+    group_b: Any = None,
+    frames: Any = None,
+    d_a_cutoff: float = HBOND_DISTANCE,
+    d_h_a_angle_cutoff: float = HBOND_ANGLE,
+    donors: Any = None,
+    hydrogens: Any = None,
+    acceptors: Any = None,
+) -> tuple[list, Any]:
+    """Return every residue pair joined by a hydrogen bond and the fraction of ``frames`` it is.
+
+    The bonds are those of :func:`hydrogen_bonds`. A standard amino acid is
+    named by its residue ID (``chain:resid`` if IDs repeat), and any other
+    residue by its residue name, so that ``149-SBM`` is residue 149 with any
+    SBM residue and pairs can be compared between polymer compositions. With
+    ``group_b`` a label is ``a-b``, the ``group_a`` residue first; without
+    it, the two names in increasing order. A pair counts on a frame when at least one hydrogen
+    bond joins it. Only pairs that form on some frame are returned; use
+    ``labels="returned"`` and ``missing=0.0`` with
+    :meth:`~polyzymd.analyses.study.Study.per_replicate`.
+
+    Returns
+    -------
+    tuple
+        The pair labels, and the fraction of frames of each.
+    """
+    import numpy as np
+
+    if _empty(group_a, group_b):
+        return [], np.zeros(0)
+    events, frames = _hbond_events(
+        group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
+    )
+    if len(events) == 0:
+        return [], np.zeros(0)
+    universe = group_a.universe
+    resindex = universe.atoms.resindices
+    names_a = _residue_names(group_a.residues)
+    names_b = names_a if group_b is None else _residue_names(group_b.residues)
+    position = {frame: i for i, frame in enumerate(frames)}
+    seen: dict[str, set[int]] = {}
+    for frame, donor, acceptor in zip(events[:, 0], events[:, 1], events[:, 3]):
+        first, second = resindex[int(donor)], resindex[int(acceptor)]
+        if group_b is None:
+            pair = sorted((names_a[first], names_a[second]), key=lambda x: (len(x), x))
+        elif first in names_a and second in names_b:
+            pair = [names_a[first], names_b[second]]
+        else:
+            pair = [names_a[second], names_b[first]]
+        seen.setdefault("-".join(pair), set()).add(position[int(frame)])
+    labels = sorted(seen)
+    return labels, np.array([len(seen[label]) / len(frames) for label in labels])
+
+
+def hbond_count(
+    group_a: Any,
+    group_b: Any = None,
+    d_a_cutoff: float = HBOND_DISTANCE,
+    d_h_a_angle_cutoff: float = HBOND_ANGLE,
+    donors: Any = None,
+    hydrogens: Any = None,
+    acceptors: Any = None,
+) -> float:
+    """Return the number of hydrogen bonds of :func:`hydrogen_bonds` at the current frame.
+
+    The bonds are found as in :func:`hydrogen_bonds`, by MDAnalysis
+    ``HydrogenBondAnalysis`` on this frame alone, so this per-frame function
+    suits a few chosen atoms, such as the hydrogen bonds of a catalytic
+    triad, run through :meth:`~polyzymd.analyses.study.Study.timeseries`;
+    for large groups, :func:`hydrogen_bonds` measures all frames in one pass.
+
+    Returns
+    -------
+    float
+        Number of hydrogen bonds.
+    """
+    if _empty(group_a, group_b):
+        return float("nan")
+    frame = int(group_a.universe.trajectory.ts.frame)
+    events, _ = _hbond_events(
+        group_a, group_b, [frame], d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
+    )
+    return float(len(events))

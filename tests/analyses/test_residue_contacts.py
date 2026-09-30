@@ -441,7 +441,7 @@ def test_an_unknown_run_is_refused_before_any_frame_is_measured(
 @pytest.mark.parametrize("method", ["distance", "occlusion"])
 def test_an_empty_selection_is_refused(configs, settings, method) -> None:
     """The selections are checked before any frame is measured, for either method."""
-    with pytest.raises(ProtocolError, match=r"picks 0\b"):
+    with pytest.raises(ProtocolError, match=r"match no atoms in any replicate"):
         analyze(
             "contacts",
             [configs["A"]],

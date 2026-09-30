@@ -19,27 +19,121 @@ the replicate as the sampling unit, see
 focuses on RMSF-specific interpretation.
 ```
 
+(rmsf-fluctuation-offset-deviation)=
 ## Fluctuation, offset and deviation
 
-After every frame is superposed on a reference structure, each atom *i* has
-three per-replicate values:
+Four quantities describe how a structure moves relative to a reference. They
+differ in two ways: what each distance is measured **from**, and what is
+averaged **over**.
+
+| Quantity | PolyzyMD name | Distance measured from | Averaged over | Result |
+|---|---|---|---|---|
+| RMSD | `rmsd` | the reference structure | atoms, at one frame | one number per frame: a timeseries |
+| Deviation | `rmsd_per_residue` | the reference structure | frames, for one atom | one number per atom or residue |
+| Fluctuation | `rmsf` | the atom's own mean position | frames, for one atom | one number per atom or residue |
+| Offset | `offset` | the reference structure, for the mean position | nothing: one mean | one number per atom or residue |
+
+After every frame is superposed on the reference, with $\mathbf{r}_i(t)$ the
+position of atom *i* at frame *t*, $\mathbf{r}_i^{\mathrm{ref}}$ its reference
+position and $\langle\cdot
+angle$ the mean over the production frames:
 
 $$
-\text{RMSF}_i^2 = \left\langle \lvert \mathbf{r}_i(t) - \langle \mathbf{r}_i \rangle \rvert^2 \right\rangle,
+	ext{RMSD}(t)^2 = rac{1}{N}\sum_i \lvert \mathbf{r}_i(t) - \mathbf{r}_i^{\mathrm{ref}} 
+vert^2,
 \qquad
-\text{offset}_i = \lvert \langle \mathbf{r}_i \rangle - \mathbf{r}_i^{\mathrm{ref}} \rvert,
-\qquad
-\text{deviation}_i^2 = \left\langle \lvert \mathbf{r}_i(t) - \mathbf{r}_i^{\mathrm{ref}} \rvert^2 \right\rangle
-= \text{RMSF}_i^2 + \text{offset}_i^2 .
+	ext{deviation}_i^2 = \left\langle \lvert \mathbf{r}_i(t) - \mathbf{r}_i^{\mathrm{ref}} 
+vert^2 
+ight
+angle,
 $$
 
-The averages run over the production frames. RMSF is the fluctuation within
-the sampled ensemble, the quantity `gmx rmsf -o` gives. The offset is how far
-the ensemble's mean structure has moved from the reference. The deviation, the
-quantity `gmx rmsf -od` gives, combines the two. Two conditions can have the
-same deviation from a crystal structure for opposite reasons: one fluctuates
-more about a crystal-like mean, while the other fluctuates less about a mean
-that has drifted. Reporting the three together separates those cases.
+$$
+	ext{RMSF}_i^2 = \left\langle \lvert \mathbf{r}_i(t) - \langle \mathbf{r}_i 
+angle 
+vert^2 
+ight
+angle,
+\qquad
+	ext{offset}_i = \lvert \langle \mathbf{r}_i 
+angle - \mathbf{r}_i^{\mathrm{ref}} 
+vert .
+$$
+
+The deviation and the RMSF are both averages over time; they differ only in
+the point each distance is measured from, the reference or the atom's own mean.
+Splitting each displacement into the fluctuation about the mean and the mean's
+distance from the reference, $\mathbf{r}_i(t) - \mathbf{r}_i^{\mathrm{ref}} =
+(\mathbf{r}_i(t) - \langle \mathbf{r}_i 
+angle) + (\langle \mathbf{r}_i 
+angle -
+\mathbf{r}_i^{\mathrm{ref}})$, and averaging the square, the cross term vanishes
+because the fluctuations average to zero:
+
+$$
+	ext{deviation}_i^2 = 	ext{RMSF}_i^2 + 	ext{offset}_i^2 ,
+$$
+
+the familiar split of a mean square error into a variance and a squared bias.
+A residue's value of each is the square root of the mean over its atoms of
+their squared values, as `gmx rmsf -res` combines atoms, so the identity holds
+per residue too. GROMACS writes the RMSF with `gmx rmsf -o` and the deviation
+with `gmx rmsf -od` ("root mean square deviation with respect to the reference
+structure"). Other tools' "per-residue RMSD", such as cpptraj's `rmsd perres`,
+is a per-residue timeseries, one value per residue and frame, and not this
+deviation.
+
+### An example with three atoms
+
+Take one dimension and a reference position of 0 Å for three atoms:
+
+| Atom | Positions over time | Mean | RMSF | Offset | Deviation |
+|---|---|---|---|---|---|
+| A | jiggles between −1 and +1 | 0 | 1 | 0 | 1 |
+| B | stays at 3 | 3 | 0 | 3 | 3 |
+| C | jiggles between 2 and 4 | 3 | 1 | 3 | √10 ≈ 3.16 |
+
+A and C are equally floppy: the same RMSF. B and C have moved equally far from
+the reference: the same offset. The deviation alone cannot tell these cases
+apart, and neither can a lower deviation: B's deviation is smaller than C's
+although B has drifted just as far, only because it does not move.
+
+### Which quantity answers which question
+
+| Question | Report | Why |
+|---|---|---|
+| How floppy is the protein, and where? | `rmsf`, and the core or region value `core_rmsf` | It measures motion about the ensemble's own mean, whatever that mean is |
+| Has the structure left a reference state, such as a catalytically competent crystal structure? | `offset` against that structure, with `reference_file` | It measures where the ensemble sits, apart from how much it moves |
+| How far, all in, is the protein from the reference on a typical frame? | `rmsd_per_residue`, shown as its two parts | It combines the two above, so report it with them, for example as the stacked decomposition figure |
+| When, or how fast, does the structure leave the reference state? | `rmsd` against the reference over time, or a time-resolved native-contact fraction | Only a timeseries shows timing; averages over the window do not |
+
+Two conditions can have the same deviation for opposite reasons, one
+fluctuating more about a reference-like mean, the other fluctuating less
+about a mean that has drifted, so a comparison of deviations alone can hide
+the effect it is meant to show.
+
+### Consequences for an analysis
+
+- **Pick the reference for the question.** The offset and the deviation are
+  measured from the reference, so for "distance from a competent state" use
+  that structure as `reference_file`. The RMSF uses the reference only to
+  superpose the frames, and barely depends on it.
+- **Superpose on a rigid core.** Fitting on atoms that unfold spreads their
+  motion over every other atom. Fit on a stable core with
+  `alignment_selection`, and report the core and regions such as an active
+  site separately with `core` and `regions`.
+- **Drift inflates the RMSF.** The mean position of a window in which the
+  structure unfolds is a blend of two structures, and the RMSF about it counts
+  the drift as fluctuation. Check the `rmsd` timeseries for a trend in the
+  window, compare conditions over windows of the same length and position,
+  and when the structure drifts, report early and late blocks or say that the
+  RMSF includes the drift.
+- **"Slower" needs time.** A lower mean deviation does not show that a change
+  slows the loss of a structure; a timeseries, or the time spent near the
+  reference, does.
+- **Global numbers are proxies for local function.** A small core deviation
+  can hide an active site that has lost its geometry; measure the region, and
+  the geometry itself, such as catalytic distances or hydrogen bonds.
 
 Low RMSF often indicates a relatively rigid region, such as a buried core or
 structured secondary element. High RMSF often indicates a flexible region,
@@ -92,7 +186,7 @@ number per replicate in two ways:
 | `mean_rmsf` | $\tfrac{1}{\lvert S \rvert}\sum_i \text{RMSF}_i$ | Plain mean of the residue values |
 
 Here $\overline{\text{MSF}}_i$ is the mean over the residue's atoms of the
-squared per-atom RMSF. The same forms give `core_offset`, `core_rms_deviation`
+squared per-atom RMSF. The same forms give `core_offset`, `core_rmsd_per_residue`
 and the region values. Only the root-mean-square form keeps the decomposition
 exact for the whole set: $F_{\text{deviation}}^2 = F_{\text{RMSF}}^2 +
 F_{\text{offset}}^2$. The plain mean is always smaller than or equal to $F$,

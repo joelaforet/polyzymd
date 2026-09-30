@@ -6,8 +6,8 @@ trajectory identity for provenance.
 `AnalysisBaseLike` and `MDARunKwargs` describe the lightweight protocol used by
 jobs and adapters. The pair-distance helper is a public but specialized
 primitive for distance-family analyses that need the same MDAnalysis-native
-pair-distance behavior as built-in plugins; most contributors only need the job,
-frame-selection, artifact, and store objects above.
+pair-distance behavior as the shipped analysis functions; most contributors
+only need the job, frame-selection, artifact, and store objects above.
 
 ```{eval-rst}
 .. automodule:: polyzymd.analyses.mda.universe

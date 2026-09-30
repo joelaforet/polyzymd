@@ -13,19 +13,43 @@ pixi run -e analysis polyzymd analyze rg -c A/config.yaml -c B/config.yaml --eq 
 
 One `-c` gives a per-condition summary. Two or more give pairwise comparisons
 with the first config as the control. `--format agent` is the default and
-prints at most 25 lines. Use `--format json` when you need the full report, and
-`-f comparison.yaml` when a comparison project already exists.
+prints one line per condition and comparison, every one of them. Use
+`--format json` when you need every field of the report.
+`polyzymd analyze` does not read `comparison.yaml`: `-f comparison.yaml` exits 2
+and prints the equivalent `-c ... --label ... --replicates ... --eq ...` command
+built from the file, which is the command to run.
 
 Environment: only the `analysis` and `sim-cuda-12-4` pixi envs have the CLI. The
 bare `polyzymd` on PATH points at a system Python without click. Always go
 through `pixi run -e analysis`.
 
 `pixi run -e analysis polyzymd analyze --help` lists the analysis names: rg,
-rmsd, rmsf, rms_deviation, sasa, secondary_structure, contacts, native_contacts,
-distances and catalytic_triad read `-c config.yaml` (they are the keys of
-`polyzymd.analyses.protocols.FUNCTION_ANALYSES`), and hydrogen_bonds, the only shipped
-comparison plugin, also reads `-f comparison.yaml`. For contacts, `--run
-mean_lifetime` reports how long contacts last.
+rmsd, rmsf, rmsd_per_residue, sasa, secondary_structure, contacts, native_contacts,
+hydrogen_bonds and distances, the keys of
+`polyzymd.analyses.protocols.FUNCTION_ANALYSES`. Every one reads `-c config.yaml`.
+For contacts, `--run mean_lifetime` reports how long contacts last; for
+hydrogen_bonds, `--run protein_polymer_mean_lifetime`, `protein_polymer_residues`
+and `protein_polymer_pairs` report how long the bonds last and how often each
+residue and residue pair is bonded.
+
+`rmsd` is one number per frame; `rmsd_per_residue`, `rmsf` and `offset` are one
+number per residue over all frames, measured from the reference, from each
+atom's own mean, and as the mean's distance from the reference, with
+`rmsd_per_residue² = rmsf² + offset²`. Report `rmsf` for flexibility and
+`offset` for distance from a reference state; read the "Fluctuation, offset
+and deviation" section of `docs/source/explanation/analysis_rmsf_best_practices.md`
+before choosing.
+
+The catalytic triad is not an analysis name: `polyzymd analyze catalytic_triad`
+exits 2. It is a routine on the study API that counts each triad hydrogen bond
+with `functions.hbond_count` and combines them with `Timeseries.transform`:
+follow `docs/source/how_to/analysis_triad_quickstart.md`
+(https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html),
+and run `polyzymd analyze distances -c config.yaml --set pairs=pairs.yaml` for
+the triad distances. For any other question, write a function of an MDAnalysis
+`Universe` and run it with `Study.timeseries` or `Study.per_replicate`; see
+`docs/source/reference/analysis_functions.md` and
+`docs/source/how_to/analysis_agent_protocol.md`.
 
 ## 2. Reading the output
 
@@ -52,7 +76,7 @@ Verdict vocabulary, fixed so you can branch on it:
 |---|---|
 | `larger` / `smaller` | the second condition differs from the control after correction |
 | `no significant difference` | the test ran and did not clear alpha; read the CI before calling it "the same" |
-| `no test recorded` | the plugin stored no corrected p value; the line describes, it does not decide |
+| `no test recorded` | the result stored no corrected p value; the line describes, it does not decide |
 | `not testable` | a condition has fewer than two replicates, so no test exists |
 
 Report the verdict sentence verbatim, with the unit and the replicate counts.

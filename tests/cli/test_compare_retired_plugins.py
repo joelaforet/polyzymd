@@ -1,8 +1,9 @@
-"""A comparison.yaml that still configures a retired plugin keeps working for the others.
+"""A comparison.yaml that still configures retired plugins keeps loading.
 
-rg, rmsd, rmsf, sasa, secondary_structure, distances, catalytic_triad and contacts left the
-plugin system for ``polyzymd analyze``. Each of their ``plugins`` blocks is ignored with one
-warning, and ``compare run <name>`` prints the equivalent ``polyzymd analyze`` command.
+rg, rmsd, rmsf, sasa, secondary_structure, distances, catalytic_triad, contacts and
+hydrogen_bonds left the plugin system for ``polyzymd analyze``. Each of their ``plugins``
+blocks is ignored with one warning, and ``compare run <name>`` prints the equivalent
+``polyzymd analyze`` command.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from polyzymd.cli.compare import compare
 from polyzymd.config.comparison import ComparisonConfig
 from tests._support.analysis_testkit import write_simulation_config
 
+TRIAD_URL = "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html"
 PAIR = {"label": "Ser-His", "selection_a": "resid 77 and name OG", "selection_b": "name NE2"}
 RETIRED = {
     "rg": "radius_of_gyration",
@@ -25,14 +27,15 @@ RETIRED = {
     "sasa": "sasa",
     "secondary_structure": "dssp_occupancy",
     "distances": "pair_distance",
-    "catalytic_triad": "pair_distance",
+    "catalytic_triad": "hbond_count",
     "contacts": "residue_occlusion",
+    "hydrogen_bonds": "hydrogen_bonds",
 }
 
 
 @pytest.fixture()
 def comparison_file(tmp_path: Path) -> Path:
-    """A comparison.yaml with retired blocks and a hydrogen_bonds block over two conditions."""
+    """A comparison.yaml with a block for every retired plugin over two conditions."""
     conditions = []
     for label in ("No Polymer", "SBMA 50"):
         config = write_simulation_config(tmp_path / label.replace(" ", "_"), scratch=tmp_path)
@@ -60,6 +63,7 @@ def comparison_file(tmp_path: Path) -> Path:
             "sasa": {},
             "secondary_structure": {},
             "contacts": {"enrichment_error_bar": "sem"},
+            "hydrogen_bonds": {},
         },
     }
     path = tmp_path / "comparison.yaml"
@@ -68,18 +72,24 @@ def comparison_file(tmp_path: Path) -> Path:
 
 
 def test_retired_blocks_are_ignored_with_one_warning_each(comparison_file: Path) -> None:
-    """The file loads, hydrogen_bonds keeps its settings, and each retired block warns once."""
+    """The file loads and each retired block warns once."""
     with pytest.warns(UserWarning, match="block, which is ignored") as record:
         config = ComparisonConfig.from_yaml(comparison_file)
 
     messages = [str(item.message) for item in record]
     for name, function in RETIRED.items():
         (message,) = [text for text in messages if f"plugins.{name} block" in text]
+        if name == "catalytic_triad":
+            assert "no longer an analysis but a routine on the study API" in message
+            assert "polyzymd.analyses.functions.hbond_count" in message
+            assert TRIAD_URL in message
+            assert "polyzymd analyze distances -c <config.yaml> --eq <time> --set pairs=" in message
+            continue
         assert f"polyzymd analyze {name} " in message
-        ending = " (" if name == "contacts" else "."
+        ending = " (" if name in ("contacts", "hydrogen_bonds") else "."
         assert f"polyzymd.analyses.functions.{function}{ending}" in message
         assert ("--set pairs=" in message) == (function == "pair_distance")
-        per_replicate = name in ("rmsf", "secondary_structure", "contacts")
+        per_replicate = name in ("rmsf", "secondary_structure", "contacts", "hydrogen_bonds")
         method = "study.per_replicate" if per_replicate else "study.timeseries"
         assert f"in Python {method} with" in message
     (contacts,) = [text for text in messages if "plugins.contacts block" in text]
@@ -87,30 +97,20 @@ def test_retired_blocks_are_ignored_with_one_warning_each(comparison_file: Path)
         "functions.residue_occlusion (residue_contacts for --set method=distance, and "
         "contact_lifetimes for how long contacts last)." in contacts
     )
-    assert sum("plot_settings." in text for text in messages) == 6
-    assert config.plugins.get_enabled_plugins() == ["hydrogen_bonds"]
-    assert config.plugins.get("hydrogen_bonds").distance_cutoff == 3.2
+    (hbonds,) = [text for text in messages if "plugins.hydrogen_bonds block" in text]
+    assert (
+        "functions.hydrogen_bonds (hbond_lifetimes for how long hydrogen bonds last, "
+        "residue_hbond_occupancy and residue_pair_hbond_occupancy" in hbonds
+    )
+    assert sum("plot_settings." in text for text in messages) == 7
+    assert config.plugins.get_enabled_plugins() == []
     assert config.validate_config() == []
 
 
-def test_compare_validate_and_run_hydrogen_bonds_succeed(
-    comparison_file: Path, monkeypatch
-) -> None:
-    """compare validate passes and compare run hydrogen_bonds reaches the pipeline."""
-    seen = {}
-
-    def _pipeline(analysis, config, **kwargs):
-        seen["analysis"], seen["plugins"] = analysis.name, config.plugins.get_enabled_plugins()
-        raise ValueError("stop after the pipeline was reached")
-
-    monkeypatch.setattr("polyzymd.analyses.orchestrator.run_comparison", _pipeline)
-    runner = CliRunner()
-
-    validated = runner.invoke(compare, ["validate", "-f", str(comparison_file)])
+def test_compare_validate_passes(comparison_file: Path) -> None:
+    """compare validate accepts a file whose plugin blocks are all retired."""
+    validated = CliRunner().invoke(compare, ["validate", "-f", str(comparison_file)])
     assert validated.exit_code == 0, validated.output
-
-    runner.invoke(compare, ["run", "hydrogen_bonds", "-f", str(comparison_file)])
-    assert seen == {"analysis": "hydrogen_bonds", "plugins": ["hydrogen_bonds"]}
 
 
 @pytest.mark.parametrize("name", list(RETIRED))
@@ -122,28 +122,26 @@ def test_compare_run_prints_the_analyze_command(comparison_file: Path, name: str
     assert "no longer runs through 'polyzymd compare run'" in result.stderr
     assert "Unknown comparison type" not in result.stderr
     fix = next(line for line in result.stderr.splitlines() if line.startswith("fix: "))
-    assert fix.startswith(f"fix: polyzymd analyze {name} -c ")
+    command = "distances" if name == "catalytic_triad" else name
+    assert fix.startswith(f"fix: polyzymd analyze {command} -c ")
     assert "--label 'No Polymer'" in fix and "--label 'SBMA 50'" in fix
-    pairs = " --set pairs=<pairs.yaml>" if RETIRED[name] == "pair_distance" else ""
+    assert (TRIAD_URL in result.stderr) == (name == "catalytic_triad")
+    pairs = " --set pairs=<pairs.yaml>" if command == "distances" else ""
     assert fix.endswith(f"--replicates 1,2 --eq 200ns{pairs}")
 
 
 def test_compare_run_all_skips_retired(comparison_file, monkeypatch, tmp_path: Path) -> None:
-    """compare run-all warns about the retired blocks and runs only the plugins that remain."""
+    """compare run-all warns about the retired blocks and finds nothing left to run."""
     seen = {}
 
     def _run_all(config, **kwargs):
         seen["plugins"] = config.plugins.get_enabled_plugins()
-        return {
-            "hydrogen_bonds": {
-                "comparison": {"ok": True},
-                "comparison_path": tmp_path / "r.json",
-            }
-        }
+        return {}
 
     monkeypatch.setattr("polyzymd.analyses.orchestrator.run_all_comparisons", _run_all)
     with pytest.warns(UserWarning, match="plugins.rmsd block, which is ignored"):
         result = CliRunner().invoke(compare, ["run-all", "-f", str(comparison_file)])
 
-    assert result.exit_code == 0, result.output
-    assert seen == {"plugins": ["hydrogen_bonds"]}
+    assert result.exit_code == 1, result.output
+    assert "No analyses are enabled in comparison.yaml." in result.output
+    assert seen == {}

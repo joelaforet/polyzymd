@@ -1,8 +1,9 @@
 """Tests for the ``polyzymd analyze`` command.
 
-These tests replace the plugin protocol with a stub, so they invoke an analysis
-that still runs through it (hydrogen_bonds). ``polyzymd analyze rg`` runs on the
-function path and is tested in ``tests/analyses/test_study_timeseries.py``.
+No shipped analysis runs through the plugin protocol any more, so these tests
+register the toy plugin of ``tests/analyses/test_protocols.py`` and invoke it,
+most of them with the protocol replaced by a stub. ``polyzymd analyze rg`` runs
+on the function path and is tested in ``tests/analyses/test_study_timeseries.py``.
 """
 
 from __future__ import annotations
@@ -20,6 +21,13 @@ from polyzymd.analyses.protocols import (
     ProtocolReport,
 )
 from polyzymd.cli.analyze import EXIT_ANALYSIS_ERROR, analyze_command
+from tests.analyses.test_protocols import _install_toy
+
+
+@pytest.fixture(autouse=True)
+def toy_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Register the toy plugin so that the plugin path of ``analyze`` is taken."""
+    _install_toy(monkeypatch)
 
 
 def _report() -> ProtocolReport:
@@ -146,7 +154,7 @@ class TestSuccess:
         """Without --format the command prints the agent report."""
         result = CliRunner().invoke(
             analyze_command,
-            ["hydrogen_bonds", "-c", str(config_paths[0]), "-c", str(config_paths[1])],
+            ["toy_protocol", "-c", str(config_paths[0]), "-c", str(config_paths[1])],
         )
 
         assert result.exit_code == 0
@@ -160,7 +168,7 @@ class TestSuccess:
         """--format json prints a document the report model validates."""
         result = CliRunner().invoke(
             analyze_command,
-            ["hydrogen_bonds", "-c", str(config_paths[0]), "--format", "json"],
+            ["toy_protocol", "-c", str(config_paths[0]), "--format", "json"],
         )
 
         assert result.exit_code == 0
@@ -174,7 +182,7 @@ class TestSuccess:
         result = CliRunner().invoke(
             analyze_command,
             [
-                "hydrogen_bonds",
+                "toy_protocol",
                 "-c",
                 str(config_paths[0]),
                 "-c",
@@ -196,7 +204,7 @@ class TestSuccess:
         )
 
         assert result.exit_code == 0
-        assert stub_analyze["name"] == "hydrogen_bonds"
+        assert stub_analyze["name"] == "toy_protocol"
         assert stub_analyze["replicates"] == [1, 2, 3]
         assert stub_analyze["equilibration"] == "20ns"
         assert stub_analyze["labels"] == ["control", "treated"]
@@ -211,7 +219,7 @@ class TestSuccess:
         result = CliRunner().invoke(
             analyze_command,
             [
-                "hydrogen_bonds",
+                "toy_protocol",
                 "-c",
                 str(config_paths[0]),
                 "--format",
@@ -240,7 +248,7 @@ class TestExitCodes:
             )
 
         monkeypatch.setattr("polyzymd.analyses.protocols.analyze", _raise)
-        result = CliRunner().invoke(analyze_command, ["hydrogen_bonds", "-c", str(config_paths[0])])
+        result = CliRunner().invoke(analyze_command, ["toy_protocol", "-c", str(config_paths[0])])
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         error_lines = [line for line in result.stderr.strip().split("\n") if line]
@@ -260,7 +268,7 @@ class TestExitCodes:
     def test_missing_config_exits_two(self, tmp_path: Path) -> None:
         """A config path that does not exist is reported before any work."""
         result = CliRunner().invoke(
-            analyze_command, ["hydrogen_bonds", "-c", str(tmp_path / "missing" / "config.yaml")]
+            analyze_command, ["toy_protocol", "-c", str(tmp_path / "missing" / "config.yaml")]
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
@@ -269,68 +277,100 @@ class TestExitCodes:
     def test_bad_setting_exits_two(self, config_paths: list[Path]) -> None:
         """A --set entry without an equals sign is a typed error."""
         result = CliRunner().invoke(
-            analyze_command, ["hydrogen_bonds", "-c", str(config_paths[0]), "--set", "broken"]
+            analyze_command, ["toy_protocol", "-c", str(config_paths[0]), "--set", "broken"]
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         assert "Cannot read setting" in result.stderr
 
     def test_nested_setting_exits_two(self, config_paths: list[Path]) -> None:
-        """A dotted --set key is rejected with a pointer to comparison.yaml."""
+        """A dotted --set key is rejected with the YAML mapping to give instead."""
         result = CliRunner().invoke(
             analyze_command,
-            ["hydrogen_bonds", "-c", str(config_paths[0]), "--set", "composition.partitions={}"],
+            ["toy_protocol", "-c", str(config_paths[0]), "--set", "composition.partitions={}"],
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         assert "top-level settings" in result.stderr
-        assert "comparison.yaml" in result.stderr
+        assert "--set groups='{protein: chainid A, polymer: chainid C}'" in result.stderr
 
     def test_bad_replicate_range_exits_two(self, config_paths: list[Path]) -> None:
         """An unparsable --replicates value is a typed error."""
         result = CliRunner().invoke(
-            analyze_command, ["hydrogen_bonds", "-c", str(config_paths[0]), "--replicates", "3-1"]
+            analyze_command, ["toy_protocol", "-c", str(config_paths[0]), "--replicates", "3-1"]
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         assert "Cannot read --replicates" in result.stderr
 
-    def test_configs_and_comparison_file_conflict(
+
+class TestRetiredComparisonFile:
+    """-f comparison.yaml is refused with the equivalent -c command and the docs to read."""
+
+    DOCS = "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html"
+
+    def _comparison(self, tmp_path: Path, config_paths: list[Path]) -> Path:
+        import yaml
+
+        comparison = tmp_path / "comparison.yaml"
+        conditions = [
+            {"label": "No Polymer", "config": str(config_paths[0]), "replicates": [1, 2, 3]},
+            {"label": "SBMA", "config": str(config_paths[1]), "replicates": [1, 2, 3]},
+        ]
+        data = {
+            "name": "x",
+            "conditions": conditions,
+            "defaults": {"equilibration_time": "200ns"},
+            "plugins": {"hydrogen_bonds": {"distance_cutoff": 3.2}},
+        }
+        comparison.write_text(yaml.safe_dump(data, sort_keys=False))
+        return comparison
+
+    def test_comparison_file_prints_the_config_command(
+        self, stub_analyze: dict[str, object], config_paths: list[Path], tmp_path: Path
+    ) -> None:
+        """The fix is the polyzymd analyze -c command built from the file, and nothing runs."""
+        comparison = self._comparison(tmp_path, config_paths)
+        result = CliRunner().invoke(analyze_command, ["hydrogen_bonds", "-f", str(comparison)])
+
+        assert result.exit_code == EXIT_ANALYSIS_ERROR
+        assert "error: comparison.yaml is no longer read by polyzymd analyze" in result.stderr
+        fix = next(line for line in result.stderr.splitlines() if line.startswith("fix: "))
+        assert fix.startswith(
+            f"fix: Run polyzymd analyze hydrogen_bonds -c {config_paths[0]} --label 'No Polymer' "
+            f"-c {config_paths[1]} --label SBMA --replicates 1,2,3 --eq 200ns. "
+        )
+        assert self.DOCS in fix
+        assert ".claude/skills/polyzymd-analyze/SKILL.md" in fix
+        assert stub_analyze == {}
+
+    def test_eq_overrides_the_file_and_configs_do_not_matter(
         self, config_paths: list[Path], tmp_path: Path
     ) -> None:
-        """Giving both -c and -f is refused with a fix hint."""
-        comparison = tmp_path / "comparison.yaml"
-        comparison.write_text("name: x\n")
-        result = CliRunner().invoke(
-            analyze_command,
-            ["hydrogen_bonds", "-c", str(config_paths[0]), "-f", str(comparison)],
-        )
+        """--eq replaces the file's window; -c or --stride next to -f still get the message."""
+        comparison = self._comparison(tmp_path, config_paths)
+        arguments = ["rg", "-f", str(comparison), "-c", str(config_paths[0]), "--eq", "5ns"]
+        result = CliRunner().invoke(analyze_command, [*arguments, "--stride", "2"])
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
-        assert "not both" in result.stderr
+        assert "--replicates 1,2,3 --eq 5ns." in result.stderr
 
-    def test_stride_is_refused_with_a_comparison_file_and_below_one(self, tmp_path: Path) -> None:
-        """--stride needs -c configs and a whole number of at least 1."""
-        comparison = tmp_path / "comparison.yaml"
-        comparison.write_text("name: x\n")
-        result = CliRunner().invoke(
-            analyze_command, ["hydrogen_bonds", "-f", str(comparison), "--stride", "2"]
-        )
+    def test_unreadable_comparison_file_gets_the_placeholder_command(self, tmp_path: Path) -> None:
+        """A missing -f file still gets the retirement message, with placeholders."""
+        result = CliRunner().invoke(analyze_command, ["rg", "-f", str(tmp_path / "nope.yaml")])
+
         assert result.exit_code == EXIT_ANALYSIS_ERROR
-        assert "--stride cannot be combined with -f" in result.stderr
-        result = CliRunner().invoke(analyze_command, ["rg", "-f", str(comparison), "--stride", "0"])
+        assert "no longer read by polyzymd analyze" in result.stderr
+        assert "fix: Run polyzymd analyze rg -c <config.yaml> --label <label>" in result.stderr
+        assert self.DOCS in result.stderr
+
+    def test_stride_below_one_is_refused(self, config_paths: list[Path]) -> None:
+        """--stride takes a whole number of at least 1."""
+        result = CliRunner().invoke(
+            analyze_command, ["rg", "-c", str(config_paths[0]), "--stride", "0"]
+        )
         assert result.exit_code != 0
         assert "--stride" in result.output
-
-    def test_missing_comparison_file_exits_two(self, tmp_path: Path) -> None:
-        """A missing -f file is reported with the init command as the fix."""
-        result = CliRunner().invoke(
-            analyze_command, ["hydrogen_bonds", "-f", str(tmp_path / "nope.yaml")]
-        )
-
-        assert result.exit_code == EXIT_ANALYSIS_ERROR
-        assert "Comparison config not found" in result.stderr
-        assert "compare init" in result.stderr
 
 
 class TestRegistration:
@@ -359,7 +399,7 @@ class TestCompareRunAgentFormat:
         from polyzymd.cli.compare import compare
 
         class _Analysis:
-            name = "hydrogen_bonds"
+            name = "toy_protocol"
 
             def format(self, result, output_format="text"):
                 raise AssertionError("agent format must not call the plugin formatter")
@@ -392,7 +432,7 @@ class TestCompareRunAgentFormat:
             compare,
             [
                 "run",
-                "hydrogen_bonds",
+                "toy_protocol",
                 "-f",
                 str(tmp_path / "comparison.yaml"),
                 "--format",

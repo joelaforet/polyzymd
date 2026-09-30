@@ -21,7 +21,7 @@ This file tracks where images should be added after the text overhaul is stable.
 
 - `docs/source/how_to/index.md`
   - Placement: between `Analysis Tasks` and `Recipe Collections`
-  - Suggested image: project tree for a comparison study, with `comparison.yaml`, `results/`, and `figures/` annotated
+  - Suggested image: output tree of `polyzymd analyze`, with `polyzymd_results/` and `figures/` annotated
   - Purpose: show users what artifacts to expect from the workflow
 
 - `docs/source/reference/index.md`
@@ -56,13 +56,13 @@ This file tracks where images should be added after the text overhaul is stable.
   - Suggested image: campaign directory tree with three conditions and a comparison workspace
   - Purpose: anchor the tutorial in a concrete example layout
   - Placement: after `Step 4: run the cross-condition comparison`
-  - Suggested image: one example output figure from `polyzymd compare plot-all`
+  - Suggested image: one example output figure from `polyzymd analyze`
   - Purpose: give the tutorial a visual payoff before the final smoke test
 
 - `docs/source/tutorials/analysis_compare_conditions.md`
-  - Placement: after `Step 2: define a minimal comparison.yaml`
-  - Suggested image: annotated `comparison.yaml` snippet or a compact infographic showing `conditions + plugins + plot_settings`
-  - Purpose: help users parse the config without wading through raw YAML
+  - Placement: after the step that runs the first comparison
+  - Suggested image: annotated `polyzymd analyze -c ... -c ...` command showing the control, labels, replicates and equilibration window
+  - Purpose: help users see which option sets which part of the comparison
 
 - `docs/source/reference/analysis_comparison_reference.md`
   - Placement: near the project layout section

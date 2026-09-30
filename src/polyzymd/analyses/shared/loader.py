@@ -381,6 +381,96 @@ def _universe_has_elements(universe: Any) -> bool:
     return len(elements) == len(universe.atoms)
 
 
+def openmm_system_file(trajectory_file: str | Path) -> Path | None:
+    """Return the OpenMM system XML PolyzyMD saved beside ``trajectory_file``, if any.
+
+    A segment ``production_0/production_0_trajectory.dcd`` has its system in
+    ``production_0/production_0_system.xml``.
+    """
+    path = Path(trajectory_file)
+    stem = path.stem[: -len("_trajectory")] if path.stem.endswith("_trajectory") else path.stem
+    candidate = path.with_name(f"{stem}_system.xml")
+    return candidate if candidate.is_file() else None
+
+
+def read_openmm_system(path: str | Path) -> tuple[NDArray[np.float64], list[tuple[int, int]]]:
+    """Return the partial charges and covalent bonds of a serialized OpenMM system.
+
+    The charges, in elementary charges, are the ``q`` of each particle of
+    the ``NonbondedForce``. The bonds are those of the ``HarmonicBondForce``
+    and the constraints, which OpenMM uses for bonds to hydrogen and rigid
+    water; the caller removes constraints that are not bonds, such as the
+    H-H constraint of rigid water. The file is streamed with
+    ``xml.etree.ElementTree.iterparse``.
+    """
+    import xml.etree.ElementTree as ET
+
+    charges: list[float] = []
+    bonds: list[tuple[int, int]] = []
+    force: str | None = None
+    for event, element in ET.iterparse(str(path), events=("start", "end")):
+        if element.tag == "Force":
+            force = element.get("type") if event == "start" else None
+            if event == "end":
+                element.clear()
+            continue
+        if event != "end":
+            continue
+        if element.tag == "Particle" and force == "NonbondedForce":
+            charges.append(float(element.get("q", "nan")))
+        elif element.tag == "Bond" and force == "HarmonicBondForce":
+            bonds.append((int(element.get("p1")), int(element.get("p2"))))
+        elif element.tag == "Constraint":
+            bonds.append((int(element.get("p1")), int(element.get("p2"))))
+        element.clear()
+    return np.asarray(charges, dtype=np.float64), bonds
+
+
+def enrich_universe_force_field(universe: Any, system_file: str | Path | None) -> dict[str, Any]:
+    """Add the partial charges and covalent bonds of the run's OpenMM system to ``universe``.
+
+    PolyzyMD saves each segment's OpenMM system as XML, in the particle order
+    of its topology PDB, which records bonds only for residues outside the
+    standard ones. When ``system_file`` exists and has one particle per atom,
+    the universe gets its ``charges`` and has its bonds replaced by the
+    system's bonds and constraints, without the constraints between two
+    hydrogens. Otherwise the universe is left unchanged.
+
+    Returns
+    -------
+    dict[str, Any]
+        ``applied``, the ``source`` path, and the number of ``bonds`` or the
+        ``reason`` nothing was applied; also stored as
+        ``universe._polyzymd_force_field``.
+    """
+    if system_file is None:
+        metadata: dict[str, Any] = {"applied": False, "source": None, "reason": "no system XML"}
+        universe._polyzymd_force_field = metadata
+        return metadata
+    charges, bonds = read_openmm_system(system_file)
+    if len(charges) != len(universe.atoms):
+        metadata = {
+            "applied": False,
+            "source": str(system_file),
+            "reason": f"{len(charges)} particles for {len(universe.atoms)} atoms",
+        }
+        universe._polyzymd_force_field = metadata
+        return metadata
+    hydrogen = (
+        np.asarray([str(e).strip().upper() == "H" for e in universe.atoms.elements])
+        if hasattr(universe.atoms, "elements")
+        else np.zeros(len(universe.atoms), dtype=bool)
+    )
+    kept = [(a, b) for a, b in bonds if not (hydrogen[a] and hydrogen[b])]
+    universe.add_TopologyAttr("charges", charges)
+    if hasattr(universe, "bonds") and len(universe.bonds):
+        universe.delete_bonds(universe.bonds)
+    universe.add_bonds(kept)
+    metadata = {"applied": True, "source": str(system_file), "bonds": len(kept)}
+    universe._polyzymd_force_field = metadata
+    return metadata
+
+
 def enrich_universe_elements(
     universe: Any, *, topology_key: str | Path | None = None
 ) -> dict[str, Any]:
@@ -1563,6 +1653,7 @@ class TrajectoryLoader:
                 [str(f) for f in info.trajectory_files],
             )
         enrich_universe_elements(u, topology_key=info.topology_file)
+        enrich_universe_force_field(u, openmm_system_file(info.trajectory_files[0]))
         apply_pbc_policy(u, pbc_policy, topology=info.topology_file)
         u.trajectory = _wrap_timestamp_preserving_trajectory(u.trajectory)
 

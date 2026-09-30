@@ -108,14 +108,6 @@ the full report, `--replicates 1-3` to use only some replicates, and
 under `provenance.settings` in the JSON report, and the two schemes are stored
 separately.
 
-```{note}
-The plugin used before this version used the simplified scheme only, counted
-unassigned residues as coil without a warning, merged every chain into one,
-and defaulted to `protein and chainid A`. Its helix, strand and coil fractions
-equal this version's simplified ones for a single-chain protein with no
-unassigned residues.
-```
-
 ## Figures
 
 `polyzymd analyze secondary_structure` writes these figures to

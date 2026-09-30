@@ -83,6 +83,7 @@ class Select:
     """An MDAnalysis selection string, built into an ``AtomGroup`` per replicate."""
 
     selection: str
+    allow_empty: bool = False
 
 
 @dataclass(frozen=True)
@@ -90,20 +91,24 @@ class UniverseArgument:
     """Stands for the replicate's ``Universe`` in the arguments of a function."""
 
 
-def select(selection: str) -> Select:
+def select(selection: str, *, allow_empty: bool = False) -> Select:
     """Stand for ``universe.select_atoms(selection)`` of each replicate.
 
     Parameters
     ----------
     selection : str
         MDAnalysis selection string. It is recorded with the result.
+    allow_empty : bool, optional
+        Give an empty ``AtomGroup`` for a replicate where ``selection``
+        matches no atoms, instead of refusing it; for analyses that leave such
+        replicates out themselves.
 
     Returns
     -------
     Select
         Placeholder that :func:`run_timeseries` replaces with an ``AtomGroup``.
     """
-    return Select(str(selection))
+    return Select(str(selection), allow_empty)
 
 
 def universe() -> UniverseArgument:
@@ -175,7 +180,7 @@ def _build(value: Any, universe_: Any) -> Any:
     """Replace a placeholder with the replicate's AtomGroup or Universe."""
     if isinstance(value, Select):
         atoms = universe_.select_atoms(value.selection)
-        if len(atoms) == 0:
+        if len(atoms) == 0 and not value.allow_empty:
             raise ProtocolError(
                 f"Selection {value.selection!r} matched no atoms.",
                 hint="Check the selection string against the topology.",
@@ -444,10 +449,14 @@ def run_per_replicate(
         Arguments of ``function``, as in :func:`run_timeseries`.
     unit : str or None
         Unit of the values.
-    labels : sequence or callable, optional
+    labels : sequence, callable or "returned", optional
         Name of each entry of the returned array, or a function of the
         replicate's ``Universe`` that returns them, such as residue IDs.
-        Replicates are lined up by label, never by position.
+        With ``"returned"``, ``function`` returns ``(labels, values)``, for
+        results whose entries are known only once measured, such as the
+        residue pairs that formed a bond; pass ``missing`` for a label that
+        only some replicates have. Replicates are lined up by label, never
+        by position.
     missing : float, optional
         Value given to a label that one replicate lacks and another has.
         By default a missing label is an error.
@@ -498,23 +507,41 @@ def run_per_replicate(
     for condition in study:
         rows[condition.label], found[condition.label] = [], []
         for replicate in condition.replicates:
-            given = labels(replicate.universe()) if callable(labels) else labels
+            returned = isinstance(labels, str) and labels == "returned"
+            given = (
+                None if returned else labels(replicate.universe()) if callable(labels) else labels
+            )
             given = (
                 None if given is None else [x.item() if hasattr(x, "item") else x for x in given]
             )
-            record = json.loads(json.dumps({**_replicate_record(base, replicate), "labels": given}))
+            record = json.loads(
+                json.dumps(
+                    {
+                        **_replicate_record(base, replicate),
+                        "labels": "returned" if returned else given,
+                    }
+                )
+            )
             folder = root / _safe(condition.label) / f"replicate_{replicate.index}"
             values = None if recompute else _stored_values(folder, record, "values.npz")
+            if values is not None and returned:
+                try:
+                    given = json.loads((folder / "labels.json").read_text())
+                except (OSError, ValueError):
+                    values = None
             if values is None:
                 built, chosen = _build_arguments({**dict(enumerate(args)), **kwargs}, replicate)
-                values = np.asarray(
-                    function(
-                        *(built[index] for index in range(len(args))),
-                        frames=replicate.frames,
-                        **{key: built[key] for key in kwargs},
-                    ),
-                    dtype=np.float64,
+                output = function(
+                    *(built[index] for index in range(len(args))),
+                    frames=replicate.frames,
+                    **{key: built[key] for key in kwargs},
                 )
+                if returned:
+                    given, output = output
+                    given = json.loads(
+                        json.dumps([x.item() if hasattr(x, "item") else x for x in given])
+                    )
+                values = np.asarray(output, dtype=np.float64)
                 expected = () if given is None else (len(given),)
                 expected = expected if parts is None else (len(parts), *expected)
                 if values.shape != expected:
@@ -525,6 +552,8 @@ def run_per_replicate(
                     )
                 folder.mkdir(parents=True, exist_ok=True)
                 np.savez(folder / "values.npz", values=values)
+                if returned:
+                    (folder / "labels.json").write_text(json.dumps(given))
                 (folder / "record.json").write_text(
                     json.dumps({**record, "chosen": chosen, "versions": _versions()}, indent=1)
                 )

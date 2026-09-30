@@ -68,9 +68,9 @@ src/polyzymd/
 ├── simulation/   # OpenMM simulation runners
 ├── workflow/     # Orchestration (build → simulate → analyze)
 ├── core/         # Base classes, shared types
-├── analyses/     # ★ Plugin system — unified analysis lifecycle (primary extension point)
+├── analyses/     # ★ Study API: functions of a replicate Universe, Study, polyzymd analyze (primary extension point)
 │   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
-│   └── <name>/   #   Analysis plugins (single-file simple modules or packages)
+│   └── _framework/, mda/  # Plugin framework: no shipped analysis uses it; being removed
 ├── exporters/    # GROMACS/other format exporters
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
@@ -81,24 +81,14 @@ src/polyzymd/
 
 | Layer | Files | Role |
 |-------|-------|------|
-| **Plugins** (public) | `hydrogen_bonds/` | One class per analysis type — the **extension point** for contributors |
-| **Function analyses** | `functions.py`, `protocols.py`, `study.py` | rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa, secondary_structure, contacts and native_contacts, run by `polyzymd analyze` on the study API (`protocols.FUNCTION_ANALYSES`) |
-| **Private modules** | `_framework/`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
-| **Shared utilities** | `shared/loader.py`, `shared/window.py`, etc. | `TrajectoryLoader`, frame windows, statistics, autocorrelation — reusable across plugins |
-| **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/` | Stable public facade, auto-discovery, artifact lifecycle, default comparison utilities |
+| **Function analyses** (the extension point) | `functions.py`, `study.py`, `timeseries.py`, `protocols.py`, `figures.py` | rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds: functions of a replicate `Universe`, measured by `Study.timeseries` or `Study.per_replicate` and run by `polyzymd analyze NAME -c config.yaml` (`protocols.FUNCTION_ANALYSES`). Before choosing among `rmsd`, `rmsf`, `offset` and `rmsd_per_residue`, read the "Fluctuation, offset and deviation" section of `docs/source/explanation/analysis_rmsf_best_practices.md`: `rmsd` is per frame, the others per residue, and `rmsd_per_residue² = rmsf² + offset²` |
+| **Shared utilities** | `shared/loader.py`, `shared/window.py`, etc. | `TrajectoryLoader`, frame windows, statistics, autocorrelation |
+| **Plugin framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/`, `_framework/` | The `Analysis` plugin lifecycle behind `polyzymd compare`. No shipped analysis is a plugin any more, and the framework is being removed; do not add plugins |
 
-New analysis types may be simple single-file modules or packages under
-`analyses/`. The scaffold defaults to a compact single-file plugin; advanced
-and built-in analyses commonly use packages with `_mda.py` and `_plotters.py`
-helpers as complexity grows.
-
-`polyzymd.analyses.base` is the stable public facade for contributor imports.
-It re-exports context objects and comparison models while delegating
-implementation to private `_framework/` modules such as `compare.py`,
-`io.py`, `contract.py`, `contexts.py`, and `comparison_models.py`. Contributors should import
-`Analysis`, `ReplicateContext`, `AggregateContext`, `ComparisonContext`,
-`PlotContext`, `MetricValue`, and `ComparisonResult` from
-`polyzymd.analyses.base`, not from private modules.
+The catalytic triad is not an analysis: it is a routine on the study API
+(`docs/source/how_to/analysis_triad_quickstart.md`), and `polyzymd analyze
+catalytic_triad` exits with a pointer to it. `polyzymd analyze` does not read
+`comparison.yaml`: `-f comparison.yaml` exits with the equivalent `-c` command.
 
 ## Key Patterns
 
@@ -119,44 +109,30 @@ implementation to private `_framework/` modules such as `compare.py`,
   `phase.json` records with `status: completed` may skip OpenMM phases. Keep
   reporter intervals independent from bounded signal-check chunks.
 - **ABC + Strategy:** `MolecularSelector`, `MoleculeCharger`
-- **Plugin discovery:** `pkgutil`-based auto-discovery in `analyses/` — no registries
+- **Analyses are functions:** a measurement is a function of an MDAnalysis `Universe`; `Study` supplies the replicate universes, records and cross-replicate statistics
 - **Config:** Pydantic v2 `BaseModel` subclasses with `model_validator`
 
 ### Contributor Entry Points for Analysis
 
-To add a new analysis type, use the scaffold command or create a module/package
-under `src/polyzymd/analyses/` and subclass `Analysis`:
+To add a measurement, write a function of an MDAnalysis `Universe` (per frame,
+or per replicate with a `frames` argument) and run it with `Study.timeseries`
+or `Study.per_replicate`. Add it to `polyzymd analyze` only when it is a
+shipped analysis, as a `FUNCTION_ANALYSES` entry and an `_analyze_<name>` in
+`protocols.py`.
 
 | Resource | Location | What It Documents |
 |----------|----------|-------------------|
-| **Scaffold CLI** | `polyzymd new-analysis <name>` | Generates a simple plugin, or an advanced package with tests |
-| `Analysis` base class | `analyses/base.py` | Stable public facade for the full contract, required methods, optional overrides, and context objects |
-| Plugin discovery | `analyses/discovery.py` | How auto-discovery works, naming rules |
-| Orchestrator | `analyses/orchestrator.py` | How the framework runs your plugin |
-| Shared utilities | `analyses/shared/` | `TrajectoryLoader`, alignment, statistics, autocorrelation |
-| Scaffold output | `polyzymd new-analysis <name>` | Simplest working plugin — start here |
-| Richer example | `analyses/catalytic_triad/` | Default-compare lifecycle with DistanceCalculator + complex plotting |
-| Stats utilities | `analyses/stats.py` | `default_scalar_comparison()`, `format_scalar_comparison()` |
-| Contributor tutorial | `docs/source/contributor_guide/extending_analyses.md` | Step-by-step guide with test examples |
+| Shipped functions | `analyses/functions.py`, `docs/source/reference/analysis_functions.md` | What each function measures, its arguments and units |
+| Study API | `analyses/study.py`, `analyses/timeseries.py` | `Study.from_configs`, `timeseries`, `per_replicate`, `transform`, `reduce`, `compare`, records under `polyzymd_results/` |
+| API explanation | `docs/source/explanation/analysis_api.md` | How the study API supplies universes, records and statistics |
+| `polyzymd analyze` | `analyses/protocols.py`, `docs/source/how_to/analysis_agent_protocol.md` | `FUNCTION_ANALYSES`, the `_analyze_<name>` functions, `ProtocolReport` |
+| Figures | `analyses/figures.py` | `ReplicateValues.plot`, profiles, differences, uncertainty footnotes |
+| Worked routine | `docs/source/how_to/analysis_triad_quickstart.md` | Combining shipped functions for a question of your own |
 
-Key rules:
-
-- **Required class variables**: `name` (str) and `Settings` (Pydantic BaseModel)
-- **Lifecycle contract**: trajectory-native analyses build `MDAAnalysisJob` objects wrapping `AnalysisBase`-compatible work and map completed jobs through collectors into `ReplicateArtifact` objects. PolyzyMD owns `ArtifactStore`, `ConditionArtifact`, `ComparisonArtifact`, ensemble aggregation, statistics, and plotting. For compare-only plugins, set `has_compute_stage=False`. `aggregate(ctx, results)` is required only when `has_aggregate_stage=True`
-- **Optional overrides**: `compare()`, `plot()`, `format()`, `extract_metrics()`, `filter_conditions()`
-- **Default compare path**: Implement `extract_metrics()` — the framework loads results automatically (via `AggregatedResultClass` or `json.loads()`) and does t-tests, ANOVA, ranking
-- **Custom compare path**: Override `compare()` entirely for multi-metric or entry-table analyses
-- **Auto-discovery**: Drop a module or package in `analyses/` — no imports, no registries, no bootstrap
-- **Result saving**: Prefer canonical artifacts through `ArtifactStore`; do not introduce plugin-specific cache filename schemes
-- **No `compare/` files needed**: Keep comparison and formatting logic in plugin packages, with shared helpers in `analyses/stats.py` and `analyses/shared/inferential_statistics.py`
-
-### Planned MetricType classification (future)
-
-The `MetricType` classification (`MEAN_BASED` and `VARIANCE_BASED`) is a
-planned enhancement and is not implemented in the current codebase.
-
-For now, reviewers should treat any `metric_type` checks as aspirational
-guidance rather than a required plugin contract.
+The plugin framework (`Analysis`, `polyzymd new-analysis`, `polyzymd compare`)
+still exists but no shipped analysis uses it, and it is being removed. Do not
+write new plugins; `docs/source/contributor_guide/analysis_plugins/` documents
+it only until the removal.
 
 ## Design Principles (Critical for Contributors)
 
@@ -165,56 +141,41 @@ without modifying core code. Follow these principles:
 
 ### Open-Closed Principle (OCP)
 
-Classes should be **open for extension, closed for modification**. The plugin
-system achieves this:
-- Subclass `Analysis` and drop a module or package in `analyses/` — no core changes needed
-- Framework discovers plugins automatically via `pkgutil`
-- Default implementations (compare, format, plot) are overridable
+A new measurement is a new function passed to `Study.timeseries` or
+`Study.per_replicate`; the study, its caching, its records and its statistics
+need no change. Do not reimplement what MDAnalysis, MDTraj or another package
+already computes: wrap it in a function.
 
 ### Follow Established Contracts
 
-When writing a new analysis plugin, **study existing implementations first**:
+When writing a new analysis, **study existing implementations first**:
 
-1. **Read `analyses/base.py`** — it defines the full contract
-2. **Start with the scaffold output** — `polyzymd new-analysis <name>` generates a complete working plugin with MDAnalysis jobs, artifacts, aggregation, comparison, plotting, and tests
-3. **Study `analyses/hydrogen_bonds/`**, which overrides `compare()` and draws its own plots
-
-For a new measurement, prefer a function run through `Study.timeseries` or `Study.per_replicate` over a new plugin; see `docs/source/explanation/analysis_api.md`. rg, rmsd, rmsf, distances, the catalytic triad, sasa, secondary_structure, native_contacts and contacts (contact fractions, occluded area and contact lifetimes) are written that way, in `analyses/functions.py` and `analyses/protocols.py`.
+1. **Read `analyses/functions.py`**: `radius_of_gyration` is a per-frame function, `hydrogen_bonds` a per-replicate one that takes `frames`
+2. **Read the matching `_analyze_<name>` in `analyses/protocols.py`** to see how a function becomes a `polyzymd analyze` result, with its `--run` names and figures
+3. **Read `docs/source/how_to/analysis_triad_quickstart.md`** for a routine that combines shipped functions with `Timeseries.transform`
 
 **Anti-pattern to avoid:**
 ```python
-# WRONG: Inventing custom data passing, bypassing the context
-def build_mda_jobs(self, ctx):
-    config = SimulationConfig.from_yaml(self.custom_config_path)  # Don't do this!
+# WRONG: your own loop over replicates and frames
+for replicate in range(1, 4):
+    universe = mda.Universe(...)
+    values = [my_measure(universe) for ts in universe.trajectory]
 ```
 
 **Correct pattern:**
 ```python
-# RIGHT: Use the framework-provided context
-def build_mda_jobs(self, ctx):
-    sim_config = ctx.sim_config  # Already loaded by framework
-    settings = ctx.settings       # Your Settings model, resolved from YAML
+# RIGHT: the study supplies the universes, the production frames and the records
+series = study.timeseries(my_measure, pz.select("protein"), unit="A", name="my_measure")
+print(series.reduce("mean").compare().to_agent_text())
 ```
-
-### Plugin System Contracts
-
-| Method | When Called | Input | Output |
-|--------|-----------|-------|--------|
-| `build_mda_jobs()` + `build_mda_collector()` | Once per replicate per condition on the MDAnalysis job compute path; MDAnalysis owns per-trajectory iteration there while PolyzyMD owns artifacts and ensemble workflow | `MDAReplicateJobContext` / collector context | `ReplicateArtifact` |
-| `aggregate()` | Once per condition after all replicates, only when `has_aggregate_stage=True` | `AggregateContext` + list of replicate results | Aggregated model or dict |
-| `extract_metrics()` | During default `compare()` | Aggregated result | `dict[str, MetricValue]` |
-| `compare()` | Once per analysis (cross-condition) | `ComparisonContext` | `ComparisonResult` or custom Pydantic model |
-| `plot()` | Once per analysis | `PlotContext` | `list[Path]` of figures |
-| `format()` | CLI display | Comparison result + format string | Formatted string |
 
 ### When Adding New Features
 
-1. **Read the tutorial**: `docs/source/contributor_guide/extending_analyses.md`
-2. **Read `analyses/base.py`** — the class docstring defines the full contract
-3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
-4. **Study a matching example**: start with scaffold output (`polyzymd new-analysis <name>`), then use `hydrogen_bonds/`, which has a custom compare
-5. **Write your plugin** as a simple module or package in `analyses/`; for advanced trajectory-native packages, isolate MDAnalysis job helpers in `_mda.py`, and extract plotting to `_plotters.py` as complexity grows
-6. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
+1. **Read** `docs/source/explanation/analysis_api.md` and `docs/source/reference/analysis_functions.md`
+2. **Write the function** in `analyses/functions.py`, with a docstring that says concretely what it measures and in which unit
+3. **Test it on placed geometry** with a known answer, then on the synthetic OpenMM run directories of `tests/_support/analysis_testkit.py` (`write_simulation_config`, `write_openmm_replicate`)
+4. **For a shipped analysis**, add the `FUNCTION_ANALYSES` entry and `_analyze_<name>` in `protocols.py`, and document it in `analysis_functions.md` and a how-to page
+5. **Test**: `pixi run -e test pytest tests/analyses -v -k <name>`
 
 ## Frame counting in analyses
 
@@ -263,7 +224,7 @@ See `.opencode/instructions/` for detailed rules on specific topics:
 - `testing.md` — test infrastructure, running tests, writing new tests
 - `development-workflow.md` — release flow, atomic scope, agent
   collaboration, commits, pushes, and PR handoff
-- `analysis-module.md` — analysis plugin system patterns and contracts
+- `analysis-module.md` — study API patterns, `polyzymd analyze` protocols and the plugin framework being removed
 - `documentation.md` — Sphinx/MyST conventions, API docs, zero-warning build gate, `:no-index:` rules
 - `openff-pdb-ingestion.md` — OpenFF protein/PDB ingestion troubleshooting and living error-log rules
 - `known-issues.md` — detailed bug descriptions and workarounds

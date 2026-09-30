@@ -1,12 +1,12 @@
 # Explanation
 
 Use Explanation when you need the reasoning behind PolyzyMD: design choices,
-analysis assumptions, statistical interpretation, and plugin-specific caveats.
+analysis assumptions, statistical interpretation, and metric-specific caveats.
 If you want commands for a task, start with {doc}`../how_to/index`. If you need
 to look up options, file layouts, or schemas, use {doc}`../reference/index`.
 
 ```{tip}
-New to the analysis plugin system? Start with {doc}`analysis_concepts`, then
+New to PolyzyMD analysis? Start with {doc}`analysis_concepts`, then
 read the statistical and reference-selection pages listed in the contributor
 pathway below.
 ```
@@ -19,7 +19,7 @@ pathway below.
 :link-type: doc
 
 Read the concepts, statistics, convergence, and reference-selection pages that
-shape analysis-plugin design.
+shape how an analysis is designed.
 :::
 
 :::{grid-item-card} Statistical interpretation
@@ -51,9 +51,9 @@ page.
 
 ## New contributor pathway
 
-If you are adding or reviewing an analysis plugin, read these pages first:
+If you are adding or reviewing an analysis, read these pages first:
 
-1. {doc}`analysis_concepts` for the analysis lifecycle and plugin boundaries.
+1. {doc}`analysis_concepts` for the analysis steps and what is stored.
 2. {doc}`analysis_statistics_best_practices` for replicate-level interpretation
    and statistical expectations.
 3. {doc}`convergence_detection` for deciding whether trajectory summaries are
@@ -77,7 +77,7 @@ Why PolyzyMD uses colored logging <colored_logging>
 
 ## Interpretation and Best Practices
 
-Start with the cross-cutting interpretation pages, then use the plugin-specific
+Start with the cross-cutting interpretation pages, then use the metric-specific
 pages for caveats tied to particular metrics.
 
 ### Foundations
@@ -90,7 +90,7 @@ Establishing convergence in MD simulations <convergence_detection>
 Methods and references <references>
 ```
 
-### Metric and plugin caveats
+### Metric caveats
 
 ```{toctree}
 :maxdepth: 1
@@ -104,5 +104,6 @@ SASA implementation verification <analysis_sasa_verification>
 Contacts implementation verification <analysis_contacts_verification>
 How long polymer contacts last <analysis_contact_lifetimes>
 Native contacts implementation verification <analysis_native_contacts_verification>
-Catalytic triad analysis: interpretation and best practices <analysis_triad_best_practices>
+Hydrogen bonds implementation verification <analysis_hydrogen_bonds_verification>
+Catalytic triad: interpretation and best practices <analysis_triad_best_practices>
 ```

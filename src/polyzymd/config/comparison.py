@@ -129,8 +129,9 @@ RETIRED_PLUGINS = {
     "sasa": "sasa",
     "secondary_structure": "dssp_occupancy",
     "distances": "pair_distance",
-    "catalytic_triad": "pair_distance",
+    "catalytic_triad": "hbond_count",
     "contacts": "residue_occlusion",
+    "hydrogen_bonds": "hydrogen_bonds",
 }
 
 #: Other functions the warning names for a retired analysis that has several.
@@ -139,19 +140,55 @@ RETIRED_PLUGIN_ALSO = {
         " (residue_contacts for --set method=distance, and contact_lifetimes for how long "
         "contacts last)"
     ),
+    "hydrogen_bonds": (
+        " (hbond_lifetimes for how long hydrogen bonds last, residue_hbond_occupancy and "
+        "residue_pair_hbond_occupancy for how often each residue or residue pair is bonded)"
+    ),
 }
 
 #: Retired analyses that measure pairs, whose command needs the pairs list.
-PAIR_ANALYSES = ("distances", "catalytic_triad")
+PAIR_ANALYSES = ("distances",)
 
 #: Retired analyses whose function returns one value per replicate, which
 #: study.per_replicate measures; the others are per-frame study.timeseries functions.
-PER_REPLICATE_ANALYSES = ("rmsf", "secondary_structure", "contacts")
+PER_REPLICATE_ANALYSES = ("rmsf", "secondary_structure", "contacts", "hydrogen_bonds")
+
+#: Published page of the polyzymd analyze protocol.
+ANALYZE_PROTOCOL_URL = (
+    "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html"
+)
+
+#: Agent skill that teaches the polyzymd analyze protocol.
+ANALYZE_AGENT_SKILL = ".claude/skills/polyzymd-analyze/SKILL.md"
+
+#: Where to read about the replacement, and what to point an agent at.
+RETIRED_DOCS_POINTER = (
+    f"Read {ANALYZE_PROTOCOL_URL}, or point an agent at {ANALYZE_AGENT_SKILL} or that page "
+    "to learn the protocol."
+)
 
 RETIRED_PLUGIN_WARNING = (
-    "comparison.yaml has a {section}.{name} block, which is ignored: {name} no longer runs "
-    "through compare. Run polyzymd analyze {name} -c <config.yaml> --eq <time>{pairs}, or in "
-    "Python {method} with polyzymd.analyses.functions.{function}{also}."
+    "comparison.yaml has a {section}.{name} block, which is ignored: the plugins and "
+    "plot_settings sections are retired, and {name} no longer runs through compare. Run "
+    "polyzymd analyze {name} -c <config.yaml> --eq <time>{pairs}, or in Python {method} with "
+    "polyzymd.analyses.functions.{function}{also}. " + RETIRED_DOCS_POINTER
+)
+
+
+#: Published page of the catalytic triad routine on the study API.
+TRIAD_ROUTINE_URL = (
+    "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html"
+)
+
+#: Warning for a catalytic_triad block: the triad is a routine, not an analysis.
+RETIRED_TRIAD_WARNING = (
+    "comparison.yaml has a {section}.catalytic_triad block, which is ignored: the plugins and "
+    "plot_settings sections are retired, and the catalytic triad is no longer an analysis but "
+    "a routine on the study API, which counts each triad hydrogen bond with "
+    "polyzymd.analyses.functions.hbond_count and combines them with Timeseries.transform. "
+    "Follow " + TRIAD_ROUTINE_URL + ", or point an agent at " + ANALYZE_AGENT_SKILL + " or "
+    "that page. For the triad distances run polyzymd analyze distances -c <config.yaml> "
+    "--eq <time> --set pairs=<pairs.yaml>."
 )
 
 
@@ -159,6 +196,9 @@ def _warn_retired(section: str, name: str) -> None:
     """Warn that a comparison.yaml block for a retired plugin is ignored."""
     import warnings
 
+    if name == "catalytic_triad":
+        warnings.warn(RETIRED_TRIAD_WARNING.format(section=section), UserWarning, stacklevel=3)
+        return
     warnings.warn(
         RETIRED_PLUGIN_WARNING.format(
             section=section,
@@ -198,7 +238,9 @@ class PluginSettingsContainer(BaseModel):
                 available = sorted(list_analyses().keys())
                 raise ValueError(
                     f"Unknown analysis plugin '{key}' in plugins section. "
-                    f"Available plugins: {available}"
+                    f"Registered plugins: {available}. No shipped analysis is configured "
+                    "in comparison.yaml any more: run it with polyzymd analyze NAME -c "
+                    f"<config.yaml>. {RETIRED_DOCS_POINTER}"
                 ) from None
 
             canonical_name = analysis_cls.name
@@ -818,9 +860,6 @@ class ComparisonConfig(BaseModel):
     >>> for cond in config.conditions:
     ...     print(f"{cond.label}: {cond.config}")
     >>> print("Enabled analyses:", config.plugins.get_enabled_plugins())
-    >>> hbond_settings = config.plugins.get("hydrogen_bonds")
-    >>> if hbond_settings:
-    ...     print(f"Donor-acceptor cutoff: {hbond_settings.distance_cutoff}")
     """
 
     model_config = {"extra": "forbid"}

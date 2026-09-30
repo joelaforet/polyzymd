@@ -1,4 +1,4 @@
-"""PolyzyMD analysis plugin system.
+"""PolyzyMD analyses: the study API, the analysis functions and the analyze protocol.
 
 Public API
 ----------
@@ -25,26 +25,20 @@ number states its unit, its uncertainty and its sample size::
     report = analyze("rmsf", ["A/config.yaml", "B/config.yaml"], equilibration="10ns")
     print(report.to_agent_text())
 
-To see what analyses exist, or to drive one yourself::
+To measure something of your own, write a function that takes an MDAnalysis
+``Universe`` and returns a number (or one number per residue), and pass it to
+:meth:`~polyzymd.analyses.study.Study.timeseries` or
+:meth:`~polyzymd.analyses.study.Study.per_replicate`. The functions PolyzyMD
+ships are in :mod:`polyzymd.analyses.functions`.
 
-    from polyzymd.analyses import get_analysis, list_analyses
-
-    # See what's available
-    for name, cls in list_analyses().items():
-        print(f"{name}: {cls.__doc__.splitlines()[0]}")
-
-    # Get a specific analysis
-    HydrogenBondsAnalysis = get_analysis("hydrogen_bonds")
-    analysis = HydrogenBondsAnalysis()
-
-Adding a New Analysis
----------------------
-Create a package in ``src/polyzymd/analyses/<name>/`` and subclass
-:class:`~polyzymd.analyses.base.Analysis`.  The framework discovers
-it automatically — no imports, no registries, no bootstrap files.
-Use ``polyzymd new-analysis <name>`` to generate the boilerplate.
-
-See :mod:`polyzymd.analyses.base` for the full contract.
+Plugin framework
+----------------
+:func:`get_analysis`, :func:`list_analyses`, :class:`Analysis`,
+:func:`run_analysis`, :func:`run_comparison` and :func:`run_all_comparisons`
+belong to the analysis plugin framework. No shipped analysis is a plugin any
+more, so :func:`list_analyses` returns only plugins you register yourself, and
+the framework is being removed. See :mod:`polyzymd.analyses.base` for its
+contract.
 """
 
 from polyzymd.analyses.base import (
