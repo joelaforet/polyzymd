@@ -538,7 +538,6 @@ For `--mem`, `--time`, and `--cpus-per-task`, submission precedence is:
 
 Current plugin resource hints:
 
-- `secondary_structure`: `16G`
 - `hydrogen_bonds`: `16G`
 
 This means large plugins get safer defaults, while explicit CLI requests still

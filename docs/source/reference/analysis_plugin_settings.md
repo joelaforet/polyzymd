@@ -97,20 +97,6 @@ field records which one was read rather than leaving it implied by a filename.
 | `min_effect_size` | `float` | `0.5` | Minimum Cohen's d highlighted in output |
 | `top_residues` | `int` | `10` | Number of top-contact residues shown in summaries |
 
-## `secondary_structure`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `chain_id` | `str` | `"A"` | Protein chain letter to analyze (PolyzyMD convention: chain A) |
-| `selection` | `str \| null` | `null` | Explicit MDAnalysis protein-residue selection. Overrides `chain_id` when set |
-
-The default is `protein and chainid A` for PDB/PolyzyMD chain-convention
-compatibility. GROMACS `.gro` topologies may not preserve chain IDs; use
-`selection: "protein"`, `selection: "protein and resid 1:269"`, or
-`selection: "protein and resindex 0:268"` when chain IDs are unavailable.
-DSSP requires complete residues; do not use CA-only selections such as
-`protein and name CA`.
-
 ## `hydrogen_bonds`
 
 | Key | Type | Default | Description |

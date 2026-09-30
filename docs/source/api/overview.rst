@@ -41,7 +41,6 @@ Package Structure
     │   ├── study.py      # Study API: replicates as MDAnalysis universes
     │   ├── functions.py  # Shipped analysis functions (rg, rmsd, rmsf, distances)
     │   ├── contacts/     # Contacts plugin package
-    │   ├── secondary_structure/  # Secondary structure plugin package
     │   └── ...           # Single-file or package plugins for each analysis type
     └── cli/              # Command-line interface
         ├── compare.py    # `polyzymd compare` subcommands

@@ -32,10 +32,11 @@ If you have not run a single-condition analysis yet, complete
 {doc}`first_analysis` first.
 
 ```{important}
-This tutorial uses the comparison plugins: contacts, secondary structure and
-hydrogen bonds. RMSD, Rg, RMSF, distances, the catalytic triad and SASA run
-through `polyzymd analyze` instead; Step 5 shows RMSF for the same study. Experimental workflows are linked at the end, but they are not part of
-the main tutorial path.
+This tutorial uses the comparison plugins, contacts and hydrogen bonds. RMSD,
+Rg, RMSF, distances, the catalytic triad, secondary structure and SASA run
+through `polyzymd analyze` instead; Step 5 shows RMSF for the same study.
+Experimental workflows are linked at the end, but they are not part of the main
+tutorial path.
 ```
 
 ```{important}
@@ -106,8 +107,6 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  secondary_structure: {}
-
   contacts:
     polymer_selection: "chainid C"
     protein_selection: "chainid A"
@@ -151,7 +150,7 @@ This parallelizes across replicates and conditions. See
 If you prefer to inspect one comparison first, a good sanity check is:
 
 ```bash
-pixi run -e analysis polyzymd compare run secondary_structure
+pixi run -e analysis polyzymd compare run contacts
 ```
 
 ## Step 4: Generate the Figures
@@ -177,19 +176,17 @@ polymer_stabilization_study/
 ├── comparison.yaml
 ├── analysis/
 │   ├── No Polymer/
-│   │   ├── secondary_structure/
-│   │   │   ├── run_1/
-│   │   │   │   └── result.json        # ReplicateArtifact
-│   │   │   ├── run_2/
-│   │   │   │   └── result.json        # ReplicateArtifact
-│   │   │   ├── run_3/
-│   │   │   │   └── result.json        # ReplicateArtifact
-│   │   │   └── aggregated/
-│   │   │       └── result.json        # ConditionArtifact
 │   │   └── contacts/
-│   │       └── ...
+│   │       ├── run_1/
+│   │       │   └── result.json        # ReplicateArtifact
+│   │       ├── run_2/
+│   │       │   └── result.json        # ReplicateArtifact
+│   │       ├── run_3/
+│   │       │   └── result.json        # ReplicateArtifact
+│   │       └── aggregated/
+│   │           └── result.json        # ConditionArtifact
 │   ├── 100% SBMA/
-│   │   └── secondary_structure/
+│   │   └── contacts/
 │   │       ├── run_1/
 │   │       │   └── result.json        # ReplicateArtifact
 │   │       └── aggregated/
@@ -197,12 +194,10 @@ polymer_stabilization_study/
 │   └── 100% EGMA/
 │       └── ...
 ├── comparison/
-│   ├── secondary_structure/
-│   │   └── result.json                # cross-condition comparison output
 │   └── contacts/
 │       └── result.json                # cross-condition comparison output
 └── figures/
-    ├── secondary_structure/
+    ├── contacts/
     └── ...
 ```
 

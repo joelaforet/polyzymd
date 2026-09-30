@@ -34,7 +34,7 @@ PolyzyMD provides a streamlined workflow for setting up and running MD simulatio
 
 ## Analysis Status
 
-- Stable comparison and plotting workflows: RMSF, contacts, distances, catalytic triad, secondary structure, RMSD, Rg, SASA, and hydrogen bonds
+- Stable comparison and plotting workflows: RMSD, Rg, RMSF, distances, catalytic triad, secondary structure and SASA through `polyzymd analyze`, and contacts and hydrogen bonds as comparison plugins
 - Experimental analysis features have been removed from the active CLI surface until their definitions and interpretation are finalized
 - Analysis supports both OpenMM (DCD) and GROMACS (XTC) trajectories via engine-aware trajectory resolution
 

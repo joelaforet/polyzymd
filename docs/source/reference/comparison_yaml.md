@@ -59,7 +59,7 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  secondary_structure: {}
+  contacts: {}
 ```
 
 ---
@@ -140,7 +140,7 @@ parallelism.
 ## `plugins`
 
 Presence of a key **enables** that analysis. The value is a mapping of that
-plugin's settings. An empty mapping (`secondary_structure: {}`) enables the plugin with all
+plugin's settings. An empty mapping (`contacts: {}`) enables the plugin with all
 defaults.
 
 ### `plugins.rmsf`
@@ -152,17 +152,11 @@ plugin in the file working. See {doc}`../how_to/analysis_rmsf_quickstart`.
 
 ### `plugins.secondary_structure`
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `chain_id` | string | `"A"` | Chain letter for the protein to analyze via DSSP |
-| `selection` | string | `null` | Explicit MDAnalysis protein-residue selection. Overrides `chain_id` when provided. |
-
-The default secondary-structure selection is `protein and chainid A`, preserving
-the PolyzyMD/PDB convention that chain A is the protein. GROMACS `.gro`
-topologies may not preserve chain IDs, so use `selection` for those files, for
-example `selection: "protein"`, `selection: "protein and resid 1:269"`, or
-`selection: "protein and resindex 0:268"`. DSSP needs complete residues; do not
-use CA-only selections such as `protein and name CA`.
+Secondary structure runs through `polyzymd analyze secondary_structure` or the
+study API, not through `comparison.yaml`. A `plugins.secondary_structure` block
+in an existing file still loads, is ignored with a warning, and leaves every
+other plugin in the file working. See
+{doc}`../how_to/analysis_secondary_structure_quickstart`.
 
 ### `plugins.sasa`
 
@@ -428,10 +422,10 @@ warning; mark residues on the RMSF profiles with
 | `generate_rt_by_aa_class_bars` | `true` | Residence time by amino acid class bar chart |
 | `generate_rt_by_partition_bars` | `true` | Residence time by user partition bar charts |
 
-**`plot_settings.secondary_structure`:**
+**`plot_settings.secondary_structure`:** retired. A block still loads and is
+ignored with a warning.
 
-| Field | Default | Description |
-|-------|---------|-------------|
+-------|---------|-------------|
 | `generate_timeline` | `true` | Residue × time SS heatmap |
 | `generate_content_bars` | `true` | Helix/strand/coil fraction bars |
 | `generate_individual_bars` | `true` | One bar chart per SS type |
@@ -447,7 +441,7 @@ warning; mark residues on the RMSF profiles with
   before launching a full analysis run.
 - Relative paths in `config:` are resolved from the directory containing
   `comparison.yaml`, not from your working directory.
-- An empty plugin mapping (e.g., `secondary_structure: {}`) enables the analysis with all
+- An empty plugin mapping (e.g., `contacts: {}`) enables the analysis with all
   default settings — you only need to specify fields you want to override.
 - Set `control:` to match one of your condition labels to get Δ-from-control
   columns in comparison tables and plots.

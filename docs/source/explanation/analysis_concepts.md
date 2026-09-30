@@ -66,8 +66,8 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  secondary_structure: {}
   contacts: {}
+  hydrogen_bonds: {}
 ```
 
 The key sections are:
@@ -96,7 +96,7 @@ with units: `"10ns"`, `"5000ps"`, etc. The default is `"10ns"`.
 ### `plugins`
 
 Which analyses to run and their settings. Each key is a plugin name (like
-`secondary_structure` or `contacts`), and the value is a settings block for that plugin. An
+`hydrogen_bonds` or `contacts`), and the value is a settings block for that plugin. An
 empty block `{}` means "run with defaults." Only plugins listed here are
 executed — if you don't include `contacts`, contacts won't be computed.
 
@@ -143,10 +143,9 @@ The available plugins are:
 | Plugin name | What it measures |
 |-------------|-----------------|
 | `contacts` | Intermolecular contacts between protein and other components |
-| `secondary_structure` | Secondary structure content (helix, sheet, coil fractions) |
 | `hydrogen_bonds` | Hydrogen bond occupancy and lifetimes |
 
-RMSD, Rg, RMSF, distances, the catalytic triad and SASA run through `polyzymd analyze` and the study API
+RMSD, Rg, RMSF, distances, the catalytic triad, secondary structure and SASA run through `polyzymd analyze` and the study API
 instead of plugins; see {doc}`analysis_api`.
 
 Each plugin has a `Settings` model with configurable parameters. Most
@@ -162,13 +161,13 @@ domain-specific measurement and interpretation logic. For a contributor-focused
 walkthrough, see {doc}`../contributor_guide/extending_analyses`.
 
 You configure plugins in the `plugins:` block. For example, to run contacts
-with a custom cutoff and secondary structure with defaults:
+with a custom cutoff and hydrogen bonds with defaults:
 
 ```yaml
 plugins:
   contacts:
     cutoff: 4.0
-  secondary_structure: {}
+  hydrogen_bonds: {}
 ```
 
 ## Periodic boundaries, whole molecules, and alignment
