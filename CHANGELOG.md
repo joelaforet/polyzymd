@@ -27,14 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `_residues` and `_pairs`, and draws `hbonds_<run>_comparison`, `_profile` and
   `_difference`.
 
-- **Per-residue RMSF, offset and `residue_rmsd` on the study API.**
-  `polyzymd.analyses.functions` gains `rmsf` (`gmx rmsf -o`), `residue_rmsd`
+- **Per-residue RMSF, offset and `rmsd_per_residue` on the study API.**
+  `polyzymd.analyses.functions` gains `rmsf` (`gmx rmsf -o`), `rmsd_per_residue`
   (each residue's root mean square over frames of its atoms' distance from
   the reference, `gmx rmsf -od`) and `rms_decomposition` (both with the
   offset of the mean position, and their mean squares, in one pass, with
-  `residue_rmsd² = rmsf² + offset²`).  `residue_rmsd` is one number per
+  `rmsd_per_residue² = rmsf² + offset²`).  `rmsd_per_residue` is one number per
   residue; `rmsd` stays one number per frame.  `polyzymd analyze rmsf` and
-  `polyzymd analyze residue_rmsd` report `core_`, `<region>_` and `mean_`
+  `polyzymd analyze rmsd_per_residue` report `core_`, `<region>_` and `mean_`
   values and the per-residue profiles.
 
 - **Force-field charges and bonds in the analysis loader.**  The loader reads

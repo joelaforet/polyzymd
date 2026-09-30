@@ -3,7 +3,7 @@
 Measure, for every residue, how much it fluctuates about its mean position
 (RMSF), how far its mean position sits from a reference structure (the
 offset), and its root mean square deviation from that reference over the
-frames (`residue_rmsd`), on every replicate. Compare conditions with the replicate as the sampling unit.
+frames (`rmsd_per_residue`), on every replicate. Compare conditions with the replicate as the sampling unit.
 
 ```{versionadded} 1.3.0
 RMSF analysis was added in PolyzyMD 1.3.0.
@@ -48,22 +48,28 @@ structure by the `alignment_selection` atoms. Then, for each atom *i* of
 |---|---|---|
 | `rmsf` | $\sqrt{\langle \lvert x_i(t) - \langle x_i \rangle \rvert^2 \rangle}$, the fluctuation about the atom's mean position | `gmx rmsf -o` |
 | `offset` | $\lvert \langle x_i \rangle - x_i^{\mathrm{ref}} \rvert$, how far the mean position sits from the reference | none |
-| `residue_rmsd` | $\sqrt{\langle \lvert x_i(t) - x_i^{\mathrm{ref}} \rvert^2 \rangle}$, the root mean square over frames of the distance from the reference | `gmx rmsf -od` |
+| `rmsd_per_residue` | $\sqrt{\langle \lvert x_i(t) - x_i^{\mathrm{ref}} \rvert^2 \rangle}$, the root mean square over frames of the distance from the reference | `gmx rmsf -od` |
 
 ```{note}
-`residue_rmsd` and `rmsd` are different measurements. `rmsd` gives one
+`rmsd_per_residue` and `rmsd` are different measurements. `rmsd` gives one
 number per frame, a timeseries: the root mean square over the selected atoms
-of their distance from the reference after superposition. `residue_rmsd`
-gives one number per residue: the root mean square over frames of each atom's
-distance from the reference, averaged over the residue's atoms, which is what
-`gmx rmsf -od` reports.
+of their distance from the reference after superposition. `rmsd_per_residue`
+gives one number per residue for all frames together: the root mean square
+over frames and over the residue's atoms of the distance from the reference,
+what `gmx rmsf -od -res` reports as the "root mean square deviation with
+respect to the reference structure". Other tools' "per-residue RMSD", such as
+cpptraj's `rmsd perres`, is a timeseries per residue instead.
 ```
 
 The values agree with `gmx rmsf` to the 4 decimals in nm that GROMACS writes;
 {doc}`../explanation/analysis_rmsf_verification` gives the comparison and the
-script that reruns it. The three are exact parts of one another: for every atom,
-`residue_rmsd² = rmsf² + offset²`. Each residue's value is
-the mean over its atoms in `selection`. The reference decides what the frames
+script that reruns it. The three are exact parts of one another: for every atom
+and every residue, `rmsd_per_residue² = rmsf² + offset²`, the mean square
+being the variance plus the squared bias. Each residue's value is the square
+root of the mean over its atoms in `selection` of their squared values, as
+`gmx rmsf -res` combines atoms; GROMACS weights the atoms by mass and PolyzyMD
+weights them equally, so the two agree when a residue's atoms have equal
+masses, as with Cα atoms only. The reference decides what the frames
 are superposed on and what the offset and deviation are measured from; `rmsf`
 is always the fluctuation about the mean.
 
@@ -76,15 +82,15 @@ polyzymd analyze rmsf -c noPoly/config.yaml -c SBMA50/config.yaml \
 
 The first `-c` is the control. One pass over each replicate gives all three
 quantities. `polyzymd analyze rmsf` reports the core RMSF by default, and
-`polyzymd analyze residue_rmsd`, the same measurement, reports the core
-`residue_rmsd` by default. Pick another result with `--run`:
+`polyzymd analyze rmsd_per_residue`, the same measurement, reports the core
+`rmsd_per_residue` by default. Pick another result with `--run`:
 
 | `--run` | One value per replicate |
 |---|---|
-| `core_rmsf`, `core_offset`, `core_residue_rmsd` | Root of the mean square over the core residues (below) |
-| `<region>_rmsf`, `<region>_offset`, `<region>_residue_rmsd` | The same over one named region |
-| `mean_rmsf`, `mean_offset`, `mean_residue_rmsd` | Plain mean over every selected residue |
-| `rmsf`, `offset`, `residue_rmsd` | The per-residue profile, compared residue by residue |
+| `core_rmsf`, `core_offset`, `core_rmsd_per_residue` | Root of the mean square over the core residues (below) |
+| `<region>_rmsf`, `<region>_offset`, `<region>_rmsd_per_residue` | The same over one named region |
+| `mean_rmsf`, `mean_offset`, `mean_rmsd_per_residue` | Plain mean over every selected residue |
+| `rmsf`, `offset`, `rmsd_per_residue` | The per-residue profile, compared residue by residue |
 
 A one-value result is summarised per condition, and every other condition is
 compared with the control by Welch's t test with the Benjamini-Hochberg
@@ -100,7 +106,7 @@ Change what is measured and what it is measured against with `--set`:
 |---|---|---|
 | `selection` | `protein and name CA` | Atoms measured |
 | `alignment_selection` | `protein and name CA` | Atoms superposed on the reference |
-| `reference_mode` | `centroid` for `rmsf`; for `residue_rmsd`, `external` when `reference_file` is set and `centroid` otherwise | `centroid`, `average`, `frame` or `external` |
+| `reference_mode` | `centroid` for `rmsf`; for `rmsd_per_residue`, `external` when `reference_file` is set and `centroid` otherwise | `centroid`, `average`, `frame` or `external` |
 | `reference_frame` | `1` | Production frame used by `frame` mode, counted from 1 after the equilibration window |
 | `reference_file` | none | Structure file used by `external` mode |
 | `core` | all selected residues | MDAnalysis selection of the residues combined into the `core_*` values |
@@ -111,7 +117,7 @@ For example, to measure against a crystal structure, with the lid as its own
 region and the termini left out of the core:
 
 ```bash
-polyzymd analyze residue_rmsd -c noPoly/config.yaml -c SBMA50/config.yaml --eq 200ns \
+polyzymd analyze rmsd_per_residue -c noPoly/config.yaml -c SBMA50/config.yaml --eq 200ns \
   --set reference_file=structures/1ISP.pdb \
   --set "core=resid 10:170" \
   --set "regions={lid: resid 70-90, termini: resid 1-9 or resid 171-181}"
@@ -140,7 +146,7 @@ measures the replicates again.
 
 ```{note}
 `rmsf` is always the fluctuation about each atom's mean position; each
-residue's deviation from a reference structure is `residue_rmsd`.
+residue's deviation from a reference structure is `rmsd_per_residue`.
 `reference_frame` counts production frames from 1, after the equilibration
 window.
 ```
@@ -151,20 +157,20 @@ verdict words are described under {ref}`polyzymd analyze <cli-analyze>`.
 
 ## Figures
 
-`polyzymd analyze rmsf` and `residue_rmsd` write these figures to
+`polyzymd analyze rmsf` and `rmsd_per_residue` write these figures to
 `<output-dir>/figures/<analysis>/`; `--no-plots` skips them.
 
 | Figure | What it shows |
 |---|---|
-| `rmsf_profile`, `offset_profile`, `residue_rmsd_profile` | Each replicate's value at every residue as a thin line, and each condition's mean with its 95 percent interval; `highlight_residues` are marked |
-| `rms_decomposition` | One panel per condition, with its mean `residue_rmsd`, RMSF and offset at every residue |
-| `rmsf_difference`, `offset_difference`, `residue_rmsd_difference` | With several conditions, one panel per condition: its difference from the control at every residue, the 95 percent interval of the difference, and a point on each significant residue |
+| `rmsf_profile`, `offset_profile`, `rmsd_per_residue_profile` | Each replicate's value at every residue as a thin line, and each condition's mean with its 95 percent interval; `highlight_residues` are marked |
+| `rms_decomposition` | One panel per condition, with its mean `rmsd_per_residue`, RMSF and offset at every residue |
+| `rmsf_difference`, `offset_difference`, `rmsd_per_residue_difference` | With several conditions, one panel per condition: its difference from the control at every residue, the 95 percent interval of the difference, and a point on each significant residue |
 | `rmsf_comparison` | The three core values of every condition, with every replicate value |
 
 ## From Python
 
 `rms_decomposition` returns six rows per replicate. `RMS_PARTS` and `MS_PARTS`
-are the names of those rows: `residue_rmsd`, `rmsf` and `offset` in Å, then
+are the names of those rows: `rmsd_per_residue`, `rmsf` and `offset` in Å, then
 `ms_deviation`, `msf` and `ms_offset` in Å², each the mean over the residue's
 atoms of the squared per-atom deviation, RMSF and offset.
 `parts=` gives each row its name, so `rows["rmsf"]` is one result. What the
@@ -200,10 +206,10 @@ lid_rmsf = rows["msf"].over_labels(lambda v: float(v.mean() ** 0.5), "lid_rmsf",
 
 A core or region value is the root of
 the mean of a mean-square row over its residues, which keeps the identity
-`residue_rmsd² = rmsf² + offset²` for the whole set. `over_labels(how, metric,
+`rmsd_per_residue² = rmsf² + offset²` for the whole set. `over_labels(how, metric,
 labels)` turns each replicate's profile into one number, over every label or
 only the ones you pass. `polyzymd.analyses.functions.rmsf` and
-`polyzymd.analyses.functions.residue_rmsd` return a single profile each.
+`polyzymd.analyses.functions.rmsd_per_residue` return a single profile each.
 
 ## Before interpreting the numbers
 

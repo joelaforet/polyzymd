@@ -1,7 +1,7 @@
 """Compare PolyzyMD's per-residue RMSF and RMS deviation with GROMACS ``gmx rmsf``.
 
 For each condition and reference mode, PolyzyMD builds the reference with
-``pz.reference`` and computes ``rmsf``, ``residue_rmsd`` and ``offset`` with
+``pz.reference`` and computes ``rmsf``, ``rmsd_per_residue`` and ``offset`` with
 ``polyzymd.analyses.functions.rms_decomposition``. The same production frames
 of the same atoms, not superposed, are written to a TRR file, and the
 reference positions to a GROMOS96 file, which stores 1e-4 nm. ``gmx rmsf -res``
@@ -145,7 +145,7 @@ def main() -> None:
 
             row = {"n_frames": int(len(frames)), "n_residues": int(len(residues))}
             row["rmsf"] = compare(fluctuation, gmx_fluctuation)
-            row["residue_rmsd"] = compare(deviation, gmx_deviation)
+            row["rmsd_per_residue"] = compare(deviation, gmx_deviation)
             row["offset"] = compare(offset, gmx_offset)
             results[f"{name} {mode}"] = row
             print(
@@ -153,7 +153,7 @@ def main() -> None:
                 + " | ".join(
                     f"{part} r {row[part]['pearson_r']:.8f} mean {row[part]['mean_abs']:.1e} "
                     f"max {row[part]['max_abs']:.1e} A"
-                    for part in ("rmsf", "residue_rmsd", "offset")
+                    for part in ("rmsf", "rmsd_per_residue", "offset")
                 ),
                 flush=True,
             )

@@ -36,7 +36,7 @@ $$
 The averages run over the production frames. RMSF is the fluctuation within
 the sampled ensemble, the quantity `gmx rmsf -o` gives. The offset is how far
 the ensemble's mean structure has moved from the reference. The deviation, the
-quantity `gmx rmsf -od` gives and PolyzyMD calls `residue_rmsd`, combines the
+quantity `gmx rmsf -od` gives and PolyzyMD calls `rmsd_per_residue`, combines the
 two. It is not `rmsd`, which is one number per frame, the root mean square
 over atoms of their distance from the reference; the deviation here is one
 number per atom, the root mean square over frames, averaged per residue. Two conditions can have the
@@ -95,7 +95,7 @@ number per replicate in two ways:
 | `mean_rmsf` | $\tfrac{1}{\lvert S \rvert}\sum_i \text{RMSF}_i$ | Plain mean of the residue values |
 
 Here $\overline{\text{MSF}}_i$ is the mean over the residue's atoms of the
-squared per-atom RMSF. The same forms give `core_offset`, `core_residue_rmsd`
+squared per-atom RMSF. The same forms give `core_offset`, `core_rmsd_per_residue`
 and the region values. Only the root-mean-square form keeps the decomposition
 exact for the whole set: $F_{\text{deviation}}^2 = F_{\text{RMSF}}^2 +
 F_{\text{offset}}^2$. The plain mean is always smaller than or equal to $F$,

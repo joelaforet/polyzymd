@@ -86,7 +86,7 @@ FUNCTION_ANALYSES = {
         "core": None,
         "regions": {},
     },
-    "residue_rmsd": {
+    "rmsd_per_residue": {
         "selection": "protein and name CA",
         "alignment_selection": "protein and name CA",
         "reference_mode": None,
@@ -583,7 +583,7 @@ def _analyze_function(
     Welch's t test. With ``plots``, ``rg`` and ``rmsd`` draw
     ``<name>_timeseries`` and ``<name>_comparison``, and ``rg`` also
     ``rg_distribution``, into ``<output_dir>/figures/<name>/``, as the legacy
-    plugins did. ``rmsf`` and ``residue_rmsd`` go to :func:`_analyze_rmsf`, and ``distances``
+    plugins did. ``rmsf`` and ``rmsd_per_residue`` go to :func:`_analyze_rmsf`, and ``distances``
     to :func:`_analyze_pairs`. Raises
     ``ProtocolError`` for a setting the analysis does not take, or a ``run``
     for ``rg`` or ``rmsd``.
@@ -596,7 +596,7 @@ def _analyze_function(
     pairs = name in (
         "distances",
         "rmsf",
-        "residue_rmsd",
+        "rmsd_per_residue",
         "sasa",
         "secondary_structure",
         "contacts",
@@ -615,7 +615,7 @@ def _analyze_function(
             ),
         )
     study = _study(configs, labels, equilibration, replicates, stride)
-    if name in ("rmsf", "residue_rmsd"):
+    if name in ("rmsf", "rmsd_per_residue"):
         return _analyze_rmsf(name, study, settings, run, recompute, output_dir, plots)
     if name == "sasa":
         return _analyze_sasa(study, settings, run, recompute, output_dir, eq_check, plots)
@@ -692,23 +692,24 @@ def _analyze_rmsf(
     together, and gives for each residue of ``selection`` its RMS deviation
     from the reference, its RMSF about the mean position and the offset of
     the mean position from the reference, labelled by residue ID, with
-    their mean squares. For ``residue_rmsd`` a missing ``reference_mode``
+    their mean squares. For ``rmsd_per_residue`` a missing ``reference_mode``
     is ``"external"`` when a ``reference_file`` is given and ``"centroid"``
     otherwise; ``rmsf`` defaults to ``"centroid"``.
 
     Each replicate's headline value of a quantity is the root of its mean
-    square over the core residues, ``core_residue_rmsd``, ``core_rmsf`` and
-    ``core_offset``, so ``core_residue_rmsd`` squared equals ``core_rmsf``
-    squared plus ``core_offset`` squared (Kuzmanic and Zagrovic 2010,
-    doi:10.1016/j.bpj.2009.11.011). The core is the residues of
+    square over the core residues, ``core_rmsd_per_residue``, ``core_rmsf`` and
+    ``core_offset``, so ``core_rmsd_per_residue`` squared equals ``core_rmsf``
+    squared plus ``core_offset`` squared, because for every atom the mean
+    square deviation is the variance about the mean position plus the squared
+    distance of the mean from the reference. The core is the residues of
     ``selection`` that the MDAnalysis selection ``core`` also selects, by
     default all of them, and must be the same in every replicate. Each entry
-    ``region: selection`` of ``regions`` gives ``<region>_residue_rmsd``,
+    ``region: selection`` of ``regions`` gives ``<region>_rmsd_per_residue``,
     ``<region>_rmsf`` and ``<region>_offset`` the same way. The frames are
     superposed by ``alignment_selection`` whatever the core, so fit on the
     same core atoms to measure motion within that core. ``mean_rmsf`` and
     the other plain means over every residue are kept for reference, and
-    ``residue_rmsd``, ``rmsf`` and ``offset`` are the profiles, compared
+    ``rmsd_per_residue``, ``rmsf`` and ``offset`` are the profiles, compared
     residue by residue. ``run`` picks the reported result and defaults to
     ``core_<name>``. The settings, the resolved reference mode and the
     residues of the core and of each region are stored in
@@ -787,7 +788,7 @@ def _analyze_rmsf(
     if plots:
         folder = _figures_dir(output_dir, name)
         highlight = settings["highlight_residues"] or []
-        names = {"residue_rmsd": "RMS deviation", "rmsf": "RMSF", "offset": "offset"}
+        names = {"rmsd_per_residue": "RMS deviation", "rmsf": "RMSF", "offset": "offset"}
         for part, profile in profiles.items():
             title = f"Per-residue {names[part]}"
             profile.plot(folder, f"{part}_profile", title, None, highlight, "Residue")

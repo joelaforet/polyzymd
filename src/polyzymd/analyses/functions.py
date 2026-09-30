@@ -3,7 +3,7 @@
 The per-frame functions take MDAnalysis ``AtomGroup`` arguments positioned at
 one frame and return one number, so they run through
 :meth:`polyzymd.analyses.study.Study.timeseries` like any function you write.
-The per-replicate functions (:func:`rmsf`, :func:`residue_rmsd`,
+The per-replicate functions (:func:`rmsf`, :func:`rmsd_per_residue`,
 :func:`rms_decomposition`, :func:`residue_sasa`, :func:`dssp_occupancy` and
 :func:`residue_contacts` and :func:`residue_occlusion`) also take the production
 frame indices and return one value per residue, and run through
@@ -314,6 +314,18 @@ def _per_residue(atoms: Any, per_atom: Any) -> Any:
     return np.bincount(residue, weights=per_atom) / np.bincount(residue)
 
 
+def _rms_per_residue(atoms: Any, per_atom: Any) -> Any:
+    """Return each residue's root mean square of per-atom RMS values: ``sqrt(mean(value**2))``.
+
+    This is the square root of the mean over the residue's atoms of each
+    atom's mean square, as ``gmx rmsf -res`` combines atoms, which weights
+    them by mass where PolyzyMD weights them equally.
+    """
+    import numpy as np
+
+    return np.sqrt(_per_residue(atoms, np.asarray(per_atom) ** 2))
+
+
 def rmsf(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     """Return the RMSF in Å of each residue of ``atoms`` over ``frames``.
 
@@ -321,8 +333,9 @@ def rmsf(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     ``MDAnalysis.analysis.rms.RMSF`` gives each atom's root mean square
     fluctuation about its mean position over the frames, as ``gmx rmsf -o``
     does. The reference only decides what the frames are superposed on.
-    Each residue's value is the mean over its atoms in ``atoms``, in the
-    order of ``atoms.residues``.
+    Each residue's value is the square root of the mean over its atoms in
+    ``atoms`` of their squared RMSF, in the order of ``atoms.residues``, as
+    ``gmx rmsf -o -res`` combines the atoms of a residue with equal masses.
 
     Parameters
     ----------
@@ -347,25 +360,29 @@ def rmsf(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     ProtocolError
         If ``reference`` does not hold one position per atom of ``atoms | fit``.
     """
-    return _per_residue(atoms, _superposed_deviations(atoms, fit, reference, frames)[1])
+    return _rms_per_residue(atoms, _superposed_deviations(atoms, fit, reference, frames)[1])
 
 
-def residue_rmsd(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
+def rmsd_per_residue(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     """Return each residue's root mean square deviation in Å from the reference over ``frames``.
 
     After the superposition of :func:`rmsf`, each atom's value is
     ``sqrt(<|x(t) - x_ref|^2>)``, the root mean square over frames of its
-    distance from the reference, as ``gmx rmsf -od`` gives. Each residue's
-    value is the mean over its atoms, and ``residue_rmsd**2 = rmsf**2 +
-    offset**2`` for every atom. Unlike :func:`rmsd`, one number per frame
-    (the root mean square over atoms), this is one number per residue. The
-    arguments are those of :func:`rmsf`.
+    distance from the reference, as ``gmx rmsf -od`` gives ("root mean
+    square deviation with respect to the reference structure", written to
+    ``rmsdev.xvg``). Each residue's value is the square root of the mean over
+    its atoms of their squared values, so ``rmsd_per_residue**2 = rmsf**2 +
+    offset**2`` for every residue as for every atom. Unlike :func:`rmsd`, one
+    number per frame (the root mean square over atoms), this is one number
+    per residue for all frames together; tools such as cpptraj call a
+    per-frame series of per-residue values "per-residue RMSD". The arguments
+    are those of :func:`rmsf`.
     """
-    return _per_residue(atoms, _superposed_deviations(atoms, fit, reference, frames)[0])
+    return _rms_per_residue(atoms, _superposed_deviations(atoms, fit, reference, frames)[0])
 
 
-#: Names of the per-residue means that :func:`rms_decomposition` returns first.
-RMS_PARTS = ("residue_rmsd", "rmsf", "offset")
+#: Names of the per-residue root mean squares that :func:`rms_decomposition` returns first.
+RMS_PARTS = ("rmsd_per_residue", "rmsf", "offset")
 
 #: Names of the per-residue mean squares that :func:`rms_decomposition` returns after them.
 MS_PARTS = ("ms_deviation", "msf", "ms_offset")
@@ -375,13 +392,14 @@ def rms_decomposition(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     """Return each residue's RMS deviation, RMSF and offset, and their mean squares, in one pass.
 
     The first three rows, named in :data:`RMS_PARTS`, are the values of
-    :func:`residue_rmsd` and :func:`rmsf`, and the offset, the distance in
-    Å of each atom's mean position from its reference position, each
-    averaged over the residue's atoms. The last three, named in
-    :data:`MS_PARTS`, are the means over the residue's atoms of the squares
-    of the same per-atom values, in Å². For every atom the squared deviation
-    is the squared RMSF plus the squared offset, so ``ms_deviation`` equals
-    ``msf + ms_offset`` for every residue. The arguments are those of
+    :func:`rmsd_per_residue` and :func:`rmsf`, and the offset, the distance in
+    Å of each atom's mean position from its reference position, each the
+    square root of the mean over the residue's atoms of the squared per-atom
+    values. The last three, named in :data:`MS_PARTS`, are those means of
+    squares, in Å². For every atom the squared deviation is the squared RMSF
+    plus the squared offset, the mean square being the variance plus the
+    squared bias, so ``ms_deviation`` equals ``msf + ms_offset`` and
+    ``rmsd_per_residue**2 = rmsf**2 + offset**2`` for every residue. The arguments are those of
     :func:`rmsf`.
 
     Returns
@@ -392,8 +410,8 @@ def rms_decomposition(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     import numpy as np
 
     parts = _superposed_deviations(atoms, fit, reference, frames)
-    means = [_per_residue(atoms, values) for values in parts]
-    return np.vstack(means + [_per_residue(atoms, values**2) for values in parts])
+    squares = [_per_residue(atoms, values**2) for values in parts]
+    return np.vstack([np.sqrt(square) for square in squares] + squares)
 
 
 #: Probe radius in nm and sphere point count of :func:`sasa` and :func:`residue_sasa`.

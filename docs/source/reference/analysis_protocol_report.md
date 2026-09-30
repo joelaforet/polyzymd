@@ -13,7 +13,7 @@ reads back exactly what `model_dump_json()` wrote.
 | `protocol_version` | `str` | The plugin's `Analysis.protocol_version`. With `analysis` it identifies the code that defined the metric. Every plugin starts at `"1"` and bumps it when the meaning, unit or estimator of a reported metric changes. |
 | `metric` | `str` | Primary metric key: the first key the plugin's `extract_metrics()` returns. |
 | `unit` | `str \| None` | Unit of `metric`, for example `A` or `%`. `None` marks a dimensionless metric, and also a plugin that declares no unit. |
-| `run` | `str \| None` | Selected result when the analysis reports several: for sasa each context's total and per-residue SASA; for distances each pair's mean distance (`<label>`) and fraction below threshold; for hydrogen_bonds each summary's counts, lifetimes, per-residue and per-pair occupancies; for rmsf and residue_rmsd the core, region and plain-mean values and the per-residue profiles. `None` when the analysis reports one result. |
+| `run` | `str \| None` | Selected result when the analysis reports several: for sasa each context's total and per-residue SASA; for distances each pair's mean distance (`<label>`) and fraction below threshold; for hydrogen_bonds each summary's counts, lifetimes, per-residue and per-pair occupancies; for rmsf and rmsd_per_residue the core, region and plain-mean values and the per-residue profiles. `None` when the analysis reports one result. |
 | `all_metrics` | `list[str]` | Every metric key the plugin reported, `metric` first. Only `metric` is summarised in `conditions` and `pairwise`. |
 | `all_runs` | `list[str]` | Every run or pair label the plugin reported, `run` first. Empty when the plugin reports one run. Select another with `--run LABEL`. |
 | `equilibration` | `str` | Equilibration window discarded from the start of every replicate, for example `10ns`. Applied uniformly to every replicate of every condition. |
@@ -74,7 +74,7 @@ rows the JSON form holds; every one of them is kept there.
 | `mdanalysis_version` | `str \| None` | Installed MDAnalysis version, `None` when it cannot be determined. |
 | `config_hashes` | `dict[str, str]` | SHA-256 of each simulation config file, keyed by condition label. |
 | `settings_fingerprint` | `str \| None` | Fingerprint of the resolved plugin settings, the same one the aggregate cache is validated against. |
-| `settings` | `dict` | Settings a study-API analysis ran with. For rmsf and residue_rmsd: every setting, the resolved `reference_mode`, and under `residues` the residue IDs of the core and of each region. Empty for other analyses. |
+| `settings` | `dict` | Settings a study-API analysis ran with. For rmsf and rmsd_per_residue: every setting, the resolved `reference_mode`, and under `residues` the residue IDs of the core and of each region. Empty for other analyses. |
 | `output_paths` | `dict[str, str]` | `comparison_result` is the cached comparison JSON; `figures` is the directory holding the generated plots. Either may be absent. |
 
 ## Verdict vocabulary

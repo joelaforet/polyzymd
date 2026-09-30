@@ -84,7 +84,7 @@ Each shipped analysis is a function in `polyzymd.analyses.functions`, and
 | `rg` | Radius of gyration |
 | `rmsd` | RMSD from a reference structure, one value per frame |
 | `rmsf` | Per-residue fluctuations |
-| `residue_rmsd` | Per-residue RMS deviation from a reference over the frames, as `gmx rmsf -od` gives |
+| `rmsd_per_residue` | Per-residue RMS deviation from a reference over the frames, as `gmx rmsf -od` gives |
 | `sasa` | Solvent-accessible surface area |
 | `secondary_structure` | DSSP secondary-structure fractions |
 | `contacts` | Polymer-protein contacts and how long they last |

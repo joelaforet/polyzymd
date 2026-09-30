@@ -25,14 +25,15 @@ on the reference; `reference`, the reference positions of `atoms | fit` from
 `pz.reference` with the selection `"(<atoms>) or (<fit>)"`; and `frames`, the
 production frame indices. Every frame is superposed on the reference by the
 `fit` atoms, with the rotation of MDAnalysis `align.AlignTraj`, on a copy of
-the coordinates. Each per-atom value is then averaged over the residue's atoms,
-giving one value per residue in the order of `atoms.residues`.
+the coordinates. Each residue's value is the square root of the mean over its
+atoms of the squared per-atom values, as `gmx rmsf -res` combines atoms with
+equal masses, giving one value per residue in the order of `atoms.residues`.
 
 | Function | Arguments | Returns | Measurement | Command |
 |---|---|---|---|---|
 | `rmsf` | `atoms`, `fit`, `reference`, `frames` | one value per residue, Å | MDAnalysis `rms.RMSF` of the superposed positions: the fluctuation of each atom about its mean position, as `gmx rmsf -o` gives | `polyzymd analyze rmsf` |
-| `residue_rmsd` | `atoms`, `fit`, `reference`, `frames` | one value per residue, Å | Root mean square over frames of each atom's distance from its reference position, as `gmx rmsf -od` gives; `residue_rmsd² = rmsf² + offset²` per atom. Not `rmsd`, which is one value per frame, the root mean square over atoms | `polyzymd analyze residue_rmsd` |
-| `rms_decomposition` | `atoms`, `fit`, `reference`, `frames` | six rows of one value per residue | Rows `RMS_PARTS = ("residue_rmsd", "rmsf", "offset")`, the offset being the distance of each atom's mean position from its reference position, in Å; then rows `MS_PARTS = ("ms_deviation", "msf", "ms_offset")`, the means over each residue's atoms of the squared per-atom deviation, RMSF and offset, in Å². `ms_deviation = msf + ms_offset` for every residue | `polyzymd analyze rmsf`, `polyzymd analyze residue_rmsd` |
+| `rmsd_per_residue` | `atoms`, `fit`, `reference`, `frames` | one value per residue, Å | Root mean square over frames of each atom's distance from its reference position, as `gmx rmsf -od` gives; `rmsd_per_residue² = rmsf² + offset²` per atom. Not `rmsd`, which is one value per frame, the root mean square over atoms | `polyzymd analyze rmsd_per_residue` |
+| `rms_decomposition` | `atoms`, `fit`, `reference`, `frames` | six rows of one value per residue | Rows `RMS_PARTS = ("rmsd_per_residue", "rmsf", "offset")`, the offset being the distance of each atom's mean position from its reference position, in Å; then rows `MS_PARTS = ("ms_deviation", "msf", "ms_offset")`, the means over each residue's atoms of the squared per-atom deviation, RMSF and offset, in Å². `ms_deviation = msf + ms_offset` for every residue | `polyzymd analyze rmsf`, `polyzymd analyze rmsd_per_residue` |
 | `residue_sasa` | `target`, `context` and `frames`, as `sasa` takes them, and the production frames | one value per target residue, Å² | Each frame's per-atom SASA as in `sasa`, one frame per MDTraj call, summed over each residue's target atoms and averaged over the frames | `polyzymd analyze sasa --run <context>_residues` |
 | `dssp_occupancy` | `atoms`, whole residues, the production frames and `simplified` (default true) | one row per class, one value per residue, fraction of frames | `mdtraj.compute_dssp(simplified=simplified)` on every frame, 200 frames per call; the rows are helix, strand, coil and unassigned of `DSSP_SIMPLIFIED`, or with `simplified=False` the eight classes and unassigned of `DSSP_CLASSES`; one MDTraj chain per chain ID or segment | `polyzymd analyze secondary_structure` |
 | `residue_contacts` | `protein` and `polymer`, `AtomGroup`s; the production frames; `cutoff` (4.0 Å), `types` (none) and `pbc` (true) | one row for the polymer, then one row per residue name in `types`, one value per protein residue, fraction of frames | On every frame, MDAnalysis `lib.distances.capped_distance` between the given polymer and protein atoms, with the minimum image of the frame's box when `pbc` is true; a residue is in contact when any of its atoms is within `cutoff` of a polymer atom, or for a row of `types`, of a polymer atom of that residue name | `polyzymd analyze contacts --set method=distance` |
@@ -72,21 +73,21 @@ routine on the study API rather than an analysis: it counts each triad
 hydrogen bond with `hbond_count` and combines them with `Timeseries.transform`;
 see {doc}`../how_to/analysis_triad_quickstart`.
 
-`polyzymd analyze rmsf` and `polyzymd analyze residue_rmsd` run
+`polyzymd analyze rmsf` and `polyzymd analyze rmsd_per_residue` run
 `rms_decomposition` once per replicate, with `selection` measured and
 `alignment_selection` fitted (both `protein and name CA` by default) against
 `pz.reference(reference_mode, "(selection) or (alignment_selection)", frame=reference_frame, file=reference_file, alignment=alignment_selection)`.
-`reference_mode` defaults to `centroid` for `rmsf`; for `residue_rmsd` it is
+`reference_mode` defaults to `centroid` for `rmsf`; for `rmsd_per_residue` it is
 `external` when `reference_file` is set and `centroid` otherwise. Each
 replicate's `core_<part>` value is the square root of the mean over the core
 residues of the part's mean-square row, so
-`core_residue_rmsd² = core_rmsf² + core_offset²`. The core is the residues of
+`core_rmsd_per_residue² = core_rmsf² + core_offset²`. The core is the residues of
 `selection` that `--set core=...` also selects, by default all of them. Each
 entry of `--set regions='{name: selection}'` gives `<name>_<part>` the same way.
 `mean_<part>` is the plain mean of the per-residue values, and `--run
-rmsf`, `offset` or `residue_rmsd` compares the profile residue by residue. The
-default result is `core_rmsf` for `rmsf` and `core_residue_rmsd` for
-`residue_rmsd`. The residues of the core and of each region are recorded
+rmsf`, `offset` or `rmsd_per_residue` compares the profile residue by residue. The
+default result is `core_rmsf` for `rmsf` and `core_rmsd_per_residue` for
+`rmsd_per_residue`. The residues of the core and of each region are recorded
 under `provenance.settings`. See {doc}`../how_to/analysis_rmsf_quickstart`.
 
 `polyzymd analyze sasa` measures `sasa` of `--set target=...` (default
@@ -174,7 +175,7 @@ and records the folder under `output_paths.figures` in the JSON report;
 |---|---|
 | `rg` | `rg_timeseries` (every replicate against time), `rg_comparison` (condition means with every replicate value), `rg_distribution` (per-frame distribution) |
 | `rmsd` | `rmsd_timeseries`, `rmsd_comparison` |
-| `rmsf`, `residue_rmsd` | `rmsf_profile`, `offset_profile` and `residue_rmsd_profile` (each replicate and each condition's mean with its interval, `highlight_residues` marked), `rms_decomposition` (the three profiles of each condition together), `rmsf_comparison` (the three core values), and with several conditions `rmsf_difference`, `offset_difference` and `residue_rmsd_difference` (each condition minus the control at every residue, with the interval of the difference and the significant residues marked) |
+| `rmsf`, `rmsd_per_residue` | `rmsf_profile`, `offset_profile` and `rmsd_per_residue_profile` (each replicate and each condition's mean with its interval, `highlight_residues` marked), `rms_decomposition` (the three profiles of each condition together), `rmsf_comparison` (the three core values), and with several conditions `rmsf_difference`, `offset_difference` and `rmsd_per_residue_difference` (each condition minus the control at every residue, with the interval of the difference and the significant residues marked) |
 | `sasa` | For a total, `sasa_timeseries_<name>`, `sasa_comparison_<name>` and `sasa_distribution_<name>`; for `<name>_residues`, `sasa_profile_<name>` and with several conditions `sasa_difference_<name>` |
 | `secondary_structure` | `ss_content_bars` (every class of the scheme but unassigned); for a total `ss_<name>_comparison`; for `<name>_residues`, `ss_<name>_profile`, `ss_classes_<name>` and with several conditions `ss_<name>_difference` |
 | `contacts` | `contacts_class_bars` (each amino-acid class's mean contact fraction); for a one-value result `contacts_<run>_comparison`; for a residue result, `contacts_<name>_profile` and with several conditions `contacts_<name>_difference` |

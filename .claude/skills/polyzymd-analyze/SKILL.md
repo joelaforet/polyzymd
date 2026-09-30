@@ -24,7 +24,7 @@ bare `polyzymd` on PATH points at a system Python without click. Always go
 through `pixi run -e analysis`.
 
 `pixi run -e analysis polyzymd analyze --help` lists the analysis names: rg,
-rmsd, rmsf, residue_rmsd, sasa, secondary_structure, contacts, native_contacts,
+rmsd, rmsf, rmsd_per_residue, sasa, secondary_structure, contacts, native_contacts,
 hydrogen_bonds and distances, the keys of
 `polyzymd.analyses.protocols.FUNCTION_ANALYSES`. Every one reads `-c config.yaml`.
 For contacts, `--run mean_lifetime` reports how long contacts last; for

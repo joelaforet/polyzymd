@@ -6,7 +6,7 @@ checked against, and what those checks do and do not establish.
 ## What the code does
 
 `polyzymd.analyses.functions.rms_decomposition` and the single-profile
-functions `rmsf` and `residue_rmsd` do the following for each replicate:
+functions `rmsf` and `rmsd_per_residue` do the following for each replicate:
 
 1. Superpose every production frame on the reference by the fitted atoms,
    with the same rotation as MDAnalysis `align.AlignTraj`, on a copy of the
@@ -30,7 +30,7 @@ restart chain, are exactly the frames used.
 rotated and translated copies of a small structure:
 
 - `rmsf` equals MDAnalysis `rms.RMSF` after `AlignTraj` onto the same
-  reference, and `residue_rmsd` and the offset equal the definitions computed
+  reference, and `rmsd_per_residue` and the offset equal the definitions computed
   by hand from the same aligned coordinates, to 1e-5 Å;
 - the squared deviation equals the squared RMSF plus the squared offset for
   every atom, and the per-residue mean squares satisfy
@@ -38,7 +38,7 @@ rotated and translated copies of a small structure:
 - fitting on different atoms gives different values, and the trajectory's
   coordinates are unchanged afterwards;
 - the core and region values are the root of the mean of `msf` over their
-  residues, and `core_residue_rmsd² = core_rmsf² + core_offset²` for every
+  residues, and `core_rmsd_per_residue² = core_rmsf² + core_offset²` for every
   replicate;
 - a reference with the wrong number of atoms, a core that selects no residues
   and a reserved region name are refused;
@@ -53,7 +53,7 @@ four reference modes, and to within 3e-8 Å² for the core and region values.
 
 `scripts/benchmarks/rmsf_gromacs_parity.py` compares the per-residue values
 with GROMACS `gmx rmsf`. For each reference mode, PolyzyMD builds the reference
-with `pz.reference` and computes `rmsf`, `residue_rmsd` and `offset`. The same
+with `pz.reference` and computes `rmsf`, `rmsd_per_residue` and `offset`. The same
 production frames of the same atoms, not superposed, are written to a TRR file
 and the reference positions to a GROMOS96 file, and `gmx rmsf -res` fits every
 frame to that reference and writes the fluctuation (`-o`) and the deviation
@@ -65,7 +65,7 @@ Run in September 2026 with GROMACS 2026.0 and MDAnalysis 2.10.0 on two
 residues, against the 1ISP crystal for `external`, production frame 50 for
 `frame`):
 
-| Replicate | Mode | Frames | `rmsf` vs `-o`: r, mean \|Δ\|, max \|Δ\| | `residue_rmsd` vs `-od`: r, mean \|Δ\|, max \|Δ\| |
+| Replicate | Mode | Frames | `rmsf` vs `-o`: r, mean \|Δ\|, max \|Δ\| | `rmsd_per_residue` vs `-od`: r, mean \|Δ\|, max \|Δ\| |
 |---|---|---|---|---|
 | No polymer | `external` | 6,418 | 0.99999996, 2.7e-4 Å, 5.0e-4 Å | 0.99999999, 2.4e-4 Å, 5.2e-4 Å |
 | No polymer | `average` | 6,418 | 0.99999996, 2.6e-4 Å, 5.1e-4 Å | 0.99999996, 2.6e-4 Å, 5.1e-4 Å |
@@ -86,9 +86,16 @@ offset of almost zero (below 1.2e-4 Å), since the reference is the mean
 structure itself.
 
 With one atom per residue, GROMACS fits with equal masses, as PolyzyMD does.
-For selections with several atoms of different masses per residue, GROMACS
-weights its fit by mass and PolyzyMD does not, so the two are not expected to
-match.
+With several atoms per residue, both combine them the same way, the square
+root of the mean over the residue's atoms of each atom's mean square, but
+GROMACS weights the fit and that mean by mass, and PolyzyMD weights atoms
+equally. On the same replicate with the Cα and C atoms of residues 4 to 174,
+GROMACS, reading a GROMOS96 file without masses, took 13.019 for CA (the
+united-atom CH mass) and 12.011 for C: its `-res` values equal the mass-weighted
+root mean square of its own per-atom values within 9e-5 nm, two roundings, and
+PolyzyMD's differ from them by at most 0.03 Å, with a correlation above
+0.9999. For a residue whose atoms have equal masses the two are the same
+quantity.
 
 ## Scope
 
