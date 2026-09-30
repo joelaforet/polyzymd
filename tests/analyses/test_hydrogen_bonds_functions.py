@@ -1,4 +1,4 @@
-"""Tests for hbond_atoms, hydrogen_bonds, hbond_lifetimes, event_lifetimes and the occupancies.
+"""Tests for hbond_atoms, hydrogen_bonds, hbond_count, hbond_lifetimes, event_lifetimes and occupancies.
 
 Every test builds a small MDAnalysis universe in memory with elements,
 residue names, residue IDs, chain IDs, bonds and a box, and places donors,
@@ -22,6 +22,7 @@ from polyzymd.analyses.functions import (
     contact_events,
     event_lifetimes,
     hbond_atoms,
+    hbond_count,
     hbond_lifetimes,
     hydrogen_bonds,
     residue_hbond_occupancy,
@@ -365,6 +366,42 @@ def test_explicit_donors_pair_with_hydrogens_by_distance() -> None:
     result = hydrogen_bonds(protein, polymer, range(n), donors=universe.select_atoms("name O2"))
 
     assert result.tolist() == pytest.approx([sum(egm) / n, sum(egm) / n, sum(egm) / n])
+
+
+def test_hbond_count_counts_the_bonds_of_the_current_frame() -> None:
+    universe = _many()
+    protein, polymer = _groups(universe)
+    expected = [int(s) + int(e) for s, e, _ in MANY_SCHEDULE]
+
+    counts = []
+    for frame in range(len(MANY_SCHEDULE)):
+        universe.trajectory[frame]
+        counts.append(hbond_count(protein, polymer))
+
+    assert counts == expected
+    universe.trajectory[1]
+    assert hbond_count(protein, None) == 1.0
+    assert hbond_count(protein, polymer, acceptors=universe.select_atoms("name O1")) == 1.0
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="HydrogenBondAnalysis.run moves the trajectory, and hbond_count does not return "
+    "it to the frame it measured, so a plain loop over the trajectory revisits frames and "
+    "positions read after the call belong to another frame",
+)
+def test_hbond_count_leaves_the_trajectory_at_the_frame_it_measured() -> None:
+    universe = _many()
+    protein, polymer = _groups(universe)
+
+    visited, counts = [], []
+    for ts in universe.trajectory:
+        visited.append(ts.frame)
+        counts.append(hbond_count(protein, polymer))
+        assert universe.trajectory.ts.frame == ts.frame
+
+    assert visited == list(range(len(MANY_SCHEDULE)))
+    assert counts == [int(s) + int(e) for s, e, _ in MANY_SCHEDULE]
 
 
 # ---------------------------------------------------------------------------
