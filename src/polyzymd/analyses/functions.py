@@ -725,6 +725,8 @@ def residue_contacts(
     """
     import numpy as np
 
+    if len(polymer) == 0:
+        return np.full((1 + len(types), len(protein.residues)), np.nan)
     counts = np.zeros((1 + len(types), len(protein.residues)))
     for _, touched in _distance_frames(protein, polymer, frames, cutoff, types, pbc):
         counts += touched
@@ -860,6 +862,8 @@ def residue_occlusion(
     import numpy as np
 
     n_measured = len(_measured_residues(protein, max_asa))
+    if len(occluder) == 0:
+        return np.full((len(OCCLUSION_PARTS) + len(types), n_measured), np.nan)
     sums = np.zeros((len(OCCLUSION_PARTS) + len(types), n_measured))
     for _, contact, exposed, alone, covered in _occlusion_frames(
         protein,
@@ -1114,6 +1118,8 @@ def contact_lifetimes(
             hint=f"Pass only {', '.join(sorted(known))}.",
         )
     settings.update(options)
+    if len(polymer) == 0:
+        return np.full((len(LIFETIME_PARTS), 1 + len(types)), np.nan)
     if method == "occlusion":
         stream = (
             (time, contact)
@@ -1339,6 +1345,11 @@ def _hbond_events(
     return events, frames
 
 
+def _empty(group_a: Any, group_b: Any) -> bool:
+    """Return whether ``group_a``, or ``group_b`` when given, holds no atoms."""
+    return len(group_a) == 0 or (group_b is not None and len(group_b) == 0)
+
+
 def hydrogen_bonds(
     group_a: Any,
     group_b: Any = None,
@@ -1372,6 +1383,8 @@ def hydrogen_bonds(
     """
     import numpy as np
 
+    if _empty(group_a, group_b):
+        return np.full(len(HBOND_PARTS), np.nan)
     events, frames = _hbond_events(
         group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
     )
@@ -1431,6 +1444,8 @@ def hbond_lifetimes(
             f"hbond_lifetimes: key must be 'residue' or 'atom', got {key!r}.",
             hint="Pass key='residue' for residue pairs or key='atom' for donor-acceptor atoms.",
         )
+    if _empty(group_a, group_b):
+        return np.full(len(LIFETIME_PARTS), np.nan)
     events, frames = _hbond_events(
         group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
     )
@@ -1477,6 +1492,8 @@ def residue_hbond_occupancy(
     """
     import numpy as np
 
+    if _empty(group_a, group_b):
+        return np.full(len(group_a.residues), np.nan)
     events, frames = _hbond_events(
         group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
     )
@@ -1545,6 +1562,8 @@ def residue_pair_hbond_occupancy(
     """
     import numpy as np
 
+    if _empty(group_a, group_b):
+        return [], np.zeros(0)
     events, frames = _hbond_events(
         group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
     )
@@ -1591,6 +1610,8 @@ def hbond_count(
     float
         Number of hydrogen bonds.
     """
+    if _empty(group_a, group_b):
+        return float("nan")
     frame = int(group_a.universe.trajectory.ts.frame)
     events, _ = _hbond_events(
         group_a, group_b, [frame], d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors

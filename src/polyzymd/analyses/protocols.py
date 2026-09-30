@@ -802,6 +802,77 @@ def _analyze_rmsf(
     return report.model_copy(update={"analysis": name, "run": run, "all_runs": runs})
 
 
+def _empty_selections(study: Any, selections: dict[str, str]) -> dict[tuple[str, int], list[str]]:
+    """Return, for each replicate where a named selection matches no atoms, those selections."""
+    empty: dict[tuple[str, int], list[str]] = {}
+    for condition in study:
+        for replicate in condition.replicates:
+            universe = replicate.universe()
+            missing = [
+                f"{name} {selection!r}"
+                for name, selection in selections.items()
+                if len(universe.select_atoms(selection)) == 0
+            ]
+            if missing:
+                empty[(condition.label, replicate.index)] = missing
+    return empty
+
+
+def _first_universe(study: Any, empty: dict[tuple[str, int], list[str]], analysis: str) -> Any:
+    """Return the universe of the first replicate whose selections all match atoms."""
+    for condition in study:
+        for replicate in condition.replicates:
+            if (condition.label, replicate.index) not in empty:
+                return replicate.universe()
+    missing = sorted({name for names in empty.values() for name in names})
+    raise ProtocolError(
+        f"{analysis}: the selections {', '.join(missing)} match no atoms in any replicate.",
+        hint="Choose selections that pick atoms, such as 'chainid A' for the protein and "
+        "'chainid C' for the polymer.",
+    )
+
+
+def _report_skipping(
+    values: Any, study: Any, empty: dict[tuple[str, int], list[str]], analysis: str
+) -> ProtocolReport:
+    """Summarise or compare ``values`` without the replicates where a selection matched no atoms.
+
+    Those replicates are left out of every statistic, and a condition left
+    without replicates is left out of the report, each with a warning. When
+    the control is left out, the other conditions are summarised and not
+    compared.
+    """
+    if empty:
+        values.rows = {
+            label: [row for row in rows if (label, row[0]) not in empty]
+            for label, rows in values.rows.items()
+        }
+    labels = [condition.label for condition in study]
+    kept = [label for label in labels if values.rows.get(label)]
+    control = labels[0]
+    if len(kept) > 1 and control in kept:
+        report = values.compare(control=control, conditions=kept)
+    else:
+        report = values.summary(conditions=kept)
+    by_condition: dict[str, list[str]] = {}
+    for (label, index), missing in sorted(empty.items()):
+        by_condition.setdefault(label, []).append(f"{index} ({'; '.join(missing)})")
+    for label, entries in by_condition.items():
+        left = "is left out" if label not in kept else "are left out"
+        what = "the condition" if label not in kept else "those replicates"
+        report.warnings.append(
+            f"{analysis}: in condition {label}, replicate {', '.join(entries)} matched no "
+            f"atoms, so {what} {left} of the statistics."
+        )
+    if len(labels) > 1 and control not in kept:
+        report.warnings.append(
+            f"{analysis}: the control {control} has no replicate where every selection matches "
+            "atoms, so the other conditions are summarised and not compared. Give a condition "
+            "with those atoms first to compare against it."
+        )
+    return report
+
+
 def _hbond_summaries(settings: dict) -> dict[str, tuple[str, str | None]]:
     """Return each summary's name with the selections of its groups, the second ``None`` for within."""
     groups = settings["groups"] or {}
@@ -918,13 +989,12 @@ def _analyze_hydrogen_bonds(
         )
     first, second = summaries[summary]
     both = first if second is None else f"({first}) or ({second})"
-    universe = next(iter(study)).replicates[0].universe()
-    for selection in [first, *([] if second is None else [second])]:
-        if len(universe.select_atoms(selection)) == 0:
-            raise ProtocolError(
-                f"hydrogen_bonds: the selection {selection!r} of summary {summary!r} picks no atoms.",
-                hint="Choose group selections that pick atoms, such as 'chainid A'.",
-            )
+    group_selections = {
+        "first group": first,
+        **({} if second is None else {"second group": second}),
+    }
+    skipped = _empty_selections(study, group_selections)
+    universe = _first_universe(study, skipped, "hydrogen_bonds")
     explicit = {
         key: select(f"({both}) and ({settings[key]})")
         for key in ("donors", "hydrogens", "acceptors")
@@ -1017,7 +1087,7 @@ def _analyze_hydrogen_bonds(
             **options,
         )
     values.metric = run
-    report = values.compare() if len(study) > 1 else values.summary()
+    report = _report_skipping(values, study, skipped, "hydrogen_bonds")
     if part in life:
         empty = [
             f"{label} replicate {row[0]}"
@@ -1486,15 +1556,10 @@ def _analyze_contacts(
         protein = f"({protein}) and not element H"
         polymer = f"({polymer}) and not element H"
     regions = settings["regions"] or {}
-    first = next(iter(study)).replicates[0].universe()
+    skipped = _empty_selections(study, {"protein_selection": protein, "polymer_selection": polymer})
+    first = _first_universe(study, skipped, "contacts")
     protein_atoms = first.select_atoms(protein)
     polymer_atoms = first.select_atoms(polymer)
-    if len(protein_atoms) == 0 or len(polymer_atoms) == 0:
-        raise ProtocolError(
-            f"contacts: protein_selection {protein!r} picks {len(protein_atoms)} atoms and "
-            f"polymer_selection {polymer!r} picks {len(polymer_atoms)}.",
-            hint="Choose selections that pick atoms, such as 'protein' and 'resname SBM EGM'.",
-        )
     types = sorted({str(name) for name in polymer_atoms.resnames})
 
     def measured(residues: Any) -> list:
@@ -1599,17 +1664,17 @@ def _analyze_contacts(
             "n_events": (None, (0.0, None)),
             "censored_fraction": (None, (0.0, 1.0)),
         }[part]
-        report = values.compare() if len(study) > 1 else values.summary()
-        empty = [
+        report = _report_skipping(values, study, skipped, "contacts")
+        no_events = [
             f"{label} replicate {row[0]}"
             for label, table_rows in values.rows.items()
             for row in table_rows
             if not np.isfinite(row[1])
         ]
-        if empty:
+        if no_events:
             report.warnings.append(
-                f"contacts: {', '.join(empty)} have no contact event for {group}, so {run} is "
-                "undefined (nan) there."
+                f"contacts: {', '.join(no_events)} have no contact event for {group}, so {run} "
+                "is undefined (nan) there."
             )
         report.provenance.settings = {
             **{
@@ -1693,7 +1758,7 @@ def _analyze_contacts(
         raise RuntimeError("contacts: the planned results differ from the computed ones.")
     runs = all_runs
     values = residue_runs[run] if run in residue_runs else totals[run]
-    report = values.compare() if len(study) > 1 else values.summary()
+    report = _report_skipping(values, study, skipped, "contacts")
     if unmeasured:
         report.warnings.append(
             f"contacts: {len(unmeasured)} residues of the protein selection have no maximum "
