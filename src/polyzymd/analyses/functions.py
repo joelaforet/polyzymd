@@ -926,6 +926,11 @@ def contact_lifetimes(
     from polyzymd.analyses.exceptions import ProtocolError
 
     frames = list(frames)
+    if tolerance_ps < 0:
+        raise ProtocolError(
+            f"contact_lifetimes: tolerance_ps must be at least 0, got {tolerance_ps}.",
+            hint="Pass tolerance_ps=0 for events that end at the first absent frame.",
+        )
     if method == "occlusion":
         known = {"threshold", "max_asa", "pbc", "probe_radius_nm", "n_sphere_points"}
         settings = {

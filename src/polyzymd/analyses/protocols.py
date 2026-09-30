@@ -1060,6 +1060,12 @@ def _analyze_contacts(
             f"contacts: max_asa must be 'theoretical' or 'empirical', got {settings['max_asa']!r}.",
             hint="Pass --set max_asa=theoretical, the values Tien et al. 2013 recommend.",
         )
+    tolerance = float(settings["tolerance_ps"])
+    if tolerance < 0:
+        raise ProtocolError(
+            f"contacts: tolerance_ps must be at least 0, got {tolerance}.",
+            hint="Pass --set tolerance_ps=0 for events that end at the first absent frame.",
+        )
     protein = str(settings["protein_selection"])
     polymer = str(settings["polymer_selection"])
     types_filter = settings["polymer_types"]
@@ -1157,12 +1163,6 @@ def _analyze_contacts(
             f"contacts: no result named {run!r}.", hint=f"Use --run with one of {all_runs}."
         )
     if run in lifetime_runs:
-        tolerance = float(settings["tolerance_ps"])
-        if tolerance < 0:
-            raise ProtocolError(
-                f"contacts: tolerance_ps must be at least 0, got {tolerance}.",
-                hint="Pass --set tolerance_ps=0 for events that end at the first absent frame.",
-            )
         life = {key: value for key, value in options.items() if key != "types"}
         if not occlusion:
             life["method"] = method

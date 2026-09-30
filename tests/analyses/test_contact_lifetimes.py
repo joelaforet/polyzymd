@@ -605,11 +605,6 @@ def test_analyze_refuses_a_negative_tolerance(config) -> None:
     assert "tolerance_ps=0" in info.value.hint
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="tolerance_ps is only checked when a lifetime run is chosen; a negative value "
-    "is accepted silently with --run coverage",
-)
 def test_analyze_refuses_a_negative_tolerance_for_any_run(config, tmp_path) -> None:
     with pytest.raises(ProtocolError, match="tolerance_ps must be at least 0"):
         analyze("contacts", [config], **_options(tmp_path, {"tolerance_ps": -1.0}))
