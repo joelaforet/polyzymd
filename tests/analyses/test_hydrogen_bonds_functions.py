@@ -202,12 +202,6 @@ def test_no_bond_gives_zeros() -> None:
     assert hydrogen_bonds(protein, polymer, [0, 1]).tolist() == [0.0, 0.0, 0.0]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=TypeError,
-    reason="frames defaults to None, but _hbond_events iterates it, so the documented "
-    "default raises TypeError instead of measuring every frame",
-)
 def test_frames_left_out_measures_every_frame() -> None:
     universe = _pair([(3.0, 175.0), None])
     protein, polymer = _groups(universe)
@@ -384,12 +378,6 @@ def test_hbond_count_counts_the_bonds_of_the_current_frame() -> None:
     assert hbond_count(protein, polymer, acceptors=universe.select_atoms("name O1")) == 1.0
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="HydrogenBondAnalysis.run moves the trajectory, and hbond_count does not return "
-    "it to the frame it measured, so a plain loop over the trajectory revisits frames and "
-    "positions read after the call belong to another frame",
-)
 def test_hbond_count_leaves_the_trajectory_at_the_frame_it_measured() -> None:
     universe = _many()
     protein, polymer = _groups(universe)
@@ -628,12 +616,6 @@ def test_hydrogen_bonds_refuses_unbonded_hydrogens_unless_they_are_given() -> No
     assert result.tolist() == pytest.approx([1.0, 1.0, 1.0])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=mda.exceptions.NoDataError,
-    reason="hbond_atoms reads bonded_atoms without checking the universe has bonds, so a "
-    "universe without a bonds attribute raises NoDataError instead of the ProtocolError",
-)
 def test_hbond_atoms_refuses_a_universe_without_bonds() -> None:
     universe = mda.Universe.empty(2, n_residues=1, atom_resindex=[0, 0], trajectory=True)
     universe.add_TopologyAttr("elements", ["O", "H"])
@@ -719,12 +701,6 @@ def test_events_touching_the_first_or_last_frame_are_censored() -> None:
     assert atom[MEAN] == pytest.approx(0.1 + (2 / 3) * (0.8 - 0.1))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ValueError,
-    reason="contact_events concatenates an empty list when the mask has no column, so "
-    "event_lifetimes raises instead of returning nan, 0 events and nan censored",
-)
 def test_no_hydrogen_bond_gives_nan_lifetime_and_no_events() -> None:
     universe = _switch([None, None, None])
     protein, polymer = _groups(universe)
@@ -784,12 +760,6 @@ def test_event_lifetimes_names_the_caller_in_its_refusals() -> None:
         event_lifetimes(np.ones((3, 2)), [0.0, 10.0, 20.0], -5.0, "my_lifetimes")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ValueError,
-    reason="contact_events concatenates an empty list when the mask has no column, so "
-    "event_lifetimes raises instead of returning nan, 0 events and nan censored",
-)
 def test_event_lifetimes_without_series_is_nan() -> None:
     result = event_lifetimes(np.zeros((4, 0)), [0.0, 1.0, 2.0, 3.0], 0.0)
 

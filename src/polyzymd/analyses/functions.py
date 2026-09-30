@@ -1010,6 +1010,8 @@ def contact_events(mask: Any, gap: int = 0) -> tuple[Any, Any]:
         ends = np.flatnonzero(change[:, column] == -1)
         lengths.append(ends - starts)
         censored.append((starts == 0) | (ends == mask.shape[0]))
+    if not lengths:
+        return np.zeros(0, dtype=int), np.zeros(0, dtype=bool)
     return np.concatenate(lengths).astype(int), np.concatenate(censored).astype(bool)
 
 
@@ -1234,8 +1236,9 @@ def hbond_atoms(atoms: Any) -> tuple[Any, Any]:
     elements = np.asarray([str(e).strip().upper() for e in atoms.elements])
     hydrogens = atoms[elements == "H"]
     polar = {"N", "O", "S"}
-    donated, orphans = [], 0
-    for hydrogen in hydrogens:
+    bonded = hasattr(atoms.universe, "bonds")
+    donated, orphans = [], 0 if bonded else len(hydrogens)
+    for hydrogen in hydrogens if bonded else []:
         partners = hydrogen.bonded_atoms
         if len(partners) == 0:
             orphans += 1
@@ -1252,7 +1255,7 @@ def hbond_atoms(atoms: Any) -> tuple[Any, Any]:
     acceptors = [
         atom.index
         for atom in candidates
-        if str(atom.element).strip().upper() == "O" or len(atom.bonded_atoms) <= 2
+        if str(atom.element).strip().upper() == "O" or (bonded and len(atom.bonded_atoms) <= 2)
     ]
     universe = atoms.universe
     return universe.atoms[np.asarray(donated, dtype=int)], universe.atoms[
@@ -1288,9 +1291,9 @@ def _hbond_events(
     import numpy as np
     from MDAnalysis.analysis.hydrogenbonds import HydrogenBondAnalysis
 
-    frames = [int(f) for f in frames]
     both = group_a if group_b is None else group_a | group_b
     universe = both.universe
+    frames = [int(f) for f in (range(len(universe.trajectory)) if frames is None else frames)]
     key = (
         id(universe),
         group_a.indices.tobytes(),
@@ -1322,7 +1325,10 @@ def _hbond_events(
             d_h_a_angle_cutoff=d_h_a_angle_cutoff,
             update_selections=False,
         )
+        current = int(universe.trajectory.ts.frame)
         analysis.run(frames=frames)
+        # MDAnalysis leaves the trajectory elsewhere; put it back on the caller's frame.
+        universe.trajectory[current]
         events = np.asarray(analysis.results.hbonds, dtype=float).reshape(-1, 6)
     if len(events):
         resindex = universe.atoms.resindices

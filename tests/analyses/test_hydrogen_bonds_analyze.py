@@ -380,12 +380,6 @@ def test_bad_settings_are_refused_with_a_hint(configs, tmp_path, settings, run, 
     assert err.value.hint
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=mda.exceptions.NoDataError,
-    reason="a universe with no bonds attribute at all, as from a PDB without CONECT records, "
-    "makes hbond_atoms raise MDAnalysis NoDataError instead of the ProtocolError with a hint",
-)
 def test_without_the_system_xml_unbonded_hydrogens_are_refused(schedules, tmp_path) -> None:
     configs = _write(tmp_path / "bare", schedules, system=False)
 
@@ -395,12 +389,6 @@ def test_without_the_system_xml_unbonded_hydrogens_are_refused(schedules, tmp_pa
     assert "_system.xml" in err.value.hint
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ValueError,
-    reason="a replicate without any hydrogen bond reaches contact_events with a mask of no "
-    "column, which raises instead of giving the nan lifetime the warning describes",
-)
 def test_a_replicate_without_hydrogen_bonds_gets_a_nan_lifetime_and_a_warning(tmp_path) -> None:
     schedules = {(label, r): _schedule(r) for label in ("A", "B") for r in (1, 2, 3)}
     schedules[("A", 2)] = [(False, False, False)] * N_FRAMES
