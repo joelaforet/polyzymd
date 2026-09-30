@@ -1977,12 +1977,11 @@ def main():
                 "\n  Next steps:"
                 "\n    1. Re-run with --generate-comparison <dir> to create comparison.yaml"
                 "\n    2. Review comparison.yaml and point each condition to its config.yaml"
-                "\n    3. Validate the comparison configuration:"
+                "\n    3. Validate the conditions:"
                 "\n       polyzymd compare validate -f comparison.yaml"
-                "\n    4. Run analyses by canonical plugin name:"
-                "\n       polyzymd compare run <analysis_type> -f comparison.yaml"
-                "\n    5. Generate figures:"
-                "\n       polyzymd compare plot-all -f comparison.yaml"
+                "\n    4. Run each analysis on the converted configs, control first:"
+                "\n       polyzymd analyze <name> -c <control>/config.yaml"
+                " -c <other>/config.yaml --eq 10ns"
             )
 
     # Exit code: success if no conversion was done, or all conversions passed
