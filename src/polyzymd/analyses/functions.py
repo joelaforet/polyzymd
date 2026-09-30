@@ -158,7 +158,7 @@ def _native_pairs(atoms: Any, reference: Any, radius: float, min_separation: int
     order of the topology whose reference positions are closer than
     ``radius`` Å, found with ``MDAnalysis.lib.distances.capped_distance``
     without periodic images, so the reference must be whole. It is computed
-    once per reference and reused for every frame.
+    once per reference and its positions, and reused for every frame.
     """
     import numpy as np
     from MDAnalysis.lib.distances import capped_distance
@@ -168,6 +168,7 @@ def _native_pairs(atoms: Any, reference: Any, radius: float, min_separation: int
     key = (
         id(reference.universe),
         reference.indices.tobytes(),
+        reference.positions.tobytes(),
         atoms.resindices.tobytes(),
         float(radius),
         int(min_separation),

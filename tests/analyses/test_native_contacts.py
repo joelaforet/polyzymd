@@ -241,12 +241,6 @@ def test_two_references_of_the_same_atoms_give_their_own_pairs() -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="_native_pairs keys its cache on the reference universe and atom indices but "
-    "not on the reference positions, so a reference moved in place (or advanced to another "
-    "frame of its trajectory) reuses the old pairs and distances",
-)
 def test_a_reference_moved_in_place_gives_the_new_pairs() -> None:
     """Changing the reference universe's positions changes the native pairs."""
     positions = _cluster(6)
