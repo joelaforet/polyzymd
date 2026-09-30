@@ -27,6 +27,7 @@ tests/
 │   ├── test_residue_contacts.py     # residue_contacts, polyzymd analyze contacts
 │   ├── test_residue_occlusion.py    # residue_occlusion
 │   ├── test_contact_lifetimes.py    # contact_events, contact_lifetimes, --run mean_lifetime
+│   ├── test_native_contacts.py      # native_contacts, polyzymd analyze native_contacts
 │   ├── test_segment_join.py     # loader repairs of restart-chain boundaries
 │   ├── test_empty_segments.py   # loader skips of empty segments
 │   ├── test_base.py             # analyses/base.py

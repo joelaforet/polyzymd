@@ -103,6 +103,18 @@ FUNCTION_ANALYSES = {
         "n_sphere_points": 960,
     },
     "secondary_structure": {"selection": "protein", "scheme": "simplified"},
+    "native_contacts": {
+        "selection": "protein and not element H",
+        "reference_mode": None,
+        "reference_frame": 1,
+        "reference_file": None,
+        "radius": 4.5,
+        "min_separation": 3,
+        "beta": 5.0,
+        "lambda_constant": 1.8,
+        "use_pbc": True,
+        "regions": {},
+    },
     "contacts": {
         "method": "occlusion",
         "polymer_selection": "chainid C",
@@ -561,6 +573,7 @@ def _analyze_function(
         "sasa",
         "secondary_structure",
         "contacts",
+        "native_contacts",
     )
     if unknown or (run is not None and not pairs):
         raise ProtocolError(
@@ -582,6 +595,10 @@ def _analyze_function(
         return _analyze_secondary_structure(study, settings, run, recompute, output_dir, plots)
     if name == "contacts":
         return _analyze_contacts(study, settings, run, recompute, output_dir, plots)
+    if name == "native_contacts":
+        return _analyze_native_contacts(
+            study, settings, run, recompute, output_dir, eq_check, plots
+        )
     if pairs:
         return _analyze_pairs(
             name,
@@ -753,6 +770,97 @@ def _analyze_rmsf(
         plot_values(core, labels, folder, "rmsf_comparison", "Root mean square over the core")
         report.provenance.output_paths["figures"] = str(folder)
     return report.model_copy(update={"analysis": name, "run": run, "all_runs": runs})
+
+
+def _analyze_native_contacts(
+    study: Any,
+    settings: dict | None,
+    run: str | None,
+    recompute: bool,
+    output_dir: Path | None,
+    eq_check: bool,
+    plots: bool,
+) -> ProtocolReport:
+    """Measure the fraction of native contacts Q on every production frame and report its mean.
+
+    :func:`~polyzymd.analyses.functions.native_contacts` measures ``selection``
+    against the reference of ``reference_mode``, ``reference_frame`` and
+    ``reference_file``, built by :func:`~polyzymd.analyses.reference.reference`.
+    A missing ``reference_mode`` is ``"external"`` when a ``reference_file``
+    is given, and otherwise ``"frame"``, production frame ``reference_frame``.
+    ``radius``, ``min_separation``, ``beta`` and ``lambda_constant`` define
+    the native pairs and the switching function; the defaults, on heavy
+    atoms, are the definition of Best, Hummer and Eaton (2013). ``q``, the
+    default result, counts every native pair; ``<region>_q`` for each entry
+    ``region: selection`` of ``regions`` counts the pairs with at least one
+    atom in the region. Only the chosen result is measured. Each replicate's
+    value is its mean Q over production frames. With ``plots``,
+    ``native_contacts_timeseries_<run>`` and ``native_contacts_comparison_<run>``
+    go to ``<output_dir>/figures/native_contacts/``.
+    """
+    from polyzymd.analyses import functions
+    from polyzymd.analyses.reference import reference
+    from polyzymd.analyses.timeseries import select
+
+    settings = {**FUNCTION_ANALYSES["native_contacts"], **(settings or {})}
+    selection = str(settings["selection"])
+    mode = settings["reference_mode"] or ("external" if settings["reference_file"] else "frame")
+    regions = settings["regions"] or {}
+    if not isinstance(regions, dict) or "q" in regions:
+        raise ProtocolError(
+            f"native_contacts: regions must map names other than 'q' to selections, got {regions!r}.",
+            hint="Pass --set regions='{active_site: resid 70-90}'.",
+        )
+    runs = ["q", *(f"{name}_q" for name in regions)]
+    run = run or "q"
+    if run not in runs:
+        raise ProtocolError(
+            f"native_contacts: no result named {run!r}.", hint=f"Use --run with one of {runs}."
+        )
+    arguments = [
+        select(selection),
+        reference(
+            mode,
+            selection,
+            frame=settings["reference_frame"],
+            file=settings["reference_file"],
+            alignment=selection,
+        ),
+    ]
+    if run != "q":
+        arguments.append(select(f"({selection}) and ({regions[run[: -len('_q')]]})"))
+    # Only non-default options, so a plain Python call reuses the stored records.
+    defaults = {
+        "radius": functions.NATIVE_CONTACT_RADIUS,
+        "min_separation": functions.NATIVE_CONTACT_SEPARATION,
+        "beta": 5.0,
+        "lambda_constant": 1.8,
+    }
+    options: dict[str, Any] = {
+        key: settings[key] for key, value in defaults.items() if settings[key] != value
+    }
+    if not settings["use_pbc"]:
+        options["pbc"] = False
+    series = study.timeseries(
+        functions.native_contacts,
+        *arguments,
+        unit=None,
+        name=f"native_contacts_{run}",
+        recompute=recompute,
+        output_dir=output_dir,
+        bounds=(0.0, 1.0),
+        **options,
+    )
+    values = series.reduce("mean", detect_equilibration=eq_check)
+    values.metric = f"mean_{run}"
+    report = values.compare() if len(study) > 1 else values.summary()
+    report.provenance.settings = {**settings, "reference_mode": mode}
+    if plots:
+        folder = _figures_dir(output_dir, "native_contacts")
+        series.plot(folder, f"native_contacts_timeseries_{run}")
+        values.plot(folder, f"native_contacts_comparison_{run}", title=f"Native contacts, {run}")
+        report.provenance.output_paths["figures"] = str(folder)
+    return report.model_copy(update={"analysis": "native_contacts", "run": run, "all_runs": runs})
 
 
 def _analyze_sasa(

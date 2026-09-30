@@ -103,5 +103,6 @@ RMSF implementation verification <analysis_rmsf_verification>
 SASA implementation verification <analysis_sasa_verification>
 Contacts implementation verification <analysis_contacts_verification>
 How long polymer contacts last <analysis_contact_lifetimes>
+Native contacts implementation verification <analysis_native_contacts_verification>
 Catalytic triad analysis: interpretation and best practices <analysis_triad_best_practices>
 ```

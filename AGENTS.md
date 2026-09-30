@@ -82,7 +82,7 @@ src/polyzymd/
 | Layer | Files | Role |
 |-------|-------|------|
 | **Plugins** (public) | `hydrogen_bonds/` | One class per analysis type — the **extension point** for contributors |
-| **Function analyses** | `functions.py`, `protocols.py`, `study.py` | rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa, secondary_structure and contacts, run by `polyzymd analyze` on the study API (`protocols.FUNCTION_ANALYSES`) |
+| **Function analyses** | `functions.py`, `protocols.py`, `study.py` | rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa, secondary_structure, contacts and native_contacts, run by `polyzymd analyze` on the study API (`protocols.FUNCTION_ANALYSES`) |
 | **Private modules** | `_framework/`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
 | **Shared utilities** | `shared/loader.py`, `shared/window.py`, etc. | `TrajectoryLoader`, frame windows, statistics, autocorrelation — reusable across plugins |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/` | Stable public facade, auto-discovery, artifact lifecycle, default comparison utilities |
@@ -179,7 +179,7 @@ When writing a new analysis plugin, **study existing implementations first**:
 2. **Start with the scaffold output** — `polyzymd new-analysis <name>` generates a complete working plugin with MDAnalysis jobs, artifacts, aggregation, comparison, plotting, and tests
 3. **Study `analyses/hydrogen_bonds/`**, which overrides `compare()` and draws its own plots
 
-For a new measurement, prefer a function run through `Study.timeseries` or `Study.per_replicate` over a new plugin; see `docs/source/explanation/analysis_api.md`. rg, rmsd, rmsf, distances, the catalytic triad, sasa, secondary_structure and contacts (contact fractions, occluded area and contact lifetimes) are written that way, in `analyses/functions.py` and `analyses/protocols.py`.
+For a new measurement, prefer a function run through `Study.timeseries` or `Study.per_replicate` over a new plugin; see `docs/source/explanation/analysis_api.md`. rg, rmsd, rmsf, distances, the catalytic triad, sasa, secondary_structure, native_contacts and contacts (contact fractions, occluded area and contact lifetimes) are written that way, in `analyses/functions.py` and `analyses/protocols.py`.
 
 **Anti-pattern to avoid:**
 ```python

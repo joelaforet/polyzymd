@@ -34,7 +34,7 @@ src/polyzymd/analyses/
 ```
 
 rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa,
-secondary_structure and contacts are not plugins. They are functions in
+secondary_structure, native_contacts and contacts are not plugins. They are functions in
 `functions.py` run through the study API, listed with their settings in
 `protocols.FUNCTION_ANALYSES`, and `polyzymd analyze <name>` runs them through
 `protocols._analyze_function`. `polyzymd analyze contacts` is dispatched by

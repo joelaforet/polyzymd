@@ -95,6 +95,7 @@ Run Distance Analysis <analysis_distances_quickstart>
 Run Contacts Analysis <analysis_contacts_quickstart>
 Run SASA Analysis <analysis_sasa_quickstart>
 Run Secondary Structure Analysis <analysis_secondary_structure_quickstart>
+Run Native Contacts Analysis <analysis_native_contacts_quickstart>
 Analyze Hydrogen Bonds <hydrogen_bonds>
 Run Catalytic Triad Analysis <analysis_triad_quickstart>
 ```

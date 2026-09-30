@@ -92,7 +92,7 @@ print(report.conditions[0].ci95, report.unit)
 ## Reuse an existing comparison project
 
 The analyses that run through the study API, rg, rmsd, rmsf, rms_deviation,
-distances, catalytic_triad, sasa, secondary_structure and contacts, read
+distances, catalytic_triad, sasa, secondary_structure, contacts and native_contacts, read
 simulation configs given with `-c` and refuse `-f`. When a `comparison.yaml`
 already exists, `-f` analyzes it directly for hydrogen_bonds, which still runs
 as a comparison plugin:

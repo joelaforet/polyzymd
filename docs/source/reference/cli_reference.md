@@ -920,8 +920,8 @@ simulation configs given with `-c`, or a comparison plugin listed by
 | `--output-dir PATH` | No | Directory for `analysis/`, `comparison/` and `figures/`. Default: the current directory. |
 | `--stride N` | No | Measure every `N`-th production frame of every replicate, starting with the first after the window. Default `1`. Function analyses only; refused with `-f` and for comparison plugins. The report header then shows `stride N`. |
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
-| `--no-plots` | No | Do not draw figures for analyses on the study API (rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa, secondary_structure, contacts). By default they are written to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
-| `--no-eq-check` | No | Skip the pymbar equilibration diagnostic for analyses on the study API (rg, rmsd). Values and statistics are the same either way. |
+| `--no-plots` | No | Do not draw figures for analyses on the study API (rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa, secondary_structure, contacts, native_contacts). By default they are written to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
+| `--no-eq-check` | No | Skip the pymbar equilibration diagnostic for analyses on the study API (rg, rmsd, native_contacts). Values and statistics are the same either way. |
 
 ### Agent format
 
