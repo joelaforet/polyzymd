@@ -104,12 +104,12 @@ def _residues(per_atom: np.ndarray) -> np.ndarray:
 
 
 def test_rmsf_deviation_and_offset_equal_aligntraj_and_gmx_definitions() -> None:
-    """rmsf is rms.RMSF after AlignTraj, rms_deviation the gmx rmsf -od deviation, in one pass."""
+    """rmsf is rms.RMSF after AlignTraj, residue_rmsd the gmx rmsf -od deviation, in one pass."""
     from polyzymd.analyses.functions import (
         RMS_PARTS,
         _superposed_deviations,
+        residue_rmsd,
         rms_decomposition,
-        rms_deviation,
     )
 
     coordinates = _frames(3, 0.5)
@@ -122,10 +122,10 @@ def test_rmsf_deviation_and_offset_equal_aligntraj_and_gmx_definitions() -> None
     expected = _by_hand(coordinates[2:], coordinates[4].astype(np.float32).astype(float))
     atoms = universe.atoms
     assert rmsf(atoms, atoms, ref.atoms, frames) == pytest.approx(_residues(expected[1]), abs=1e-5)
-    assert rms_deviation(atoms, atoms, ref.atoms, frames) == pytest.approx(
+    assert residue_rmsd(atoms, atoms, ref.atoms, frames) == pytest.approx(
         _residues(expected[0]), abs=1e-5
     )
-    assert RMS_PARTS == ("rms_deviation", "rmsf", "offset")
+    assert RMS_PARTS == ("residue_rmsd", "rmsf", "offset")
     both = rms_decomposition(atoms, atoms, ref.atoms, frames)
     assert both[:3] == pytest.approx(np.vstack([_residues(e) for e in expected]), abs=1e-5)
     assert both[3:] == pytest.approx(np.vstack([_residues(e**2) for e in expected]), abs=1e-5)
@@ -307,19 +307,19 @@ def test_cli_rmsf_reports_mean_rmsf_and_draws_the_profile(configs, tmp_path, fig
     folder = tmp_path / "figures" / "rmsf"
     assert {path.name for path in folder.iterdir()} == {
         "rmsf_profile.png",
-        "rms_deviation_profile.png",
+        "residue_rmsd_profile.png",
         "offset_profile.png",
         "rms_decomposition.png",
         "rmsf_comparison.png",
         "rmsf_difference.png",
-        "rms_deviation_difference.png",
+        "residue_rmsd_difference.png",
         "offset_difference.png",
     }
     decomposition = figures["rms_decomposition"].axes
     assert [ax.get_title() for ax in decomposition] == ["A (n = 3)", "B (n = 3)"]
     assert [line.get_label() for line in decomposition[0].get_lines()] == [
-        "rms deviation",
-        "rmsf",
+        "RMS deviation",
+        "RMSF",
         "offset",
     ]
     per_residue = CliRunner().invoke(analyze_command, [*arguments, "--run", "rmsf"])
@@ -361,10 +361,10 @@ def test_analyze_rmsf_refuses_an_unknown_run(configs) -> None:
         )
 
 
-def test_rms_deviation_defaults_to_the_reference_file_and_reports_every_part(
+def test_residue_rmsd_defaults_to_the_reference_file_and_reports_every_part(
     configs, study, tmp_path
 ) -> None:
-    """With a reference file, rms_deviation superposes on it; runs pick any of the six results."""
+    """With a reference file, residue_rmsd superposes on it; runs pick any of the six results."""
     from polyzymd.analyses import analyze
 
     reference = tmp_path / "ref.pdb"
@@ -373,9 +373,9 @@ def test_rms_deviation_defaults_to_the_reference_file_and_reports_every_part(
     universe.atoms.write(str(reference))
     settings = {"selection": "all", "alignment_selection": "all", "reference_file": str(reference)}
     options = {"equilibration": EQUILIBRATION, "settings": settings, "output_dir": tmp_path}
-    report = analyze("rms_deviation", [configs["A"], configs["B"]], plots=False, **options)
-    assert report.analysis == "rms_deviation" and report.metric == "core_rms_deviation"
-    parts = ("rms_deviation", "rmsf", "offset")
+    report = analyze("residue_rmsd", [configs["A"], configs["B"]], plots=False, **options)
+    assert report.analysis == "residue_rmsd" and report.metric == "core_residue_rmsd"
+    parts = ("residue_rmsd", "rmsf", "offset")
     assert report.all_runs == [f"{kind}_{p}" for kind in ("core", "mean") for p in parts] + list(
         parts
     )
@@ -393,16 +393,16 @@ def test_rms_deviation_defaults_to_the_reference_file_and_reports_every_part(
     assert report.conditions[0].replicate_values == pytest.approx(core)
     assert report.provenance.settings["residues"] == {"core": [1, 2, 3]}
     assert report.provenance.settings["reference_mode"] == "external"
-    offset = analyze("rms_deviation", [configs["A"]], plots=False, run="offset", **options)
+    offset = analyze("residue_rmsd", [configs["A"]], plots=False, run="offset", **options)
     assert [row.entry for row in offset.conditions] == ["1", "2", "3"]
-    mean = analyze("rms_deviation", [configs["A"]], plots=False, run="mean_rmsf", **options)
+    mean = analyze("residue_rmsd", [configs["A"]], plots=False, run="mean_rmsf", **options)
     assert mean.conditions[0].replicate_values == pytest.approx(
         [float(np.mean(v)) for v in rows["rmsf"].values["A"]]
     )
 
 
 def test_core_values_keep_the_identity_and_follow_core_and_regions(configs, tmp_path) -> None:
-    """core_rms_deviation^2 = core_rmsf^2 + core_offset^2 per replicate, over the chosen residues."""
+    """core_residue_rmsd^2 = core_rmsf^2 + core_offset^2 per replicate, over the chosen residues."""
     from polyzymd.analyses import analyze
 
     settings = {"selection": "all", "alignment_selection": "all", "reference_mode": "average"}
@@ -410,10 +410,10 @@ def test_core_values_keep_the_identity_and_follow_core_and_regions(configs, tmp_
     options = {"equilibration": EQUILIBRATION, "output_dir": tmp_path, "plots": False}
     got = {
         run: analyze("rmsf", [configs["A"]], run=run, settings=settings, **options)
-        for run in ("core_rms_deviation", "core_rmsf", "core_offset", "tip_rmsf", "tip_offset")
+        for run in ("core_residue_rmsd", "core_rmsf", "core_offset", "tip_rmsf", "tip_offset")
     }
     values = {run: np.array(r.conditions[0].replicate_values) for run, r in got.items()}
-    identity = values["core_rms_deviation"] ** 2 - values["core_rmsf"] ** 2
+    identity = values["core_residue_rmsd"] ** 2 - values["core_rmsf"] ** 2
     assert np.max(np.abs(identity - values["core_offset"] ** 2)) < 1e-6
     assert got["tip_rmsf"].provenance.settings["residues"] == {"core": [1, 2], "tip": [3]}
     study = pz.Study.from_configs({"A": configs["A"]}, equilibration=EQUILIBRATION)

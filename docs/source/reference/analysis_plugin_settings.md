@@ -13,7 +13,7 @@ analysis is ignored with a warning, as {ref}`comparison-yaml-retired` lists.
 |---|---|
 | `rg` | {doc}`../how_to/analysis_rg_quickstart` |
 | `rmsd` | {doc}`../how_to/analysis_rmsd_quickstart` |
-| `rmsf`, `rms_deviation` | {doc}`../how_to/analysis_rmsf_quickstart` |
+| `rmsf`, `residue_rmsd` | {doc}`../how_to/analysis_rmsf_quickstart` |
 | `sasa` | {doc}`../how_to/analysis_sasa_quickstart` |
 | `secondary_structure` | {doc}`../how_to/analysis_secondary_structure_quickstart` |
 | `contacts` | {doc}`../how_to/analysis_contacts_quickstart` |

@@ -3,7 +3,7 @@
 The per-frame functions take MDAnalysis ``AtomGroup`` arguments positioned at
 one frame and return one number, so they run through
 :meth:`polyzymd.analyses.study.Study.timeseries` like any function you write.
-The per-replicate functions (:func:`rmsf`, :func:`rms_deviation`,
+The per-replicate functions (:func:`rmsf`, :func:`residue_rmsd`,
 :func:`rms_decomposition`, :func:`residue_sasa`, :func:`dssp_occupancy` and
 :func:`residue_contacts` and :func:`residue_occlusion`) also take the production
 frame indices and return one value per residue, and run through
@@ -350,19 +350,22 @@ def rmsf(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     return _per_residue(atoms, _superposed_deviations(atoms, fit, reference, frames)[1])
 
 
-def rms_deviation(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
+def residue_rmsd(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     """Return each residue's root mean square deviation in Å from the reference over ``frames``.
 
     After the superposition of :func:`rmsf`, each atom's value is
-    ``sqrt(<|x(t) - x_ref|^2>)``, as ``gmx rmsf -od`` gives, and the legacy
-    rmsf plugin gave in external mode. Each residue's value is the mean over
-    its atoms. The arguments are those of :func:`rmsf`.
+    ``sqrt(<|x(t) - x_ref|^2>)``, the root mean square over frames of its
+    distance from the reference, as ``gmx rmsf -od`` gives. Each residue's
+    value is the mean over its atoms, and ``residue_rmsd**2 = rmsf**2 +
+    offset**2`` for every atom. Unlike :func:`rmsd`, one number per frame
+    (the root mean square over atoms), this is one number per residue. The
+    arguments are those of :func:`rmsf`.
     """
     return _per_residue(atoms, _superposed_deviations(atoms, fit, reference, frames)[0])
 
 
 #: Names of the per-residue means that :func:`rms_decomposition` returns first.
-RMS_PARTS = ("rms_deviation", "rmsf", "offset")
+RMS_PARTS = ("residue_rmsd", "rmsf", "offset")
 
 #: Names of the per-residue mean squares that :func:`rms_decomposition` returns after them.
 MS_PARTS = ("ms_deviation", "msf", "ms_offset")
@@ -372,7 +375,7 @@ def rms_decomposition(atoms: Any, fit: Any, reference: Any, frames: Any) -> Any:
     """Return each residue's RMS deviation, RMSF and offset, and their mean squares, in one pass.
 
     The first three rows, named in :data:`RMS_PARTS`, are the values of
-    :func:`rms_deviation` and :func:`rmsf`, and the offset, the distance in
+    :func:`residue_rmsd` and :func:`rmsf`, and the offset, the distance in
     Å of each atom's mean position from its reference position, each
     averaged over the residue's atoms. The last three, named in
     :data:`MS_PARTS`, are the means over the residue's atoms of the squares

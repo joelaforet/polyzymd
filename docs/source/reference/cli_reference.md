@@ -904,9 +904,12 @@ no `comparison.yaml`.
 polyzymd analyze NAME -c config.yaml [-c other/config.yaml ...] [OPTIONS]
 ```
 
-`NAME` is one of `rg`, `rmsd`, `rmsf`, `rms_deviation`, `sasa`,
+`NAME` is one of `rg`, `rmsd`, `rmsf`, `residue_rmsd`, `sasa`,
 `secondary_structure`, `contacts`, `native_contacts`, `hydrogen_bonds` and
-`distances`. An unknown name is refused with the list of all of them.
+`distances`. `rmsd` is one value per frame, the root mean square over atoms
+of their distance from the reference; `residue_rmsd` is one value per residue,
+the root mean square over frames of each atom's distance from the reference,
+as `gmx rmsf -od` reports. An unknown name is refused with the list of all of them.
 `catalytic_triad` is refused with a pointer to the triad routine on the study
 API, {doc}`../how_to/analysis_triad_quickstart`, and to `polyzymd analyze
 distances --set pairs=...` for the triad distances.
@@ -928,7 +931,7 @@ distances --set pairs=...` for the triad distances.
 | `--output-dir PATH` | No | Directory for `polyzymd_results/`, where the measured values are stored, and `figures/`. Default: the current directory. |
 | `--stride N` | No | Measure every `N`-th production frame of every replicate, starting with the first after the window. Default `1`. The report header then shows `stride N`. |
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
-| `--no-plots` | No | Do not draw figures. By default rg, rmsd, rmsf, rms_deviation, distances, sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
+| `--no-plots` | No | Do not draw figures. By default rg, rmsd, rmsf, residue_rmsd, distances, sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
 | `--no-eq-check` | No | Skip the pymbar equilibration diagnostic, which rg, rmsd, native_contacts, distances and the totals of sasa report for each replicate's per-frame series. Values and statistics are the same either way. |
 
 ### Agent format

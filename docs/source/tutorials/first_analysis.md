@@ -107,7 +107,7 @@ After the run, the directory holds:
     └── rmsf/
         ├── rmsf_profile.png
         ├── offset_profile.png
-        ├── rms_deviation_profile.png
+        ├── residue_rmsd_profile.png
         ├── rms_decomposition.png
         └── rmsf_comparison.png
 ```
@@ -119,7 +119,7 @@ After the run, the directory holds:
   produced it.
 - **`values.npz`** holds the replicate's per-residue values.
 - The **figures** show each residue's RMSF, its offset from the reference and
-  its deviation from the reference, and the three core values.
+  its RMS deviation from the reference (`residue_rmsd`), and the three core values.
 
 The second run above, with `--run rmsf`, did not read the trajectory again: a
 stored result is reused when the inputs and settings match. Pass `--recompute`

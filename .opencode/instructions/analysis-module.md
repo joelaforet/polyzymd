@@ -11,7 +11,7 @@ src/polyzymd/analyses/
 ├── study.py             # Study, Condition, Replicate: replicates as MDAnalysis universes
 ├── timeseries.py        # Study.timeseries, Study.per_replicate, Timeseries, ReplicateValues
 ├── functions.py         # Shipped measurements: radius_of_gyration, rmsd, pair_distance,
-│                        # all_below, native_contacts, rmsf, rms_deviation,
+│                        # all_below, native_contacts, rmsf, residue_rmsd,
 │                        # rms_decomposition, sasa, residue_sasa, dssp_occupancy,
 │                        # residue_contacts, residue_occlusion, contact_events,
 │                        # restricted_mean_lifetime, contact_lifetimes, event_lifetimes,
@@ -38,7 +38,7 @@ src/polyzymd/analyses/
 
 There is no plugin package under `analyses/` any more.
 
-rg, rmsd, rmsf, rms_deviation, distances, sasa, secondary_structure,
+rg, rmsd, rmsf, residue_rmsd, distances, sasa, secondary_structure,
 native_contacts, contacts and hydrogen_bonds are not plugins. They are functions in
 `functions.py` run through the study API, listed with their settings in
 `protocols.FUNCTION_ANALYSES`, and `polyzymd analyze <name>` runs them through

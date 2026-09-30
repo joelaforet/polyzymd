@@ -21,7 +21,7 @@ tests/
 │   ├── test_figures.py          # figures.py
 │   ├── test_protocols.py        # protocols.py: polyzymd analyze, ProtocolReport
 │   ├── test_protocols_real_artifacts.py  # reports from stored real-data artifacts
-│   ├── test_rmsf.py             # rmsf, rms_deviation, rms_decomposition
+│   ├── test_rmsf.py             # rmsf, residue_rmsd, rms_decomposition
 │   ├── test_sasa.py             # sasa, residue_sasa
 │   ├── test_secondary_structure.py  # dssp_occupancy
 │   ├── test_residue_contacts.py     # residue_contacts, polyzymd analyze contacts

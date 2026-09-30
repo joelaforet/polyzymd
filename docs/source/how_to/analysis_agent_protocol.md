@@ -93,7 +93,7 @@ print(report.conditions[0].ci95, report.unit)
 
 ## If you have a `comparison.yaml`
 
-Every analysis, rg, rmsd, rmsf, rms_deviation, distances, sasa,
+Every analysis, rg, rmsd, rmsf, residue_rmsd, distances, sasa,
 secondary_structure, contacts, native_contacts and hydrogen_bonds, reads the
 simulation configs given with `-c`. `comparison.yaml` is no longer read by
 `polyzymd analyze`: with `-f comparison.yaml` the command exits 2 without
