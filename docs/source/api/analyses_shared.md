@@ -160,8 +160,8 @@ artifact-oriented file locations used by analysis plugins.
 
 ## Multi-run formatting
 
-Multi-run formatting helpers render the summaries of plugins that compare
-several named entities per condition, such as contacts.
+Multi-run formatting helpers write the interval and single-replicate notes of
+the scalar comparison tables in `polyzymd.analyses.stats`.
 
 ```{eval-rst}
 .. automodule:: polyzymd.analyses.shared.multi_run_formatting

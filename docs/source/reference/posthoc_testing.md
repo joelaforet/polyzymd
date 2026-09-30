@@ -151,24 +151,9 @@ These fields appear in comparison JSON files and are used by the CLI formatter.
 
 ## CLI Significance Markers
 
-The CLI formatter annotates pairwise rows with significance markers:
-
-| Marker | Meaning |
-|--------|---------|
-| `*` | `p_adj <= fdr_alpha` (default 0.05) |
-| `**` | `p_adj <= 0.01` |
-| `***` | `p_adj <= 0.001` |
-
-```{note}
-The contacts formatter uses multi-level markers (`**`, `***`). The default
-scalar formatter uses a single `*` for any significant result.
-```
-
-Some plugins also use:
-
-| Marker | Meaning |
-|--------|---------|
-| `†` (dagger) | Cohen's d meets the `min_effect_size` threshold (practical significance). Currently used by the contacts plugin. |
+The default scalar formatter marks a pairwise row with a single `*` when it is
+significant, that is when `p_adj <= fdr_alpha` (default 0.05). It uses no
+further levels such as `**` or `***`.
 
 ---
 

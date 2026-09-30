@@ -16,25 +16,14 @@ FDR thresholds for comparison workflows are configured through top-level
 plugin-local settings unless a plugin explicitly lists its own `fdr_alpha` field
 below.
 
-## Plot settings shared by every plugin
+## Error bars in plugin figures
 
-Each plugin's `plot_settings` block inherits this key.
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `error_bar` | `"ci95" \| "sem"` | `"ci95"` | Interval drawn on comparison bars and shaded bands. `ci95` draws the 95 percent Student t confidence interval across replicates. `sem` draws one standard error, which at `n = 3` is 4.3 times narrower |
-
-```yaml
-plugins:
-  contacts:
-    plot_settings:
-      error_bar: ci95
-```
-
-Whichever value is set, the figure carries a footnote naming the interval, the
-number of replicates and the production window, and per-replicate points stay
-overlaid on the bars. `hydrogen_bonds` has no plot settings model, so its
-figures always use the default.
+A plugin whose plot settings model declares `error_bar` (`"ci95"` or `"sem"`)
+lets `plot_settings.<plugin>.error_bar` choose the interval its figures draw.
+`hydrogen_bonds` has no plot settings model, so its figures always draw the 95
+percent Student t confidence interval across replicates. Every figure that draws
+an interval carries a footnote naming it, the number of replicates and the
+production window, and per-replicate points stay overlaid on the bars.
 
 ## Universe loading (`pbc_policy`)
 
@@ -82,20 +71,9 @@ field records which one was read rather than leaving it implied by a filename.
 
 ## `contacts`
 
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `polymer_selection` | `str` | `"chainid C"` | MDAnalysis selection for polymer atoms |
-| `protein_selection` | `str` | `"chainid A"` | MDAnalysis selection for protein atoms |
-| `cutoff` | `float` | `4.5` | Contact cutoff distance in Å |
-| `polymer_types` | `list[str] \| null` | `null` | Optional polymer residue-name filter |
-| `grouping` | `str` | `"aa_class"` | Grouping mode: `aa_class`, `secondary_structure`, or `none` |
-| `compute_residence_times` | `bool` | `true` | Compute aggregate residence-time summaries and plots; per-replicate contact events remain stored when disabled |
-| `allow_single_fragment_fallback` | `bool` | `false` | Put every polymer residue in chain 0 when the topology has no bonds, instead of raising `TopologyBondsMissingError` |
-| `protein_groups` | `dict[str, list[int]] \| null` | `null` | Custom residue groups, e.g. `{name: [resid, ...]}` |
-| `protein_partitions` | `dict[str, list[str]] \| null` | `null` | Partition definitions over custom `protein_groups` |
-| `fdr_alpha` | `float` | `0.05` | Benjamini-Hochberg false-discovery-rate alpha |
-| `min_effect_size` | `float` | `0.5` | Minimum Cohen's d highlighted in output |
-| `top_residues` | `int` | `10` | Number of top-contact residues shown in summaries |
+`contacts` is not a comparison plugin. A `plugins.contacts` block is ignored
+with a warning; run `polyzymd analyze contacts`, whose settings are listed in
+{doc}`../how_to/analysis_contacts_quickstart`.
 
 ## `hydrogen_bonds`
 

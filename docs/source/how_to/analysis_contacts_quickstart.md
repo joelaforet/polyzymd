@@ -199,11 +199,9 @@ the estimator, the censoring and these choices, with references.
 | `contacts_<name>_difference` | For a residue result with several conditions: each condition minus the control at every residue, with the interval of the difference and the significant residues marked |
 
 ```{note}
-The `comparison.yaml` workflow, `polyzymd compare run contacts`, still runs in
-this version and counts contacts by distance on all atoms within 4.5 Å; see
-{doc}`../reference/analysis_contacts_reference`. `--set method=distance
---set cutoff=4.5 --set heavy_atoms=false` gives the same coverage and contact
-fractions for the same frames.
+Before this version contacts were counted by distance on all atoms within
+4.5 Å. `--set method=distance --set cutoff=4.5 --set heavy_atoms=false` gives
+the same coverage and contact fractions for the same frames.
 ```
 
 ## From Python
@@ -266,4 +264,3 @@ allowed solvent accessibilities of residues in proteins." *PLoS ONE*
 - **How long contacts last**: {doc}`../explanation/analysis_contact_lifetimes`
 - **Understand statistics**: {doc}`../explanation/analysis_statistics_best_practices`
 - **SASA analysis**: {doc}`analysis_sasa_quickstart`
-- **Residence times and the comparison workflow**: {doc}`../reference/analysis_contacts_reference`
