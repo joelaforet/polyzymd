@@ -13,7 +13,8 @@ pixi run -e analysis polyzymd analyze rg -c A/config.yaml -c B/config.yaml --eq 
 
 One `-c` gives a per-condition summary. Two or more give pairwise comparisons
 with the first config as the control. `--format agent` is the default and
-prints at most 25 lines. Use `--format json` when you need the full report.
+prints one line per condition and comparison, every one of them. Use
+`--format json` when you need every field of the report.
 `polyzymd analyze` does not read `comparison.yaml`: `-f comparison.yaml` exits 2
 and prints the equivalent `-c ... --label ... --replicates ... --eq ...` command
 built from the file, which is the command to run.
@@ -23,7 +24,7 @@ bare `polyzymd` on PATH points at a system Python without click. Always go
 through `pixi run -e analysis`.
 
 `pixi run -e analysis polyzymd analyze --help` lists the analysis names: rg,
-rmsd, rmsf, rms_deviation, sasa, secondary_structure, contacts, native_contacts,
+rmsd, rmsf, residue_rmsd, sasa, secondary_structure, contacts, native_contacts,
 hydrogen_bonds and distances, the keys of
 `polyzymd.analyses.protocols.FUNCTION_ANALYSES`. Every one reads `-c config.yaml`.
 For contacts, `--run mean_lifetime` reports how long contacts last; for

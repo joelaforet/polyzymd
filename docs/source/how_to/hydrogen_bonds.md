@@ -108,10 +108,15 @@ event; with `lifetime_key=atom`, a pair is one donor atom and one acceptor
 atom. As for contacts, the lifetime depends on the frame spacing and on
 `tolerance_ps`; see {doc}`../explanation/analysis_contact_lifetimes`.
 
-In `<s>_pairs`, a standard amino acid is named by its residue ID and any other
-residue by its residue name, so `149-SBM` is residue 149 with any SBM monomer
-and pairs line up between polymer compositions. A pair that forms in one
-replicate but not another counts 0 in the other. A per-residue or per-pair
+In `<s>_pairs`, a pair is a protein residue and a monomer type: a standard
+amino acid is named by its residue ID and any other residue by its residue
+name, so `149-SBM` is residue 149 with any SBM monomer, whichever chain and
+monomer it is. The polymers are taken to sample the protein surface freely,
+and copolymer replicates hold different chains, so the protein residue and the
+monomer type are what line up between replicates and conditions. Each pair's
+value in a replicate is the fraction of its frames with at least one such
+bond; a pair that forms in one replicate but never in another has the value 0
+in the other, which is a measured fraction, not a missing one. A per-residue or per-pair
 comparison is corrected over every entry of every compared condition, and
 every row is kept in the JSON report.
 

@@ -77,6 +77,74 @@ example because its trajectory grew, is measured again, so rerunning the same
 script while a campaign is still producing trajectories measures only the
 replicates that changed.
 
+## Measure replicates in parallel
+
+A long campaign takes too long to measure in one job. Because every replicate's
+result is stored and read back, one job per condition and replicate can
+measure them at the same time, and a last job, run after them, reads every
+stored result and computes the statistics and figures:
+
+```text
+  condition × replicate jobs (SLURM array)          report job
+ ┌──────────────────────────────────────┐
+ │ No Polymer, replicate 1  ──┐         │
+ │ No Polymer, replicate 2  ──┤         │     ┌──────────────────────────┐
+ │ ...                        ├─ store ─┼────▶│ polyzymd analyze, all -c │
+ │ SBMA-100,  replicate 1   ──┤ results │     │ reads every stored result│
+ │ SBMA-100,  replicate 2   ──┘         │     │ statistics + figures     │
+ └──────────────────────────────────────┘     └──────────────────────────┘
+                                   --dependency=afterany
+```
+
+List the conditions in a file, one config and its label per line, the labels
+exactly as in the report script, and write the array script, whose task
+number picks a condition and a replicate:
+
+```bash
+# conditions.txt
+noPoly_CALB_pNPB/config.yaml No Polymer
+SBMA_100_CALB_pNPB/config.yaml SBMA-100
+```
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=hbonds-replicates
+#SBATCH --array=0-9            # 2 conditions x 5 replicates
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=16G
+#SBATCH --time=12:00:00
+#SBATCH --output=slurm_logs/%x.%A_%a.out
+
+REPLICATES=5
+line=$(( SLURM_ARRAY_TASK_ID / REPLICATES + 1 ))
+replicate=$(( SLURM_ARRAY_TASK_ID % REPLICATES + 1 ))
+read -r config label < <(sed -n "${line}p" conditions.txt)
+
+pixi run -e analysis polyzymd analyze hydrogen_bonds \
+    -c "$config" --label "$label" --replicates "$replicate" \
+    --eq 10ns --output-dir analysis_results --no-plots
+```
+
+Then submit the report job, the script of [Write a batch script](#write-a-batch-script),
+to start when every array task has ended:
+
+```bash
+mkdir -p slurm_logs
+array=$(sbatch --parsable hbonds_replicates.sbatch)
+sbatch --dependency=afterany:$array hbonds.sbatch
+```
+
+A stored result is read back only when its record matches, so give every
+job the same analysis, `--set` settings, `--label` per condition,
+`--eq` and `--stride`. A task that fails leaves its replicate unmeasured,
+and the report job, which starts once every task has ended, measures it
+itself; check the array's logs for the failure.
+
+```{note}
+A `polyzymd analyze ... --submit` option that writes and submits these jobs
+from cluster presets is planned; until then, the scripts above do the same.
+```
+
 ## One job per analysis
 
 Each analysis is one command, so submit one script per analysis, or run
@@ -98,14 +166,19 @@ others stored. `--stride N` measures every N-th production frame, which
 shortens a first look at a long campaign; a stored result is reused only for
 the same stride.
 
-## Cluster-specific notes (CU Boulder CURC)
+## Cluster settings: an example
+
+Every cluster needs its own partition, account and QoS flags in the
+`#SBATCH` lines. The settings below are those of CU Boulder Research
+Computing; for simulation jobs, `polyzymd submit --preset` carries such
+settings for several clusters, see {doc}`hpc_slurm`.
 
 CU Boulder's Research Computing provides two SLURM clusters: **Alpine**
 (shared campus resource) and **Blanca** (condo model with PI-owned nodes).
 Both require `--partition`, `--account`, and `--qos` to be set for job
 submission.
 
-### Switching between clusters
+### CU Boulder: switching between clusters
 
 Use environment modules to select which cluster's SLURM scheduler you target:
 
@@ -121,7 +194,7 @@ Run the appropriate `module load slurm/<cluster>` command **before** `sbatch`.
 The module swap points `sbatch`, `squeue`, and the other SLURM utilities at the
 selected cluster.
 
-### Required SLURM flags
+### CU Boulder: required SLURM flags
 
 Both clusters require all three scheduling flags. Omitting any of them causes
 `sbatch` to reject the job.
