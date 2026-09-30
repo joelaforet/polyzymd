@@ -96,6 +96,12 @@ FUNCTION_ANALYSES = {
         "core": None,
         "regions": {},
     },
+    "sasa": {
+        "target": "protein",
+        "contexts": {},
+        "probe_radius_nm": 0.14,
+        "n_sphere_points": 960,
+    },
     "distances": {"pairs": None, "threshold": 3.5, "use_pbc": True},
     "catalytic_triad": {"pairs": None, "threshold": 3.5, "use_pbc": True},
 }
@@ -221,6 +227,7 @@ class ProtocolReport(BaseModel):
     all_metrics: list[str] = Field(default_factory=list)
     all_runs: list[str] = Field(default_factory=list)
     equilibration: str
+    stride: int = 1
     frames_per_replicate: dict[str, int | list[int] | None] = Field(default_factory=dict)
     conditions: list[ConditionReport] = Field(default_factory=list)
     pairwise: list[PairwiseReport] = Field(default_factory=list)
@@ -245,7 +252,8 @@ class ProtocolReport(BaseModel):
         header = (
             f"# polyzymd analyze {self.analysis}  metric {self.metric}"
             f"  unit {self.unit or 'none'}{run}  eq {self.equilibration}"
-            f"  conditions {len(counts)}"
+            + (f"  stride {self.stride}" if self.stride != 1 else "")
+            + f"  conditions {len(counts)}"
             f"  replicates {','.join(str(n) for n in counts.values()) or 'none'}"
             f"  protocol {self.analysis}/{self.protocol_version}"
         )
@@ -285,6 +293,7 @@ def analyze(
     run: str | None = None,
     eq_check: bool = True,
     plots: bool = True,
+    stride: int = 1,
 ) -> ProtocolReport:
     """Run one analysis over one or more simulation conditions.
 
@@ -322,6 +331,11 @@ def analyze(
         For the analyses in :data:`FUNCTION_ANALYSES`, draw the figures into
         ``<output_dir>/figures/<name>/`` and record that folder in
         ``provenance.output_paths["figures"]``. ``False`` draws none.
+    stride : int, optional
+        For the analyses in :data:`FUNCTION_ANALYSES`, measure every
+        ``stride``-th production frame of every replicate, 1 by default; see
+        :meth:`~polyzymd.analyses.study.Study.from_configs`. The plugin
+        analyses take every frame and refuse another stride.
 
     Returns
     -------
@@ -352,6 +366,12 @@ def analyze(
             run=run,
             eq_check=eq_check,
             plots=plots,
+            stride=stride,
+        )
+    if stride != 1:
+        raise ProtocolError(
+            f"{name} runs as a comparison plugin, which measures every production frame.",
+            hint=f"Drop --stride, or use one of {', '.join(FUNCTION_ANALYSES)}.",
         )
     analysis_cls = get_analysis_class(name)
     config = _build_config(
@@ -492,6 +512,7 @@ def _analyze_function(
     run: str | None,
     eq_check: bool = True,
     plots: bool = True,
+    stride: int = 1,
 ) -> ProtocolReport:
     """Measure ``name`` on every production frame and report its per-replicate mean.
 
@@ -515,7 +536,7 @@ def _analyze_function(
     from polyzymd.analyses.timeseries import select
 
     unknown = set(settings or {}) - set(FUNCTION_ANALYSES[name])
-    pairs = name in ("distances", "catalytic_triad", "rmsf", "rms_deviation")
+    pairs = name in ("distances", "catalytic_triad", "rmsf", "rms_deviation", "sasa")
     if unknown or (run is not None and not pairs):
         raise ProtocolError(
             f"{name} takes {'' if pairs else 'no run and '}no setting other than "
@@ -523,9 +544,11 @@ def _analyze_function(
             hint=f"Run polyzymd analyze {name} -c A/config.yaml "
             + ("--set pairs=pairs.yaml." if pairs else "--set selection='protein and name CA'."),
         )
-    study = _study(configs, labels, equilibration, replicates)
+    study = _study(configs, labels, equilibration, replicates, stride)
     if name in ("rmsf", "rms_deviation"):
         return _analyze_rmsf(name, study, settings, run, recompute, output_dir, plots)
+    if name == "sasa":
+        return _analyze_sasa(study, settings, run, recompute, output_dir, eq_check, plots)
     if pairs:
         return _analyze_pairs(
             name,
@@ -699,6 +722,118 @@ def _analyze_rmsf(
     return report.model_copy(update={"analysis": name, "run": run, "all_runs": runs})
 
 
+def _analyze_sasa(
+    study: Any,
+    settings: dict | None,
+    run: str | None,
+    recompute: bool,
+    output_dir: Path | None,
+    eq_check: bool,
+    plots: bool,
+) -> ProtocolReport:
+    """Measure the SASA of ``target`` in one context and report its total or its residues.
+
+    ``contexts`` maps a name to the MDAnalysis selection of the atoms present
+    in the calculation, for example ``{isolated: protein, with_polymer:
+    protein or resname SBM EGM}``; each must contain every ``target`` atom.
+    With no contexts, the target is measured alone under the name
+    ``isolated``. Each context gives two results: ``<name>``, the mean over
+    production frames of the target's total SASA from
+    :func:`~polyzymd.analyses.functions.sasa`, and ``<name>_residues``, each
+    target residue's mean SASA from
+    :func:`~polyzymd.analyses.functions.residue_sasa`, compared residue by
+    residue. Only the result that ``run`` picks is measured, by default the
+    first context's total, because every context is a separate Shrake-Rupley
+    pass over every frame. With ``plots``, a total draws
+    ``sasa_timeseries_<name>``, ``sasa_comparison_<name>`` and
+    ``sasa_distribution_<name>``, and a residue result ``sasa_profile_<name>``
+    and, with several conditions, ``sasa_difference_<name>``, into
+    ``<output_dir>/figures/sasa/``.
+    """
+    from polyzymd.analyses import functions
+    from polyzymd.analyses.figures import plot_differences
+    from polyzymd.analyses.timeseries import select
+
+    settings = {**FUNCTION_ANALYSES["sasa"], **(settings or {})}
+    target = str(settings["target"])
+    contexts = settings["contexts"] or {"isolated": target}
+    if not isinstance(contexts, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) and not key.endswith("_residues")
+        for key, value in contexts.items()
+    ):
+        raise ProtocolError(
+            f"sasa: contexts must map names, none ending in _residues, to selections, "
+            f"got {contexts!r}.",
+            hint="Pass --set contexts='{isolated: protein, with_polymer: protein or resname SBM EGM}'.",
+        )
+    runs = [key for name in contexts for key in (name, f"{name}_residues")]
+    run = run or runs[0]
+    if run not in runs:
+        raise ProtocolError(
+            f"sasa: no result named {run!r}.", hint=f"Use --run with one of {runs}."
+        )
+    residues = run.endswith("_residues") and run[: -len("_residues")] in contexts
+    context = contexts[run[: -len("_residues")] if residues else run]
+    # Pass only non-default options, so the stored record equals that of a
+    # study.timeseries(functions.sasa, ...) call left at the defaults.
+    defaults = {
+        "probe_radius_nm": functions.SASA_PROBE_RADIUS_NM,
+        "n_sphere_points": functions.SASA_SPHERE_POINTS,
+    }
+    options = {
+        key: kind(settings[key])
+        for key, kind in (("probe_radius_nm", float), ("n_sphere_points", int))
+        if kind(settings[key]) != defaults[key]
+    }
+    folder = _figures_dir(output_dir, "sasa") if plots else None
+    if residues:
+        values = study.per_replicate(
+            functions.residue_sasa,
+            select(target),
+            select(context),
+            unit="A^2",
+            labels=lambda u: u.select_atoms(target).residues.resids,
+            name=f"sasa_{run}",
+            recompute=recompute,
+            output_dir=output_dir,
+            bounds=(0.0, None),
+            **options,
+        )
+        report = values.compare() if len(study) > 1 else values.summary()
+        if plots:
+            name = run[: -len("_residues")]
+            values.plot(
+                folder, f"sasa_profile_{name}", f"Per-residue SASA, {name}", None, [], "Residue"
+            )
+            if len(study) > 1:
+                plot_differences(
+                    values, report, folder, f"sasa_difference_{name}", None, None, "Residue"
+                )
+    else:
+        series = study.timeseries(
+            functions.sasa,
+            select(target),
+            select(context),
+            unit="A^2",
+            name=f"sasa_{run}",
+            recompute=recompute,
+            output_dir=output_dir,
+            bounds=(0.0, None),
+            **options,
+        )
+        values = series.reduce("mean", detect_equilibration=eq_check)
+        values.metric = "mean_sasa"
+        report = values.compare() if len(study) > 1 else values.summary()
+        if plots:
+            series.plot(folder, f"sasa_timeseries_{run}")
+            values.plot(folder, f"sasa_comparison_{run}", title=f"SASA, {run}")
+            series.plot_distribution(output_dir=folder, name=f"sasa_distribution_{run}")
+    report.provenance.settings = {**settings, "contexts": dict(contexts)}
+    if plots:
+        report.provenance.output_paths["figures"] = str(folder)
+    return report.model_copy(update={"analysis": "sasa", "run": run, "all_runs": runs})
+
+
 def _residue_ids(study: Any, selection: str) -> list[int]:
     """Return the residue IDs ``selection`` picks, the same in every replicate of ``study``."""
     found = {
@@ -725,6 +860,7 @@ def _study(
     labels: Sequence[str] | None,
     equilibration: str | None,
     replicates: Sequence[int] | None,
+    stride: int = 1,
 ) -> Any:
     """Build the Study of ``configs``, with the package default equilibration window."""
     from polyzymd.analyses.study import Study
@@ -735,6 +871,7 @@ def _study(
         dict(zip(_labels(paths, labels), paths, strict=True)),
         equilibration=equilibration or AnalysisDefaults().equilibration_time,
         replicates=replicates,
+        stride=stride,
     )
 
 
@@ -854,8 +991,9 @@ def _analyze_pairs(
     values.metric = metric
     report = values.compare() if len(study) > 1 else values.summary()
     if plots:
-        folder, prefix = _figures_dir(output_dir, name), (
-            "triad" if name == "catalytic_triad" else "distance"
+        folder, prefix = (
+            _figures_dir(output_dir, name),
+            ("triad" if name == "catalytic_triad" else "distance"),
         )
         from polyzymd.analyses.figures import plot_distributions, plot_values
 

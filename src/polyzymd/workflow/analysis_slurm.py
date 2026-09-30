@@ -9,7 +9,7 @@ This module provides a shared DAG submission layer for analysis plugins:
 The DAG parallelizes at the per-replicate compute-stage boundary, with one
 SLURM job per (condition, replicate) pair. This per-replicate worker is the
 analysis lifecycle's atomic unit. Sub-replicate parallelism (for example,
-per-run work inside SASA-style calculations) is intentionally handled inside
+per-selection work inside a hydrogen-bond calculation) is intentionally handled inside
 each plugin's compute path. Plugins can use internal threading/multiprocessing
 for that finer-grained work when needed.
 """

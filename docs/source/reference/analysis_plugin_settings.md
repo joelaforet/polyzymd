@@ -111,24 +111,6 @@ compatibility. GROMACS `.gro` topologies may not preserve chain IDs; use
 DSSP requires complete residues; do not use CA-only selections such as
 `protein and name CA`.
 
-## `sasa`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `runs` | `list[SASARunSettings]` | `[]` (must be non-empty) | SASA runs to compute |
-| `probe_radius_nm` | `float` | `0.14` | MDTraj Shrake-Rupley probe radius (nm) |
-| `n_sphere_points` | `int` | `960` | MDTraj Shrake-Rupley sphere point count |
-| `chunk_size` | `int` | `100` | Frames per chunk for SASA computation |
-
-`SASARunSettings` entries in `runs`:
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `label` | `str` | required | Human-readable run label |
-| `target_selection` | `str` | required | Selection whose SASA is reported |
-| `context_selection` | `str \| null` | `null` | Environment/context selection for SASA computation (`null` defaults to `target_selection`) |
-| `stride` | `int` | `1` | Frame stride (1 means every frame) |
-
 ## `hydrogen_bonds`
 
 | Key | Type | Default | Description |

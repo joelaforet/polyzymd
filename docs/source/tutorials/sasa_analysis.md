@@ -1,18 +1,18 @@
 # Tutorial: Measure Polymer Shielding with SASA
 
-This tutorial walks through one guided SASA (Solvent Accessible Surface Area)
+This tutorial walks through one guided SASA (solvent-accessible surface area)
 workflow: compare an enzyme without polymer to polymer-conjugated conditions and
 interpret whether the polymer shields the protein surface.
 
 By the end, you will have:
 
-- configured paired SASA runs for an isolated and polymer-aware protein surface,
-- run the `sasa` analysis plugin on a comparison study,
-- checked the expected output files, and
-- interpreted the main shielding signal in the comparison plots.
+- measured the protein's SASA with and without polymer in the calculation,
+- compared each condition with the no-polymer control,
+- computed the area the polymer covers, frame by frame, and compared it, and
+- found the figures to check first.
 
-For task recipes, use {doc}`../how_to/analysis_sasa_quickstart`. For field and
-artifact lookup, use {doc}`../reference/analysis_sasa_reference`.
+For task recipes, use {doc}`../how_to/analysis_sasa_quickstart`. For what each
+function measures, use {doc}`../reference/analysis_functions`.
 
 ## Prerequisites
 
@@ -20,199 +20,138 @@ Before starting, make sure you have:
 
 1. a working PolyzyMD pixi environment,
 2. completed production trajectories for at least two conditions,
-3. a `comparison.yaml` with those conditions, and
-4. the PolyzyMD chain convention in mind: A = protein, B = substrate,
-   C = polymer, D+ = solvent/ions/other.
+3. the `config.yaml` of each condition, and
+4. the residue names of the polymer's monomers in your topology.
 
-If you have not run a comparison analysis before, complete
-{doc}`first_analysis` first.
+If you have not run an analysis before, complete {doc}`first_analysis` first.
+
+:::{admonition} Environment Setup
+:class: tip
+
+All analysis commands below assume you have activated the PolyzyMD analysis
+pixi environment:
+
+```bash
+pixi shell -e analysis
+```
+
+Alternatively, prefix each command with `pixi run -e analysis`.
+:::
 
 ## What SASA will tell us
 
-SASA reports how much molecular surface is accessible to solvent. The SASA
-plugin lets each run define two selections:
+SASA is the area of a molecule's surface that a solvent-sized probe can reach.
+Each SASA calculation has two selections:
 
 | Selection | Role in this tutorial |
 |-----------|-----------------------|
-| `target_selection` | the atoms whose SASA is reported |
-| `context_selection` | the atoms allowed to block the target surface |
+| `target` | the atoms whose SASA is reported, here the protein |
+| context | the atoms present in the calculation, which can cover the target's surface |
 
 The shielding idea is simple:
 
 1. Compute protein SASA with only protein atoms in the context.
-2. Compute protein SASA with protein plus polymer atoms in the context.
+2. Compute protein SASA with protein and polymer atoms in the context.
 3. Compare the two values.
 
-If the polymer-aware run has lower protein SASA, the polymer is shielding part
-of the protein surface.
+If the protein's SASA is lower with polymer in the context, the polymer is
+covering part of the protein surface.
 
-## Step 1: Add paired SASA runs
-
-Add a `sasa` section to your `comparison.yaml` under `plugins:`.
-
-```yaml
-plugins:
-  sasa:
-    runs:
-      - label: "protein_isolated"
-        target_selection: "protein"
-        context_selection: "protein"
-
-      - label: "protein_with_polymer"
-        target_selection: "protein"
-        context_selection: "protein or chainid C"
-
-    probe_radius_nm: 0.14
-    n_sphere_points: 960
-```
-
-The first run is the baseline. The second run lets the polymer on chain C block
-protein surface points.
-
-:::{tip}
-For a no-polymer control condition, `protein_with_polymer` should be nearly the
-same as `protein_isolated` because there are no chain C atoms. Treat this as a
-useful consistency check.
-:::
-
-## Step 2: Use the runs in a comparison file
-
-Here is a minimal two-condition example. Replace the config paths and labels
-with your own completed simulations.
-
-```yaml
-name: "calb_sasa_shielding"
-description: "SASA shielding tutorial"
-control: "No Polymer"
-
-conditions:
-  - label: "No Polymer"
-    config: "../no_polymer/config.yaml"
-    replicates: [1, 2, 3]
-
-  - label: "With Polymer"
-    config: "../with_polymer/config.yaml"
-    replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "10ns"
-
-plugins:
-  sasa:
-    runs:
-      - label: "protein_isolated"
-        target_selection: "protein"
-        context_selection: "protein"
-      - label: "protein_with_polymer"
-        target_selection: "protein"
-        context_selection: "protein or chainid C"
-    probe_radius_nm: 0.14
-    n_sphere_points: 960
-
-plot_settings:
-  format: "png"
-  dpi: 300
-  style: "compact"
-```
-
-## Step 3: Run the SASA analysis
-
-Run the plugin from the directory containing `comparison.yaml`:
+## Step 1: Measure the protein on its own
 
 ```bash
-pixi run -e analysis polyzymd compare run sasa -f comparison.yaml
+polyzymd analyze sasa \
+  -c ../noPoly_enzyme/config.yaml -c ../SBMA_100_enzyme/config.yaml \
+  --label "No Polymer" --label "100% SBMA" --eq 200ns \
+  --set "contexts={isolated: protein, with_polymer: protein or resname SBM EGM}" \
+  --run isolated
 ```
 
-PolyzyMD computes each replicate, aggregates results by condition, compares the
-conditions, and writes plots.
+Replace `SBM EGM` with the residue names of your polymer. The report gives each
+condition's mean protein SASA with its 95 percent interval and every replicate
+value, and compares `100% SBMA` with `No Polymer`.
 
-:::{note}
-SASA can be slower than RMSD or Rg because each frame must evaluate surface
-points around atoms in the context selection. For large studies, use the SLURM
-workflow in {doc}`../how_to/hpc_execution` rather than copying HPC commands
-from this tutorial.
-:::
+`isolated` asks whether the protein itself has a similar accessible surface
+across conditions before polymer covering is counted. A large difference here
+can mean the protein's compactness or conformation differs between conditions.
 
-## Step 4: Check that the run succeeded
+## Step 2: Measure the protein with polymer present
 
-You should see these outputs:
-
-```text
-analysis/<condition>/sasa/run_<replicate>/result.json
-analysis/<condition>/sasa/aggregated/result.json
-comparison/sasa/result.json
-figures/sasa/
-```
-
-The comparison file is the first place to check after a successful run:
+Run the same command with `--run with_polymer`:
 
 ```bash
-python - <<'PY'
-import json
-from pathlib import Path
-
-result = json.loads(Path("comparison/sasa/result.json").read_text())
-print(result["run_labels"])
-for condition in result["conditions"]:
-    print(condition["label"])
-    for run in condition["run_summaries"]:
-        print(f"  {run['label']}: {run['mean_sasa']:.1f} ± {run['sem_sasa']:.1f} A^2")
-PY
+polyzymd analyze sasa \
+  -c ../noPoly_enzyme/config.yaml -c ../SBMA_100_enzyme/config.yaml \
+  --label "No Polymer" --label "100% SBMA" --eq 200ns \
+  --set "contexts={isolated: protein, with_polymer: protein or resname SBM EGM}" \
+  --run with_polymer
 ```
 
-Success looks like one summary for each condition and one entry for each SASA
-run label.
-
-## Step 5: Interpret the shielding signal
-
-Start with the `protein_isolated` run. It asks whether the protein itself has a
-similar accessible surface across conditions before polymer blocking is counted.
-Large differences here can mean the protein compactness or conformation differs
-between conditions.
-
-Then inspect `protein_with_polymer`. In polymer conditions, a lower mean SASA
-relative to the no-polymer control is the main shielding signal.
+In the no-polymer condition the context adds no atoms, so `with_polymer` equals
+`isolated` there. In polymer conditions, a lower mean than the control is the
+shielding signal.
 
 The strongest evidence for polymer shielding is:
 
-1. `protein_isolated` remains similar across conditions, and
-2. `protein_with_polymer` decreases in polymer-conjugated conditions.
+1. `isolated` stays similar across conditions, and
+2. `with_polymer` decreases in the polymer conditions.
 
-You can also compare the two runs within a polymer condition:
+## Step 3: Compare the covered area
 
-```text
-shielded area = protein_isolated mean - protein_with_polymer mean
+The area the polymer covers is `isolated` minus `with_polymer`, frame by frame.
+In Python, `Timeseries.transform` computes it from the two stored series without
+reading the trajectories again:
+
+```python
+import numpy as np
+import polyzymd as pz
+from polyzymd.analyses.functions import sasa
+
+study = pz.Study.from_configs(
+    {"No Polymer": "../noPoly_enzyme/config.yaml", "100% SBMA": "../SBMA_100_enzyme/config.yaml"},
+    equilibration="200ns",
+)
+protein = pz.select("protein")
+isolated = study.timeseries(sasa, protein, protein, unit="A^2", name="sasa_isolated")
+with_polymer = study.timeseries(
+    sasa, protein, pz.select("protein or resname SBM EGM"), unit="A^2", name="sasa_with_polymer"
+)
+covered = isolated.transform(np.subtract, with_polymer, unit="A^2", name="sasa_covered")
+print(covered.reduce("mean").compare(control="No Polymer").to_agent_text())
 ```
 
-A larger positive difference indicates that more protein surface is blocked by
-the polymer context.
+`sasa_isolated` and `sasa_with_polymer` are the names `polyzymd analyze sasa`
+stores its results under, so run in the same folder, the two series are read
+back rather than measured again. A larger positive covered area means more
+protein surface is covered by polymer.
 
-## Step 6: Use the plots
+## Step 4: Use the figures
 
-Open the SASA plots in the configured plot output directory, usually
-`figures/sasa/`. The most useful first checks are:
+`polyzymd analyze sasa` writes its figures to `figures/sasa/`. The most useful
+first checks are:
 
-- `sasa_comparison_protein_with_polymer.png` — mean SASA by condition, with
-  replicate scatter points.
-- `sasa_normalized_comparison_protein_with_polymer.png` — percent change for
-  each non-control condition relative to the configured control.
+- `sasa_comparison_with_polymer` — each condition's mean SASA with its interval
+  and every replicate value.
+- `sasa_timeseries_with_polymer` — every replicate's SASA against time, to see
+  whether it settles after the equilibration window.
 
-Negative normalized values indicate lower SASA than the control, which is
-consistent with shielding for this tutorial's `protein_with_polymer` run.
+To see which residues are covered, run `--run with_polymer_residues`, which
+compares each residue's SASA with the control and draws
+`sasa_profile_with_polymer` and `sasa_difference_with_polymer`.
 
 ## What you have now
 
 You have completed a guided SASA shielding analysis and can now answer:
 
-- Did the polymer reduce protein solvent-accessible surface area?
+- Did the polymer reduce the protein's solvent-accessible surface area?
 - Was the reduction specific to the polymer-aware context?
-- Which plots should you inspect first for replicate consistency and effect
-  direction?
+- How much area does the polymer cover, and does it differ between conditions?
 
 ## Next steps
 
-- Use {doc}`../how_to/analysis_sasa_quickstart` for active-site,
-  monomer-specific, stride, and quick-command recipes.
-- Use {doc}`../reference/analysis_sasa_reference` for settings, canonical
-  artifact paths, plot filenames, and programmatic artifact loading.
-- Use {doc}`../how_to/hpc_execution` when the SASA workload needs SLURM.
+- Use {doc}`../how_to/analysis_sasa_quickstart` for active-site targets,
+  per-residue results and the settings.
+- Use {doc}`../explanation/analysis_sasa_verification` for how the values were
+  checked.
+- Use {doc}`../explanation/analysis_api` to run your own functions on every
+  replicate.

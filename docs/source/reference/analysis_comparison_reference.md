@@ -42,7 +42,7 @@ plugins:
 `ttest_method`, `posthoc_method` and `fdr_alpha` from the `defaults:` block
 reach every plugin's comparison step, including the plugins listed below as
 "custom" in the plugin summary table. Asking for `ttest_method: "welch"` runs
-Welch's unequal-variance t-test in `sasa`, `contacts` and the default scalar
+Welch's unequal-variance t-test in `contacts` and the default scalar
 pipeline alike.
 
 The multiple-comparison family is defined once for the whole package:
@@ -111,7 +111,6 @@ Stable analysis plugins:
 
 - `contacts`
 - `secondary_structure`
-- `sasa`
 - `hydrogen_bonds`
 
 ## Plugin Summary Table
@@ -120,7 +119,6 @@ Stable analysis plugins:
 |--------|-----------------|----------------|-------------|-------------------|
 | `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests + omnibus ANOVA |
 | `secondary_structure` | Yes | `helix_fraction` | Secondary structure content | FDR-corrected pairwise t-tests + omnibus ANOVA |
-| `sasa` | No (custom) | Per-run mean SASA | Multi-run target/context model | FDR-corrected per-run pairwise t-tests + omnibus ANOVA |
 | `hydrogen_bonds` | Custom loader with default-style scalar statistics | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA per configured summary |
 
 ## Path Rules
@@ -159,7 +157,6 @@ All commands below assume you are inside the pixi environment
 
 ```bash
 polyzymd compare run contacts
-polyzymd compare run sasa
 polyzymd compare run hydrogen_bonds
 polyzymd compare run-all
 polyzymd compare plot-all
@@ -183,7 +180,6 @@ Typical comparison cache paths:
 
 ```text
 comparison/contacts/result.json
-comparison/sasa/result.json
 comparison/hydrogen_bonds/result.json
 ```
 

@@ -914,8 +914,9 @@ List the available analysis names with `polyzymd compare run --list`.
 | `--format agent\|json` | No | `agent` (default) prints one line per condition and comparison; `json` prints the full `ProtocolReport`. For a human-readable table of the same comparison, use `polyzymd compare run --format table`. |
 | `-o, --output PATH` | No | Also write the rendered output to this file. |
 | `--output-dir PATH` | No | Directory for `analysis/`, `comparison/` and `figures/`. Default: the current directory. |
+| `--stride N` | No | Measure every `N`-th production frame of every replicate, starting with the first after the window. Default `1`. Function analyses only; refused with `-f` and for comparison plugins. The report header then shows `stride N`. |
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
-| `--no-plots` | No | Do not draw figures for analyses on the study API (rg, rmsd, distances, catalytic_triad). By default they are written to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
+| `--no-plots` | No | Do not draw figures for analyses on the study API (rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa). By default they are written to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
 | `--no-eq-check` | No | Skip the pymbar equilibration diagnostic for analyses on the study API (rg, rmsd). Values and statistics are the same either way. |
 
 ### Agent format
@@ -1058,7 +1059,7 @@ with any discovered analysis plugin.
 polyzymd compare run COMPARISON_TYPE [OPTIONS]
 
 Arguments:
-  COMPARISON_TYPE        Analysis plugin name (e.g. contacts, sasa, secondary_structure)
+  COMPARISON_TYPE        Analysis plugin name (e.g. contacts, secondary_structure)
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
@@ -1222,7 +1223,7 @@ already exist on disk (or use `compare submit-all` instead).
 polyzymd compare submit ANALYSIS [OPTIONS]
 
 Arguments:
-  ANALYSIS               Analysis plugin name (e.g. contacts, sasa)
+  ANALYSIS               Analysis plugin name (e.g. contacts, hydrogen_bonds)
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
@@ -1246,21 +1247,21 @@ Options:
 #### Example
 
 ```bash
-# Submit SASA analysis to SLURM
-polyzymd compare submit sasa --partition gpu --account my_alloc
+# Submit contacts analysis to SLURM
+polyzymd compare submit contacts --partition gpu --account my_alloc
 
 # Dry run to inspect generated scripts
 polyzymd compare submit contacts --dry-run
 
 # Use job arrays for efficiency
-polyzymd compare submit sasa --job-arrays --partition aa100
+polyzymd compare submit contacts --job-arrays --partition aa100
 
 # Rely on plugin memory hints and cluster default partition
 polyzymd compare submit secondary_structure --qos normal
 
 # Blanca condo nodes at CU Boulder
 module load slurm/blanca
-polyzymd compare submit sasa \
+polyzymd compare submit contacts \
     -f comparison.yaml \
     --partition blanca-shirts \
     --account blanca-shirts \
@@ -1303,7 +1304,7 @@ Options:
 polyzymd compare submit-all -f comparison.yaml --partition aa100 --qos normal
 
 # Skip selected plugins
-polyzymd compare submit-all -f comparison.yaml --exclude sasa --exclude hydrogen_bonds
+polyzymd compare submit-all -f comparison.yaml --exclude secondary_structure --exclude hydrogen_bonds
 
 # Dry-run planning only
 polyzymd compare submit-all -f comparison.yaml --dry-run
@@ -1329,11 +1330,11 @@ Options:
 #### Example
 
 ```bash
-# Check status of SASA SLURM jobs
-polyzymd compare status sasa
+# Check status of contacts SLURM jobs
+polyzymd compare status contacts
 
 # Reconcile with SLURM scheduler and get JSON output
-polyzymd compare status sasa --reconcile --json
+polyzymd compare status contacts --reconcile --json
 ```
 
 ### polyzymd compare finalize
@@ -1358,7 +1359,7 @@ Options:
 
 ```bash
 # Finalize after SLURM jobs complete
-polyzymd compare finalize sasa
+polyzymd compare finalize contacts
 
 # Allow partial results (some conditions may have failed)
 polyzymd compare finalize contacts --allow-partial

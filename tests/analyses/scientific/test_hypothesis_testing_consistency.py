@@ -94,45 +94,6 @@ def _base_metadata(settings: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _sasa_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]:
-    from polyzymd.analyses.sasa import SASAAnalysis, SASARunSettings, SASASettings
-
-    settings = SASASettings(runs=[SASARunSettings(label="protein", target_selection="chainid A")])
-
-    def artifact(label: str, values: tuple[float, ...]) -> ConditionArtifact:
-        return ConditionArtifact(
-            analysis_name="sasa",
-            condition_label=label,
-            replicates=[1, 2, 3],
-            payload={
-                "run_results": [
-                    {
-                        "run_label": "protein",
-                        "target_selection": "chainid A",
-                        "context_selection": "chainid A",
-                        "replicates": [1, 2, 3],
-                        "n_replicates": 3,
-                        "overall_mean": float(np.mean(values)),
-                        "overall_sem": 0.05,
-                        "per_replicate_means": list(values),
-                        "zero_atom_selection": False,
-                    }
-                ],
-                "metrics": {},
-                "replicate_metrics": {},
-                "n_replicates": 3,
-            },
-            metadata=_base_metadata(settings),
-            provenance={"frame_selection": {"equilibration": "10ns"}},
-        )
-
-    aggregated = {
-        "Control": artifact("Control", LOW_VARIANCE),
-        "Treated": artifact("Treated", HIGH_VARIANCE),
-    }
-    return SASAAnalysis(), _context(tmp_path, settings, aggregated, ttest_method)
-
-
 def _contacts_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonContext]:
     from polyzymd.analyses.contacts import ContactsAnalysis, ContactsSettings
     from polyzymd.analyses.contacts._identity import contacts_detection_fingerprint
@@ -223,7 +184,6 @@ def _contacts_case(tmp_path: Path, ttest_method: str) -> tuple[Any, ComparisonCo
 
 
 CASES = {
-    "sasa": _sasa_case,
     "contacts": _contacts_case,
 }
 
@@ -231,15 +191,11 @@ CASES = {
 def _pairwise_p_values(plugin: str, result: Any) -> list[tuple[float, float | None]]:
     """Return ``(p_value, p_value_adjusted)`` for every testable pairwise test."""
     pairs: list[tuple[float, float | None]] = []
-    if plugin == "contacts":
-        for comparison in result.pairwise_comparisons:
-            for aggregate in comparison.aggregate_comparisons:
-                if aggregate.metric != "mean_contact_fraction":
-                    continue
-                pairs.append((aggregate.p_value, aggregate.p_value_adjusted))
-    else:
-        for comparison in result.pairwise_comparisons:
-            pairs.append((comparison.p_value, comparison.p_value_adjusted))
+    for comparison in result.pairwise_comparisons:
+        for aggregate in comparison.aggregate_comparisons:
+            if aggregate.metric != "mean_contact_fraction":
+                continue
+            pairs.append((aggregate.p_value, aggregate.p_value_adjusted))
     return pairs
 
 
@@ -276,17 +232,6 @@ def test_pairwise_results_carry_adjusted_p_values(plugin: str, tmp_path: Path) -
         assert adjusted_p >= raw_p
 
 
-@pytest.mark.parametrize("plugin", ["sasa"])
-def test_single_comparison_leaves_p_value_unchanged(plugin: str, tmp_path: Path) -> None:
-    """A family of one test must have an adjusted p-value equal to the raw one."""
-    analysis, ctx = CASES[plugin](tmp_path, "welch")
-    pairs = _pairwise_p_values(plugin, analysis.compare(ctx))
-
-    assert len(pairs) == 1
-    raw_p, adjusted_p = pairs[0]
-    assert adjusted_p == pytest.approx(raw_p)
-
-
 @pytest.mark.parametrize("plugin", sorted(CASES))
 def test_direction_labels_require_significance(plugin: str, tmp_path: Path) -> None:
     """Direction labels must not claim a change that the test did not find."""
@@ -295,14 +240,11 @@ def test_direction_labels_require_significance(plugin: str, tmp_path: Path) -> N
     analysis, ctx = CASES[plugin](tmp_path, "welch")
     result = analysis.compare(ctx)
 
-    if plugin == "contacts":
-        checked = [
-            (aggregate.significant, aggregate.direction)
-            for comparison in result.pairwise_comparisons
-            for aggregate in comparison.aggregate_comparisons
-        ]
-    else:
-        checked = [(c.significant, c.direction) for c in result.pairwise_comparisons]
+    checked = [
+        (aggregate.significant, aggregate.direction)
+        for comparison in result.pairwise_comparisons
+        for aggregate in comparison.aggregate_comparisons
+    ]
 
     assert checked
     for significant, direction in checked:

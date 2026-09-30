@@ -12,7 +12,7 @@ want a worked example with a clear beginning, middle, and end.
 - [Analyze a Multi-Condition Study](analysis_complete_workflow.md)
   Follow the full path from finished trajectories to comparison figures.
 - [Measure Surface Accessibility with SASA](sasa_analysis.md)
-  Configure multi-run SASA analysis to quantify polymer shielding effects.
+  Compare the protein's SASA with and without polymer to quantify shielding.
 
 ## What Belongs Here
 

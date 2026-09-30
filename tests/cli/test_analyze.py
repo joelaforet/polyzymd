@@ -1,7 +1,7 @@
 """Tests for the ``polyzymd analyze`` command.
 
 These tests replace the plugin protocol with a stub, so they invoke an analysis
-that still runs through it (sasa). ``polyzymd analyze rg`` runs on the
+that still runs through it (contacts). ``polyzymd analyze rg`` runs on the
 function path and is tested in ``tests/analyses/test_study_timeseries.py``.
 """
 
@@ -146,7 +146,7 @@ class TestSuccess:
         """Without --format the command prints the agent report."""
         result = CliRunner().invoke(
             analyze_command,
-            ["sasa", "-c", str(config_paths[0]), "-c", str(config_paths[1])],
+            ["contacts", "-c", str(config_paths[0]), "-c", str(config_paths[1])],
         )
 
         assert result.exit_code == 0
@@ -160,7 +160,7 @@ class TestSuccess:
         """--format json prints a document the report model validates."""
         result = CliRunner().invoke(
             analyze_command,
-            ["sasa", "-c", str(config_paths[0]), "--format", "json"],
+            ["contacts", "-c", str(config_paths[0]), "--format", "json"],
         )
 
         assert result.exit_code == 0
@@ -174,7 +174,7 @@ class TestSuccess:
         result = CliRunner().invoke(
             analyze_command,
             [
-                "sasa",
+                "contacts",
                 "-c",
                 str(config_paths[0]),
                 "-c",
@@ -196,7 +196,7 @@ class TestSuccess:
         )
 
         assert result.exit_code == 0
-        assert stub_analyze["name"] == "sasa"
+        assert stub_analyze["name"] == "contacts"
         assert stub_analyze["replicates"] == [1, 2, 3]
         assert stub_analyze["equilibration"] == "20ns"
         assert stub_analyze["labels"] == ["control", "treated"]
@@ -210,7 +210,7 @@ class TestSuccess:
         destination = tmp_path / "rg.json"
         result = CliRunner().invoke(
             analyze_command,
-            ["sasa", "-c", str(config_paths[0]), "--format", "json", "-o", str(destination)],
+            ["contacts", "-c", str(config_paths[0]), "--format", "json", "-o", str(destination)],
         )
 
         assert result.exit_code == 0
@@ -232,7 +232,7 @@ class TestExitCodes:
             )
 
         monkeypatch.setattr("polyzymd.analyses.protocols.analyze", _raise)
-        result = CliRunner().invoke(analyze_command, ["sasa", "-c", str(config_paths[0])])
+        result = CliRunner().invoke(analyze_command, ["contacts", "-c", str(config_paths[0])])
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         error_lines = [line for line in result.stderr.strip().split("\n") if line]
@@ -252,7 +252,7 @@ class TestExitCodes:
     def test_missing_config_exits_two(self, tmp_path: Path) -> None:
         """A config path that does not exist is reported before any work."""
         result = CliRunner().invoke(
-            analyze_command, ["sasa", "-c", str(tmp_path / "missing" / "config.yaml")]
+            analyze_command, ["contacts", "-c", str(tmp_path / "missing" / "config.yaml")]
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
@@ -261,7 +261,7 @@ class TestExitCodes:
     def test_bad_setting_exits_two(self, config_paths: list[Path]) -> None:
         """A --set entry without an equals sign is a typed error."""
         result = CliRunner().invoke(
-            analyze_command, ["sasa", "-c", str(config_paths[0]), "--set", "broken"]
+            analyze_command, ["contacts", "-c", str(config_paths[0]), "--set", "broken"]
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
@@ -271,7 +271,7 @@ class TestExitCodes:
         """A dotted --set key is rejected with a pointer to comparison.yaml."""
         result = CliRunner().invoke(
             analyze_command,
-            ["sasa", "-c", str(config_paths[0]), "--set", "composition.partitions={}"],
+            ["contacts", "-c", str(config_paths[0]), "--set", "composition.partitions={}"],
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
@@ -281,7 +281,7 @@ class TestExitCodes:
     def test_bad_replicate_range_exits_two(self, config_paths: list[Path]) -> None:
         """An unparsable --replicates value is a typed error."""
         result = CliRunner().invoke(
-            analyze_command, ["sasa", "-c", str(config_paths[0]), "--replicates", "3-1"]
+            analyze_command, ["contacts", "-c", str(config_paths[0]), "--replicates", "3-1"]
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
@@ -295,15 +295,30 @@ class TestExitCodes:
         comparison.write_text("name: x\n")
         result = CliRunner().invoke(
             analyze_command,
-            ["sasa", "-c", str(config_paths[0]), "-f", str(comparison)],
+            ["contacts", "-c", str(config_paths[0]), "-f", str(comparison)],
         )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         assert "not both" in result.stderr
 
+    def test_stride_is_refused_with_a_comparison_file_and_below_one(self, tmp_path: Path) -> None:
+        """--stride needs -c configs and a whole number of at least 1."""
+        comparison = tmp_path / "comparison.yaml"
+        comparison.write_text("name: x\n")
+        result = CliRunner().invoke(
+            analyze_command, ["contacts", "-f", str(comparison), "--stride", "2"]
+        )
+        assert result.exit_code == EXIT_ANALYSIS_ERROR
+        assert "--stride cannot be combined with -f" in result.stderr
+        result = CliRunner().invoke(analyze_command, ["rg", "-f", str(comparison), "--stride", "0"])
+        assert result.exit_code != 0
+        assert "--stride" in result.output
+
     def test_missing_comparison_file_exits_two(self, tmp_path: Path) -> None:
         """A missing -f file is reported with the init command as the fix."""
-        result = CliRunner().invoke(analyze_command, ["sasa", "-f", str(tmp_path / "nope.yaml")])
+        result = CliRunner().invoke(
+            analyze_command, ["contacts", "-f", str(tmp_path / "nope.yaml")]
+        )
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         assert "Comparison config not found" in result.stderr
@@ -336,7 +351,7 @@ class TestCompareRunAgentFormat:
         from polyzymd.cli.compare import compare
 
         class _Analysis:
-            name = "sasa"
+            name = "contacts"
 
             def format(self, result, output_format="text"):
                 raise AssertionError("agent format must not call the plugin formatter")
@@ -367,7 +382,7 @@ class TestCompareRunAgentFormat:
 
         result = CliRunner().invoke(
             compare,
-            ["run", "sasa", "-f", str(tmp_path / "comparison.yaml"), "--format", "agent"],
+            ["run", "contacts", "-f", str(tmp_path / "comparison.yaml"), "--format", "agent"],
         )
 
         assert result.exit_code == 0

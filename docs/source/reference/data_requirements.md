@@ -257,7 +257,7 @@ my_study/
 ├── comparison.yaml          # Analysis configuration (edit this)
 ├── comparison/              # Cross-condition comparison results
 ├── figures/                 # Generated plots
-└── structures/              # (Optional) shared structure files (e.g., enzyme PDB for SASA)
+└── structures/              # (Optional) shared structure files (e.g., an enzyme PDB)
 ```
 
 Analysis runs also create and populate `analysis/` with canonical

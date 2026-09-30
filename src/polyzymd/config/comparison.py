@@ -126,6 +126,7 @@ RETIRED_PLUGINS = {
     "rg": "radius_of_gyration",
     "rmsd": "rmsd",
     "rmsf": "rmsf",
+    "sasa": "sasa",
     "distances": "pair_distance",
     "catalytic_triad": "pair_distance",
 }
@@ -802,9 +803,9 @@ class ComparisonConfig(BaseModel):
     >>> for cond in config.conditions:
     ...     print(f"{cond.label}: {cond.config}")
     >>> print("Enabled analyses:", config.plugins.get_enabled_plugins())
-    >>> rmsf_settings = config.plugins.get("rmsf")
-    >>> if rmsf_settings:
-    ...     print(f"RMSF selection: {rmsf_settings.selection}")
+    >>> contacts_settings = config.plugins.get("contacts")
+    >>> if contacts_settings:
+    ...     print(f"Contact cutoff: {contacts_settings.cutoff}")
     """
 
     model_config = {"extra": "forbid"}

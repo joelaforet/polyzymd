@@ -104,7 +104,7 @@ class TestDiscovery:
         """Discovery should find shipped plugins and register analysis classes."""
         from polyzymd.analyses.contacts import ContactsAnalysis
         from polyzymd.analyses.discovery import clear_cache, list_analyses
-        from polyzymd.analyses.sasa import SASAAnalysis
+        from polyzymd.analyses.hydrogen_bonds import HydrogenBondsAnalysis
 
         clear_cache()
         analyses = list_analyses()
@@ -112,7 +112,6 @@ class TestDiscovery:
         expected_names = {
             "contacts",
             "hydrogen_bonds",
-            "sasa",
             "secondary_structure",
         }
         assert set(analyses) == expected_names
@@ -120,7 +119,7 @@ class TestDiscovery:
         for name, cls in analyses.items():
             assert issubclass(cls, Analysis), f"{name} is not an Analysis subclass"
 
-        assert analyses["sasa"] is SASAAnalysis
+        assert analyses["hydrogen_bonds"] is HydrogenBondsAnalysis
         assert analyses["contacts"] is ContactsAnalysis
 
     def test_discovery_excludes_removed_plugins(self):
@@ -156,7 +155,7 @@ class TestDiscovery:
             with pytest.raises(KeyError, match="Unknown analysis"):
                 get_analysis(name)
 
-        for name in ("contacts", "hydrogen_bonds", "sasa"):
+        for name in ("contacts", "hydrogen_bonds", "secondary_structure"):
             assert name in active_plugins
 
     def test_get_analysis_unknown_raises(self):
@@ -236,7 +235,7 @@ class TestDiscoveryRobustness:
         assert _should_skip_module("polyzymd.analyses.mda", package_prefix) is True
         assert _should_skip_module("polyzymd.analyses.mda.base", package_prefix) is True
 
-        assert _should_skip_module("polyzymd.analyses.sasa", package_prefix) is False
+        assert _should_skip_module("polyzymd.analyses.hydrogen_bonds", package_prefix) is False
         assert _should_skip_module("polyzymd.analyses.contacts", package_prefix) is False
 
     def test_top_level_module_detection(self):
@@ -544,5 +543,5 @@ class TestDiscoveryImportCost:
         )
         result = json.loads(completed.stdout.strip().splitlines()[-1])
 
-        assert len(result["names"]) == 4, result["names"]
+        assert result["names"] == ["contacts", "hydrogen_bonds", "secondary_structure"]
         assert result["heavy"] == []

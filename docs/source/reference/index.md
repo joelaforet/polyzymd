@@ -80,7 +80,6 @@ Analysis Plugin Settings Reference <analysis_plugin_settings>
 Comparison and Plotting Reference <analysis_comparison_reference>
 Contacts Plugin Reference <analysis_contacts_reference>
 Secondary Structure Plugin Reference <analysis_secondary_structure_reference>
-SASA Plugin Reference <analysis_sasa_reference>
 Hydrogen Bonds Plugin Reference <analysis_hydrogen_bonds_reference>
 Post-Hoc Testing Reference <posthoc_testing>
 Experimental Analyses Archive <experimental_analyses_archive>

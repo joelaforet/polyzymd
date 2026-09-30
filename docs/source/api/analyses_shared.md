@@ -158,18 +158,12 @@ artifact-oriented file locations used by analysis plugins.
    :no-index:
 ```
 
-## Multi-run comparison and formatting
+## Multi-run formatting
 
-Multi-run helpers support plugins that compare several named runs or entities
-per condition, such as RMSD, radius of gyration, and SASA analyses.
+Multi-run formatting helpers render the summaries of plugins that compare
+several named entities per condition, such as contacts.
 
 ```{eval-rst}
-.. automodule:: polyzymd.analyses.shared.multi_run_comparison
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
 .. automodule:: polyzymd.analyses.shared.multi_run_formatting
    :members:
    :undoc-members:

@@ -98,7 +98,7 @@ with units: `"10ns"`, `"5000ps"`, etc. The default is `"10ns"`.
 Which analyses to run and their settings. Each key is a plugin name (like
 `secondary_structure` or `contacts`), and the value is a settings block for that plugin. An
 empty block `{}` means "run with defaults." Only plugins listed here are
-executed — if you don't include `sasa`, SASA won't be computed.
+executed — if you don't include `contacts`, contacts won't be computed.
 
 For the complete schema with all fields, see
 {doc}`../reference/comparison_yaml`.
@@ -144,10 +144,9 @@ The available plugins are:
 |-------------|-----------------|
 | `contacts` | Intermolecular contacts between protein and other components |
 | `secondary_structure` | Secondary structure content (helix, sheet, coil fractions) |
-| `sasa` | Solvent-accessible surface area |
 | `hydrogen_bonds` | Hydrogen bond occupancy and lifetimes |
 
-RMSD, Rg, RMSF, distances and the catalytic triad run through `polyzymd analyze` and the study API
+RMSD, Rg, RMSF, distances, the catalytic triad and SASA run through `polyzymd analyze` and the study API
 instead of plugins; see {doc}`analysis_api`.
 
 Each plugin has a `Settings` model with configurable parameters. Most

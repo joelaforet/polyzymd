@@ -131,7 +131,6 @@ from polyzymd.analyses.shared import inferential_statistics, statistics
 For plotting and multi-run summaries:
 
 ```python
-from polyzymd.analyses.shared import multi_run_comparison
 from polyzymd.analyses.shared import multi_run_formatting, plotting
 ```
 

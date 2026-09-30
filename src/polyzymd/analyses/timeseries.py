@@ -1183,6 +1183,7 @@ class ReplicateValues:
             metric=self.metric,
             unit=self.unit,
             equilibration=study[chosen[0]].equilibration,
+            stride=getattr(study[chosen[0]], "stride", 1),
             frames_per_replicate={label: [row[4] for row in self.rows[label]] for label in chosen},
             conditions=conditions,
             pairwise=pairwise,
