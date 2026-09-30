@@ -17,8 +17,9 @@ does the following for each frame:
 3. Compute each protein residue's SASA again with the protein and the moved
    polymer atoms, which cover the protein without being counted.
 4. Divide both by the residue's maximum ASA from Tien et al. (2013). The
-   residue is exposed when the first ratio is at least `threshold`, and in
-   contact when it is exposed and the second ratio is below `threshold`. The
+   residue is exposed when the first ratio is at least `exposed_threshold`,
+   and in contact when it is exposed, the second ratio is below
+   `buried_threshold`, and the second SASA is lower than the first. The
    occluded area is `max(0, alone - with)`.
 
 It then averages over the production frames. `residue_contacts`, behind

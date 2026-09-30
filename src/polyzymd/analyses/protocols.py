@@ -112,7 +112,8 @@ FUNCTION_ANALYSES = {
         "regions": {},
         "cutoff": 4.0,
         "heavy_atoms": True,
-        "threshold": 0.2,
+        "exposed_threshold": 0.2,
+        "buried_threshold": 0.2,
         "max_asa": "theoretical",
         "probe_radius_nm": 0.14,
         "n_sphere_points": 960,
@@ -975,7 +976,13 @@ def _analyze_secondary_structure(
 #: Settings of polyzymd analyze contacts that only one method reads.
 CONTACT_METHOD_SETTINGS = {
     "distance": ("cutoff", "heavy_atoms"),
-    "occlusion": ("threshold", "max_asa", "probe_radius_nm", "n_sphere_points"),
+    "occlusion": (
+        "exposed_threshold",
+        "buried_threshold",
+        "max_asa",
+        "probe_radius_nm",
+        "n_sphere_points",
+    ),
 }
 
 
@@ -994,9 +1001,10 @@ def _analyze_contacts(
     - ``occlusion`` (default):
       :func:`~polyzymd.analyses.functions.residue_occlusion` computes each
       residue's SASA with the protein alone and with the polymer. A residue is
-      in contact when it is exposed without the polymer (SASA at least
-      ``threshold`` times its maximum ASA from Tien et al. 2013, column
-      ``max_asa``) and below that with it. Residues without a maximum ASA,
+      in contact when it is exposed without the polymer (relative SASA, over
+      its maximum ASA from Tien et al. 2013, column ``max_asa``, at least
+      ``exposed_threshold``) and buried by it (relative SASA below
+      ``buried_threshold``, and lower than without the polymer). Residues without a maximum ASA,
       such as terminal caps, are not measured, and a warning names them.
     - ``distance``: :func:`~polyzymd.analyses.functions.residue_contacts`
       counts a contact when any polymer atom is within ``cutoff`` Å of the
@@ -1134,7 +1142,8 @@ def _analyze_contacts(
             list(functions.OCCLUSION_PARTS),
         )
         defaults = {
-            "threshold": functions.OCCLUSION_THRESHOLD,
+            "exposed_threshold": functions.EXPOSED_THRESHOLD,
+            "buried_threshold": functions.BURIED_THRESHOLD,
             "max_asa": "theoretical",
             "probe_radius_nm": functions.SASA_PROBE_RADIUS_NM,
             "n_sphere_points": functions.SASA_SPHERE_POINTS,

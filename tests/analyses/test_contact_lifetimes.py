@@ -426,10 +426,10 @@ def test_occlusion_lifetimes_equal_the_hand_computed_values(tmp_path) -> None:
 
 
 def test_occlusion_options_reach_the_contacts(tmp_path) -> None:
-    """A threshold of 0 needs a residue to lose more than all its area, which never happens."""
+    """exposed_threshold=10 counts no residue exposed, so no contact happens."""
     universe = _universe(tmp_path, OCCLUSION_SCHEDULE, occlusion=True)
 
-    result = _lifetimes(universe, method="occlusion", types=TYPES, threshold=0.0)
+    result = _lifetimes(universe, method="occlusion", types=TYPES, exposed_threshold=10.0)
 
     assert result[EVENTS].tolist() == [0, 0, 0]
 
@@ -455,7 +455,7 @@ def test_an_unknown_method_is_refused(distance_universe) -> None:
 @pytest.mark.parametrize(
     ("method", "option", "match"),
     [
-        ("distance", {"threshold": 0.3}, "method distance takes no option threshold"),
+        ("distance", {"buried_threshold": 0.3}, "method distance takes no option buried_threshold"),
         ("distance", {"max_asa": "empirical"}, "method distance takes no option max_asa"),
         ("occlusion", {"cutoff": 4.0}, "method occlusion takes no option cutoff"),
         ("occlusion", {"bogus": 1}, "method occlusion takes no option bogus"),

@@ -27,8 +27,9 @@ import polyzymd as pz
 from polyzymd.analyses import analyze, functions
 from polyzymd.analyses.exceptions import ProtocolError
 from polyzymd.analyses.functions import (
+    BURIED_THRESHOLD,
+    EXPOSED_THRESHOLD,
     OCCLUSION_PARTS,
-    OCCLUSION_THRESHOLD,
     residue_occlusion,
     residue_sasa,
 )
@@ -51,6 +52,11 @@ pytestmark = [
 
 EQUILIBRATION = "0ns"
 CONTACT, EXPOSED, AREA, EXPOSED_AREA = range(4)
+
+
+def _both(value: float) -> dict:
+    """Return ``exposed_threshold`` and ``buried_threshold`` both set to ``value``."""
+    return {"exposed_threshold": value, "buried_threshold": value}
 
 
 def _shell(radius: float, centre=(0.0, 0.0, 0.0)) -> np.ndarray:
@@ -228,8 +234,8 @@ def test_a_partial_occluder_counts_by_the_threshold_on_the_area_left() -> None:
     ala = get_max_asa("ALA")
     assert 0 < covered < alone
 
-    above = residue_occlusion(protein, occluder, [0], threshold=(covered + alone) / 2 / ala)
-    below = residue_occlusion(protein, occluder, [0], threshold=covered / 2 / ala)
+    above = residue_occlusion(protein, occluder, [0], **_both((covered + alone) / 2 / ala))
+    below = residue_occlusion(protein, occluder, [0], **_both(covered / 2 / ala))
 
     for result in (above, below):
         assert result[EXPOSED] == pytest.approx([1.0])
@@ -238,7 +244,7 @@ def test_a_partial_occluder_counts_by_the_threshold_on_the_area_left() -> None:
     assert above[CONTACT] == pytest.approx([1.0])
     assert below[CONTACT] == pytest.approx([0.0])
     # At the default threshold the area left is well above the limit.
-    assert OCCLUSION_THRESHOLD * ala < covered
+    assert BURIED_THRESHOLD * ala < covered
     assert residue_occlusion(protein, occluder, [0])[CONTACT] == pytest.approx([0.0])
 
 
@@ -251,7 +257,7 @@ def test_threshold_boundaries_exposed_at_equality_and_contact_strictly_below() -
     ala = get_max_asa("ALA")
 
     def row(threshold):
-        return residue_occlusion(protein, occluder, [0], threshold=threshold)[[CONTACT, EXPOSED]]
+        return residue_occlusion(protein, occluder, [0], **_both(threshold))[[CONTACT, EXPOSED]]
 
     at_alone = _exact_threshold(alone, ala)
     at_covered = _exact_threshold(covered, ala)
@@ -270,7 +276,7 @@ def test_a_residue_the_protein_buries_is_never_in_contact_even_when_covered() ->
     ala = protein.residues[0].atoms
     alone = residue_sasa(ala, protein, [0])[0]
     covered = residue_sasa(ala, universe.atoms, [0])[0]
-    limit = OCCLUSION_THRESHOLD * get_max_asa("ALA")
+    limit = EXPOSED_THRESHOLD * get_max_asa("ALA")
     assert covered < alone < limit
 
     result = residue_occlusion(protein, occluder, [0])
@@ -281,7 +287,7 @@ def test_a_residue_the_protein_buries_is_never_in_contact_even_when_covered() ->
     assert result[AREA, 0] == pytest.approx(alone - covered, rel=1e-12)
     assert result[EXPOSED_AREA] == pytest.approx(residue_sasa(protein, protein, [0]), rel=1e-12)
     # Between the two areas, the same residue is exposed and in contact.
-    gated = residue_occlusion(protein, occluder, [0], threshold=(covered + alone) / 2 / 129.0)
+    gated = residue_occlusion(protein, occluder, [0], **_both((covered + alone) / 2 / 129.0))
     assert (gated[EXPOSED, 0], gated[CONTACT, 0]) == (1.0, 1.0)
 
 
@@ -367,8 +373,8 @@ def test_a_protonation_state_is_measured_with_the_standard_value() -> None:
     alone = residue_sasa(protein, protein, [0])[0]
     his = get_max_asa("HIS")
 
-    exposed = residue_occlusion(protein, occluder, [0], threshold=alone / his / 1.01)
-    buried = residue_occlusion(protein, occluder, [0], threshold=alone / his * 1.01)
+    exposed = residue_occlusion(protein, occluder, [0], **_both(alone / his / 1.01))
+    buried = residue_occlusion(protein, occluder, [0], **_both(alone / his * 1.01))
 
     assert (exposed[EXPOSED, 0], buried[EXPOSED, 0]) == (1.0, 0.0)
 
@@ -380,8 +386,8 @@ def test_empirical_max_asa_lowers_the_limit() -> None:
     alone = residue_sasa(protein, protein, [0])[0]
     threshold = alone / 125.0
 
-    theoretical = residue_occlusion(protein, occluder, [0], threshold=threshold)
-    empirical = residue_occlusion(protein, occluder, [0], threshold=threshold, max_asa="empirical")
+    theoretical = residue_occlusion(protein, occluder, [0], **_both(threshold))
+    empirical = residue_occlusion(protein, occluder, [0], **_both(threshold), max_asa="empirical")
 
     assert theoretical[EXPOSED, 0] == 0.0
     assert empirical[EXPOSED, 0] == 1.0
@@ -664,13 +670,20 @@ def test_contacts_defaults_and_method_settings_agree() -> None:
     defaults = FUNCTION_ANALYSES["contacts"]
     assert defaults["method"] == "occlusion"
     assert (defaults["cutoff"], defaults["heavy_atoms"]) == (functions.CONTACT_CUTOFF, True)
-    assert defaults["threshold"] == OCCLUSION_THRESHOLD == 0.2
+    assert defaults["exposed_threshold"] == EXPOSED_THRESHOLD == 0.2
+    assert defaults["buried_threshold"] == BURIED_THRESHOLD == 0.2
     assert defaults["max_asa"] == "theoretical"
     assert defaults["probe_radius_nm"] == functions.SASA_PROBE_RADIUS_NM
     assert defaults["n_sphere_points"] == functions.SASA_SPHERE_POINTS
     assert CONTACT_METHOD_SETTINGS == {
         "distance": ("cutoff", "heavy_atoms"),
-        "occlusion": ("threshold", "max_asa", "probe_radius_nm", "n_sphere_points"),
+        "occlusion": (
+            "exposed_threshold",
+            "buried_threshold",
+            "max_asa",
+            "probe_radius_nm",
+            "n_sphere_points",
+        ),
     }
     for names in CONTACT_METHOD_SETTINGS.values():
         assert set(names) <= set(defaults)
@@ -695,7 +708,8 @@ def test_analyze_occlusion_is_the_default_and_reports_coverage(
     assert settings["residues"] == {
         "classes": {"charged_positive": [2, 3], "nonpolar": [4], "charged_negative": [5]}
     }
-    assert (settings["threshold"], settings["max_asa"]) == (0.2, "theoretical")
+    assert (settings["exposed_threshold"], settings["buried_threshold"]) == (0.2, 0.2)
+    assert settings["max_asa"] == "theoretical"
     assert not {"cutoff", "heavy_atoms"} & set(settings)
     warnings = [text for text in report.warnings if "maximum ASA" in text]
     assert len(warnings) == 1
@@ -787,7 +801,7 @@ def test_analyze_empirical_max_asa_and_threshold_reach_the_function(configs, tmp
     LYS is exposed only by the empirical table; ARG, ALA and ASP are exposed by both.
     """
     area = _lone_carbon_area()
-    settings = {"threshold": area / 233.0}
+    settings = {"exposed_threshold": area / 233.0, "buried_threshold": area / 233.0}
     theoretical = analyze(
         "contacts",
         [configs["A"]],
@@ -831,8 +845,8 @@ def test_analyze_occlusion_stride_measures_every_other_frame(configs, schedules,
         ({"cutoff": 4.5}, r"cutoff only apply to method=distance, and method is occlusion"),
         ({"heavy_atoms": False}, r"heavy_atoms only apply to method=distance"),
         (
-            {"method": "distance", "threshold": 0.3, "max_asa": "empirical"},
-            r"max_asa, threshold only apply to method=occlusion, and method is distance",
+            {"method": "distance", "buried_threshold": 0.3, "max_asa": "empirical"},
+            r"buried_threshold, max_asa only apply to method=occlusion, and method is distance",
         ),
         ({"method": "distance", "probe_radius_nm": 0.1}, r"probe_radius_nm only apply"),
         ({"method": "distance", "n_sphere_points": 100}, r"n_sphere_points only apply"),
@@ -962,3 +976,76 @@ def test_cli_method_and_occlusion_settings_pass_through_set(configs, tmp_path) -
     assert '"method": "distance"' in distance.stdout
     assert misplaced.exit_code != 0
     assert "only apply to method=distance" in misplaced.output
+
+
+def test_exposed_and_buried_thresholds_act_separately() -> None:
+    """Exposure uses only exposed_threshold and burial only buried_threshold."""
+    universe = _lone([3.5, 0.0, 0.0])
+    protein, occluder = _parts(universe)
+    alone = residue_sasa(protein, protein, [0])[0]
+    covered = residue_sasa(protein, universe.atoms, [0])[0]
+    ala = get_max_asa("ALA")
+    assert 0 < covered < alone
+
+    def row(exposed, buried):
+        result = residue_occlusion(
+            protein, occluder, [0], exposed_threshold=exposed, buried_threshold=buried
+        )
+        return float(result[CONTACT, 0]), float(result[EXPOSED, 0])
+
+    # Exposed alone; buried only when the limit is above the area left.
+    assert row(alone / ala / 1.01, covered / ala * 1.01) == (1.0, 1.0)
+    assert row(alone / ala / 1.01, covered / ala / 1.01) == (0.0, 1.0)
+    # A stricter exposure removes the contact whatever buried_threshold is.
+    assert row(alone / ala * 1.01, covered / ala * 1.01) == (0.0, 0.0)
+    # buried_threshold may exceed exposed_threshold.
+    assert row(covered / ala / 2, alone / ala * 1.01) == (1.0, 1.0)
+
+
+def test_exposed_threshold_zero_counts_residues_the_protein_buries() -> None:
+    """With exposed_threshold=0 the GLY-buried ALA counts when the polymer lowers its SASA."""
+    gaps = [[2.0, 2.0, 4.0], [-2.0, 2.0, 4.0], [2.0, -2.0, 4.0], [-2.0, -2.0, 4.0]]
+    positions = np.vstack([[[0.0, 0.0, 0.0]], _shell(4.0), gaps])
+    universe = _universe(positions, [("ALA", "A", 1), ("GLY", "A", 26), ("SBM", "C", 4)])
+    protein, occluder = _parts(universe)
+    ala = protein.residues[0].atoms
+    alone = residue_sasa(ala, protein, [0])[0]
+    covered = residue_sasa(ala, universe.atoms, [0])[0]
+    assert covered < alone < EXPOSED_THRESHOLD * 129.0
+
+    result = residue_occlusion(
+        protein,
+        occluder,
+        [0],
+        exposed_threshold=0.0,
+        buried_threshold=(covered + alone) / 2 / 129.0,
+    )
+    assert (result[EXPOSED, 0], result[CONTACT, 0]) == (1.0, 1.0)
+
+
+def test_an_occluder_that_covers_nothing_is_never_in_contact() -> None:
+    """A residue already below buried_threshold alone is not in contact with a far occluder."""
+    universe = _lone([50.0, 0.0, 0.0])
+    protein, occluder = _parts(universe)
+    alone = residue_sasa(protein, protein, [0])[0]
+    ala = get_max_asa("ALA")
+
+    result = residue_occlusion(
+        protein, occluder, [0], exposed_threshold=0.0, buried_threshold=alone / ala * 2
+    )
+
+    assert result[EXPOSED, 0] == 1.0
+    assert result[AREA, 0] == 0.0
+    assert result[CONTACT, 0] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("exposed", "buried"), [(-0.1, 0.2), (0.2, 0.0), (0.2, -0.5), (float("nan"), 0.2)]
+)
+def test_thresholds_out_of_range_are_refused(exposed, buried) -> None:
+    universe = _lone([3.5, 0.0, 0.0])
+    protein, occluder = _parts(universe)
+    with pytest.raises(ProtocolError, match="exposed_threshold must be at least 0"):
+        residue_occlusion(
+            protein, occluder, [0], exposed_threshold=exposed, buried_threshold=buried
+        )

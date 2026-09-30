@@ -638,9 +638,13 @@ def _distance_frames(
         yield float(ts.time), touched
 
 
-#: Relative SASA, as a fraction of the residue's maximum ASA, that separates an
-#: exposed residue from a buried one in :func:`residue_occlusion`.
-OCCLUSION_THRESHOLD = 0.2
+#: Relative SASA, as a fraction of the residue's maximum ASA, at or above which
+#: :func:`residue_occlusion` counts a residue exposed with the protein alone.
+EXPOSED_THRESHOLD = 0.2
+
+#: Relative SASA below which :func:`residue_occlusion` counts an exposed residue
+#: buried by the occluder.
+BURIED_THRESHOLD = 0.2
 
 #: Rows of :func:`residue_occlusion` before the per-type rows.
 OCCLUSION_PARTS = ("contact_fraction", "exposed_fraction", "occluded_area", "exposed_area")
@@ -689,7 +693,8 @@ def residue_occlusion(
     protein: Any,
     occluder: Any,
     frames: Any,
-    threshold: float = OCCLUSION_THRESHOLD,
+    exposed_threshold: float = EXPOSED_THRESHOLD,
+    buried_threshold: float = BURIED_THRESHOLD,
     types: Any = (),
     max_asa: str = "theoretical",
     pbc: bool = True,
@@ -703,12 +708,16 @@ def residue_occlusion(
     and with the protein and ``occluder``, whose atoms cover the protein
     without being counted. When ``pbc`` is true and the frame has a box, each
     occluder molecule is first moved whole to its periodic image nearest the
-    protein, since the SASA calculation ignores periodic images. A residue
-    is exposed on a frame when its SASA with the protein alone is at least
-    ``threshold`` times its maximum ASA from Tien et al. 2013 (the
+    protein, since the SASA calculation ignores periodic images. A residue's
+    relative SASA is its SASA over its maximum ASA from Tien et al. 2013 (the
     ``theoretical`` or ``empirical`` column, see
-    :func:`~polyzymd.analyses.shared.aa_classification.get_max_asa`), and in
-    contact when it is exposed and its SASA with the occluder is below that.
+    :func:`~polyzymd.analyses.shared.aa_classification.get_max_asa`). It is
+    exposed on a frame when its relative SASA with the protein alone is at
+    least ``exposed_threshold``, and in contact when it is exposed, its
+    relative SASA with the occluder is below ``buried_threshold``, and the
+    occluder lowers its SASA. ``exposed_threshold=0`` counts every residue
+    exposed, so any residue the occluder brings below ``buried_threshold``
+    is in contact; ``buried_threshold`` must be above 0.
 
     The rows, named in :data:`OCCLUSION_PARTS`, are each residue's fraction
     of frames in contact; its fraction of frames exposed; its mean occluded
@@ -729,7 +738,16 @@ def residue_occlusion(
     n_measured = len(_measured_residues(protein, max_asa))
     sums = np.zeros((len(OCCLUSION_PARTS) + len(types), n_measured))
     for _, contact, exposed, alone, covered in _occlusion_frames(
-        protein, occluder, frames, threshold, types, max_asa, pbc, probe_radius_nm, n_sphere_points
+        protein,
+        occluder,
+        frames,
+        exposed_threshold,
+        buried_threshold,
+        types,
+        max_asa,
+        pbc,
+        probe_radius_nm,
+        n_sphere_points,
     ):
         sums[0] += contact[0]
         sums[1] += exposed
@@ -759,7 +777,8 @@ def _occlusion_frames(
     protein: Any,
     occluder: Any,
     frames: Any,
-    threshold: float,
+    exposed_threshold: float,
+    buried_threshold: float,
     types: Any,
     max_asa: str,
     pbc: bool,
@@ -778,15 +797,21 @@ def _occlusion_frames(
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.shared.aa_classification import get_max_asa
 
+    if not (exposed_threshold >= 0 and buried_threshold > 0):
+        raise ProtocolError(
+            f"occlusion: exposed_threshold must be at least 0 and buried_threshold above 0, "
+            f"got {exposed_threshold} and {buried_threshold}.",
+            hint="Pass fractions of the maximum ASA, such as exposed_threshold=0.2 and "
+            "buried_threshold=0.2.",
+        )
     measured = _measured_residues(protein, max_asa)
     if len(measured) == 0:
         raise ProtocolError(
             "occlusion: no residue of the protein selection has a maximum ASA.",
             hint="Select standard amino acids, such as 'protein'.",
         )
-    limit = threshold * np.array(
-        [get_max_asa(str(protein.residues[i].resname), max_asa) for i in measured]
-    )
+    maximum = np.array([get_max_asa(str(protein.residues[i].resname), max_asa) for i in measured])
+    exposed_limit, buried_limit = exposed_threshold * maximum, buried_threshold * maximum
     residue = np.unique(protein.resindices, return_inverse=True)[1]
     n_residues = len(protein.residues)
     groups = [occluder, *(occluder[occluder.resnames == name] for name in types)]
@@ -802,7 +827,7 @@ def _occlusion_frames(
 
     for ts in protein.universe.trajectory[frames]:
         alone = per_residue(protein, protein.positions)
-        exposed = alone >= limit
+        exposed = alone >= exposed_limit
         imaged = _nearest_images(protein, occluder, ts.dimensions if pbc else None)
         contact = np.zeros((len(groups), len(measured)), dtype=bool)
         covered_all = alone
@@ -813,7 +838,7 @@ def _occlusion_frames(
                 positions = context.positions
                 positions[rows[k]] = imaged[picks[k]]
                 covered = per_residue(context, positions)
-            contact[k] = exposed & (covered < limit)
+            contact[k] = exposed & (covered < buried_limit) & (covered < alone)
             if k == 0:
                 covered_all = covered
         yield float(ts.time), contact, exposed, alone, covered_all
@@ -902,7 +927,7 @@ def contact_lifetimes(
 
     Each frame's contacts come from :func:`residue_occlusion` for ``method``
     ``occlusion`` or :func:`residue_contacts` for ``distance``, with
-    ``options`` passed on (``threshold``, ``max_asa``, ``pbc``,
+    ``options`` passed on (``exposed_threshold``, ``buried_threshold``, ``max_asa``, ``pbc``,
     ``probe_radius_nm`` and ``n_sphere_points``, or ``cutoff`` and ``pbc``).
     An event is a run of consecutive frames in which one residue is in
     contact, found by :func:`contact_events`; absences of at most
@@ -932,9 +957,17 @@ def contact_lifetimes(
             hint="Pass tolerance_ps=0 for events that end at the first absent frame.",
         )
     if method == "occlusion":
-        known = {"threshold", "max_asa", "pbc", "probe_radius_nm", "n_sphere_points"}
+        known = {
+            "exposed_threshold",
+            "buried_threshold",
+            "max_asa",
+            "pbc",
+            "probe_radius_nm",
+            "n_sphere_points",
+        }
         settings = {
-            "threshold": OCCLUSION_THRESHOLD,
+            "exposed_threshold": EXPOSED_THRESHOLD,
+            "buried_threshold": BURIED_THRESHOLD,
             "max_asa": "theoretical",
             "pbc": True,
             "probe_radius_nm": SASA_PROBE_RADIUS_NM,
@@ -962,7 +995,8 @@ def contact_lifetimes(
                 protein,
                 polymer,
                 frames,
-                settings["threshold"],
+                settings["exposed_threshold"],
+                settings["buried_threshold"],
                 types,
                 settings["max_asa"],
                 settings["pbc"],
