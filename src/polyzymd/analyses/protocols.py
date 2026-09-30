@@ -1041,6 +1041,12 @@ def _analyze_contacts(
         for name, selection in regions.items()
     }
     parts = ["contact_fraction", *(f"{name}_contact_fraction" for name in types)]
+    # Only non-default options, so a plain Python call reuses the stored records.
+    options: dict[str, Any] = {"types": types}
+    if float(settings["cutoff"]) != functions.CONTACT_CUTOFF:
+        options["cutoff"] = float(settings["cutoff"])
+    if not settings["use_pbc"]:
+        options["pbc"] = False
     rows = study.per_replicate(
         functions.residue_contacts,
         select(protein),
@@ -1052,9 +1058,7 @@ def _analyze_contacts(
         output_dir=output_dir,
         bounds=(0.0, 1.0),
         parts=parts,
-        cutoff=float(settings["cutoff"]),
-        types=types,
-        pbc=bool(settings["use_pbc"]),
+        **options,
     )
     profile = rows["contact_fraction"]
     totals = {

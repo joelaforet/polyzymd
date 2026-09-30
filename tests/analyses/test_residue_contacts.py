@@ -477,3 +477,27 @@ def test_study_per_replicate_with_the_function_matches_analyze(configs, tmp_path
             float(values[int(row.entry) - 1]) for values in rows["SBM_contact_fraction"].values["A"]
         ]
         assert row.replicate_values == pytest.approx(expected, abs=1e-12)
+
+
+def test_study_per_replicate_at_the_defaults_reuses_what_analyze_contacts_stored(
+    configs, tmp_path
+) -> None:
+    """analyze passes only non-default options, so a plain Python call finds its records."""
+    analyze("contacts", [configs["A"]], labels=["A"], **_options(tmp_path))
+    stored = sorted((tmp_path / "polyzymd_results" / "residue_contacts").rglob("*.npz"))
+    assert stored
+    before = [path.stat().st_mtime_ns for path in stored]
+    study = pz.Study.from_configs({"A": configs["A"]}, equilibration=EQUILIBRATION)
+    study.per_replicate(
+        functions.residue_contacts,
+        pz.select("chainid A"),
+        pz.select("chainid C"),
+        unit=None,
+        labels=lambda u: u.select_atoms("chainid A").residues.resids,
+        name="residue_contacts",
+        output_dir=tmp_path,
+        bounds=(0.0, 1.0),
+        parts=["contact_fraction", "EGM_contact_fraction", "SBM_contact_fraction"],
+        types=["EGM", "SBM"],
+    )
+    assert [path.stat().st_mtime_ns for path in stored] == before
