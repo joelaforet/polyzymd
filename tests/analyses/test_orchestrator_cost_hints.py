@@ -69,7 +69,7 @@ def test_execution_cost_hint_default() -> None:
 
 @pytest.mark.parametrize(
     "analysis_name",
-    ["contacts", "hydrogen_bonds"],
+    ["hydrogen_bonds"],
 )
 def test_execution_cost_hint_high(analysis_name: str) -> None:
     """Expensive plugins should declare high execution cost hints."""

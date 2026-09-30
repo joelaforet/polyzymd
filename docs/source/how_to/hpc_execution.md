@@ -97,9 +97,9 @@ without dispatching jobs.
 
 ## Analyses that run through `polyzymd analyze`
 
-`rg`, `rmsd`, `rmsf`, `rms_deviation`, `distances`, `catalytic_triad` and
-`sasa` run through `polyzymd analyze` and the study API, not through
-`polyzymd compare submit`. To run one on a cluster, put the command in a batch
+`rg`, `rmsd`, `rmsf`, `rms_deviation`, `distances`, `catalytic_triad`,
+`sasa`, `secondary_structure` and `contacts` run through `polyzymd analyze`
+and the study API, not through `polyzymd compare submit`. To run one on a cluster, put the command in a batch
 script and submit it; it measures every replicate of every condition in one
 job, and a rerun reuses every stored replicate result:
 
@@ -150,7 +150,7 @@ calb_study/
 ```
 
 The `comparison.yaml` defines three conditions with three replicates each,
-and enables the contacts analysis plugin:
+and enables the hydrogen_bonds analysis plugin:
 
 ```yaml
 name: "calb_polymer_study"
@@ -174,10 +174,10 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  contacts:
-    polymer_selection: "chainid C"
-    protein_selection: "chainid A"
-    cutoff: 4.5
+  hydrogen_bonds:
+    groups:
+      protein: "chainid A"
+      polymer: "chainid C"
 
 plot_settings:
   format: "png"
@@ -199,10 +199,10 @@ scheduler. This lets you inspect the generated SLURM scripts and verify
 that paths, partition names, and resource requests are correct.
 
 ```bash
-pixi run -e analysis polyzymd compare submit contacts \
+pixi run -e analysis polyzymd compare submit hydrogen_bonds \
     -f comparison.yaml \
     --partition aa100 \
-    --mem 8G \
+    --mem 16G \
     --time 02:00:00 \
     --dry-run
 ```
@@ -217,7 +217,7 @@ Dry run only: no jobs were submitted
 The generated scripts are written to the HPC artifact directory:
 
 ```text
-comparison/contacts/_hpc/
+comparison/hydrogen_bonds/_hpc/
 ├── manifest.json          # Snapshot of analysis inputs
 ├── scripts/
 │   ├── replicate__no_polymer__r1.sh
@@ -248,10 +248,10 @@ Open one of the generated `.sh` scripts and check that:
 Once you are satisfied with the dry run, submit for real:
 
 ```bash
-pixi run -e analysis polyzymd compare submit contacts \
+pixi run -e analysis polyzymd compare submit hydrogen_bonds \
     -f comparison.yaml \
     --partition aa100 \
-    --mem 8G \
+    --mem 16G \
     --time 02:00:00
 ```
 
@@ -277,15 +277,15 @@ execution instead.
 Check the status of your submitted DAG at any time:
 
 ```bash
-pixi run -e analysis polyzymd compare status contacts \
+pixi run -e analysis polyzymd compare status hydrogen_bonds \
     -f comparison.yaml
 ```
 
 Sample output:
 
 ```text
-Analysis: contacts
-HPC dir: /path/to/calb_study/comparison/contacts/_hpc
+Analysis: hydrogen_bonds
+HPC dir: /path/to/calb_study/comparison/hydrogen_bonds/_hpc
 States: pending=4 running=2 retrying=0 succeeded=7 failed=0 unknown=0
 ```
 
@@ -304,7 +304,7 @@ are:
 For machine-readable output (useful in scripts), add `--json`:
 
 ```bash
-pixi run -e analysis polyzymd compare status contacts \
+pixi run -e analysis polyzymd compare status hydrogen_bonds \
     -f comparison.yaml --json
 ```
 
@@ -315,7 +315,7 @@ be stale. Use `--reconcile` to query `sacct` and update status files
 atomically:
 
 ```bash
-pixi run -e analysis polyzymd compare status contacts \
+pixi run -e analysis polyzymd compare status hydrogen_bonds \
     -f comparison.yaml --reconcile
 ```
 
@@ -326,7 +326,7 @@ You can also use standard SLURM tools alongside PolyzyMD status:
 
 ```bash
 squeue -u $USER
-tail -f comparison/contacts/_hpc/logs/*.out
+tail -f comparison/hydrogen_bonds/_hpc/logs/*.out
 ```
 
 ## Step 4: Finalize Results
@@ -342,14 +342,14 @@ finalize manually:
 Run finalize manually:
 
 ```bash
-pixi run -e analysis polyzymd compare finalize contacts \
+pixi run -e analysis polyzymd compare finalize hydrogen_bonds \
     -f comparison.yaml
 ```
 
 Output:
 
 ```text
-Saved result: /path/to/calb_study/comparison/contacts/result.json
+Saved result: /path/to/calb_study/comparison/hydrogen_bonds/result.json
 ```
 
 The finalize step runs `compare()` (cross-condition statistics) and `plot()`
@@ -361,7 +361,7 @@ If some conditions failed but you still want partial results, pass
 `--allow-partial`:
 
 ```bash
-pixi run -e analysis polyzymd compare finalize contacts \
+pixi run -e analysis polyzymd compare finalize hydrogen_bonds \
     -f comparison.yaml --allow-partial
 ```
 
@@ -377,7 +377,7 @@ SLURM jobs run in a non-interactive shell that may not have your login-time
 PATH. Use `--pixi-path` to provide the absolute path:
 
 ```bash
-pixi run -e analysis polyzymd compare submit contacts \
+pixi run -e analysis polyzymd compare submit hydrogen_bonds \
     -f comparison.yaml \
     --pixi-path /home/youruser/.pixi/bin/pixi \
     --partition aa100
@@ -393,7 +393,7 @@ Contact analysis of large systems can be memory-intensive. Increase the
 memory allocation:
 
 ```bash
-pixi run -e analysis polyzymd compare submit contacts \
+pixi run -e analysis polyzymd compare submit hydrogen_bonds \
     -f comparison.yaml \
     --mem 16G \
     --partition aa100
@@ -405,7 +405,7 @@ pixi run -e analysis polyzymd compare submit contacts \
 Increase the wall-time limit:
 
 ```bash
-pixi run -e analysis polyzymd compare submit contacts \
+pixi run -e analysis polyzymd compare submit hydrogen_bonds \
     -f comparison.yaml \
     --time 04:00:00 \
     --partition aa100
@@ -416,7 +416,7 @@ pixi run -e analysis polyzymd compare submit contacts \
 Check the SLURM log for that replicate:
 
 ```bash
-cat comparison/contacts/_hpc/logs/replicate__sbma_100__r2.*.out
+cat comparison/hydrogen_bonds/_hpc/logs/replicate__sbma_100__r2.*.out
 ```
 
 Common causes: trajectory file not found, selection string matches zero atoms,
@@ -551,10 +551,10 @@ of `sbatch` calls and make the SLURM queue easier to manage. Pass
 replicate jobs:
 
 ```bash
-pixi run -e analysis polyzymd compare submit contacts \
+pixi run -e analysis polyzymd compare submit hydrogen_bonds \
     -f comparison.yaml \
     --partition aa100 \
-    --mem 8G \
+    --mem 16G \
     --time 02:00:00 \
     --job-arrays
 ```
@@ -647,12 +647,12 @@ pixi run -e analysis polyzymd compare submit-all \
 The same flags work with `compare submit` for individual plugins:
 
 ```bash
-pixi run -e analysis polyzymd compare submit contacts \
+pixi run -e analysis polyzymd compare submit hydrogen_bonds \
     -f comparison.yaml \
     --partition blanca-shirts \
     --account blanca-shirts \
     --qos blanca-shirts \
-    --mem 8G \
+    --mem 16G \
     --time 02:00:00
 ```
 

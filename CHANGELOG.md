@@ -343,6 +343,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   profile version is also folded into the RMSF settings fingerprint, so RMSF
   caches from before this change are invalidated.
 
+### Removed
+
+- **The `contacts` comparison plugin (`polyzymd.analyses.contacts`).**
+  `polyzymd analyze contacts -c A/config.yaml -c B/config.yaml` measures
+  polymer-protein contacts instead, through
+  `polyzymd.analyses.functions.residue_occlusion` (the default,
+  `--set method=occlusion`: a residue is in contact when the polymer occludes
+  its SASA), `residue_contacts` (`--set method=distance`: a polymer atom within
+  `cutoff` Å) and `contact_lifetimes` (`--run mean_lifetime`,
+  `lifetime_events` and `censored_fraction`, how long contacts last).
+  `--set method=distance --set cutoff=4.5 --set heavy_atoms=false` gives the
+  coverage and contact fractions the plugin computed.  A `comparison.yaml`
+  with a `plugins.contacts` or `plot_settings.contacts` block still loads: the
+  block is ignored with a warning naming the `polyzymd analyze contacts`
+  command, and `polyzymd compare run contacts` exits with that command for the
+  file's conditions.  `polyzymd new-analysis` refuses the names of analyses
+  that `polyzymd analyze` runs from functions, such as `contacts`.
+  `polyzymd.analyses.protocols.build_report` still reads comparison results
+  the plugin stored.
+
 ## [1.3.0] - 2026-04-09 — Analysis Plugin System & OCP Compliance
 
 Large-scale refactoring of the analysis and comparison subsystems to achieve

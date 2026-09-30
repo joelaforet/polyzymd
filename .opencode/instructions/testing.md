@@ -24,6 +24,9 @@ tests/
 │   ├── test_rmsf.py             # rmsf, rms_deviation, rms_decomposition
 │   ├── test_sasa.py             # sasa, residue_sasa
 │   ├── test_secondary_structure.py  # dssp_occupancy
+│   ├── test_residue_contacts.py     # residue_contacts, polyzymd analyze contacts
+│   ├── test_residue_occlusion.py    # residue_occlusion
+│   ├── test_contact_lifetimes.py    # contact_events, contact_lifetimes, --run mean_lifetime
 │   ├── test_native_contacts.py      # native_contacts, polyzymd analyze native_contacts
 │   ├── test_segment_join.py     # loader repairs of restart-chain boundaries
 │   ├── test_empty_segments.py   # loader skips of empty segments
@@ -34,7 +37,7 @@ tests/
 │   ├── mda/                     # analyses/mda/
 │   ├── shared/                  # analyses/shared/ utilities (loader, window, statistics, ...)
 │   ├── scientific/              # statistical and uncertainty contract tests
-│   ├── plugins/                 # The remaining plugins: contacts, hydrogen_bonds
+│   ├── plugins/                 # The remaining plugin: hydrogen_bonds
 │   └── integration/             # Cross-analysis integration tests
 ├── cli/                         # Tests for cli/ source tree
 │   ├── test_main.py
@@ -75,8 +78,8 @@ pixi run -e build pytest tests/analyses/test_sasa.py -v
 # Run tests matching a pattern
 pixi run -e build pytest tests/ -v -k "rmsf"
 
-# Run tests for a remaining plugin
-pixi run -e build pytest tests/ -v -k "contacts"
+# Run tests for the remaining plugin
+pixi run -e build pytest tests/ -v -k "hydrogen_bonds"
 ```
 
 ## Writing New Tests

@@ -18,26 +18,7 @@ correct.
 
 ---
 
-## 2. Contact Criteria Cutoff Mismatch (Severity: Medium)
-
-**Symptom:** Cached analysis results may use a 4.0A cutoff while the current
-config specifies 4.5A (or vice versa). This leads to incorrect results being
-loaded from cache.
-
-**Root cause:** The cache key does not include the cutoff value, so changing
-the cutoff doesn't invalidate the cache.
-
-**Location:** `src/polyzymd/analyses/contacts/` and `analyses/_framework/cache_identity.py`
-
-**Fix approach:** Include the cutoff value (and other analysis parameters)
-in the cache key hash computation.
-
-**Workaround:** Manually clear the cache directory before re-running with
-different cutoff values.
-
----
-
-## 3. Sphinx Incremental Build Limitations (Severity: Low, Documented)
+## 2. Sphinx Incremental Build Limitations (Severity: Low, Documented)
 
 **Symptom:** After adding a new page to a `toctree` directive, the sidebar
 in built documentation doesn't show the new page (other pages appear stale).
@@ -51,7 +32,7 @@ or removing toctree entries. This is documented in
 
 ---
 
-## 4. GitHub Issue #20 — Analysis Module TODOs (Severity: Tracking)
+## 3. GitHub Issue #20 — Analysis Module TODOs (Severity: Tracking)
 
 **Symptom:** Various incomplete features and inconsistencies in the analysis
 module.
@@ -64,7 +45,7 @@ module.
 
 ---
 
-## 5. Pre-existing LSP Type Errors (Severity: Low, Cosmetic)
+## 4. Pre-existing LSP Type Errors (Severity: Low, Cosmetic)
 
 **Symptom:** Pyright/Pylance reports many type errors in `config/schema.py`,
 `builders/system_builder.py`, `simulation/runner.py`, and `cli/main.py`.

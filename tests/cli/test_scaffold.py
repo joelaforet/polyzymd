@@ -110,9 +110,15 @@ class TestValidateName:
             assert "reserved" in err
 
     def test_reject_existing_plugin(self):
-        err = validate_name("contacts", check_existing=True)
+        err = validate_name("hydrogen_bonds", check_existing=True)
         assert err is not None
         assert "already exists" in err
+
+    def test_reject_function_analysis_name(self):
+        for name in ("contacts", "rg"):
+            err = validate_name(name, check_existing=False)
+            assert err is not None
+            assert f"polyzymd analyze {name}" in err
 
     def test_accept_novel_name_with_collision_check(self):
         assert validate_name("my_brand_new_analysis_xyz", check_existing=True) is None
@@ -767,9 +773,17 @@ class TestNewAnalysisCLI:
         assert "snake_case" in result.output
 
     def test_existing_plugin_rejected(self, runner: CliRunner, cli):
-        result = runner.invoke(cli, ["contacts", "--project-root", str(self.root)])
+        result = runner.invoke(cli, ["hydrogen_bonds", "--project-root", str(self.root)])
         assert result.exit_code != 0
         assert "already exists" in result.output
+
+    def test_function_analysis_name_rejected(self, runner: CliRunner, cli):
+        result = runner.invoke(cli, ["contacts", "--project-root", str(self.root), "--force"])
+        assert result.exit_code != 0
+        assert "polyzymd analyze contacts" in result.output
+        analyses = self.root / "src" / "polyzymd" / "analyses"
+        assert not (analyses / "contacts").exists()
+        assert not (analyses / "contacts.py").exists()
 
     def test_invalid_class_name(self, runner: CliRunner, cli):
         result = runner.invoke(
@@ -868,7 +882,7 @@ class TestNewAnalysisCLI:
     def test_force_rejects_registered_builtin_name(self, runner: CliRunner, cli):
         result = runner.invoke(
             cli,
-            ["contacts", "--project-root", str(self.root), "--force"],
+            ["hydrogen_bonds", "--project-root", str(self.root), "--force"],
         )
         assert result.exit_code != 0
         assert "registered analysis plugin" in result.output

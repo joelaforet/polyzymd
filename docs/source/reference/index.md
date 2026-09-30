@@ -78,7 +78,6 @@ ProtocolReport Schema <analysis_protocol_report>
 Shipped analysis functions <analysis_functions>
 Analysis Plugin Settings Reference <analysis_plugin_settings>
 Comparison and Plotting Reference <analysis_comparison_reference>
-Contacts Plugin Reference <analysis_contacts_reference>
 Hydrogen Bonds Plugin Reference <analysis_hydrogen_bonds_reference>
 Post-Hoc Testing Reference <posthoc_testing>
 Experimental Analyses Archive <experimental_analyses_archive>

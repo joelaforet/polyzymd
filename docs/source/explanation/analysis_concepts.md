@@ -66,7 +66,6 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  contacts: {}
   hydrogen_bonds: {}
 ```
 
@@ -96,9 +95,9 @@ with units: `"10ns"`, `"5000ps"`, etc. The default is `"10ns"`.
 ### `plugins`
 
 Which analyses to run and their settings. Each key is a plugin name (like
-`hydrogen_bonds` or `contacts`), and the value is a settings block for that plugin. An
-empty block `{}` means "run with defaults." Only plugins listed here are
-executed — if you don't include `contacts`, contacts won't be computed.
+`hydrogen_bonds`), and the value is a settings block for that plugin. An empty
+block `{}` means "run with defaults." Only plugins listed here are executed — if
+you don't include `hydrogen_bonds`, hydrogen bonds won't be computed.
 
 For the complete schema with all fields, see
 {doc}`../reference/comparison_yaml`.
@@ -134,18 +133,16 @@ The pipeline processes data in this order:
 
 ## Plugins — the analysis modules
 
-PolyzyMD ships with 9 analysis plugins. Each plugin is a self-contained
-module that knows how to compute one type of measurement, aggregate it, compare
-across conditions, and generate plots.
-
-The available plugins are:
+A plugin is a self-contained module that knows how to compute one type of
+measurement, aggregate it, compare across conditions, and generate plots.
+PolyzyMD ships one:
 
 | Plugin name | What it measures |
 |-------------|-----------------|
-| `contacts` | Intermolecular contacts between protein and other components |
 | `hydrogen_bonds` | Hydrogen bond occupancy and lifetimes |
 
-RMSD, Rg, RMSF, distances, the catalytic triad, secondary structure and SASA run through `polyzymd analyze` and the study API
+RMSD, Rg, RMSF, distances, the catalytic triad, secondary structure, SASA and
+polymer-protein contacts run through `polyzymd analyze` and the study API
 instead of plugins; see {doc}`analysis_api`.
 
 Each plugin has a `Settings` model with configurable parameters. Most
@@ -160,14 +157,13 @@ PolyzyMD owns artifact storage and orchestration, while plugins own the
 domain-specific measurement and interpretation logic. For a contributor-focused
 walkthrough, see {doc}`../contributor_guide/extending_analyses`.
 
-You configure plugins in the `plugins:` block. For example, to run contacts
-with a custom cutoff and hydrogen bonds with defaults:
+You configure plugins in the `plugins:` block. For example, to run hydrogen
+bonds with a custom donor-acceptor cutoff:
 
 ```yaml
 plugins:
-  contacts:
-    cutoff: 4.0
-  hydrogen_bonds: {}
+  hydrogen_bonds:
+    distance_cutoff: 3.2
 ```
 
 ## Periodic boundaries, whole molecules, and alignment

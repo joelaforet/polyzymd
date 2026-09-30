@@ -174,7 +174,7 @@ def _one_line(text: str) -> str:
     "no_plots",
     is_flag=True,
     help="Draw no figures. By default rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, "
-    "sasa, secondary_structure and native_contacts draw theirs into <output-dir>/figures/<name>/.",
+    "sasa, secondary_structure, contacts and native_contacts draw theirs into <output-dir>/figures/<name>/.",
 )
 def analyze_command(
     name: str,
@@ -196,8 +196,10 @@ def analyze_command(
     """Run one analysis and print a validated result.
 
     Give one -c config.yaml for a single-condition summary, or several for a
-    comparison with the first config as the control. List the analysis names
-    with 'polyzymd compare run --list'.
+    comparison with the first config as the control. NAME is rg, rmsd, rmsf,
+    rms_deviation, sasa, secondary_structure, contacts, native_contacts,
+    distances or catalytic_triad, or a comparison plugin from 'polyzymd compare run --list',
+    such as hydrogen_bonds, which reads -f comparison.yaml.
 
     \b
     Examples:
@@ -209,8 +211,10 @@ def analyze_command(
         polyzymd analyze rms_deviation -c A/config.yaml --set reference_file=crystal.pdb
         polyzymd analyze sasa -c A/config.yaml --run isolated_residues
         polyzymd analyze secondary_structure -c A/config.yaml -c B/config.yaml --run helix_residues
+        polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --stride 10 --run contact_fraction_residues
+        polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --set method=distance
+        polyzymd analyze hydrogen_bonds -f comparison.yaml --format json -o hbonds.json
         polyzymd analyze native_contacts -c A/config.yaml -c B/config.yaml --set reference_file=crystal.pdb
-        polyzymd analyze contacts -f comparison.yaml --format json -o contacts.json
     """
     warn_if_wrong_pixi_env("analyze", ANALYSIS_PIXI_ENVS)
 

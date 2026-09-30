@@ -610,4 +610,4 @@ class TestStride:
         assert report.stride == 2
         assert report.frames_per_replicate["A"] == [len(FRAMES[::2])] * 3
         with pytest.raises(ProtocolError, match="comparison plugin"):
-            analyze("contacts", [configs["A"]], equilibration=EQUILIBRATION, stride=2)
+            analyze("hydrogen_bonds", [configs["A"]], equilibration=EQUILIBRATION, stride=2)

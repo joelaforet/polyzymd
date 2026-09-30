@@ -117,7 +117,7 @@ def settings_fingerprint(settings: BaseModel) -> str:
     The fingerprint is derived from canonical JSON produced with
     ``json.dumps(settings.model_dump(mode="json"), sort_keys=True)``, then
     hashed with SHA-256. It is intended for cache identity, so changing
-    settings (for example contacts cutoff) naturally changes cache filenames.
+    settings (for example the hydrogen-bond distance cutoff) naturally changes cache filenames.
 
     Parameters
     ----------

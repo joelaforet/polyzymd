@@ -39,8 +39,9 @@ Package Structure
     │   ├── mda/          # Public MDAnalysis job and artifact layer
     │   ├── shared/       # Reusable utilities (TrajectoryLoader, alignment, etc.)
     │   ├── study.py      # Study API: replicates as MDAnalysis universes
-    │   ├── functions.py  # Shipped analysis functions (rg, rmsd, rmsf, distances)
-    │   ├── contacts/     # Contacts plugin package
+    │   ├── functions.py  # Shipped analysis functions (rg, rmsd, rmsf, distances, contacts)
+    │   ├── protocols.py  # `polyzymd analyze` for the function analyses
+    │   ├── hydrogen_bonds/  # Hydrogen-bond plugin package
     │   └── ...           # Single-file or package plugins for each analysis type
     └── cli/              # Command-line interface
         ├── compare.py    # `polyzymd compare` subcommands
@@ -101,7 +102,7 @@ Analysis
 - :py:class:`~polyzymd.analyses.mda.artifacts.ComparisonArtifact` - Canonical comparison output for cross-condition results
 - :py:class:`~polyzymd.analyses.mda.store.ArtifactStore` - Canonical artifact persistence and loading helper
 - :py:class:`~polyzymd.analyses.base.MetricValue` - Scalar metric descriptor for default comparisons
-- :py:class:`~polyzymd.analyses.contacts.ParallelContactAnalyzer` - Polymer-protein contacts
+- :py:func:`~polyzymd.analyses.functions.residue_occlusion` - Polymer-protein contacts by occluded SASA
 
 Comparison
 ~~~~~~~~~~

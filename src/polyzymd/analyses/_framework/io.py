@@ -16,7 +16,6 @@ logger = logging.getLogger("polyzymd.analyses")
 
 _STRICT_CANONICAL_AGGREGATE_ANALYSES = frozenset(
     {
-        "contacts",
         "hydrogen_bonds",
     }
 )

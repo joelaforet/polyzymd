@@ -274,11 +274,11 @@ def compare():
 
     \b
     Example (local):
-        polyzymd compare run contacts --eq-time 10ns
+        polyzymd compare run hydrogen_bonds --eq-time 10ns
 
     \b
     Example (HPC):
-        polyzymd compare submit contacts --partition aa100 --mem 8G --time 02:00:00
+        polyzymd compare submit hydrogen_bonds --partition aa100 --mem 8G --time 02:00:00
     """
     pass
 
@@ -364,17 +364,18 @@ place only comparison-wide references in this directory.
         click.echo("Next steps:")
         click.echo(f"  1. Edit {_display_path(config_path)}")
         click.echo("     - Add your simulation conditions (paths to config.yaml files)")
-        click.echo("     - Define contacts for polymer-protein contact analysis")
+        click.echo("     - Configure plugins.hydrogen_bonds for the hydrogen-bond comparison")
         click.echo()
         click.echo(f"  2. cd {_display_path(project_dir)}")
         click.echo("  3. Run comparisons:")
-        click.echo(
-            "     polyzymd compare run contacts             # Compare polymer-protein contacts"
-        )
         click.echo("     polyzymd compare run hydrogen_bonds       # Compare hydrogen bonds")
+        click.echo("  Polymer-protein contacts run through polyzymd analyze instead:")
+        click.echo(
+            f"     polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --eq {eq_time}"
+        )
         click.echo()
         click.echo("  On an HPC cluster, submit as SLURM jobs instead:")
-        click.echo("     polyzymd compare submit contacts --partition <part> --mem 8G")
+        click.echo("     polyzymd compare submit hydrogen_bonds --partition <part> --mem 8G")
         click.echo()
 
     except (OSError, IOError) as e:
@@ -573,8 +574,8 @@ def run_comparison(
 
     \b
     Examples:
-        polyzymd compare run contacts --eq-time 10ns
-        polyzymd compare run contacts --format markdown
+        polyzymd compare run hydrogen_bonds --eq-time 10ns
+        polyzymd compare run hydrogen_bonds --format markdown
         polyzymd compare run hydrogen_bonds --format agent
         polyzymd compare run --list
     """
@@ -717,7 +718,7 @@ def run_comparison(
     "analysis_type",
     type=str,
     default=None,
-    help="Generate plots for specific analysis type only (e.g., 'contacts', 'hydrogen_bonds').",
+    help="Generate plots for specific analysis type only (e.g., 'hydrogen_bonds').",
 )
 @click.option(
     "--list-available",
@@ -753,7 +754,7 @@ def plot_all(
     \b
     Examples:
         polyzymd compare plot-all -f comparison.yaml
-        polyzymd compare plot-all -f comparison.yaml -a contacts
+        polyzymd compare plot-all -f comparison.yaml -a hydrogen_bonds
         polyzymd compare plot-all --list-available
     """
     warn_if_wrong_pixi_env("compare plot-all", ANALYSIS_PIXI_ENVS)

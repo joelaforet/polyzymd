@@ -1,7 +1,20 @@
-# Polymer-Protein Contacts Analysis: Quick Start
+# Polymer-protein contacts analysis: quick start
 
-Analyze polymer-protein contact frequencies and coverage for one or more
-conditions using the `contacts` plugin.
+Measure how often the polymer covers or touches each protein residue on the
+production frames of every replicate, and compare how much of the protein the
+polymer covers, overall, per monomer type, per amino-acid class, per region or
+residue by residue, with the replicate as the sampling unit.
+
+```{versionadded} 1.3.0
+Contacts analysis was added in PolyzyMD 1.3.0.
+```
+
+```{note}
+**Want to understand the measurement?** For what each shipped function
+measures, see {doc}`../reference/analysis_functions`; for how the occlusion
+values were checked, see {doc}`../explanation/analysis_contacts_verification`;
+for the statistics, see {doc}`../explanation/analysis_statistics_best_practices`.
+```
 
 :::{admonition} Environment Setup
 :class: tip
@@ -16,29 +29,49 @@ pixi shell -e analysis
 Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
-## TL;DR
+## What is measured
 
-```bash
-# Configure plugins.contacts in comparison.yaml, then run:
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
+A protein residue is either in contact with the polymer on a frame or not.
+The `method` setting picks what contact means.
 
-# Run all enabled analyses in the same workflow
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
+**`method=occlusion`** (default): the polymer covers the residue's surface. On
+every frame, each residue's solvent-accessible surface area (SASA) is computed
+twice, with MDTraj's Shrake-Rupley code as in {doc}`analysis_sasa_quickstart`:
+with the protein alone, and with the protein and the polymer, whose atoms
+cover the protein without being counted. A residue's relative SASA is its SASA
+divided by its maximum accessible surface area from Tien et al. (2013). The
+residue is **exposed** on a frame when its relative SASA with the protein
+alone is at least `exposed_threshold` (0.2), and in contact when it is exposed
+and the polymer **buries** it: its relative SASA with the polymer is below
+`buried_threshold` (0.2) and lower than without the polymer.
+`exposed_threshold=0` counts every residue as exposed, so any residue the
+polymer brings below `buried_threshold` is in contact, including one the
+protein itself already partly buries. The polymer's SASA
+loss on each residue, `max(0, alone - with)`, is also reported in Å².
 
-# Force recompute
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns --recompute
-```
+Before the SASA with the polymer is computed, each polymer molecule (each
+bonded fragment of the polymer selection) is moved whole by the box vector
+that brings it to the periodic image nearest the protein, because the SASA
+calculation does not consider periodic images. Molecules must be whole in the
+trajectory, as OpenMM writes them. Residues with no maximum ASA, such as
+terminal caps or non-standard residues, still cover their neighbours but are
+not measured; a warning names them.
 
-## Prerequisites
+**`method=distance`**: the polymer touches the residue. On every frame,
+MDAnalysis `lib.distances.capped_distance` finds every pair of a polymer atom
+and a protein atom within `cutoff` (4.0 Å) of each other, using the minimum
+image of the frame's box. Only heavy atoms are compared unless
+`heavy_atoms=false`. A residue is in contact when any of its atoms is in such
+a pair.
 
-Before running contacts analysis, make sure you have:
+For either method, each residue's **contact fraction** is the fraction of
+production frames it is in contact, and the same is measured for each polymer
+residue name, such as each monomer type. For occlusion, a type's contact
+fraction counts frames on which that type's atoms alone bury the residue. A
+residue can be in contact with several types on one frame, so the per-type
+fractions do not add up to the total.
 
-1. Completed production trajectories for each replicate
-2. A `comparison.yaml` with conditions and `plugins.contacts`
-3. Topology with valid chain IDs and polymer atoms
-4. At least 2 replicates per condition if you want robust comparison stats
-
-## Chain convention used by contacts
+PolyzyMD topologies put the protein on chain A and the polymer on chain C:
 
 | Chain | Contents |
 |-------|----------|
@@ -47,275 +80,192 @@ Before running contacts analysis, make sure you have:
 | C | Polymer |
 | D+ | Solvent and ions |
 
-The default contacts setup expects polymer on chain C and protein on chain A.
+The default selections, `chainid A` and `chainid C`, follow that convention.
+Water and ions are never part of either calculation.
 
-## Basic usage
-
-### 1) Configure `comparison.yaml`
-
-```yaml
-# comparison.yaml
-name: "contacts_study"
-control: "No Polymer"
-
-conditions:
-  - label: "No Polymer"
-    config: "../no_polymer/config.yaml"
-    replicates: [1, 2, 3]
-
-  - label: "SBMA"
-    config: "../sbma_100/config.yaml"
-    replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "10ns"
-
-plugins:
-  contacts:
-    polymer_selection: "chainid C"
-    protein_selection: "chainid A"
-    cutoff: 4.5
-    grouping: "aa_class"
-    compute_residence_times: true
-```
-
-### 2) Run contacts
+## From the command line
 
 ```bash
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
+polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml \
+  --label "SBMA 50%" --label "SBMA 100%" --eq 200ns --stride 10
 ```
 
-Expected output includes per-replicate progress and aggregated summary metrics
-(coverage and mean contact fraction).
+The first `-c` is the control. One pass over each replicate gives every result.
+By default the report shows `coverage`: for each replicate, the fraction of
+measured residues in contact on at least one production frame. The replicate
+values are summarised per condition, and every other condition is compared with
+the control by Welch's t test with the Benjamini-Hochberg correction. Every
+condition needs a polymer: the selections are checked on the first replicate of
+the control, and a selection that picks no atoms is refused.
 
-### 3) Run all enabled plugins (optional)
+Occlusion computes the SASA of the whole protein twice per frame, plus once
+more per monomer type, so it takes about 2 s per frame for a 180-residue
+lipase with 7,700 polymer atoms on four threads. `--stride 10` measures every
+tenth production frame.
+
+Pick another result with `--run`:
+
+| `--run` | One value per replicate |
+|---|---|
+| `coverage` (default) | Fraction of measured residues in contact on at least one frame |
+| `mean_contact_fraction` | Mean over residues of each residue's contact fraction |
+| `<type>_contact_fraction` | The same for one polymer residue name `<type>`, for each type in the polymer, such as `SBM` or `EGM` |
+| `<class>_contact_fraction` | Mean contact fraction of the residues of one amino-acid class: `aromatic`, `charged_positive`, `charged_negative`, `polar` or `nonpolar`, for the classes present |
+| `<region>_contact_fraction` | Mean contact fraction of the residues of one region of `regions` |
+| `occluded_area` | Occlusion only: SASA the polymer removes from the measured residues, in Å² per frame |
+| `occlusion_fraction` | Occlusion only: that area over the residues' SASA with the protein alone, summed over frames |
+| `contact_fraction_residues` | Each residue's contact fraction, compared residue by residue |
+| `<type>_contact_fraction_residues` | Each residue's contact fraction with one monomer type, compared residue by residue |
+| `occluded_area_residues` | Occlusion only: each residue's mean occluded area in Å², compared residue by residue |
+| `mean_lifetime` | Kaplan-Meier restricted mean duration of a contact event, in ns; see [How long contacts last](#how-long-contacts-last) |
+| `<type>_mean_lifetime` | The same for contacts with one monomer type |
+| `lifetime_events` | Number of contact events |
+| `censored_fraction` | Fraction of contact events cut off by the first or last production frame |
+
+A per-residue comparison is corrected over every residue of every compared
+condition, and the text report gives, for each condition, how many residues
+are significantly lower and higher than in the control and lists them. Every
+per-residue row is kept in the JSON report.
+
+Settings, passed with `--set`:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `method` | `occlusion` | `occlusion` or `distance`, as above |
+| `protein_selection` | `chainid A` | Protein atoms whose residues are measured |
+| `polymer_selection` | `chainid C` | Polymer atoms |
+| `polymer_types` | none | Residue names to keep in the polymer selection, such as `[SBM]` |
+| `use_pbc` | `true` | Use the frame's box: the minimum image for `distance`, and for `occlusion` each polymer molecule moved to its image nearest the protein |
+| `regions` | none | Mapping of region names to selections, each reported as `<region>_contact_fraction`; a region cannot be named `coverage`, `mean`, `contact`, `classes`, `occluded`, `occlusion`, a monomer type or an amino-acid class |
+| `exposed_threshold` | `0.2` | Occlusion only: relative SASA with the protein alone at or above which a residue is exposed; 0 counts every residue as exposed |
+| `buried_threshold` | `0.2` | Occlusion only: relative SASA with the polymer below which an exposed residue is buried, and so in contact; above 0 |
+| `max_asa` | `theoretical` | Occlusion only: the column of Tien et al. (2013) Table 1, `theoretical` (which the authors recommend) or `empirical` |
+| `probe_radius_nm` | `0.14` | Occlusion only: SASA probe radius in nm |
+| `n_sphere_points` | `960` | Occlusion only: points on each atom's sphere |
+| `tolerance_ps` | `0` | Lifetime results only: absences of at most this many ps between two contacts do not end an event |
+| `cutoff` | `4.0` | Distance only: contact distance in Å |
+| `heavy_atoms` | `true` | Distance only: compare heavy atoms only |
+
+A setting of the other method is refused. For example, to compare how much
+SBMA buries the active site of two polymer conditions:
 
 ```bash
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
+polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml --eq 200ns \
+  --stride 10 --set "regions={active_site: resid 77 or resid 133 or resid 156}" \
+  --run active_site_contact_fraction
 ```
 
-## Key metrics to check first
-
-- **Coverage**: fraction of protein residues contacted at least once
-- **Mean contact fraction**: average per-residue fraction of frames in contact
-- **Residence time (optional)**: average duration of individual contact events
-
-## Common tasks
-
-### Enable residence time statistics
-
-Residence times are enabled by default, but it is fine to set this explicitly:
-
-```yaml
-plugins:
-  contacts:
-    compute_residence_times: true
-```
-
-Then run:
+or to count contacts by distance instead:
 
 ```bash
-polyzymd compare run contacts -f comparison.yaml
+polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml --eq 200ns \
+  --set method=distance --set cutoff=4.5
 ```
 
-Set `compute_residence_times: false` when you only need contact fractions or
-downstream contacts-derived analyses. This skips aggregate residence-time
-summaries and residence-time plots, but still stores per-replicate contact
-events. Changing the setting changes the canonical contacts artifact identity,
-so recompute contacts after toggling it.
+The resolved selections, the monomer types found, the unmeasured residues and
+the residues of each amino-acid class and region are recorded under
+`provenance.settings` in the JSON report. Add `--format json` for the full
+report, `--replicates 1-3` to use only some replicates, and `--recompute` to
+ignore stored results.
 
-### Analyze one polymer type only
+## How long contacts last
 
-```yaml
-plugins:
-  contacts:
-    polymer_selection: "chainid C and resname SBM"
-    protein_selection: "chainid A"
-```
-
-For EGMA-only analysis, switch to `resname EGM`.
-
-### Restrict analysis to a protein region
-
-```yaml
-plugins:
-  contacts:
-    polymer_selection: "chainid C"
-    protein_selection: "chainid A and (resname TRP PHE TYR)"
-```
-
-For an active-site slice, use a residue range selection such as:
-
-```yaml
-protein_selection: "chainid A and (resid 75-80 or resid 130-140)"
-```
-
-### Run with reproducible cache behavior
+An event is a run of consecutive production frames in which one residue is in
+contact, by the chosen method. `--run mean_lifetime` reports, for each
+replicate, the Kaplan-Meier restricted mean duration of the events of all
+measured residues, in ns: the estimate treats an event under way at the first
+or last frame as lasting at least as long as observed, instead of counting it
+as finished. `lifetime_events` and `censored_fraction` report how many events
+there were and how many were cut off. The lifetime results need a pass over
+the frames of their own and are measured only when chosen:
 
 ```bash
-# Use cache if present
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
-
-# Ignore cache and recompute
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns --recompute
+polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml --eq 200ns \
+  --set method=distance --run mean_lifetime
 ```
 
-### Use a fuller contacts configuration
+The result depends on the spacing of the frames, since a contact or a break
+shorter than the spacing is not seen, so compare conditions at the same frame
+spacing and `--stride` only. `--set tolerance_ps=40` lets breaks of up to
+40 ps continue an event; a tolerance changes the result strongly and should be
+reported with it. {doc}`../explanation/analysis_contact_lifetimes` explains
+the estimator, the censoring and these choices, with references.
 
-If you want one place to set the most common contacts options:
+## Figures
 
-```yaml
-plugins:
-  contacts:
-    polymer_selection: "chainid C"
-    protein_selection: "chainid A"
-    cutoff: 4.5
-    polymer_types: ["SBM", "EGM"]
-    grouping: "aa_class"
-    compute_residence_times: true
-    fdr_alpha: 0.05
-    min_effect_size: 0.5
-    top_residues: 10
+`polyzymd analyze contacts` writes these figures to
+`<output-dir>/figures/contacts/`; `--no-plots` skips them.
+
+| Figure | What it shows |
+|---|---|
+| `contacts_class_bars` | The mean contact fraction of each amino-acid class for every condition, with every replicate value |
+| `contacts_<run>_comparison` | For a one-value result: each condition's mean with its interval and every replicate value |
+| `contacts_<name>_profile` | For a residue result: each residue's value per replicate and each condition's mean with its interval |
+| `contacts_<name>_difference` | For a residue result with several conditions: each condition minus the control at every residue, with the interval of the difference and the significant residues marked |
+
+```{note}
+Before this version contacts were counted by distance on all atoms within
+4.5 Å. `--set method=distance --set cutoff=4.5 --set heavy_atoms=false` gives
+the same coverage and contact fractions for the same frames.
 ```
 
-This is usually enough for cross-condition comparison without extra tuning.
-
-### Add user-defined protein groups and partitions
-
-Use this when you want plots and summaries for specific regions:
-
-```yaml
-plugins:
-  contacts:
-    protein_groups:
-      active_site: [77, 133, 156]
-      binding_patch: [45, 46, 47, 82, 84]
-      distal_surface: [12, 13, 14, 190, 191, 192]
-    protein_partitions:
-      functional_regions: [active_site, binding_patch, distal_surface]
-```
-
-After running, these partitions are used in partition-level contacts plots.
-
-### Generate contacts plots after running
-
-```bash
-polyzymd compare plot-all -f comparison.yaml
-```
-
-You will get contact-fraction profiles and grouped bar plots for AA classes and
-(if configured) user partitions. Residence-time profiles are generated only
-when `compute_residence_times` is enabled and residence-time data exists.
-
-For the full list of plot outputs and plot settings, see
-{doc}`../reference/analysis_contacts_reference`.
-
-### Run only contacts in a multi-plugin config
-
-If your `comparison.yaml` enables several plugins, you can run only contacts:
-
-```bash
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
-```
-
-Later, run all enabled plugins:
-
-```bash
-polyzymd compare run-all -f comparison.yaml --eq-time 10ns
-```
-
-## Quick output checks
-
-After a run, verify these two things first:
-
-1. **Coverage and mean contact fraction** in the aggregated result
-2. **Replicate count used** in aggregation
-
-Minimal check pattern:
-
-```bash
-ls analysis/<condition>/contacts/aggregated/
-```
-
-Then inspect key values programmatically:
+## From Python
 
 ```python
-import json
-from pathlib import Path
+import polyzymd as pz
+from polyzymd.analyses.functions import OCCLUSION_PARTS, residue_occlusion
+from polyzymd.analyses.shared.aa_classification import get_max_asa
 
-agg = json.loads(Path("analysis/<condition>/contacts/aggregated/result.json").read_text())
-print(f"n_replicates={agg['n_replicates']}")
-print(f"coverage={agg['coverage_mean']:.3f} ± {agg['coverage_sem']:.3f}")
-print(
-    "mean_contact_fraction="
-    f"{agg['mean_contact_fraction']:.3f} ± {agg['mean_contact_fraction_sem']:.3f}"
+study = pz.Study.from_configs(
+    {"SBMA 50%": "SBMA50/config.yaml", "SBMA 100%": "SBMA100/config.yaml"},
+    equilibration="200ns",
+    stride=10,
 )
+rows = study.per_replicate(
+    residue_occlusion,
+    pz.select("chainid A"),
+    pz.select("chainid C"),
+    unit=None,
+    labels=lambda u: [
+        r.resid for r in u.select_atoms("chainid A").residues if get_max_asa(r.resname)
+    ],
+    parts=[*OCCLUSION_PARTS, "SBM_contact_fraction"],
+    bounds=(0.0, 1.0),
+    types=["SBM"],
+)
+profile = rows["contact_fraction"]
+print(profile.over_labels("mean", "mean_contact_fraction").compare(control="SBMA 50%").to_agent_text())
+print(profile.compare(control="SBMA 50%").to_agent_text())  # residue by residue
 ```
 
-If residence times were enabled, also check:
+`residue_occlusion(protein, occluder, frames, exposed_threshold=0.2,
+buried_threshold=0.2, types=(), max_asa="theoretical", pbc=True)` returns the rows of `OCCLUSION_PARTS`,
+`contact_fraction`, `exposed_fraction`, `occluded_area` and `exposed_area`, then
+one contact-fraction row per residue name in `types`, with one column per
+residue that has a maximum ASA. `residue_contacts(protein, polymer, frames,
+cutoff=4.0, types=(), pbc=True)` returns one row of contact fractions, then one
+per residue name in `types`, with one column per residue; pass heavy-atom
+selections, such as `pz.select("chainid A and not element H")`, for the
+default of `polyzymd analyze contacts --set method=distance`.
 
-```python
-for ptype, stats in agg.get("residence_time_by_polymer_type", {}).items():
-    print(f"{ptype}: mean={stats[0]:.2f} frames, sem={stats[1]:.2f}")
-```
+`contact_lifetimes(protein, polymer, frames, method="occlusion", types=(),
+tolerance_ps=0.0, **options)` returns the rows of `LIFETIME_PARTS`,
+`mean_lifetime`, `n_events` and `censored_fraction`, with one column for the
+polymer and one per residue name in `types`; `options` are the settings of the
+method, such as `cutoff` or `buried_threshold`. Run it with
+`study.per_replicate(contact_lifetimes, ..., labels=["polymer", *types],
+parts=list(LIFETIME_PARTS), types=types)`.
 
-## Programmatic post-processing (JSON)
+## References
 
-After CLI execution, load result files directly:
-
-```python
-import json
-from pathlib import Path
-
-replicate_result = json.loads(
-    Path("analysis/<condition>/contacts/run_1/result.json").read_text()
-)
-print(f"Coverage: {replicate_result['coverage_fraction']:.1%}")
-
-aggregated_result = json.loads(
-    Path("analysis/<condition>/contacts/aggregated/result.json").read_text()
-)
-print(
-    "Mean contact fraction: "
-    f"{aggregated_result['mean_contact_fraction']:.1%} "
-    f"± {aggregated_result['mean_contact_fraction_sem']:.1%}"
-)
-```
-
-For complete contacts configuration, output, plotting, and troubleshooting
-details, use {doc}`../reference/analysis_contacts_reference`.
-
-## Compare conditions
-
-Use the same comparison workflow as other stable analyses:
-
-```bash
-polyzymd compare run contacts -f comparison.yaml --eq-time 10ns
-```
-
-The plugin compares conditions with dual primary metrics:
-
-- coverage
-- mean contact fraction
-
-For multi-plugin comparison workflow details, see
-{doc}`analysis_compare_conditions`.
-
-## Reference and troubleshooting
-
-For complete lookup documentation, including:
-
-- full configuration field tables
-- output directory structure and JSON schemas
-- full plot catalog and `plot_settings.contacts` options
-- common CLI options
-- troubleshooting fixes
-
-see {doc}`../reference/analysis_contacts_reference`.
+**Tien MZ, Meyer AG, Sydykova DK, Spielman SJ, Wilke CO.** (2013) "Maximum
+allowed solvent accessibilities of residues in proteins." *PLoS ONE*
+8:e80635. https://doi.org/10.1371/journal.pone.0080635
 
 ## Next steps
 
-- {doc}`analysis_compare_conditions`
-- {doc}`analysis_rmsf_quickstart`
-- {doc}`analysis_triad_quickstart`
-- {doc}`../reference/analysis_contacts_reference`
+- **What each function measures**: {doc}`../reference/analysis_functions`
+- **How the occlusion values were checked**: {doc}`../explanation/analysis_contacts_verification`
+- **How long contacts last**: {doc}`../explanation/analysis_contact_lifetimes`
+- **Understand statistics**: {doc}`../explanation/analysis_statistics_best_practices`
+- **SASA analysis**: {doc}`analysis_sasa_quickstart`

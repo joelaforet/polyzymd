@@ -4,8 +4,8 @@ The per-frame functions take MDAnalysis ``AtomGroup`` arguments positioned at
 one frame and return one number, so they run through
 :meth:`polyzymd.analyses.study.Study.timeseries` like any function you write.
 The per-replicate functions (:func:`rmsf`, :func:`rms_deviation`,
-:func:`rms_decomposition`, :func:`residue_sasa` and :func:`dssp_occupancy`)
-also take the production
+:func:`rms_decomposition`, :func:`residue_sasa`, :func:`dssp_occupancy` and
+:func:`residue_contacts` and :func:`residue_occlusion`) also take the production
 frame indices and return one value per residue, and run through
 :meth:`polyzymd.analyses.study.Study.per_replicate`.
 """
@@ -470,11 +470,25 @@ def _atom_sasa(
     """Return the SASA in Å² of each ``target`` atom in each frame of ``positions`` (Å, of ``context``)."""
     import mdtraj as md
     import numpy as np
+    from scipy.spatial import cKDTree
+
+    from polyzymd.analyses.exceptions import ProtocolError
 
     topology, where = _sasa_topology(target, context)
-    trajectory = md.Trajectory(
-        xyz=np.asarray(positions, dtype=np.float32) / 10.0, topology=topology
-    )
+    xyz = np.asarray(positions, dtype=np.float32) / 10.0
+    # MDTraj's Shrake-Rupley code ends the process, without raising, when two
+    # atoms are closer than 1e-5 nm, so such frames are refused here first.
+    for frame in xyz:
+        close = cKDTree(frame).query_pairs(1e-5, output_type="ndarray")
+        if len(close):
+            first, second = context.indices[close[0]]
+            raise ProtocolError(
+                f"sasa: atoms {first} and {second} are at the same position, and MDTraj's "
+                "Shrake-Rupley code cannot compute SASA with two atoms on top of each other.",
+                hint="Check the coordinates of those atoms, or leave one of them out of the "
+                "selection.",
+            )
+    trajectory = md.Trajectory(xyz=xyz, topology=topology)
     atom_nm2 = md.shrake_rupley(
         trajectory, mode="atom", probe_radius=probe_radius_nm, n_sphere_points=n_sphere_points
     )
@@ -673,3 +687,478 @@ def dssp_occupancy(atoms: Any, frames: Any, simplified: bool = True, chunk: int 
         for row, code in enumerate(codes):
             counts[row] += (assigned == code).sum(axis=0)
     return counts / len(frames)
+
+
+#: Cutoff in Å within which a protein residue and a polymer are in contact.
+#: Distance in Å within which :func:`residue_contacts` counts a contact.
+CONTACT_CUTOFF = 4.0
+
+
+def residue_contacts(
+    protein: Any,
+    polymer: Any,
+    frames: Any,
+    cutoff: float = CONTACT_CUTOFF,
+    types: Any = (),
+    pbc: bool = True,
+) -> Any:
+    """Return, for each residue of ``protein``, the fraction of ``frames`` it touches ``polymer``.
+
+    On every frame, ``MDAnalysis.lib.distances.capped_distance`` finds every
+    pair of a ``polymer`` atom and a ``protein`` atom closer than ``cutoff``
+    Å, with the minimum image of the frame's box when ``pbc`` is true and the
+    box is known. A protein residue is in contact on a frame when any of its
+    atoms is in such a pair. The first row is each residue's fraction of
+    frames in contact with any polymer atom; then one row per residue name in
+    ``types``, the fraction of frames in contact with polymer atoms of that
+    residue name, such as one monomer type. The type rows do not sum to the
+    first, since a residue can touch several types on one frame. Columns
+    follow ``protein.residues``.
+
+    The atoms compared are the atoms given; select heavy atoms, such as
+    ``chainid A and not element H``, to leave hydrogens out.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(1 + len(types), n_residues)``.
+    """
+    import numpy as np
+
+    counts = np.zeros((1 + len(types), len(protein.residues)))
+    for _, touched in _distance_frames(protein, polymer, frames, cutoff, types, pbc):
+        counts += touched
+    return counts / len(frames)
+
+
+def _distance_frames(
+    protein: Any, polymer: Any, frames: Any, cutoff: float, types: Any, pbc: bool
+) -> Any:
+    """Yield each frame's time in ps and contact rows of :func:`residue_contacts`.
+
+    The rows are booleans of shape ``(1 + len(types), n_residues)``: in
+    contact with any ``polymer`` atom, then with the atoms of each residue
+    name in ``types``.
+    """
+    import numpy as np
+    from MDAnalysis.lib.distances import capped_distance
+
+    residue = np.unique(protein.resindices, return_inverse=True)[1]
+    n_residues = len(protein.residues)
+    type_of_atom = np.full(len(polymer), -1)
+    for row, name in enumerate(types):
+        type_of_atom[polymer.resnames == name] = row
+    for ts in protein.universe.trajectory[frames]:
+        touched = np.zeros((1 + len(types), n_residues), dtype=bool)
+        box = ts.dimensions if pbc else None
+        pairs = capped_distance(
+            polymer.positions, protein.positions, max_cutoff=cutoff, box=box, return_distances=False
+        )
+        if len(pairs):
+            touched[0, residue[pairs[:, 1]]] = True
+            kinds = type_of_atom[pairs[:, 0]]
+            known = kinds >= 0
+            touched[1 + kinds[known], residue[pairs[known, 1]]] = True
+        yield float(ts.time), touched
+
+
+#: Relative SASA, as a fraction of the residue's maximum ASA, at or above which
+#: :func:`residue_occlusion` counts a residue exposed with the protein alone.
+EXPOSED_THRESHOLD = 0.2
+
+#: Relative SASA below which :func:`residue_occlusion` counts an exposed residue
+#: buried by the occluder.
+BURIED_THRESHOLD = 0.2
+
+#: Rows of :func:`residue_occlusion` before the per-type rows.
+OCCLUSION_PARTS = ("contact_fraction", "exposed_fraction", "occluded_area", "exposed_area")
+
+
+def _nearest_images(anchor: Any, atoms: Any, box: Any) -> Any:
+    """Return the positions of ``atoms`` with each molecule moved to its image nearest ``anchor``.
+
+    Atoms are grouped into molecules by their bonded fragment. Each molecule
+    is translated as a whole by the box vector that brings its centroid to
+    the minimum image of its offset from the centroid of ``anchor``, with
+    ``MDAnalysis.lib.distances.minimize_vectors``. Molecules must be whole in
+    the coordinates as loaded. Without a box the positions are returned as
+    they are.
+    """
+    import numpy as np
+    from MDAnalysis.exceptions import NoDataError
+    from MDAnalysis.lib.distances import minimize_vectors
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    positions = atoms.positions
+    if box is None:
+        return positions
+    try:
+        fragments = atoms.fragindices
+    except NoDataError as exc:
+        raise ProtocolError(
+            "occlusion: the topology has no bonds, so polymer molecules cannot be moved whole "
+            "to the image nearest the protein.",
+            hint="Load a topology with bonds, or pass pbc=False (use_pbc=false) to use the "
+            "coordinates as loaded.",
+        ) from exc
+    inverse = np.unique(fragments, return_inverse=True)[1]
+    counts = np.bincount(inverse)
+    centroids = (
+        np.stack([np.bincount(inverse, weights=positions[:, axis]) for axis in range(3)], axis=1)
+        / counts[:, None]
+    )
+    offsets = (centroids - anchor.positions.mean(axis=0)).astype(np.float32)
+    shifts = minimize_vectors(offsets, box) - offsets
+    return positions + shifts[inverse]
+
+
+def residue_occlusion(
+    protein: Any,
+    occluder: Any,
+    frames: Any,
+    exposed_threshold: float = EXPOSED_THRESHOLD,
+    buried_threshold: float = BURIED_THRESHOLD,
+    types: Any = (),
+    max_asa: str = "theoretical",
+    pbc: bool = True,
+    probe_radius_nm: float = SASA_PROBE_RADIUS_NM,
+    n_sphere_points: int = SASA_SPHERE_POINTS,
+) -> Any:
+    """Return, for each residue of ``protein``, how much ``occluder`` covers its surface.
+
+    On every frame, the SASA of each protein residue is computed twice as in
+    :func:`residue_sasa`, one frame per MDTraj call: with the protein alone,
+    and with the protein and ``occluder``, whose atoms cover the protein
+    without being counted. When ``pbc`` is true and the frame has a box, each
+    occluder molecule is first moved whole to its periodic image nearest the
+    protein, since the SASA calculation ignores periodic images. A residue's
+    relative SASA is its SASA over its maximum ASA from Tien et al. 2013 (the
+    ``theoretical`` or ``empirical`` column, see
+    :func:`~polyzymd.analyses.shared.aa_classification.get_max_asa`). It is
+    exposed on a frame when its relative SASA with the protein alone is at
+    least ``exposed_threshold``, and in contact when it is exposed, its
+    relative SASA with the occluder is below ``buried_threshold``, and the
+    occluder lowers its SASA. ``exposed_threshold=0`` counts every residue
+    exposed, so any residue the occluder brings below ``buried_threshold``
+    is in contact; ``buried_threshold`` must be above 0.
+
+    The rows, named in :data:`OCCLUSION_PARTS`, are each residue's fraction
+    of frames in contact; its fraction of frames exposed; its mean occluded
+    area, the SASA lost to the occluder, ``max(0, alone - with)``, in Å²; and
+    its mean SASA with the protein alone, in Å². Then one row per residue
+    name in ``types``: the fraction of frames in contact when only the
+    occluder atoms of that residue name are present. Columns follow the
+    residues of ``protein`` that have a maximum ASA; residues without one,
+    such as terminal caps, still cover their neighbours but are not measured.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(4 + len(types), n_measured_residues)``.
+    """
+    import numpy as np
+
+    n_measured = len(_measured_residues(protein, max_asa))
+    sums = np.zeros((len(OCCLUSION_PARTS) + len(types), n_measured))
+    for _, contact, exposed, alone, covered in _occlusion_frames(
+        protein,
+        occluder,
+        frames,
+        exposed_threshold,
+        buried_threshold,
+        types,
+        max_asa,
+        pbc,
+        probe_radius_nm,
+        n_sphere_points,
+    ):
+        sums[0] += contact[0]
+        sums[1] += exposed
+        sums[2] += np.maximum(0.0, alone - covered)
+        sums[3] += alone
+        sums[len(OCCLUSION_PARTS) :] += contact[1:]
+    return sums / len(frames)
+
+
+def _measured_residues(protein: Any, max_asa: str) -> Any:
+    """Return the positions in ``protein.residues`` of the residues with a maximum ASA."""
+    import numpy as np
+
+    from polyzymd.analyses.shared.aa_classification import get_max_asa
+
+    return np.array(
+        [
+            i
+            for i, residue in enumerate(protein.residues)
+            if get_max_asa(str(residue.resname), max_asa) is not None
+        ],
+        dtype=int,
+    )
+
+
+def _occlusion_frames(
+    protein: Any,
+    occluder: Any,
+    frames: Any,
+    exposed_threshold: float,
+    buried_threshold: float,
+    types: Any,
+    max_asa: str,
+    pbc: bool,
+    probe_radius_nm: float,
+    n_sphere_points: int,
+) -> Any:
+    """Yield, for each frame, what :func:`residue_occlusion` measures on it.
+
+    Each item is the frame's time in ps; the contact rows, booleans of shape
+    ``(1 + len(types), n_measured)``, with all ``occluder`` atoms and then
+    with each residue name's; whether each measured residue is exposed; and
+    its SASA in Å² alone and with all occluder atoms.
+    """
+    import numpy as np
+
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.shared.aa_classification import get_max_asa
+
+    if not (exposed_threshold >= 0 and buried_threshold > 0):
+        raise ProtocolError(
+            f"occlusion: exposed_threshold must be at least 0 and buried_threshold above 0, "
+            f"got {exposed_threshold} and {buried_threshold}.",
+            hint="Pass fractions of the maximum ASA, such as exposed_threshold=0.2 and "
+            "buried_threshold=0.2.",
+        )
+    measured = _measured_residues(protein, max_asa)
+    if len(measured) == 0:
+        raise ProtocolError(
+            "occlusion: no residue of the protein selection has a maximum ASA.",
+            hint="Select standard amino acids, such as 'protein'.",
+        )
+    maximum = np.array([get_max_asa(str(protein.residues[i].resname), max_asa) for i in measured])
+    exposed_limit, buried_limit = exposed_threshold * maximum, buried_threshold * maximum
+    residue = np.unique(protein.resindices, return_inverse=True)[1]
+    n_residues = len(protein.residues)
+    groups = [occluder, *(occluder[occluder.resnames == name] for name in types)]
+    contexts = [protein | group for group in groups]
+    rows = [
+        np.searchsorted(context.indices, group.indices) for context, group in zip(contexts, groups)
+    ]
+    picks = [np.searchsorted(occluder.indices, group.indices) for group in groups]
+
+    def per_residue(context: Any, positions: Any) -> Any:
+        atom = _atom_sasa(protein, context, positions[None], probe_radius_nm, n_sphere_points)
+        return np.bincount(residue, weights=atom[0], minlength=n_residues)[measured]
+
+    for ts in protein.universe.trajectory[frames]:
+        alone = per_residue(protein, protein.positions)
+        exposed = alone >= exposed_limit
+        imaged = _nearest_images(protein, occluder, ts.dimensions if pbc else None)
+        contact = np.zeros((len(groups), len(measured)), dtype=bool)
+        covered_all = alone
+        for k, (context, group) in enumerate(zip(contexts, groups)):
+            if len(group) == 0:
+                covered = alone
+            else:
+                positions = context.positions
+                positions[rows[k]] = imaged[picks[k]]
+                covered = per_residue(context, positions)
+            contact[k] = exposed & (covered < buried_limit) & (covered < alone)
+            if k == 0:
+                covered_all = covered
+        yield float(ts.time), contact, exposed, alone, covered_all
+
+
+#: Rows of :func:`contact_lifetimes`, one column per group.
+LIFETIME_PARTS = ("mean_lifetime", "n_events", "censored_fraction")
+
+
+def contact_events(mask: Any, gap: int = 0) -> tuple[Any, Any]:
+    """Return the lengths in frames of the runs of ``True`` in each column of ``mask``, and which are censored.
+
+    ``mask`` has one row per frame and one column per series, such as one
+    residue. An event is a run of consecutive frames in which a column is
+    true. With ``gap``, absences of at most ``gap`` consecutive frames between
+    two presences are filled first, with
+    ``MDAnalysis.lib.correlations.correct_intermittency``, so they do not end
+    the event. An event that includes the first or the last frame is
+    censored: it may have begun before or lasted beyond the frames, so its
+    length is only a lower bound.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        The lengths in frames of every event, column by column, and a boolean
+        array that is true for the censored ones.
+    """
+    import numpy as np
+
+    mask = np.asarray(mask, dtype=bool)
+    if gap > 0:
+        from MDAnalysis.lib.correlations import correct_intermittency
+
+        sets = [set(np.flatnonzero(row).tolist()) for row in mask]
+        filled = correct_intermittency(sets, gap)
+        mask = np.zeros_like(mask)
+        for i, present in enumerate(filled):
+            mask[i, list(present)] = True
+    padded = np.zeros((mask.shape[0] + 2, mask.shape[1]), dtype=np.int8)
+    padded[1:-1] = mask
+    change = np.diff(padded, axis=0)
+    lengths, censored = [], []
+    for column in range(mask.shape[1]):
+        starts = np.flatnonzero(change[:, column] == 1)
+        ends = np.flatnonzero(change[:, column] == -1)
+        lengths.append(ends - starts)
+        censored.append((starts == 0) | (ends == mask.shape[0]))
+    return np.concatenate(lengths).astype(int), np.concatenate(censored).astype(bool)
+
+
+def restricted_mean_lifetime(durations: Any, censored: Any, horizon: float) -> float:
+    """Return the Kaplan-Meier restricted mean of ``durations`` up to ``horizon``.
+
+    ``scipy.stats.ecdf`` estimates the survival function, the probability that
+    an event lasts longer than ``t``, from the durations, the ``censored``
+    ones being only lower bounds (Kaplan and Meier 1958). The restricted mean
+    is its area from 0 to ``horizon`` (Royston and Parmar 2013): the mean
+    duration with every duration cut at ``horizon``. It is ``nan`` without
+    durations.
+    """
+    import numpy as np
+    from scipy.stats import CensoredData, ecdf
+
+    durations = np.asarray(durations, dtype=float)
+    censored = np.asarray(censored, dtype=bool)
+    if len(durations) == 0:
+        return float("nan")
+    survival = ecdf(CensoredData(uncensored=durations[~censored], right=durations[censored])).sf
+    times = np.concatenate([[0.0], survival.quantiles, [np.inf]])
+    levels = np.concatenate([[1.0], survival.probabilities])
+    ends = np.minimum(times[1:], horizon)
+    starts = np.minimum(times[:-1], horizon)
+    return float(np.sum(levels * (ends - starts)))
+
+
+def contact_lifetimes(
+    protein: Any,
+    polymer: Any,
+    frames: Any,
+    method: str = "occlusion",
+    types: Any = (),
+    tolerance_ps: float = 0.0,
+    **options: Any,
+) -> Any:
+    """Return how long contacts of ``protein`` residues with ``polymer`` last.
+
+    Each frame's contacts come from :func:`residue_occlusion` for ``method``
+    ``occlusion`` or :func:`residue_contacts` for ``distance``, with
+    ``options`` passed on (``exposed_threshold``, ``buried_threshold``, ``max_asa``, ``pbc``,
+    ``probe_radius_nm`` and ``n_sphere_points``, or ``cutoff`` and ``pbc``).
+    An event is a run of consecutive frames in which one residue is in
+    contact, found by :func:`contact_events`; absences of at most
+    ``tolerance_ps`` ps are filled first. A run of ``k`` frames lasts ``k``
+    times the frame spacing. Events of all residues are pooled.
+
+    The columns are the polymer, then each residue name in ``types``, whose
+    contacts are those of its atoms alone. The rows, named in
+    :data:`LIFETIME_PARTS`, are the Kaplan-Meier restricted mean lifetime in
+    ns, up to the time the frames span (see :func:`restricted_mean_lifetime`),
+    ``nan`` without events; the number of events; and the fraction of them
+    censored by the first or last frame.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(3, 1 + len(types))``.
+    """
+    import numpy as np
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    frames = list(frames)
+    if tolerance_ps < 0:
+        raise ProtocolError(
+            f"contact_lifetimes: tolerance_ps must be at least 0, got {tolerance_ps}.",
+            hint="Pass tolerance_ps=0 for events that end at the first absent frame.",
+        )
+    if method == "occlusion":
+        known = {
+            "exposed_threshold",
+            "buried_threshold",
+            "max_asa",
+            "pbc",
+            "probe_radius_nm",
+            "n_sphere_points",
+        }
+        settings = {
+            "exposed_threshold": EXPOSED_THRESHOLD,
+            "buried_threshold": BURIED_THRESHOLD,
+            "max_asa": "theoretical",
+            "pbc": True,
+            "probe_radius_nm": SASA_PROBE_RADIUS_NM,
+            "n_sphere_points": SASA_SPHERE_POINTS,
+        }
+    elif method == "distance":
+        known = {"cutoff", "pbc"}
+        settings = {"cutoff": CONTACT_CUTOFF, "pbc": True}
+    else:
+        raise ProtocolError(
+            f"contact_lifetimes: method must be 'occlusion' or 'distance', got {method!r}.",
+            hint="Pass method='occlusion' or method='distance'.",
+        )
+    if set(options) - known:
+        raise ProtocolError(
+            f"contact_lifetimes: method {method} takes no option "
+            f"{', '.join(sorted(set(options) - known))}.",
+            hint=f"Pass only {', '.join(sorted(known))}.",
+        )
+    settings.update(options)
+    if method == "occlusion":
+        stream = (
+            (time, contact)
+            for time, contact, *_ in _occlusion_frames(
+                protein,
+                polymer,
+                frames,
+                settings["exposed_threshold"],
+                settings["buried_threshold"],
+                types,
+                settings["max_asa"],
+                settings["pbc"],
+                settings["probe_radius_nm"],
+                settings["n_sphere_points"],
+            )
+        )
+    else:
+        stream = _distance_frames(
+            protein, polymer, frames, settings["cutoff"], types, settings["pbc"]
+        )
+    times, masks = [], []
+    for time, contact in stream:
+        times.append(time)
+        masks.append(contact)
+    if len(times) < 2:
+        raise ProtocolError(
+            f"contact_lifetimes: {len(times)} frame, and a lifetime needs at least two.",
+            hint="Use more production frames, or a smaller stride.",
+        )
+    spacing = np.diff(times)
+    step = float(np.median(spacing))
+    if step <= 0 or np.max(np.abs(spacing - step)) > 1e-3 * step:
+        raise ProtocolError(
+            f"contact_lifetimes: the frames are not evenly spaced in time (from "
+            f"{spacing.min():.6g} to {spacing.max():.6g} ps apart), so a run of frames has no "
+            "single duration.",
+            hint="Check the trajectory's time axis for missing or repeated frames.",
+        )
+    # Frame times carry float rounding, so 40 ps at a 40.0000001 ps spacing is one frame.
+    gap = int(np.floor(tolerance_ps / step * (1 + 1e-6))) if tolerance_ps > 0 else 0
+    masks = np.asarray(masks)  # frames, groups, residues
+    horizon = len(times) * step / 1000.0
+    result = np.zeros((len(LIFETIME_PARTS), masks.shape[1]))
+    for group in range(masks.shape[1]):
+        lengths, censored = contact_events(masks[:, group, :], gap)
+        durations = lengths * step / 1000.0
+        result[0, group] = restricted_mean_lifetime(durations, censored, horizon)
+        result[1, group] = len(lengths)
+        result[2, group] = float(np.mean(censored)) if len(lengths) else float("nan")
+    return result

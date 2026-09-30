@@ -158,8 +158,8 @@ Replace `solvent_shell` with the desired plugin name.
   artifacts, sidecars, stores, aggregation, and comparison.
 - Use only utilities documented on {doc}`../../api/analyses_shared` from
   `polyzymd.analyses.shared`.
-- Treat built-in plugin package roots, such as `polyzymd.analyses.contacts`, as
-  public locations for their documented analysis classes and settings. Treat
+- Treat built-in plugin package roots, such as
+  `polyzymd.analyses.hydrogen_bonds`, as public locations for their documented analysis classes and settings. Treat
   their leading-underscore helper modules as implementation examples, not
   contributor dependencies.
 

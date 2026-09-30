@@ -244,7 +244,7 @@ def get_analysis(name: str) -> type["Analysis"]:
     Parameters
     ----------
     name : str
-        Canonical analysis name, for example ``"contacts"``.
+        Canonical analysis name, for example ``"hydrogen_bonds"``.
 
     Returns
     -------

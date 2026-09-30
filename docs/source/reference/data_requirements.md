@@ -289,7 +289,7 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  contacts: {}
+  hydrogen_bonds: {}
   # ... additional analysis plugins
 ```
 

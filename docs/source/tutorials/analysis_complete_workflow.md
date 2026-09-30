@@ -32,9 +32,10 @@ If you have not run a single-condition analysis yet, complete
 {doc}`first_analysis` first.
 
 ```{important}
-This tutorial uses the comparison plugins, contacts and hydrogen bonds. RMSD,
-Rg, RMSF, distances, the catalytic triad, secondary structure and SASA run
-through `polyzymd analyze` instead; Step 5 shows RMSF for the same study.
+This tutorial uses the comparison plugin, hydrogen bonds. RMSD, Rg, RMSF,
+distances, the catalytic triad, secondary structure, SASA and polymer-protein
+contacts run through `polyzymd analyze` instead; Step 5 shows RMSF and contacts
+for the same study.
 Experimental workflows are linked at the end, but they are not part of the main
 tutorial path.
 ```
@@ -107,11 +108,11 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  contacts:
-    polymer_selection: "chainid C"
-    protein_selection: "chainid A"
-    cutoff: 4.5
-    compute_residence_times: true
+  hydrogen_bonds:
+    groups:
+      protein: "chainid A"
+      polymer: "chainid C"
+    distance_cutoff: 3.0
 ```
 
 ## Step 2: Validate the Comparison Config
@@ -141,7 +142,7 @@ outputs under `comparison/<analysis>/result.json`.
 **On an HPC cluster?** For large studies, submit each analysis as a SLURM
 job DAG instead of running interactively:
 
-    pixi run -e analysis polyzymd compare submit contacts --partition <part> --mem 8G
+    pixi run -e analysis polyzymd compare submit hydrogen_bonds --partition <part> --mem 16G
 
 This parallelizes across replicates and conditions. See
 {doc}`../how_to/hpc_execution` for the complete HPC workflow.
@@ -150,7 +151,7 @@ This parallelizes across replicates and conditions. See
 If you prefer to inspect one comparison first, a good sanity check is:
 
 ```bash
-pixi run -e analysis polyzymd compare run contacts
+pixi run -e analysis polyzymd compare run hydrogen_bonds
 ```
 
 ## Step 4: Generate the Figures
@@ -176,7 +177,7 @@ polymer_stabilization_study/
 ├── comparison.yaml
 ├── analysis/
 │   ├── No Polymer/
-│   │   └── contacts/
+│   │   └── hydrogen_bonds/
 │   │       ├── run_1/
 │   │       │   └── result.json        # ReplicateArtifact
 │   │       ├── run_2/
@@ -186,7 +187,7 @@ polymer_stabilization_study/
 │   │       └── aggregated/
 │   │           └── result.json        # ConditionArtifact
 │   ├── 100% SBMA/
-│   │   └── contacts/
+│   │   └── hydrogen_bonds/
 │   │       ├── run_1/
 │   │       │   └── result.json        # ReplicateArtifact
 │   │       └── aggregated/
@@ -194,10 +195,10 @@ polymer_stabilization_study/
 │   └── 100% EGMA/
 │       └── ...
 ├── comparison/
-│   └── contacts/
+│   └── hydrogen_bonds/
 │       └── result.json                # cross-condition comparison output
 └── figures/
-    ├── contacts/
+    ├── hydrogen_bonds/
     └── ...
 ```
 
@@ -207,18 +208,40 @@ That is the tutorial success state: canonical `ReplicateArtifact` and
 artifact or plugin-specific summary output, the figures exist, and
 `polyzymd compare plot-all` completes without error.
 
-## Step 5: Add RMSF for the Same Study
+## Step 5: Add RMSF and Contacts for the Same Study
 
-RMSF runs through `polyzymd analyze`, which reads the same conditions from
-`comparison.yaml`:
+RMSF runs through `polyzymd analyze`, which reads the simulation configs of the
+same conditions, the first one being the control:
 
 ```bash
-pixi run -e analysis polyzymd analyze rmsf -f comparison.yaml
+pixi run -e analysis polyzymd analyze rmsf \
+  -c ../noPoly_enzyme_DMSO/config.yaml \
+  -c ../SBMA_100_enzyme_DMSO/config.yaml \
+  -c ../EGMA_100_enzyme_DMSO/config.yaml \
+  --label "No Polymer" --label "100% SBMA" --label "100% EGMA" \
+  --replicates 1-3 --eq 10ns
 ```
 
 The report compares each condition's core RMSF with the control, and the
 figures go to `figures/rmsf/`. See {doc}`../how_to/analysis_rmsf_quickstart`
 for the reference, the core and the per-residue comparison.
+
+Polymer-protein contacts run the same way, over the two conditions that have a
+polymer. The command below compares the fraction of protein residues in contact
+with the polymer on at least one frame, where a residue is in contact when the
+polymer occludes its solvent-accessible surface; `--run mean_lifetime` reports
+how long contacts last instead:
+
+```bash
+pixi run -e analysis polyzymd analyze contacts \
+  -c ../SBMA_100_enzyme_DMSO/config.yaml \
+  -c ../EGMA_100_enzyme_DMSO/config.yaml \
+  --label "100% SBMA" --label "100% EGMA" \
+  --replicates 1-3 --eq 10ns
+```
+
+See {doc}`../how_to/analysis_contacts_quickstart` for the other results and the
+distance method.
 
 ## What to Do Next
 

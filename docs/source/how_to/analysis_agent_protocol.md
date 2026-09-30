@@ -91,19 +91,23 @@ print(report.conditions[0].ci95, report.unit)
 
 ## Reuse an existing comparison project
 
-When a `comparison.yaml` already exists, analyze it directly instead of
-repeating its conditions on the command line:
+The analyses that run through the study API, rg, rmsd, rmsf, rms_deviation,
+distances, catalytic_triad, sasa, secondary_structure, contacts and native_contacts, read
+simulation configs given with `-c` and refuse `-f`. When a `comparison.yaml`
+already exists, `-f` analyzes it directly for hydrogen_bonds, which still runs
+as a comparison plugin:
 
 ```bash
-pixi run -e analysis polyzymd analyze rmsf -f comparison.yaml
+pixi run -e analysis polyzymd analyze hydrogen_bonds -f comparison.yaml
 ```
 
-For an analysis that still runs as a comparison plugin, such as contacts, the same
-summary is available from the full comparison workflow, which also writes
-plots:
+How long polymer contacts last comes from `polyzymd analyze contacts` too:
+`--run mean_lifetime` reports the Kaplan-Meier restricted mean duration of a
+contact event per replicate, and `--run lifetime_events` and
+`--run censored_fraction` the counts behind it:
 
 ```bash
-pixi run -e analysis polyzymd compare run contacts -f comparison.yaml --format agent
+pixi run -e analysis polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --eq 10ns --run mean_lifetime
 ```
 
 ## Read the result
@@ -118,10 +122,11 @@ pixi run -e analysis polyzymd compare run contacts -f comparison.yaml --format a
 - `no test recorded` means the plugin stored a raw p value but no
   multiplicity-corrected one, so the line describes a difference without
   deciding it. Distances is the analysis that does this today.
-- A plugin that stores only means and standard errors, such as contacts, gets
-  its condition intervals rebuilt from the standard error and the replicate
-  count; `ci_method` then reads `student_t_from_sem` and no interval is given
-  on a difference.
+- A stored comparison result that holds only means and standard errors, such
+  as a contacts result stored before this version, gets its condition
+  intervals rebuilt from the standard error and the replicate count;
+  `ci_method` then reads `student_t_from_sem` and no interval is given on a
+  difference.
 - Every `warning:` line is part of the answer. A warning that a condition has
   two replicates changes how wide the interval really is.
 
@@ -135,7 +140,7 @@ are reused; pass `--recompute` to rebuild them.
 
 | Message | Fix |
 |---|---|
-| `error: Unknown analysis 'rgyr'` | Use a name from `polyzymd compare run --list`. |
+| `error: Unknown analysis 'rgyr'` | Use one of the names the error's `hint:` line lists. |
 | `error: ... no replicate directories under the scratch directory` | Pass `--replicates 1-3` to state which replicates to use. |
 | `error: Config file(s) not found` | Point `-c` at a simulation `config.yaml`, not a `comparison.yaml`. |
 | `polyzymd: command not found` | Run through `pixi run -e analysis`. |

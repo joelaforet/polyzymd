@@ -81,7 +81,8 @@ src/polyzymd/
 
 | Layer | Files | Role |
 |-------|-------|------|
-| **Plugins** (public) | `contacts/`, `hydrogen_bonds/` | One class per analysis type — the **extension point** for contributors |
+| **Plugins** (public) | `hydrogen_bonds/` | One class per analysis type — the **extension point** for contributors |
+| **Function analyses** | `functions.py`, `protocols.py`, `study.py` | rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa, secondary_structure, contacts and native_contacts, run by `polyzymd analyze` on the study API (`protocols.FUNCTION_ANALYSES`) |
 | **Private modules** | `_framework/`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
 | **Shared utilities** | `shared/loader.py`, `shared/window.py`, etc. | `TrajectoryLoader`, frame windows, statistics, autocorrelation — reusable across plugins |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/` | Stable public facade, auto-discovery, artifact lifecycle, default comparison utilities |
@@ -117,7 +118,7 @@ implementation to private `_framework/` modules such as `compare.py`,
 - **Preemption lifecycle:** Install handlers at `run-segment` entry; only atomic
   `phase.json` records with `status: completed` may skip OpenMM phases. Keep
   reporter intervals independent from bounded signal-check chunks.
-- **ABC + Strategy:** `ContactCriteria`, `MolecularSelector`, `MoleculeCharger`
+- **ABC + Strategy:** `MolecularSelector`, `MoleculeCharger`
 - **Plugin discovery:** `pkgutil`-based auto-discovery in `analyses/` — no registries
 - **Config:** Pydantic v2 `BaseModel` subclasses with `model_validator`
 
@@ -176,9 +177,9 @@ When writing a new analysis plugin, **study existing implementations first**:
 
 1. **Read `analyses/base.py`** — it defines the full contract
 2. **Start with the scaffold output** — `polyzymd new-analysis <name>` generates a complete working plugin with MDAnalysis jobs, artifacts, aggregation, comparison, plotting, and tests
-3. **Study `analyses/contacts/`** or **`analyses/hydrogen_bonds/`**, which override `compare()` and draw their own plots
+3. **Study `analyses/hydrogen_bonds/`**, which overrides `compare()` and draws its own plots
 
-For a new measurement, prefer a function run through `Study.timeseries` or `Study.per_replicate` over a new plugin; see `docs/source/explanation/analysis_api.md`. rg, rmsd, rmsf, distances, the catalytic triad, sasa, secondary_structure and native_contacts are written that way, in `analyses/functions.py` and `analyses/protocols.py`.
+For a new measurement, prefer a function run through `Study.timeseries` or `Study.per_replicate` over a new plugin; see `docs/source/explanation/analysis_api.md`. rg, rmsd, rmsf, distances, the catalytic triad, sasa, secondary_structure, native_contacts and contacts (contact fractions, occluded area and contact lifetimes) are written that way, in `analyses/functions.py` and `analyses/protocols.py`.
 
 **Anti-pattern to avoid:**
 ```python
@@ -211,7 +212,7 @@ def build_mda_jobs(self, ctx):
 1. **Read the tutorial**: `docs/source/contributor_guide/extending_analyses.md`
 2. **Read `analyses/base.py`** — the class docstring defines the full contract
 3. **Pick your complexity level**: simple (use default compare) or custom (override compare)
-4. **Study a matching example**: start with scaffold output (`polyzymd new-analysis <name>`), then use `contacts/` or `hydrogen_bonds/`, both with custom compare
+4. **Study a matching example**: start with scaffold output (`polyzymd new-analysis <name>`), then use `hydrogen_bonds/`, which has a custom compare
 5. **Write your plugin** as a simple module or package in `analyses/`; for advanced trajectory-native packages, isolate MDAnalysis job helpers in `_mda.py`, and extract plotting to `_plotters.py` as complexity grows
 6. **Test**: `pixi run -e build pytest tests/analyses/plugins/test_<name>.py -v`
 
@@ -249,10 +250,9 @@ two ways, and mixing them up picks the wrong structure:
 ## Known Issues
 
 1. **Config hash mismatch warning** prints 66+ times — should print once
-2. **Contacts criteria mismatch** — cached 4.0A vs 4.5A cutoff disagreement
-3. **Docs sidebar** — after adding toctree entries, run `make clean html` (not just `make html`)
-4. **GitHub Issue #20** — tracks remaining analysis module TODOs
-5. **Pre-existing LSP type errors** — Pyright/Pylance reports false positives in `config/schema.py`, `builders/system_builder.py`, etc. due to missing type stubs for OpenMM/OpenFF. Does NOT affect runtime.
+2. **Docs sidebar** — after adding toctree entries, run `make clean html` (not just `make html`)
+3. **GitHub Issue #20** — tracks remaining analysis module TODOs
+4. **Pre-existing LSP type errors** — Pyright/Pylance reports false positives in `config/schema.py`, `builders/system_builder.py`, etc. due to missing type stubs for OpenMM/OpenFF. Does NOT affect runtime.
 
 ## Modular Instructions
 
