@@ -461,7 +461,8 @@ def _dssp_topology(atoms: Any) -> Any:
     """Return an MDTraj topology of ``atoms``, which must hold whole residues.
 
     One MDTraj chain is made per chain ID (or segment, when the topology has
-    no chain IDs), so DSSP never pairs residues of different chains; each
+    no chain IDs; one chain when it has neither), so DSSP never pairs
+    residues of different chains; each
     residue keeps its name and number, and each atom its name and its element
     from the MDAnalysis universe. It is built once per universe and selection.
     """
@@ -488,7 +489,7 @@ def _dssp_topology(atoms: Any) -> Any:
     chains: dict[str, Any] = {}
     residues: dict[int, Any] = {}
     for atom in atoms:
-        chain_key = str(getattr(atom, "chainID", "") or atom.segid)
+        chain_key = str(getattr(atom, "chainID", "") or getattr(atom, "segid", ""))
         chain = chains.get(chain_key)
         if chain is None:
             chain = chains[chain_key] = topology.add_chain()
