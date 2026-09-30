@@ -514,10 +514,11 @@ def _exit_retired(name: str, config_file: Path, eq_time: str | None) -> None:
     """Exit 1 with the polyzymd analyze command that replaces compare run for ``name``."""
     import shlex
 
-    from polyzymd.config.comparison import PAIR_ANALYSES
+    from polyzymd.config.comparison import PAIR_ANALYSES, TRIAD_ROUTINE_URL
 
     config = load_comparison_config(config_file)
-    command = [f"polyzymd analyze {name}"]
+    triad = name == "catalytic_triad"
+    command = ["polyzymd analyze distances" if triad else f"polyzymd analyze {name}"]
     for condition in config.conditions:
         command += [
             f"-c {shlex.quote(str(condition.config))}",
@@ -526,9 +527,16 @@ def _exit_retired(name: str, config_file: Path, eq_time: str | None) -> None:
     if len({tuple(condition.replicates) for condition in config.conditions}) == 1:
         command.append(f"--replicates {','.join(map(str, config.conditions[0].replicates))}")
     command.append(f"--eq {eq_time or config.defaults.equilibration_time}")
-    if name in PAIR_ANALYSES:
+    if triad or name in PAIR_ANALYSES:
         command.append("--set pairs=<pairs.yaml>")
     click.echo(f"Error: {name} no longer runs through 'polyzymd compare run'.", err=True)
+    if triad:
+        click.echo(
+            "The catalytic triad is now a routine on the study API, which counts each triad "
+            f"hydrogen bond with functions.hbond_count: follow {TRIAD_ROUTINE_URL}. "
+            "The command below measures the triad distances.",
+            err=True,
+        )
     click.echo(f"fix: {' '.join(command)}", err=True)
     sys.exit(1)
 

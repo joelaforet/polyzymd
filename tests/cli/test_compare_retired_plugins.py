@@ -18,6 +18,7 @@ from polyzymd.cli.compare import compare
 from polyzymd.config.comparison import ComparisonConfig
 from tests._support.analysis_testkit import write_simulation_config
 
+TRIAD_URL = "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html"
 PAIR = {"label": "Ser-His", "selection_a": "resid 77 and name OG", "selection_b": "name NE2"}
 RETIRED = {
     "rg": "radius_of_gyration",
@@ -26,7 +27,7 @@ RETIRED = {
     "sasa": "sasa",
     "secondary_structure": "dssp_occupancy",
     "distances": "pair_distance",
-    "catalytic_triad": "pair_distance",
+    "catalytic_triad": "hbond_count",
     "contacts": "residue_occlusion",
     "hydrogen_bonds": "hydrogen_bonds",
 }
@@ -78,6 +79,12 @@ def test_retired_blocks_are_ignored_with_one_warning_each(comparison_file: Path)
     messages = [str(item.message) for item in record]
     for name, function in RETIRED.items():
         (message,) = [text for text in messages if f"plugins.{name} block" in text]
+        if name == "catalytic_triad":
+            assert "no longer an analysis but a routine on the study API" in message
+            assert "polyzymd.analyses.functions.hbond_count" in message
+            assert TRIAD_URL in message
+            assert "polyzymd analyze distances -c <config.yaml> --eq <time> --set pairs=" in message
+            continue
         assert f"polyzymd analyze {name} " in message
         ending = " (" if name in ("contacts", "hydrogen_bonds") else "."
         assert f"polyzymd.analyses.functions.{function}{ending}" in message
@@ -115,9 +122,11 @@ def test_compare_run_prints_the_analyze_command(comparison_file: Path, name: str
     assert "no longer runs through 'polyzymd compare run'" in result.stderr
     assert "Unknown comparison type" not in result.stderr
     fix = next(line for line in result.stderr.splitlines() if line.startswith("fix: "))
-    assert fix.startswith(f"fix: polyzymd analyze {name} -c ")
+    command = "distances" if name == "catalytic_triad" else name
+    assert fix.startswith(f"fix: polyzymd analyze {command} -c ")
     assert "--label 'No Polymer'" in fix and "--label 'SBMA 50'" in fix
-    pairs = " --set pairs=<pairs.yaml>" if RETIRED[name] == "pair_distance" else ""
+    assert (TRIAD_URL in result.stderr) == (name == "catalytic_triad")
+    pairs = " --set pairs=<pairs.yaml>" if command == "distances" else ""
     assert fix.endswith(f"--replicates 1,2 --eq 200ns{pairs}")
 
 

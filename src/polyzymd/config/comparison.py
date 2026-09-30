@@ -129,7 +129,7 @@ RETIRED_PLUGINS = {
     "sasa": "sasa",
     "secondary_structure": "dssp_occupancy",
     "distances": "pair_distance",
-    "catalytic_triad": "pair_distance",
+    "catalytic_triad": "hbond_count",
     "contacts": "residue_occlusion",
     "hydrogen_bonds": "hydrogen_bonds",
 }
@@ -147,7 +147,7 @@ RETIRED_PLUGIN_ALSO = {
 }
 
 #: Retired analyses that measure pairs, whose command needs the pairs list.
-PAIR_ANALYSES = ("distances", "catalytic_triad")
+PAIR_ANALYSES = ("distances",)
 
 #: Retired analyses whose function returns one value per replicate, which
 #: study.per_replicate measures; the others are per-frame study.timeseries functions.
@@ -160,10 +160,28 @@ RETIRED_PLUGIN_WARNING = (
 )
 
 
+#: Published page of the catalytic triad routine on the study API.
+TRIAD_ROUTINE_URL = (
+    "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html"
+)
+
+#: Warning for a catalytic_triad block: the triad is a routine, not an analysis.
+RETIRED_TRIAD_WARNING = (
+    "comparison.yaml has a {section}.catalytic_triad block, which is ignored: the catalytic "
+    "triad is no longer an analysis but a routine on the study API, which counts each triad "
+    "hydrogen bond with polyzymd.analyses.functions.hbond_count and combines them with "
+    "Timeseries.transform. Follow " + TRIAD_ROUTINE_URL + ". For the triad distances run "
+    "polyzymd analyze distances -c <config.yaml> --eq <time> --set pairs=<pairs.yaml>."
+)
+
+
 def _warn_retired(section: str, name: str) -> None:
     """Warn that a comparison.yaml block for a retired plugin is ignored."""
     import warnings
 
+    if name == "catalytic_triad":
+        warnings.warn(RETIRED_TRIAD_WARNING.format(section=section), UserWarning, stacklevel=3)
+        return
     warnings.warn(
         RETIRED_PLUGIN_WARNING.format(
             section=section,

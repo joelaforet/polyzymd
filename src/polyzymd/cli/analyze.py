@@ -173,8 +173,8 @@ def _one_line(text: str) -> str:
     "--no-plots",
     "no_plots",
     is_flag=True,
-    help="Draw no figures. By default rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, "
-    "sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs into "
+    help="Draw no figures. By default rg, rmsd, rmsf, rms_deviation, distances, sasa, "
+    "secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs into "
     "<output-dir>/figures/<name>/.",
 )
 def analyze_command(
@@ -199,14 +199,15 @@ def analyze_command(
     Give one -c config.yaml for a single-condition summary, or several for a
     comparison with the first config as the control. NAME is rg, rmsd, rmsf,
     rms_deviation, sasa, secondary_structure, contacts, native_contacts,
-    hydrogen_bonds, distances or catalytic_triad.
+    hydrogen_bonds or distances. The catalytic triad is a routine on the study
+    API: see https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html.
 
     \b
     Examples:
         polyzymd analyze rg -c A/config.yaml
         polyzymd analyze rg -c A/config.yaml -c B/config.yaml --eq 10ns
         polyzymd analyze rmsd -c A/config.yaml --set reference_mode=average
-        polyzymd analyze catalytic_triad -c A/config.yaml --set pairs=triad.yaml --run simultaneous
+        polyzymd analyze distances -c A/config.yaml --set pairs=pairs.yaml
         polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml --eq 10ns --run rmsf
         polyzymd analyze rms_deviation -c A/config.yaml --set reference_file=crystal.pdb
         polyzymd analyze sasa -c A/config.yaml --run isolated_residues

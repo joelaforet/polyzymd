@@ -143,12 +143,8 @@ FUNCTION_ANALYSES = {
         "tolerance_ps": 0.0,
     },
     "distances": {"pairs": None, "threshold": 3.5, "use_pbc": True},
-    "catalytic_triad": {"pairs": None, "threshold": 3.5, "use_pbc": True},
 }
 
-#: Name of the catalytic triad result that holds the simultaneous contact fraction,
-#: as --run takes it.
-SIMULTANEOUS_RUN = "simultaneous"
 
 __all__ = [
     "FUNCTION_ANALYSES",
@@ -393,6 +389,7 @@ def analyze(
     The analyses in :data:`FUNCTION_ANALYSES` run through
     :func:`_analyze_function` instead of a plugin.
     """
+    _refuse_retired(name)
     if name in FUNCTION_ANALYSES:
         return _analyze_function(
             name,
@@ -526,10 +523,29 @@ def build_report(
     )
 
 
+def _refuse_retired(name: str) -> None:
+    """Raise ``ProtocolError`` for ``catalytic_triad``, which is now a routine on the study API."""
+    if name == "catalytic_triad":
+        from polyzymd.config.comparison import TRIAD_ROUTINE_URL
+
+        raise ProtocolError(
+            "catalytic_triad is no longer a polyzymd analyze analysis: the triad is now a "
+            "routine on the study API, which counts each triad hydrogen bond with "
+            "functions.hbond_count and combines them with Timeseries.transform.",
+            hint=(
+                f"Follow {TRIAD_ROUTINE_URL} (docs/source/how_to/analysis_triad_quickstart.md), "
+                "or point an agent at .claude/skills/polyzymd-analyze/SKILL.md or that page. "
+                "For the triad distances run polyzymd analyze distances -c <config.yaml> "
+                "--set pairs=<pairs.yaml>."
+            ),
+        )
+
+
 def get_analysis_class(name: str) -> type["Analysis"]:
     """Look up an analysis plugin class by name, raising ``ProtocolError`` if unknown."""
     from polyzymd.analyses.discovery import get_analysis, list_all_names
 
+    _refuse_retired(name)
     try:
         return get_analysis(name)
     except KeyError as exc:
@@ -567,7 +583,7 @@ def _analyze_function(
     ``<name>_timeseries`` and ``<name>_comparison``, and ``rg`` also
     ``rg_distribution``, into ``<output_dir>/figures/<name>/``, as the legacy
     plugins did. ``rmsf`` and ``rms_deviation`` go to :func:`_analyze_rmsf`, and ``distances``
-    and ``catalytic_triad`` to :func:`_analyze_pairs`. Raises
+    to :func:`_analyze_pairs`. Raises
     ``ProtocolError`` for a setting the analysis does not take, or a ``run``
     for ``rg`` or ``rmsd``.
     """
@@ -578,7 +594,6 @@ def _analyze_function(
     unknown = set(settings or {}) - set(FUNCTION_ANALYSES[name])
     pairs = name in (
         "distances",
-        "catalytic_triad",
         "rmsf",
         "rms_deviation",
         "sasa",
@@ -594,7 +609,7 @@ def _analyze_function(
             hint=f"Run polyzymd analyze {name} -c A/config.yaml "
             + (
                 "--set pairs=pairs.yaml."
-                if name in ("distances", "catalytic_triad")
+                if name == "distances"
                 else f"--set {next(iter(FUNCTION_ANALYSES[name]))}=..., one of the settings above."
             ),
         )
@@ -1772,7 +1787,7 @@ def _analyze_pairs(
     eq_check: bool,
     plots: bool = True,
 ) -> ProtocolReport:
-    """Measure every pair of ``distances`` or ``catalytic_triad`` and report one result.
+    """Measure every pair of ``distances`` and report one result.
 
     ``pairs`` is a list of mappings with ``label``, ``selection_a``,
     ``selection_b`` and optionally ``threshold``, ``below_label`` and
@@ -1781,19 +1796,15 @@ def _analyze_pairs(
     is measured once with :func:`~polyzymd.analyses.functions.pair_distance`,
     and its results are named ``<label>`` for the mean distance and
     ``<label> <below_label>`` for the fraction of frames strictly below the
-    pair's threshold, which defaults to ``threshold``. The catalytic triad
-    adds ``simultaneous``, the fraction of frames in which every pair is
-    below its threshold, computed from the stored distances with
-    :func:`~polyzymd.analyses.functions.all_below`, and reports it first.
+    pair's threshold, which defaults to ``threshold``, computed from the
+    stored distance with :func:`~polyzymd.analyses.functions.all_below`.
     ``run`` picks the result to report, by default the first, and
     ``all_runs`` lists them all. With ``plots``, every pair's distance
-    distribution with its threshold is drawn as ``<prefix>_kde_<label>`` and
-    every fraction as ``<prefix>_fraction_<result>``, with the prefix
-    ``distance`` or ``triad`` as in the legacy plugins, into
-    ``<output_dir>/figures/<name>/``. ``<prefix>_kde_panel`` stacks every
-    pair's distribution in one figure and ``<prefix>_threshold_bars`` groups
-    every fraction, with the triad's ``All pairs`` last, as the legacy
-    catalytic triad KDE panel and threshold bar charts did.
+    distribution with its threshold is drawn as ``distance_kde_<label>`` and
+    every fraction as ``distance_fraction_<result>`` into
+    ``<output_dir>/figures/<name>/``. ``distance_kde_panel`` stacks every
+    pair's distribution in one figure and ``distance_threshold_bars`` groups
+    every fraction.
     """
     import yaml
 
@@ -1856,17 +1867,6 @@ def _analyze_pairs(
         results[f"{pair['label']} {below}"] = (fraction, "fraction", "fraction_below_threshold")
         distances.append(distance)
         thresholds.append(threshold)
-    if name == "catalytic_triad":
-        both = distances[0].transform(
-            functions.all_below,
-            *distances[1:],
-            unit=None,
-            bounds=(0.0, 1.0),
-            name=f"{name}_{SIMULTANEOUS_RUN}",
-            thresholds=thresholds,
-        )
-        simultaneous = (both, "fraction", "simultaneous_contact_fraction")
-        results = {SIMULTANEOUS_RUN: simultaneous, **results}
     run = next(iter(results)) if run is None else run
     if run not in results:
         raise ProtocolError(
@@ -1877,10 +1877,7 @@ def _analyze_pairs(
     values.metric = metric
     report = values.compare() if len(study) > 1 else values.summary()
     if plots:
-        folder, prefix = (
-            _figures_dir(output_dir, name),
-            ("triad" if name == "catalytic_triad" else "distance"),
-        )
+        folder, prefix = _figures_dir(output_dir, name), "distance"
         from polyzymd.analyses.figures import plot_distributions, plot_values
 
         titles = [f"{pair['label']} distance" for pair in pairs]
@@ -1893,16 +1890,12 @@ def _analyze_pairs(
                 fractions[key] = series.reduce(how, detect_equilibration=False)
                 fractions[key].metric = metric
                 fractions[key].plot(folder, f"{prefix}_fraction_{key}", title=key)
-        # The legacy threshold bars put each pair's fraction first and the triad's "All pairs" last.
-        grouped = sorted(fractions, key=lambda key: key == SIMULTANEOUS_RUN)
-        names = ["All pairs" if key == SIMULTANEOUS_RUN else key for key in grouped]
-        title = (
-            "Catalytic triad contact fractions"
-            if prefix == "triad"
-            else "Distance contact fractions"
-        )
         plot_values(
-            [fractions[key] for key in grouped], names, folder, f"{prefix}_threshold_bars", title
+            list(fractions.values()),
+            list(fractions),
+            folder,
+            f"{prefix}_threshold_bars",
+            "Distance contact fractions",
         )
         report.provenance.output_paths["figures"] = str(folder)
     return report.model_copy(update={"analysis": name, "run": run, "all_runs": list(results)})

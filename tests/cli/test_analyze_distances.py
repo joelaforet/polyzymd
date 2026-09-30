@@ -1,4 +1,4 @@
-"""Tests for ``polyzymd analyze distances`` and ``catalytic_triad`` and the pair distance.
+"""Tests for ``polyzymd analyze distances``, the pair distance, and the retired ``catalytic_triad``.
 
 Each replicate is an OpenMM run directory with one DCD segment of four atoms
 on a cross scaled on frame ``k`` by ``s = base + 0.01 * k``, so atoms C1 and C2
@@ -107,41 +107,60 @@ def test_cli_distances_reports_each_pair(configs, tmp_path: Path) -> None:
     assert "no result named 'C1-C3'" in unknown.stderr
 
 
-def test_python_catalytic_triad_reports_the_simultaneous_fraction(configs, tmp_path) -> None:
-    """The triad reports first the fraction of frames with every pair below its threshold."""
-    from polyzymd.analyses import analyze
+def test_all_below_gives_the_fraction_with_every_pair_below_its_threshold(
+    configs, tmp_path
+) -> None:
+    """Two stored pair distances combine, as in the triad routine, into one fraction."""
+    import polyzymd as pz
+    from polyzymd.analyses.functions import all_below
 
-    settings = {"pairs": PAIRS, "threshold": 1.135}
-    report = analyze(
-        "catalytic_triad",
-        [configs["A"]],
-        equilibration=EQUILIBRATION,
-        settings=settings,
+    study = pz.Study.from_configs({"A": configs["A"]}, equilibration=EQUILIBRATION)
+    c1_c2 = study.timeseries(
+        pair_distance,
+        pz.select("name C1"),
+        pz.select("name C2"),
+        unit="A",
+        name="c1_c2",
         output_dir=tmp_path,
     )
-    assert report.run == "simultaneous" and report.metric == "simultaneous_contact_fraction"
-    assert report.all_runs[0] == "simultaneous" and "mid-C3 bound" in report.all_runs
-    # Replicate A1: C1-C2 below 2.31 in frames 3 to 5, mid-C3 below 1.135 in frame 3 only.
-    assert report.conditions[0].replicate_values == pytest.approx([1 / 7, 0.0, 0.0])
-    record = json.loads(
-        (
-            tmp_path / "polyzymd_results/catalytic_triad_simultaneous/A/replicate_1/record.json"
-        ).read_text()
+    mid_c3 = study.timeseries(
+        pair_distance,
+        pz.select("name C1 C2"),
+        pz.select("name C3"),
+        mode_a="midpoint",
+        unit="A",
+        name="mid_c3",
+        output_dir=tmp_path,
     )
+    both = c1_c2.transform(
+        all_below, mid_c3, unit=None, bounds=(0.0, 1.0), name="both", thresholds=[2.31, 1.135]
+    )
+    # Replicate A1: C1-C2 below 2.31 in frames 3 to 5, mid-C3 below 1.135 in frame 3 only.
+    assert both.reduce("fraction").values["A"] == pytest.approx([1 / 7, 0.0, 0.0])
+    record = json.loads((tmp_path / "polyzymd_results/both/A/replicate_1/record.json").read_text())
     assert record["transform"]["qualname"] == "all_below"
     assert record["kwargs"] == {"thresholds": [2.31, 1.135]}
     assert len(record["inputs"]) == 2
 
-    mean = analyze(
-        "catalytic_triad",
-        [configs["A"]],
-        equilibration=EQUILIBRATION,
-        settings=settings,
-        output_dir=tmp_path,
-        run="mid-C3",
+
+def test_catalytic_triad_is_refused_with_the_routine_and_distances(configs, tmp_path) -> None:
+    """catalytic_triad is a routine now: Python and the CLI name its page and distances."""
+    from polyzymd.analyses import analyze
+
+    url = "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html"
+    with pytest.raises(ProtocolError, match="routine on the study API") as raised:
+        analyze("catalytic_triad", [configs["A"]], equilibration=EQUILIBRATION)
+    assert url in raised.value.hint
+    assert "polyzymd analyze distances -c <config.yaml> --set pairs=<pairs.yaml>" in (
+        raised.value.hint
     )
-    expected = [_scales(1.0, r).mean() for r in (1, 2, 3)]
-    assert mean.conditions[0].replicate_values == pytest.approx(expected, abs=1e-5)
+    assert ".claude/skills/polyzymd-analyze/SKILL.md" in raised.value.hint
+
+    result = CliRunner().invoke(analyze_command, ["catalytic_triad", "-c", str(configs["A"])])
+    assert result.exit_code == EXIT_ANALYSIS_ERROR
+    assert "error: catalytic_triad is no longer a polyzymd analyze analysis" in result.stderr
+    assert f"fix: Follow {url}" in result.stderr
+    assert not (tmp_path / "polyzymd_results").exists()
 
 
 @pytest.mark.parametrize(
