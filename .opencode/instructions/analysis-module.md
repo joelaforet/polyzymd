@@ -36,8 +36,8 @@ src/polyzymd/analyses/
 └── hydrogen_bonds/      # __init__, _mda, _models, _plotters
 ```
 
-rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa and
-secondary_structure are no longer plugins. They are functions in `functions.py`
+rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa,
+secondary_structure and native_contacts are no longer plugins. They are functions in `functions.py`
 run through the study API, and `polyzymd analyze <name>` runs them through
 `protocols._analyze_function`. Only contacts and hydrogen_bonds are still
 plugins; the refactor ports them next and then removes the plugin framework.

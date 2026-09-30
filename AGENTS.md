@@ -178,7 +178,7 @@ When writing a new analysis plugin, **study existing implementations first**:
 2. **Start with the scaffold output** — `polyzymd new-analysis <name>` generates a complete working plugin with MDAnalysis jobs, artifacts, aggregation, comparison, plotting, and tests
 3. **Study `analyses/contacts/`** or **`analyses/hydrogen_bonds/`**, which override `compare()` and draw their own plots
 
-For a new measurement, prefer a function run through `Study.timeseries` or `Study.per_replicate` over a new plugin; see `docs/source/explanation/analysis_api.md`. rg, rmsd, rmsf, distances, the catalytic triad, sasa and secondary_structure are written that way, in `analyses/functions.py` and `analyses/protocols.py`.
+For a new measurement, prefer a function run through `Study.timeseries` or `Study.per_replicate` over a new plugin; see `docs/source/explanation/analysis_api.md`. rg, rmsd, rmsf, distances, the catalytic triad, sasa, secondary_structure and native_contacts are written that way, in `analyses/functions.py` and `analyses/protocols.py`.
 
 **Anti-pattern to avoid:**
 ```python

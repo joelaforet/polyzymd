@@ -14,6 +14,7 @@ functions measure all production frames of one replicate and run through
 | `rmsd` | `atoms` and `reference`, `AtomGroup`s with the same atoms | float, Å | MDAnalysis `rms.rmsd(center=True, superposition=True)`: unweighted, `atoms` superposed on `reference` | `polyzymd analyze rmsd` |
 | `pair_distance` | `atoms_a`, `atoms_b`, `mode_a` and `mode_b` (`single`, `midpoint`, `centroid` or `com`), `pbc` | float, Å | MDAnalysis `lib.distances.calc_bonds` between the two points, with the minimum image of the frame's box when `pbc` is true | `polyzymd analyze distances`, `polyzymd analyze catalytic_triad` |
 | `all_below` | distance series, `thresholds` | 1 or 0 per frame | 1 for each frame in which every distance is strictly below its threshold; used with `Timeseries.transform` | `polyzymd analyze catalytic_triad` |
+| `native_contacts` | `atoms` and `reference`, `AtomGroup`s with the same atoms; optional `region`; `radius` (4.5 Å), `min_separation` (3), `beta` (5 Å⁻¹), `lambda_constant` (1.8), `pbc` | float, from 0 to 1 | Native pairs: pairs of `atoms` more than `min_separation` residues apart whose `reference` positions are closer than `radius`, found once per reference without periodic images; on each frame, MDAnalysis `analysis.contacts.soft_cut_q` of their distances (`lib.distances.calc_bonds`, minimum image when `pbc` is true) and reference distances, the mean over pairs of `1/(1 + exp(beta (r - lambda_constant r0)))`; with `region`, only pairs with an atom in it. The defaults on heavy atoms are the definition of Best, Hummer and Eaton (2013) | `polyzymd analyze native_contacts` |
 | `sasa` | `target` and `context`, `AtomGroup`s with every target atom in the context; `probe_radius_nm` (0.14) and `n_sphere_points` (960) | float, Å² | `mdtraj.shrake_rupley(mode="atom")` on the context atoms in a call of its own, with each atom's radius from MDTraj's element table plus the probe radius, summed over the target atoms; context atoms outside the target cover the target without being counted; periodic images not considered | `polyzymd analyze sasa` |
 
 ## Per-replicate functions
@@ -89,6 +90,19 @@ chosen result is measured. The default is the first context's total. See
 because MDTraj 1.11.1 returns about 0.1 percent too much area for the later
 frames each thread computes in a call; see {doc}`../explanation/analysis_sasa_verification`.
 
+`polyzymd analyze native_contacts` measures `native_contacts` of `--set
+selection=...` (default `protein and not element H`) against
+`pz.reference(reference_mode, selection, frame=reference_frame, file=reference_file)`,
+on every production frame, and reduces each replicate to its mean. A missing
+`reference_mode` is `external` when `reference_file` is set and `frame` with
+production frame `reference_frame` (1) otherwise. `radius`, `min_separation`,
+`beta`, `lambda_constant` and `use_pbc` are passed on. `--run q`, the default,
+counts every native pair, and `--run <region>_q` for each entry of `--set
+regions='{name: selection}'` only the pairs with an atom in the region. Only
+the chosen result is measured. See
+{doc}`../how_to/analysis_native_contacts_quickstart` and
+{doc}`../explanation/analysis_native_contacts_verification`.
+
 `polyzymd analyze secondary_structure` runs `dssp_occupancy` once per
 replicate on `--set selection=...` (default `protein`, whole residues), in the
 scheme of `--set scheme=...`: `simplified` (default) or `full`. `--run <class>`
@@ -110,5 +124,6 @@ and records the folder under `output_paths.figures` in the JSON report;
 | `rmsf`, `rms_deviation` | `rmsf_profile`, `offset_profile` and `rms_deviation_profile` (each replicate and each condition's mean with its interval, `highlight_residues` marked), `rms_decomposition` (the three profiles of each condition together), `rmsf_comparison` (the three core values), and with several conditions `rmsf_difference`, `offset_difference` and `rms_deviation_difference` (each condition minus the control at every residue, with the interval of the difference and the significant residues marked) |
 | `sasa` | For a total, `sasa_timeseries_<name>`, `sasa_comparison_<name>` and `sasa_distribution_<name>`; for `<name>_residues`, `sasa_profile_<name>` and with several conditions `sasa_difference_<name>` |
 | `secondary_structure` | `ss_content_bars` (every class of the scheme but unassigned); for a total `ss_<name>_comparison`; for `<name>_residues`, `ss_<name>_profile`, `ss_classes_<name>` and with several conditions `ss_<name>_difference` |
+| `native_contacts` | `native_contacts_timeseries_<run>` (every replicate against time) and `native_contacts_comparison_<run>` (condition means with every replicate value) |
 | `distances` | `distance_kde_<pair>` for each pair with its threshold, `distance_fraction_<result>` for each fraction below threshold, and the grouped `distance_threshold_bars` (every pair's fraction) and `distance_kde_panel` (one panel per pair) |
 | `catalytic_triad` | `triad_kde_<pair>` for each pair with its threshold, `triad_fraction_<result>` for `simultaneous` and each pair's fraction, and the grouped `triad_threshold_bars` (each pair's fraction, then all pairs) and `triad_kde_panel` (one panel per pair) |
