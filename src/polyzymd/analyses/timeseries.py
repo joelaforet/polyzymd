@@ -83,6 +83,7 @@ class Select:
     """An MDAnalysis selection string, built into an ``AtomGroup`` per replicate."""
 
     selection: str
+    allow_empty: bool = False
 
 
 @dataclass(frozen=True)
@@ -90,20 +91,24 @@ class UniverseArgument:
     """Stands for the replicate's ``Universe`` in the arguments of a function."""
 
 
-def select(selection: str) -> Select:
+def select(selection: str, *, allow_empty: bool = False) -> Select:
     """Stand for ``universe.select_atoms(selection)`` of each replicate.
 
     Parameters
     ----------
     selection : str
         MDAnalysis selection string. It is recorded with the result.
+    allow_empty : bool, optional
+        Give an empty ``AtomGroup`` for a replicate where ``selection``
+        matches no atoms, instead of refusing it; for analyses that leave such
+        replicates out themselves.
 
     Returns
     -------
     Select
         Placeholder that :func:`run_timeseries` replaces with an ``AtomGroup``.
     """
-    return Select(str(selection))
+    return Select(str(selection), allow_empty)
 
 
 def universe() -> UniverseArgument:
@@ -175,7 +180,7 @@ def _build(value: Any, universe_: Any) -> Any:
     """Replace a placeholder with the replicate's AtomGroup or Universe."""
     if isinstance(value, Select):
         atoms = universe_.select_atoms(value.selection)
-        if len(atoms) == 0:
+        if len(atoms) == 0 and not value.allow_empty:
             raise ProtocolError(
                 f"Selection {value.selection!r} matched no atoms.",
                 hint="Check the selection string against the topology.",

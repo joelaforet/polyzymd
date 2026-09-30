@@ -996,7 +996,7 @@ def _analyze_hydrogen_bonds(
     skipped = _empty_selections(study, group_selections)
     universe = _first_universe(study, skipped, "hydrogen_bonds")
     explicit = {
-        key: select(f"({both}) and ({settings[key]})")
+        key: select(f"({both}) and ({settings[key]})", allow_empty=True)
         for key in ("donors", "hydrogens", "acceptors")
         if settings[key]
     }
@@ -1025,7 +1025,9 @@ def _analyze_hydrogen_bonds(
         options["d_a_cutoff"] = float(settings["d_a_cutoff"])
     if float(settings["d_h_a_angle_cutoff"]) != functions.HBOND_ANGLE:
         options["d_h_a_angle_cutoff"] = float(settings["d_h_a_angle_cutoff"])
-    arguments = [select(first)] + ([] if second is None else [select(second)])
+    arguments = [select(first, allow_empty=True)] + (
+        [] if second is None else [select(second, allow_empty=True)]
+    )
     if part in parts:
         rows = study.per_replicate(
             functions.hydrogen_bonds,
@@ -1120,7 +1122,7 @@ def _analyze_hydrogen_bonds(
                 [],
                 "Residue" if part == "residues" else "Residue pair",
             )
-            if len(study) > 1:
+            if report.pairwise:
                 plot_differences(
                     values,
                     report,
@@ -1646,8 +1648,8 @@ def _analyze_contacts(
             life["tolerance_ps"] = tolerance
         table = study.per_replicate(
             functions.contact_lifetimes,
-            select(protein),
-            select(polymer),
+            select(protein, allow_empty=True),
+            select(polymer, allow_empty=True),
             unit=None,
             labels=["polymer", *types],
             name="contact_lifetimes",
@@ -1694,8 +1696,8 @@ def _analyze_contacts(
         return report.model_copy(update={"analysis": "contacts", "run": run, "all_runs": all_runs})
     rows = study.per_replicate(
         function,
-        select(protein),
-        select(polymer),
+        select(protein, allow_empty=True),
+        select(polymer, allow_empty=True),
         unit=None,
         labels=lambda u: [int(r.resid) for r in measured(u.select_atoms(protein).residues)],
         name=name,
@@ -1791,7 +1793,7 @@ def _analyze_contacts(
             values.plot(
                 folder, f"contacts_{name}_profile", f"Per-residue {name}", None, [], "Residue"
             )
-            if len(study) > 1:
+            if report.pairwise:
                 plot_differences(
                     values, report, folder, f"contacts_{name}_difference", None, None, "Residue"
                 )

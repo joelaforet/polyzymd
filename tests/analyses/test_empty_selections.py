@@ -49,37 +49,6 @@ EQUILIBRATION = "0ns"
 POLYMER = "(chainid C) and not element H"
 
 
-#: Every run with a replicate left out fails before its statistics: ``_build``
-#: in src/polyzymd/analyses/timeseries.py raises "Selection ... matched no
-#: atoms" for the empty group, so ``study.per_replicate`` never reaches the
-#: functions' nan return and ``_report_skipping`` is never called. Proposed
-#: fix: ``select(selection, allow_empty=True)`` (a ``Select.allow_empty``
-#: field, default False, that ``_build`` honours) for the group arguments and
-#: the explicit donors, hydrogens and acceptors of ``_analyze_contacts`` and
-#: ``_analyze_hydrogen_bonds``.
-EMPTY_GROUP_REFUSED = pytest.mark.xfail(
-    strict=True,
-    raises=ProtocolError,
-    reason="timeseries._build refuses the empty group before the replicate can be left out",
-)
-
-#: With plots, a condition left out breaks the figures even once the group
-#: is built: ``_setup`` in src/polyzymd/analyses/figures.py takes the labels
-#: of every condition of the study, so ``plot_condition_values`` and
-#: ``plot_profile`` read the left-out condition's values (no rows, or no key),
-#: and ``plot_differences`` is called whenever the study has several
-#: conditions, also when the control is left out and ``report.pairwise`` is
-#: empty. Proposed fix: in those two plots keep only
-#: ``[label for label in labels if values.values.get(label)]``, and in
-#: ``_analyze_contacts`` and ``_analyze_hydrogen_bonds`` draw the difference
-#: figure only ``if report.pairwise``.
-LEFT_OUT_CONDITION_NOT_PLOTTABLE = pytest.mark.xfail(
-    strict=True,
-    raises=(ProtocolError, KeyError, ValueError, StatisticsError),
-    reason="a left-out condition keeps an empty entry in values.rows, which the figures fail on",
-)
-
-
 # ---------------------------------------------------------------------------
 # Writing run directories with or without the polymer
 # ---------------------------------------------------------------------------
@@ -322,7 +291,6 @@ CONTACT_RUNS = [
 ]
 
 
-@EMPTY_GROUP_REFUSED
 @pytest.mark.parametrize("run", CONTACT_RUNS)
 def test_contacts_without_polymer_in_the_control_summarise_the_others(
     contact_configs, tmp_path, run
@@ -342,7 +310,6 @@ def test_contacts_without_polymer_in_the_control_summarise_the_others(
     assert len([text for text in report.warnings if "matched no atoms" in text]) == 1
 
 
-@EMPTY_GROUP_REFUSED
 @pytest.mark.parametrize("run", CONTACT_RUNS)
 def test_contacts_without_polymer_in_the_last_condition_compare_the_others(
     contact_configs, tmp_path, run
@@ -358,7 +325,6 @@ def test_contacts_without_polymer_in_the_last_condition_compare_the_others(
     assert not any("the control" in text for text in report.warnings)
 
 
-@EMPTY_GROUP_REFUSED
 @pytest.mark.parametrize("run", CONTACT_RUNS)
 def test_contacts_leave_out_the_one_replicate_without_polymer(
     contact_configs, tmp_path, run
@@ -376,7 +342,6 @@ def test_contacts_leave_out_the_one_replicate_without_polymer(
     assert report.warnings.count(_left_out("contacts", "A", entries, whole=False)) == 1
 
 
-@EMPTY_GROUP_REFUSED
 def test_contacts_leaving_out_a_replicate_equals_excluding_it_with_replicates(
     contact_configs, tmp_path
 ) -> None:
@@ -388,7 +353,6 @@ def test_contacts_leaving_out_a_replicate_equals_excluding_it_with_replicates(
     assert not any("matched no atoms" in text for text in expected.warnings)
 
 
-@pytest.mark.xfail(strict=True, reason="EMPTY_GROUP_REFUSED: the command exits with that error")
 def test_cli_contacts_without_polymer_in_the_control_prints_both_warnings(
     contact_configs, tmp_path
 ) -> None:
@@ -403,7 +367,6 @@ def test_cli_contacts_without_polymer_in_the_control_prints_both_warnings(
     assert "the control N has no replicate" in result.stdout
 
 
-@EMPTY_GROUP_REFUSED
 def test_contacts_with_a_resname_missing_from_one_replicate_leave_that_replicate_out(
     tmp_path, contact_schedules
 ) -> None:
@@ -431,7 +394,6 @@ def test_contacts_with_a_resname_missing_from_one_replicate_leave_that_replicate
     _assert_same_statistics(report, expected)
 
 
-@LEFT_OUT_CONDITION_NOT_PLOTTABLE
 @pytest.mark.parametrize("run", ["contact_fraction_residues", "coverage", "mean_lifetime"])
 @pytest.mark.parametrize("labels", [["N", "A", "B"], ["A", "B", "N"]])
 def test_contacts_figures_are_drawn_with_a_condition_left_out(
@@ -444,7 +406,6 @@ def test_contacts_figures_are_drawn_with_a_condition_left_out(
     assert {row.label for row in report.conditions} == {"A", "B"}
 
 
-@EMPTY_GROUP_REFUSED
 @pytest.mark.parametrize("run", ["mean_lifetime", "SBM_mean_lifetime", "lifetime_events"])
 @pytest.mark.parametrize(
     ("labels", "reference"),
@@ -513,7 +474,6 @@ def _occlusion(configs, labels, tmp_path, name, run=None):
     )
 
 
-@EMPTY_GROUP_REFUSED
 @pytest.mark.parametrize("run", ["coverage", "occluded_area", "occlusion_fraction"])
 @pytest.mark.parametrize(
     ("labels", "reference"),
@@ -535,7 +495,6 @@ def test_occlusion_leaves_out_what_has_no_polymer(
     assert any("matched no atoms" in text for text in report.warnings)
 
 
-@EMPTY_GROUP_REFUSED
 @pytest.mark.parametrize("run", ["contact_fraction_residues", "occluded_area_residues"])
 def test_occlusion_residue_runs_with_the_last_condition_left_out(
     occlusion_configs, tmp_path, run
@@ -575,7 +534,6 @@ HB_RUNS = [f"protein_polymer_{kind}" for kind in hb.KINDS]
 HB_ENTRIES = _no_polymer_entries("second group", "chainid C")
 
 
-@EMPTY_GROUP_REFUSED
 @pytest.mark.parametrize("run", HB_RUNS)
 def test_hbonds_without_polymer_in_the_control_summarise_the_others(
     hb_configs, tmp_path, run
@@ -594,7 +552,6 @@ def test_hbonds_without_polymer_in_the_control_summarise_the_others(
     assert not any("N replicate" in text for text in report.warnings)
 
 
-@EMPTY_GROUP_REFUSED
 @pytest.mark.parametrize("run", HB_RUNS)
 def test_hbonds_without_polymer_in_the_last_condition_compare_the_others(
     hb_configs, tmp_path, run
@@ -609,7 +566,6 @@ def test_hbonds_without_polymer_in_the_last_condition_compare_the_others(
     assert not any("the control" in text for text in report.warnings)
 
 
-@EMPTY_GROUP_REFUSED
 @pytest.mark.parametrize("run", HB_RUNS)
 def test_hbonds_leave_out_the_one_replicate_without_polymer(hb_configs, tmp_path, run) -> None:
     report = _hbonds(hb_configs, ["A2", "B"], tmp_path, "skip", run)
@@ -622,7 +578,6 @@ def test_hbonds_leave_out_the_one_replicate_without_polymer(hb_configs, tmp_path
     assert _left_out("hydrogen_bonds", "A", entries, whole=False) in report.warnings
 
 
-@EMPTY_GROUP_REFUSED
 def test_hbonds_leaving_out_a_replicate_equals_excluding_it_with_replicates(
     hb_configs, tmp_path
 ) -> None:
@@ -644,7 +599,6 @@ def test_hbonds_a_within_summary_of_the_protein_keeps_every_replicate(hb_configs
     assert not any("matched no atoms" in text for text in report.warnings)
 
 
-@LEFT_OUT_CONDITION_NOT_PLOTTABLE
 @pytest.mark.parametrize(
     "run", ["protein_polymer_mean_hbonds", "protein_polymer_residues", "protein_polymer_pairs"]
 )
@@ -659,7 +613,6 @@ def test_hbonds_figures_are_drawn_with_a_condition_left_out(
     assert {row.label for row in report.conditions} == {"A", "B"}
 
 
-@EMPTY_GROUP_REFUSED
 def test_hbonds_explicit_acceptors_only_on_the_polymer_with_the_last_condition_left_out(
     hb_configs, tmp_path
 ) -> None:
