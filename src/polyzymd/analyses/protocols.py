@@ -353,7 +353,8 @@ def analyze(
     labels : sequence of str, optional
         One label per config. Defaults to each config's directory name.
     output_dir : Path, optional
-        Where ``analysis/``, ``comparison/`` and ``figures/`` are written.
+        Where ``polyzymd_results/`` and ``figures/`` are written, and for a
+        registered plugin ``analysis/`` and ``comparison/``.
     recompute : bool, optional
         Recompute replicates instead of reusing cached results.
     run : str, optional

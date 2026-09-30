@@ -154,7 +154,7 @@ def _one_line(text: str) -> str:
     "output_dir",
     type=click.Path(path_type=Path),
     default=None,
-    help="Directory for analysis/, comparison/ and figures/. Default: the current directory.",
+    help="Directory for polyzymd_results/ and figures/. Default: the current directory.",
 )
 @click.option(
     "--stride",
