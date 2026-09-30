@@ -141,6 +141,129 @@ def all_below(*distances: Any, thresholds: Any) -> Any:
     return np.logical_and.reduce(below).astype(np.float64)
 
 
+#: Native-contact definition of Best, Hummer and Eaton (2013, SI Eq. 1): pairs
+#: of atoms closer than this many Å in the reference and more than
+#: :data:`NATIVE_CONTACT_SEPARATION` residues apart.
+NATIVE_CONTACT_RADIUS = 4.5
+NATIVE_CONTACT_SEPARATION = 3
+
+#: Native pairs and their reference distances, keyed by reference universe, atoms and definition.
+_NATIVE_PAIRS: dict[tuple, tuple[Any, Any, Any, Any]] = {}
+
+
+def _native_pairs(atoms: Any, reference: Any, radius: float, min_separation: int) -> tuple:
+    """Return the native pairs of ``atoms`` as two index arrays and their reference distances.
+
+    A pair is two atoms more than ``min_separation`` residues apart in the
+    order of the topology whose reference positions are closer than
+    ``radius`` Å, found with ``MDAnalysis.lib.distances.capped_distance``
+    without periodic images, so the reference must be whole. It is computed
+    once per reference and reused for every frame.
+    """
+    import numpy as np
+    from MDAnalysis.lib.distances import capped_distance
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    key = (
+        id(reference.universe),
+        reference.indices.tobytes(),
+        atoms.resindices.tobytes(),
+        float(radius),
+        int(min_separation),
+    )
+    cached = _NATIVE_PAIRS.get(key)
+    if cached is not None and cached[0] is reference.universe:
+        return cached[1], cached[2], cached[3]
+    if len(atoms) != len(reference):
+        raise ProtocolError(
+            f"native contacts: the selection has {len(atoms)} atoms and the reference "
+            f"{len(reference)}.",
+            hint="Build the reference from the same selection, with pz.reference(mode, selection).",
+        )
+    pairs, distances = capped_distance(
+        reference.positions, reference.positions, max_cutoff=radius, return_distances=True
+    )
+    resindex = atoms.resindices
+    keep = (
+        (pairs[:, 0] < pairs[:, 1])
+        & (distances < radius)
+        & (np.abs(resindex[pairs[:, 0]] - resindex[pairs[:, 1]]) > min_separation)
+    )
+    first, second, native = pairs[keep, 0], pairs[keep, 1], distances[keep]
+    if len(native) == 0:
+        raise ProtocolError(
+            f"native contacts: no pair of the selection is closer than {radius} Å and more "
+            f"than {min_separation} residues apart in the reference.",
+            hint="Select the protein's heavy atoms, such as 'protein and not element H'.",
+        )
+    if len(_NATIVE_PAIRS) > 32:
+        _NATIVE_PAIRS.clear()
+    _NATIVE_PAIRS[key] = (reference.universe, first, second, native)
+    return first, second, native
+
+
+def native_contacts(
+    atoms: Any,
+    reference: Any,
+    region: Any = None,
+    radius: float = NATIVE_CONTACT_RADIUS,
+    min_separation: int = NATIVE_CONTACT_SEPARATION,
+    beta: float = 5.0,
+    lambda_constant: float = 1.8,
+    pbc: bool = True,
+) -> float:
+    """Return the fraction of native contacts Q of ``atoms`` at the current frame.
+
+    Native pairs are the pairs of ``atoms`` more than ``min_separation``
+    residues apart whose ``reference`` positions are closer than ``radius``
+    Å. Each pair at distance ``r`` now and ``r0`` in the reference counts
+    ``1 / (1 + exp(beta * (r - lambda_constant * r0)))``, the switching
+    function ``MDAnalysis.analysis.contacts.soft_cut_q``, and Q is the mean
+    over pairs. With the defaults and heavy atoms this is the definition of
+    Best, Hummer and Eaton (2013): 4.5 Å, more than 3 residues apart,
+    ``beta`` 5 Å⁻¹ and ``lambda_constant`` 1.8. Distances now use the
+    minimum image of the frame's box when ``pbc`` is true; the reference
+    must be whole. With ``region``, only the pairs with at least one atom in
+    ``region`` count.
+
+    Parameters
+    ----------
+    atoms : MDAnalysis.core.groups.AtomGroup
+        Atoms whose contacts are measured, such as ``protein and not element H``.
+    reference : MDAnalysis.core.groups.AtomGroup
+        The same atoms at their native positions, usually from
+        :func:`polyzymd.analyses.reference.reference`.
+    region : MDAnalysis.core.groups.AtomGroup, optional
+        Atoms of which each counted pair has at least one.
+
+    Returns
+    -------
+    float
+        Q, from 0 to 1.
+    """
+    import numpy as np
+    from MDAnalysis.analysis.contacts import soft_cut_q
+    from MDAnalysis.lib.distances import calc_bonds
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    first, second, native = _native_pairs(atoms, reference, radius, min_separation)
+    if region is not None:
+        inside = np.isin(atoms.indices, region.indices)
+        chosen = inside[first] | inside[second]
+        if not chosen.any():
+            raise ProtocolError(
+                "native contacts: no native pair has an atom in the region.",
+                hint="Choose a region inside the measured selection.",
+            )
+        first, second, native = first[chosen], second[chosen], native[chosen]
+    positions = atoms.positions
+    box = atoms.dimensions if pbc else None
+    distances = calc_bonds(positions[first], positions[second], box=box)
+    return float(soft_cut_q(distances, native, beta=beta, lambda_constant=lambda_constant))
+
+
 def _superposed_deviations(atoms: Any, fit: Any, reference: Any, frames: Any) -> tuple:
     """Superpose every frame on the reference and return the per-atom deviation, RMSF and offset.
 
