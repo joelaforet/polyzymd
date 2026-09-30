@@ -1162,3 +1162,185 @@ def contact_lifetimes(
         result[1, group] = len(lengths)
         result[2, group] = float(np.mean(censored)) if len(lengths) else float("nan")
     return result
+
+
+#: Default hydrogen-bond geometry: donor-acceptor distance in Å and
+#: donor-hydrogen-acceptor angle in degrees.
+HBOND_DISTANCE = 3.5
+HBOND_ANGLE = 150.0
+
+#: Rows of :func:`hydrogen_bonds`.
+HBOND_PARTS = ("mean_hbonds", "mean_residue_pairs", "any_fraction")
+
+#: Hydrogen bonds found by MDAnalysis, keyed by universe, groups, frames and criteria.
+_HBOND_EVENTS: dict[tuple, tuple[Any, Any]] = {}
+
+
+def hbond_atoms(atoms: Any) -> tuple[Any, Any]:
+    """Return the hydrogens that can be donated and the acceptors among ``atoms``.
+
+    A donor is an N, O or S atom covalently bonded to at least one hydrogen,
+    and its hydrogens are those bonded to it. An acceptor is any O, or an N
+    or S bonded to at most two atoms, so that it keeps a lone pair: this
+    leaves out amide, guanidinium, protonated amine and quaternary nitrogens
+    and keeps unprotonated histidine nitrogens and thioether sulfur. The
+    rule reads the universe's bonds, which PolyzyMD takes from the run's
+    OpenMM system, so every hydrogen of ``atoms`` must be bonded.
+
+    Returns
+    -------
+    tuple of MDAnalysis.core.groups.AtomGroup
+        The donatable hydrogens and the acceptors.
+    """
+    import numpy as np
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    elements = np.asarray([str(e).strip().upper() for e in atoms.elements])
+    hydrogens = atoms[elements == "H"]
+    polar = {"N", "O", "S"}
+    donated, orphans = [], 0
+    for hydrogen in hydrogens:
+        partners = hydrogen.bonded_atoms
+        if len(partners) == 0:
+            orphans += 1
+        elif str(partners[0].element).strip().upper() in polar:
+            donated.append(hydrogen.index)
+    if orphans:
+        raise ProtocolError(
+            f"hydrogen bonds: {orphans} of the {len(hydrogens)} hydrogens have no bonded atom, "
+            "so donors cannot be told apart.",
+            hint="Keep the run's <segment>_system.xml beside its trajectory, which PolyzyMD "
+            "reads for bonds, or give donors, hydrogens and acceptors explicitly.",
+        )
+    candidates = atoms[np.isin(elements, sorted(polar))]
+    acceptors = [
+        atom.index
+        for atom in candidates
+        if str(atom.element).strip().upper() == "O" or len(atom.bonded_atoms) <= 2
+    ]
+    universe = atoms.universe
+    return universe.atoms[np.asarray(donated, dtype=int)], universe.atoms[
+        np.asarray(acceptors, dtype=int)
+    ]
+
+
+def _index_selection(atoms: Any) -> str:
+    """Return an MDAnalysis selection string for exactly ``atoms``, by index."""
+    return "index " + " ".join(str(i) for i in atoms.indices) if len(atoms) else "index -1"
+
+
+def _hbond_events(
+    group_a: Any,
+    group_b: Any,
+    frames: Any,
+    d_a_cutoff: float,
+    d_h_a_angle_cutoff: float,
+    donors: Any,
+    hydrogens: Any,
+    acceptors: Any,
+) -> tuple[Any, Any]:
+    """Return every hydrogen bond MDAnalysis finds between or within the groups, and the frames.
+
+    ``MDAnalysis.analysis.hydrogenbonds.HydrogenBondAnalysis`` runs on
+    ``frames`` with the hydrogens and acceptors of :func:`hbond_atoms`, or
+    those given, and pairs each hydrogen with its donor through the bonds,
+    or by distance within 1.2 Å when ``donors`` is given. With ``group_b``,
+    only bonds with one partner in each group are kept. Bonds between two
+    atoms of one residue are dropped. The rows are MDAnalysis's: frame,
+    donor, hydrogen and acceptor index, distance and angle.
+    """
+    import numpy as np
+    from MDAnalysis.analysis.hydrogenbonds import HydrogenBondAnalysis
+
+    frames = [int(f) for f in frames]
+    both = group_a if group_b is None else group_a | group_b
+    universe = both.universe
+    key = (
+        id(universe),
+        group_a.indices.tobytes(),
+        None if group_b is None else group_b.indices.tobytes(),
+        tuple(frames),
+        float(d_a_cutoff),
+        float(d_h_a_angle_cutoff),
+        *(None if g is None else g.indices.tobytes() for g in (donors, hydrogens, acceptors)),
+    )
+    cached = _HBOND_EVENTS.get(key)
+    if cached is not None and cached[0] is universe:
+        return cached[1], frames
+    if hydrogens is None or acceptors is None:
+        found_hydrogens, found_acceptors = hbond_atoms(both)
+        hydrogens = found_hydrogens if hydrogens is None else hydrogens
+        acceptors = found_acceptors if acceptors is None else acceptors
+    if len(hydrogens) == 0 or len(acceptors) == 0:
+        events = np.zeros((0, 6))
+    else:
+        analysis = HydrogenBondAnalysis(
+            universe,
+            donors_sel=None if donors is None else _index_selection(donors),
+            hydrogens_sel=_index_selection(hydrogens),
+            acceptors_sel=_index_selection(acceptors),
+            between=None
+            if group_b is None
+            else [_index_selection(group_a), _index_selection(group_b)],
+            d_a_cutoff=d_a_cutoff,
+            d_h_a_angle_cutoff=d_h_a_angle_cutoff,
+            update_selections=False,
+        )
+        analysis.run(frames=frames)
+        events = np.asarray(analysis.results.hbonds, dtype=float).reshape(-1, 6)
+    if len(events):
+        resindex = universe.atoms.resindices
+        events = events[resindex[events[:, 1].astype(int)] != resindex[events[:, 3].astype(int)]]
+    if len(_HBOND_EVENTS) > 8:
+        _HBOND_EVENTS.clear()
+    _HBOND_EVENTS[key] = (universe, events)
+    return events, frames
+
+
+def hydrogen_bonds(
+    group_a: Any,
+    group_b: Any = None,
+    frames: Any = None,
+    d_a_cutoff: float = HBOND_DISTANCE,
+    d_h_a_angle_cutoff: float = HBOND_ANGLE,
+    donors: Any = None,
+    hydrogens: Any = None,
+    acceptors: Any = None,
+) -> Any:
+    """Return how many hydrogen bonds join ``group_a`` and ``group_b``, or form within ``group_a``.
+
+    MDAnalysis ``HydrogenBondAnalysis`` finds, on every frame, each hydrogen
+    of a donor within ``d_a_cutoff`` Å of an acceptor (donor-acceptor
+    distance, with the minimum image of the frame's box) with a
+    donor-hydrogen-acceptor angle of at least ``d_h_a_angle_cutoff``
+    degrees; see :func:`_hbond_events`. Donors, hydrogens and acceptors come
+    from :func:`hbond_atoms` unless given. With ``group_b``, only bonds with
+    one partner in each group count, in either direction; without it, bonds
+    within ``group_a``. Bonds within one residue are left out.
+
+    The rows, named in :data:`HBOND_PARTS`, are the mean number of hydrogen
+    bonds per frame, each donor-hydrogen-acceptor counted once; the mean
+    number of distinct residue pairs joined by at least one hydrogen bond
+    per frame; and the fraction of frames with at least one.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(3,)``.
+    """
+    import numpy as np
+
+    events, frames = _hbond_events(
+        group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
+    )
+    n = len(frames)
+    if len(events) == 0:
+        return np.zeros(len(HBOND_PARTS))
+    position = {frame: i for i, frame in enumerate(frames)}
+    frame = np.array([position[int(f)] for f in events[:, 0]])
+    resindex = group_a.universe.atoms.resindices
+    first = resindex[events[:, 1].astype(int)]
+    second = resindex[events[:, 3].astype(int)]
+    pairs = {(f, min(a, b), max(a, b)) for f, a, b in zip(frame, first, second)}
+    return np.array([len(events) / n, len(pairs) / n, len(np.unique(frame)) / n], dtype=np.float64)

@@ -103,6 +103,15 @@ FUNCTION_ANALYSES = {
         "n_sphere_points": 960,
     },
     "secondary_structure": {"selection": "protein", "scheme": "simplified"},
+    "hydrogen_bonds": {
+        "groups": {"protein": "chainid A", "polymer": "chainid C"},
+        "summaries": {"protein_polymer": {"between": ["protein", "polymer"]}},
+        "d_a_cutoff": 3.5,
+        "d_h_a_angle_cutoff": 150.0,
+        "donors": None,
+        "hydrogens": None,
+        "acceptors": None,
+    },
     "native_contacts": {
         "selection": "protein and not element H",
         "reference_mode": None,
@@ -574,6 +583,7 @@ def _analyze_function(
         "secondary_structure",
         "contacts",
         "native_contacts",
+        "hydrogen_bonds",
     )
     if unknown or (run is not None and not pairs):
         raise ProtocolError(
@@ -595,6 +605,8 @@ def _analyze_function(
         return _analyze_secondary_structure(study, settings, run, recompute, output_dir, plots)
     if name == "contacts":
         return _analyze_contacts(study, settings, run, recompute, output_dir, plots)
+    if name == "hydrogen_bonds":
+        return _analyze_hydrogen_bonds(study, settings, run, recompute, output_dir, plots)
     if name == "native_contacts":
         return _analyze_native_contacts(
             study, settings, run, recompute, output_dir, eq_check, plots
@@ -770,6 +782,159 @@ def _analyze_rmsf(
         plot_values(core, labels, folder, "rmsf_comparison", "Root mean square over the core")
         report.provenance.output_paths["figures"] = str(folder)
     return report.model_copy(update={"analysis": name, "run": run, "all_runs": runs})
+
+
+def _hbond_summaries(settings: dict) -> dict[str, tuple[str, str | None]]:
+    """Return each summary's name with the selections of its groups, the second ``None`` for within."""
+    groups = settings["groups"] or {}
+    summaries = settings["summaries"] or {}
+    if isinstance(summaries, list):
+        summaries = {str(item.get("name")): item for item in summaries if isinstance(item, dict)}
+    if (
+        not isinstance(groups, dict)
+        or not groups
+        or not isinstance(summaries, dict)
+        or not summaries
+    ):
+        raise ProtocolError(
+            "hydrogen_bonds: groups must map names to selections and summaries must map names "
+            "to {between: [group, group]} or {within: group}.",
+            hint="Pass --set groups='{protein: chainid A, polymer: chainid C}' --set "
+            "summaries='{protein_polymer: {between: [protein, polymer]}}'.",
+        )
+    resolved: dict[str, tuple[str, str | None]] = {}
+    for name, spec in summaries.items():
+        spec = spec if isinstance(spec, dict) else {}
+        between, within = spec.get("between"), spec.get("within")
+        names = list(between) if between is not None else [within]
+        if (between is None) == (within is None) or (between is not None and len(names) != 2):
+            raise ProtocolError(
+                f"hydrogen_bonds: summary {name!r} needs exactly one of between: [group, group] "
+                "or within: group.",
+                hint="Write summaries='{protein_polymer: {between: [protein, polymer]}}'.",
+            )
+        unknown = [group for group in names if group not in groups]
+        if unknown:
+            raise ProtocolError(
+                f"hydrogen_bonds: summary {name!r} names groups {unknown} that groups does not "
+                f"define; it defines {sorted(groups)}.",
+                hint="Add the group to --set groups='{name: selection}'.",
+            )
+        first = str(groups[names[0]])
+        resolved[str(name)] = (first, None if within is not None else str(groups[names[1]]))
+    return resolved
+
+
+def _analyze_hydrogen_bonds(
+    study: Any,
+    settings: dict | None,
+    run: str | None,
+    recompute: bool,
+    output_dir: Path | None,
+    plots: bool,
+) -> ProtocolReport:
+    """Count hydrogen bonds between or within named groups and report one result.
+
+    ``groups`` maps names to MDAnalysis selections, and each entry of
+    ``summaries`` is ``{between: [a, b]}``, hydrogen bonds with one partner in
+    each group, or ``{within: a}``. :func:`~polyzymd.analyses.functions.hydrogen_bonds`
+    runs MDAnalysis ``HydrogenBondAnalysis`` once per replicate for the chosen
+    summary, with ``d_a_cutoff`` Å and ``d_h_a_angle_cutoff`` degrees, and
+    donors, hydrogens and acceptors from
+    :func:`~polyzymd.analyses.functions.hbond_atoms` unless the selections
+    ``donors``, ``hydrogens`` or ``acceptors`` are given. Each summary ``s``
+    gives ``s_mean_hbonds`` (the default for the first summary),
+    ``s_mean_residue_pairs`` and ``s_any_fraction``. The atoms counted as
+    hydrogens and acceptors are recorded under ``provenance.settings``, as
+    counts per residue name and atom name. With ``plots``,
+    ``hbonds_<run>_comparison`` goes to ``<output_dir>/figures/hydrogen_bonds/``.
+    """
+    from collections import Counter
+
+    from polyzymd.analyses import functions
+    from polyzymd.analyses.timeseries import select
+
+    settings = {**FUNCTION_ANALYSES["hydrogen_bonds"], **(settings or {})}
+    summaries = _hbond_summaries(settings)
+    parts = list(functions.HBOND_PARTS)
+    runs = [f"{name}_{part}" for name in summaries for part in parts]
+    run = run or runs[0]
+    if run not in runs:
+        raise ProtocolError(
+            f"hydrogen_bonds: no result named {run!r}.", hint=f"Use --run with one of {runs}."
+        )
+    summary = next(
+        name for name in summaries if run.startswith(f"{name}_") and run[len(name) + 1 :] in parts
+    )
+    part = run[len(summary) + 1 :]
+    first, second = summaries[summary]
+    both = first if second is None else f"({first}) or ({second})"
+    universe = next(iter(study)).replicates[0].universe()
+    for selection in [first, *([] if second is None else [second])]:
+        if len(universe.select_atoms(selection)) == 0:
+            raise ProtocolError(
+                f"hydrogen_bonds: the selection {selection!r} of summary {summary!r} picks no atoms.",
+                hint="Choose group selections that pick atoms, such as 'chainid A'.",
+            )
+    explicit = {
+        key: select(f"({both}) and ({settings[key]})")
+        for key in ("donors", "hydrogens", "acceptors")
+        if settings[key]
+    }
+    atoms = universe.select_atoms(both)
+    hydrogens, acceptors = (
+        (None, None)
+        if {"hydrogens", "acceptors"} <= set(explicit)
+        else functions.hbond_atoms(atoms)
+    )
+    if "hydrogens" in explicit:
+        hydrogens = universe.select_atoms(f"({both}) and ({settings['hydrogens']})")
+    if "acceptors" in explicit:
+        acceptors = universe.select_atoms(f"({both}) and ({settings['acceptors']})")
+
+    def counts(group: Any) -> dict[str, int]:
+        return dict(sorted(Counter(f"{a.resname} {a.name}" for a in group).items()))
+
+    donor_atoms = (
+        universe.select_atoms(f"({both}) and ({settings['donors']})")
+        if "donors" in explicit
+        else sum((h.bonded_atoms[:1] for h in hydrogens), universe.atoms[[]])
+    )
+    # Only non-default options, so a plain Python call reuses the stored records.
+    options: dict[str, Any] = dict(explicit)
+    if float(settings["d_a_cutoff"]) != functions.HBOND_DISTANCE:
+        options["d_a_cutoff"] = float(settings["d_a_cutoff"])
+    if float(settings["d_h_a_angle_cutoff"]) != functions.HBOND_ANGLE:
+        options["d_h_a_angle_cutoff"] = float(settings["d_h_a_angle_cutoff"])
+    arguments = [select(first)] + ([] if second is None else [select(second)])
+    rows = study.per_replicate(
+        functions.hydrogen_bonds,
+        *arguments,
+        unit=None,
+        name=f"hydrogen_bonds_{summary}",
+        recompute=recompute,
+        output_dir=output_dir,
+        parts=parts,
+        **options,
+    )
+    values = rows[part]
+    values.metric = run
+    values.bounds = (0.0, 1.0) if part == "any_fraction" else (0.0, None)
+    report = values.compare() if len(study) > 1 else values.summary()
+    report.provenance.settings = {
+        **settings,
+        "summary": {"name": summary, "groups": [first] if second is None else [first, second]},
+        "hbond_atoms": {
+            "donors": counts(donor_atoms),
+            "hydrogens": len(hydrogens),
+            "acceptors": counts(acceptors),
+        },
+    }
+    if plots:
+        folder = _figures_dir(output_dir, "hydrogen_bonds")
+        values.plot(folder, f"hbonds_{run}_comparison", title=run.replace("_", " "))
+        report.provenance.output_paths["figures"] = str(folder)
+    return report.model_copy(update={"analysis": "hydrogen_bonds", "run": run, "all_runs": runs})
 
 
 def _analyze_native_contacts(
