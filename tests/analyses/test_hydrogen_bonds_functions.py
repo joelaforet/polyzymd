@@ -628,6 +628,20 @@ def test_hydrogen_bonds_refuses_unbonded_hydrogens_unless_they_are_given() -> No
     assert result.tolist() == pytest.approx([1.0, 1.0, 1.0])
 
 
+@pytest.mark.xfail(
+    strict=True,
+    raises=mda.exceptions.NoDataError,
+    reason="hbond_atoms reads bonded_atoms without checking the universe has bonds, so a "
+    "universe without a bonds attribute raises NoDataError instead of the ProtocolError",
+)
+def test_hbond_atoms_refuses_a_universe_without_bonds() -> None:
+    universe = mda.Universe.empty(2, n_residues=1, atom_resindex=[0, 0], trajectory=True)
+    universe.add_TopologyAttr("elements", ["O", "H"])
+
+    with pytest.raises(ProtocolError, match="1 of the 1 hydrogens have no bonded atom"):
+        hbond_atoms(universe.atoms)
+
+
 def test_hbond_atoms_with_no_hydrogen_returns_empty_groups() -> None:
     universe = _valence_universe()
 
