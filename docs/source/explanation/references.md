@@ -120,8 +120,6 @@ which is what these tests and corrections are built for.
 - Welch, B. L. (1947). The generalization of Student's problem when several
   different population variances are involved. Biometrika 34:28-35.
   doi:10.1093/biomet/34.1-2.28
-- Tukey, J. W. (1949). Comparing individual means in the analysis of variance.
-  Biometrics 5:99-114. doi:10.2307/3001913
 - Benjamini, Y. and Hochberg, Y. (1995). Controlling the false discovery rate:
   a practical and powerful approach to multiple testing. Journal of the Royal
   Statistical Society Series B 57:289-300.

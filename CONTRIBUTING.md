@@ -105,9 +105,8 @@ adding one needs **one function** and **no changes to the study code**.
 
 5. **Run the test suite**: `pixi run -e build pytest tests/ -v`
 
-The plugin framework (`Analysis`, `polyzymd new-analysis`, `polyzymd compare`)
-still exists, but no shipped analysis uses it and it is being removed. Do not
-add plugins.
+`docs/source/contributor_guide/adding_an_analysis.md` walks through these
+steps.
 
 ### Key Rules
 
@@ -189,9 +188,9 @@ src/polyzymd/
 
 The `analyses/` directory is the primary extension point: `functions.py` holds
 the shipped measurements, `study.py` and `timeseries.py` the study API, and
-`protocols.py` the `polyzymd analyze` analyses. `base.py`, `orchestrator.py`,
-`discovery.py`, `mda/` and `_framework/` are the plugin framework, which no
-shipped analysis uses and which is being removed.
+`protocols.py` the `polyzymd analyze` analyses, `universe.py` the replicate
+loading and input file records, and `identity.py` the config hash every stored
+result records.
 
 ## Getting Help
 

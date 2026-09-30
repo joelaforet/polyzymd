@@ -64,9 +64,9 @@ This file tracks where images should be added after the text overhaul is stable.
   - Suggested image: annotated `polyzymd analyze -c ... -c ...` command showing the control, labels, replicates and equilibration window
   - Purpose: help users see which option sets which part of the comparison
 
-- `docs/source/reference/analysis_comparison_reference.md`
-  - Placement: near the project layout section
-  - Suggested image: small reference diagram showing where result JSON files and figures are written
+- `docs/source/reference/data_requirements.md`
+  - Placement: near the analysis output layout section
+  - Suggested image: small reference diagram showing where stored replicate results, figures and SLURM folders are written
   - Purpose: make output locations memorable
 
 ## Batch 3 Pages

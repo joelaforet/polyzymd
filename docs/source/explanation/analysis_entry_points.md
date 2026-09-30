@@ -57,13 +57,6 @@ Loading a file with `mda.Universe()` directly leaves the element attribute empty
 when the topology file has none, and does not chain the production segments.
 It is not a general-purpose route.
 
-## The plugin framework
-
-`polyzymd compare run`, `run_analysis` and `run_comparison` drive the analysis
-plugin framework, which runs plugins registered with it. No shipped analysis is
-a plugin any more, so these commands run only plugins you register yourself,
-and the framework is being removed.
-
 ## See also
 
 - {doc}`../how_to/analysis_agent_protocol` for the one-command recipe.

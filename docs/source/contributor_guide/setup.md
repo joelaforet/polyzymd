@@ -1,7 +1,7 @@
 # Set Up a Contributor Environment
 
 Use this page when you want to modify PolyzyMD, run tests, build the docs, or
-work on new analysis plugins.
+add an analysis.
 
 ## What This Environment Is For
 
@@ -77,4 +77,4 @@ pixi install -e build
 - {doc}`index`
 - {doc}`packaging`
 - {doc}`contributing`
-- {doc}`extending_analyses`
+- {doc}`adding_an_analysis`

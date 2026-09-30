@@ -16,3 +16,12 @@
    :undoc-members:
    :show-inheritance:
 ```
+
+## Plot Settings and Analysis Defaults
+
+```{eval-rst}
+.. automodule:: polyzymd.config.analysis_settings
+   :members:
+   :show-inheritance:
+   :no-index:
+```

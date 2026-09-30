@@ -166,7 +166,7 @@ In the `build` environment, these commands should work directly:
 | `polyzymd submit --engine gromacs` | Yes | GROMACS submission can run from `build`; SLURM runs GROMACS in the external cluster environment |
 | `polyzymd run-segment` | No | OpenMM execution requires a `sim-cuda-*` runtime |
 
-The `analysis` environment is the supported environment for `polyzymd compare`
+The `analysis` environment is the supported environment for `polyzymd analyze`
 commands. It contains MDAnalysis, MDTraj, pandas, SciPy, scikit-learn,
 matplotlib, seaborn, Python 3.12, and NumPy 2 without the CUDA runtime pins.
 

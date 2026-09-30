@@ -7,20 +7,18 @@ errors.
 
 ---
 
-## The Two-Project Pattern
+## Simulation Projects and Analysis Output
 
-PolyzyMD separates simulation execution from cross-condition analysis into two
-distinct project types, each with its own directory scaffold and configuration
-file:
+PolyzyMD keeps one simulation project per condition. Analysis reads those
+projects and writes into a separate output directory:
 
-| Project Type | Created By | Config File | Purpose |
-|---|---|---|---|
-| Simulation project | `polyzymd init -n <name>` | `config.yaml` | Build, run, and store one simulation condition |
-| Comparison project | `polyzymd compare init -n <name>` | `comparison.yaml` | List the conditions of a comparison, for `polyzymd compare validate`; `polyzymd analyze` takes the `config.yaml` files directly |
+| Directory | Created By | Holds |
+|---|---|---|
+| Simulation project | `polyzymd init -n <name>` | `config.yaml` and the inputs of one simulation condition; its replicates' trajectories live under the scratch or projects directory the config names |
+| Analysis output | `polyzymd analyze NAME -c A/config.yaml ...` or the study API | `polyzymd_results/` (every replicate's stored values and record), `figures/<analysis>/` and, with `--submit`, `slurm/`; the current directory unless `--output-dir` is given |
 
-A comparison project does not contain trajectory data. Instead, its
-`comparison.yaml` points to one or more simulation project `config.yaml` files,
-which in turn resolve to the trajectory directories on disk.
+`polyzymd analyze` takes each condition's `config.yaml` with `-c`, control
+first; no other file lists the conditions.
 
 ---
 
@@ -248,54 +246,34 @@ reaction files at runtime.
 
 ---
 
-## Comparison Project Layout
+## Analysis Output Layout
 
-Running `polyzymd compare init -n my_study` creates:
+`polyzymd analyze hydrogen_bonds -c noPoly/config.yaml -c sbma/config.yaml
+--output-dir results` writes:
 
 ```
-my_study/
-├── comparison.yaml          # Conditions of the comparison (edit this)
-├── comparison/              # Comparison results of registered plugins
-├── figures/                 # Generated plots
-└── structures/              # (Optional) shared structure files (e.g., an enzyme PDB)
+results/
+├── polyzymd_results/
+│   └── <name>/                  # one folder per measurement name, e.g. hydrogen_bonds_protein_polymer
+│       └── <condition>/
+│           └── replicate_<n>/
+│               ├── series.npz   # per-frame values (Study.timeseries), or
+│               ├── values.npz   # one value or labelled array (Study.per_replicate)
+│               └── record.json  # function, arguments, config hash, input files, frames, versions
+├── figures/
+│   └── hydrogen_bonds/          # the analysis's figures, unless --no-plots
+└── slurm/                       # with --submit: one folder per submission
+    └── hydrogen_bonds_<YYYYmmdd-HHMMSS>/
+        ├── tasks.tsv
+        ├── replicates.sbatch
+        ├── report.sbatch
+        ├── logs/
+        └── report.txt           # report.json with --format json, or the -o path
 ```
 
-`polyzymd analyze` writes the values it measures to `polyzymd_results/` and
-its figures to `figures/<analysis>/` under `--output-dir`, the current
-directory by default. The `analysis/` and `comparison/` directories hold the
-artifacts of analysis plugins you register yourself; no shipped analysis
-writes them.
-
-### comparison.yaml structure
-
-The comparison config references simulation projects by pointing to their
-`config.yaml` files:
-
-```yaml
-name: "polymer_study"
-description: "Comparison of polymer conjugation effects"
-
-control: "No Polymer"       # Label of the control condition, or null
-
-conditions:
-  - label: "No Polymer"
-    config: "../no_polymer/config.yaml"
-    replicates: [1, 2, 3]
-
-  - label: "PEG 10k"
-    config: "../peg_10k/config.yaml"
-    replicates: [1, 2, 3]
-
-defaults:
-  equilibration_time: "10ns"
-```
-
-No analysis is configured in `comparison.yaml`; the `plugins:` section is
-retired (see {ref}`comparison-yaml-retired`). `polyzymd analyze` takes the
-same `config.yaml` files directly with `-c`.
-
-Relative paths in `conditions[].config` are resolved relative to the directory
-containing `comparison.yaml`, not the current working directory.
+A stored replicate result is read back instead of measured when every field
+of its `record.json` matches the new call; see
+{doc}`../explanation/analysis_api`.
 
 ---
 
@@ -319,13 +297,13 @@ topology and trajectory files of each replicate.
 **Path resolution is config-relative, not CWD-relative.**
 Relative paths in `config.yaml` (e.g., `enzyme.pdb_path: "structures/enzyme.pdb"`)
 are resolved relative to the directory containing `config.yaml`, not your
-shell's current working directory. The same applies to `conditions[].config`
-paths in `comparison.yaml`.
+shell's current working directory. Relative `-c` paths of `polyzymd analyze`
+are resolved from the current directory.
 ```
 
 - **Mismatched scratch directory.** If you built and ran simulations with one
-  `scratch_directory` value but later changed it in `config.yaml`, the analysis
-  framework will look in the wrong location. The `scratch_directory` in
+  `scratch_directory` value but later changed it in `config.yaml`, analysis
+  looks in the wrong location. The `scratch_directory` in
   `config.yaml` must match where the trajectory files actually reside.
 
 - **The `"default"` sentinel for reactions.** Setting
@@ -333,10 +311,9 @@ paths in `comparison.yaml`.
   reaction template. Writing `"structures/default"` or any path containing
   `"default"` will fail because no such file exists.
 
-- **Missing replicate directories.** Each replicate number listed in
-  `comparison.yaml` must have a corresponding directory on disk. If replicate 3
-  was never simulated, the analysis will fail with a `FileNotFoundError`
-  showing the expected path.
+- **Missing replicate directories.** Each replicate number given with
+  `--replicates` must have a run directory on disk. If replicate 3 was never
+  simulated, `polyzymd analyze` exits 2 and names the replicates it found.
 
 - **Incomplete replicate directories.** Every replicate directory must contain
   at least a topology file (`system.prmtop` or `solvated_system.pdb`) and one or more production
@@ -348,6 +325,6 @@ paths in `comparison.yaml`.
 ## See Also
 
 - {doc}`configuration` -- Full configuration field reference
-- {doc}`cli_reference` -- CLI command reference including `init` and `compare init`
+- {doc}`cli_reference` -- CLI command reference including `init` and `analyze`
 - {doc}`../how_to/analysis_compare_conditions` -- How to set up and run a comparison
 - {doc}`../get_started/quickstart` -- Run your first simulation end-to-end

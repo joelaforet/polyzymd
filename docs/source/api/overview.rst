@@ -11,7 +11,7 @@ Package Structure
     polyzymd/
     ├── config/           # Configuration and YAML loading
     │   ├── schema.py     # Pydantic models for all config sections
-    │   ├── comparison.py # ComparisonConfig, PlotSettings, condition models
+    │   ├── analysis_settings.py # PlotSettings, PlotTheme, AnalysisDefaults
     │   └── loader.py     # YAML loading utilities
     ├── builders/         # System building components
     │   ├── enzyme.py     # Enzyme/protein preparation
@@ -26,7 +26,8 @@ Package Structure
     │   └── signals.py    # SLURM signal handling
     ├── workflow/         # HPC workflow management
     │   ├── slurm.py      # SLURM script generation
-    │   └── daisy_chain.py     # Job submission
+    │   ├── daisy_chain.py     # Job submission
+    │   └── analysis_submit.py # `polyzymd analyze --submit` SLURM jobs
     ├── core/             # Core utilities
     │   ├── parameters.py # Simulation parameters
     │   └── restraints.py # Restraint definitions
@@ -37,20 +38,17 @@ Package Structure
     │   │                 # hydrogen bonds, distances, ...)
     │   ├── figures.py    # Figures drawn from stored values
     │   ├── protocols.py  # `polyzymd analyze` and the ProtocolReport
-    │   ├── mda/          # MDAnalysis loading, file identity, job and artifact layer
-    │   ├── shared/       # Reusable utilities (TrajectoryLoader, alignment, etc.)
-    │   ├── base.py, discovery.py, orchestrator.py, stats.py, _framework/
-    │   │                 # Analysis plugin framework: no shipped analysis is a
-    │   │                 # plugin any more, and it is being removed
+    │   ├── reference.py  # Reference structures for RMSD, RMSF, native contacts
+    │   ├── universe.py   # UniverseProvider: replicate universes and input file records
+    │   ├── identity.py   # compute_config_hash, recorded by every stored result
+    │   ├── shared/       # Reusable utilities (TrajectoryLoader, statistics, plotting)
     └── cli/              # Command-line interface
         ├── analyze.py    # `polyzymd analyze`
-        ├── compare.py    # `polyzymd compare` subcommands
+        ├── retired.py    # hidden `compare` and `new-analysis`, which name their replacements
         └── main.py       # Click CLI
 
-No shipped analysis is a plugin: every analysis that ``polyzymd analyze``
-offers is a function in ``polyzymd.analyses.functions`` run through
-``polyzymd.analyses.study.Study``. The ``analyses/_framework/`` package is
-private implementation detail of the plugin framework.
+Every analysis that ``polyzymd analyze`` offers is a function in
+``polyzymd.analyses.functions`` run through ``polyzymd.analyses.study.Study``.
 
 
 Key Classes
@@ -97,24 +95,15 @@ Analysis
 - :py:class:`~polyzymd.analyses.study.Study` - Every replicate of every condition as MDAnalysis universes
 - :py:func:`~polyzymd.analyses.functions.hydrogen_bonds` - Hydrogen-bond counts between two groups
 - :py:func:`~polyzymd.analyses.functions.residue_occlusion` - Polymer-protein contacts by occluded SASA
-- :py:class:`~polyzymd.analyses.base.Analysis` - Base class of the plugin framework, which no shipped analysis uses
-- :py:class:`~polyzymd.analyses.mda.job.MDAAnalysisJob` - Unit of trajectory-native MDAnalysis work
-- :py:class:`~polyzymd.analyses.mda.frame_selection.FrameSelection` - Frame selection and equilibration-window descriptor
-- :py:class:`~polyzymd.analyses.mda.artifacts.ReplicateArtifact` - Validated output for one replicate
-- :py:class:`~polyzymd.analyses.mda.artifacts.ConditionArtifact` - Aggregated output for one condition
-- :py:class:`~polyzymd.analyses.mda.artifacts.ComparisonArtifact` - Canonical comparison output for cross-condition results
-- :py:class:`~polyzymd.analyses.mda.store.ArtifactStore` - Canonical artifact persistence and loading helper
-- :py:class:`~polyzymd.analyses.base.MetricValue` - Scalar metric descriptor for default comparisons
+- :py:class:`~polyzymd.analyses.timeseries.Timeseries` - Per-frame values of every replicate, from ``Study.timeseries``
+- :py:class:`~polyzymd.analyses.timeseries.ReplicateValues` - One value or labelled array per replicate, with ``summary()`` and ``compare()``
+- :py:class:`~polyzymd.analyses.universe.UniverseProvider` - Loads a replicate's universe and records its input files
+- :py:class:`~polyzymd.config.analysis_settings.PlotSettings` - Figure format, style preset, theme and condition colours
 
 Comparison
 ~~~~~~~~~~
 
 - :py:class:`~polyzymd.analyses.protocols.ProtocolReport` - The report of ``polyzymd analyze`` and of ``summary()`` and ``compare()``
-- :py:class:`~polyzymd.analyses.base.ComparisonResult` - Universal comparison result model
-- :py:class:`~polyzymd.analyses.base.MetricValue` - Scalar metric descriptor
-- :py:class:`~polyzymd.analyses.base.ReplicateContext` - Context for per-replicate computation
-- :py:class:`~polyzymd.analyses.base.ComparisonContext` - Context for cross-condition comparison
-
 
 Quick Reference
 ---------------

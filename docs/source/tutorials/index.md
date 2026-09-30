@@ -27,7 +27,7 @@ If you already know what you want to do, jump to
 [How-To Guides](../how_to/index.md) instead.
 
 <!-- IMAGE OPPORTUNITY: Add a compact pipeline figure for the end-to-end
-analysis workflow, from completed trajectories through analysis artifacts,
+analysis workflow, from completed trajectories through stored replicate results,
 comparison results, and figures. -->
 
 ```{toctree}
