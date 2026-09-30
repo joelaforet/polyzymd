@@ -1,6 +1,6 @@
 """A comparison.yaml that still configures a retired plugin keeps working for the others.
 
-rg, rmsd, rmsf, sasa, distances and catalytic_triad left the plugin system for
+rg, rmsd, rmsf, sasa, secondary_structure, distances and catalytic_triad left the plugin system for
 ``polyzymd analyze``. Each of their ``plugins`` blocks is ignored with one
 warning, and ``compare run <name>`` prints the equivalent ``polyzymd analyze``
 command.
@@ -24,6 +24,7 @@ RETIRED = {
     "rmsd": "rmsd",
     "rmsf": "rmsf",
     "sasa": "sasa",
+    "secondary_structure": "dssp_occupancy",
     "distances": "pair_distance",
     "catalytic_triad": "pair_distance",
 }
@@ -31,7 +32,7 @@ RETIRED = {
 
 @pytest.fixture()
 def comparison_file(tmp_path: Path) -> Path:
-    """A comparison.yaml with retired blocks and a secondary_structure block over two conditions."""
+    """A comparison.yaml with retired blocks and a hydrogen_bonds block over two conditions."""
     conditions = []
     for label in ("No Polymer", "SBMA 50"):
         config = write_simulation_config(tmp_path / label.replace(" ", "_"), scratch=tmp_path)
@@ -49,12 +50,14 @@ def comparison_file(tmp_path: Path) -> Path:
             "rmsf": {"selection": "name CA"},
             "sasa": {"runs": [{"label": "Protein", "target_selection": "protein"}]},
             "secondary_structure": {"chain_id": "B"},
+            "hydrogen_bonds": {"distance_cutoff": 3.2},
         },
         "plot_settings": {
             "distances": {"use_kde": True},
             "catalytic_triad": {},
             "rmsf": {},
             "sasa": {},
+            "secondary_structure": {},
         },
     }
     path = tmp_path / "comparison.yaml"
@@ -63,7 +66,7 @@ def comparison_file(tmp_path: Path) -> Path:
 
 
 def test_retired_blocks_are_ignored_with_one_warning_each(comparison_file: Path) -> None:
-    """The file loads, secondary_structure keeps its settings, and each retired block warns once."""
+    """The file loads, hydrogen_bonds keeps its settings, and each retired block warns once."""
     with pytest.warns(UserWarning, match="block, which is ignored") as record:
         config = ComparisonConfig.from_yaml(comparison_file)
 
@@ -73,18 +76,19 @@ def test_retired_blocks_are_ignored_with_one_warning_each(comparison_file: Path)
         assert f"polyzymd analyze {name} " in message
         assert f"polyzymd.analyses.functions.{function}." in message
         assert ("--set pairs=" in message) == (function == "pair_distance")
-        method = "study.per_replicate" if name == "rmsf" else "study.timeseries"
+        per_replicate = name in ("rmsf", "secondary_structure")
+        method = "study.per_replicate" if per_replicate else "study.timeseries"
         assert f"in Python {method} with" in message
-    assert sum("plot_settings." in text for text in messages) == 4
-    assert config.plugins.get_enabled_plugins() == ["secondary_structure"]
-    assert config.plugins.get("secondary_structure").chain_id == "B"
+    assert sum("plot_settings." in text for text in messages) == 5
+    assert config.plugins.get_enabled_plugins() == ["hydrogen_bonds"]
+    assert config.plugins.get("hydrogen_bonds").distance_cutoff == 3.2
     assert config.validate_config() == []
 
 
-def test_compare_validate_and_run_secondary_structure_succeed(
+def test_compare_validate_and_run_hydrogen_bonds_succeed(
     comparison_file: Path, monkeypatch
 ) -> None:
-    """compare validate passes and compare run secondary_structure reaches the pipeline."""
+    """compare validate passes and compare run hydrogen_bonds reaches the pipeline."""
     seen = {}
 
     def _pipeline(analysis, config, **kwargs):
@@ -97,8 +101,8 @@ def test_compare_validate_and_run_secondary_structure_succeed(
     validated = runner.invoke(compare, ["validate", "-f", str(comparison_file)])
     assert validated.exit_code == 0, validated.output
 
-    runner.invoke(compare, ["run", "secondary_structure", "-f", str(comparison_file)])
-    assert seen == {"analysis": "secondary_structure", "plugins": ["secondary_structure"]}
+    runner.invoke(compare, ["run", "hydrogen_bonds", "-f", str(comparison_file)])
+    assert seen == {"analysis": "hydrogen_bonds", "plugins": ["hydrogen_bonds"]}
 
 
 @pytest.mark.parametrize("name", list(RETIRED))
@@ -123,7 +127,7 @@ def test_compare_run_all_skips_retired(comparison_file, monkeypatch, tmp_path: P
     def _run_all(config, **kwargs):
         seen["plugins"] = config.plugins.get_enabled_plugins()
         return {
-            "secondary_structure": {
+            "hydrogen_bonds": {
                 "comparison": {"ok": True},
                 "comparison_path": tmp_path / "r.json",
             }
@@ -134,4 +138,4 @@ def test_compare_run_all_skips_retired(comparison_file, monkeypatch, tmp_path: P
         result = CliRunner().invoke(compare, ["run-all", "-f", str(comparison_file)])
 
     assert result.exit_code == 0, result.output
-    assert seen == {"plugins": ["secondary_structure"]}
+    assert seen == {"plugins": ["hydrogen_bonds"]}

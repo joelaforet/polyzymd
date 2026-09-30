@@ -39,7 +39,6 @@ T_FACTOR_N5 = 2.7764451051977934
 PLUGIN_NAMES = (
     "contacts",
     "hydrogen_bonds",
-    "secondary_structure",
 )
 
 
@@ -401,15 +400,6 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
     dict
         Metric summaries keyed by metric name.
     """
-    if analysis_name == "secondary_structure":
-        from polyzymd.analyses.secondary_structure._mda import HELIX_FRACTION_METRIC
-
-        return {
-            HELIX_FRACTION_METRIC: metric_summary_payload(
-                HELIX_FRACTION_METRIC, [0.4], unit="fraction"
-            )
-        }
-
     if analysis_name == "contacts":
         return {"coverage": metric_summary_payload("coverage", [0.4], unit="fraction")}
 

@@ -127,12 +127,17 @@ RETIRED_PLUGINS = {
     "rmsd": "rmsd",
     "rmsf": "rmsf",
     "sasa": "sasa",
+    "secondary_structure": "dssp_occupancy",
     "distances": "pair_distance",
     "catalytic_triad": "pair_distance",
 }
 
 #: Retired analyses that measure pairs, whose command needs the pairs list.
 PAIR_ANALYSES = ("distances", "catalytic_triad")
+
+#: Retired analyses whose function returns one value per replicate, which
+#: study.per_replicate measures; the others are per-frame study.timeseries functions.
+PER_REPLICATE_ANALYSES = ("rmsf", "secondary_structure")
 
 RETIRED_PLUGIN_WARNING = (
     "comparison.yaml has a {section}.{name} block, which is ignored: {name} no longer runs "
@@ -151,7 +156,7 @@ def _warn_retired(section: str, name: str) -> None:
             name=name,
             function=RETIRED_PLUGINS[name],
             pairs=" --set pairs=<pairs.yaml>" if name in PAIR_ANALYSES else "",
-            method="study.per_replicate" if name == "rmsf" else "study.timeseries",
+            method="study.per_replicate" if name in PER_REPLICATE_ANALYSES else "study.timeseries",
         ),
         UserWarning,
         stacklevel=3,

@@ -47,19 +47,17 @@ defaults:
 # Define which analyses to run. Presence of a section enables that analysis.
 
 plugins:
-  # Secondary Structure (DSSP) Analysis
-  # Per-residue and per-frame secondary structure via mdtraj DSSP.
-  # Produces timeline heatmaps, content bar charts, and persistence profiles.
-  #
-  # secondary_structure:
-  #   chain_id: "A"              # chain letter for the protein to analyze
-
-  # RMSF and SASA are not configured here. Run them per condition, for example
+  # RMSF, SASA and secondary structure are not configured here. Run them per
+  # condition, for example
   #   polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml
   #   polyzymd analyze sasa -c A/config.yaml -c B/config.yaml \
   #     --set contexts='{isolated: protein, with_polymer: protein or resname SBM EGM}'
+  #   polyzymd analyze secondary_structure -c A/config.yaml -c B/config.yaml \
+  #     --set selection='protein and chainID A'
   # Pick the total SASA with --run <context> and each residue's SASA with
-  # --run <context>_residues.
+  # --run <context>_residues. Pick the helix, strand or coil fraction, or one
+  # DSSP class such as alpha_helix, with --run <name> and its per-residue
+  # profile with --run <name>_residues.
 
   # Catalytic triad and pair distances are not configured here. Write the
   # pairs to pairs.yaml, a list of label, selection_a, selection_b and
@@ -246,10 +244,3 @@ plot_settings:
   #   generate_cf_by_partition_bars: true
   #   generate_rt_by_aa_class_bars: true
   #   generate_rt_by_partition_bars: true
-
-  # secondary_structure:
-  #   generate_timeline: true      # per-condition residue × time SS heatmap
-  #   generate_content_bars: true  # helix/strand/coil fraction bars
-  #   generate_individual_bars: true  # one bar chart per SS type
-  #   generate_diff_heatmap: true  # Δ(helix persistence) vs control
-  #   diff_colormap: "RdBu_r"     # diverging colormap for diff heatmap

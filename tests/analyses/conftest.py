@@ -12,7 +12,6 @@ _PLOTTER_MODULES = tuple(
     for name in (
         "contacts",
         "hydrogen_bonds",
-        "secondary_structure",
     )
 )
 

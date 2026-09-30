@@ -112,7 +112,6 @@ class TestDiscovery:
         expected_names = {
             "contacts",
             "hydrogen_bonds",
-            "secondary_structure",
         }
         assert set(analyses) == expected_names
 
@@ -155,7 +154,7 @@ class TestDiscovery:
             with pytest.raises(KeyError, match="Unknown analysis"):
                 get_analysis(name)
 
-        for name in ("contacts", "hydrogen_bonds", "secondary_structure"):
+        for name in ("contacts", "hydrogen_bonds"):
             assert name in active_plugins
 
     def test_get_analysis_unknown_raises(self):
@@ -543,5 +542,5 @@ class TestDiscoveryImportCost:
         )
         result = json.loads(completed.stdout.strip().splitlines()[-1])
 
-        assert result["names"] == ["contacts", "hydrogen_bonds", "secondary_structure"]
+        assert result["names"] == ["contacts", "hydrogen_bonds"]
         assert result["heavy"] == []
