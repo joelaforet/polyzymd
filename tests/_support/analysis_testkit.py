@@ -545,13 +545,20 @@ def write_openmm_frames(
     atom_resindex: Sequence[int],
     *,
     resids: Sequence[int] | None = None,
+    names: Sequence[str] | None = None,
+    resnames: Sequence[str] | None = None,
+    elements: Sequence[str] | None = None,
+    chain_ids: Sequence[str] | None = None,
     dt_ps: float = 100.0,
 ) -> Path:
     """Write an OpenMM run directory whose DCD holds ``coordinates`` frame by frame.
 
-    Atom ``i`` is named ``C<i>`` and belongs to residue ``atom_resindex[i]``,
-    whose residue ID is ``resids[atom_resindex[i]]``, by default that index
-    plus one, and whose name is ``ALA``. The topology holds the first frame.
+    Atom ``i`` is named ``names[i]``, by default ``C<i>``, and belongs to
+    residue ``atom_resindex[i]``, whose residue ID is
+    ``resids[atom_resindex[i]]``, by default that index plus one, and whose
+    name is ``resnames[atom_resindex[i]]``, by default ``ALA``. ``elements``
+    and ``chain_ids``, one per atom, fill the PDB's element and chain ID
+    columns when given. The topology holds the first frame.
 
     Returns
     -------
@@ -568,10 +575,14 @@ def write_openmm_frames(
     universe = mda.Universe.empty(
         n_atoms, n_residues=n_residues, atom_resindex=list(atom_resindex), trajectory=True
     )
-    universe.add_TopologyAttr("names", [f"C{i}" for i in range(n_atoms)])
-    universe.add_TopologyAttr("resnames", ["ALA"] * n_residues)
+    universe.add_TopologyAttr("names", list(names or [f"C{i}" for i in range(n_atoms)]))
+    universe.add_TopologyAttr("resnames", list(resnames or ["ALA"] * n_residues))
     universe.add_TopologyAttr("resids", list(resids or range(1, n_residues + 1)))
     universe.add_TopologyAttr("masses", [1.0] * n_atoms)
+    if elements is not None:
+        universe.add_TopologyAttr("elements", list(elements))
+    if chain_ids is not None:
+        universe.add_TopologyAttr("chainIDs", list(chain_ids))
     universe.atoms.positions = coordinates[0]
     universe.atoms.write(str(run_dir / "solvated_system.pdb"))
     path = segment / "production_0_trajectory.dcd"
