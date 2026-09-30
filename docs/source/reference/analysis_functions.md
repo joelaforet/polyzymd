@@ -12,9 +12,10 @@ functions measure all production frames of one replicate and run through
 |---|---|---|---|---|
 | `radius_of_gyration` | `atoms`, an `AtomGroup` | float, Å | MDAnalysis `AtomGroup.radius_of_gyration()`: mass-weighted, coordinates as loaded, molecules split across periodic boundaries not unwrapped | `polyzymd analyze rg` |
 | `rmsd` | `atoms` and `reference`, `AtomGroup`s with the same atoms | float, Å | MDAnalysis `rms.rmsd(center=True, superposition=True)`: unweighted, `atoms` superposed on `reference` | `polyzymd analyze rmsd` |
-| `pair_distance` | `atoms_a`, `atoms_b`, `mode_a` and `mode_b` (`single`, `midpoint`, `centroid` or `com`), `pbc` | float, Å | MDAnalysis `lib.distances.calc_bonds` between the two points, with the minimum image of the frame's box when `pbc` is true | `polyzymd analyze distances`, `polyzymd analyze catalytic_triad` |
-| `all_below` | distance series, `thresholds` | 1 or 0 per frame | 1 for each frame in which every distance is strictly below its threshold; used with `Timeseries.transform` | `polyzymd analyze catalytic_triad` |
+| `pair_distance` | `atoms_a`, `atoms_b`, `mode_a` and `mode_b` (`single`, `midpoint`, `centroid` or `com`), `pbc` | float, Å | MDAnalysis `lib.distances.calc_bonds` between the two points, with the minimum image of the frame's box when `pbc` is true | `polyzymd analyze distances` |
+| `all_below` | distance series, `thresholds` | 1 or 0 per frame | 1 for each frame in which every distance is strictly below its threshold; used with `Timeseries.transform` | `polyzymd analyze distances`, for each pair's fraction below its threshold |
 | `native_contacts` | `atoms` and `reference`, `AtomGroup`s with the same atoms; optional `region`; `radius` (4.5 Å), `min_separation` (3), `beta` (5 Å⁻¹), `lambda_constant` (1.8), `pbc` | float, from 0 to 1 | Native pairs: pairs of `atoms` more than `min_separation` residues apart whose `reference` positions are closer than `radius`, found once per reference without periodic images; on each frame, MDAnalysis `analysis.contacts.soft_cut_q` of their distances (`lib.distances.calc_bonds`, minimum image when `pbc` is true) and reference distances, the mean over pairs of `1/(1 + exp(beta (r - lambda_constant r0)))`; with `region`, only pairs with an atom in it. The defaults on heavy atoms are the definition of Best, Hummer and Eaton (2013) | `polyzymd analyze native_contacts` |
+| `hbond_count` | `group_a`, optional `group_b`; `d_a_cutoff` (3.5 Å), `d_h_a_angle_cutoff` (150°), optional `donors`, `hydrogens` and `acceptors` | float, number of hydrogen bonds | MDAnalysis `HydrogenBondAnalysis` on the current frame alone, with the atoms and rules of `hydrogen_bonds` below; suits a few chosen atoms, such as the hydrogen bonds of a catalytic triad | none; the routine of {doc}`../how_to/analysis_triad_quickstart` |
 | `sasa` | `target` and `context`, `AtomGroup`s with every target atom in the context; `probe_radius_nm` (0.14) and `n_sphere_points` (960) | float, Å² | `mdtraj.shrake_rupley(mode="atom")` on the context atoms in a call of its own, with each atom's radius from MDTraj's element table plus the probe radius, summed over the target atoms; context atoms outside the target cover the target without being counted; periodic images not considered | `polyzymd analyze sasa` |
 
 ## Per-replicate functions
@@ -36,6 +37,11 @@ giving one value per residue in the order of `atoms.residues`.
 | `dssp_occupancy` | `atoms`, whole residues, the production frames and `simplified` (default true) | one row per class, one value per residue, fraction of frames | `mdtraj.compute_dssp(simplified=simplified)` on every frame, 200 frames per call; the rows are helix, strand, coil and unassigned of `DSSP_SIMPLIFIED`, or with `simplified=False` the eight classes and unassigned of `DSSP_CLASSES`; one MDTraj chain per chain ID or segment | `polyzymd analyze secondary_structure` |
 | `residue_contacts` | `protein` and `polymer`, `AtomGroup`s; the production frames; `cutoff` (4.0 Å), `types` (none) and `pbc` (true) | one row for the polymer, then one row per residue name in `types`, one value per protein residue, fraction of frames | On every frame, MDAnalysis `lib.distances.capped_distance` between the given polymer and protein atoms, with the minimum image of the frame's box when `pbc` is true; a residue is in contact when any of its atoms is within `cutoff` of a polymer atom, or for a row of `types`, of a polymer atom of that residue name | `polyzymd analyze contacts --set method=distance` |
 | `residue_occlusion` | `protein` and `occluder`, `AtomGroup`s; the production frames; `exposed_threshold` (0.2), `buried_threshold` (0.2), `types` (none), `max_asa` (`theoretical`), `pbc` (true), `probe_radius_nm` and `n_sphere_points` | rows `OCCLUSION_PARTS = ("contact_fraction", "exposed_fraction", "occluded_area", "exposed_area")`, then one contact-fraction row per residue name in `types`; one value per protein residue with a maximum ASA | Each residue's SASA with the protein alone and with the protein and the occluder, as `residue_sasa` computes it, one frame per MDTraj call, after each occluder molecule (bonded fragment) is moved whole to its periodic image nearest the protein when `pbc` is true; exposed when the SASA alone is at least `exposed_threshold` times the residue's maximum ASA of Tien et al. (2013), in contact when exposed and the SASA with the occluder is below `buried_threshold` times it and lower than alone; `occluded_area` is the mean of `max(0, alone - with)` in Å², `exposed_area` the mean SASA alone; a type row counts contact with only that residue name's occluder atoms present | `polyzymd analyze contacts` |
+| `hbond_atoms` | `atoms`, an `AtomGroup` | the donatable hydrogens and the acceptors, two `AtomGroup`s | Reads the universe's bonds, which PolyzyMD takes from the run's OpenMM system: a donor is an N, O or S atom bonded to at least one hydrogen, and its hydrogens are those bonded to it; an acceptor is any O, or an N or S bonded to at most two atoms. Raises `ProtocolError` when a hydrogen of `atoms` has no bonded atom. Not a measurement: the atoms `hydrogen_bonds` and the functions below use unless given | `polyzymd analyze hydrogen_bonds`, recorded under `provenance.settings.hbond_atoms` |
+| `hydrogen_bonds` | `group_a`, optional `group_b`, the production frames; `d_a_cutoff` (3.5 Å), `d_h_a_angle_cutoff` (150°), optional `donors`, `hydrogens` and `acceptors` | rows `HBOND_PARTS = ("mean_hbonds", "mean_residue_pairs", "any_fraction")` | MDAnalysis `HydrogenBondAnalysis` run once over the frames, with the hydrogens and acceptors of `hbond_atoms` unless given; a bond is a hydrogen of a donor within `d_a_cutoff` of an acceptor (minimum image of the frame's box) with a donor-hydrogen-acceptor angle of at least `d_h_a_angle_cutoff`. Each hydrogen is paired with its donor through the bonds, or by distance within 1.2 Å when `donors` is given. With `group_b`, only bonds with one partner in each group count, in either direction; without it, bonds within `group_a`. Bonds within one residue are left out. The rows are the mean hydrogen bonds per frame, the mean residue pairs joined by at least one per frame, and the fraction of frames with at least one | `polyzymd analyze hydrogen_bonds` |
+| `hbond_lifetimes` | as `hydrogen_bonds`, and `key` (`residue`) and `tolerance_ps` (0) | rows `LIFETIME_PARTS = ("mean_lifetime", "n_events", "censored_fraction")` | The bonds of `hydrogen_bonds`; with `key="residue"` a pair is two residues, present on a frame when any hydrogen bond joins them, with `key="atom"` one donor atom and one acceptor atom; each pair's runs of frames are events, pooled as in `contact_lifetimes`: the Kaplan-Meier restricted mean lifetime in ns, the number of events and the fraction censored by the first or last frame | `polyzymd analyze hydrogen_bonds --run <s>_mean_lifetime` |
+| `residue_hbond_occupancy` | as `hydrogen_bonds` | one value per residue of `group_a`, fraction of frames | The bonds of `hydrogen_bonds`; a residue counts on a frame when one of its atoms is the donor or acceptor of at least one | `polyzymd analyze hydrogen_bonds --run <s>_residues` |
+| `residue_pair_hbond_occupancy` | as `hydrogen_bonds` | the pair labels, and one value per pair, fraction of frames | The bonds of `hydrogen_bonds`; a pair counts on a frame when at least one hydrogen bond joins it. A standard amino acid is named by its residue ID (`chain:resid` when IDs repeat) and any other residue by its residue name, so `149-SBM` is residue 149 with any SBM residue; with `group_b` the `group_a` residue comes first. Only pairs that form on some frame are returned, so run it with `labels="returned"` and `missing=0.0` | `polyzymd analyze hydrogen_bonds --run <s>_pairs` |
 | `contact_lifetimes` | `protein` and `polymer`, `AtomGroup`s; the production frames; `method` (`occlusion`), `types` (none), `tolerance_ps` (0) and the method's options | rows `LIFETIME_PARTS = ("mean_lifetime", "n_events", "censored_fraction")`; one column for the polymer, then one per residue name in `types` | Each frame's contacts by `residue_occlusion`'s or `residue_contacts`'s rule; `contact_events` finds each residue's runs of frames in contact, after filling absences of at most `tolerance_ps` with MDAnalysis `lib.correlations.correct_intermittency`, a run including the first or last frame being censored; a run of `k` frames lasts `k` frame spacings; `mean_lifetime` is the Kaplan-Meier restricted mean in ns (`scipy.stats.ecdf` on `CensoredData`, area under the survival function up to the time the frames span), `nan` without events | `polyzymd analyze contacts --run mean_lifetime` |
 
 The comparison with `gmx rmsf` on real trajectories, and the script that reruns
@@ -59,12 +65,12 @@ is superposed on the `selection` atoms themselves. See
 pairs, each with `label`, `selection_a`, `selection_b` and optionally
 `threshold` and `below_label`. It reports `<label>`, the mean distance, and
 `<label> <below_label>`, the fraction of frames below the pair's threshold (the
-analysis `threshold`, 3.5 Å by default, when the pair sets none).
-`polyzymd analyze catalytic_triad` adds `simultaneous`, the fraction of frames in
-which every pair is below its threshold, computed from the stored distances,
-and reports it first. Pick a result with `--run`. See
-{doc}`../how_to/analysis_distances_quickstart` and
-{doc}`../how_to/analysis_triad_quickstart`.
+analysis `threshold`, 3.5 Å by default, when the pair sets none), computed from
+the stored distance with `all_below`. Pick a result with `--run`. See
+{doc}`../how_to/analysis_distances_quickstart`. The catalytic triad is a
+routine on the study API rather than an analysis: it counts each triad
+hydrogen bond with `hbond_count` and combines them with `Timeseries.transform`;
+see {doc}`../how_to/analysis_triad_quickstart`.
 
 `polyzymd analyze rmsf` and `polyzymd analyze rms_deviation` run
 `rms_decomposition` once per replicate, with `selection` measured and
@@ -137,6 +143,27 @@ residues of each class and region are recorded under `provenance.settings`.
 {doc}`../how_to/analysis_contacts_quickstart` and
 {doc}`../explanation/analysis_contacts_verification`.
 
+`polyzymd analyze hydrogen_bonds` counts hydrogen bonds for the summaries of
+`--set summaries=...`, each `{between: [a, b]}` or `{within: a}` over the named
+selections of `--set groups=...`; the defaults are `groups` `{protein: chainid
+A, polymer: chainid C}` and `summaries` `{protein_polymer: {between: [protein,
+polymer]}}`. Only the chosen summary is measured. Each summary `<s>` gives
+`<s>_mean_hbonds` (the default for the first summary), `<s>_mean_residue_pairs`
+and `<s>_any_fraction` from `hydrogen_bonds`; `<s>_mean_lifetime`,
+`<s>_lifetime_events` and `<s>_censored_fraction` from `hbond_lifetimes`, with
+`lifetime_key` (`residue`) as `key` and `tolerance_ps` (0); `<s>_residues`
+from `residue_hbond_occupancy`, one value per residue of the summary's first
+group; and `<s>_pairs` from `residue_pair_hbond_occupancy`, with a pair that
+forms in one replicate but not another counted 0 in the other. `d_a_cutoff`
+(3.5 Å) and `d_h_a_angle_cutoff` (150°) set the geometry, and `donors`,
+`hydrogens` and `acceptors` are selections, taken within the summary's
+groups, that replace the atoms `hbond_atoms` chooses. The donors, hydrogens
+and acceptors used are recorded under `provenance.settings.hbond_atoms`, as
+counts per residue name and atom name. A replicate with no hydrogen bond in
+the summary gets `nan` for a lifetime result and a warning. See
+{doc}`../how_to/hydrogen_bonds` and
+{doc}`../explanation/analysis_hydrogen_bonds_verification`.
+
 ## Figures
 
 `polyzymd analyze` writes these figures to `<output-dir>/figures/<analysis>/`
@@ -153,4 +180,4 @@ and records the folder under `output_paths.figures` in the JSON report;
 | `contacts` | `contacts_class_bars` (each amino-acid class's mean contact fraction); for a one-value result `contacts_<run>_comparison`; for a residue result, `contacts_<name>_profile` and with several conditions `contacts_<name>_difference` |
 | `native_contacts` | `native_contacts_timeseries_<run>` (every replicate against time) and `native_contacts_comparison_<run>` (condition means with every replicate value) |
 | `distances` | `distance_kde_<pair>` for each pair with its threshold, `distance_fraction_<result>` for each fraction below threshold, and the grouped `distance_threshold_bars` (every pair's fraction) and `distance_kde_panel` (one panel per pair) |
-| `catalytic_triad` | `triad_kde_<pair>` for each pair with its threshold, `triad_fraction_<result>` for `simultaneous` and each pair's fraction, and the grouped `triad_threshold_bars` (each pair's fraction, then all pairs) and `triad_kde_panel` (one panel per pair) |
+| `hydrogen_bonds` | For a one-value result `hbonds_<run>_comparison` (condition means with every replicate value); for `<s>_residues` and `<s>_pairs`, `hbonds_<run>_profile` (each entry's value per replicate and each condition's mean with its interval) and with several conditions `hbonds_<run>_difference` (each condition minus the control at every residue or pair, with the interval of the difference and the significant entries marked) |

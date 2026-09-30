@@ -43,9 +43,7 @@ and comparison statistics all come from the current code.
 
 ## Current workflow
 
-Contacts, SASA, distances and the other structural analyses run through
-`polyzymd analyze <analysis>`. The hydrogen-bond comparison runs from
-`comparison.yaml`: run `polyzymd compare validate`, then
-`polyzymd compare run hydrogen_bonds`, and use `polyzymd compare plot-all` for
-figures. Requests for the archived plugin names are handled as ordinary unknown
+Every shipped analysis, hydrogen bonds included, runs through
+`polyzymd analyze <analysis> -c <config.yaml> ...`, which draws its figures;
+see {doc}`analysis_functions`. Requests for the archived plugin names are handled as ordinary unknown
 analysis names.

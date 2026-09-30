@@ -1,43 +1,46 @@
 # `comparison.yaml` Schema Reference
 
-The `comparison.yaml` file defines a cross-condition analysis project. It
-specifies which simulation conditions to compare, which analysis plugins to
-run, and how to visualize results. Create one with `polyzymd compare init -n
-<name>` and place it at the root of your comparison project directory.
+The `comparison.yaml` file lists the simulation conditions of a comparison,
+with their replicates, the control and the default equilibration window.
+Create one with `polyzymd compare init -n <name>`. No analysis is configured
+in it: every shipped analysis runs with `polyzymd analyze NAME -c
+<config.yaml> ...` on the simulation configs, and `polyzymd analyze` does not
+read `comparison.yaml`. The `plugins` and `plot_settings` sections are
+retired.
+
+`comparison.yaml` is still read by:
+
+- `polyzymd compare validate`, which checks the conditions and their config
+  paths;
+- `polyzymd compare run NAME` for a shipped analysis name and `polyzymd
+  analyze NAME -f comparison.yaml`, which run nothing and print the
+  equivalent `polyzymd analyze NAME -c <config> --label <label> ...
+  --replicates ... --eq ...` command built from the file's conditions;
+- the plugin framework commands (`polyzymd compare run`, `run-all`,
+  `plot-all`, `submit`, `status`, `finalize`) for analysis plugins you
+  register yourself. No shipped analysis is a plugin any more, and the
+  framework is being removed.
 
 Source of truth: {func}`polyzymd.config.comparison.ComparisonConfig` in
 `src/polyzymd/config/comparison.py`.
 
 ```{important}
-Plugin settings path fields are resolved relative to the directory containing
-`comparison.yaml`.
-
-For example, in condition `config` paths and plugin-declared path fields, a
-relative path like `structures/enzyme.pdb` is interpreted as:
-
-`<comparison_yaml_parent>/structures/enzyme.pdb`
+Condition `config` paths are resolved relative to the directory containing
+`comparison.yaml`. For example, `../sbma_100/config.yaml` is interpreted as
+`<comparison_yaml_parent>/../sbma_100/config.yaml`.
 ```
 
-For CLI commands that consume this file, see
-{doc}`analysis_comparison_reference`. For directory layout and data
-expectations, see {doc}`data_requirements`.
+For the commands that run the analyses, see
+{doc}`../how_to/analysis_agent_protocol` and {doc}`cli_reference`. For
+directory layout and data expectations, see {doc}`data_requirements`.
 
-Typical local workflow:
+Typical workflow:
 
 ```bash
 pixi run -e analysis polyzymd compare validate -f comparison.yaml
-pixi run -e analysis polyzymd compare run hydrogen_bonds -f comparison.yaml
-pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
-```
-
-Typical SLURM workflow:
-
-```bash
-pixi run -e analysis polyzymd compare submit hydrogen_bonds -f comparison.yaml --dry-run
-pixi run -e analysis polyzymd compare submit hydrogen_bonds -f comparison.yaml --partition <part>
-pixi run -e analysis polyzymd compare status hydrogen_bonds -f comparison.yaml
-pixi run -e analysis polyzymd compare finalize hydrogen_bonds -f comparison.yaml
-pixi run -e analysis polyzymd compare plot-all -f comparison.yaml
+pixi run -e analysis polyzymd analyze hydrogen_bonds \
+  -c ../no_polymer/config.yaml -c ../sbma_100/config.yaml \
+  --label "No Polymer" --label "100% SBMA" --eq 10ns
 ```
 
 ---
@@ -57,9 +60,6 @@ conditions:
 
 defaults:
   equilibration_time: "10ns"
-
-plugins:
-  hydrogen_bonds: {}
 ```
 
 ---
@@ -73,13 +73,12 @@ plugins:
 | `control` | string | no | `null` | Label of the control condition. Must match a `label` in `conditions`. Used for relative comparisons (e.g., Δ from control). |
 | `conditions` | list | **yes** | — | List of condition entries (min 1 required) |
 | `defaults` | mapping | no | see below | Default analysis parameters |
-| `plugins` | mapping | no | `{}` | Analysis plugin settings — **what** to compute |
-| `mda_backend_policy` | mapping | no | `{}` | Optional MDAnalysis internal backend policy for job-backed analyses |
-| `plot_settings` | mapping | no | see below | Plot customization — **how** to visualize |
+| `plugins` | mapping | no | `{}` | Retired; see {ref}`comparison-yaml-retired`. Settings of analysis plugins you register yourself |
+| `mda_backend_policy` | mapping | no | `{}` | Optional MDAnalysis internal backend policy for the jobs of registered plugins |
+| `plot_settings` | mapping | no | see below | Retired; see {ref}`comparison-yaml-retired`. Plot customization of registered plugins |
 
 Unknown top-level keys raise a `ValueError` listing the invalid keys and valid
-alternatives. Use `plugins:` for analysis plugin settings; unsupported keys such
-as `analysis_settings:` are rejected.
+alternatives; unsupported keys such as `analysis_settings:` are rejected.
 
 ---
 
@@ -137,124 +136,52 @@ parallelism.
 
 ---
 
-## `plugins`
+(comparison-yaml-retired)=
+## Retired `plugins` and `plot_settings` blocks
 
-Presence of a key **enables** that analysis. The value is a mapping of that
-plugin's settings. An empty mapping (`hydrogen_bonds: {}`) enables the plugin with
-all defaults.
+A `plugins.<name>` or `plot_settings.<name>` block for a shipped analysis still
+loads, so an old `comparison.yaml` keeps working for `polyzymd compare
+validate`, and each block is ignored with one `UserWarning`. The retired names
+and the function each warning names are:
 
-### `plugins.rmsf`
+| Block | `polyzymd analyze` command | Python |
+|---|---|---|
+| `rg` | `polyzymd analyze rg` | `study.timeseries` with `functions.radius_of_gyration` |
+| `rmsd` | `polyzymd analyze rmsd` | `study.timeseries` with `functions.rmsd` |
+| `rmsf` | `polyzymd analyze rmsf` | `study.per_replicate` with `functions.rmsf` |
+| `sasa` | `polyzymd analyze sasa` | `study.timeseries` with `functions.sasa` |
+| `secondary_structure` | `polyzymd analyze secondary_structure` | `study.per_replicate` with `functions.dssp_occupancy` |
+| `distances` | `polyzymd analyze distances --set pairs=<pairs.yaml>` | `study.timeseries` with `functions.pair_distance` |
+| `contacts` | `polyzymd analyze contacts` | `study.per_replicate` with `functions.residue_occlusion`, `residue_contacts` for `--set method=distance` and `contact_lifetimes` |
+| `hydrogen_bonds` | `polyzymd analyze hydrogen_bonds` | `study.per_replicate` with `functions.hydrogen_bonds`, `hbond_lifetimes`, `residue_hbond_occupancy` and `residue_pair_hbond_occupancy` |
+| `catalytic_triad` | `polyzymd analyze distances --set pairs=<pairs.yaml>` for the distances | the triad routine, which counts each triad hydrogen bond with `functions.hbond_count` and combines them with `Timeseries.transform` |
 
-RMSF runs through `polyzymd analyze rmsf` or `polyzymd analyze rms_deviation`
-and the study API, not through `comparison.yaml`. A `plugins.rmsf` block in an
-existing file still loads, is ignored with a warning, and leaves every other
-plugin in the file working. See {doc}`../how_to/analysis_rmsf_quickstart`.
+Every warning names the replacement command and the Python function, and
+ends with the address of {doc}`../how_to/analysis_agent_protocol`
+(<https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html>)
+and the agent skill `.claude/skills/polyzymd-analyze/SKILL.md`, which an agent
+can be pointed at to learn the protocol. The `catalytic_triad` warning points
+to the triad routine instead, {doc}`../how_to/analysis_triad_quickstart`. The
+settings of a retired block are not carried over: pass them to `polyzymd
+analyze` with `--set`, as the how-to page of each analysis shows.
 
-### `plugins.secondary_structure`
+Any other key in `plugins` must name an analysis plugin you registered
+yourself; an unknown key raises a `ValueError` that names the registered
+plugins and the same address and skill.
 
-Secondary structure runs through `polyzymd analyze secondary_structure` or the
-study API, not through `comparison.yaml`. A `plugins.secondary_structure` block
-in an existing file still loads, is ignored with a warning, and leaves every
-other plugin in the file working. See
-{doc}`../how_to/analysis_secondary_structure_quickstart`.
+## `PlotSettings` fields
 
-### `plugins.sasa`
-
-SASA runs through `polyzymd analyze sasa` or the study API, not through
-`comparison.yaml`. A `plugins.sasa` block in an existing file still loads, is
-ignored with a warning, and leaves every other plugin in the file working. See
-{doc}`../how_to/analysis_sasa_quickstart`.
-
-### `plugins.catalytic_triad`
-
-The catalytic triad run through `polyzymd analyze catalytic_triad` or the study API, not through
-`comparison.yaml`. A `plugins.catalytic_triad` block in an existing file still loads, is
-ignored with a warning, and leaves every other plugin in the file working. See
-{doc}`../reference/analysis_functions`.
-
-### `plugins.distances`
-
-Distances run through `polyzymd analyze distances` or the study API, not through
-`comparison.yaml`. A `plugins.distances` block in an existing file still loads, is
-ignored with a warning, and leaves every other plugin in the file working. See
-{doc}`../reference/analysis_functions`.
-
-### `plugins.contacts`
-
-Polymer-protein contacts run through `polyzymd analyze contacts` or the study
-API, not through `comparison.yaml`. A `plugins.contacts` block in an existing
-file still loads, is ignored with a warning, and leaves every other plugin in
-the file working. See {doc}`../how_to/analysis_contacts_quickstart`.
-
-### `plugins.rmsd`
-
-RMSD runs through `polyzymd analyze rmsd` or the study API, not through
-`comparison.yaml`. A `plugins.rmsd` block in an existing file still loads, is
-ignored with a warning, and leaves every other plugin in the file working. See
-{doc}`../how_to/analysis_rmsd_quickstart`.
-
-### `plugins.rg`
-
-Rg runs through `polyzymd analyze rg` or the study API, not through
-`comparison.yaml`. A `plugins.rg` block in an existing file still loads, is
-ignored with a warning, and leaves every other plugin in the file working. See
-{doc}`../how_to/analysis_rg_quickstart`.
-
-### `plugins.hydrogen_bonds`
+`polyzymd analyze` does not read `plot_settings`: its figures use the default
+`PlotSettings`. In Python, every figure of the study API takes a
+`plot_settings=` argument, a {class}`polyzymd.config.comparison.PlotSettings`
+with the fields below, for example
+`values.plot(plot_settings=PlotSettings(format="pdf", style="large_elements"))`.
+The plugin framework commands also read these fields from a `plot_settings:`
+block for registered plugins.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `groups` | mapping | `{"protein": "chainid A", "polymer": "chainid C"}` | Named atom groups: `{name: "MDAnalysis selection"}` |
-| `summaries` | list or mapping | one default summary (`protein_polymer` between `protein` and `polymer`) | Named H-bond summaries (see below) |
-| `distance_cutoff` | float | `3.0` | H-bond distance cutoff in Angstroms |
-| `angle_cutoff` | float | `150` | H-bond angle cutoff in degrees |
-| `update_selections` | bool | `true` | Update atom selections every frame |
-| `top_n_pairs` | int | `15` | Number of top residue pairs to report |
-| `allow_empty_groups` | bool | `false` | Empty group selections: `false` = raise `SelectionError` naming the group and selection; `true` = warn and skip the summaries that use the group |
-| `donor_acceptor_elements` | list of string | `["N", "O"]` | Elements allowed to act as donors and acceptors; add `"S"` for sulfur |
-| `allow_overlapping_composition` | bool | `false` | Whether overlapping composition partitions are allowed |
-| `composition` | mapping | `null` | Composition analysis settings |
-| `hydrogens_selection` | string | `null` | Advanced explicit-hydrogen selection override for unusual atom names |
-| `timestep_ps` | float | `null` | Override trajectory timestep in picoseconds for time-axis plots |
-
-Time-axis plots assume uniformly saved frames. PolyzyMD converts frame index to
-time as `frame_index * timestep_ps`; variable-timestep concatenated
-trajectories are not supported.
-
-Each summary entry in `summaries` has:
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | yes | Unique summary name |
-| `between` | `[group_a, group_b]` | exactly one of `between` / `within` | Inter-group H-bonds |
-| `within` | `group_name` | exactly one of `between` / `within` | Intra-group H-bonds |
-
-For mapping-form input, keys are treated as `name` values.
-
-Hydrogen detection uses MDAnalysis `HydrogenBondAnalysis` and requires explicit
-hydrogens and element metadata. Donors and acceptors are
-`(<group union>) and element <donor_acceptor_elements>` and hydrogens are
-`(<group union>) and (element H)`. For GRO-like topologies without MDAnalysis
-`elements`, PolyzyMD tries safe element inference from atom types or atom names;
-if elements remain unavailable the plugin raises `SelectionError` instead of
-counting every atom as a donor and an acceptor. Element spellings are taken from
-the topology, so a topology that writes `CL` is matched even though the
-canonical symbol is `Cl`. Set `hydrogens_selection` only for unusual
-explicit-hydrogen naming schemes.
-
-`composition` sub-fields:
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `partitions` | mapping | — | Named partitions: `{name: "MDAnalysis selection"}` |
-
----
-
-## `plot_settings`
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `output_dir` | path | `"figures/"` | Directory for generated plots (relative to `comparison.yaml`) |
+| `output_dir` | path | `"figures/"` | Directory for generated plots of registered plugins (relative to `comparison.yaml`); the study figures take the folder as their own `output_dir` argument |
 | `format` | string | `"png"` | Image format: `"png"`, `"pdf"`, or `"svg"` |
 | `dpi` | int | `300` | Resolution for raster formats. Range: 50–600. |
 | `style` | string | `"compact"` | PolyzyMD theme preset: `"compact"`, `"large_elements"`, or `"low_ink"` |
@@ -269,7 +196,7 @@ is not a matplotlib or seaborn stylesheet, and it does not control `format`,
 `theme` values are merged on top of the selected preset, so you can choose a
 base style and override only the fields that need project-specific changes.
 
-### `plot_settings.semantic_colors`
+### `semantic_colors`
 
 Semantic colors let a comparison project encode condition meaning directly in
 figures. The settings are optional and disabled by default; when disabled,
@@ -331,7 +258,7 @@ Semantic colors apply to plots where colors represent comparison conditions.
 Non-condition categories, such as secondary-structure states or residue classes,
 may still use categorical palettes or plot-specific colormaps.
 
-### `plot_settings.theme`
+### `theme`
 
 All fields are optional. Defaults are drawn from the selected `style` preset,
 then any values under `theme:` override individual fields.
@@ -376,31 +303,21 @@ then any values under `theme:` override individual fields.
 | `legend_bbox` | `[1.02, 0.5]` | `[1.02, 0.5]` | `[1.02, 0.5]` | `bbox_to_anchor` for legend placement |
 | `show_watermark` | `true` | `true` | `true` | Render the "Made by PolyzyMD" watermark |
 
-### Per-Analysis Plot Settings
+### Per-analysis plot settings
 
-`hydrogen_bonds`, the only shipped comparison plugin, has no per-analysis plot
-settings; its figures use the keys above.
-
-**`plot_settings.rmsf`:** retired. A block still loads and is ignored with a
-warning; mark residues on the RMSF profiles with
-`polyzymd analyze rmsf --set highlight_residues='[...]'` instead.
-
-**`plot_settings.catalytic_triad`, `plot_settings.distances`,
-`plot_settings.contacts` and `plot_settings.secondary_structure`:** retired.
-A block still loads and is ignored with a warning; `polyzymd analyze` draws
-the figures of these analyses.
+No shipped analysis has per-analysis plot settings. A `plot_settings.<name>`
+block for a retired name is ignored with the warning of
+{ref}`comparison-yaml-retired`. Mark residues on the RMSF profiles with
+`polyzymd analyze rmsf --set highlight_residues='[...]'`.
 
 ---
 
 ```{tip}
 **Common tips:**
 
-- Run `polyzymd compare validate` to check your `comparison.yaml` for errors
-  before launching a full analysis run.
+- Run `polyzymd compare validate` to check the conditions and their config
+  paths.
 - Relative paths in `config:` are resolved from the directory containing
   `comparison.yaml`, not from your working directory.
-- An empty plugin mapping (e.g., `hydrogen_bonds: {}`) enables the analysis with
-  all default settings — you only need to specify fields you want to override.
-- Set `control:` to match one of your condition labels to get Δ-from-control
-  columns in comparison tables and plots.
+- In `polyzymd analyze`, the first `-c` is the control.
 ```

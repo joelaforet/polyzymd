@@ -3,6 +3,17 @@
 Use this page when you need quick lookup information for `polyzymd compare`,
 `comparison.yaml`, output paths, or plotting behavior.
 
+```{note}
+No shipped analysis runs through `polyzymd compare` any more. Every shipped
+analysis runs with `polyzymd analyze NAME -c <config.yaml> ...` on the study
+API; see {doc}`../how_to/analysis_agent_protocol`, {doc}`analysis_functions`
+and {doc}`cli_reference`. The `polyzymd compare` commands below run analysis
+plugins you register yourself, and the plugin framework behind them is being
+removed. The statistics fields of this page also describe the reports of
+`polyzymd analyze`, whose conditions are compared with the first `-c` by
+Welch's t test with the Benjamini-Hochberg correction.
+```
+
 ## Comparison Project Layout
 
 `polyzymd compare init -n my_study` creates a workspace like this:
@@ -32,17 +43,17 @@ defaults:
   ttest_method: "student"    # or "welch"
   posthoc_method: "ttest_bh" # or "tukey_hsd"
   fdr_alpha: 0.05
-
-plugins:
-  hydrogen_bonds: {}
 ```
+
+The `plugins:` and `plot_settings:` sections are retired for the shipped
+analyses; see {ref}`comparison-yaml-retired`.
 
 ## Hypothesis Testing Across Plugins
 
 `ttest_method`, `posthoc_method` and `fdr_alpha` from the `defaults:` block
-reach every plugin's comparison step. Asking for `ttest_method: "welch"` runs
-Welch's unequal-variance t-test in `hydrogen_bonds` and in any plugin that uses
-the default scalar pipeline.
+reach the comparison step of every registered plugin. Asking for
+`ttest_method: "welch"` runs Welch's unequal-variance t-test in any plugin that
+uses the default scalar pipeline. `polyzymd analyze` does not read this block.
 
 The multiple-comparison family is defined once for the whole package:
 
@@ -64,20 +75,12 @@ The multiple-comparison family is defined once for the whole package:
 
 Full field tables are in {doc}`posthoc_testing`.
 
-## Stable Plugin Keys
+## Shipped analyses
 
-Stable analysis plugins:
-
-- `hydrogen_bonds`
-
-Polymer-protein contacts run through `polyzymd analyze contacts`, not through
-`polyzymd compare`; see {doc}`../how_to/analysis_contacts_quickstart`.
-
-## Plugin Summary Table
-
-| Plugin | Default compare? | Primary metric | Key feature | Statistical method |
-|--------|-----------------|----------------|-------------|-------------------|
-| `hydrogen_bonds` | Custom loader with default-style scalar statistics | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA per configured summary |
+No shipped analysis is a plugin. `polyzymd compare run NAME` for a shipped
+name exits 1 and prints the equivalent `polyzymd analyze NAME -c ...` command;
+{doc}`analysis_functions` lists every shipped analysis with its results and
+figures.
 
 ## Path Rules
 
@@ -87,8 +90,8 @@ Polymer-protein contacts run through `polyzymd analyze contacts`, not through
 
 ## Replicate Counts
 
-All stable shipped analyses support `replicates: [1]` for smoke tests and
-protocol validation. One-replicate runs compute aggregate metrics and plots, but
+Every analysis supports a single replicate for smoke tests and protocol
+validation. One-replicate runs compute aggregate metrics and plots, but
 inferential statistics, FDR correction, and uncertainty bands require at least
 two independent replicates per condition. Singleton pairwise tests and ANOVA are
 reported as not testable rather than significant.
@@ -98,8 +101,8 @@ reported as not testable rather than significant.
 | Command | Purpose |
 |---------|---------|
 | `polyzymd compare init -n NAME` | Create a comparison workspace |
-| `polyzymd compare validate` | Check `comparison.yaml` before running |
-| `polyzymd compare run TYPE` | Run one analysis plugin |
+| `polyzymd compare validate` | Check the conditions of `comparison.yaml` |
+| `polyzymd compare run TYPE` | Run one registered analysis plugin |
 | `polyzymd compare run --list` | List available comparison types |
 | `polyzymd compare run-all` | Run every enabled plugin in one pass |
 | `polyzymd compare plot-all` | Generate configured figures |
@@ -108,13 +111,13 @@ reported as not testable rather than significant.
 | `polyzymd compare status ANALYSIS` | Show status of a submitted SLURM DAG |
 | `polyzymd compare finalize ANALYSIS` | Run comparison + plotting from on-disk aggregated results |
 
-## Common Stable Commands
+## Common Commands
 
 All commands below assume you are inside the pixi environment
 (`pixi shell -e analysis`) or are prefixed with `pixi run -e analysis`.
 
 ```bash
-polyzymd compare run hydrogen_bonds
+polyzymd compare run my_analysis
 polyzymd compare run-all
 polyzymd compare plot-all
 ```
@@ -136,7 +139,7 @@ polyzymd compare plot-all
 Typical comparison cache paths:
 
 ```text
-comparison/hydrogen_bonds/result.json
+comparison/my_analysis/result.json
 ```
 
 ## Cache reuse and input freshness
@@ -239,12 +242,6 @@ For a final smoke test after comparisons finish:
 polyzymd compare plot-all --list-available
 polyzymd compare plot-all
 ```
-
-## Plugin-Specific Metadata Fields
-
-Some plugins include additional metadata in their comparison output beyond the
-standard ranking and statistical fields. These fields are **additive
-diagnostics** — they do not affect rankings, p-values, or effect sizes.
 
 ## Uncertainty fields
 

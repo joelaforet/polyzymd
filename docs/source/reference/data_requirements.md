@@ -16,7 +16,7 @@ file:
 | Project Type | Created By | Config File | Purpose |
 |---|---|---|---|
 | Simulation project | `polyzymd init -n <name>` | `config.yaml` | Build, run, and store one simulation condition |
-| Comparison project | `polyzymd compare init -n <name>` | `comparison.yaml` | Analyze and compare results across conditions |
+| Comparison project | `polyzymd compare init -n <name>` | `comparison.yaml` | List the conditions of a comparison, for `polyzymd compare validate`; `polyzymd analyze` takes the `config.yaml` files directly |
 
 A comparison project does not contain trajectory data. Instead, its
 `comparison.yaml` points to one or more simulation project `config.yaml` files,
@@ -254,16 +254,17 @@ Running `polyzymd compare init -n my_study` creates:
 
 ```
 my_study/
-├── comparison.yaml          # Analysis configuration (edit this)
-├── comparison/              # Cross-condition comparison results
+├── comparison.yaml          # Conditions of the comparison (edit this)
+├── comparison/              # Comparison results of registered plugins
 ├── figures/                 # Generated plots
 └── structures/              # (Optional) shared structure files (e.g., an enzyme PDB)
 ```
 
-Analysis runs also create and populate `analysis/` with canonical
-`ReplicateArtifact` and `ConditionArtifact` outputs for per-replicate and
-per-condition results. The `comparison/` directory is reserved for
-cross-condition comparison results.
+`polyzymd analyze` writes the values it measures to `polyzymd_results/` and
+its figures to `figures/<analysis>/` under `--output-dir`, the current
+directory by default. The `analysis/` and `comparison/` directories hold the
+artifacts of analysis plugins you register yourself; no shipped analysis
+writes them.
 
 ### comparison.yaml structure
 
@@ -287,11 +288,11 @@ conditions:
 
 defaults:
   equilibration_time: "10ns"
-
-plugins:
-  hydrogen_bonds: {}
-  # ... additional analysis plugins
 ```
+
+No analysis is configured in `comparison.yaml`; the `plugins:` section is
+retired (see {ref}`comparison-yaml-retired`). `polyzymd analyze` takes the
+same `config.yaml` files directly with `-c`.
 
 Relative paths in `conditions[].config` are resolved relative to the directory
 containing `comparison.yaml`, not the current working directory.
@@ -303,14 +304,12 @@ containing `comparison.yaml`, not the current working directory.
 ```
 polyzymd init       -->  config.yaml  -->  polyzymd build  -->  polyzymd run  -->  trajectories/
                                                                                        |
-polyzymd compare init  -->  comparison.yaml  -->  polyzymd compare run  -->  results + figures
-                                  |
-                    (points to config.yaml files)
+polyzymd analyze NAME -c A/config.yaml -c B/config.yaml  -->  report + polyzymd_results/ + figures/
 ```
 
-The comparison framework reads each condition's `config.yaml`, resolves the
-scratch directory and naming template, then uses `TrajectoryLoader` to find
-topology and trajectory files for each replicate.
+`polyzymd analyze` reads each condition's `config.yaml`, resolves the scratch
+directory and naming template, then uses `TrajectoryLoader` to find the
+topology and trajectory files of each replicate.
 
 ---
 
