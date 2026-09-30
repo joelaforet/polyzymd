@@ -34,7 +34,7 @@ defaults:
   fdr_alpha: 0.05
 
 plugins:
-  secondary_structure: {}
+  contacts: {}
 ```
 
 ## Hypothesis Testing Across Plugins
@@ -110,7 +110,6 @@ plugins:
 Stable analysis plugins:
 
 - `contacts`
-- `secondary_structure`
 - `hydrogen_bonds`
 
 ## Plugin Summary Table
@@ -118,7 +117,6 @@ Stable analysis plugins:
 | Plugin | Default compare? | Primary metric | Key feature | Statistical method |
 |--------|-----------------|----------------|-------------|-------------------|
 | `contacts` | No (custom) | Coverage + contact fraction | Per-residue contact mapping | FDR-corrected pairwise t-tests + omnibus ANOVA |
-| `secondary_structure` | Yes | `helix_fraction` | Secondary structure content | FDR-corrected pairwise t-tests + omnibus ANOVA |
 | `hydrogen_bonds` | Custom loader with default-style scalar statistics | `mean_hbonds_per_frame` per summary | Flexible named groups + summaries + composition analysis | FDR-corrected pairwise t-tests + ANOVA per configured summary |
 
 ## Path Rules

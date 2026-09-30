@@ -60,7 +60,7 @@ You can enable multiple plugins in the same `comparison.yaml` file:
 ```yaml
 plugins:
   contacts: {}
-  secondary_structure: {}
+  hydrogen_bonds: {}
 ```
 
 Then run all configured plugins at once:

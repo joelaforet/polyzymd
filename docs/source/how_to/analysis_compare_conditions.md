@@ -11,13 +11,13 @@ You will:
 - generate figures with `polyzymd compare plot-all`
 
 ```{important}
-RMSD, Rg, RMSF, distances, the catalytic triad and SASA run through
-`polyzymd analyze` and the study API instead of this workflow; see
+RMSD, Rg, RMSF, distances, the catalytic triad, secondary structure and SASA
+run through `polyzymd analyze` and the study API instead of this workflow; see
 {doc}`analysis_rmsd_quickstart`, {doc}`analysis_rg_quickstart`,
 {doc}`analysis_rmsf_quickstart`, {doc}`analysis_distances_quickstart`,
-{doc}`analysis_triad_quickstart` and {doc}`analysis_sasa_quickstart`. This guide
-covers the analyses that still run as comparison plugins: contacts, secondary
-structure and hydrogen bonds.
+{doc}`analysis_triad_quickstart`, {doc}`analysis_secondary_structure_quickstart`
+and {doc}`analysis_sasa_quickstart`. This guide covers the analyses that still
+run as comparison plugins: contacts and hydrogen bonds.
 ```
 
 ```{note}
@@ -113,8 +113,7 @@ polymer_stability_study/
 
 ## Step 2: Define a Minimal `comparison.yaml`
 
-Start with one analysis. Secondary structure is a good first comparison because
-it needs few extra inputs.
+Start with one analysis, contacts between polymer and protein.
 
 ```yaml
 name: "polymer_stability_study"
@@ -138,20 +137,14 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  secondary_structure: {}
-```
-
-To enable more analyses, add more sections under `plugins:`:
-
-```yaml
-plugins:
-  secondary_structure: {}
-
   contacts:
     polymer_selection: "chainid C"
     protein_selection: "chainid A"
     cutoff: 4.5
 ```
+
+To enable more analyses, add more sections under `plugins:`, for example
+`hydrogen_bonds` (see {doc}`hydrogen_bonds`).
 
 :::{admonition} Statistical settings for pairwise comparisons
 :class: tip
@@ -177,15 +170,15 @@ enabled plugin sections.
 ## Step 4: Run One Comparison
 
 ```bash
-polyzymd compare run secondary_structure
+polyzymd compare run contacts
 ```
 
 This command:
 
-- resolves `plugins.secondary_structure` from `comparison.yaml`
-- computes or reloads per-condition secondary-structure data
+- resolves `plugins.contacts` from `comparison.yaml`
+- computes or reloads per-condition contact data
 - performs the cross-condition comparison
-- writes the canonical cache file to `comparison/secondary_structure/result.json`
+- writes the canonical cache file to `comparison/contacts/result.json`
 - prints a formatted summary to the terminal
 
 :::{admonition} Running on an HPC cluster?
@@ -209,7 +202,7 @@ workflow, including dry-run previews and job arrays.
 You can save the formatted report separately with `-o`:
 
 ```bash
-polyzymd compare run secondary_structure --format markdown -o reports/secondary_structure.md
+polyzymd compare run contacts --format markdown -o reports/contacts.md
 ```
 
 ## Step 5: Run All Enabled Comparisons
@@ -247,7 +240,7 @@ polymer_stability_study/
 ├── comparison.yaml
 ├── analysis/
 │   ├── no_polymer/
-│   │   └── secondary_structure/
+│   │   └── contacts/
 │   │       ├── run_1/
 │   │       │   └── result.json
 │   │       ├── run_2/
@@ -255,15 +248,13 @@ polymer_stability_study/
 │   │       └── aggregated/
 │   │           └── result.json
 │   └── 100_sbma/
-│       └── secondary_structure/
+│       └── contacts/
 │           └── ...
 ├── comparison/
-│   ├── secondary_structure/
-│   │   └── result.json
 │   └── contacts/
 │       └── result.json
 └── figures/
-    ├── secondary_structure/
+    ├── contacts/
     └── ...
 ```
 
@@ -286,7 +277,7 @@ from polyzymd.analyses.orchestrator import run_comparison
 from polyzymd.config.comparison import ComparisonConfig
 
 config = ComparisonConfig.from_yaml(Path("comparison.yaml"))
-analysis = get_analysis("secondary_structure")()
+analysis = get_analysis("contacts")()
 
 pipeline_result = run_comparison(
     analysis,

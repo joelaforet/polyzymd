@@ -32,6 +32,7 @@ giving one value per residue in the order of `atoms.residues`.
 | `rms_deviation` | one value per residue, Å | Root mean square deviation of each atom from its reference position, as `gmx rmsf -od` gives | `polyzymd analyze rms_deviation` |
 | `rms_decomposition` | six rows of one value per residue | Rows `RMS_PARTS = ("rms_deviation", "rmsf", "offset")`, the offset being the distance of each atom's mean position from its reference position, in Å; then rows `MS_PARTS = ("ms_deviation", "msf", "ms_offset")`, the means over each residue's atoms of the squared per-atom values, in Å². `ms_deviation = msf + ms_offset` for every residue | `polyzymd analyze rmsf`, `polyzymd analyze rms_deviation` |
 | `residue_sasa` | `target`, `context` and `frames`, as `sasa` takes them, and the production frames | one value per target residue, Å² | Each frame's per-atom SASA as in `sasa`, one frame per MDTraj call, summed over each residue's target atoms and averaged over the frames | `polyzymd analyze sasa --run <context>_residues` |
+| `dssp_occupancy` | `atoms`, whole residues, the production frames and `simplified` (default true) | one row per class, one value per residue, fraction of frames | `mdtraj.compute_dssp(simplified=simplified)` on every frame, 200 frames per call; the rows are helix, strand, coil and unassigned of `DSSP_SIMPLIFIED`, or with `simplified=False` the eight classes and unassigned of `DSSP_CLASSES`; one MDTraj chain per chain ID or segment | `polyzymd analyze secondary_structure` |
 
 The comparison with `gmx rmsf` on real trajectories, and the script that reruns
 it, are in {doc}`../explanation/analysis_rmsf_verification`.
@@ -88,6 +89,14 @@ chosen result is measured. The default is the first context's total. See
 because MDTraj 1.11.1 returns about 0.1 percent too much area for the later
 frames each thread computes in a call; see {doc}`../explanation/analysis_sasa_verification`.
 
+`polyzymd analyze secondary_structure` runs `dssp_occupancy` once per
+replicate on `--set selection=...` (default `protein`, whole residues), in the
+scheme of `--set scheme=...`: `simplified` (default) or `full`. `--run <class>`
+reports a class's mean over the residues, the fraction of residue-frames in it,
+and `--run <class>_residues` compares every residue. The default is the
+scheme's first class, `helix` or `alpha_helix`. A warning names the replicates
+with unassigned residues. See {doc}`../how_to/analysis_secondary_structure_quickstart`.
+
 ## Figures
 
 `polyzymd analyze` writes these figures to `<output-dir>/figures/<analysis>/`
@@ -100,5 +109,6 @@ and records the folder under `output_paths.figures` in the JSON report;
 | `rmsd` | `rmsd_timeseries`, `rmsd_comparison` |
 | `rmsf`, `rms_deviation` | `rmsf_profile`, `offset_profile` and `rms_deviation_profile` (each replicate and each condition's mean with its interval, `highlight_residues` marked), `rms_decomposition` (the three profiles of each condition together), `rmsf_comparison` (the three core values), and with several conditions `rmsf_difference`, `offset_difference` and `rms_deviation_difference` (each condition minus the control at every residue, with the interval of the difference and the significant residues marked) |
 | `sasa` | For a total, `sasa_timeseries_<name>`, `sasa_comparison_<name>` and `sasa_distribution_<name>`; for `<name>_residues`, `sasa_profile_<name>` and with several conditions `sasa_difference_<name>` |
+| `secondary_structure` | `ss_content_bars` (every class of the scheme but unassigned); for a total `ss_<name>_comparison`; for `<name>_residues`, `ss_<name>_profile`, `ss_classes_<name>` and with several conditions `ss_<name>_difference` |
 | `distances` | `distance_kde_<pair>` for each pair with its threshold, `distance_fraction_<result>` for each fraction below threshold, and the grouped `distance_threshold_bars` (every pair's fraction) and `distance_kde_panel` (one panel per pair) |
 | `catalytic_triad` | `triad_kde_<pair>` for each pair with its threshold, `triad_fraction_<result>` for `simultaneous` and each pair's fraction, and the grouped `triad_threshold_bars` (each pair's fraction, then all pairs) and `triad_kde_panel` (one panel per pair) |

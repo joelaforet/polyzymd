@@ -371,7 +371,7 @@ place only comparison-wide references in this directory.
         click.echo(
             "     polyzymd compare run contacts             # Compare polymer-protein contacts"
         )
-        click.echo("     polyzymd compare run secondary_structure  # Compare secondary structure")
+        click.echo("     polyzymd compare run hydrogen_bonds       # Compare hydrogen bonds")
         click.echo()
         click.echo("  On an HPC cluster, submit as SLURM jobs instead:")
         click.echo("     polyzymd compare submit contacts --partition <part> --mem 8G")
@@ -573,7 +573,6 @@ def run_comparison(
 
     \b
     Examples:
-        polyzymd compare run secondary_structure
         polyzymd compare run contacts --eq-time 10ns
         polyzymd compare run contacts --format markdown
         polyzymd compare run hydrogen_bonds --format agent
@@ -718,7 +717,7 @@ def run_comparison(
     "analysis_type",
     type=str,
     default=None,
-    help="Generate plots for specific analysis type only (e.g., 'contacts', 'secondary_structure').",
+    help="Generate plots for specific analysis type only (e.g., 'contacts', 'hydrogen_bonds').",
 )
 @click.option(
     "--list-available",

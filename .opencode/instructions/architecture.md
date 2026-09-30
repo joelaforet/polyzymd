@@ -10,9 +10,9 @@ src/polyzymd/
 ├── simulation/   # OpenMM simulation execution
 ├── workflow/     # Orchestration layer
 ├── core/         # Shared base classes and types
-├── analyses/     # ★ Plugin system — unified analysis lifecycle
+├── analyses/     # ★ Study API (functions over replicate universes) and the remaining plugins
 │   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
-│   └── <name>/   #   Analysis plugins (single-file simple modules or packages)
+│   └── <name>/   #   The remaining plugins: contacts/, hydrogen_bonds/
 ├── exporters/    # Format converters (GROMACS, etc.)
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
@@ -23,9 +23,10 @@ src/polyzymd/
 
 | Layer | Files | Role |
 |-------|-------|------|
-| **Plugins** (public) | `rmsf/`, `contacts/`, `distances/`, etc. | One class per analysis type — the extension point |
+| **Study API** (public) | `study.py`, `timeseries.py`, `functions.py`, `reference.py`, `figures.py`, `protocols.py` | Replicates as MDAnalysis universes, shipped measurement functions, statistics, reports and `polyzymd analyze`; where new measurements go |
+| **Plugins** (public) | `contacts/`, `hydrogen_bonds/` | The two analyses not yet ported to the study API |
 | **Private modules** | `_framework/`, `<name>/_*.py`, etc. | Internal framework and plugin implementation details; not contributor import targets |
-| **Shared utilities** | `shared/loader.py`, `shared/alignment.py`, etc. | `TrajectoryLoader`, alignment, statistics |
+| **Shared utilities** | `shared/loader.py`, `shared/window.py`, etc. | `TrajectoryLoader`, frame windows, statistics |
 | **Framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/` | Stable public facade, auto-discovery, artifact lifecycle |
 
 New analysis types may be simple single-file modules or packages under
@@ -105,7 +106,7 @@ for name, cls in list_analyses().items():
     print(f"{name}: {cls.__doc__.splitlines()[0]}")
 
 # Get a specific plugin
-RMSFAnalysis = get_analysis("rmsf")
+ContactsAnalysis = get_analysis("contacts")
 ```
 
 No registries, no decorators, no explicit imports needed — just create a module

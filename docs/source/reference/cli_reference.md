@@ -1059,7 +1059,7 @@ with any discovered analysis plugin.
 polyzymd compare run COMPARISON_TYPE [OPTIONS]
 
 Arguments:
-  COMPARISON_TYPE        Analysis plugin name (e.g. contacts, secondary_structure)
+  COMPARISON_TYPE        Analysis plugin name (e.g. contacts, hydrogen_bonds)
 
 Options:
   -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
@@ -1081,17 +1081,17 @@ rules that apply to the other commands.
 #### Example
 
 ```bash
-# Run the secondary-structure comparison (uses plugins.secondary_structure)
-polyzymd compare run secondary_structure
+# Run the contacts comparison (uses plugins.contacts)
+polyzymd compare run contacts
 
 # Override equilibration time
-polyzymd compare run secondary_structure --eq-time 20ns
+polyzymd compare run contacts --eq-time 20ns
 
 # Run contacts comparison with markdown output
 polyzymd compare run contacts --format markdown -o report.md
 
 # Print the compact agent report instead of the plugin's table
-polyzymd compare run secondary_structure --format agent
+polyzymd compare run contacts --format agent
 
 # List all available analysis types
 polyzymd compare run --list
@@ -1151,7 +1151,7 @@ Validating: /path/to/comparison.yaml
   Conditions: 3
     - WT, PEG, SBMA
   Control: WT
-  Analysis sections: contacts, secondary_structure
+  Analysis sections: contacts, hydrogen_bonds
 ```
 
 **Output (errors):**
@@ -1175,7 +1175,7 @@ Validating: /path/to/comparison.yaml
     "conditions_count": 3,
     "condition_labels": ["WT", "PEG", "SBMA"],
     "control": "WT",
-    "sections_configured": ["contacts", "secondary_structure"]
+    "sections_configured": ["contacts", "hydrogen_bonds"]
   }
 }
 ```
@@ -1257,7 +1257,7 @@ polyzymd compare submit contacts --dry-run
 polyzymd compare submit contacts --job-arrays --partition aa100
 
 # Rely on plugin memory hints and cluster default partition
-polyzymd compare submit secondary_structure --qos normal
+polyzymd compare submit hydrogen_bonds --qos normal
 
 # Blanca condo nodes at CU Boulder
 module load slurm/blanca
@@ -1304,7 +1304,7 @@ Options:
 polyzymd compare submit-all -f comparison.yaml --partition aa100 --qos normal
 
 # Skip selected plugins
-polyzymd compare submit-all -f comparison.yaml --exclude secondary_structure --exclude hydrogen_bonds
+polyzymd compare submit-all -f comparison.yaml --exclude hydrogen_bonds
 
 # Dry-run planning only
 polyzymd compare submit-all -f comparison.yaml --dry-run

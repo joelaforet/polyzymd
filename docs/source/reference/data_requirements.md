@@ -289,7 +289,7 @@ defaults:
   equilibration_time: "10ns"
 
 plugins:
-  secondary_structure: {}
+  contacts: {}
   # ... additional analysis plugins
 ```
 

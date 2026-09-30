@@ -2,48 +2,65 @@
 
 ## The real tree
 
-Verified against `src/polyzymd/analyses/` on 2026-09-11. Every file named here
-exists. If you add or delete a module, update this list in the same commit.
+Verified against `src/polyzymd/analyses/` on 2026-09-29, after slice 7 of the
+v1.3 analysis refactor. Every file named here exists. If you add or delete a
+module, update this list in the same commit.
 
 ```
 src/polyzymd/analyses/
+├── study.py             # Study, Condition, Replicate: replicates as MDAnalysis universes
+├── timeseries.py        # Study.timeseries, Study.per_replicate, Timeseries, ReplicateValues
+├── functions.py         # Shipped measurements: radius_of_gyration, rmsd, pair_distance,
+│                        # all_below, rmsf, rms_deviation, rms_decomposition, sasa,
+│                        # residue_sasa, dssp_occupancy
+├── reference.py         # pz.reference: external, frame, average and centroid references
+├── figures.py           # Figures drawn from stored study results
+├── protocols.py         # polyzymd analyze: FUNCTION_ANALYSES, ProtocolReport, plugin path
 ├── base.py              # Public import surface for plugin authors
 ├── discovery.py         # pkgutil auto-discovery of plugins
-├── orchestrator.py      # Engine: compute, aggregate, compare, plot
+├── orchestrator.py      # Plugin engine: compute, aggregate, compare, plot
 ├── stats.py             # default_scalar_comparison, format_scalar_comparison
 ├── exceptions.py        # Typed analysis errors
 ├── _framework/          # aggregate_validation, cache_identity, compare,
 │                        # comparison_models, contexts, contract, io,
 │                        # lifecycle, results_base
 ├── mda/                 # aggregation, artifacts, base, comparison,
-│                        # frame_selection, job, lifecycle, pair_distance,
-│                        # plugin, store, universe
-├── shared/              # aa_classification, alignment, autocorrelation,
-│                        # centroid, convergence, diagnostics,
-│                        # inferential_statistics, loader, multi_run_comparison,
-│                        # multi_run_formatting, paths, plotting, selections,
-│                        # statistics, window, groupings/, selectors/
-├── catalytic_triad/     # __init__, _mda, _plot_settings, _plotters
+│                        # frame_selection, job, lifecycle, plugin, store, universe
+├── shared/              # aa_classification, autocorrelation, centroid, diagnostics,
+│                        # inferential_statistics, loader, multi_run_formatting,
+│                        # paths, plotting, selections, statistics, topology,
+│                        # window, groupings/, selectors/
 ├── contacts/            # __init__, _aggregator, _comparison,
 │                        # _comparison_results, _events, _filters, _formatters,
 │                        # _identity, _lifecycle, _mda, _plot_settings, _plotters
-├── distances/           # __init__, _comparison_results, _formatters, _mda,
-│                        # _plot_settings, _plotters
-├── hydrogen_bonds/      # __init__, _mda, _models, _plotters
-├── rg/                  # __init__, _comparison_results, _formatters, _mda,
-│                        # _plot_settings, _plotters
-├── rmsd/                # __init__, _comparison_results, _formatters, _mda,
-│                        # _plot_settings, _plotters
-├── rmsf/                # __init__, _mda, _plot_settings, _plotters
-├── sasa/                # __init__, _artifacts, _comparison_results,
-│                        # _formatters, _mda, _plot_settings, _plotters
-└── secondary_structure/ # __init__, _mda, _plot_settings, _plotters
+└── hydrogen_bonds/      # __init__, _mda, _models, _plotters
 ```
+
+rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa and
+secondary_structure are no longer plugins. They are functions in `functions.py`
+run through the study API, and `polyzymd analyze <name>` runs them through
+`protocols._analyze_function`. Only contacts and hydrogen_bonds are still
+plugins; the refactor ports them next and then removes the plugin framework.
 
 There is no `_results.py`, `_cache.py`, `_paths.py` or `_plotting.py` in any
 plugin package. Result models live in `_models.py` (hydrogen bonds), in
 `_comparison_results.py`, or in the plugin `__init__.py`. Cache and path
 handling belong to the framework artifact layer, not to plugins.
+
+## Adding a measurement
+
+Write a new measurement as a function, not a plugin, and run it through the
+study API; see `docs/source/explanation/analysis_api.md`.
+
+- A per-frame function takes MDAnalysis `AtomGroup`s at one frame and returns
+  one number. Run it with `study.timeseries(fn, pz.select(...), ...)`.
+- A per-replicate function also takes `frames` and returns a number or one value
+  per label, such as per residue. Run it with `study.per_replicate(fn, ...,
+  labels=..., parts=...)`.
+- Call MDAnalysis or MDTraj for the measurement; do not reimplement them.
+- To ship it in `polyzymd analyze`, add it to `FUNCTION_ANALYSES` with its
+  settings and a dispatcher in `protocols.py`, as the existing analyses do, with
+  its figures, a quick-start page and a real-data parity check.
 
 ## Loading trajectories
 
@@ -63,7 +80,7 @@ Import from `polyzymd.analyses.base`. It re-exports `Analysis`, the four
 lifecycle contexts, `MetricValue`, the comparison models, `PluginContractError`
 and `SlurmResourceHint`. Do not import `_framework/` modules from a plugin.
 
-## Adding a plugin
+## Adding a plugin (contacts and hydrogen_bonds only)
 
 1. Run `polyzymd new-analysis <name>` to scaffold the package and its tests, or
    write the package by hand under `src/polyzymd/analyses/`.
@@ -99,13 +116,8 @@ against `None`. A hook that returns a type outside the contract raises
 
 The simple path implements `extract_metrics()` and lets `stats.py` run the
 t-tests, the ANOVA, the Benjamini-Hochberg correction and the ranking. The
-custom path overrides `compare()` and returns its own saveable model. rmsf,
-catalytic_triad and secondary_structure take the simple path. rmsf and
-secondary_structure do define `compare()`, but only as a type guard that raises
-`TypeError` when an aggregated result is not a `ConditionArtifact` before
-delegating to `super().compare(ctx)`. That is still the simple path. Do not copy
-it as a template for a custom comparison. rmsd, rg, sasa,
-distances, contacts and hydrogen_bonds take the custom path.
+custom path overrides `compare()` and returns its own saveable model. Both
+remaining plugins, contacts and hydrogen_bonds, take the custom path.
 
 ## Results and plotting
 

@@ -173,9 +173,8 @@ def _one_line(text: str) -> str:
     "--no-plots",
     "no_plots",
     is_flag=True,
-    help="Draw no figures. By default rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad and sasa "
-    "draw theirs "
-    "into <output-dir>/figures/<name>/.",
+    help="Draw no figures. By default rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, "
+    "sasa and secondary_structure draw theirs into <output-dir>/figures/<name>/.",
 )
 def analyze_command(
     name: str,
@@ -209,6 +208,7 @@ def analyze_command(
         polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml --eq 10ns --run rmsf
         polyzymd analyze rms_deviation -c A/config.yaml --set reference_file=crystal.pdb
         polyzymd analyze sasa -c A/config.yaml --run isolated_residues
+        polyzymd analyze secondary_structure -c A/config.yaml -c B/config.yaml --run helix_residues
         polyzymd analyze contacts -f comparison.yaml --format json -o contacts.json
     """
     warn_if_wrong_pixi_env("analyze", ANALYSIS_PIXI_ENVS)
