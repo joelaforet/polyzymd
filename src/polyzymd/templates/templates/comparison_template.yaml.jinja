@@ -1,5 +1,5 @@
 # PolyzyMD Comparison Configuration
-# Compare analyses across simulation conditions (e.g., polymer, temperature).
+# Lists the simulation conditions of a comparison (e.g., polymer, temperature).
 # Docs: https://polyzymd.readthedocs.io/en/latest/
 
 name: {{ name | yaml_quote }}
@@ -42,181 +42,22 @@ defaults:
 #   n_parts: 2                  # optional; requires backend
 
 # ============================================================================
-# Plugins (unified analysis settings)
+# Analyses
 # ============================================================================
-# Define which analyses to run. Presence of a section enables that analysis.
-
-plugins:
-  # RMSF, SASA and secondary structure are not configured here. Run them per
-  # condition, for example
-  #   polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml
-  #   polyzymd analyze sasa -c A/config.yaml -c B/config.yaml \
-  #     --set contexts='{isolated: protein, with_polymer: protein or resname SBM EGM}'
-  #   polyzymd analyze secondary_structure -c A/config.yaml -c B/config.yaml \
-  #     --set selection='protein and chainID A'
-  # Pick the total SASA with --run <context> and each residue's SASA with
-  # --run <context>_residues. Pick the helix, strand or coil fraction with
-  # --run <name>, or add --set scheme=full for the eight DSSP classes such as
-  # alpha_helix, and each residue's fraction with --run <name>_residues.
-
-  # Catalytic triad and pair distances are not configured here. Write the
-  # pairs to pairs.yaml, a list of label, selection_a, selection_b and
-  # optionally threshold, below_label and above_label, and run
-  #   polyzymd analyze catalytic_triad -c A/config.yaml --set pairs=pairs.yaml
-  #   polyzymd analyze distances -c A/config.yaml --set pairs=pairs.yaml
-  # Always use "protein and resid X" for protein residues, because residue
-  # numbers restart per chain.
-
-  # Polymer-protein contacts are not configured here. Run
-  #   polyzymd analyze contacts -c A/config.yaml -c B/config.yaml \
-  #     --set polymer_selection='chainid C' --set protein_selection='chainid A'
-  # Pick the result with --run, for example coverage, mean_contact_fraction,
-  # contact_fraction_residues or mean_lifetime (how long contacts last). A
-  # residue is in contact when the polymer occludes its SASA; add
-  # --set method=distance to count a contact when a polymer atom is within
-  # --set cutoff=<Å> (default 4.0) of the residue instead.
-
-  # Hydrogen-bond Analysis
-  #
-  # hydrogen_bonds:
-  #   distance_cutoff: 3.0
-  #   angle_cutoff: 150
-  #   groups:
-  #     protein_all: "protein"
-  #     substrate: "resname LIG"     # adjust to your ligand
-  #     polymer_all: "chainid C"
-  #   summaries:
-  #     protein_polymer:
-  #       between: [protein_all, polymer_all]
-  #     protein_substrate:
-  #       between: [protein_all, substrate]
-  #     protein_internal:
-  #       within: protein_all
-  #     polymer_internal:
-  #       within: polymer_all
-  #   composition:
-  #     partitions:
-  #       protein: "protein"
-  #       substrate: "resname LIG"
-  #       polymer: "chainid C"
-
-# ============================================================================
-# Plot Settings (HOW to visualize - figure customization)
-# ============================================================================
-# Controls plot generation for all analyses. Per-analysis sections override
-# defaults. Run `polyzymd compare plot-all` to generate all configured plots.
-
-plot_settings:
-  output_dir: "figures/"         # relative to this file
-  format: "png"                  # png, pdf, or svg
-  dpi: 300                       # resolution for raster formats
-  style: "compact"               # compact, large_elements, or low_ink
-  color_palette: "tab10"         # seaborn/matplotlib color palette
-
-  # ── Semantic condition colors (optional) ───────────────────────────────────
-  # Keep this block commented unless you want condition colors/order to encode
-  # project-specific meaning. Semantic order is plot-only; it does not change
-  # statistics, rankings, comparison JSON, or cached artifacts.
-  #
-  # semantic_colors:
-  #   enabled: true
-  #   order:
-  #     - "No Polymer"
-  #     - "100% SBMA"
-  #     - "100% EGMA"
-  #     - "1% EGPMA"
-  #     - "2% EGPMA"
-  #     - "5% EGPMA"
-  #     - "10% EGPMA"
-  #   control_color: "#222222"
-  #   missing_color: "#bdbdbd"
-  #   conditions:
-  #     "No Polymer":
-  #       role: control
-  #       order: 0
-  #     "100% SBMA":
-  #       family: sbma
-  #       value: 100
-  #       order: 10
-  #     "100% EGMA":
-  #       family: egma
-  #       value: 100
-  #       order: 20
-  #     "1% EGPMA":
-  #       family: egpma
-  #       value: 1
-  #       order: 30
-  #     "2% EGPMA":
-  #       family: egpma
-  #       value: 2
-  #       order: 40
-  #     "5% EGPMA":
-  #       family: egpma
-  #       value: 5
-  #       order: 50
-  #     "10% EGPMA":
-  #       family: egpma
-  #       value: 10
-  #       order: 60
-  #   families:
-  #     sbma:
-  #       colormap: "Blues"
-  #       scale: linear
-  #       vmin: 0
-  #       vmax: 100
-  #       colormap_range: [0.55, 0.85]
-  #     egma:
-  #       colormap: "Greens"
-  #       scale: linear
-  #       vmin: 0
-  #       vmax: 100
-  #       colormap_range: [0.55, 0.85]
-  #     egpma:
-  #       colormap: "Purples"
-  #       scale: ordinal
-  #       value_order: [1, 2, 5, 10]
-  #       colormap_range: [0.35, 0.9]
-
-  # ── Visual theme (all fields optional — defaults come from style preset) ──
-  # Uncomment individual lines to override the preset values.
-  # theme:
-  #   # Font sizes by semantic role
-  #   title_fontsize: 13           # axes titles
-  #   suptitle_fontsize: 14        # figure suptitles
-  #   label_fontsize: 11           # axis labels (xlabel/ylabel)
-  #   tick_fontsize: 9             # tick labels
-  #   legend_fontsize: 9           # legend entries
-  #   annotation_fontsize: 9       # heatmap cell annotations
-  #   small_fontsize: 8            # secondary annotations (SEM labels)
-  #   tiny_fontsize: 7             # fine-grained annotations (residue IDs)
-  #
-  #   # Bar chart defaults
-  #   bar_alpha: 0.85              # bar fill opacity
-  #   bar_edgecolor: "black"       # bar edge colour
-  #   bar_linewidth: 0.5           # bar edge line width
-  #   bar_capsize: 4               # error bar cap size (points)
-  #
-  #   # Replicate dot overlay
-  #   dot_size: 18                 # scatter marker size (s=)
-  #   dot_alpha: 0.7               # dot opacity
-  #   dot_color: "black"           # dot colour
-  #
-  #   # Line defaults
-  #   line_alpha: 0.8              # line plot opacity
-  #   fill_alpha: 0.25             # fill_between band opacity
-  #   reference_line_color: "black"   # reference/threshold line colour
-  #   reference_line_style: "--"      # reference line style
-  #   reference_line_width: 1.5       # reference line width
-  #   highlight_line_alpha: 0.5       # vertical highlight line opacity
-  #
-  #   # Axes chrome
-  #   hide_top_spine: true         # hide top axis spine
-  #   hide_right_spine: true       # hide right axis spine
-  #
-  #   # Title style
-  #   title_fontweight: "bold"     # title font weight
-  #
-  #   # Legend placement
-  #   legend_loc: "center left"           # matplotlib legend loc string
-  #   legend_bbox: [1.02, 0.5]            # bbox_to_anchor (outside right)
-
+# No analysis is configured here: the plugins and plot_settings sections are
+# retired, and polyzymd analyze reads the simulation configs given with -c,
+# control first. For example
+#   polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml --eq {{ eq_time }}
+#   polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --set d_a_cutoff=3.0
+#   polyzymd analyze contacts -c A/config.yaml -c B/config.yaml \
+#     --set polymer_selection='chainid C' --set protein_selection='chainid A'
+#   polyzymd analyze distances -c A/config.yaml --set pairs=pairs.yaml
+# where pairs.yaml is a list of label, selection_a, selection_b and optionally
+# threshold, below_label and above_label. Always use "protein and resid X" for
+# protein residues, because residue numbers restart per chain. The catalytic
+# triad is a routine on the study API:
+# https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html
+#
+# Read https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html,
+# or point an agent at .claude/skills/polyzymd-analyze/SKILL.md or that page to
+# learn the protocol.
