@@ -4,8 +4,8 @@ The per-frame functions take MDAnalysis ``AtomGroup`` arguments positioned at
 one frame and return one number, so they run through
 :meth:`polyzymd.analyses.study.Study.timeseries` like any function you write.
 The per-replicate functions (:func:`rmsf`, :func:`rms_deviation`,
-:func:`rms_decomposition`, :func:`residue_sasa` and :func:`dssp_occupancy`)
-also take the production
+:func:`rms_decomposition`, :func:`residue_sasa`, :func:`dssp_occupancy` and
+:func:`residue_contacts`) also take the production
 frame indices and return one value per residue, and run through
 :meth:`polyzymd.analyses.study.Study.per_replicate`.
 """
@@ -548,4 +548,59 @@ def dssp_occupancy(atoms: Any, frames: Any, simplified: bool = True, chunk: int 
         )
         for row, code in enumerate(codes):
             counts[row] += (assigned == code).sum(axis=0)
+    return counts / len(frames)
+
+
+#: Cutoff in Å within which a protein residue and a polymer are in contact.
+CONTACT_CUTOFF = 4.5
+
+
+def residue_contacts(
+    protein: Any,
+    polymer: Any,
+    frames: Any,
+    cutoff: float = CONTACT_CUTOFF,
+    types: Any = (),
+    pbc: bool = True,
+) -> Any:
+    """Return, for each residue of ``protein``, the fraction of ``frames`` it touches ``polymer``.
+
+    On every frame, ``MDAnalysis.lib.distances.capped_distance`` finds every
+    pair of a ``polymer`` atom and a ``protein`` atom closer than ``cutoff``
+    Å, with the minimum image of the frame's box when ``pbc`` is true and the
+    box is known. A protein residue is in contact on a frame when any of its
+    atoms is in such a pair. The first row is each residue's fraction of
+    frames in contact with any polymer atom; then one row per residue name in
+    ``types``, the fraction of frames in contact with polymer atoms of that
+    residue name, such as one monomer type. The type rows do not sum to the
+    first, since a residue can touch several types on one frame. Columns
+    follow ``protein.residues``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(1 + len(types), n_residues)``.
+    """
+    import numpy as np
+    from MDAnalysis.lib.distances import capped_distance
+
+    residue = np.unique(protein.resindices, return_inverse=True)[1]
+    n_residues = len(protein.residues)
+    type_of_atom = np.full(len(polymer), -1)
+    for row, name in enumerate(types):
+        type_of_atom[polymer.resnames == name] = row
+    counts = np.zeros((1 + len(types), n_residues))
+    for ts in protein.universe.trajectory[frames]:
+        box = ts.dimensions if pbc else None
+        pairs = capped_distance(
+            polymer.positions, protein.positions, max_cutoff=cutoff, box=box, return_distances=False
+        )
+        if len(pairs) == 0:
+            continue
+        touched = np.zeros((1 + len(types), n_residues), dtype=bool)
+        touched[0, residue[pairs[:, 1]]] = True
+        kinds = type_of_atom[pairs[:, 0]]
+        known = kinds >= 0
+        touched[1 + kinds[known], residue[pairs[known, 1]]] = True
+        counts += touched
     return counts / len(frames)

@@ -103,6 +103,14 @@ FUNCTION_ANALYSES = {
         "n_sphere_points": 960,
     },
     "secondary_structure": {"selection": "protein", "scheme": "simplified"},
+    "contacts": {
+        "polymer_selection": "chainid C",
+        "protein_selection": "chainid A",
+        "cutoff": 4.5,
+        "polymer_types": None,
+        "use_pbc": True,
+        "regions": {},
+    },
     "distances": {"pairs": None, "threshold": 3.5, "use_pbc": True},
     "catalytic_triad": {"pairs": None, "threshold": 3.5, "use_pbc": True},
 }
@@ -544,6 +552,7 @@ def _analyze_function(
         "rms_deviation",
         "sasa",
         "secondary_structure",
+        "contacts",
     )
     if unknown or (run is not None and not pairs):
         raise ProtocolError(
@@ -563,6 +572,8 @@ def _analyze_function(
         return _analyze_sasa(study, settings, run, recompute, output_dir, eq_check, plots)
     if name == "secondary_structure":
         return _analyze_secondary_structure(study, settings, run, recompute, output_dir, plots)
+    if name == "contacts":
+        return _analyze_contacts(study, settings, run, recompute, output_dir, plots)
     if pairs:
         return _analyze_pairs(
             name,
@@ -952,6 +963,163 @@ def _analyze_secondary_structure(
     return report.model_copy(
         update={"analysis": "secondary_structure", "run": run, "all_runs": runs}
     )
+
+
+def _analyze_contacts(
+    study: Any,
+    settings: dict | None,
+    run: str | None,
+    recompute: bool,
+    output_dir: Path | None,
+    plots: bool,
+) -> ProtocolReport:
+    """Measure each protein residue's contact with the polymer and report one result.
+
+    :func:`~polyzymd.analyses.functions.residue_contacts` gives, in one pass
+    per replicate, each residue of ``protein_selection`` its fraction of
+    production frames with any atom of ``polymer_selection`` (narrowed to the
+    residue names in ``polymer_types`` when given) within ``cutoff`` Å, and
+    the same per polymer residue name found in the selection. Results:
+
+    - ``coverage``, the default: the fraction of residues in contact on at
+      least one frame;
+    - ``mean_contact_fraction``: the mean over residues of the contact fraction;
+    - ``contact_fraction_residues``: each residue's contact fraction, compared
+      residue by residue;
+    - ``<type>_contact_fraction`` and ``<type>_contact_fraction_residues`` for
+      each polymer residue name, such as one monomer type;
+    - ``<class>_contact_fraction`` for each amino-acid class of
+      :class:`~polyzymd.analyses.shared.groupings.base.ProteinAAClassification`
+      present, and ``<region>_contact_fraction`` for each entry
+      ``region: selection`` of ``regions``: the mean contact fraction of those
+      residues.
+
+    With ``plots``, ``contacts_class_bars`` groups the classes, a one-value
+    result draws ``contacts_<run>_comparison``, and a residue result
+    ``contacts_<name>_profile`` and, with several conditions,
+    ``contacts_<name>_difference``, into ``<output_dir>/figures/contacts/``.
+    """
+    import numpy as np
+
+    from polyzymd.analyses import functions
+    from polyzymd.analyses.figures import plot_differences, plot_values
+    from polyzymd.analyses.shared.groupings.base import ProteinAAClassification
+    from polyzymd.analyses.timeseries import select
+
+    settings = {**FUNCTION_ANALYSES["contacts"], **(settings or {})}
+    protein = str(settings["protein_selection"])
+    polymer = str(settings["polymer_selection"])
+    types_filter = settings["polymer_types"]
+    if types_filter:
+        names = [types_filter] if isinstance(types_filter, str) else list(types_filter)
+        polymer = f"({polymer}) and (resname {' '.join(str(name) for name in names)})"
+    regions = settings["regions"] or {}
+    first = next(iter(study)).replicates[0].universe()
+    protein_atoms = first.select_atoms(protein)
+    polymer_atoms = first.select_atoms(polymer)
+    if len(protein_atoms) == 0 or len(polymer_atoms) == 0:
+        raise ProtocolError(
+            f"contacts: protein_selection {protein!r} picks {len(protein_atoms)} atoms and "
+            f"polymer_selection {polymer!r} picks {len(polymer_atoms)}.",
+            hint="Choose selections that pick atoms, such as 'protein' and 'resname SBM EGM'.",
+        )
+    types = sorted({str(name) for name in polymer_atoms.resnames})
+    grouping = ProteinAAClassification()
+    by_class: dict[str, list[int]] = {}
+    for residue in protein_atoms.residues:
+        by_class.setdefault(grouping.classify(str(residue.resname)), []).append(int(residue.resid))
+    classes = [name for name in grouping.available_groups if name in by_class]
+    reserved = {"coverage", "mean", "contact", *types, *classes}
+    if not isinstance(regions, dict) or reserved & set(regions):
+        raise ProtocolError(
+            f"contacts: regions must map names other than {sorted(reserved)} to selections, "
+            f"got {regions!r}.",
+            hint="Pass --set regions='{lid: resid 70-90}'.",
+        )
+    region_ids = {
+        name: _residue_ids(study, f"({protein}) and ({selection})")
+        for name, selection in regions.items()
+    }
+    parts = ["contact_fraction", *(f"{name}_contact_fraction" for name in types)]
+    rows = study.per_replicate(
+        functions.residue_contacts,
+        select(protein),
+        select(polymer),
+        unit=None,
+        labels=lambda u: u.select_atoms(protein).residues.resids,
+        name="residue_contacts",
+        recompute=recompute,
+        output_dir=output_dir,
+        bounds=(0.0, 1.0),
+        parts=parts,
+        cutoff=float(settings["cutoff"]),
+        types=types,
+        pbc=bool(settings["use_pbc"]),
+    )
+    profile = rows["contact_fraction"]
+    totals = {
+        "coverage": profile.over_labels(lambda v: float(np.mean(np.asarray(v) > 0)), "coverage"),
+        "mean_contact_fraction": profile.over_labels("mean", "mean_contact_fraction"),
+    }
+    totals |= {
+        f"{name}_contact_fraction": rows[f"{name}_contact_fraction"].over_labels(
+            "mean", f"{name}_contact_fraction"
+        )
+        for name in types
+    }
+    totals |= {
+        f"{name}_contact_fraction": profile.over_labels(
+            "mean", f"{name}_contact_fraction", labels=by_class[name]
+        )
+        for name in classes
+    }
+    totals |= {
+        f"{name}_contact_fraction": profile.over_labels(
+            "mean", f"{name}_contact_fraction", labels=ids
+        )
+        for name, ids in region_ids.items()
+    }
+    for values in totals.values():
+        values.bounds = (0.0, 1.0)
+    residue_runs = {"contact_fraction_residues": profile} | {
+        f"{name}_contact_fraction_residues": rows[f"{name}_contact_fraction"] for name in types
+    }
+    runs = [*totals, *residue_runs]
+    run = run or "coverage"
+    if run not in runs:
+        raise ProtocolError(
+            f"contacts: no result named {run!r}.", hint=f"Use --run with one of {runs}."
+        )
+    values = residue_runs[run] if run in residue_runs else totals[run]
+    report = values.compare() if len(study) > 1 else values.summary()
+    report.provenance.settings = {
+        **settings,
+        "polymer_selection": polymer,
+        "polymer_types_found": types,
+        "residues": {"classes": by_class, **region_ids},
+    }
+    if plots:
+        folder = _figures_dir(output_dir, "contacts")
+        plot_values(
+            [totals[f"{name}_contact_fraction"] for name in classes],
+            classes,
+            folder,
+            "contacts_class_bars",
+            "Contact fraction by amino-acid class",
+        )
+        if run in residue_runs:
+            name = run[: -len("_residues")]
+            values.plot(
+                folder, f"contacts_{name}_profile", f"Per-residue {name}", None, [], "Residue"
+            )
+            if len(study) > 1:
+                plot_differences(
+                    values, report, folder, f"contacts_{name}_difference", None, None, "Residue"
+                )
+        else:
+            values.plot(folder, f"contacts_{run}_comparison", title=run.replace("_", " "))
+        report.provenance.output_paths["figures"] = str(folder)
+    return report.model_copy(update={"analysis": "contacts", "run": run, "all_runs": runs})
 
 
 def _residue_ids(study: Any, selection: str) -> list[int]:
