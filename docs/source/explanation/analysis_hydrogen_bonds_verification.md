@@ -48,25 +48,6 @@ and polymer atoms, including His NE2 (unprotonated), Met SD, and every
 carbonyl, carboxylate, hydroxyl, ether, ester and sulfonate oxygen. The
 chosen atoms are recorded in every report under `provenance.settings`.
 
-## Agreement with the plugin used before this version
-
-The plugin used before this version took every N and O of the groups as a
-donor and acceptor candidate, paired hydrogens with donors within 1.2 Å, and
-used 3.0 Å. On 716 production frames of a 363 K *B. subtilis* lipase A
-replicate with a 50:50 SBMA-EGMA polymer, in September 2026:
-
-| Calculation | Protein-polymer bonds per frame | Residue pairs per frame |
-|---|---|---|
-| The plugin | 8.849162011173185 | 8.19413407821229 |
-| `hydrogen_bonds` with the plugin's selections and 3.0 Å | 8.849162011173185 | 8.19413407821229 |
-| `hydrogen_bonds` with the element and valency rule and 3.0 Å | 8.849162011173185 | |
-| `hydrogen_bonds` with the element and valency rule and 3.5 Å (default) | 13.406424581005586 | 12.018156424581006 |
-
-The two selections give the same protein-polymer bonds at 3.0 Å on this
-replicate: the acceptors the plugin added, such as the ammonium nitrogen,
-never met the geometry. The default cutoff of 3.5 Å counts about half again
-as many bonds.
-
 ## What the tests check
 
 `tests/analyses/test_hydrogen_bonds_functions.py` checks, on small synthetic
@@ -84,7 +65,9 @@ XML, or a topology with bonds, the analysis refuses to run unless the
 hydrogens and acceptors are given as selections. The geometry is
 MDAnalysis's, with the donor-acceptor distance and not the hydrogen-acceptor
 distance. The counts depend on the cutoffs, which should be reported with the
-results.
+results: on 716 frames of a 363 K lipase replicate with a 50:50 SBMA-EGMA
+polymer, the default 3.5 Å counted 13.4 protein-polymer bonds per frame and
+3.0 Å counted 8.8.
 
 ## See Also
 

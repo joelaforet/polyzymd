@@ -56,23 +56,6 @@ gives MDTraj one frame per call. That costs speed, because MDTraj's parallel
 loop runs over frames, but it makes every frame's area independent of the
 others.
 
-## Agreement with the plugin used before this version
-
-On 91 production frames of the same replicate, `polyzymd analyze sasa` gave
-the same mean total SASA, to every printed digit, as the SASA plugin used before
-this version when that plugin was set to compute one frame per call
-(`chunk_size: 1`). With its default of 100 frames per call, the plugin gave
-values 0.094 percent larger:
-
-| Context | This version | Earlier plugin, 1 frame per call | Earlier plugin, 100 frames per call |
-|---|---|---|---|
-| protein | 8831.825 Å² | 8831.825 Å² | 8840.102 Å² |
-| protein and polymer | 4386.069 Å² | 4386.069 Å² | 4390.174 Å² |
-
-Stored SASA values from the earlier plugin are therefore about 0.1 percent too
-large. The bias is nearly the same in every frame and every condition, so
-differences between conditions change far less than the values themselves.
-
 ## What the tests check
 
 `tests/analyses/test_sasa.py` checks, on small synthetic systems:
