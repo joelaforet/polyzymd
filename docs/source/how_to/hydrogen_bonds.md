@@ -56,6 +56,15 @@ OpenMM system that PolyzyMD saves beside each segment's trajectory,
 non-standard residues; the partial charges are read from it too. The atoms
 chosen are recorded in the report; see [What is recorded](#what-is-recorded).
 
+```{important}
+Keep `<segment>_system.xml` beside the trajectory in any copy of a run you
+analyse, such as a copy thinned to fewer frames. Without it the protein has
+no bonds, and the analysis stops with an error naming the file. A run with no
+system XML, such as a GROMACS run for now, can still be analysed by giving
+`donors`, `hydrogens` and `acceptors` as selections, which pairs each hydrogen
+with a donor within 1.2 Å instead of by bonds.
+```
+
 ## From the command line
 
 ```bash

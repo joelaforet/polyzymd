@@ -138,7 +138,10 @@ A stored result is read back only when its record matches, so give every
 job the same analysis, `--set` settings, `--label` per condition,
 `--eq` and `--stride`. A task that fails leaves its replicate unmeasured,
 and the report job, which starts once every task has ended, measures it
-itself; check the array's logs for the failure.
+itself; check the array's logs for the failure. Each task loads its replicate
+as a single run would, so an analysis's own requirements hold for every task,
+such as the `<segment>_system.xml` that {doc}`hydrogen_bonds` needs beside
+each trajectory.
 
 ```{note}
 A `polyzymd analyze ... --submit` option that writes and submits these jobs
