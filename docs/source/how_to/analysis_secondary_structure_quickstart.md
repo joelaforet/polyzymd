@@ -29,11 +29,11 @@ Alternatively, prefix each command with `pixi run -e analysis`.
 
 ## What is measured
 
-On every production frame, `mdtraj.compute_dssp(simplified=False)` assigns
-each residue of the selection one of the eight DSSP classes of Kabsch and
-Sander (1983) from its backbone hydrogen bonds and geometry:
+On every production frame, `mdtraj.compute_dssp` assigns each residue of the
+selection a DSSP class of Kabsch and Sander (1983) from its backbone hydrogen
+bonds and geometry. The `scheme` setting picks one of MDTraj's two schemes:
 
-| Class | DSSP code | Group |
+| `scheme=full` class | DSSP code | `scheme=simplified` class (default) |
 |---|---|---|
 | `alpha_helix` | H | `helix` |
 | `3_10_helix` | G | `helix` |
@@ -43,13 +43,14 @@ Sander (1983) from its backbone hydrogen bonds and geometry:
 | `turn` | T | `coil` |
 | `bend` | S | `coil` |
 | `loop` | blank | `coil` |
-| `unassigned` | NA | none |
+| `unassigned` | NA | `unassigned` |
 
-The groups are the three classes of MDTraj's simplified DSSP. MDTraj gives
-`NA` to a residue it cannot assign, for example one missing a backbone atom;
-PolyzyMD counts those as `unassigned`, in no group, and warns. For each
-replicate, each residue's value of a class or group is the fraction of
-production frames it spends in it.
+`simplified` calls `mdtraj.compute_dssp(simplified=True)`, which joins the
+eight classes into helix, strand and coil as the table shows; `full` calls
+`simplified=False` and keeps the eight. MDTraj gives `NA` to a residue it cannot
+assign, for example one missing a backbone atom; PolyzyMD counts those as
+`unassigned` in either scheme and warns. For each replicate, each residue's
+value of a class is the fraction of production frames it spends in it.
 
 The selection must hold whole residues, because DSSP reads every backbone atom.
 Each chain of the topology stays its own chain, so DSSP never pairs residues of
@@ -64,30 +65,37 @@ polyzymd analyze secondary_structure -c noPoly/config.yaml -c SBMA50/config.yaml
 ```
 
 The first `-c` is the control. One pass over each replicate gives every class
-and group. By default the report shows `helix`: for each replicate, the
-fraction of residue-frames in the helix group, which is the mean over residues
-of each residue's helix fraction. The replicate values are summarised per
+of the scheme. By default the scheme is `simplified` and the report shows
+`helix`: for each replicate, the fraction of residue-frames in helix, which is
+the mean over residues of each residue's helix fraction. The replicate values are summarised per
 condition, and every other condition is compared with the control by Welch's t
 test with the Benjamini-Hochberg correction. Pick another result with `--run`:
 
 | `--run` | One value per replicate |
 |---|---|
-| `helix`, `strand`, `coil` (default `helix`) | Fraction of residue-frames in the group |
-| any class, such as `alpha_helix` or `unassigned` | Fraction of residue-frames in the class |
-| `<name>_residues` | Each residue's fraction of frames in the class or group, compared residue by residue |
+| a class of the scheme: `helix`, `strand`, `coil` or `unassigned` for `simplified` (default `helix`), or `alpha_helix` to `unassigned` for `full` (default `alpha_helix`) | Fraction of residue-frames in the class |
+| `<class>_residues` | Each residue's fraction of frames in the class, compared residue by residue |
 
 A per-residue comparison is corrected over every residue of every compared
 condition, and the text report gives, for each condition, how many residues
 are significantly lower and higher than in the control and lists them. Every
 per-residue row is kept in the JSON report.
 
-The one setting, passed with `--set`:
+Settings, passed with `--set`:
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `selection` | `protein` | Whole residues to assign |
+| `scheme` | `simplified` | `simplified` for helix, strand and coil, or `full` for the eight DSSP classes |
 
-For example, to compare the helix content of one domain, residue by residue:
+For example, to compare how much of each protein is 3-10 helix:
+
+```bash
+polyzymd analyze secondary_structure -c noPoly/config.yaml -c SBMA50/config.yaml \
+  --eq 200ns --set scheme=full --run 3_10_helix
+```
+
+Or to compare the helix content of one domain, residue by residue:
 
 ```bash
 polyzymd analyze secondary_structure -c noPoly/config.yaml -c SBMA50/config.yaml \
@@ -96,14 +104,16 @@ polyzymd analyze secondary_structure -c noPoly/config.yaml -c SBMA50/config.yaml
 
 Add `--stride 5` to assign every fifth production frame, `--format json` for
 the full report, `--replicates 1-3` to use only some replicates, and
-`--recompute` to ignore stored results. The selection is recorded under
-`provenance.settings` in the JSON report.
+`--recompute` to ignore stored results. The selection and scheme are recorded
+under `provenance.settings` in the JSON report, and the two schemes are stored
+separately.
 
 ```{note}
-The plugin used before this version reported only the three groups, counted
+The plugin used before this version used the simplified scheme only, counted
 unassigned residues as coil without a warning, merged every chain into one,
 and defaulted to `protein and chainid A`. Its helix, strand and coil fractions
-equal this version's for a single-chain protein with no unassigned residues.
+equal this version's simplified ones for a single-chain protein with no
+unassigned residues.
 ```
 
 ## Figures
@@ -113,17 +123,17 @@ equal this version's for a single-chain protein with no unassigned residues.
 
 | Figure | What it shows |
 |---|---|
-| `ss_content_bars` | The helix, strand and coil fractions of every condition, with every replicate value |
+| `ss_content_bars` | The fraction of every class of the scheme except unassigned, for every condition, with every replicate value |
 | `ss_<name>_comparison` | For a total: each condition's mean with its interval and every replicate value |
 | `ss_<name>_profile` | For `<name>_residues`: each residue's fraction per replicate and each condition's mean with its interval |
-| `ss_groups_<name>` | For `<name>_residues`: one panel per condition with each residue's helix, strand and coil fractions |
+| `ss_classes_<name>` | For `<name>_residues`: one panel per condition with each residue's fraction of every class of the scheme except unassigned |
 | `ss_<name>_difference` | For `<name>_residues` with several conditions: each condition minus the control at every residue, with the interval of the difference and the significant residues marked |
 
 ## From Python
 
 ```python
 import polyzymd as pz
-from polyzymd.analyses.functions import DSSP_PARTS, dssp_occupancy
+from polyzymd.analyses.functions import DSSP_SIMPLIFIED, dssp_occupancy
 
 study = pz.Study.from_configs(
     {"No polymer": "noPoly/config.yaml", "SBMA 50%": "SBMA50/config.yaml"},
@@ -134,7 +144,7 @@ rows = study.per_replicate(
     pz.select("protein"),
     unit=None,
     labels=lambda u: u.select_atoms("protein").residues.resids,
-    parts=DSSP_PARTS,
+    parts=list(DSSP_SIMPLIFIED),
     bounds=(0.0, 1.0),
 )
 helix = rows["helix"].over_labels("mean", "helix_fraction")
@@ -142,11 +152,13 @@ print(helix.compare(control="No polymer").to_agent_text())
 print(rows["helix"].compare(control="No polymer").to_agent_text())  # residue by residue
 ```
 
-`dssp_occupancy(atoms, frames)` returns one row per name in `DSSP_PARTS`, the
-eight classes and `unassigned` from `DSSP_CLASSES`, then the groups of
-`DSSP_GROUPS`, with one column per residue. `parts=` turns each row into its own
-result, and `over_labels("mean")` turns a residue profile into one value per
-replicate.
+`dssp_occupancy(atoms, frames)` returns one row per class of `DSSP_SIMPLIFIED`
+(helix, strand, coil and unassigned), with one column per residue.
+`dssp_occupancy(atoms, frames, simplified=False)` returns one row per class of
+`DSSP_CLASSES` instead; pass `simplified=False` and `parts=list(DSSP_CLASSES)`
+for the eight classes. `DSSP_GROUPS` lists the eight classes each simplified
+class joins. `parts=` turns each row into its own result, and
+`over_labels("mean")` turns a residue profile into one value per replicate.
 
 ## References
 
