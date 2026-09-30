@@ -2,8 +2,8 @@
 
 ## The real tree
 
-Verified against `src/polyzymd/analyses/` on 2026-09-29, after slice 7 of the
-v1.3 analysis refactor. Every file named here exists. If you add or delete a
+Verified against `src/polyzymd/analyses/` on 2026-09-30, after the
+hydrogen-bonds slice of the v1.3 analysis refactor. Every file named here exists. If you add or delete a
 module, update this list in the same commit.
 
 ```
@@ -11,12 +11,16 @@ src/polyzymd/analyses/
 ├── study.py             # Study, Condition, Replicate: replicates as MDAnalysis universes
 ├── timeseries.py        # Study.timeseries, Study.per_replicate, Timeseries, ReplicateValues
 ├── functions.py         # Shipped measurements: radius_of_gyration, rmsd, pair_distance,
-│                        # all_below, rmsf, rms_deviation, rms_decomposition, sasa,
-│                        # residue_sasa, dssp_occupancy
+│                        # all_below, native_contacts, rmsf, rms_deviation,
+│                        # rms_decomposition, sasa, residue_sasa, dssp_occupancy,
+│                        # residue_contacts, residue_occlusion, contact_events,
+│                        # restricted_mean_lifetime, contact_lifetimes, event_lifetimes,
+│                        # hbond_atoms, hydrogen_bonds, hbond_lifetimes,
+│                        # residue_hbond_occupancy, residue_pair_hbond_occupancy, hbond_count
 ├── reference.py         # pz.reference: external, frame, average and centroid references
 ├── figures.py           # Figures drawn from stored study results
 ├── protocols.py         # polyzymd analyze: FUNCTION_ANALYSES, ProtocolReport, plugin path
-├── base.py              # Public import surface for plugin authors
+├── base.py              # Plugin framework: public import surface for plugin authors
 ├── discovery.py         # pkgutil auto-discovery of plugins
 ├── orchestrator.py      # Plugin engine: compute, aggregate, compare, plot
 ├── stats.py             # default_scalar_comparison, format_scalar_comparison
@@ -30,11 +34,12 @@ src/polyzymd/analyses/
 │                        # inferential_statistics, loader, multi_run_formatting,
 │                        # paths, plotting, selections, statistics, topology,
 │                        # window, groupings/, selectors/
-└── hydrogen_bonds/      # __init__, _mda, _models, _plotters
 ```
 
-rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa,
-secondary_structure, native_contacts and contacts are not plugins. They are functions in
+There is no plugin package under `analyses/` any more.
+
+rg, rmsd, rmsf, rms_deviation, distances, sasa, secondary_structure,
+native_contacts, contacts and hydrogen_bonds are not plugins. They are functions in
 `functions.py` run through the study API, listed with their settings in
 `protocols.FUNCTION_ANALYSES`, and `polyzymd analyze <name>` runs them through
 `protocols._analyze_function`. `polyzymd analyze contacts` is dispatched by
@@ -42,16 +47,32 @@ secondary_structure, native_contacts and contacts are not plugins. They are func
 `method=occlusion`, the default, and `functions.residue_contacts` for
 `method=distance` give coverage, contact fractions and occluded area, and
 `functions.contact_lifetimes` gives `--run mean_lifetime`, `lifetime_events`
-and `censored_fraction`. A `plugins.<name>` or `plot_settings.<name>` block for
-one of them in `comparison.yaml` is ignored with a warning
-(`config.comparison.RETIRED_PLUGINS`), and `polyzymd compare run <name>` exits
-with the `polyzymd analyze` command. Only hydrogen_bonds is still a plugin; the
-plugin framework remains for it.
+and `censored_fraction`. `polyzymd analyze hydrogen_bonds` is dispatched by
+`protocols._analyze_hydrogen_bonds`: `functions.hydrogen_bonds` gives each
+summary's counts, `functions.hbond_lifetimes` its lifetimes,
+`functions.residue_hbond_occupancy` its `_residues` and
+`functions.residue_pair_hbond_occupancy` (with `labels="returned"`) its `_pairs`.
 
-There is no `_results.py`, `_cache.py`, `_paths.py` or `_plotting.py` in any
-plugin package. Result models live in `_models.py` (hydrogen bonds) or in the plugin
-`__init__.py`. Cache and path
-handling belong to the framework artifact layer, not to plugins.
+Retired names: a `plugins.<name>` or `plot_settings.<name>` block for any of
+them in `comparison.yaml` is ignored with a warning
+(`config.comparison.RETIRED_PLUGINS`, `RETIRED_PLUGIN_WARNING`) that names the
+command, the Python function, the analyze protocol page and the agent skill,
+and `polyzymd compare run <name>` exits with the `polyzymd analyze` command
+(`cli._compare_utils.analyze_command_for`). `catalytic_triad` is a routine on
+the study API (`docs/source/how_to/analysis_triad_quickstart.md`), not an
+analysis: `polyzymd analyze catalytic_triad` raises `ProtocolError`
+(`protocols._refuse_retired`) pointing to that page and to
+`polyzymd analyze distances --set pairs=...`. `polyzymd analyze -f
+comparison.yaml` raises `ProtocolError` with the equivalent `-c` command
+(`cli.analyze._refuse_comparison_file`). Warnings for retired things name the
+replacement, the docs page to read and what to point an agent at.
+
+No shipped analysis is a plugin any more. The plugin framework (`base.py`,
+`discovery.py`, `orchestrator.py`, `stats.py`, `mda/`, `_framework/`, the
+`polyzymd compare` commands, `polyzymd new-analysis` and
+`workflow/analysis_slurm.py`) stays until a later slice removes it; its tests
+register the toy plugin of `tests/analyses/test_protocols.py` (`_install_toy`).
+Do not add plugins.
 
 ## Adding a measurement
 
@@ -78,28 +99,15 @@ segment lineage, and builds the MDAnalysis universe.
 takes a `SimulationConfig`, instantiates the loader lazily, and adds input
 provenance (`UniverseProvenance`) to each load. Plugins and framework code use
 `UniverseProvider`. Nothing else should build a `Universe` directly, and no
-plugin should construct file paths by hand.
+code should construct file paths by hand.
 
-## Public import surface
+## Plugin framework (being removed)
 
-Import from `polyzymd.analyses.base`. It re-exports `Analysis`, the four
-lifecycle contexts, `MetricValue`, the comparison models, `PluginContractError`
-and `SlurmResourceHint`. Do not import `_framework/` modules from a plugin.
-
-## Adding a plugin (hydrogen_bonds only)
-
-1. Run `polyzymd new-analysis <name>` to scaffold the package and its tests, or
-   write the package by hand under `src/polyzymd/analyses/`.
-2. Define a `Settings` class as a Pydantic v2 `BaseModel`.
-3. Subclass `Analysis` and set `name` and `Settings` as `ClassVar`s.
-4. With `has_compute_stage=True`, implement `build_mda_jobs()` and, when the
-   plugin needs one, `build_mda_collector()`. Put `AnalysisBase` subclasses in
-   `_mda.py`.
-5. Set `has_compute_stage=False` for a compare-only plugin. Setting
-   `has_aggregate_stage=True` with `has_compute_stage=False` raises
-   `PluginContractError`.
-6. Implement `aggregate()` only when `has_aggregate_stage=True`.
-7. Discovery is automatic through `pkgutil`. There is no registry to edit.
+The rest of this file describes the plugin framework for the code that still
+uses it. Import from `polyzymd.analyses.base`; it re-exports `Analysis`, the
+four lifecycle contexts, `MetricValue`, the comparison models,
+`PluginContractError` and `SlurmResourceHint`. Discovery is automatic through
+`pkgutil`.
 
 ## Lifecycle hooks and contexts
 
@@ -122,10 +130,7 @@ against `None`. A hook that returns a type outside the contract raises
 
 The simple path implements `extract_metrics()` and lets `stats.py` run the
 t-tests, the ANOVA, the Benjamini-Hochberg correction and the ranking. The
-custom path overrides `compare()` and returns its own saveable model. The
-remaining plugin, hydrogen_bonds, overrides `compare()` to validate its
-aggregated results and then runs the default comparison through
-`super().compare()`.
+custom path overrides `compare()` and returns its own saveable model.
 
 ## Results and plotting
 
