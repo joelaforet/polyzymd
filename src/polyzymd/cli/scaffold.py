@@ -53,7 +53,9 @@ def validate_name(name: str, *, check_existing: bool = True) -> str | None:
         Proposed plugin name in snake_case.
     check_existing : bool, optional
         If True, also reject names that collide with already-registered
-        analysis plugins, by default True.
+        analysis plugins, by default True. Names of the analyses that
+        ``polyzymd analyze`` runs from functions, such as ``contacts``, are
+        rejected either way.
 
     Returns
     -------
@@ -68,6 +70,10 @@ def validate_name(name: str, *, check_existing: bool = True) -> str | None:
         return f"'{name}' is a Python keyword."
     if name in _RESERVED_NAMES:
         return f"'{name}' is reserved for framework infrastructure."
+    from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+
+    if name in FUNCTION_ANALYSES:
+        return f"'{name}' already runs as 'polyzymd analyze {name}'. Choose another name."
     if check_existing:
         try:
             from polyzymd.analyses.discovery import list_all_names

@@ -67,29 +67,14 @@ plugins:
   # Always use "protein and resid X" for protein residues, because residue
   # numbers restart per chain.
 
-  # Polymer-Protein Contact Analysis
-  # contacts:
-  #   polymer_selection: "chainID C"
-  #   protein_selection: "protein"
-  #   cutoff: 4.5
-  #   grouping: "aa_class"  # aa_class, secondary_structure, or none
-  #   compute_residence_times: true
-  #   # Custom protein groups (residue IDs from your enzyme):
-  #   # protein_groups:
-  #   #   catalytic_triad: [77, 133, 156]
-  #   #   lid_helix_5: [141, 142, 143, 144, 145]
-  #   #   lid_helix_10: [281, 282, 283, 284, 285]
-  #   #
-  #   # User-defined partitions for contact-fraction and residence-time plots
-  #   # --------------------------------------------------------------------
-  #   # Groups within a partition MUST be mutually exclusive (no overlapping
-  #   # residues). A rest group is automatically added if the groups do not
-  #   # cover all residues represented in the contact aggregate.
-  #   #
-  #   # protein_partitions:
-  #   #   lid_helices:          # partition name (becomes plot title)
-  #   #     - lid_helix_5       # must be defined in protein_groups above
-  #   #     - lid_helix_10
+  # Polymer-protein contacts are not configured here. Run
+  #   polyzymd analyze contacts -c A/config.yaml -c B/config.yaml \
+  #     --set polymer_selection='chainid C' --set protein_selection='chainid A'
+  # Pick the result with --run, for example coverage, mean_contact_fraction,
+  # contact_fraction_residues or mean_lifetime (how long contacts last). A
+  # residue is in contact when the polymer occludes its SASA; add
+  # --set method=distance to count a contact when a polymer atom is within
+  # --set cutoff=<Å> (default 4.0) of the residue instead.
 
   # Hydrogen-bond Analysis
   #
@@ -235,12 +220,3 @@ plot_settings:
   #   legend_loc: "center left"           # matplotlib legend loc string
   #   legend_bbox: [1.02, 0.5]            # bbox_to_anchor (outside right)
 
-  # Per-analysis plot customization (uncomment sections as needed):
-
-  # contacts:
-  #   generate_contact_fraction_profile: true
-  #   generate_residence_time_profile: true
-  #   generate_cf_by_aa_class_bars: true
-  #   generate_cf_by_partition_bars: true
-  #   generate_rt_by_aa_class_bars: true
-  #   generate_rt_by_partition_bars: true
