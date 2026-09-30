@@ -878,7 +878,7 @@ def _analyze_hydrogen_bonds(
     summaries = _hbond_summaries(settings)
     parts = list(functions.HBOND_PARTS)
     life = {"mean_lifetime": 0, "lifetime_events": 1, "censored_fraction": 2}
-    kinds = [*parts, *life, "residues"]
+    kinds = [*parts, *life, "residues", "pairs"]
     runs = [f"{name}_{kind}" for name in summaries for kind in kinds]
     run = run or runs[0]
     if run not in runs:
@@ -975,6 +975,19 @@ def _analyze_hydrogen_bonds(
             "lifetime_events": (None, (0.0, None)),
             "censored_fraction": (None, (0.0, 1.0)),
         }[part]
+    elif part == "pairs":
+        values = study.per_replicate(
+            functions.residue_pair_hbond_occupancy,
+            *arguments,
+            unit=None,
+            labels="returned",
+            missing=0.0,
+            name=f"residue_pair_hbond_occupancy_{summary}",
+            recompute=recompute,
+            output_dir=output_dir,
+            bounds=(0.0, 1.0),
+            **options,
+        )
     else:
         values = study.per_replicate(
             functions.residue_hbond_occupancy,
@@ -1012,9 +1025,14 @@ def _analyze_hydrogen_bonds(
     }
     if plots:
         folder = _figures_dir(output_dir, "hydrogen_bonds")
-        if part == "residues":
+        if part in ("residues", "pairs"):
             values.plot(
-                folder, f"hbonds_{run}_profile", f"H-bond occupancy, {summary}", None, [], "Residue"
+                folder,
+                f"hbonds_{run}_profile",
+                f"H-bond occupancy, {summary}",
+                None,
+                [],
+                "Residue" if part == "residues" else "Residue pair",
             )
             if len(study) > 1:
                 plot_differences(

@@ -1485,3 +1485,79 @@ def residue_hbond_occupancy(
             keep = np.array([owner in column for owner in owners], dtype=bool)
             occupied[rows[keep], [column[o] for o in owners[keep]]] = True
     return occupied.mean(axis=0)
+
+
+def _residue_names(residues: Any) -> dict[int, str]:
+    """Return each residue's label in :func:`residue_pair_hbond_occupancy`.
+
+    A standard amino acid, one with a maximum ASA, is labelled by its residue
+    ID, or ``chain:resid`` when IDs repeat among them; any other residue, such
+    as a monomer or a ligand, by its residue name.
+    """
+    from polyzymd.analyses.shared.aa_classification import get_max_asa
+
+    amino = [r for r in residues if get_max_asa(str(r.resname)) is not None]
+    ids = [int(r.resid) for r in amino]
+    by_chain = len(set(ids)) != len(ids)
+    names = {}
+    for residue in residues:
+        if get_max_asa(str(residue.resname)) is None:
+            names[residue.resindex] = str(residue.resname)
+        elif by_chain:
+            names[residue.resindex] = f"{residue.atoms[0].chainID}:{int(residue.resid)}"
+        else:
+            names[residue.resindex] = str(int(residue.resid))
+    return names
+
+
+def residue_pair_hbond_occupancy(
+    group_a: Any,
+    group_b: Any = None,
+    frames: Any = None,
+    d_a_cutoff: float = HBOND_DISTANCE,
+    d_h_a_angle_cutoff: float = HBOND_ANGLE,
+    donors: Any = None,
+    hydrogens: Any = None,
+    acceptors: Any = None,
+) -> tuple[list, Any]:
+    """Return every residue pair joined by a hydrogen bond and the fraction of ``frames`` it is.
+
+    The bonds are those of :func:`hydrogen_bonds`. A standard amino acid is
+    named by its residue ID (``chain:resid`` if IDs repeat), and any other
+    residue by its residue name, so that ``149-SBM`` is residue 149 with any
+    SBM residue and pairs can be compared between polymer compositions. With
+    ``group_b`` a label is ``a-b``, the ``group_a`` residue first; without
+    it, the two names in increasing order. A pair counts on a frame when at least one hydrogen
+    bond joins it. Only pairs that form on some frame are returned; use
+    ``labels="returned"`` and ``missing=0.0`` with
+    :meth:`~polyzymd.analyses.study.Study.per_replicate`.
+
+    Returns
+    -------
+    tuple
+        The pair labels, and the fraction of frames of each.
+    """
+    import numpy as np
+
+    events, frames = _hbond_events(
+        group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
+    )
+    if len(events) == 0:
+        return [], np.zeros(0)
+    universe = group_a.universe
+    resindex = universe.atoms.resindices
+    names_a = _residue_names(group_a.residues)
+    names_b = names_a if group_b is None else _residue_names(group_b.residues)
+    position = {frame: i for i, frame in enumerate(frames)}
+    seen: dict[str, set[int]] = {}
+    for frame, donor, acceptor in zip(events[:, 0], events[:, 1], events[:, 3]):
+        first, second = resindex[int(donor)], resindex[int(acceptor)]
+        if group_b is None:
+            pair = sorted((names_a[first], names_a[second]), key=lambda x: (len(x), x))
+        elif first in names_a and second in names_b:
+            pair = [names_a[first], names_b[second]]
+        else:
+            pair = [names_a[second], names_b[first]]
+        seen.setdefault("-".join(pair), set()).add(position[int(frame)])
+    labels = sorted(seen)
+    return labels, np.array([len(seen[label]) / len(frames) for label in labels])
