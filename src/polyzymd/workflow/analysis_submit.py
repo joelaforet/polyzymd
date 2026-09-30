@@ -160,7 +160,7 @@ def write_submission(
     task_file.write_text(
         "".join(f"{config}\t{label}\t{replicate}\n" for config, label, replicate in tasks)
     )
-    header = ["#!/bin/bash", *resources.directives(), f"#SBATCH --chdir={working_dir}"]
+    header = ["#!/bin/bash", *resources.directives(), f'#SBATCH --chdir="{working_dir}"']
     setup = ["set -euo pipefail", *environment]
     options = " ".join(shlex.quote(option) for option in task_options)
     array = folder / "replicates.sbatch"
@@ -170,7 +170,7 @@ def write_submission(
                 *header,
                 f"#SBATCH --job-name={name}-replicates",
                 f"#SBATCH --array=0-{len(tasks) - 1}",
-                f"#SBATCH --output={folder}/logs/replicate.%A_%a.out",
+                f'#SBATCH --output="{folder}/logs/replicate.%A_%a.out"',
                 "# One condition and replicate per task: measure it and store its result.",
                 *setup,
                 f"IFS=$'\\t' read -r config label replicate < <(sed -n \"$((SLURM_ARRAY_TASK_ID + 1))p\" {shlex.quote(str(task_file))})",
@@ -192,7 +192,7 @@ def write_submission(
             [
                 *header,
                 f"#SBATCH --job-name={name}-report",
-                f"#SBATCH --output={folder}/logs/report.%j.out",
+                f'#SBATCH --output="{folder}/logs/report.%j.out"',
                 "# Every condition: reads the stored results, measures any replicate a",
                 "# task left unmeasured, and writes the report and figures.",
                 *setup,

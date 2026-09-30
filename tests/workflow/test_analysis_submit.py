@@ -226,10 +226,10 @@ def test_the_array_script(tmp_path: Path) -> None:
     assert lines[0] == "#!/bin/bash"
     assert lines[1:4] == EXPECTED_ACCOUNT_LINES["blanca-shirts"]
     assert lines[4:8] == DEFAULT_RESOURCE_LINES
-    assert f"#SBATCH --chdir={tmp_path}" in lines
+    assert f'#SBATCH --chdir="{tmp_path}"' in lines
     assert "#SBATCH --job-name=rg-replicates" in lines
     assert "#SBATCH --array=0-2" in lines
-    assert f"#SBATCH --output={folder}/logs/replicate.%A_%a.out" in lines
+    assert f'#SBATCH --output="{folder}/logs/replicate.%A_%a.out"' in lines
     setup = lines.index("set -euo pipefail")
     assert lines[setup + 1 : setup + 3] == ["export PYTHONPATH=/x", "export MPLBACKEND=Agg"]
     assert lines[setup + 3] == (
@@ -250,9 +250,9 @@ def test_the_report_script(tmp_path: Path) -> None:
     lines = submission.report.read_text().splitlines()
     assert lines[0] == "#!/bin/bash"
     assert lines[1:8] == [*EXPECTED_ACCOUNT_LINES["blanca-shirts"], *DEFAULT_RESOURCE_LINES]
-    assert f"#SBATCH --chdir={tmp_path}" in lines
+    assert f'#SBATCH --chdir="{tmp_path}"' in lines
     assert "#SBATCH --job-name=rg-report" in lines
-    assert f"#SBATCH --output={folder}/logs/report.%j.out" in lines
+    assert f'#SBATCH --output="{folder}/logs/report.%j.out"' in lines
     assert not [line for line in lines if "--array" in line]
     setup = lines.index("set -euo pipefail")
     assert lines[setup + 1 : setup + 3] == ["export PYTHONPATH=/x", "export MPLBACKEND=Agg"]
@@ -324,11 +324,6 @@ def test_the_array_script_reads_each_task_row_in_bash(tmp_path: Path) -> None:
         assert words[8:13] == ["--eq", "10ns", "--set", "selection=name CA", "--no-plots"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="write_submission writes --chdir and --output unquoted, and sbatch ends an "
-    "#SBATCH value at the first space, so a directory with a space breaks both jobs",
-)
 def test_a_directory_with_a_space_is_quoted_or_refused(tmp_path: Path) -> None:
     """``#SBATCH --chdir=/a b`` gives sbatch ``--chdir=/a``; the value needs quotes or a refusal."""
     base = tmp_path / "my runs"
@@ -693,7 +688,7 @@ def test_the_scripts_run_in_the_submitting_directory(configs, tmp_path, monkeypa
     result = _dry_run(configs, tmp_path)
     assert result.exit_code == 0, result.output
     folder = _only_folder(tmp_path)
-    assert f"#SBATCH --chdir={here.resolve()}" in (folder / "report.sbatch").read_text()
+    assert f'#SBATCH --chdir="{here.resolve()}"' in (folder / "report.sbatch").read_text()
 
 
 def test_an_output_dir_defaults_to_the_current_directory(configs, tmp_path, monkeypatch) -> None:
