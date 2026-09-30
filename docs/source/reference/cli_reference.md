@@ -989,8 +989,8 @@ polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml \
 polyzymd analyze sasa -c A/config.yaml -c B/config.yaml \
   --format json -o sasa_report.json
 
-# Contact fraction of every residue, compared residue by residue
-polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --run contact_fraction_residues
+# Fraction of frames the polymer buries each residue, compared residue by residue
+polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --stride 10 --run contact_fraction_residues
 
 # An existing comparison project, for a comparison plugin
 polyzymd analyze hydrogen_bonds -f comparison.yaml

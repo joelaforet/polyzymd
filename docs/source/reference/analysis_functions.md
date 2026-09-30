@@ -33,7 +33,8 @@ giving one value per residue in the order of `atoms.residues`.
 | `rms_decomposition` | `atoms`, `fit`, `reference`, `frames` | six rows of one value per residue | Rows `RMS_PARTS = ("rms_deviation", "rmsf", "offset")`, the offset being the distance of each atom's mean position from its reference position, in Å; then rows `MS_PARTS = ("ms_deviation", "msf", "ms_offset")`, the means over each residue's atoms of the squared per-atom values, in Å². `ms_deviation = msf + ms_offset` for every residue | `polyzymd analyze rmsf`, `polyzymd analyze rms_deviation` |
 | `residue_sasa` | `target`, `context` and `frames`, as `sasa` takes them, and the production frames | one value per target residue, Å² | Each frame's per-atom SASA as in `sasa`, one frame per MDTraj call, summed over each residue's target atoms and averaged over the frames | `polyzymd analyze sasa --run <context>_residues` |
 | `dssp_occupancy` | `atoms`, whole residues, the production frames and `simplified` (default true) | one row per class, one value per residue, fraction of frames | `mdtraj.compute_dssp(simplified=simplified)` on every frame, 200 frames per call; the rows are helix, strand, coil and unassigned of `DSSP_SIMPLIFIED`, or with `simplified=False` the eight classes and unassigned of `DSSP_CLASSES`; one MDTraj chain per chain ID or segment | `polyzymd analyze secondary_structure` |
-| `residue_contacts` | `protein` and `polymer`, `AtomGroup`s; the production frames; `cutoff` (4.5 Å), `types` (none) and `pbc` (true) | one row for the polymer, then one row per residue name in `types`, one value per protein residue, fraction of frames | On every frame, MDAnalysis `lib.distances.capped_distance` between the polymer and protein atoms, with the minimum image of the frame's box when `pbc` is true; a residue is in contact when any of its atoms is within `cutoff` of a polymer atom, or for a row of `types`, of a polymer atom of that residue name | `polyzymd analyze contacts` |
+| `residue_contacts` | `protein` and `polymer`, `AtomGroup`s; the production frames; `cutoff` (4.0 Å), `types` (none) and `pbc` (true) | one row for the polymer, then one row per residue name in `types`, one value per protein residue, fraction of frames | On every frame, MDAnalysis `lib.distances.capped_distance` between the given polymer and protein atoms, with the minimum image of the frame's box when `pbc` is true; a residue is in contact when any of its atoms is within `cutoff` of a polymer atom, or for a row of `types`, of a polymer atom of that residue name | `polyzymd analyze contacts --set method=distance` |
+| `residue_occlusion` | `protein` and `occluder`, `AtomGroup`s; the production frames; `threshold` (0.2), `types` (none), `max_asa` (`theoretical`), `pbc` (true), `probe_radius_nm` and `n_sphere_points` | rows `OCCLUSION_PARTS = ("contact_fraction", "exposed_fraction", "occluded_area", "exposed_area")`, then one contact-fraction row per residue name in `types`; one value per protein residue with a maximum ASA | Each residue's SASA with the protein alone and with the protein and the occluder, as `residue_sasa` computes it, one frame per MDTraj call, after each occluder molecule (bonded fragment) is moved whole to its periodic image nearest the protein when `pbc` is true; exposed when the SASA alone is at least `threshold` times the residue's maximum ASA of Tien et al. (2013), in contact when exposed and below that with the occluder; `occluded_area` is the mean of `max(0, alone - with)` in Å², `exposed_area` the mean SASA alone; a type row counts contact with only that residue name's occluder atoms present | `polyzymd analyze contacts` |
 
 The comparison with `gmx rmsf` on real trajectories, and the script that reruns
 it, are in {doc}`../explanation/analysis_rmsf_verification`.
@@ -98,20 +99,28 @@ and `--run <class>_residues` compares every residue. The default is the
 scheme's first class, `helix` or `alpha_helix`. A warning names the replicates
 with unassigned residues. See {doc}`../how_to/analysis_secondary_structure_quickstart`.
 
-`polyzymd analyze contacts` runs `residue_contacts` once per replicate between
-`--set protein_selection=...` (default `chainid A`) and `polymer_selection`
-(default `chainid C`, narrowed to the residue names of `polymer_types` when
-set), with `cutoff` and `use_pbc`, and a row for every polymer residue name of
-the control's first replicate. `coverage`, the default, is the fraction of
-protein residues with a contact fraction above zero; `mean_contact_fraction`,
-`<type>_contact_fraction`, `<class>_contact_fraction` for each amino-acid class
-of `ProteinAAClassification` and `<region>_contact_fraction` for each entry of
-`--set regions='{name: selection}'` are means of contact fractions over those
-residues; `contact_fraction_residues` and `<type>_contact_fraction_residues`
-compare every residue. The polymer selection, the types found and the residues
-of each class and region are recorded under `provenance.settings`. Residence
-times still run through `polyzymd compare run contacts`. See
-{doc}`../how_to/analysis_contacts_quickstart`.
+`polyzymd analyze contacts` runs, once per replicate between `--set
+protein_selection=...` (default `chainid A`) and `polymer_selection` (default
+`chainid C`, narrowed to the residue names of `polymer_types` when set),
+`residue_occlusion` with `threshold`, `max_asa`, `probe_radius_nm` and
+`n_sphere_points` for `method=occlusion` (default), or `residue_contacts` with
+`cutoff` for `method=distance`, on heavy atoms only when `heavy_atoms` is true
+(default). `use_pbc` sets `pbc`, and every polymer residue name of the
+control's first replicate gets a row. `coverage`, the default, is the fraction
+of measured residues with a contact fraction above zero;
+`mean_contact_fraction`, `<type>_contact_fraction`, `<class>_contact_fraction`
+for each amino-acid class of `ProteinAAClassification` and
+`<region>_contact_fraction` for each entry of `--set regions='{name:
+selection}'` are means of contact fractions over those residues;
+`contact_fraction_residues` and `<type>_contact_fraction_residues` compare
+every residue. For occlusion, `occluded_area` is the sum over residues of the
+mean occluded area, `occlusion_fraction` is the summed occluded area over the
+summed SASA alone, and `occluded_area_residues` compares every residue. The
+selections, the types found, the residues without a maximum ASA and the
+residues of each class and region are recorded under `provenance.settings`.
+Residence times still run through `polyzymd compare run contacts`. See
+{doc}`../how_to/analysis_contacts_quickstart` and
+{doc}`../explanation/analysis_contacts_verification`.
 
 ## Figures
 

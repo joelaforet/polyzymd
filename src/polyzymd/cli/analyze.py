@@ -209,7 +209,8 @@ def analyze_command(
         polyzymd analyze rms_deviation -c A/config.yaml --set reference_file=crystal.pdb
         polyzymd analyze sasa -c A/config.yaml --run isolated_residues
         polyzymd analyze secondary_structure -c A/config.yaml -c B/config.yaml --run helix_residues
-        polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --run contact_fraction_residues
+        polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --stride 10 --run contact_fraction_residues
+        polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --set method=distance
         polyzymd analyze hydrogen_bonds -f comparison.yaml --format json -o hbonds.json
     """
     warn_if_wrong_pixi_env("analyze", ANALYSIS_PIXI_ENVS)

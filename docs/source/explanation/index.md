@@ -101,5 +101,6 @@ RMSF analysis: statistical best practices <analysis_rmsf_best_practices>
 How RMSF reference selection changes interpretation <analysis_reference_selection>
 RMSF implementation verification <analysis_rmsf_verification>
 SASA implementation verification <analysis_sasa_verification>
+Contacts implementation verification <analysis_contacts_verification>
 Catalytic triad analysis: interpretation and best practices <analysis_triad_best_practices>
 ```
