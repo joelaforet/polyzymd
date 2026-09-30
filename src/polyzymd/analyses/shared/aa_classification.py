@@ -35,6 +35,24 @@ CANONICAL_AA_CLASS_ORDER: Final[list[str]] = [
 ]
 
 
+#: Residue names of protonation states and disulfide-bonded cysteine, mapped to
+#: the standard residue name.
+PROTONATION_VARIANTS: Final[dict[str, str]] = {
+    "HIE": "HIS",
+    "HID": "HIS",
+    "HIP": "HIS",
+    "HSE": "HIS",
+    "HSD": "HIS",
+    "HSP": "HIS",
+    "CYSH": "CYS",
+    "CYX": "CYS",
+    "CYM": "CYS",
+    "ASH": "ASP",
+    "GLH": "GLU",
+    "LYN": "LYS",
+}
+
+
 class AAClass(str, Enum):
     """Standard amino acid classifications."""
 
@@ -50,9 +68,34 @@ class AAClass(str, Enum):
 # Maximum Accessible Surface Area (maxASA)
 # =============================================================================
 
-# Tien et al. 2013 empirical maxASA values (Angstrom^2)
-# These represent the maximum solvent-accessible surface area
-# for each amino acid type in extended tripeptide conformations.
+# Tien et al. 2013 theoretical maxASA values (Angstrom^2), Table 1 column 1:
+# the largest ASA of the residue X in a Gly-X-Gly tripeptide over the allowed
+# backbone conformations. The authors recommend these for normalizing ASA.
+THEORETICAL_MAX_ASA_TABLE: Final[dict[str, float]] = {
+    "ALA": 129.0,
+    "ARG": 274.0,
+    "ASN": 195.0,
+    "ASP": 193.0,
+    "CYS": 167.0,
+    "GLU": 223.0,
+    "GLN": 225.0,
+    "GLY": 104.0,
+    "HIS": 224.0,
+    "ILE": 197.0,
+    "LEU": 201.0,
+    "LYS": 236.0,
+    "MET": 224.0,
+    "PHE": 240.0,
+    "PRO": 159.0,
+    "SER": 155.0,
+    "THR": 172.0,
+    "TRP": 285.0,
+    "TYR": 263.0,
+    "VAL": 174.0,
+}
+
+# Tien et al. 2013 empirical maxASA values (Angstrom^2), Table 1 column 2:
+# the largest ASA of each residue type observed in a set of protein structures.
 MAX_ASA_TABLE: Final[dict[str, float]] = {
     "ALA": 121.0,
     "ARG": 265.0,
@@ -167,49 +210,42 @@ def get_aa_class(resname: str) -> str:
     >>> get_aa_class("UNK")
     'unknown'
     """
-    # Handle common protonation state variants
-    variants = {
-        "HIE": "HIS",
-        "HID": "HIS",
-        "HIP": "HIS",
-        "HSE": "HIS",
-        "HSD": "HIS",
-        "HSP": "HIS",
-        "CYSH": "CYS",
-        "CYX": "CYS",
-        "ASH": "ASP",
-        "GLH": "GLU",
-        "LYN": "LYS",
-    }
     normalized = resname.upper().strip()
-    normalized = variants.get(normalized, normalized)
+    normalized = PROTONATION_VARIANTS.get(normalized, normalized)
 
     return AA_CLASSIFICATION_TABLE.get(normalized, "unknown")
 
 
-def get_max_asa(resname: str) -> float | None:
-    """Get maximum accessible surface area for a residue name.
+def get_max_asa(resname: str, table: str = "theoretical") -> float | None:
+    """Return the maximum accessible surface area of a residue name, in Å².
 
     Parameters
     ----------
     resname : str
-        3-letter amino acid code (case-insensitive)
+        3-letter amino acid code, case-insensitive. Protonation states such as
+        ``HID`` or ``ASH`` and ``CYX`` take the value of the standard residue.
+    table : {"theoretical", "empirical"}
+        Column of Table 1 of Tien et al. 2013: ``theoretical`` (default, which
+        the authors recommend for normalizing ASA) or ``empirical``.
 
     Returns
     -------
     float or None
-        Maximum ASA in Angstrom^2, or None if residue not in table
+        Maximum ASA in Å², or None if the residue is not in the table.
 
     Examples
     --------
     >>> get_max_asa("ALA")
-    121.0
-    >>> get_max_asa("TRP")
-    264.0
+    129.0
+    >>> get_max_asa("HID", table="empirical")
+    216.0
     >>> get_max_asa("UNK")  # Returns None for unknown residues
     """
+    tables = {"theoretical": THEORETICAL_MAX_ASA_TABLE, "empirical": MAX_ASA_TABLE}
+    if table not in tables:
+        raise ValueError(f"table must be 'theoretical' or 'empirical', got {table!r}")
     normalized = resname.upper().strip()
-    return MAX_ASA_TABLE.get(normalized)
+    return tables[table].get(PROTONATION_VARIANTS.get(normalized, normalized))
 
 
 def get_residues_for_class(aa_class: str) -> list[str]:

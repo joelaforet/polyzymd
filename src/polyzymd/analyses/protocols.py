@@ -104,12 +104,18 @@ FUNCTION_ANALYSES = {
     },
     "secondary_structure": {"selection": "protein", "scheme": "simplified"},
     "contacts": {
+        "method": "occlusion",
         "polymer_selection": "chainid C",
         "protein_selection": "chainid A",
-        "cutoff": 4.5,
         "polymer_types": None,
         "use_pbc": True,
         "regions": {},
+        "cutoff": 4.0,
+        "heavy_atoms": True,
+        "threshold": 0.2,
+        "max_asa": "theoretical",
+        "probe_radius_nm": 0.14,
+        "n_sphere_points": 960,
     },
     "distances": {"pairs": None, "threshold": 3.5, "use_pbc": True},
     "catalytic_triad": {"pairs": None, "threshold": 3.5, "use_pbc": True},
@@ -965,6 +971,13 @@ def _analyze_secondary_structure(
     )
 
 
+#: Settings of polyzymd analyze contacts that only one method reads.
+CONTACT_METHOD_SETTINGS = {
+    "distance": ("cutoff", "heavy_atoms"),
+    "occlusion": ("threshold", "max_asa", "probe_radius_nm", "n_sphere_points"),
+}
+
+
 def _analyze_contacts(
     study: Any,
     settings: dict | None,
@@ -975,24 +988,42 @@ def _analyze_contacts(
 ) -> ProtocolReport:
     """Measure each protein residue's contact with the polymer and report one result.
 
-    :func:`~polyzymd.analyses.functions.residue_contacts` gives, in one pass
-    per replicate, each residue of ``protein_selection`` its fraction of
-    production frames with any atom of ``polymer_selection`` (narrowed to the
-    residue names in ``polymer_types`` when given) within ``cutoff`` Å, and
-    the same per polymer residue name found in the selection. Results:
+    ``method`` picks what contact means on one frame:
+
+    - ``occlusion`` (default):
+      :func:`~polyzymd.analyses.functions.residue_occlusion` computes each
+      residue's SASA with the protein alone and with the polymer. A residue is
+      in contact when it is exposed without the polymer (SASA at least
+      ``threshold`` times its maximum ASA from Tien et al. 2013, column
+      ``max_asa``) and below that with it. Residues without a maximum ASA,
+      such as terminal caps, are not measured, and a warning names them.
+    - ``distance``: :func:`~polyzymd.analyses.functions.residue_contacts`
+      counts a contact when any polymer atom is within ``cutoff`` Å of the
+      residue, comparing heavy atoms only when ``heavy_atoms`` is true.
+
+    ``polymer_selection`` is narrowed to the residue names in
+    ``polymer_types`` when given, and ``use_pbc`` uses the frame's box: the
+    minimum image for ``distance``, and for ``occlusion`` each polymer
+    molecule moved whole to its image nearest the protein. Results:
 
     - ``coverage``, the default: the fraction of residues in contact on at
       least one frame;
-    - ``mean_contact_fraction``: the mean over residues of the contact fraction;
+    - ``mean_contact_fraction``: the mean over residues of the fraction of
+      frames in contact;
     - ``contact_fraction_residues``: each residue's contact fraction, compared
       residue by residue;
     - ``<type>_contact_fraction`` and ``<type>_contact_fraction_residues`` for
-      each polymer residue name, such as one monomer type;
+      each polymer residue name, such as one monomer type; for ``occlusion``,
+      a contact with only that type's atoms present;
     - ``<class>_contact_fraction`` for each amino-acid class of
       :class:`~polyzymd.analyses.shared.groupings.base.ProteinAAClassification`
       present, and ``<region>_contact_fraction`` for each entry
       ``region: selection`` of ``regions``: the mean contact fraction of those
-      residues.
+      residues;
+    - for ``occlusion`` only, ``occluded_area``: the SASA in Å² the polymer
+      removes from the measured residues per frame, ``occlusion_fraction``:
+      that area over their SASA with the protein alone, and
+      ``occluded_area_residues``: each residue's mean occluded area.
 
     With ``plots``, ``contacts_class_bars`` groups the classes, a one-value
     result draws ``contacts_<run>_comparison``, and a residue result
@@ -1003,16 +1034,40 @@ def _analyze_contacts(
 
     from polyzymd.analyses import functions
     from polyzymd.analyses.figures import plot_differences, plot_values
+    from polyzymd.analyses.shared.aa_classification import get_max_asa
     from polyzymd.analyses.shared.groupings.base import ProteinAAClassification
-    from polyzymd.analyses.timeseries import select
+    from polyzymd.analyses.timeseries import ReplicateValues, select
 
-    settings = {**FUNCTION_ANALYSES["contacts"], **(settings or {})}
+    given = dict(settings or {})
+    settings = {**FUNCTION_ANALYSES["contacts"], **given}
+    method = settings["method"]
+    if method not in CONTACT_METHOD_SETTINGS:
+        raise ProtocolError(
+            f"contacts: method must be 'occlusion' or 'distance', got {method!r}.",
+            hint="Pass --set method=occlusion or --set method=distance.",
+        )
+    other = next(name for name in CONTACT_METHOD_SETTINGS if name != method)
+    misplaced = sorted(set(given) & set(CONTACT_METHOD_SETTINGS[other]))
+    if misplaced:
+        raise ProtocolError(
+            f"contacts: {', '.join(misplaced)} only apply to method={other}, and method is "
+            f"{method}.",
+            hint=f"Drop {', '.join(misplaced)}, or pass --set method={other}.",
+        )
+    if method == "occlusion" and settings["max_asa"] not in ("theoretical", "empirical"):
+        raise ProtocolError(
+            f"contacts: max_asa must be 'theoretical' or 'empirical', got {settings['max_asa']!r}.",
+            hint="Pass --set max_asa=theoretical, the values Tien et al. 2013 recommend.",
+        )
     protein = str(settings["protein_selection"])
     polymer = str(settings["polymer_selection"])
     types_filter = settings["polymer_types"]
     if types_filter:
         names = [types_filter] if isinstance(types_filter, str) else list(types_filter)
         polymer = f"({polymer}) and (resname {' '.join(str(name) for name in names)})"
+    if method == "distance" and settings["heavy_atoms"]:
+        protein = f"({protein}) and not element H"
+        polymer = f"({polymer}) and not element H"
     regions = settings["regions"] or {}
     first = next(iter(study)).replicates[0].universe()
     protein_atoms = first.select_atoms(protein)
@@ -1024,40 +1079,71 @@ def _analyze_contacts(
             hint="Choose selections that pick atoms, such as 'protein' and 'resname SBM EGM'.",
         )
     types = sorted({str(name) for name in polymer_atoms.resnames})
+
+    def measured(residues: Any) -> list:
+        if method == "distance":
+            return list(residues)
+        return [r for r in residues if get_max_asa(str(r.resname), settings["max_asa"]) is not None]
+
+    kept_residues = set(measured(protein_atoms.residues))
+    unmeasured = [f"{r.resname}{r.resid}" for r in protein_atoms.residues if r not in kept_residues]
     grouping = ProteinAAClassification()
     by_class: dict[str, list[int]] = {}
-    for residue in protein_atoms.residues:
+    for residue in measured(protein_atoms.residues):
         by_class.setdefault(grouping.classify(str(residue.resname)), []).append(int(residue.resid))
     classes = [name for name in grouping.available_groups if name in by_class]
-    reserved = {"coverage", "mean", "contact", "classes", *types, *classes}
+    reserved = {"coverage", "mean", "contact", "classes", "occluded", "occlusion", *types, *classes}
     if not isinstance(regions, dict) or reserved & set(regions):
         raise ProtocolError(
             f"contacts: regions must map names other than {sorted(reserved)} to selections, "
             f"got {regions!r}.",
             hint="Pass --set regions='{lid: resid 70-90}'.",
         )
+    kept = {int(r.resid) for r in kept_residues}
     region_ids = {
-        name: _residue_ids(study, f"({protein}) and ({selection})")
+        name: [i for i in _residue_ids(study, f"({protein}) and ({selection})") if i in kept]
         for name, selection in regions.items()
     }
-    parts = ["contact_fraction", *(f"{name}_contact_fraction" for name in types)]
+    empty = [name for name, ids in region_ids.items() if not ids]
+    if empty:
+        raise ProtocolError(
+            f"contacts: regions {empty} have no measured residue.",
+            hint="Choose regions with standard amino acids; residues without a maximum ASA "
+            "are not measured by method=occlusion.",
+        )
+    type_parts = [f"{name}_contact_fraction" for name in types]
     # Only non-default options, so a plain Python call reuses the stored records.
     options: dict[str, Any] = {"types": types}
-    if float(settings["cutoff"]) != functions.CONTACT_CUTOFF:
-        options["cutoff"] = float(settings["cutoff"])
     if not settings["use_pbc"]:
         options["pbc"] = False
+    if method == "distance":
+        function, name, parts = functions.residue_contacts, "residue_contacts", ["contact_fraction"]
+        if float(settings["cutoff"]) != functions.CONTACT_CUTOFF:
+            options["cutoff"] = float(settings["cutoff"])
+    else:
+        function, name, parts = (
+            functions.residue_occlusion,
+            "residue_occlusion",
+            list(functions.OCCLUSION_PARTS),
+        )
+        defaults = {
+            "threshold": functions.OCCLUSION_THRESHOLD,
+            "max_asa": "theoretical",
+            "probe_radius_nm": functions.SASA_PROBE_RADIUS_NM,
+            "n_sphere_points": functions.SASA_SPHERE_POINTS,
+        }
+        options |= {key: settings[key] for key, value in defaults.items() if settings[key] != value}
     rows = study.per_replicate(
-        functions.residue_contacts,
+        function,
         select(protein),
         select(polymer),
         unit=None,
-        labels=lambda u: u.select_atoms(protein).residues.resids,
-        name="residue_contacts",
+        labels=lambda u: [int(r.resid) for r in measured(u.select_atoms(protein).residues)],
+        name=name,
         recompute=recompute,
         output_dir=output_dir,
         bounds=(0.0, 1.0),
-        parts=parts,
+        parts=[*parts, *type_parts],
         **options,
     )
     profile = rows["contact_fraction"]
@@ -1088,6 +1174,27 @@ def _analyze_contacts(
     residue_runs = {"contact_fraction_residues": profile} | {
         f"{name}_contact_fraction_residues": rows[f"{name}_contact_fraction"] for name in types
     }
+    if method == "occlusion":
+        area = rows["occluded_area"]
+        exposed = rows["exposed_area"]
+        area.unit, area.bounds = "A^2", (0.0, None)
+        totals["occluded_area"] = area.over_labels(lambda v: float(np.sum(v)), "occluded_area")
+        totals["occluded_area"].unit, totals["occluded_area"].bounds = "A^2", (0.0, None)
+        ratio = {}
+        for label, table in area.rows.items():
+            alone = {row[0]: float(np.sum(row[1])) for row in exposed.rows[label]}
+            ratio[label] = [
+                (
+                    row[0],
+                    float(np.sum(row[1])) / alone[row[0]] if alone[row[0]] > 0 else 0.0,
+                    *row[2:],
+                )
+                for row in table
+            ]
+        totals["occlusion_fraction"] = ReplicateValues(
+            area.source, "occlusion_fraction", None, True, ratio
+        )
+        residue_runs["occluded_area_residues"] = area
     runs = [*totals, *residue_runs]
     run = run or "coverage"
     if run not in runs:
@@ -1096,10 +1203,22 @@ def _analyze_contacts(
         )
     values = residue_runs[run] if run in residue_runs else totals[run]
     report = values.compare() if len(study) > 1 else values.summary()
+    if unmeasured:
+        report.warnings.append(
+            f"contacts: {len(unmeasured)} residues of the protein selection have no maximum "
+            f"ASA and are not measured by method=occlusion: {', '.join(unmeasured)}. They "
+            "still cover their neighbours."
+        )
     report.provenance.settings = {
-        **settings,
+        **{
+            key: value
+            for key, value in settings.items()
+            if key not in CONTACT_METHOD_SETTINGS[other]
+        },
+        "protein_selection": protein,
         "polymer_selection": polymer,
         "polymer_types_found": types,
+        "unmeasured_residues": unmeasured,
         "residues": {"classes": by_class, **region_ids},
     }
     if plots:

@@ -5,7 +5,7 @@ one frame and return one number, so they run through
 :meth:`polyzymd.analyses.study.Study.timeseries` like any function you write.
 The per-replicate functions (:func:`rmsf`, :func:`rms_deviation`,
 :func:`rms_decomposition`, :func:`residue_sasa`, :func:`dssp_occupancy` and
-:func:`residue_contacts`) also take the production
+:func:`residue_contacts` and :func:`residue_occlusion`) also take the production
 frame indices and return one value per residue, and run through
 :meth:`polyzymd.analyses.study.Study.per_replicate`.
 """
@@ -552,7 +552,8 @@ def dssp_occupancy(atoms: Any, frames: Any, simplified: bool = True, chunk: int 
 
 
 #: Cutoff in Å within which a protein residue and a polymer are in contact.
-CONTACT_CUTOFF = 4.5
+#: Distance in Å within which :func:`residue_contacts` counts a contact.
+CONTACT_CUTOFF = 4.0
 
 
 def residue_contacts(
@@ -575,6 +576,9 @@ def residue_contacts(
     residue name, such as one monomer type. The type rows do not sum to the
     first, since a residue can touch several types on one frame. Columns
     follow ``protein.residues``.
+
+    The atoms compared are the atoms given; select heavy atoms, such as
+    ``chainid A and not element H``, to leave hydrogens out.
 
     Returns
     -------
@@ -604,3 +608,138 @@ def residue_contacts(
         touched[1 + kinds[known], residue[pairs[known, 1]]] = True
         counts += touched
     return counts / len(frames)
+
+
+#: Relative SASA, as a fraction of the residue's maximum ASA, that separates an
+#: exposed residue from a buried one in :func:`residue_occlusion`.
+OCCLUSION_THRESHOLD = 0.2
+
+#: Rows of :func:`residue_occlusion` before the per-type rows.
+OCCLUSION_PARTS = ("contact_fraction", "exposed_fraction", "occluded_area", "exposed_area")
+
+
+def _nearest_images(anchor: Any, atoms: Any, box: Any) -> Any:
+    """Return the positions of ``atoms`` with each molecule moved to its image nearest ``anchor``.
+
+    Atoms are grouped into molecules by their bonded fragment. Each molecule
+    is translated as a whole by the box vector that brings its centroid to
+    the minimum image of its offset from the centroid of ``anchor``, with
+    ``MDAnalysis.lib.distances.minimize_vectors``. Molecules must be whole in
+    the coordinates as loaded. Without a box the positions are returned as
+    they are.
+    """
+    import numpy as np
+    from MDAnalysis.exceptions import NoDataError
+    from MDAnalysis.lib.distances import minimize_vectors
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    positions = atoms.positions
+    if box is None:
+        return positions
+    try:
+        fragments = atoms.fragindices
+    except NoDataError as exc:
+        raise ProtocolError(
+            "occlusion: the topology has no bonds, so polymer molecules cannot be moved whole "
+            "to the image nearest the protein.",
+            hint="Load a topology with bonds, or pass pbc=False (use_pbc=false) to use the "
+            "coordinates as loaded.",
+        ) from exc
+    inverse = np.unique(fragments, return_inverse=True)[1]
+    counts = np.bincount(inverse)
+    centroids = (
+        np.stack([np.bincount(inverse, weights=positions[:, axis]) for axis in range(3)], axis=1)
+        / counts[:, None]
+    )
+    offsets = (centroids - anchor.positions.mean(axis=0)).astype(np.float32)
+    shifts = minimize_vectors(offsets, box) - offsets
+    return positions + shifts[inverse]
+
+
+def residue_occlusion(
+    protein: Any,
+    occluder: Any,
+    frames: Any,
+    threshold: float = OCCLUSION_THRESHOLD,
+    types: Any = (),
+    max_asa: str = "theoretical",
+    pbc: bool = True,
+    probe_radius_nm: float = SASA_PROBE_RADIUS_NM,
+    n_sphere_points: int = SASA_SPHERE_POINTS,
+) -> Any:
+    """Return, for each residue of ``protein``, how much ``occluder`` covers its surface.
+
+    On every frame, the SASA of each protein residue is computed twice as in
+    :func:`residue_sasa`, one frame per MDTraj call: with the protein alone,
+    and with the protein and ``occluder``, whose atoms cover the protein
+    without being counted. When ``pbc`` is true and the frame has a box, each
+    occluder molecule is first moved whole to its periodic image nearest the
+    protein, since the SASA calculation ignores periodic images. A residue
+    is exposed on a frame when its SASA with the protein alone is at least
+    ``threshold`` times its maximum ASA from Tien et al. 2013 (the
+    ``theoretical`` or ``empirical`` column, see
+    :func:`~polyzymd.analyses.shared.aa_classification.get_max_asa`), and in
+    contact when it is exposed and its SASA with the occluder is below that.
+
+    The rows, named in :data:`OCCLUSION_PARTS`, are each residue's fraction
+    of frames in contact; its fraction of frames exposed; its mean occluded
+    area, the SASA lost to the occluder, ``max(0, alone - with)``, in Å²; and
+    its mean SASA with the protein alone, in Å². Then one row per residue
+    name in ``types``: the fraction of frames in contact when only the
+    occluder atoms of that residue name are present. Columns follow the
+    residues of ``protein`` that have a maximum ASA; residues without one,
+    such as terminal caps, still cover their neighbours but are not measured.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(4 + len(types), n_measured_residues)``.
+    """
+    import numpy as np
+
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.shared.aa_classification import get_max_asa
+
+    maxima = [get_max_asa(str(residue.resname), max_asa) for residue in protein.residues]
+    measured = np.array([i for i, value in enumerate(maxima) if value is not None], dtype=int)
+    if len(measured) == 0:
+        raise ProtocolError(
+            "occlusion: no residue of the protein selection has a maximum ASA.",
+            hint="Select standard amino acids, such as 'protein'.",
+        )
+    limit = threshold * np.array([maxima[i] for i in measured])
+    residue = np.unique(protein.resindices, return_inverse=True)[1]
+    n_residues = len(protein.residues)
+    groups = [occluder, *(occluder[occluder.resnames == name] for name in types)]
+    contexts = [protein | group for group in groups]
+    rows = [
+        np.searchsorted(context.indices, group.indices) for context, group in zip(contexts, groups)
+    ]
+    picks = [np.searchsorted(occluder.indices, group.indices) for group in groups]
+
+    def per_residue(context: Any, positions: Any) -> Any:
+        atom = _atom_sasa(protein, context, positions[None], probe_radius_nm, n_sphere_points)
+        return np.bincount(residue, weights=atom[0], minlength=n_residues)[measured]
+
+    sums = np.zeros((len(OCCLUSION_PARTS) + len(types), len(measured)))
+    for ts in protein.universe.trajectory[frames]:
+        alone = per_residue(protein, protein.positions)
+        exposed = alone >= limit
+        imaged = _nearest_images(protein, occluder, ts.dimensions if pbc else None)
+        for k, (context, group) in enumerate(zip(contexts, groups)):
+            if len(group) == 0:
+                covered = alone
+            else:
+                positions = context.positions
+                positions[rows[k]] = imaged[picks[k]]
+                covered = per_residue(context, positions)
+            contact = exposed & (covered < limit)
+            if k == 0:
+                sums[0] += contact
+                sums[1] += exposed
+                sums[2] += np.maximum(0.0, alone - covered)
+                sums[3] += alone
+            else:
+                sums[len(OCCLUSION_PARTS) + k - 1] += contact
+    return sums / len(frames)
