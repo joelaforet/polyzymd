@@ -1036,7 +1036,13 @@ def _analyze_hydrogen_bonds(
             )
             if len(study) > 1:
                 plot_differences(
-                    values, report, folder, f"hbonds_{run}_difference", None, None, "Residue"
+                    values,
+                    report,
+                    folder,
+                    f"hbonds_{run}_difference",
+                    None,
+                    None,
+                    "Residue" if part == "residues" else "Residue pair",
                 )
         else:
             values.plot(folder, f"hbonds_{run}_comparison", title=run.replace("_", " "))

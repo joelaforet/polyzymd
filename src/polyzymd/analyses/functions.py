@@ -1561,3 +1561,32 @@ def residue_pair_hbond_occupancy(
         seen.setdefault("-".join(pair), set()).add(position[int(frame)])
     labels = sorted(seen)
     return labels, np.array([len(seen[label]) / len(frames) for label in labels])
+
+
+def hbond_count(
+    group_a: Any,
+    group_b: Any = None,
+    d_a_cutoff: float = HBOND_DISTANCE,
+    d_h_a_angle_cutoff: float = HBOND_ANGLE,
+    donors: Any = None,
+    hydrogens: Any = None,
+    acceptors: Any = None,
+) -> float:
+    """Return the number of hydrogen bonds of :func:`hydrogen_bonds` at the current frame.
+
+    The bonds are found as in :func:`hydrogen_bonds`, by MDAnalysis
+    ``HydrogenBondAnalysis`` on this frame alone, so this per-frame function
+    suits a few chosen atoms, such as the hydrogen bonds of a catalytic
+    triad, run through :meth:`~polyzymd.analyses.study.Study.timeseries`;
+    for large groups, :func:`hydrogen_bonds` measures all frames in one pass.
+
+    Returns
+    -------
+    float
+        Number of hydrogen bonds.
+    """
+    frame = int(group_a.universe.trajectory.ts.frame)
+    events, _ = _hbond_events(
+        group_a, group_b, [frame], d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
+    )
+    return float(len(events))
