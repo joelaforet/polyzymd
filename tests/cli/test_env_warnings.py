@@ -226,12 +226,15 @@ def test_compare_init_warns_for_analysis_environment(monkeypatch, tmp_path) -> N
 
 def test_compare_status_json_skips_environment_warning(monkeypatch, tmp_path) -> None:
     """Machine-readable analysis status output should not get advisory warnings."""
+    from tests.analyses.test_protocols import _install_toy
+
+    _install_toy(monkeypatch)
     config_path = tmp_path / "comparison.yaml"
     config_path.write_text("name: demo\nconditions: []\nplugins: {}\n", encoding="utf-8")
     monkeypatch.setenv("PIXI_ENVIRONMENT_NAME", "build")
     runner = CliRunner()
 
-    result = runner.invoke(compare, ["status", "hydrogen_bonds", "-f", str(config_path), "--json"])
+    result = runner.invoke(compare, ["status", "toy_protocol", "-f", str(config_path), "--json"])
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)

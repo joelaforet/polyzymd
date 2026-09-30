@@ -342,8 +342,6 @@ for condition, artifact in condition_artifacts.items():
 - {doc}`publication_plots` for settings that control PolyzyMD's standard
   analysis plots.
 - {doc}`hydrogen_bonds` for configuring hydrogen-bond summaries.
-- {doc}`../reference/analysis_hydrogen_bonds_reference` for hydrogen-bond
-  settings and the generated output files and plots.
 - {doc}`../reference/comparison_yaml` for `comparison.yaml` schema details.
 - {doc}`../reference/analysis_comparison_reference` for comparison output paths
   and plotting behavior.

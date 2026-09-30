@@ -131,6 +131,7 @@ RETIRED_PLUGINS = {
     "distances": "pair_distance",
     "catalytic_triad": "pair_distance",
     "contacts": "residue_occlusion",
+    "hydrogen_bonds": "hydrogen_bonds",
 }
 
 #: Other functions the warning names for a retired analysis that has several.
@@ -139,6 +140,10 @@ RETIRED_PLUGIN_ALSO = {
         " (residue_contacts for --set method=distance, and contact_lifetimes for how long "
         "contacts last)"
     ),
+    "hydrogen_bonds": (
+        " (hbond_lifetimes for how long hydrogen bonds last, residue_hbond_occupancy and "
+        "residue_pair_hbond_occupancy for how often each residue or residue pair is bonded)"
+    ),
 }
 
 #: Retired analyses that measure pairs, whose command needs the pairs list.
@@ -146,7 +151,7 @@ PAIR_ANALYSES = ("distances", "catalytic_triad")
 
 #: Retired analyses whose function returns one value per replicate, which
 #: study.per_replicate measures; the others are per-frame study.timeseries functions.
-PER_REPLICATE_ANALYSES = ("rmsf", "secondary_structure", "contacts")
+PER_REPLICATE_ANALYSES = ("rmsf", "secondary_structure", "contacts", "hydrogen_bonds")
 
 RETIRED_PLUGIN_WARNING = (
     "comparison.yaml has a {section}.{name} block, which is ignored: {name} no longer runs "
@@ -818,9 +823,6 @@ class ComparisonConfig(BaseModel):
     >>> for cond in config.conditions:
     ...     print(f"{cond.label}: {cond.config}")
     >>> print("Enabled analyses:", config.plugins.get_enabled_plugins())
-    >>> hbond_settings = config.plugins.get("hydrogen_bonds")
-    >>> if hbond_settings:
-    ...     print(f"Donor-acceptor cutoff: {hbond_settings.distance_cutoff}")
     """
 
     model_config = {"extra": "forbid"}

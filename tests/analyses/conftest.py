@@ -7,7 +7,9 @@ from typing import Any
 
 import pytest
 
-_PLOTTER_MODULES = tuple(f"polyzymd.analyses.{name}._plotters" for name in ("hydrogen_bonds",))
+#: Plugin plotter modules whose ``save_figure`` the footnote audit wraps. No
+#: shipped analysis is a plugin any more, so none is left to wrap.
+_PLOTTER_MODULES: tuple[str, ...] = ()
 
 
 def figure_draws_uncertainty(fig: Any) -> bool:

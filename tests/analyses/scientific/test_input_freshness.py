@@ -457,7 +457,7 @@ class TestArtifactVersionStamping:
 class TestOverridingPluginsCannotBypassTheCheck:
     """Plugins that override the aggregate loader still get the staleness check."""
 
-    @pytest.mark.parametrize("plugin_name", ["rmsd", "hydrogen_bonds"])
+    @pytest.mark.parametrize("plugin_name", ["rmsd", "demo_plugin"])
     def test_outdated_aggregate_is_rejected(self, tmp_path: Path, plugin_name: str) -> None:
         """Each override reads through ArtifactStore, where the check lives."""
 

@@ -109,8 +109,11 @@ class TestValidateName:
             assert err is not None
             assert "reserved" in err
 
-    def test_reject_existing_plugin(self):
-        err = validate_name("hydrogen_bonds", check_existing=True)
+    def test_reject_existing_plugin(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.list_all_names", lambda: ["registered_plugin"]
+        )
+        err = validate_name("registered_plugin", check_existing=True)
         assert err is not None
         assert "already exists" in err
 
@@ -772,8 +775,13 @@ class TestNewAnalysisCLI:
         assert result.exit_code != 0
         assert "snake_case" in result.output
 
-    def test_existing_plugin_rejected(self, runner: CliRunner, cli):
-        result = runner.invoke(cli, ["hydrogen_bonds", "--project-root", str(self.root)])
+    def test_existing_plugin_rejected(
+        self, runner: CliRunner, cli, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.list_all_names", lambda: ["registered_plugin"]
+        )
+        result = runner.invoke(cli, ["registered_plugin", "--project-root", str(self.root)])
         assert result.exit_code != 0
         assert "already exists" in result.output
 
@@ -879,10 +887,15 @@ class TestNewAnalysisCLI:
             clear_cache()
             sys.modules.pop(f"polyzymd.analyses.{plugin_name}", None)
 
-    def test_force_rejects_registered_builtin_name(self, runner: CliRunner, cli):
+    def test_force_rejects_registered_name(
+        self, runner: CliRunner, cli, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr(
+            "polyzymd.analyses.discovery.list_all_names", lambda: ["registered_plugin"]
+        )
         result = runner.invoke(
             cli,
-            ["hydrogen_bonds", "--project-root", str(self.root), "--force"],
+            ["registered_plugin", "--project-root", str(self.root), "--force"],
         )
         assert result.exit_code != 0
         assert "registered analysis plugin" in result.output

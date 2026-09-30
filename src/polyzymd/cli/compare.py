@@ -272,13 +272,17 @@ def compare():
     4. polyzymd compare status <analysis>   # Monitor progress
     5. polyzymd compare finalize <analysis> # (if needed) re-run compare+plot
 
+    No shipped analysis runs through these commands any more: they run
+    analysis plugins you register yourself, and they are being removed. Run
+    the shipped analyses with 'polyzymd analyze NAME -c <config.yaml>'.
+
     \b
     Example (local):
-        polyzymd compare run hydrogen_bonds --eq-time 10ns
+        polyzymd compare run my_analysis --eq-time 10ns
 
     \b
     Example (HPC):
-        polyzymd compare submit hydrogen_bonds --partition aa100 --mem 8G --time 02:00:00
+        polyzymd compare submit my_analysis --partition aa100 --mem 8G --time 02:00:00
     """
     pass
 
@@ -364,18 +368,14 @@ place only comparison-wide references in this directory.
         click.echo("Next steps:")
         click.echo(f"  1. Edit {_display_path(config_path)}")
         click.echo("     - Add your simulation conditions (paths to config.yaml files)")
-        click.echo("     - Configure plugins.hydrogen_bonds for the hydrogen-bond comparison")
         click.echo()
-        click.echo(f"  2. cd {_display_path(project_dir)}")
-        click.echo("  3. Run comparisons:")
-        click.echo("     polyzymd compare run hydrogen_bonds       # Compare hydrogen bonds")
-        click.echo("  Polymer-protein contacts run through polyzymd analyze instead:")
+        click.echo("  2. Run each analysis on the simulation configs, control first:")
+        click.echo(
+            f"     polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --eq {eq_time}"
+        )
         click.echo(
             f"     polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --eq {eq_time}"
         )
-        click.echo()
-        click.echo("  On an HPC cluster, submit as SLURM jobs instead:")
-        click.echo("     polyzymd compare submit hydrogen_bonds --partition <part> --mem 8G")
         click.echo()
 
     except (OSError, IOError) as e:
@@ -574,9 +574,9 @@ def run_comparison(
 
     \b
     Examples:
-        polyzymd compare run hydrogen_bonds --eq-time 10ns
-        polyzymd compare run hydrogen_bonds --format markdown
-        polyzymd compare run hydrogen_bonds --format agent
+        polyzymd compare run my_analysis --eq-time 10ns
+        polyzymd compare run my_analysis --format markdown
+        polyzymd compare run my_analysis --format agent
         polyzymd compare run --list
     """
     warn_if_wrong_pixi_env("compare run", ANALYSIS_PIXI_ENVS)
@@ -718,7 +718,7 @@ def run_comparison(
     "analysis_type",
     type=str,
     default=None,
-    help="Generate plots for specific analysis type only (e.g., 'hydrogen_bonds').",
+    help="Generate plots for specific analysis type only (e.g., 'my_analysis').",
 )
 @click.option(
     "--list-available",
@@ -754,7 +754,7 @@ def plot_all(
     \b
     Examples:
         polyzymd compare plot-all -f comparison.yaml
-        polyzymd compare plot-all -f comparison.yaml -a hydrogen_bonds
+        polyzymd compare plot-all -f comparison.yaml -a my_analysis
         polyzymd compare plot-all --list-available
     """
     warn_if_wrong_pixi_env("compare plot-all", ANALYSIS_PIXI_ENVS)

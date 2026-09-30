@@ -36,7 +36,9 @@ from polyzymd.analyses.shared.statistics import (
 T_FACTOR_N3 = 4.302652729749462
 T_FACTOR_N5 = 2.7764451051977934
 
-PLUGIN_NAMES = ("hydrogen_bonds",)
+#: Plugin names the artifact tests run under. No shipped analysis is a plugin
+#: any more, so this is a stand-in name.
+PLUGIN_NAMES = ("demo_plugin",)
 
 
 def _frame_selection() -> dict[str, int]:
@@ -397,12 +399,8 @@ def _one_replicate_condition_metrics(analysis_name: str) -> dict[str, dict[str, 
     dict
         Metric summaries keyed by metric name.
     """
-    if analysis_name == "hydrogen_bonds":
-        return {
-            "mean_hbonds_all": metric_summary_payload(
-                "mean_hbonds_all", [3.5], unit="hydrogen bonds per frame"
-            )
-        }
+    if analysis_name == "demo_plugin":
+        return {"mean_value": metric_summary_payload("mean_value", [3.5], unit="A")}
 
     raise AssertionError(f"no single-replicate builder for {analysis_name!r}")
 

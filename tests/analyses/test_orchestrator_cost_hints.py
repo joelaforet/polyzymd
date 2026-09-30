@@ -67,18 +67,6 @@ def test_execution_cost_hint_default() -> None:
     assert _DefaultHintAnalysis.execution_cost_hint == "medium"
 
 
-@pytest.mark.parametrize(
-    "analysis_name",
-    ["hydrogen_bonds"],
-)
-def test_execution_cost_hint_high(analysis_name: str) -> None:
-    """Expensive plugins should declare high execution cost hints."""
-    from polyzymd.analyses.discovery import get_analysis
-
-    cls = get_analysis(analysis_name)
-    assert cls.execution_cost_hint == "high"
-
-
 def test_execution_summary_printed(monkeypatch: pytest.MonkeyPatch, caplog, tmp_path: Path) -> None:
     """run_comparison should log an execution summary before compute loop."""
     analysis = _DefaultHintAnalysis()
