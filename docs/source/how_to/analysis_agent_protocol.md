@@ -91,16 +91,18 @@ print(report.conditions[0].ci95, report.unit)
 
 ## Reuse an existing comparison project
 
-When a `comparison.yaml` already exists, analyze it directly instead of
-repeating its conditions on the command line:
+The analyses that run through the study API, rg, rmsd, rmsf, rms_deviation,
+distances, catalytic_triad, sasa, secondary_structure and contacts, read
+simulation configs given with `-c` and refuse `-f`. When a `comparison.yaml`
+already exists, `-f` analyzes it directly for hydrogen_bonds, which still runs
+as a comparison plugin:
 
 ```bash
-pixi run -e analysis polyzymd analyze rmsf -f comparison.yaml
+pixi run -e analysis polyzymd analyze hydrogen_bonds -f comparison.yaml
 ```
 
-For an analysis that still runs as a comparison plugin, such as contacts, the same
-summary is available from the full comparison workflow, which also writes
-plots:
+Contact residence times also still come from the comparison plugin, through
+the full comparison workflow, which also writes plots:
 
 ```bash
 pixi run -e analysis polyzymd compare run contacts -f comparison.yaml --format agent
@@ -118,7 +120,8 @@ pixi run -e analysis polyzymd compare run contacts -f comparison.yaml --format a
 - `no test recorded` means the plugin stored a raw p value but no
   multiplicity-corrected one, so the line describes a difference without
   deciding it. Distances is the analysis that does this today.
-- A plugin that stores only means and standard errors, such as contacts, gets
+- A plugin that stores only means and standard errors, such as the contacts
+  plugin behind `compare run contacts`, gets
   its condition intervals rebuilt from the standard error and the replicate
   count; `ci_method` then reads `student_t_from_sem` and no interval is given
   on a difference.

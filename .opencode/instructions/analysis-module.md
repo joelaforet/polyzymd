@@ -39,8 +39,13 @@ src/polyzymd/analyses/
 rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa and
 secondary_structure are no longer plugins. They are functions in `functions.py`
 run through the study API, and `polyzymd analyze <name>` runs them through
-`protocols._analyze_function`. Only contacts and hydrogen_bonds are still
-plugins; the refactor ports them next and then removes the plugin framework.
+`protocols._analyze_function`. `polyzymd analyze contacts` also runs through
+the study API (`functions.residue_occlusion` for `method=occlusion`, the
+default, and `functions.residue_contacts` for `method=distance`, dispatched by
+`protocols._analyze_contacts`) for contact fractions, coverage and occluded area; the contacts plugin stays only for residence
+times through `polyzymd compare run contacts`, until those are ported. Only
+contacts and hydrogen_bonds are still plugins; the refactor ports them next and
+then removes the plugin framework.
 
 There is no `_results.py`, `_cache.py`, `_paths.py` or `_plotting.py` in any
 plugin package. Result models live in `_models.py` (hydrogen bonds), in

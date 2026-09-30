@@ -905,7 +905,7 @@ List the available analysis names with `polyzymd compare run --list`.
 |--------|----------|-------------|
 | `NAME` | Yes | Canonical analysis name, for example `rg`. |
 | `-c, --config PATH` | One of `-c`/`-f` | Simulation `config.yaml`. Repeatable; the first one is the control. |
-| `-f, --file PATH` | One of `-c`/`-f` | Existing `comparison.yaml` to analyze instead of `-c` configs. Cannot be combined with `-c` or `--set`. |
+| `-f, --file PATH` | One of `-c`/`-f` | Existing `comparison.yaml` to analyze instead of `-c` configs, for the comparison plugins only (hydrogen_bonds); the analyses on the study API refuse it. Cannot be combined with `-c` or `--set`. |
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
 | `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default: the comparison default, `10ns`. |
 | `--label TEXT` | No | Condition label, one per `-c` in the same order. Default: the name of the directory holding the config. |
@@ -916,7 +916,7 @@ List the available analysis names with `polyzymd compare run --list`.
 | `--output-dir PATH` | No | Directory for `analysis/`, `comparison/` and `figures/`. Default: the current directory. |
 | `--stride N` | No | Measure every `N`-th production frame of every replicate, starting with the first after the window. Default `1`. Function analyses only; refused with `-f` and for comparison plugins. The report header then shows `stride N`. |
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
-| `--no-plots` | No | Do not draw figures for analyses on the study API (rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa). By default they are written to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
+| `--no-plots` | No | Do not draw figures for analyses on the study API (rg, rmsd, rmsf, rms_deviation, distances, catalytic_triad, sasa, secondary_structure, contacts). By default they are written to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
 | `--no-eq-check` | No | Skip the pymbar equilibration diagnostic for analyses on the study API (rg, rmsd). Values and statistics are the same either way. |
 
 ### Agent format
@@ -989,8 +989,11 @@ polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml \
 polyzymd analyze sasa -c A/config.yaml -c B/config.yaml \
   --format json -o sasa_report.json
 
-# An existing comparison project
-polyzymd analyze rmsf -f comparison.yaml
+# Fraction of frames the polymer buries each residue, compared residue by residue
+polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --stride 10 --run contact_fraction_residues
+
+# An existing comparison project, for a comparison plugin
+polyzymd analyze hydrogen_bonds -f comparison.yaml
 
 # Measure the protein backbone instead of all protein atoms
 polyzymd analyze rg -c A/config.yaml -c B/config.yaml --set selection='protein and name CA'

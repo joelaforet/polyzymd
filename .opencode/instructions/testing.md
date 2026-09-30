@@ -24,6 +24,7 @@ tests/
 │   ├── test_rmsf.py             # rmsf, rms_deviation, rms_decomposition
 │   ├── test_sasa.py             # sasa, residue_sasa
 │   ├── test_secondary_structure.py  # dssp_occupancy
+│   ├── test_residue_contacts.py     # residue_contacts, polyzymd analyze contacts
 │   ├── test_segment_join.py     # loader repairs of restart-chain boundaries
 │   ├── test_empty_segments.py   # loader skips of empty segments
 │   ├── test_base.py             # analyses/base.py

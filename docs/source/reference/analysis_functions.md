@@ -18,7 +18,7 @@ functions measure all production frames of one replicate and run through
 
 ## Per-replicate functions
 
-Each takes `atoms`, the measured `AtomGroup`; `fit`, the `AtomGroup` superposed
+The three RMS functions each take `atoms`, the measured `AtomGroup`; `fit`, the `AtomGroup` superposed
 on the reference; `reference`, the reference positions of `atoms | fit` from
 `pz.reference` with the selection `"(<atoms>) or (<fit>)"`; and `frames`, the
 production frame indices. Every frame is superposed on the reference by the
@@ -26,13 +26,15 @@ production frame indices. Every frame is superposed on the reference by the
 the coordinates. Each per-atom value is then averaged over the residue's atoms,
 giving one value per residue in the order of `atoms.residues`.
 
-| Function | Returns | Measurement | Command |
-|---|---|---|---|
-| `rmsf` | one value per residue, Å | MDAnalysis `rms.RMSF` of the superposed positions: the fluctuation of each atom about its mean position, as `gmx rmsf -o` gives | `polyzymd analyze rmsf` |
-| `rms_deviation` | one value per residue, Å | Root mean square deviation of each atom from its reference position, as `gmx rmsf -od` gives | `polyzymd analyze rms_deviation` |
-| `rms_decomposition` | six rows of one value per residue | Rows `RMS_PARTS = ("rms_deviation", "rmsf", "offset")`, the offset being the distance of each atom's mean position from its reference position, in Å; then rows `MS_PARTS = ("ms_deviation", "msf", "ms_offset")`, the means over each residue's atoms of the squared per-atom values, in Å². `ms_deviation = msf + ms_offset` for every residue | `polyzymd analyze rmsf`, `polyzymd analyze rms_deviation` |
+| Function | Arguments | Returns | Measurement | Command |
+|---|---|---|---|---|
+| `rmsf` | `atoms`, `fit`, `reference`, `frames` | one value per residue, Å | MDAnalysis `rms.RMSF` of the superposed positions: the fluctuation of each atom about its mean position, as `gmx rmsf -o` gives | `polyzymd analyze rmsf` |
+| `rms_deviation` | `atoms`, `fit`, `reference`, `frames` | one value per residue, Å | Root mean square deviation of each atom from its reference position, as `gmx rmsf -od` gives | `polyzymd analyze rms_deviation` |
+| `rms_decomposition` | `atoms`, `fit`, `reference`, `frames` | six rows of one value per residue | Rows `RMS_PARTS = ("rms_deviation", "rmsf", "offset")`, the offset being the distance of each atom's mean position from its reference position, in Å; then rows `MS_PARTS = ("ms_deviation", "msf", "ms_offset")`, the means over each residue's atoms of the squared per-atom values, in Å². `ms_deviation = msf + ms_offset` for every residue | `polyzymd analyze rmsf`, `polyzymd analyze rms_deviation` |
 | `residue_sasa` | `target`, `context` and `frames`, as `sasa` takes them, and the production frames | one value per target residue, Å² | Each frame's per-atom SASA as in `sasa`, one frame per MDTraj call, summed over each residue's target atoms and averaged over the frames | `polyzymd analyze sasa --run <context>_residues` |
 | `dssp_occupancy` | `atoms`, whole residues, the production frames and `simplified` (default true) | one row per class, one value per residue, fraction of frames | `mdtraj.compute_dssp(simplified=simplified)` on every frame, 200 frames per call; the rows are helix, strand, coil and unassigned of `DSSP_SIMPLIFIED`, or with `simplified=False` the eight classes and unassigned of `DSSP_CLASSES`; one MDTraj chain per chain ID or segment | `polyzymd analyze secondary_structure` |
+| `residue_contacts` | `protein` and `polymer`, `AtomGroup`s; the production frames; `cutoff` (4.0 Å), `types` (none) and `pbc` (true) | one row for the polymer, then one row per residue name in `types`, one value per protein residue, fraction of frames | On every frame, MDAnalysis `lib.distances.capped_distance` between the given polymer and protein atoms, with the minimum image of the frame's box when `pbc` is true; a residue is in contact when any of its atoms is within `cutoff` of a polymer atom, or for a row of `types`, of a polymer atom of that residue name | `polyzymd analyze contacts --set method=distance` |
+| `residue_occlusion` | `protein` and `occluder`, `AtomGroup`s; the production frames; `exposed_threshold` (0.2), `buried_threshold` (0.2), `types` (none), `max_asa` (`theoretical`), `pbc` (true), `probe_radius_nm` and `n_sphere_points` | rows `OCCLUSION_PARTS = ("contact_fraction", "exposed_fraction", "occluded_area", "exposed_area")`, then one contact-fraction row per residue name in `types`; one value per protein residue with a maximum ASA | Each residue's SASA with the protein alone and with the protein and the occluder, as `residue_sasa` computes it, one frame per MDTraj call, after each occluder molecule (bonded fragment) is moved whole to its periodic image nearest the protein when `pbc` is true; exposed when the SASA alone is at least `exposed_threshold` times the residue's maximum ASA of Tien et al. (2013), in contact when exposed and the SASA with the occluder is below `buried_threshold` times it and lower than alone; `occluded_area` is the mean of `max(0, alone - with)` in Å², `exposed_area` the mean SASA alone; a type row counts contact with only that residue name's occluder atoms present | `polyzymd analyze contacts` |
 
 The comparison with `gmx rmsf` on real trajectories, and the script that reruns
 it, are in {doc}`../explanation/analysis_rmsf_verification`.
@@ -97,6 +99,29 @@ and `--run <class>_residues` compares every residue. The default is the
 scheme's first class, `helix` or `alpha_helix`. A warning names the replicates
 with unassigned residues. See {doc}`../how_to/analysis_secondary_structure_quickstart`.
 
+`polyzymd analyze contacts` runs, once per replicate between `--set
+protein_selection=...` (default `chainid A`) and `polymer_selection` (default
+`chainid C`, narrowed to the residue names of `polymer_types` when set),
+`residue_occlusion` with `exposed_threshold`, `buried_threshold`, `max_asa`, `probe_radius_nm` and
+`n_sphere_points` for `method=occlusion` (default), or `residue_contacts` with
+`cutoff` for `method=distance`, on heavy atoms only when `heavy_atoms` is true
+(default). `use_pbc` sets `pbc`, and every polymer residue name of the
+control's first replicate gets a row. `coverage`, the default, is the fraction
+of measured residues with a contact fraction above zero;
+`mean_contact_fraction`, `<type>_contact_fraction`, `<class>_contact_fraction`
+for each amino-acid class of `ProteinAAClassification` and
+`<region>_contact_fraction` for each entry of `--set regions='{name:
+selection}'` are means of contact fractions over those residues;
+`contact_fraction_residues` and `<type>_contact_fraction_residues` compare
+every residue. For occlusion, `occluded_area` is the sum over residues of the
+mean occluded area, `occlusion_fraction` is the summed occluded area over the
+summed SASA alone, and `occluded_area_residues` compares every residue. The
+selections, the types found, the residues without a maximum ASA and the
+residues of each class and region are recorded under `provenance.settings`.
+Residence times still run through `polyzymd compare run contacts`. See
+{doc}`../how_to/analysis_contacts_quickstart` and
+{doc}`../explanation/analysis_contacts_verification`.
+
 ## Figures
 
 `polyzymd analyze` writes these figures to `<output-dir>/figures/<analysis>/`
@@ -110,5 +135,6 @@ and records the folder under `output_paths.figures` in the JSON report;
 | `rmsf`, `rms_deviation` | `rmsf_profile`, `offset_profile` and `rms_deviation_profile` (each replicate and each condition's mean with its interval, `highlight_residues` marked), `rms_decomposition` (the three profiles of each condition together), `rmsf_comparison` (the three core values), and with several conditions `rmsf_difference`, `offset_difference` and `rms_deviation_difference` (each condition minus the control at every residue, with the interval of the difference and the significant residues marked) |
 | `sasa` | For a total, `sasa_timeseries_<name>`, `sasa_comparison_<name>` and `sasa_distribution_<name>`; for `<name>_residues`, `sasa_profile_<name>` and with several conditions `sasa_difference_<name>` |
 | `secondary_structure` | `ss_content_bars` (every class of the scheme but unassigned); for a total `ss_<name>_comparison`; for `<name>_residues`, `ss_<name>_profile`, `ss_classes_<name>` and with several conditions `ss_<name>_difference` |
+| `contacts` | `contacts_class_bars` (each amino-acid class's mean contact fraction); for a one-value result `contacts_<run>_comparison`; for a residue result, `contacts_<name>_profile` and with several conditions `contacts_<name>_difference` |
 | `distances` | `distance_kde_<pair>` for each pair with its threshold, `distance_fraction_<result>` for each fraction below threshold, and the grouped `distance_threshold_bars` (every pair's fraction) and `distance_kde_panel` (one panel per pair) |
 | `catalytic_triad` | `triad_kde_<pair>` for each pair with its threshold, `triad_fraction_<result>` for `simultaneous` and each pair's fraction, and the grouped `triad_threshold_bars` (each pair's fraction, then all pairs) and `triad_kde_panel` (one panel per pair) |
