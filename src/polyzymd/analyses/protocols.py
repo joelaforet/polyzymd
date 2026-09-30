@@ -102,7 +102,7 @@ FUNCTION_ANALYSES = {
         "probe_radius_nm": 0.14,
         "n_sphere_points": 960,
     },
-    "secondary_structure": {"selection": "protein"},
+    "secondary_structure": {"selection": "protein", "scheme": "simplified"},
     "distances": {"pairs": None, "threshold": 3.5, "use_pbc": True},
     "catalytic_triad": {"pairs": None, "threshold": 3.5, "use_pbc": True},
 }
@@ -856,49 +856,60 @@ def _analyze_secondary_structure(
     output_dir: Path | None,
     plots: bool,
 ) -> ProtocolReport:
-    """Assign DSSP classes to every residue of ``selection`` and report one class or group.
+    """Assign DSSP classes to every residue of ``selection`` and report one class.
 
-    :func:`~polyzymd.analyses.functions.dssp_occupancy` gives, in one pass
-    per replicate, each residue's fraction of production frames in each DSSP
-    class of :data:`~polyzymd.analyses.functions.DSSP_CLASSES` and each group
-    of :data:`~polyzymd.analyses.functions.DSSP_GROUPS`. ``<name>`` is a
-    class's or group's mean over the residues, the fraction of residue-frames
-    in it, and ``<name>_residues`` its per-residue profile, compared residue
-    by residue. ``run`` defaults to ``helix``. A warning names the replicates
-    with unassigned residues, which MDTraj gives ``"NA"`` when it cannot
-    assign them. With ``plots``, ``ss_content_bars`` groups the helix, strand
-    and coil fractions, a total draws ``ss_<name>_comparison``, and a
-    residue result ``ss_<name>_profile``, ``ss_groups_<name>`` (helix, strand
-    and coil of each residue per condition) and, with several conditions,
-    ``ss_<name>_difference``, into ``<output_dir>/figures/secondary_structure/``.
+    ``scheme`` picks MDTraj's DSSP: ``simplified`` (the default) gives helix,
+    strand, coil and unassigned of
+    :data:`~polyzymd.analyses.functions.DSSP_SIMPLIFIED`, and ``full`` the
+    eight classes and unassigned of
+    :data:`~polyzymd.analyses.functions.DSSP_CLASSES`.
+    :func:`~polyzymd.analyses.functions.dssp_occupancy` gives, in one pass per
+    replicate, each residue's fraction of production frames in each class.
+    ``<name>`` is a class's mean over the residues, the fraction of
+    residue-frames in it, and ``<name>_residues`` its per-residue profile,
+    compared residue by residue. ``run`` defaults to the first class, helix or
+    alpha_helix. A warning names the replicates with unassigned residues,
+    which MDTraj gives ``"NA"`` when it cannot assign them. With ``plots``,
+    ``ss_content_bars`` groups every class's fraction except unassigned, a
+    total draws ``ss_<name>_comparison``, and a residue result
+    ``ss_<name>_profile``, ``ss_classes_<name>`` (every class of each residue
+    per condition) and, with several conditions, ``ss_<name>_difference``,
+    into ``<output_dir>/figures/secondary_structure/``.
     """
     from polyzymd.analyses import functions
     from polyzymd.analyses.figures import plot_decomposition, plot_differences, plot_values
     from polyzymd.analyses.timeseries import select
 
     settings = {**FUNCTION_ANALYSES["secondary_structure"], **(settings or {})}
-    atoms = str(settings["selection"])
-    groups_first = [*functions.DSSP_GROUPS, *functions.DSSP_CLASSES]
-    runs = [key for name in groups_first for key in (name, f"{name}_residues")]
-    run = run or "helix"
+    atoms, scheme = str(settings["selection"]), settings["scheme"]
+    if scheme not in ("simplified", "full"):
+        raise ProtocolError(
+            f"secondary_structure: scheme must be simplified or full, got {scheme!r}.",
+            hint="Pass --set scheme=full for the eight DSSP classes.",
+        )
+    classes = list(functions.DSSP_SIMPLIFIED if scheme == "simplified" else functions.DSSP_CLASSES)
+    runs = [key for name in classes for key in (name, f"{name}_residues")]
+    run = run or classes[0]
     if run not in runs:
         raise ProtocolError(
-            f"secondary_structure: no result named {run!r}.", hint=f"Use --run with one of {runs}."
+            f"secondary_structure: no result named {run!r} in the {scheme} scheme.",
+            hint=f"Use --run with one of {runs}, or --set scheme="
+            + ("full" if scheme == "simplified" else "simplified")
+            + " for the other classes.",
         )
     rows = study.per_replicate(
         functions.dssp_occupancy,
         select(atoms),
         unit=None,
         labels=lambda u: u.select_atoms(atoms).residues.resids,
-        name="dssp_occupancy",
+        name=f"dssp_occupancy_{scheme}",
         recompute=recompute,
         output_dir=output_dir,
         bounds=(0.0, 1.0),
-        parts=functions.DSSP_PARTS,
+        parts=classes,
+        simplified=scheme == "simplified",
     )
-    totals = {
-        name: rows[name].over_labels("mean", f"{name}_fraction") for name in functions.DSSP_PARTS
-    }
+    totals = {name: rows[name].over_labels("mean", f"{name}_fraction") for name in classes}
     residues = run.endswith("_residues")
     values = rows[run[: -len("_residues")]] if residues else totals[run]
     report = values.compare() if len(study) > 1 else values.summary()
@@ -912,21 +923,25 @@ def _analyze_secondary_structure(
         report.warnings.append(
             "MDTraj could not assign a DSSP class to some residues (code NA) in "
             + ", ".join(unassigned)
-            + "; they count in unassigned, in no group. Check for missing backbone atoms "
-            "or non-standard residue names."
+            + "; they count in unassigned. Check for missing backbone atoms or "
+            "non-standard residue names."
         )
     report.provenance.settings = dict(settings)
     if plots:
         folder = _figures_dir(output_dir, "secondary_structure")
-        content = [totals[name] for name in functions.DSSP_GROUPS]
+        shown = [name for name in classes if name != "unassigned"]
         plot_values(
-            content, list(functions.DSSP_GROUPS), folder, "ss_content_bars", "Secondary structure"
+            [totals[name] for name in shown],
+            shown,
+            folder,
+            "ss_content_bars",
+            "Secondary structure",
         )
         if residues:
             name = run[: -len("_residues")]
             values.plot(folder, f"ss_{name}_profile", f"Per-residue {name}", None, [], "Residue")
-            groups = {group: rows[group] for group in functions.DSSP_GROUPS}
-            plot_decomposition(groups, folder, f"ss_groups_{name}", None, None, "Residue")
+            profiles = {part: rows[part] for part in shown}
+            plot_decomposition(profiles, folder, f"ss_classes_{name}", None, None, "Residue")
             if len(study) > 1:
                 plot_differences(
                     values, report, folder, f"ss_{name}_difference", None, None, "Residue"

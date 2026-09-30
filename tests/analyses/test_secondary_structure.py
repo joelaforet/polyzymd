@@ -24,7 +24,7 @@ from polyzymd.analyses.exceptions import ProtocolError
 from polyzymd.analyses.functions import (
     DSSP_CLASSES,
     DSSP_GROUPS,
-    DSSP_PARTS,
+    DSSP_SIMPLIFIED,
     _dssp_topology,
     dssp_occupancy,
 )
@@ -103,7 +103,7 @@ def _universe(coordinates, chain_ids=None, elements=None) -> "mda.Universe":
     return universe
 
 
-def _direct_codes(coordinates) -> np.ndarray:
+def _direct_codes(coordinates, simplified: bool = False) -> np.ndarray:
     """DSSP codes of each frame from its own mdtraj.compute_dssp call, shape (frames, residues)."""
     topology = md.Topology()
     chain = topology.add_chain()
@@ -114,19 +114,18 @@ def _direct_codes(coordinates) -> np.ndarray:
     return np.vstack(
         [
             md.compute_dssp(
-                md.Trajectory(xyz=frame[np.newaxis] / 10.0, topology=topology), simplified=False
+                md.Trajectory(xyz=frame[np.newaxis] / 10.0, topology=topology),
+                simplified=simplified,
             )
             for frame in np.asarray(coordinates, dtype=np.float32)
         ]
     )
 
 
-def _expected_occupancy(codes: np.ndarray) -> dict[str, np.ndarray]:
-    """Each class's and group's fraction of frames per residue, from per-frame codes."""
-    fractions = {name: (codes == code).mean(axis=0) for name, code in DSSP_CLASSES.items()}
-    for group, members in DSSP_GROUPS.items():
-        fractions[group] = sum(fractions[name] for name in members)
-    return fractions
+def _expected_occupancy(codes: np.ndarray, simplified: bool = True) -> dict[str, np.ndarray]:
+    """Each class's fraction of frames per residue, from per-frame codes of one scheme."""
+    table = DSSP_SIMPLIFIED if simplified else DSSP_CLASSES
+    return {name: (codes == code).mean(axis=0) for name, code in table.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -143,24 +142,42 @@ def test_ideal_helix_is_alpha_helix_inside_and_extended_chain_is_not() -> None:
     assert "H" not in codes[1] and "G" not in codes[1]
 
 
-def test_rows_equal_the_fraction_of_frames_of_each_code() -> None:
-    """Every class row is the fraction of frames with its code; each group sums its classes."""
+def test_rows_equal_the_fraction_of_frames_of_each_code_in_both_schemes() -> None:
+    """Each row is the fraction of frames with its code in either scheme, and rows sum to 1."""
     coordinates = _peptide_frames(seed=3, helix_chance=0.6)
-    codes = _direct_codes(coordinates)
     universe = _universe(coordinates)
+    frames = np.arange(N_FRAMES)
 
-    result = dssp_occupancy(universe.atoms, np.arange(N_FRAMES))
+    full = dssp_occupancy(universe.atoms, frames, simplified=False)
+    simplified = dssp_occupancy(universe.atoms, frames)
 
-    assert result.shape == (len(DSSP_PARTS), N_RESIDUES)
-    expected = _expected_occupancy(codes)
-    for row, name in enumerate(DSSP_PARTS):
-        assert result[row] == pytest.approx(expected[name], abs=1e-12), name
-    assert len(set(codes.ravel())) > 2
-    assert 0.0 < expected["helix"].mean() < 1.0
-    classes = result[: len(DSSP_CLASSES)]
-    assert classes.sum(axis=0) == pytest.approx(np.ones(N_RESIDUES), abs=1e-12)
-    groups = result[len(DSSP_CLASSES) :].sum(axis=0) + result[DSSP_PARTS.index("unassigned")]
-    assert groups == pytest.approx(np.ones(N_RESIDUES), abs=1e-12)
+    assert full.shape == (len(DSSP_CLASSES), N_RESIDUES)
+    assert simplified.shape == (len(DSSP_SIMPLIFIED), N_RESIDUES)
+    full_codes = _direct_codes(coordinates)
+    simplified_codes = _direct_codes(coordinates, simplified=True)
+    assert len(set(full_codes.ravel())) > 2
+    for row, (name, code) in enumerate(DSSP_CLASSES.items()):
+        assert full[row] == pytest.approx((full_codes == code).mean(axis=0), abs=1e-12), name
+    for row, (name, code) in enumerate(DSSP_SIMPLIFIED.items()):
+        expected = (simplified_codes == code).mean(axis=0)
+        assert simplified[row] == pytest.approx(expected, abs=1e-12), name
+    assert 0.0 < simplified[0].mean() < 1.0
+    assert full.sum(axis=0) == pytest.approx(np.ones(N_RESIDUES), abs=1e-12)
+    assert simplified.sum(axis=0) == pytest.approx(np.ones(N_RESIDUES), abs=1e-12)
+
+
+def test_simplified_classes_join_the_full_classes_as_mdtraj_translates_them() -> None:
+    """helix is H+G+I, strand E+B and coil T+S+loop of the eight-class assignment."""
+    coordinates = _peptide_frames(seed=4, helix_chance=0.5)
+    universe = _universe(coordinates)
+    frames = np.arange(N_FRAMES)
+    full = dict(zip(DSSP_CLASSES, dssp_occupancy(universe.atoms, frames, simplified=False)))
+    simplified = dict(zip(DSSP_SIMPLIFIED, dssp_occupancy(universe.atoms, frames)))
+
+    for group, members in DSSP_GROUPS.items():
+        joined = sum(full[name] for name in members)
+        assert simplified[group] == pytest.approx(joined, abs=1e-12), group
+    assert simplified["unassigned"] == pytest.approx(full["unassigned"], abs=1e-12)
 
 
 def test_frames_pick_the_measured_frames_and_batching_changes_nothing() -> None:
@@ -171,8 +188,10 @@ def test_frames_pick_the_measured_frames_and_batching_changes_nothing() -> None:
 
     default = dssp_occupancy(universe.atoms, frames)
 
-    expected = _expected_occupancy(_direct_codes(coordinates[frames]))
-    assert default[DSSP_PARTS.index("helix")] == pytest.approx(expected["helix"], abs=1e-12)
+    expected = _expected_occupancy(_direct_codes(coordinates[frames], simplified=True))
+    assert default[list(DSSP_SIMPLIFIED).index("helix")] == pytest.approx(
+        expected["helix"], abs=1e-12
+    )
     assert np.array_equal(dssp_occupancy(universe.atoms, frames, chunk=1), default)
     assert np.array_equal(dssp_occupancy(universe.atoms, frames, chunk=7), default)
 
@@ -202,8 +221,9 @@ def test_each_chain_id_becomes_its_own_mdtraj_chain() -> None:
     topology = _dssp_topology(two.atoms)
     assert topology.n_chains == 2
     assert [chain.n_residues for chain in topology.chains] == [6, 6]
-    whole = dssp_occupancy(one.atoms, [0])[DSSP_PARTS.index("alpha_helix")]
-    split = dssp_occupancy(two.atoms, [0])[DSSP_PARTS.index("alpha_helix")]
+    row = list(DSSP_CLASSES).index("alpha_helix")
+    whole = dssp_occupancy(one.atoms, [0], simplified=False)[row]
+    split = dssp_occupancy(two.atoms, [0], simplified=False)[row]
     assert whole.sum() > split.sum()
 
 
@@ -250,8 +270,8 @@ def configs(tmp_path: Path, coordinates) -> dict[str, Path]:
     return paths
 
 
-def _run_names() -> list[str]:
-    names = [*DSSP_GROUPS, *DSSP_CLASSES]
+def _run_names(scheme: str = "simplified") -> list[str]:
+    names = DSSP_SIMPLIFIED if scheme == "simplified" else DSSP_CLASSES
     return [key for name in names for key in (name, f"{name}_residues")]
 
 
@@ -274,14 +294,14 @@ def test_analyze_reports_the_helix_fraction_by_default(configs, coordinates, tmp
         "coil",
         "coil_residues",
     ]
-    assert report.provenance.settings == {"selection": "protein"}
+    assert report.provenance.settings == {"selection": "protein", "scheme": "simplified"}
     assert not any("could not assign" in text for text in report.warnings)
     for condition in report.conditions:
         expected = [
             float(
-                _expected_occupancy(_direct_codes(coordinates[(condition.label, r)]))[
-                    "helix"
-                ].mean()
+                _expected_occupancy(
+                    _direct_codes(coordinates[(condition.label, r)], simplified=True)
+                )["helix"].mean()
             )
             for r in (1, 2, 3)
         ]
@@ -297,6 +317,7 @@ def test_analyze_residue_run_is_labelled_by_residue(configs, coordinates, tmp_pa
         [configs["A"], configs["B"]],
         equilibration=EQUILIBRATION,
         output_dir=tmp_path,
+        settings={"scheme": "full"},
         run="alpha_helix_residues",
         plots=False,
     )
@@ -308,9 +329,9 @@ def test_analyze_residue_run_is_labelled_by_residue(configs, coordinates, tmp_pa
     for row in report.conditions:
         expected = [
             float(
-                _expected_occupancy(_direct_codes(coordinates[(row.label, r)]))["alpha_helix"][
-                    int(row.entry) - 1
-                ]
+                _expected_occupancy(_direct_codes(coordinates[(row.label, r)]), simplified=False)[
+                    "alpha_helix"
+                ][int(row.entry) - 1]
             )
             for r in (1, 2, 3)
         ]
@@ -338,7 +359,7 @@ def test_unassigned_residues_are_named_in_a_warning(configs, tmp_path) -> None:
 
     (warning,) = [text for text in report.warnings if "could not assign" in text]
     assert "A replicate 1, A replicate 2, A replicate 3" in warning
-    assert report.provenance.settings == {"selection": "all"}
+    assert report.provenance.settings == {"selection": "all", "scheme": "simplified"}
     by_residue = {row.entry: row.replicate_values for row in report.conditions}
     assert by_residue[str(N_RESIDUES + 1)] == pytest.approx([1.0, 1.0, 1.0])
     assert by_residue["1"] == pytest.approx([0.0, 0.0, 0.0])
@@ -358,7 +379,7 @@ def test_cli_draws_the_documented_figures(configs, tmp_path) -> None:
         "ss_content_bars.png",
         "ss_helix_comparison.png",
         "ss_helix_profile.png",
-        "ss_groups_helix.png",
+        "ss_classes_helix.png",
         "ss_helix_difference.png",
     }
 
@@ -374,7 +395,11 @@ def test_stride_measures_every_other_frame(configs, coordinates, tmp_path) -> No
     assert _frame_counts(strided) == [count // 2 for count in _frame_counts(full)]
     (condition,) = strided.conditions
     expected = [
-        float(_expected_occupancy(_direct_codes(coordinates[("A", r)][::2]))["helix"].mean())
+        float(
+            _expected_occupancy(_direct_codes(coordinates[("A", r)][::2], simplified=True))[
+                "helix"
+            ].mean()
+        )
         for r in (1, 2, 3)
     ]
     assert condition.replicate_values == pytest.approx(expected, abs=1e-12)
@@ -396,7 +421,7 @@ def test_study_per_replicate_with_the_function_matches_analyze(configs, tmp_path
         labels=lambda u: u.select_atoms("protein").residues.resids,
         output_dir=tmp_path,
         bounds=(0.0, 1.0),
-        parts=DSSP_PARTS,
+        parts=list(DSSP_SIMPLIFIED),
     )
     report = analyze(
         "secondary_structure",
@@ -410,3 +435,31 @@ def test_study_per_replicate_with_the_function_matches_analyze(configs, tmp_path
     for row in report.conditions:
         expected = [float(values[int(row.entry) - 1]) for values in rows["coil"].values["A"]]
         assert row.replicate_values == pytest.approx(expected, abs=1e-12)
+
+
+def test_full_scheme_reports_the_eight_classes_and_joins_to_the_simplified(
+    configs, tmp_path
+) -> None:
+    """scheme=full gives the eight classes; their helix classes add up to simplified helix."""
+    options = {"equilibration": EQUILIBRATION, "output_dir": tmp_path, "plots": False}
+    full = {
+        name: analyze(
+            "secondary_structure", [configs["A"]], settings={"scheme": "full"}, run=name, **options
+        )
+        for name in DSSP_GROUPS["helix"]
+    }
+    simplified = analyze("secondary_structure", [configs["A"]], run="helix", **options)
+
+    assert full["alpha_helix"].all_runs == _run_names("full")
+    assert full["alpha_helix"].provenance.settings["scheme"] == "full"
+    joined = np.sum([report.conditions[0].replicate_values for report in full.values()], axis=0)
+    assert simplified.conditions[0].replicate_values == pytest.approx(list(joined), abs=1e-12)
+
+
+def test_a_run_from_the_other_scheme_and_an_unknown_scheme_are_refused(configs) -> None:
+    options = {"equilibration": EQUILIBRATION, "plots": False}
+    with pytest.raises(ProtocolError, match="in the simplified scheme") as info:
+        analyze("secondary_structure", [configs["A"]], run="alpha_helix", **options)
+    assert "--set scheme=full" in info.value.hint
+    with pytest.raises(ProtocolError, match="scheme must be simplified or full"):
+        analyze("secondary_structure", [configs["A"]], settings={"scheme": "eight"}, **options)

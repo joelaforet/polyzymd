@@ -55,9 +55,9 @@ plugins:
   #   polyzymd analyze secondary_structure -c A/config.yaml -c B/config.yaml \
   #     --set selection='protein and chainID A'
   # Pick the total SASA with --run <context> and each residue's SASA with
-  # --run <context>_residues. Pick the helix, strand or coil fraction, or one
-  # DSSP class such as alpha_helix, with --run <name> and its per-residue
-  # profile with --run <name>_residues.
+  # --run <context>_residues. Pick the helix, strand or coil fraction with
+  # --run <name>, or add --set scheme=full for the eight DSSP classes such as
+  # alpha_helix, and each residue's fraction with --run <name>_residues.
 
   # Catalytic triad and pair distances are not configured here. Write the
   # pairs to pairs.yaml, a list of label, selection_a, selection_b and

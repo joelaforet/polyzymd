@@ -429,8 +429,9 @@ def residue_sasa(
     return total / len(frames)
 
 
-#: Names of the DSSP classes, with their codes in ``mdtraj.compute_dssp(simplified=False)``.
-#: ``unassigned`` is MDTraj's ``"NA"``, given to a residue it cannot assign.
+#: Names of the eight DSSP classes, with their codes in
+#: ``mdtraj.compute_dssp(simplified=False)``. ``unassigned`` is MDTraj's ``"NA"``,
+#: given to a residue it cannot assign.
 DSSP_CLASSES = {
     "alpha_helix": "H",
     "3_10_helix": "G",
@@ -443,15 +444,16 @@ DSSP_CLASSES = {
     "unassigned": "NA",
 }
 
-#: The three groups of MDTraj's simplified DSSP, as the classes each one joins.
+#: Names of the three classes of ``mdtraj.compute_dssp(simplified=True)``, with
+#: their codes, and ``unassigned``.
+DSSP_SIMPLIFIED = {"helix": "H", "strand": "E", "coil": "C", "unassigned": "NA"}
+
+#: The eight classes each simplified class joins, as MDTraj translates them.
 DSSP_GROUPS = {
     "helix": ("alpha_helix", "3_10_helix", "pi_helix"),
     "strand": ("extended_strand", "isolated_bridge"),
     "coil": ("turn", "bend", "loop"),
 }
-
-#: Names of the rows :func:`dssp_occupancy` returns, the classes then the groups.
-DSSP_PARTS = (*DSSP_CLASSES, *DSSP_GROUPS)
 
 #: MDTraj topologies of DSSP selections, keyed by universe and atom indices.
 _DSSP_TOPOLOGIES: dict[tuple[int, bytes], tuple[Any, Any]] = {}
@@ -513,41 +515,37 @@ def _dssp_topology(atoms: Any) -> Any:
     return topology
 
 
-def dssp_occupancy(atoms: Any, frames: Any, chunk: int = 200) -> Any:
+def dssp_occupancy(atoms: Any, frames: Any, simplified: bool = True, chunk: int = 200) -> Any:
     """Return, for each residue of ``atoms``, the fraction of ``frames`` in each DSSP class.
 
-    ``mdtraj.compute_dssp(simplified=False)`` assigns every residue of
-    ``atoms`` one of the eight DSSP codes, or ``"NA"`` when it cannot, on
-    every frame, ``chunk`` frames per call. The rows follow
-    :data:`DSSP_PARTS`: the fraction of frames in each class of
-    :data:`DSSP_CLASSES`, then in each group of :data:`DSSP_GROUPS` (helix
-    H+G+I, strand E+B and coil T+S+loop, as MDTraj's simplified DSSP joins
-    them). ``unassigned`` counts in no group. Columns follow
-    ``atoms.residues``. The coordinates are used as loaded, so a protein
-    split across a periodic boundary should be made whole first.
+    ``mdtraj.compute_dssp(simplified=simplified)`` assigns every residue of
+    ``atoms`` a DSSP code, or ``"NA"`` when it cannot, on every frame,
+    ``chunk`` frames per call. With ``simplified``, the rows are the classes of
+    :data:`DSSP_SIMPLIFIED`: helix (DSSP H, G and I), strand (E and B), coil
+    (T, S and loop) and unassigned. Otherwise they are the eight classes and
+    unassigned of :data:`DSSP_CLASSES`. Columns follow ``atoms.residues``, and
+    each residue's row values sum to 1. The coordinates are used as loaded, so
+    a protein split across a periodic boundary should be made whole first.
 
     Returns
     -------
     numpy.ndarray
-        Shape ``(len(DSSP_PARTS), n_residues)``.
+        Shape ``(len(DSSP_SIMPLIFIED), n_residues)`` with ``simplified``,
+        otherwise ``(len(DSSP_CLASSES), n_residues)``.
     """
     import mdtraj as md
     import numpy as np
 
     topology = _dssp_topology(atoms)
-    codes = list(DSSP_CLASSES.values())
+    codes = list((DSSP_SIMPLIFIED if simplified else DSSP_CLASSES).values())
     counts = np.zeros((len(codes), len(atoms.residues)))
     trajectory = atoms.universe.trajectory
     for start in range(0, len(frames), chunk):
         xyz = np.array([atoms.positions for _ in trajectory[frames[start : start + chunk]]])
         assigned = md.compute_dssp(
-            md.Trajectory(xyz=xyz.astype(np.float32) / 10.0, topology=topology), simplified=False
+            md.Trajectory(xyz=xyz.astype(np.float32) / 10.0, topology=topology),
+            simplified=simplified,
         )
         for row, code in enumerate(codes):
             counts[row] += (assigned == code).sum(axis=0)
-    occupancy = counts / len(frames)
-    groups = [
-        occupancy[[list(DSSP_CLASSES).index(name) for name in members]].sum(axis=0)
-        for members in DSSP_GROUPS.values()
-    ]
-    return np.vstack([occupancy, *groups])
+    return counts / len(frames)
