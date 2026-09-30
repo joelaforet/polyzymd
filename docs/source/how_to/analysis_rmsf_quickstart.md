@@ -58,7 +58,9 @@ gives one number per residue for all frames together: the root mean square
 over frames and over the residue's atoms of the distance from the reference,
 what `gmx rmsf -od -res` reports as the "root mean square deviation with
 respect to the reference structure". Other tools' "per-residue RMSD", such as
-cpptraj's `rmsd perres`, is a timeseries per residue instead.
+cpptraj's `rmsd perres`, is a timeseries per residue instead. For which of
+`rmsd`, `rmsf`, `offset` and `rmsd_per_residue` answers a given question, with
+a worked example, see {ref}`Fluctuation, offset and deviation <rmsf-fluctuation-offset-deviation>`.
 ```
 
 The values agree with `gmx rmsf` to the 4 decimals in nm that GROMACS writes;

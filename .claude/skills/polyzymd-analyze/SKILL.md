@@ -32,6 +32,14 @@ hydrogen_bonds, `--run protein_polymer_mean_lifetime`, `protein_polymer_residues
 and `protein_polymer_pairs` report how long the bonds last and how often each
 residue and residue pair is bonded.
 
+`rmsd` is one number per frame; `rmsd_per_residue`, `rmsf` and `offset` are one
+number per residue over all frames, measured from the reference, from each
+atom's own mean, and as the mean's distance from the reference, with
+`rmsd_per_residue² = rmsf² + offset²`. Report `rmsf` for flexibility and
+`offset` for distance from a reference state; read the "Fluctuation, offset
+and deviation" section of `docs/source/explanation/analysis_rmsf_best_practices.md`
+before choosing.
+
 The catalytic triad is not an analysis name: `polyzymd analyze catalytic_triad`
 exits 2. It is a routine on the study API that counts each triad hydrogen bond
 with `functions.hbond_count` and combines them with `Timeseries.transform`:

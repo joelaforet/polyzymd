@@ -12,7 +12,9 @@ RMSD analysis was added in PolyzyMD 1.3.0.
 **Want to understand the statistics?** This guide focuses on getting results
 quickly. For interpretation of RMSD curves and the choice of reference, see
 {doc}`../explanation/analysis_rmsd_best_practices`. For what each shipped
-function measures, see {doc}`../reference/analysis_functions`.
+function measures, see {doc}`../reference/analysis_functions`. `rmsd` is one
+number per frame; for how it differs from the per-residue `rmsd_per_residue`,
+`rmsf` and `offset`, and which to report, see {ref}`Fluctuation, offset and deviation <rmsf-fluctuation-offset-deviation>`.
 ```
 
 :::{admonition} Environment Setup
