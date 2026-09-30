@@ -1029,7 +1029,7 @@ def _analyze_contacts(
     for residue in protein_atoms.residues:
         by_class.setdefault(grouping.classify(str(residue.resname)), []).append(int(residue.resid))
     classes = [name for name in grouping.available_groups if name in by_class]
-    reserved = {"coverage", "mean", "contact", *types, *classes}
+    reserved = {"coverage", "mean", "contact", "classes", *types, *classes}
     if not isinstance(regions, dict) or reserved & set(regions):
         raise ProtocolError(
             f"contacts: regions must map names other than {sorted(reserved)} to selections, "
