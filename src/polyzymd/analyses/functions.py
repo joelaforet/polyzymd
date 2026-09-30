@@ -4,7 +4,8 @@ The per-frame functions take MDAnalysis ``AtomGroup`` arguments positioned at
 one frame and return one number, so they run through
 :meth:`polyzymd.analyses.study.Study.timeseries` like any function you write.
 The per-replicate functions (:func:`rmsf`, :func:`rms_deviation`,
-:func:`rms_decomposition` and :func:`residue_sasa`) also take the production
+:func:`rms_decomposition`, :func:`residue_sasa` and :func:`dssp_occupancy`)
+also take the production
 frame indices and return one value per residue, and run through
 :meth:`polyzymd.analyses.study.Study.per_replicate`.
 """
@@ -426,3 +427,126 @@ def residue_sasa(
         )
         total += np.bincount(residue, weights=atom[0], minlength=len(total))
     return total / len(frames)
+
+
+#: Names of the DSSP classes, with their codes in ``mdtraj.compute_dssp(simplified=False)``.
+#: ``unassigned`` is MDTraj's ``"NA"``, given to a residue it cannot assign.
+DSSP_CLASSES = {
+    "alpha_helix": "H",
+    "3_10_helix": "G",
+    "pi_helix": "I",
+    "extended_strand": "E",
+    "isolated_bridge": "B",
+    "turn": "T",
+    "bend": "S",
+    "loop": " ",
+    "unassigned": "NA",
+}
+
+#: The three groups of MDTraj's simplified DSSP, as the classes each one joins.
+DSSP_GROUPS = {
+    "helix": ("alpha_helix", "3_10_helix", "pi_helix"),
+    "strand": ("extended_strand", "isolated_bridge"),
+    "coil": ("turn", "bend", "loop"),
+}
+
+#: Names of the rows :func:`dssp_occupancy` returns, the classes then the groups.
+DSSP_PARTS = (*DSSP_CLASSES, *DSSP_GROUPS)
+
+#: MDTraj topologies of DSSP selections, keyed by universe and atom indices.
+_DSSP_TOPOLOGIES: dict[tuple[int, bytes], tuple[Any, Any]] = {}
+
+
+def _dssp_topology(atoms: Any) -> Any:
+    """Return an MDTraj topology of ``atoms``, which must hold whole residues.
+
+    One MDTraj chain is made per chain ID (or segment, when the topology has
+    no chain IDs), so DSSP never pairs residues of different chains; each
+    residue keeps its name and number, and each atom its name and its element
+    from the MDAnalysis universe. It is built once per universe and selection.
+    """
+    import mdtraj as md
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    key = (id(atoms.universe), atoms.indices.tobytes())
+    cached = _DSSP_TOPOLOGIES.get(key)
+    if cached is not None and cached[0] is atoms.universe:
+        return cached[1]
+    if len(atoms) == 0 or len(atoms.residues.atoms) != len(atoms):
+        raise ProtocolError(
+            f"dssp: the selection has {len(atoms)} atoms and must hold whole residues "
+            f"({len(atoms.residues.atoms)} atoms in its residues).",
+            hint="Select whole residues, such as 'protein'; DSSP needs every backbone atom.",
+        )
+    if not hasattr(atoms, "elements"):
+        raise ProtocolError(
+            "dssp: the universe has no element for its atoms.",
+            hint="Load the replicate with PolyzyMD, which fills in elements from atom types or names.",
+        )
+    topology = md.Topology()
+    chains: dict[str, Any] = {}
+    residues: dict[int, Any] = {}
+    for atom in atoms:
+        chain_key = str(getattr(atom, "chainID", "") or atom.segid)
+        chain = chains.get(chain_key)
+        if chain is None:
+            chain = chains[chain_key] = topology.add_chain()
+        residue = residues.get(atom.resindex)
+        if residue is None:
+            residue = residues[atom.resindex] = topology.add_residue(
+                str(atom.resname), chain, resSeq=int(atom.resid)
+            )
+        try:
+            element = md.element.get_by_symbol(str(atom.element).strip().capitalize())
+        except KeyError as exc:
+            raise ProtocolError(
+                f"dssp: atom {atom.index} ({atom.name}) has element {atom.element!r}, which "
+                "MDTraj does not know.",
+                hint="Check the topology's element column or the atom types.",
+            ) from exc
+        topology.add_atom(str(atom.name), element, residue)
+    if len(_DSSP_TOPOLOGIES) > 32:
+        _DSSP_TOPOLOGIES.clear()
+    _DSSP_TOPOLOGIES[key] = (atoms.universe, topology)
+    return topology
+
+
+def dssp_occupancy(atoms: Any, frames: Any, chunk: int = 200) -> Any:
+    """Return, for each residue of ``atoms``, the fraction of ``frames`` in each DSSP class.
+
+    ``mdtraj.compute_dssp(simplified=False)`` assigns every residue of
+    ``atoms`` one of the eight DSSP codes, or ``"NA"`` when it cannot, on
+    every frame, ``chunk`` frames per call. The rows follow
+    :data:`DSSP_PARTS`: the fraction of frames in each class of
+    :data:`DSSP_CLASSES`, then in each group of :data:`DSSP_GROUPS` (helix
+    H+G+I, strand E+B and coil T+S+loop, as MDTraj's simplified DSSP joins
+    them). ``unassigned`` counts in no group. Columns follow
+    ``atoms.residues``. The coordinates are used as loaded, so a protein
+    split across a periodic boundary should be made whole first.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(len(DSSP_PARTS), n_residues)``.
+    """
+    import mdtraj as md
+    import numpy as np
+
+    topology = _dssp_topology(atoms)
+    codes = list(DSSP_CLASSES.values())
+    counts = np.zeros((len(codes), len(atoms.residues)))
+    trajectory = atoms.universe.trajectory
+    for start in range(0, len(frames), chunk):
+        xyz = np.array([atoms.positions for _ in trajectory[frames[start : start + chunk]]])
+        assigned = md.compute_dssp(
+            md.Trajectory(xyz=xyz.astype(np.float32) / 10.0, topology=topology), simplified=False
+        )
+        for row, code in enumerate(codes):
+            counts[row] += (assigned == code).sum(axis=0)
+    occupancy = counts / len(frames)
+    groups = [
+        occupancy[[list(DSSP_CLASSES).index(name) for name in members]].sum(axis=0)
+        for members in DSSP_GROUPS.values()
+    ]
+    return np.vstack([occupancy, *groups])
