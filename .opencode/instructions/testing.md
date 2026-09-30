@@ -2,11 +2,11 @@
 
 ## Current State
 
-The test suite covers the study API, the shipped analysis functions, the plugin framework (being removed) and core infrastructure:
+The test suite covers the study API, the shipped analysis functions, `polyzymd analyze` and core infrastructure:
 
 - **Test directory:** `tests/` with subdirectories mirroring the source tree
 - **Test count:** run `pytest tests --collect-only -q | tail -1`; do not copy a number here
-- **Fixtures:** `tests/conftest.py` with shared fixtures for comparison configs, mock data, etc.
+- **Fixtures:** `tests/conftest.py` with shared fixtures for simulation configs, mock data, etc.
 - **Markers:** `@pytest.mark.slow` for tests requiring simulation data
 
 ### Directory Structure
@@ -20,7 +20,6 @@ tests/
 │   ├── test_reference.py        # reference.py
 │   ├── test_figures.py          # figures.py
 │   ├── test_protocols.py        # protocols.py: polyzymd analyze, ProtocolReport
-│   ├── test_protocols_real_artifacts.py  # reports from stored real-data artifacts
 │   ├── test_rmsf.py             # rmsf, rmsd_per_residue, rms_decomposition
 │   ├── test_sasa.py             # sasa, residue_sasa
 │   ├── test_secondary_structure.py  # dssp_occupancy
@@ -32,11 +31,8 @@ tests/
 │   ├── test_hydrogen_bonds_analyze.py    # polyzymd analyze hydrogen_bonds on OpenMM run directories
 │   ├── test_segment_join.py     # loader repairs of restart-chain boundaries
 │   ├── test_empty_segments.py   # loader skips of empty segments
-│   ├── test_base.py             # analyses/base.py
-│   ├── test_discovery.py        # analyses/discovery.py (no shipped plugin is found)
-│   ├── test_orchestrator*.py    # analyses/orchestrator.py (plugin framework, with fake plugins)
-│   ├── test_stats.py            # analyses/stats.py
-│   ├── mda/                     # analyses/mda/
+│   ├── test_universe.py         # universe.py: UniverseProvider and input file records
+│   ├── test_identity.py         # identity.py: the config hash must not change
 │   ├── shared/                  # analyses/shared/ utilities (loader, window, statistics, ...)
 │   ├── scientific/              # statistical and uncertainty contract tests
 │   └── integration/             # Cross-analysis integration tests
@@ -44,8 +40,8 @@ tests/
 │   ├── test_main.py
 │   ├── test_main_recover.py
 │   ├── test_main_status.py
-│   ├── test_compare.py
-│   ├── test_scaffold.py
+│   ├── test_analyze.py          # polyzymd analyze options, -f refusal
+│   ├── test_retired_commands.py # hidden compare and new-analysis stubs
 │   └── test_colors.py
 ├── config/                      # Tests for config/ source tree
 │   ├── test_schema.py
@@ -56,7 +52,7 @@ tests/
 │   ├── test_runner.py
 │   └── test_signals.py
 ├── workflow/                    # Tests for workflow/ source tree
-│   ├── test_analysis_slurm.py
+│   ├── test_analysis_submit.py  # polyzymd analyze --submit scripts
 │   ├── test_slurm.py
 │   └── test_daisy_chain.py
 ├── exporters/                   # Tests for exporters/ source tree
@@ -96,8 +92,7 @@ When adding tests:
 
 ### Testing an analysis function
 
-No shipped analysis is a plugin any more. A new analysis is a function in
-`analyses/functions.py`; test it in `tests/analyses/test_<name>.py`:
+A new analysis is a function in `analyses/functions.py`; test it in `tests/analyses/test_<name>.py`:
 
 1. **Known answer on placed geometry**: build a small `MDAnalysis.Universe`
    with atoms at chosen positions and check the function's value by hand
@@ -111,8 +106,6 @@ No shipped analysis is a plugin any more. A new analysis is a function in
    the CLI and check `metric`, `unit`, `all_runs`, the replicate values and the
    figures written.
 
-Framework tests that need a registered plugin use `_install_toy` from
-`tests/analyses/test_protocols.py` instead of a shipped plugin.
 
 ## Test Data
 

@@ -62,15 +62,15 @@ checks before committing.
 
 ```
 src/polyzymd/
-├── cli/          # Click CLI (main.py = entry point, scaffold.py = new-analysis generator)
+├── cli/          # Click CLI (main.py = entry point, analyze.py = polyzymd analyze, retired.py = hidden compare/new-analysis stubs)
 ├── config/       # Pydantic v2 models (schema.py), YAML loading
 ├── builders/     # System construction (PDB → parameterized topology)
 ├── simulation/   # OpenMM simulation runners
-├── workflow/     # Orchestration (build → simulate → analyze)
+├── workflow/     # Orchestration (build → simulate), SLURM scripts, analysis_submit.py = analyze --submit
 ├── core/         # Base classes, shared types
 ├── analyses/     # ★ Study API: functions of a replicate Universe, Study, polyzymd analyze (primary extension point)
-│   ├── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
-│   └── _framework/, mda/  # Plugin framework: no shipped analysis uses it; being removed
+│   ├── universe.py, identity.py  #   UniverseProvider (replicate universes, input file records), compute_config_hash
+│   └── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
 ├── exporters/    # GROMACS/other format exporters
 ├── data/         # Bundled data files (force fields, templates)
 ├── utils/        # Shared utilities
@@ -83,12 +83,17 @@ src/polyzymd/
 |-------|-------|------|
 | **Function analyses** (the extension point) | `functions.py`, `study.py`, `timeseries.py`, `protocols.py`, `figures.py` | rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds: functions of a replicate `Universe`, measured by `Study.timeseries` or `Study.per_replicate` and run by `polyzymd analyze NAME -c config.yaml` (`protocols.FUNCTION_ANALYSES`). Before choosing among `rmsd`, `rmsf`, `offset` and `rmsd_per_residue`, read the "Fluctuation, offset and deviation" section of `docs/source/explanation/analysis_rmsf_best_practices.md`: `rmsd` is per frame, the others per residue, and `rmsd_per_residue² = rmsf² + offset²` |
 | **Shared utilities** | `shared/loader.py`, `shared/window.py`, etc. | `TrajectoryLoader`, frame windows, statistics, autocorrelation |
-| **Plugin framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/`, `_framework/` | The `Analysis` plugin lifecycle behind `polyzymd compare`. No shipped analysis is a plugin any more, and the framework is being removed; do not add plugins |
+| **Loading and identity** | `universe.py`, `identity.py` | `UniverseProvider` loads each replicate's `Universe` and records its input files; `compute_config_hash` is recorded by every stored result and must not change |
 
 The catalytic triad is not an analysis: it is a routine on the study API
 (`docs/source/how_to/analysis_triad_quickstart.md`), and `polyzymd analyze
 catalytic_triad` exits with a pointer to it. `polyzymd analyze` does not read
 `comparison.yaml`: `-f comparison.yaml` exits with the equivalent `-c` command.
+An unknown name exits 2 listing `FUNCTION_ANALYSES`. `polyzymd analyze NAME -c
+... --submit --preset <cluster>` runs one SLURM array task per condition and
+replicate and a report job (`workflow/analysis_submit.py`). The hidden
+`polyzymd compare` and `polyzymd new-analysis` commands (`cli/retired.py`) only
+exit 2 and name their replacements.
 
 ## Key Patterns
 
@@ -108,7 +113,7 @@ catalytic_triad` exits with a pointer to it. `polyzymd analyze` does not read
 - **Preemption lifecycle:** Install handlers at `run-segment` entry; only atomic
   `phase.json` records with `status: completed` may skip OpenMM phases. Keep
   reporter intervals independent from bounded signal-check chunks.
-- **ABC + Strategy:** `MolecularSelector`, `MoleculeCharger`
+- **ABC + Strategy:** `MoleculeCharger`
 - **Analyses are functions:** a measurement is a function of an MDAnalysis `Universe`; `Study` supplies the replicate universes, records and cross-replicate statistics
 - **Config:** Pydantic v2 `BaseModel` subclasses with `model_validator`
 
@@ -129,10 +134,8 @@ shipped analysis, as a `FUNCTION_ANALYSES` entry and an `_analyze_<name>` in
 | Figures | `analyses/figures.py` | `ReplicateValues.plot`, profiles, differences, uncertainty footnotes |
 | Worked routine | `docs/source/how_to/analysis_triad_quickstart.md` | Combining shipped functions for a question of your own |
 
-The plugin framework (`Analysis`, `polyzymd new-analysis`, `polyzymd compare`)
-still exists but no shipped analysis uses it, and it is being removed. Do not
-write new plugins; `docs/source/contributor_guide/analysis_plugins/` documents
-it only until the removal.
+`docs/source/contributor_guide/adding_an_analysis.md` gives the contributor
+steps. There is no plugin class, registry or scaffold.
 
 ## Design Principles (Critical for Contributors)
 
@@ -210,10 +213,9 @@ two ways, and mixing them up picks the wrong structure:
 
 ## Known Issues
 
-1. **Config hash mismatch warning** prints 66+ times — should print once
-2. **Docs sidebar** — after adding toctree entries, run `make clean html` (not just `make html`)
-3. **GitHub Issue #20** — tracks remaining analysis module TODOs
-4. **Pre-existing LSP type errors** — Pyright/Pylance reports false positives in `config/schema.py`, `builders/system_builder.py`, etc. due to missing type stubs for OpenMM/OpenFF. Does NOT affect runtime.
+1. **Docs sidebar** — after adding toctree entries, run `make clean html` (not just `make html`)
+2. **GitHub Issue #20** — tracks remaining analysis module TODOs
+3. **Pre-existing LSP type errors** — Pyright/Pylance reports false positives in `config/schema.py`, `builders/system_builder.py`, etc. due to missing type stubs for OpenMM/OpenFF. Does NOT affect runtime.
 
 ## Modular Instructions
 
@@ -224,7 +226,7 @@ See `.opencode/instructions/` for detailed rules on specific topics:
 - `testing.md` — test infrastructure, running tests, writing new tests
 - `development-workflow.md` — release flow, atomic scope, agent
   collaboration, commits, pushes, and PR handoff
-- `analysis-module.md` — study API patterns, `polyzymd analyze` protocols and the plugin framework being removed
+- `analysis-module.md` — study API patterns and `polyzymd analyze` protocols
 - `documentation.md` — Sphinx/MyST conventions, API docs, zero-warning build gate, `:no-index:` rules
 - `openff-pdb-ingestion.md` — OpenFF protein/PDB ingestion troubleshooting and living error-log rules
 - `known-issues.md` — detailed bug descriptions and workarounds
