@@ -37,8 +37,7 @@ def convert_legacy() -> ModuleType:
 def test_parse_folder_name_with_polymer(convert_legacy: ModuleType) -> None:
     """Folder parsing extracts replicate, polymer, and phase metadata."""
     folder = (
-        "10A_RESTRAINT_LipA_Resorufin-Butyrate_SBMA-EGMA-50%_38x_"
-        "363.0K_0.5ns-NVT_1000.0ns-NPT_run2"
+        "10A_RESTRAINT_LipA_Resorufin-Butyrate_SBMA-EGMA-50%_38x_363.0K_0.5ns-NVT_1000.0ns-NPT_run2"
     )
 
     metadata = convert_legacy.parse_folder_name(folder)
@@ -496,9 +495,7 @@ def test_generate_comparison_yaml_accepts_explicit_disambiguated_control(
         converted,
         "12A_RESTRAINT_CALB_Resorufin-Butyrate_conf2_363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
     )
-    control_label = (
-        "No Polymer (Control) " "(12A, CALB, Resorufin-Butyrate, conf2, 363K, no polymer)"
-    )
+    control_label = "No Polymer (Control) (12A, CALB, Resorufin-Butyrate, conf2, 363K, no polymer)"
 
     comparison_yaml = convert_legacy.generate_comparison_yaml(
         output_dir=converted,
@@ -903,7 +900,7 @@ def test_convert_simulation_returns_false_for_empty_trajectory_single_production
 def test_conversion_guidance_uses_canonical_compare_commands(
     convert_legacy: ModuleType, caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
-    """Generated guidance uses current comparison commands only."""
+    """Generated guidance uses current comparison and analyze commands only."""
     caplog.set_level("INFO", logger=convert_legacy.logger.name)
     converted = tmp_path / "converted"
     sim_dir = converted / (
@@ -923,5 +920,6 @@ def test_conversion_guidance_uses_canonical_compare_commands(
     assert "polyzymd compare validate -f" in guidance
     assert "polyzymd compare run rmsf -f" in guidance
     assert "polyzymd compare plot-all -f" in guidance
-    assert "polyzymd analyze" not in guidance
+    assert "polyzymd analyze contacts -c " in guidance
+    assert "polyzymd compare run contacts" not in guidance
     assert "analysis.yaml" not in guidance
