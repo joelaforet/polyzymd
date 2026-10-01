@@ -180,6 +180,12 @@ def _one_line(text: str) -> str:
     help="Measure every N-th production frame of every replicate. Default 1.",
 )
 @click.option(
+    "--until",
+    default=None,
+    help="End of a common analysis window, e.g. 38ns: leave out production frames after it, "
+    "so conditions simulated for different lengths are compared over the same time.",
+)
+@click.option(
     "--recompute", is_flag=True, help="Recompute replicates instead of reusing cached results."
 )
 @click.option(
@@ -247,6 +253,7 @@ def analyze_command(
     output_path: Path | None,
     output_dir: Path | None,
     stride: int | None,
+    until: str | None,
     recompute: bool,
     no_eq_check: bool,
     no_plots: bool,
@@ -292,6 +299,7 @@ def analyze_command(
     if name is None:
         _analyze_every_run(ctx, study_path)
         return
+    _quiet_console(ctx, study_path, output_dir, "analyze")
     run_name = name
     data: dict | None = None
     if study_path is not None:
@@ -306,6 +314,7 @@ def analyze_command(
                 setting_overrides,
                 output_dir,
                 data,
+                study_until,
             ) = _from_study(
                 study_path,
                 name,
@@ -324,6 +333,8 @@ def analyze_command(
                 click.echo(f"fix: {_one_line(hint)}", err=True)
             sys.exit(EXIT_ANALYSIS_ERROR)
     stride = stride or 1
+    if study_path is not None and until is None:
+        until = study_until
     study_record = (
         _study_record(study_path, run_name, _settings(setting_overrides))
         if study_path is not None
@@ -354,6 +365,7 @@ def analyze_command(
                 run_name=run_name,
                 data=data,
                 data_dir=data_dir,
+                until=until,
                 dry_run=dry_run or not submit,
                 preset=preset,
                 overrides={
@@ -391,6 +403,7 @@ def analyze_command(
             study_path=study_path,
             run_name=run_name,
             data=data,
+            until=until,
         )
     except AnalysisError as exc:
         hint = getattr(exc, "hint", None)
@@ -418,6 +431,34 @@ def analyze_command(
             Path(output_path).write_text(rendered.rstrip("\n") + "\n")
         except OSError as exc:
             raise click.ClickException(f"Could not write output file: {exc}") from exc
+
+
+def _quiet_console(
+    ctx: click.Context, study_path: Path | None, output_dir: Path | None, command: str
+) -> None:
+    """Keep the console to warnings and send the full log to a file, once per process.
+
+    The log goes to ``<study>/logs/`` with ``--study``, otherwise to
+    ``<output-dir>/logs/`` (the current directory by default). ``polyzymd -v``
+    keeps INFO on the console.
+    """
+    import logging
+
+    from polyzymd.cli.logging_utils import analysis_logging
+
+    if any(isinstance(h, logging.FileHandler) for h in logging.getLogger().handlers):
+        return
+    root = Path(output_dir or Path.cwd())
+    if study_path is not None:
+        try:
+            from polyzymd.analyses.study_file import find_study_file
+
+            root = find_study_file(study_path).parent
+        except Exception:  # noqa: BLE001 - the command itself reports a bad study path
+            pass
+    verbose = bool(ctx.find_root().params.get("verbose"))
+    path = analysis_logging(root / "logs", command, verbose=verbose)
+    click.echo(f"log: {path}", err=True)
 
 
 def _analyze_every_run(ctx: click.Context, study_path: Path | None) -> None:
@@ -449,6 +490,7 @@ def _analyze_every_run(ctx: click.Context, study_path: Path | None) -> None:
         click.echo(f"error: {study_path} lists no analyses.", err=True)
         click.echo("fix: Add runs under analyses: in the study file.", err=True)
         sys.exit(EXIT_ANALYSIS_ERROR)
+    _quiet_console(ctx, study_path, None, "analyze")
     failed = []
     for run in runs:
         click.echo(f"== {run}")
@@ -465,13 +507,22 @@ def _analyze_every_run(ctx: click.Context, study_path: Path | None) -> None:
 
 
 def _study_record(study_path: Path, run: str, settings: dict) -> dict:
-    """Return the study file and git state a report records, warning about uncommitted inputs."""
+    """Return the study file and git state a report records, warning about uncommitted inputs.
+
+    ``settings`` are the run's ``--set`` entries (for a shipped analysis, the
+    file's settings already among them); for the study's own function they
+    are applied over its ``settings:``, so the record holds what the function
+    was called with. The path is relative to the study folder.
+    """
     import hashlib
 
-    from polyzymd.analyses.study_file import find_study_file
+    from polyzymd.analyses.study_file import find_study_file, load_study_file
     from polyzymd.analyses.study_git import git_state
 
     file = find_study_file(study_path)
+    entry = load_study_file(file).analyses.get(run)
+    if entry is not None and entry.function is not None:
+        settings = {**entry.function.settings, **settings}
     state = git_state(file.parent)
     if state and state["inputs_uncommitted"]:
         click.echo(
@@ -480,7 +531,7 @@ def _study_record(study_path: Path, run: str, settings: dict) -> dict:
             err=True,
         )
     return {
-        "path": str(file),
+        "path": file.name,
         "sha256": hashlib.sha256(file.read_bytes()).hexdigest(),
         "run": run,
         "settings": settings,
@@ -515,7 +566,8 @@ def _from_study(
     tuple
         The analysis name (``None`` for the study's own function), configs,
         labels, equilibration, stride, replicate spec, ``--set`` entries,
-        output directory, and the run directories of ``data.local.yaml``.
+        output directory, the run directories of ``data.local.yaml``, and
+        ``until``.
     """
     import json
 
@@ -577,6 +629,7 @@ def _from_study(
         (*from_file, *setting_overrides),
         output_dir or protocol.results_dir(run_name),
         dict(protocol.data),
+        protocol.until,
     )
 
 
@@ -604,6 +657,7 @@ def _submit(
     run_name: str | None = None,
     data: dict | None = None,
     data_dir: Path | None = None,
+    until: str | None = None,
 ) -> None:
     """Write, and unless ``dry_run`` submit, the SLURM jobs of one ``polyzymd analyze`` command."""
     import shlex
@@ -635,6 +689,7 @@ def _submit(
         _replicates(replicate_spec),
         stride,
         data,
+        until,
     )
     tasks = [
         (condition.config_path, condition.label, replicate.index)
@@ -646,6 +701,8 @@ def _submit(
     common = ["--eq", first.equilibration, "--stride", str(stride), "--output-dir", str(target)]
     if data_dir is not None:
         common += ["--data", str(Path(data_dir).expanduser().resolve())]
+    if until is not None:
+        common += ["--until", str(until)]
     for setting in setting_overrides:
         common += ["--set", setting]
     if run is not None:
@@ -717,6 +774,7 @@ def _run(
     study_path: Path | None = None,
     run_name: str | None = None,
     data: dict | None = None,
+    until: str | None = None,
 ) -> "ProtocolReport":
     """Resolve the options and run the protocol on the -c configs.
 
@@ -740,6 +798,7 @@ def _run(
             replicates=_replicates(replicate_spec),
             stride=stride,
             data=data,
+            until=until,
         )
         return run_user_analysis(
             study,
@@ -769,6 +828,7 @@ def _run(
         plots=plots,
         stride=stride,
         data=data,
+        until=until,
     )
 
 

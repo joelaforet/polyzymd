@@ -30,6 +30,7 @@ def check_command(path: Path) -> None:
     or a condition's config cannot be read; missing runs are reported but are
     not errors, so a study folder without its trajectories still checks.
     """
+    _study_logging(path, "study-check")
     import polyzymd
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.results import REPORT_FILE
@@ -198,6 +199,7 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
     conditions not found are kept as they were. Moving data never changes
     the study or its stored results' config hashes.
     """
+    _study_logging(study_path, "study-locate")
     import yaml
 
     from polyzymd.analyses.exceptions import ProtocolError
@@ -386,6 +388,21 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _study_logging(path: Path, command: str) -> None:
+    """Keep the console to warnings and log everything to ``<study>/logs/``; see analysis_logging."""
+    import logging
+
+    from polyzymd.cli.logging_utils import analysis_logging
+
+    if any(isinstance(h, logging.FileHandler) for h in logging.getLogger().handlers):
+        return
+    root = Path(path)
+    root = root if root.is_dir() else root.parent
+    context = click.get_current_context(silent=True)
+    verbose = bool(context and context.find_root().params.get("verbose"))
+    click.echo(f"log: {analysis_logging(root / 'logs', command, verbose=verbose)}", err=True)
+
+
 def _check_against_manifest(root: Path, label: str, folder: Path, verify: bool) -> list[str]:
     """Compare located run files with the sizes (and with ``verify``, SHA-256) in manifest.json."""
     import hashlib
@@ -439,6 +456,7 @@ def freeze_command(path: Path, tag: str | None) -> None:
     uploads and publishes nothing. Every gap is a warning, never a refusal.
     Refreeze after filling a gap, such as the study's or paper's DOI.
     """
+    _study_logging(path, "study-freeze")
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.study_freeze import freeze
 

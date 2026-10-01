@@ -179,6 +179,29 @@ class TestStale:
         assert any("equilibration" in r for r in reasons["rg"])
         assert reasons["rg2"] == ["no stored results; run polyzymd analyze rg2 --study"]
 
+    def test_own_function_with_settings_is_not_stale(self, study: Path) -> None:
+        (study / "analyses" / "metrics.py").write_text(
+            "def scaled_rg(atoms, frames, factor=1.0):\n"
+            "    total = 0.0\n"
+            "    for _ in atoms.universe.trajectory[frames]:\n"
+            "        total += atoms.radius_of_gyration()\n"
+            "    return factor * total / len(frames)\n"
+        )
+        text = (study / "study.yaml").read_text().replace(
+            "  rg: {selection: all}",
+            "  rg: {selection: all}\n  scaled:\n    function: analyses/metrics.py:scaled_rg\n"
+            "    kind: per_replicate\n    selections: {atoms: all}\n    settings: {factor: 2.0}",
+        )
+        (study / "study.yaml").write_text(text)
+        result = CliRunner().invoke(
+            cli, ["analyze", "scaled", "--study", str(study), "--no-eq-check", "--no-plots"]
+        )
+        assert result.exit_code == 0, result.output
+        report = json.loads((study / "results" / "scaled" / "report.json").read_text())
+        assert report["provenance"]["study"]["settings"] == {"factor": 2.0}
+        assert report["provenance"]["study"]["path"] == "study.yaml"
+        assert "scaled" not in stale_runs(load_study_file(study))
+
     def test_changed_setting(self, study: Path) -> None:
         text = (
             (study / "study.yaml")

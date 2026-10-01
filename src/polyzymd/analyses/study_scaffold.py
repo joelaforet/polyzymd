@@ -39,6 +39,8 @@ __pycache__/
 .ipynb_checkpoints/
 # What polyzymd study freeze lays out for upload.
 deposit/
+# Full logs of polyzymd commands; the console shows only warnings.
+logs/
 # SLURM logs of polyzymd analyze --submit and of the simulations.
 results/*/slurm/*/logs/
 conditions/*/slurm_logs/

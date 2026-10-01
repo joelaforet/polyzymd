@@ -258,6 +258,76 @@ def _engine_inputs(provenance: Any) -> list[Path]:
     return unique
 
 
+def _production_length_warnings(conditions: dict[str, Any]) -> list[str]:
+    """Warn when the conditions' replicates were simulated for very different lengths.
+
+    Uses the production length of each replicate in the manifest and the
+    tolerance of :func:`polyzymd.analyses.study.production_length_warnings`.
+    """
+    from polyzymd.analyses.study import PRODUCTION_LENGTH_TOLERANCE
+
+    lengths = {
+        label: [
+            r["production_ns"] for r in c.get("replicates", {}).values() if "production_ns" in r
+        ]
+        for label, c in conditions.items()
+    }
+    lengths = {label: v for label, v in lengths.items() if v}
+    if len(lengths) < 2:
+        return []
+    longest = max(max(v) for v in lengths.values())
+    shortest = min(min(v) for v in lengths.values())
+    if longest <= 0 or (longest - shortest) / longest <= PRODUCTION_LENGTH_TOLERANCE:
+        return []
+    described = "; ".join(f"{label} {min(v):.4g}-{max(v):.4g} ns" for label, v in lengths.items())
+    return [
+        f"the conditions' production lengths differ ({described}); results compared across "
+        f"them may reflect simulated time, so analyse with until {shortest:.4g}ns or extend the "
+        "short runs, and say which in the methods"
+    ]
+
+
+def composition_warnings(label: str, config: Any, universe: Any) -> list[str]:
+    """Return how the topology of ``label`` disagrees with what its config says was simulated.
+
+    The residues that are neither protein, water nor ions are compared with
+    the config: its substrate's ``residue_name`` should be among them, and
+    the others are taken as polymer, which the config should enable. A
+    disagreement means the deposited config does not describe the simulated
+    system, which a reproducer would then build wrongly.
+    """
+    found = Counter(
+        str(r).upper()
+        for r in universe.select_atoms("not protein and not water").residues.resnames
+        if str(r).upper() not in _IONS
+    )
+    notes: list[str] = []
+    substrate = getattr(config, "substrate", None)
+    substrate_name = str(substrate.residue_name).upper() if substrate is not None else None
+    if substrate_name and substrate_name not in found:
+        notes.append(
+            f"{label}: the config names substrate residue {substrate_name}, which the topology "
+            "does not contain"
+        )
+    others = {name: n for name, n in found.items() if name != substrate_name}
+    polymers = getattr(config, "polymers", None)
+    expects_polymer = bool(polymers is not None and getattr(polymers, "enabled", False))
+    described = ", ".join(f"{name} {n}" for name, n in sorted(others.items()))
+    if expects_polymer and not others:
+        notes.append(
+            f"{label}: the config enables polymers, but the topology has no residue besides "
+            "protein, water, ions and the substrate"
+        )
+    elif not expects_polymer and others:
+        notes.append(
+            f"{label}: the topology contains residues {described} besides protein, water and "
+            f"ions{' and the substrate' if substrate_name else ''}, but the config "
+            f"{'has no substrate and ' if not substrate_name else ''}enables no polymers; the "
+            "deposited config may not describe the simulated system"
+        )
+    return notes
+
+
 def _portable(value: Any, root: Path, key: str | None = None) -> Any:
     """Return ``value`` with every config path made relative to ``root``, or reduced to its name.
 
@@ -381,6 +451,8 @@ def _replicates(
                 python_warnings.simplefilter("ignore")
                 universe = replicate.universe()
                 rows.append(_summary_row(label, replicate.index, universe))
+                if replicate is condition.replicates[0]:
+                    warnings.extend(composition_warnings(label, condition.config, universe))
                 universe.trajectory[-1]
                 final_pdb = (
                     protocol.root
@@ -408,8 +480,12 @@ def _replicates(
                 "first_analysed_ns": float(replicate.times[0]) if len(replicate.times) else None,
                 "trajectory_variant": provenance.trajectory_variant,
                 "bond_source": provenance.bond_source,
+                "warnings": list(provenance.warnings),
             }
         conditions[label] = {**record, "replicates": replicates}
+        for index, replicate_record in replicates.items():
+            for text in replicate_record["warnings"]:
+                warnings.append(f"{label} replicate {index}: {text}")
     return conditions, rows
 
 
@@ -603,6 +679,7 @@ def freeze(root: str | Path, *, tag: str | None = None) -> FreezeResult:
     hashes.save()
     for label, items in condition_restraints(protocol).items():
         conditions[label]["restraints"] = items
+    warnings.extend(_production_length_warnings(conditions))
 
     released = date.today().isoformat()
     version = tag or "unversioned"
@@ -686,12 +763,15 @@ def freeze(root: str | Path, *, tag: str | None = None) -> FreezeResult:
     )
     gitignore = root / ".gitignore"
     lines = gitignore.read_text().splitlines() if gitignore.exists() else []
-    if f"{DEPOSIT}/" not in lines:
-        gitignore.write_text(
-            "\n".join(
-                [*lines, "# What polyzymd study freeze lays out for upload.", f"{DEPOSIT}/", ""]
-            )
-        )
+    added = False
+    for entry, why in (
+        (f"{DEPOSIT}/", "What polyzymd study freeze lays out for upload."),
+        ("logs/", "Full logs of polyzymd commands; the console shows only warnings."),
+    ):
+        if entry not in lines:
+            lines, added = [*lines, f"# {why}", entry], True
+    if added:
+        gitignore.write_text("\n".join([*lines, ""]))
 
     commit = None
     if state and tag:

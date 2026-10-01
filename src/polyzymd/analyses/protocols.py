@@ -343,6 +343,7 @@ def analyze(
     plots: bool = True,
     stride: int = 1,
     data: dict[str, Path] | None = None,
+    until: str | None = None,
 ) -> ProtocolReport:
     """Run one analysis over one or more simulation conditions.
 
@@ -386,6 +387,9 @@ def analyze(
     data : dict of str to Path, optional
         Condition label to the directory holding its run directories on this
         machine, in place of its config's ``scratch_directory``.
+    until : str, optional
+        End of a common analysis window, such as ``"38ns"``; see
+        :class:`~polyzymd.analyses.study.Condition`.
 
     Returns
     -------
@@ -415,6 +419,7 @@ def analyze(
         plots=plots,
         stride=stride,
         data=data,
+        until=until,
     )
 
 
@@ -467,6 +472,7 @@ def _analyze_function(
     plots: bool = True,
     stride: int = 1,
     data: dict[str, Path] | None = None,
+    until: str | None = None,
 ) -> ProtocolReport:
     """Measure ``name`` on every production frame and report its per-replicate mean.
 
@@ -510,7 +516,7 @@ def _analyze_function(
                 else f"--set {next(iter(FUNCTION_ANALYSES[name]))}=..., one of the settings above."
             ),
         )
-    study = _study(configs, labels, equilibration, replicates, stride, data)
+    study = _study(configs, labels, equilibration, replicates, stride, data, until)
     if name in ("rmsf", "rmsd_per_residue"):
         return _analyze_rmsf(name, study, settings, run, recompute, output_dir, plots)
     if name == "sasa":
@@ -1730,6 +1736,7 @@ def _study(
     replicates: Sequence[int] | None,
     stride: int = 1,
     data: dict[str, Path] | None = None,
+    until: str | None = None,
 ) -> Any:
     """Build the Study of ``configs``, with the package default equilibration window."""
     from polyzymd.analyses.study import Study
@@ -1742,6 +1749,7 @@ def _study(
         replicates=replicates,
         stride=stride,
         data=data,
+        until=until,
     )
 
 

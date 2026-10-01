@@ -95,8 +95,27 @@ class Replicate:
         segment (see :class:`~polyzymd.analyses.shared.loader.SegmentJoin`),
         that frame's index is left out. With the condition's ``stride`` above
         1, every ``stride``-th of these frames is kept, starting with the
-        first.
+        first. With the condition's ``until_ns``, frames after that time are
+        left out, so conditions of unequal length can be compared over a
+        common window.
         """
+        frames = self._production_frames()
+        if self.condition.until_ns is not None:
+            frames = frames[self._times_of(frames) <= self.condition.until_ns + 1e-9]
+        return frames
+
+    @property
+    def production_ns(self) -> float:
+        """Time of the last production frame, in ns: how far the replicate was simulated."""
+        window = self._production_window()
+        last = window.n_frames_total - 1
+        join = self._segment_join()
+        if join is not None:
+            return float(join.times_ps[last] / 1000.0)
+        return float(((window.first_frame_time_ps or 0.0) + last * window.timestep_ps) / 1000.0)
+
+    def _production_frames(self) -> np.ndarray:
+        """The frames after the equilibration window, with the stride, before ``until_ns``."""
         import numpy as np
 
         from polyzymd.analyses.shared.window import FRAME_BOUNDARY_TOLERANCE
@@ -123,12 +142,16 @@ class Replicate:
         frame interval, so frames after a dropped or missing frame keep their
         recorded times.
         """
+        return self._times_of(self.frames)
+
+    def _times_of(self, frames: np.ndarray) -> np.ndarray:
+        """Simulation time of each of ``frames``, in ns; see :attr:`times`."""
         join = self._segment_join()
         if join is not None:
-            return join.times_ps[self.frames] / 1000.0
+            return join.times_ps[frames] / 1000.0
         window = self._production_window()
         origin_ps = window.first_frame_time_ps or 0.0
-        return (origin_ps + self.frames * window.timestep_ps) / 1000.0
+        return (origin_ps + frames * window.timestep_ps) / 1000.0
 
     @property
     def identity(self) -> dict[str, Any]:
@@ -142,13 +165,75 @@ class Replicate:
             time) from :class:`~polyzymd.analyses.universe.FileIdentity`.
         """
         provenance = self.condition._provider.provenance_for(self.index, refresh=True)
-        return {
+        identity = {
             "config_hash": self.condition.config_hash,
             "equilibration": self.condition.equilibration,
             "stride": self.condition.stride,
             "topology": provenance.topology.as_dict(),
             "trajectories": [item.as_dict() for item in provenance.trajectories],
         }
+        if self.condition.until_ns is not None:
+            # Present only with a common window, so other stored records stay valid.
+            identity["until_ns"] = self.condition.until_ns
+        return identity
+
+
+def _parse_until(label: str, until: str | None) -> float | None:
+    """Return the common window end ``until`` in ns, or ``None``."""
+    if until is None:
+        return None
+    from polyzymd.analyses.shared.loader import convert_time, parse_time_string
+
+    try:
+        value, unit = parse_time_string(str(until))
+        return float(convert_time(value, unit, "ns"))
+    except ValueError as exc:
+        raise ProtocolError(
+            f"Condition {label!r}: cannot read until {until!r}: {exc}",
+            hint="Write it as a time such as '38ns'.",
+        ) from exc
+
+
+#: Relative difference in production length above which conditions are flagged.
+PRODUCTION_LENGTH_TOLERANCE = 0.10
+
+
+def production_length_warnings(study: Any, labels: Sequence[str] | None = None) -> list[str]:
+    """Warn when the conditions were analysed over production of different lengths.
+
+    A difference between conditions can then come from simulated time rather
+    than from the conditions: a structure that drifts late appears only in the
+    longer runs. Each condition's analysed span is the range of its
+    replicates' last analysed times; conditions whose longest and shortest
+    spans across the study differ by more than
+    :data:`PRODUCTION_LENGTH_TOLERANCE` are named, with the remedy. This is a
+    warning only; no value changes.
+    """
+    ends: dict[str, list[float]] = {}
+    for label in list(labels) if labels is not None else list(study.labels):
+        condition = study[label]
+        spans = []
+        for replicate in getattr(condition, "replicates", []):
+            times = getattr(replicate, "times", None)
+            if times is not None and len(times):
+                spans.append(float(times[-1]))
+        if spans:
+            ends[label] = spans
+    if len(ends) < 2:
+        return []
+    longest = max(max(v) for v in ends.values())
+    shortest = min(min(v) for v in ends.values())
+    if longest <= 0 or (longest - shortest) / longest <= PRODUCTION_LENGTH_TOLERANCE:
+        return []
+    described = "; ".join(
+        f"{label} {min(v):.4g}" + (f"-{max(v):.4g}" if max(v) != min(v) else "") + " ns"
+        for label, v in ends.items()
+    )
+    return [
+        f"the conditions were analysed up to different times ({described}); a difference may "
+        f"come from simulated time rather than the condition. Compare over a common window with "
+        f"until {shortest:.4g}ns (--until, or until: in study.yaml)"
+    ]
 
 
 def with_data_dir(config: Any, data_dir: Path | None) -> Any:
@@ -179,6 +264,10 @@ class Condition:
     stride : int, optional
         Keep every ``stride``-th production frame of every replicate, 1 by
         default.
+    until : str, optional
+        End of a common analysis window, such as ``"38ns"``: production frames
+        after it are left out, so conditions simulated for different lengths
+        are compared over the same time.
     data_dir : Path, optional
         Where this machine keeps the condition's run directories, in place of
         the config's ``scratch_directory``, as ``data.local.yaml`` or
@@ -194,6 +283,7 @@ class Condition:
         replicates: Sequence[int] | None = None,
         stride: int = 1,
         data_dir: Path | None = None,
+        until: str | None = None,
     ) -> None:
         from polyzymd.analyses.identity import compute_config_hash
         from polyzymd.analyses.universe import UniverseProvider
@@ -209,6 +299,8 @@ class Condition:
             )
         self.stride = stride
         self.data_dir = None if data_dir is None else Path(data_dir).expanduser().resolve()
+        self.until = until
+        self.until_ns = _parse_until(label, until)
         try:
             written = SimulationConfig.from_yaml(config_path)
         except (OSError, ValueError) as exc:
@@ -278,6 +370,7 @@ class Study:
                     protocol.replicates,
                     protocol.stride,
                     protocol.data.get(label),
+                    protocol.until,
                 )
                 for label, path in protocol.conditions.items()
             }
@@ -336,6 +429,7 @@ class Study:
         replicates: Sequence[int] | None = None,
         stride: int = 1,
         data: Mapping[str, str | Path] | None = None,
+        until: str | None = None,
     ) -> Study:
         """Build a study from simulation config paths.
 
@@ -359,6 +453,9 @@ class Study:
             Condition label to the directory holding its run directories on
             this machine, in place of its config's ``scratch_directory``. The
             key ``"*"`` applies to every condition the mapping does not name.
+        until : str, optional
+            End of a common analysis window for every condition, such as
+            ``"38ns"``; see :class:`Condition`.
 
         Returns
         -------
@@ -402,6 +499,7 @@ class Study:
                     replicates,
                     stride,
                     (data or {}).get(label, (data or {}).get("*")),
+                    until,
                 )
                 for label, path in zip(labels, paths, strict=True)
             ]
