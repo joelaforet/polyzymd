@@ -378,19 +378,20 @@ def estimate_rate_ns_per_day(
         return ns / (window.total_seconds() / 86400.0)
 
     if window_fn is not None:
-        # File timestamps first: newest stopped segment, then the live one.
+        # File timestamps first. A live segment past an hour reflects the GPU
+        # the chain is on now, so it wins; otherwise use the newest stopped one.
+        if live and segments:
+            window = window_fn(segments[-1].index)
+            if window is not None and now - window[0] >= _MIN_LIVE_WINDOW:
+                rate = _rate(segments[-1].steps_completed, window[0], now)
+                if rate is not None:
+                    return rate
         for seg in reversed(segments):
             if getattr(seg.status, "value", seg.status) == "running":
                 continue
             window = window_fn(seg.index)
             if window is not None:
                 rate = _rate(seg.steps_completed, *window)
-                if rate is not None:
-                    return rate
-        if live and segments:
-            window = window_fn(segments[-1].index)
-            if window is not None and now - window[0] >= _MIN_LIVE_WINDOW:
-                rate = _rate(segments[-1].steps_completed, window[0], now)
                 if rate is not None:
                     return rate
 

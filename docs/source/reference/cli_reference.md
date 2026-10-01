@@ -656,7 +656,7 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 
 Each `DEAD` row ends with an action. `resubmit` means the cause leaves a valid checkpoint, such as a node failure, preemption, GPU fault, CUDA routing failure or a duplicate chain whose twin has ended. `resubmit --skip-build` means a first segment crashed on the missing `openff` package while the standalone build left its system files. `inspect` covers physics blow-ups, build refusals and anything unrecognised. The footer prints submit commands only for the first two and lists `inspect` chains separately.
 
-Throughput (`ns/d`) is measured from the newest stopped segment, using its file timestamps: the parameters JSON written at segment start and the state-data CSV written on every report. The live segment counts only after it has run for an hour. The ETA is remaining nanoseconds divided by that rate and is only printed for `RUNNING` and `QUEUED` replicates.
+Throughput (`ns/d`) comes from segment file timestamps: the parameters JSON written at segment start and the state-data CSV written on every report. A live segment that has run for at least an hour sets the rate, since it reflects the GPU the chain is on now; otherwise the newest stopped segment does. The ETA is remaining nanoseconds divided by that rate and is only printed for `RUNNING` and `QUEUED` replicates.
 
 If `squeue` is unavailable the header carries a warning and every non-complete
 replicate falls back to `progress.json` alone; treat `DEAD` as unreliable in

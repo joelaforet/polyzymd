@@ -591,3 +591,15 @@ def test_footer_splits_restart_and_inspect():
     assert "# dead chains that need a look before restarting:\nSYS run1" in text
     assert "-r 1" not in text
     assert "action: inspect" in text
+
+
+def test_settled_live_segment_beats_older_node():
+    """After a move to a slower GPU, the live rate (not the last node's) drives the ETA."""
+    old = SegmentRecord(index=0, steps_completed=90_000_000, status=SegmentStatus.INTERRUPTED)
+    cur = SegmentRecord(index=1, steps_completed=25_000_000, status=SegmentStatus.RUNNING)  # 50 ns
+    windows = {
+        0: (NOW - timedelta(days=2), NOW - timedelta(days=1)),  # 180 ns/day
+        1: (NOW - timedelta(hours=12), NOW),  # 100 ns/day so far
+    }
+    rate = estimate_rate_ns_per_day(_progress([old, cur]), NOW, live=True, window_fn=windows.get)
+    assert rate is not None and abs(rate - 100.0) < 1.0
