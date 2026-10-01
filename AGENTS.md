@@ -106,7 +106,12 @@ without trajectories (`analyses/results.py`). `polyzymd study init` writes a
 study folder and commits it (`analyses/study_scaffold.py`); a gitignored
 `data.local.yaml`, written by `polyzymd study locate DIR`, or `--data DIR` says
 where this machine keeps each condition's runs without changing its config
-hash; reports record the study's git state (`analyses/study_git.py`). The design of study folders and
+hash; reports record the study's git state (`analyses/study_git.py`).
+`polyzymd study freeze` (`analyses/study_freeze.py`, `analyses/study_metadata.py`)
+checks staleness and metadata, writes `manifest.json`, `CITATION.cff` (citing
+PolyzyMD through `polyzymd/citation.py`), `.zenodo.json`, `md_checklist.yaml` and
+`system_summary.csv`, commits and tags them with `results/`, and lays out the
+gitignored `deposit/`. The design of study folders and
 the slices still to come are in `docs/source/explanation/study_folders.md`.
 
 ## Key Patterns
@@ -145,7 +150,7 @@ shipped analysis, as a `FUNCTION_ANALYSES` entry and an `_analyze_<name>` in
 | Study API | `analyses/study.py`, `analyses/timeseries.py` | `Study.from_configs`, `timeseries`, `per_replicate`, `transform`, `reduce`, `compare`, records under `polyzymd_results/` |
 | API explanation | `docs/source/explanation/analysis_api.md` | How the study API supplies universes, records and statistics |
 | `polyzymd analyze` | `analyses/protocols.py`, `docs/source/how_to/analysis_agent_protocol.md` | `FUNCTION_ANALYSES`, the `_analyze_<name>` functions, `ProtocolReport` |
-| Study folders | `analyses/study_file.py`, `analyses/results.py`, `analyses/study_scaffold.py`, `analyses/study_git.py`, `docs/source/how_to/study_yaml.md`, `docs/source/how_to/study_folder.md` | `study.yaml`, `--study`, `polyzymd study check/init/locate`, `data.local.yaml`, `--data`, `Study.results` |
+| Study folders | `analyses/study_file.py`, `analyses/results.py`, `analyses/study_scaffold.py`, `analyses/study_git.py`, `docs/source/how_to/study_yaml.md`, `docs/source/how_to/study_folder.md` | `study.yaml`, `--study`, `polyzymd study check/init/locate/freeze`, `data.local.yaml`, `--data`, `Study.results`, `docs/source/how_to/study_freeze.md` |
 | Figures | `analyses/figures.py` | `ReplicateValues.plot`, profiles, differences, uncertainty footnotes |
 | Worked routine | `docs/source/how_to/analysis_triad_quickstart.md` | Combining shipped functions for a question of your own |
 

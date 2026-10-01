@@ -121,6 +121,18 @@ def check_command(path: Path) -> None:
     from polyzymd.analyses.study_git import describe, git_state
 
     click.echo(describe(git_state(protocol.root)))
+    from polyzymd.analyses.study_metadata import check_metadata
+
+    try:
+        _, gaps = check_metadata(protocol.metadata)
+        click.echo(
+            f"metadata: {len(gaps)} gaps for publishing; polyzymd study freeze lists them"
+            if gaps
+            else "metadata: complete"
+        )
+    except ProtocolError as exc:
+        click.echo(f"error: {' '.join(str(exc).split())}")
+        failed = True
     click.echo(f"cite: {citation_line()}")
     if failed:
         sys.exit(EXIT_STUDY_ERROR)
@@ -165,12 +177,18 @@ def find_run_parents(config: Any, root: Path, max_depth: int = 6) -> dict[Path, 
     show_default=True,
     help="study.yaml, or the folder holding it.",
 )
-def locate_command(directory: Path, study_path: Path) -> None:
+@click.option(
+    "--verify",
+    is_flag=True,
+    help="Also check every located file's SHA-256 against manifest.json, not only its size.",
+)
+def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
     """Find each condition's runs under DIRECTORY and record where they are in data.local.yaml.
 
     Use it after downloading or moving trajectories. For every condition,
     the directory under DIRECTORY holding the most of its run directories
-    (named by its config's naming_template) is written to data.local.yaml
+    (named by its config's naming_template), preferring one whose files have the sizes
+    manifest.json records, is written to data.local.yaml
     beside study.yaml, which is never committed or published; entries for
     conditions not found are kept as they were. Moving data never changes
     the study or its stored results' config hashes.
@@ -205,10 +223,16 @@ def locate_command(directory: Path, study_path: Path) -> None:
             )
             missing.append(label)
             continue
-        best = max(parents, key=lambda parent: (len(parents[parent]), -len(parent.parts)))
+        matching = [p for p in parents if _matches_manifest(protocol.root, label, p, verify)]
+        candidates = matching or list(parents)
+        best = max(candidates, key=lambda parent: (len(parents[parent]), -len(parent.parts)))
         located[label] = str(best)
         others = f" ({len(parents) - 1} other folders also hold some)" if len(parents) > 1 else ""
         click.echo(f"{label}: runs {parents[best]} under {best}{others}")
+        for line in _check_against_manifest(protocol.root, label, best, verify):
+            click.echo(line)
+            if line.startswith("error"):
+                missing.append(label)
     target = protocol.root / DATA_FILE
     target.write_text(
         "# Where this machine keeps each condition's runs. Written by polyzymd study locate;\n"
@@ -322,3 +346,120 @@ def init_command(
     if equilibration is None:
         click.echo("note: set equilibration in study.yaml before analysing")
     click.echo(f"next: polyzymd study check {created.root}")
+
+
+def _matches_manifest(root: Path, label: str, folder: Path, verify: bool = False) -> bool:
+    """Return whether every run file manifest.json lists for ``label`` is in ``folder``.
+
+    Files are compared by size, and with ``verify`` also by SHA-256, which
+    tells apart conditions whose runs have the same names and sizes.
+    """
+    import json
+
+    from polyzymd.analyses.study_freeze import MANIFEST
+
+    try:
+        replicates = json.loads((root / MANIFEST).read_text())["conditions"][label]["replicates"]
+    except (OSError, ValueError, KeyError):
+        return False
+    files = [item for replicate in replicates.values() for item in replicate.get("files", [])]
+    return bool(files) and all(
+        (folder / item["path"]).is_file()
+        and (folder / item["path"]).stat().st_size == item["size"]
+        and (not verify or _sha256(folder / item["path"]) == item["sha256"])
+        for item in files
+    )
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 22), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _check_against_manifest(root: Path, label: str, folder: Path, verify: bool) -> list[str]:
+    """Compare located run files with the sizes (and with ``verify``, SHA-256) in manifest.json."""
+    import hashlib
+    import json
+
+    from polyzymd.analyses.study_freeze import MANIFEST
+
+    try:
+        manifest = json.loads((root / MANIFEST).read_text())
+    except (OSError, ValueError):
+        return []
+    replicates = manifest.get("conditions", {}).get(label, {}).get("replicates", {})
+    if not replicates:
+        return []
+    checked, problems = 0, []
+    for index, replicate in replicates.items():
+        for item in replicate.get("files", []):
+            path = folder / item["path"]
+            if not path.is_file():
+                problems.append(f"replicate {index}: {item['path']} is missing")
+                continue
+            if path.stat().st_size != item["size"]:
+                problems.append(f"replicate {index}: {item['path']} has another size")
+                continue
+            if verify:
+                if _sha256(path) != item["sha256"]:
+                    problems.append(f"replicate {index}: {item['path']} has another SHA-256")
+                    continue
+            checked += 1
+    if problems:
+        return [f"error: {label}: {problem}" for problem in problems]
+    return [
+        f"{label}: {checked} files match manifest.json" + (" (SHA-256)" if verify else " (size)")
+    ]
+
+
+@study_group.command("freeze")
+@click.argument("path", type=click.Path(path_type=Path), default=Path("."))
+@click.option(
+    "--tag", default=None, help="Git tag of the frozen study. Default: study-v1, study-v2, ..."
+)
+@click.option("--zip", "make_zip", is_flag=True, help="Also write deposit/<study>-<tag>.zip.")
+def freeze_command(path: Path, tag: str | None, make_zip: bool) -> None:
+    """Freeze the study at PATH for publication.
+
+    Checks the metadata, the git state and whether each analysis's stored
+    results still match the study; hashes the trajectories and writes their
+    engine inputs and final frames to deposit/; writes manifest.json,
+    md_checklist.yaml, system_summary.csv, CITATION.cff and .zenodo.json;
+    commits those and results/, tags the commit, and lays out deposit/ for
+    upload. Every gap is a warning, never a refusal. Refreeze after filling a
+    gap, such as the paper's DOI once it is known.
+    """
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.study_freeze import freeze
+
+    try:
+        result = freeze(path, tag=tag, make_zip=make_zip)
+    except ProtocolError as exc:
+        click.echo(f"error: {' '.join(str(exc).split())}", err=True)
+        if exc.hint:
+            click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
+        sys.exit(EXIT_STUDY_ERROR)
+    conditions = result.manifest["conditions"]
+    replicates = sum(len(c["replicates"]) for c in conditions.values())
+    click.echo(
+        f"froze {result.root}"
+        + (f" as {result.tag} ({result.commit[:12]})" if result.tag else " without a git tag")
+    )
+    click.echo(
+        f"manifest: {len(result.manifest['files'])} study files, {len(conditions)} conditions, "
+        f"{replicates} replicates hashed"
+    )
+    click.echo(
+        f"deposit: {result.deposit}" + (f"; zip {result.zip_path}" if result.zip_path else "")
+    )
+    for warning in result.warnings:
+        click.echo(f"warning: {warning}")
+    click.echo(
+        "next: upload the trajectories and the files in deposit/ (see "
+        "https://polyzymd.readthedocs.io/en/latest/how_to/study_freeze.html)"
+    )

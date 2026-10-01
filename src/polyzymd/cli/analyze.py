@@ -324,7 +324,11 @@ def analyze_command(
                 click.echo(f"fix: {_one_line(hint)}", err=True)
             sys.exit(EXIT_ANALYSIS_ERROR)
     stride = stride or 1
-    study_record = _study_record(study_path, run_name) if study_path is not None else None
+    study_record = (
+        _study_record(study_path, run_name, _settings(setting_overrides))
+        if study_path is not None
+        else None
+    )
     if data_dir is not None:
         data = {"*": Path(data_dir).expanduser().resolve()}
 
@@ -460,7 +464,7 @@ def _analyze_every_run(ctx: click.Context, study_path: Path | None) -> None:
         sys.exit(EXIT_ANALYSIS_ERROR)
 
 
-def _study_record(study_path: Path, run: str) -> dict:
+def _study_record(study_path: Path, run: str, settings: dict) -> dict:
     """Return the study file and git state a report records, warning about uncommitted inputs."""
     import hashlib
 
@@ -479,6 +483,7 @@ def _study_record(study_path: Path, run: str) -> dict:
         "path": str(file),
         "sha256": hashlib.sha256(file.read_bytes()).hexdigest(),
         "run": run,
+        "settings": settings,
         "git": state,
     }
 

@@ -74,7 +74,9 @@ them all; command-line options override the file, and results go to
 `docs/source/how_to/study_yaml.md`. When `study check` finds no runs for a
 condition, the trajectories are elsewhere: run `polyzymd study locate DIR`
 (writes the gitignored `data.local.yaml`) or pass `--data DIR`; never edit the
-configs' paths to point at moved data.
+configs' paths to point at moved data. To publish, fill `metadata:` and run
+`polyzymd study freeze STUDY`; its `warning:` lines list what is missing or stale
+(`docs/source/how_to/study_freeze.md`).
 
 ## 2. Reading the output
 

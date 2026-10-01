@@ -241,7 +241,8 @@ class ProtocolProvenance(BaseModel):
 
     ``settings`` holds the analysis settings the analysis ran with and what
     they resolved to, such as the residues of an rmsf core. ``study`` is set
-    for a run from a study file: its ``path``, ``sha256`` and ``run``, and
+    for a run from a study file: its ``path``, ``sha256``, ``run`` and the
+    ``settings`` the run was given (from the file and ``--set``), and
     ``git``, the study folder's commit and uncommitted files
     (:func:`~polyzymd.analyses.study_git.git_state`), or ``None`` outside a
     repository.
