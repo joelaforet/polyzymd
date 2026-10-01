@@ -347,6 +347,8 @@ class TestFreezeNudge:
         )  # no progress.json
         _progress(working)
         subprocess.run(["git", "-C", str(root), "add", "-A"], check=False)
-        assert any("polyzymd hash-trajectories --study" in w for w in freeze(root).warnings)
+        nudged = freeze(root)
+        assert any("polyzymd hash-trajectories --study ." in w for w in nudged.warnings)
+        assert str(tmp_path) not in (root / "manifest.json").read_text()
         record_trajectory_hashes(working)
         assert not any("hash-trajectories" in w for w in freeze(root).warnings)

@@ -582,9 +582,9 @@ def _replicates(
         if unhashed:
             warnings.append(
                 f"{label}: replicates {', '.join(unhashed)} have no trajectory hashes in "
-                "progress.json (the runs predate them); record them, once, with polyzymd "
-                f"hash-trajectories --study {protocol.root}, so anyone can check the trajectories "
-                "without hashing them again"
+                "progress.json (the runs predate them); record them, once, by running polyzymd "
+                "hash-trajectories --study . in the study folder, so anyone can check the "
+                "trajectories without hashing them again"
             )
         if unknown:
             warnings.append(
