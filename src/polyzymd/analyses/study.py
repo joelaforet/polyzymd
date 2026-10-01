@@ -151,6 +151,18 @@ class Replicate:
         }
 
 
+def with_data_dir(config: Any, data_dir: Path | None) -> Any:
+    """Return ``config`` with its run directories looked for under ``data_dir``.
+
+    ``None`` returns ``config`` unchanged. Only the scratch directory, where
+    the run directories are, changes; the config's own file is not edited.
+    """
+    if data_dir is None:
+        return config
+    output = config.output.model_copy(update={"scratch_directory": Path(data_dir)})
+    return config.model_copy(update={"output": output})
+
+
 class Condition:
     """One simulation condition and the replicates chosen for it.
 
@@ -167,6 +179,11 @@ class Condition:
     stride : int, optional
         Keep every ``stride``-th production frame of every replicate, 1 by
         default.
+    data_dir : Path, optional
+        Where this machine keeps the condition's run directories, in place of
+        the config's ``scratch_directory``, as ``data.local.yaml`` or
+        ``--data`` give it. The config hash is that of the config as written,
+        so moving the data does not change it.
     """
 
     def __init__(
@@ -176,6 +193,7 @@ class Condition:
         equilibration: str,
         replicates: Sequence[int] | None = None,
         stride: int = 1,
+        data_dir: Path | None = None,
     ) -> None:
         from polyzymd.analyses.identity import compute_config_hash
         from polyzymd.analyses.universe import UniverseProvider
@@ -190,8 +208,19 @@ class Condition:
                 hint="Pass stride=5 to keep every fifth production frame.",
             )
         self.stride = stride
+        self.data_dir = None if data_dir is None else Path(data_dir).expanduser().resolve()
         try:
-            self.config = SimulationConfig.from_yaml(config_path)
+            written = SimulationConfig.from_yaml(config_path)
+        except (OSError, ValueError) as exc:
+            raise ProtocolError(
+                f"Condition {label!r}: cannot read {config_path}: {exc}",
+                hint="Point the condition at a PolyzyMD simulation config.yaml.",
+            ) from exc
+        # The hash is of the config as written: where the data sits now is a
+        # pointer, not part of what was simulated.
+        self.config_hash = compute_config_hash(written)
+        self.config = with_data_dir(written, self.data_dir)
+        try:
             found = sorted(int(index) for index, _ in self.config.discover_replicate_dirs())
         except (OSError, ValueError) as exc:
             raise ProtocolError(
@@ -201,12 +230,13 @@ class Condition:
         chosen = found if replicates is None else sorted({int(index) for index in replicates})
         missing = sorted(set(chosen) - set(found))
         if not chosen or missing:
+            where = self.config.output.effective_scratch_directory
             raise ProtocolError(
                 f"Condition {label!r}: replicates {missing or chosen} have no run directory "
-                f"under the scratch directory of {config_path}; found {found}.",
-                hint="Pass replicates that exist on disk, or run the simulations first.",
+                f"under {where}; found {found}.",
+                hint="Pass replicates that exist on disk, run the simulations first, or say "
+                "where the runs are with data.local.yaml, polyzymd study locate DIR or --data.",
             )
-        self.config_hash = compute_config_hash(self.config)
         self._provider = UniverseProvider.from_config(self.config)
         self.replicates = [Replicate(self, index) for index in chosen]
 
@@ -242,7 +272,12 @@ class Study:
             protocol = self.protocol
             self._built = {
                 label: Condition(
-                    label, path, protocol.equilibration, protocol.replicates, protocol.stride
+                    label,
+                    path,
+                    protocol.equilibration,
+                    protocol.replicates,
+                    protocol.stride,
+                    protocol.data.get(label),
                 )
                 for label, path in protocol.conditions.items()
             }
@@ -300,6 +335,7 @@ class Study:
         equilibration: str,
         replicates: Sequence[int] | None = None,
         stride: int = 1,
+        data: Mapping[str, str | Path] | None = None,
     ) -> Study:
         """Build a study from simulation config paths.
 
@@ -319,6 +355,10 @@ class Study:
             starting with the first after the equilibration window, 1 by
             default. Every measurement, reference and time then uses those
             frames only; a ``frame`` reference counts them from 1.
+        data : mapping of str to path, optional
+            Condition label to the directory holding its run directories on
+            this machine, in place of its config's ``scratch_directory``. The
+            key ``"*"`` applies to every condition the mapping does not name.
 
         Returns
         -------
@@ -355,7 +395,14 @@ class Study:
             ) from exc
         return cls(
             [
-                Condition(label, path, str(equilibration), replicates, stride)
+                Condition(
+                    label,
+                    path,
+                    str(equilibration),
+                    replicates,
+                    stride,
+                    (data or {}).get(label, (data or {}).get("*")),
+                )
                 for label, path in zip(labels, paths, strict=True)
             ]
         )
