@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/joelaforet/polyzymd/schemas/study-1.schema.json",
+  "title": "PolyzyMD study.yaml",
+  "description": "The analysis protocol of a PolyzyMD study folder: its conditions, one equilibration window, and the settings of every analysis run. See docs/source/how_to/study_yaml.md.",
+  "type": "object",
+  "required": ["equilibration", "conditions"],
+  "additionalProperties": false,
+  "properties": {
+    "polyzymd": {"type": "string", "description": "PolyzyMD version that produced the results."},
+    "equilibration": {"type": "string", "description": "Window removed from the start of every replicate's production, e.g. 100ns."},
+    "stride": {"type": "integer", "minimum": 1},
+    "until": {"type": "string", "description": "End of a common analysis window, e.g. 38ns."},
+    "replicates": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "integer"}}]},
+    "conditions": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Condition label to config.yaml path, relative to study.yaml; the first is the control.",
+      "additionalProperties": {"type": "string"}
+    },
+    "analyses": {
+      "type": "object",
+      "description": "Run name to the settings of a shipped analysis (with optional analysis:), or to the study's own function.",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["function", "kind"],
+            "additionalProperties": false,
+            "properties": {
+              "function": {"type": "string", "pattern": ".+\\.py:.+"},
+              "kind": {"enum": ["per_replicate", "timeseries"]},
+              "unit": {"type": "string"},
+              "selections": {"type": "object", "additionalProperties": {"type": "string"}},
+              "universe": {"type": "string"},
+              "settings": {"type": "object"},
+              "labels": {"const": "returned"},
+              "reduce": {"type": "string"},
+              "allow_empty": {"type": "boolean"}
+            }
+          },
+          {
+            "type": "object",
+            "not": {"required": ["function"]},
+            "properties": {"analysis": {"type": "string"}}
+          },
+          {"type": "null"}
+        ]
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Publishing metadata; see docs/source/how_to/study_freeze.md.",
+      "additionalProperties": false,
+      "properties": {
+        "doi": {"type": "string"},
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "purpose": {"type": "string"},
+        "keywords": {"type": "array", "items": {"type": "string"}},
+        "system_type": {"type": "array", "items": {"type": "string"}},
+        "authors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["family-names"],
+            "additionalProperties": false,
+            "properties": {
+              "family-names": {"type": "string"},
+              "given-names": {"type": "string"},
+              "name-suffix": {"type": "string"},
+              "orcid": {"type": "string"},
+              "affiliation": {"type": "string"},
+              "email": {"type": "string"}
+            }
+          }
+        },
+        "contact": {"type": "object"},
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"data": {"type": "string"}, "code": {"type": "string"}}
+        },
+        "funding": {"type": "array", "items": {"type": "object"}},
+        "related": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "paper": {"type": "object"},
+            "trajectories": {"type": "array", "items": {"type": "object"}},
+            "experimental": {"type": "array", "items": {"type": "object"}}
+          }
+        },
+        "zenodo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "communities": {"type": "array", "items": {"type": "string"}},
+            "access_right": {"enum": ["open", "embargoed", "restricted", "closed"]}
+          }
+        }
+      }
+    }
+  }
+}

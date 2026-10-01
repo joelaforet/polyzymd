@@ -162,15 +162,28 @@ class Replicate:
         dict
             ``config_hash``, ``equilibration``, ``stride``, and the ``topology`` and
             ``trajectories`` file records (path, format, size and modification
-            time) from :class:`~polyzymd.analyses.universe.FileIdentity`.
+            time) from :class:`~polyzymd.analyses.universe.FileIdentity`, each
+            path relative to the folder holding the condition's runs.
         """
         provenance = self.condition._provider.provenance_for(self.index, refresh=True)
+        data_root = Path(self.condition.config.output.effective_scratch_directory).resolve()
+
+        def located(item: Any) -> dict[str, Any]:
+            # Relative to the folder holding the condition's runs: a record names
+            # its files, not where this machine keeps them.
+            record = item.as_dict()
+            path = Path(record["path"]).resolve()
+            record["path"] = (
+                str(path.relative_to(data_root)) if path.is_relative_to(data_root) else path.name
+            )
+            return record
+
         identity = {
             "config_hash": self.condition.config_hash,
             "equilibration": self.condition.equilibration,
             "stride": self.condition.stride,
-            "topology": provenance.topology.as_dict(),
-            "trajectories": [item.as_dict() for item in provenance.trajectories],
+            "topology": located(provenance.topology),
+            "trajectories": [located(item) for item in provenance.trajectories],
         }
         if self.condition.until_ns is not None:
             # Present only with a common window, so other stored records stay valid.

@@ -55,6 +55,8 @@ ZENODO = ".zenodo.json"
 #: Files freeze writes in the study folder and commits.
 GENERATED = (MANIFEST, CHECKLIST, SUMMARY, CITATION, ZENODO)
 MANIFEST_SCHEMA = "polyzymd-study-manifest/1"
+#: JSON Schema of the manifest, shipped with PolyzyMD and written into every deposit.
+MANIFEST_SCHEMA_FILE = "manifest-1.schema.json"
 _IONS = {"NA", "CL", "K", "MG", "ZN", "CA", "SOD", "CLA", "POT", "NA+", "CL-", "K+", "MG2+"}
 _HASH_CACHE = ".hashes.json"
 
@@ -250,12 +252,52 @@ def _engine_inputs(provenance: Any) -> list[Path]:
             system = openmm_system_file(trajectory.path)
             if system is not None:
                 files.append(system)
+    build = Path(provenance.working_directory) / "build_manifest.json"
+    if build.is_file():
+        files.append(build)
     unique, seen = [], set()
     for path in files:
         if path.is_file() and path.resolve() not in seen:
             seen.add(path.resolve())
             unique.append(path)
     return unique
+
+
+#: What a deposited config says in place of a machine's directories.
+_PLACEHOLDER = "machine path removed by polyzymd study freeze: say where the runs are with data.local.yaml (polyzymd study locate)"
+
+
+def _condition_configs(protocol: Any) -> list[str]:
+    """Return the condition configs inside the study folder, relative to it."""
+    return [
+        str(path.relative_to(protocol.root))
+        for path in protocol.conditions.values()
+        if path.is_relative_to(protocol.root)
+    ]
+
+
+def without_machine_paths(text: str) -> str:
+    """Return a config's text with the directories of one machine taken out, for the deposit.
+
+    ``projects_directory`` and ``scratch_directory`` say where one machine
+    keeps job files and runs; they become ``.`` and ``data``, with a comment
+    saying how a reproducer points the study at their copy. The config hash
+    leaves both out, so stored results still match. A ``Copied by polyzymd
+    study init from <path>`` header keeps only the file name.
+    """
+    import re
+
+    lines = []
+    for line in text.splitlines():
+        match = re.match(r"^(\s*)(projects_directory|scratch_directory):\s*.*$", line)
+        if match:
+            value = "." if match.group(2) == "projects_directory" else "data"
+            line = f"{match.group(1)}{match.group(2)}: {value}  # {_PLACEHOLDER}"
+        header = re.match(r"^# Copied by polyzymd study init from (.+)$", line)
+        if header:
+            line = f"# Copied by polyzymd study init from {Path(header.group(1).strip()).name}"
+        lines.append(line)
+    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
 
 
 def _production_length_warnings(conditions: dict[str, Any]) -> list[str]:
@@ -326,6 +368,39 @@ def composition_warnings(label: str, config: Any, universe: Any) -> list[str]:
             "deposited config may not describe the simulated system"
         )
     return notes
+
+
+def simulated_with(working_dir: Path) -> dict[str, Any]:
+    """Return the software versions that built and ran a replicate, as the run recorded them.
+
+    ``build`` comes from the replicate's ``build_manifest.json``, and
+    ``segments`` lists each distinct (PolyzyMD, OpenMM, pixi environment)
+    combination that ``progress.json`` records for its production segments,
+    so a reproducer knows which engine produced the trajectories, not only
+    which PolyzyMD analysed them.
+    """
+    from polyzymd.simulation.progress import load_progress
+
+    found: dict[str, Any] = {}
+    build = working_dir / "build_manifest.json"
+    try:
+        manifest = json.loads(build.read_text())
+        found["build"] = {k: manifest.get(k) for k in ("polyzymd_version", "openmm_version")}
+    except (OSError, ValueError):
+        pass
+    try:
+        progress = load_progress(working_dir)
+    except Exception:  # noqa: BLE001 - an unreadable progress file records nothing
+        progress = None
+    if progress is not None:
+        combos = {
+            (s.polyzymd_version, s.openmm_version, s.pixi_environment) for s in progress.segments
+        }
+        found["segments"] = [
+            {"polyzymd_version": a, "openmm_version": b, "pixi_environment": c}
+            for a, b, c in sorted(combos, key=lambda t: tuple(str(x) for x in t))
+        ]
+    return found
 
 
 def _portable(value: Any, root: Path, key: str | None = None) -> Any:
@@ -481,11 +556,29 @@ def _replicates(
                 "trajectory_variant": provenance.trajectory_variant,
                 "bond_source": provenance.bond_source,
                 "warnings": list(provenance.warnings),
+                "simulated_with": simulated_with(Path(provenance.working_directory)),
             }
         conditions[label] = {**record, "replicates": replicates}
         for index, replicate_record in replicates.items():
             for text in replicate_record["warnings"]:
                 warnings.append(f"{label} replicate {index}: {text}")
+        unknown = [
+            index
+            for index, r in replicates.items()
+            if not any(
+                v.get("openmm_version")
+                for v in [
+                    r["simulated_with"].get("build", {}),
+                    *r["simulated_with"].get("segments", []),
+                ]
+            )
+        ]
+        if unknown:
+            warnings.append(
+                f"{label}: replicates {', '.join(unknown)} record no OpenMM version (no "
+                "build_manifest.json, and progress.json predates version recording); state the "
+                "engine version in the methods"
+            )
     return conditions, rows
 
 
@@ -712,6 +805,7 @@ def freeze(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         }
     study_files = sorted(p for p in candidates if p not in GENERATED and (root / p).is_file())
     manifest: dict[str, Any] = {
+        "$schema": MANIFEST_SCHEMA_FILE,
         "schema": MANIFEST_SCHEMA,
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "tag": tag,
@@ -741,6 +835,11 @@ def freeze(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         "cite": {
             "polyzymd": __import__("polyzymd.citation", fromlist=["citation_line"]).citation_line()
         },
+        "deposit_without_machine_paths": [
+            f"{config}: output.projects_directory and output.scratch_directory replaced, "
+            "'Copied from' header reduced to a file name"
+            for config in _condition_configs(protocol)
+        ],
         "warnings": warnings,
     }
     hashes.save()
@@ -812,10 +911,29 @@ def freeze(root: str | Path, *, tag: str | None = None) -> FreezeResult:
             target = study_copy / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(root / name, target)
-    for name in (MANIFEST, CITATION, ZENODO, "README.md"):
+    for config in _condition_configs(protocol):
+        copied = study_copy / config
+        if copied.is_file():
+            copied.write_text(without_machine_paths(copied.read_text()))
+    for name in (MANIFEST, CITATION, ZENODO):
         if (root / name).exists():
             shutil.copy2(root / name, deposit / name)
-    from polyzymd.analyses.study_upload_guide import prepare_upload
+    shutil.copy2(
+        Path(__file__).parent / "schemas" / MANIFEST_SCHEMA_FILE, deposit / MANIFEST_SCHEMA_FILE
+    )
+    from polyzymd.analyses.study_upload_guide import deposit_readme, prepare_upload
+
+    # The deposit's README describes the study from its metadata; the study's
+    # own README.md stays as written, inside the study.
+    (deposit / "README.md").write_text(
+        deposit_readme(
+            study_name=root.name,
+            tag=tag if commit else None,
+            meta=meta,
+            analyses=protocol.analyses,
+            root=root,
+        )
+    )
 
     prepared = prepare_upload(
         deposit,

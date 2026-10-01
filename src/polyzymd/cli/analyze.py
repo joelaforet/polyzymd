@@ -421,6 +421,16 @@ def analyze_command(
         from polyzymd.analyses.results import REPORT_FILE
 
         report.provenance.study = study_record
+        study_root = Path(study_path).expanduser().resolve()
+        study_root = study_root if study_root.is_dir() else study_root.parent
+        report.provenance.output_paths = {
+            key: (
+                str(Path(value).resolve().relative_to(study_root))
+                if Path(value).resolve().is_relative_to(study_root)
+                else value
+            )
+            for key, value in report.provenance.output_paths.items()
+        }
         saved = Path(output_dir) / REPORT_FILE
         saved.parent.mkdir(parents=True, exist_ok=True)
         saved.write_text(report.model_dump_json(indent=2) + "\n")

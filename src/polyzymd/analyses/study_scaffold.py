@@ -366,3 +366,76 @@ def _polyzymd_init(folder: Path) -> None:
         raise ProtocolError(
             f"polyzymd init could not create {folder}.", hint="Check that the folder is new."
         ) from exc
+
+
+def add_condition(
+    study: str | Path, label: str, *, config: Path | None = None, new: bool = False
+) -> Path:
+    """Add a condition to an existing study folder and list it in ``study.yaml``.
+
+    With ``config``, the config and its input files are copied as
+    :func:`copy_condition` does; with ``new``, ``conditions/<name>/`` is a new
+    ``polyzymd init`` project to fill in. The condition is added as one line
+    under ``conditions:``, so the rest of ``study.yaml``, comments included, is
+    kept as written. Returns the new condition's config path.
+
+    Raises
+    ------
+    ProtocolError
+        If neither or both of ``config`` and ``new`` are given, the label or
+        its folder is taken, or the config cannot be copied.
+    """
+    from polyzymd.analyses.study_file import find_study_file, load_study_file
+
+    if (config is None) == (not new):
+        raise ProtocolError(
+            "Give either a config to copy or new, not both or neither.",
+            hint="polyzymd study add-condition LABEL --config path/to/config.yaml, or --new.",
+        )
+    file = find_study_file(study)
+    protocol = load_study_file(file)
+    folder = protocol.root / "conditions" / condition_folder(label)
+    if label in protocol.conditions or folder.exists():
+        raise ProtocolError(
+            f"{file} already has a condition {label!r} or a folder {folder}.",
+            hint="Choose another label.",
+        )
+    if config is not None:
+        copy_condition(Path(config), folder)
+    else:
+        _polyzymd_init(folder)
+    _list_condition(file, label, str((folder / "config.yaml").relative_to(protocol.root)))
+    load_study_file(file)
+    return folder / "config.yaml"
+
+
+def _list_condition(file: Path, label: str, path: str) -> None:
+    """Insert ``label: path`` as the last entry of ``conditions:`` in ``file``, keeping the rest."""
+    import json
+    import re
+
+    lines = file.read_text().splitlines()
+    entry = (
+        f"  {json.dumps(label) if re.search(r'[:#{}\\[\\],&*!|>%@`]', label) else label}: {path}"
+    )
+    for index, line in enumerate(lines):
+        if re.match(r"^conditions:\s*(\{\s*\})?\s*(#.*)?$", line):
+            if "{" in line:
+                lines[index] = "conditions:"
+                lines.insert(index + 1, entry)
+                break
+            end = index + 1
+            while end < len(lines) and (
+                lines[end].startswith((" ", "\t")) or not lines[end].strip()
+            ):
+                end += 1
+            while end > index + 1 and not lines[end - 1].strip():
+                end -= 1
+            lines.insert(end, entry)
+            break
+    else:
+        raise ProtocolError(
+            f"{file} has no top-level 'conditions:' block to add to.",
+            hint="Add the condition under conditions: by hand.",
+        )
+    file.write_text("\n".join(lines) + "\n")
