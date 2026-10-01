@@ -412,7 +412,7 @@ def _frame_counts(report) -> list[int]:
 
 
 def test_study_per_replicate_with_the_function_matches_analyze(configs, tmp_path) -> None:
-    """dssp_occupancy runs through study.per_replicate as the retired plugin warning says."""
+    """dssp_occupancy run through study.per_replicate gives what polyzymd analyze reports."""
     study = pz.Study.from_configs({"A": configs["A"]}, equilibration=EQUILIBRATION)
     rows = study.per_replicate(
         functions.dssp_occupancy,
