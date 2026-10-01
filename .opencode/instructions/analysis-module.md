@@ -12,6 +12,8 @@ src/polyzymd/analyses/
 ├── study_file.py        # study.yaml: conditions, equilibration, analysis runs; Study("study.yaml")
 ├── results.py           # read_results: stored values and report.json without trajectories
 ├── user_functions.py    # a study's own functions (function: file.py:name), hashed by whole file
+├── study_scaffold.py    # polyzymd study init: the study folder layout
+├── study_git.py         # the study folder's git state, recorded in reports
 ├── timeseries.py        # Study.timeseries, Study.per_replicate, Timeseries, ReplicateValues
 ├── functions.py         # Shipped measurements: radius_of_gyration, rmsd, pair_distance,
 │                        # all_below, native_contacts, rmsf, rmsd_per_residue,
