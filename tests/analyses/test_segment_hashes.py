@@ -320,3 +320,33 @@ class TestHashExistingRuns:
         save_progress(working, progress)
         conflict = CliRunner().invoke(cli, ["hash-trajectories", "-c", str(config)])
         assert conflict.exit_code == 2 and "conflict:" in conflict.output
+
+
+class TestFreezeNudge:
+    def test_freeze_names_the_command_until_hashes_are_recorded(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        import subprocess
+
+        from polyzymd.analyses.study_freeze import freeze
+        from polyzymd.analyses.study_scaffold import create_study
+        from polyzymd.simulation.progress import record_trajectory_hashes
+
+        for key in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+            monkeypatch.setenv(key, "Test")
+        for key in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+            monkeypatch.setenv(key, "test@example.com")
+        config = write_simulation_config(tmp_path / "A", scratch=tmp_path / "data")
+        (config.parent / "test.pdb").write_text("REMARK\nEND\n")
+        write_openmm_replicate(config, 1, [1.0 + 0.01 * k for k in range(5)])
+        root = tmp_path / "study"
+        create_study(root, conditions={"A": config}, equilibration="0ns")
+        working = pz.Study(root)["A"].config.get_working_directory(1)
+        assert (
+            any("hash-trajectories" in w for w in freeze(root).warnings) is False
+        )  # no progress.json
+        _progress(working)
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=False)
+        assert any("polyzymd hash-trajectories --study" in w for w in freeze(root).warnings)
+        record_trajectory_hashes(working)
+        assert not any("hash-trajectories" in w for w in freeze(root).warnings)

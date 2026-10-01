@@ -123,6 +123,28 @@ size, so moved, copied or downloaded data reuses every stored result. The
 first analysis at a new location reads each file once to hash it, about a
 second per gigabyte, unless the run recorded the hash in `progress.json`.
 
+### Record the hashes of older runs
+
+Runs that finished before PolyzyMD recorded segment hashes have none in
+`progress.json`, so each machine that analyses them hashes them again. Record
+them once, where the runs are:
+
+```bash
+polyzymd hash-trajectories --study lipase_363K --dry-run   # what it would hash
+polyzymd hash-trajectories --study lipase_363K             # record them
+```
+
+```
+No polymer replicate 1: hashed 3, already recorded 0
+SBMA 50% replicate 1: hashed 12, already recorded 0
+```
+
+Running it again prints `hashed 0` and changes nothing; a hash already in
+`progress.json` is never overwritten, and a disagreement is reported as
+`conflict:` with exit code 2. `--verify` rehashes and compares. On a cluster,
+run it in a batch job: it reads every trajectory once. `-c config.yaml` works
+for runs outside a study. See {doc}`../reference/cli_reference`.
+
 ## Commit as you go
 
 Every report from `polyzymd analyze --study` records the study file's

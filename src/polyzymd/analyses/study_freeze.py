@@ -359,6 +359,21 @@ def composition_warnings(label: str, config: Any, universe: Any) -> list[str]:
     return notes
 
 
+def _hashes_recorded(provenance: Any) -> bool:
+    """Return whether progress.json records the hash of every trajectory file the replicate reads.
+
+    A run with no ``progress.json`` has nowhere to record them, so it counts
+    as recorded and freeze does not ask for ``polyzymd hash-trajectories``.
+    """
+    from polyzymd.analyses.shared.file_hashes import recorded_segment_hashes
+
+    if not (Path(provenance.working_directory) / "progress.json").is_file():
+        return True
+    recorded = recorded_segment_hashes(provenance.working_directory)
+    names = [Path(item.path).name for item in provenance.trajectories]
+    return bool(names) and all(name in recorded for name in names)
+
+
 def simulated_with(working_dir: Path) -> dict[str, Any]:
     """Return the software versions that built and ran a replicate, as the run recorded them.
 
@@ -546,6 +561,7 @@ def _replicates(
                 "bond_source": provenance.bond_source,
                 "warnings": list(provenance.warnings),
                 "simulated_with": simulated_with(Path(provenance.working_directory)),
+                "hashes_recorded": _hashes_recorded(provenance),
             }
         conditions[label] = {**record, "replicates": replicates}
         for index, replicate_record in replicates.items():
@@ -562,6 +578,14 @@ def _replicates(
                 ]
             )
         ]
+        unhashed = [index for index, r in replicates.items() if not r["hashes_recorded"]]
+        if unhashed:
+            warnings.append(
+                f"{label}: replicates {', '.join(unhashed)} have no trajectory hashes in "
+                "progress.json (the runs predate them); record them, once, with polyzymd "
+                f"hash-trajectories --study {protocol.root}, so anyone can check the trajectories "
+                "without hashing them again"
+            )
         if unknown:
             warnings.append(
                 f"{label}: replicates {', '.join(unknown)} record no OpenMM version (no "
