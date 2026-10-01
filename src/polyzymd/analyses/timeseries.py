@@ -557,6 +557,10 @@ def run_per_replicate(
                 (folder / "record.json").write_text(
                     json.dumps({**record, "chosen": chosen, "versions": _versions()}, indent=1)
                 )
+            if parts is not None and not (folder / "parts.json").is_file():
+                # The part names, for polyzymd.analyses.results. They are not in
+                # the record, so they decide nothing about reuse.
+                (folder / "parts.json").write_text(json.dumps(list(parts)))
             if given is None:
                 value = float(values) if parts is None else values.tolist()
             else:

@@ -3791,10 +3791,12 @@ def _register_optional_command_groups() -> None:
     from polyzymd.cli.analysis_topology import analysis_topology_command
     from polyzymd.cli.analyze import analyze_command
     from polyzymd.cli.retired import compare, new_analysis
+    from polyzymd.cli.study import study_group
 
     cli.add_command(compare)
     cli.add_command(new_analysis)
     cli.add_command(analyze_command)
+    cli.add_command(study_group)
     cli.add_command(analysis_topology_command)
 
 
