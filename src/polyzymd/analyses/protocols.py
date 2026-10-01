@@ -240,7 +240,11 @@ class ProtocolProvenance(BaseModel):
     """Versions, config hashes, output paths and settings of one protocol run.
 
     ``settings`` holds the analysis settings the analysis ran with and what
-    they resolved to, such as the residues of an rmsf core.
+    they resolved to, such as the residues of an rmsf core. ``study`` is set
+    for a run from a study file: its ``path``, ``sha256`` and ``run``, and
+    ``git``, the study folder's commit and uncommitted files
+    (:func:`~polyzymd.analyses.study_git.git_state`), or ``None`` outside a
+    repository.
     """
 
     polyzymd_version: str
@@ -249,6 +253,7 @@ class ProtocolProvenance(BaseModel):
     settings_fingerprint: str | None = None
     settings: dict[str, Any] = Field(default_factory=dict)
     output_paths: dict[str, str] = Field(default_factory=dict)
+    study: dict[str, Any] | None = None
 
 
 class ProtocolReport(BaseModel):
@@ -336,6 +341,7 @@ def analyze(
     eq_check: bool = True,
     plots: bool = True,
     stride: int = 1,
+    data: dict[str, Path] | None = None,
 ) -> ProtocolReport:
     """Run one analysis over one or more simulation conditions.
 
@@ -376,6 +382,9 @@ def analyze(
     stride : int, optional
         Measure every ``stride``-th production frame of every replicate, 1 by
         default; see :meth:`~polyzymd.analyses.study.Study.from_configs`.
+    data : dict of str to Path, optional
+        Condition label to the directory holding its run directories on this
+        machine, in place of its config's ``scratch_directory``.
 
     Returns
     -------
@@ -404,6 +413,7 @@ def analyze(
         eq_check=eq_check,
         plots=plots,
         stride=stride,
+        data=data,
     )
 
 
@@ -455,6 +465,7 @@ def _analyze_function(
     eq_check: bool = True,
     plots: bool = True,
     stride: int = 1,
+    data: dict[str, Path] | None = None,
 ) -> ProtocolReport:
     """Measure ``name`` on every production frame and report its per-replicate mean.
 
@@ -498,7 +509,7 @@ def _analyze_function(
                 else f"--set {next(iter(FUNCTION_ANALYSES[name]))}=..., one of the settings above."
             ),
         )
-    study = _study(configs, labels, equilibration, replicates, stride)
+    study = _study(configs, labels, equilibration, replicates, stride, data)
     if name in ("rmsf", "rmsd_per_residue"):
         return _analyze_rmsf(name, study, settings, run, recompute, output_dir, plots)
     if name == "sasa":
@@ -1717,6 +1728,7 @@ def _study(
     equilibration: str | None,
     replicates: Sequence[int] | None,
     stride: int = 1,
+    data: dict[str, Path] | None = None,
 ) -> Any:
     """Build the Study of ``configs``, with the package default equilibration window."""
     from polyzymd.analyses.study import Study
@@ -1728,6 +1740,7 @@ def _study(
         equilibration=equilibration or AnalysisDefaults().equilibration_time,
         replicates=replicates,
         stride=stride,
+        data=data,
     )
 
 

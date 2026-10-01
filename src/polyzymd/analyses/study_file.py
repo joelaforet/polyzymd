@@ -23,6 +23,8 @@ from polyzymd.analyses.exceptions import ProtocolError
 STUDY_FILE = "study.yaml"
 #: Folder, beside ``study.yaml``, that holds each analysis's results.
 RESULTS_FOLDER = "results"
+#: Where this machine keeps each condition's runs; never committed or published.
+DATA_FILE = "data.local.yaml"
 
 _TOP_KEYS = (
     "polyzymd",
@@ -109,6 +111,7 @@ class StudyFile:
     stride: int = 1
     replicates: list[int] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Path] = field(default_factory=dict)
 
     @property
     def root(self) -> Path:
@@ -238,12 +241,48 @@ def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
     )
 
 
+def read_data_file(path: Path, labels: Any) -> dict[str, Path]:
+    """Read ``data.local.yaml``: condition label to the directory holding its runs.
+
+    Relative directories are taken from the study folder. A missing file
+    gives an empty mapping, so each condition's config says where its runs
+    are, as it does for someone running the simulations.
+
+    Raises
+    ------
+    ProtocolError
+        If the file is not a mapping of known condition labels to paths.
+    """
+    import yaml
+
+    if not path.is_file():
+        return {}
+    try:
+        raw = yaml.safe_load(path.read_text()) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise ProtocolError(
+            f"Cannot read {path}: {exc}", hint="Check that it is valid YAML."
+        ) from exc
+    if not isinstance(raw, Mapping):
+        raise ProtocolError(
+            f"{path} must map each condition label to the directory holding its runs.",
+            hint="Write it with polyzymd study locate DIR, or see data.example.yaml.",
+        )
+    known = tuple(labels)
+    _unknown(raw, known, str(path))
+    return {
+        str(label): (path.parent / Path(str(folder)).expanduser()).resolve()
+        for label, folder in raw.items()
+    }
+
+
 def load_study_file(path: str | Path) -> StudyFile:
     """Read and check ``study.yaml``.
 
     Condition paths are resolved against the folder holding the file, so
     the folder can be moved as a whole. ``replicates`` takes a list or a
-    range string such as ``"1-5"``.
+    range string such as ``"1-5"``. ``data`` holds ``data.local.yaml`` beside
+    the file, when there is one (:func:`read_data_file`).
 
     Raises
     ------
@@ -334,6 +373,7 @@ def load_study_file(path: str | Path) -> StudyFile:
         raise ProtocolError(f"{file}: metadata must be a mapping.", hint="Leave it out for now.")
 
     version = raw.get("polyzymd")
+    data = read_data_file(file.parent / DATA_FILE, conditions)
     return StudyFile(
         path=file,
         equilibration=equilibration,
@@ -343,4 +383,5 @@ def load_study_file(path: str | Path) -> StudyFile:
         stride=stride,
         replicates=replicates,
         metadata=dict(metadata),
+        data=data,
     )

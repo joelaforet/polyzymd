@@ -879,6 +879,7 @@ distances --set pairs=...` for the triad distances.
 |--------|----------|-------------|
 | `NAME` | Yes, without `--study` | Canonical analysis name, for example `rg`; with `--study`, a run of the study file, and every run when left out. |
 | `-c, --config PATH` | Yes, without `--study` | Simulation `config.yaml`. Repeatable; the first one is the control. Refused with `--study`. |
+| `--data DIR` | No | Directory holding the run directories of every condition, for this command only, in place of each config's `scratch_directory` and of a study's `data.local.yaml`. The config hash is that of the config as written. |
 | `--study PATH` | No | `study.yaml`, or the folder holding it. Gives the conditions, `--eq`, `--stride`, `--replicates` and the run's settings, and stores the run in `<study>/results/<run>/` with its `report.json`. Options given on the command line override the file; `--label` then picks conditions of the study. |
 | `-f, --file PATH` | No | Retired. With a `comparison.yaml`, the command runs nothing and exits 2: the `error:` line says that `comparison.yaml` is no longer read by `polyzymd analyze`, and the `fix:` line gives the equivalent `polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq ...` command built from the file's conditions, replicates and equilibration (or `--eq`), followed by the address of {doc}`../how_to/analysis_agent_protocol` and `.claude/skills/polyzymd-analyze/SKILL.md`, the skill to point an agent at. A file that cannot be read gives the command with placeholders. |
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
@@ -1040,13 +1041,50 @@ directory) without loading any trajectory, and prints:
 | Line | Fields |
 |---|---|
 | header | `study <path>  equilibration <window>  stride <n>[  replicates <list>]` |
-| condition | `control\|condition <label>: runs <numbers> under <directory>`, or `no runs found under <directory>` |
+| condition | `control\|condition <label>: runs <numbers> under <directory> (from data.local.yaml\|config)`, or `no runs found under <directory> ...` |
 | analysis | `analysis <run>: <settings>; stored results in <folder>[ with its report]`, or `no stored results`; for the study's own function, `analysis <run> (<file>:<function>, <kind>)`, after importing it |
+| git | `git: commit <sha>; inputs committed`, `git: commit <sha>; uncommitted inputs: <paths>`, or `git: not a repository` |
 | citation | `cite: <how to cite PolyzyMD>` |
 | warning | `warning: written for PolyzyMD <version>; this is <version>` |
 
 It exits 2 when the study file, a condition's config or a listed function
 cannot be read, and 0 otherwise; missing runs are not errors.
+
+### polyzymd study init
+
+```bash
+polyzymd study init DIRECTORY [--condition LABEL=CONFIG ...] [--new-condition LABEL ...] \
+  [--equilibration 100ns] [--holder NAME] [--no-git]
+```
+
+Creates a study folder: `study.yaml`, `conditions/`, `structures/`,
+`analyses/`, `figures/`, `results/`, `environment/`, `README.md`,
+`LICENSE-data` (CC-BY-4.0), `LICENSE-code` (MIT), `data.example.yaml` and
+`.gitignore`, then makes it a git repository with one commit.
+
+| Option | Description |
+|---|---|
+| `--condition LABEL=CONFIG` | Copies an existing `config.yaml` to `conditions/<label>/config.yaml`, with every input file it names copied to `conditions/<label>/structures/` and its path made relative. The scratch and projects directories are kept. Repeatable; the first is the control |
+| `--new-condition LABEL` | Creates `conditions/<label>/` with `polyzymd init`. Repeatable |
+| `--equilibration TEXT` | The study's equilibration window; `0ns` with a note when left out |
+| `--holder NAME` | Copyright holder in both LICENSE files. Default: `git config user.name` |
+| `--no-git` | Do not make a git repository |
+
+It refuses a folder that already holds a `study.yaml`, and exits 2 on an
+unreadable config.
+
+### polyzymd study locate
+
+```bash
+polyzymd study locate DIRECTORY [--study PATH]
+```
+
+Searches `DIRECTORY` (six levels deep) for each condition's run directories,
+named by its config's `naming_template`, and writes the folder holding the
+most of them to `data.local.yaml` beside `study.yaml`, keeping entries of
+conditions it does not find. Prints `<label>: runs <numbers> under <folder>`
+per condition found. Exits 2 when a condition is not found. See
+{doc}`../how_to/study_folder`.
 
 ---
 

@@ -18,6 +18,21 @@ from polyzymd.config.schema import SimulationConfig
 from polyzymd.core.branding import prepend_file_header
 
 
+#: Config keys whose values are file or directory paths, resolved against the
+#: folder holding the config when they are relative.
+PATH_KEYS = frozenset(
+    {
+        "pdb_path",
+        "sdf_path",
+        "sdf_directory",
+        "cache_directory",
+        "initiation",
+        "polymerization",
+        "termination",
+    }
+)
+
+
 def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
     """Recursively expand relative paths in configuration data.
 
@@ -34,15 +49,7 @@ def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
     Returns:
         Configuration with expanded paths
     """
-    path_keys = {
-        "pdb_path",
-        "sdf_path",
-        "sdf_directory",
-        "cache_directory",
-        "initiation",
-        "polymerization",
-        "termination",
-    }
+    path_keys = PATH_KEYS
 
     # Sentinel values that should be forwarded to Pydantic validators as-is,
     # not treated as filesystem paths.
@@ -79,15 +86,7 @@ def _convert_paths_to_relative(data: Dict[str, Any], base_path: Path) -> Dict[st
     Returns:
         Configuration with relative paths
     """
-    path_keys = {
-        "pdb_path",
-        "sdf_path",
-        "sdf_directory",
-        "cache_directory",
-        "initiation",
-        "polymerization",
-        "termination",
-    }
+    path_keys = PATH_KEYS
 
     # Sentinel values that should be forwarded as-is (see _expand_paths).
     _SENTINEL_VALUES = {"default"}
