@@ -10,9 +10,10 @@ finish. Each section names its slice. Slices A, B and C are implemented:
 `Study.results` ({doc}`../how_to/study_yaml`); `polyzymd study init`,
 `data.local.yaml`, `polyzymd study locate`, `--data` and git provenance
 ({doc}`../how_to/study_folder`); and `polyzymd study freeze`
-({doc}`../how_to/study_freeze`). Uploading to Zenodo (slice D), the segment
-hashes recorded when simulations finish, and identity by content do not
-exist yet.
+({doc}`../how_to/study_freeze`), which also prepares the upload to Zenodo
+and writes the steps (slice D: PolyzyMD uploads and publishes nothing). The
+segment hashes recorded when simulations finish and identity by content do
+not exist yet.
 ```
 
 A **study folder** holds one MD study: every condition's simulation config,
@@ -189,12 +190,19 @@ schema-version reset.
 5. Writes `CITATION.cff` and `.zenodo.json` from the one `metadata:` block, so
    they cannot disagree (Zenodo ignores `CITATION.cff` when `.zenodo.json`
    exists).
-6. Tags the commit and lays out the files for upload one by one, with the
-   manifest, README and `CITATION.cff` at the top level, plus an optional
-   zip. Archives whose contents cannot be indexed hide data from search
-   (Tiemann et al. 2024).
+6. Tags the commit and lays out `deposit/`, with the manifest, README and
+   `CITATION.cff` at the top level, unzipped so that they stay indexed and
+   previewable (Tiemann et al. 2024).
 
-Uploading to Zenodo through its deposit API is slice D.
+Slice D prepares the upload rather than doing it: publishing on Zenodo is
+permanent and mints a DOI, so it stays the author's step. `freeze` writes
+`deposit/upload/`, exactly the files to add to a Zenodo record within its
+limits (100 files and 50 GB by default), with the study, engine inputs and
+final frames as one zip each; `deposit/trajectories.csv`, the trajectory
+files grouped into batches that each fit a record; and `deposit/UPLOAD.md`,
+the steps for this study from reserving its DOI (`metadata.doi`) to
+publishing. Zenodo's REST API remains available to anyone who wants to
+script the upload.
 
 ### Publishing metadata
 

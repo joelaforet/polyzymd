@@ -76,7 +76,8 @@ condition, the trajectories are elsewhere: run `polyzymd study locate DIR`
 (writes the gitignored `data.local.yaml`) or pass `--data DIR`; never edit the
 configs' paths to point at moved data. To publish, fill `metadata:` and run
 `polyzymd study freeze STUDY`; its `warning:` lines list what is missing or stale
-(`docs/source/how_to/study_freeze.md`).
+(`docs/source/how_to/study_freeze.md`). Then hand the author `deposit/UPLOAD.md`:
+uploading and publishing on Zenodo are theirs, never an agent's.
 
 ## 2. Reading the output
 

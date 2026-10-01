@@ -133,6 +133,11 @@ def check_command(path: Path) -> None:
     except ProtocolError as exc:
         click.echo(f"error: {' '.join(str(exc).split())}")
         failed = True
+    guide = protocol.root / "deposit" / "UPLOAD.md"
+    if guide.is_file():
+        click.echo(f"publish: follow {guide}")
+    elif protocol.analyses:
+        click.echo("publish: when the analyses are final, run polyzymd study freeze")
     click.echo(f"cite: {citation_line()}")
     if failed:
         sys.exit(EXIT_STUDY_ERROR)
@@ -422,8 +427,7 @@ def _check_against_manifest(root: Path, label: str, folder: Path, verify: bool) 
 @click.option(
     "--tag", default=None, help="Git tag of the frozen study. Default: study-v1, study-v2, ..."
 )
-@click.option("--zip", "make_zip", is_flag=True, help="Also write deposit/<study>-<tag>.zip.")
-def freeze_command(path: Path, tag: str | None, make_zip: bool) -> None:
+def freeze_command(path: Path, tag: str | None) -> None:
     """Freeze the study at PATH for publication.
 
     Checks the metadata, the git state and whether each analysis's stored
@@ -431,14 +435,15 @@ def freeze_command(path: Path, tag: str | None, make_zip: bool) -> None:
     engine inputs and final frames to deposit/; writes manifest.json,
     md_checklist.yaml, system_summary.csv, CITATION.cff and .zenodo.json;
     commits those and results/, tags the commit, and lays out deposit/ for
-    upload. Every gap is a warning, never a refusal. Refreeze after filling a
-    gap, such as the paper's DOI once it is known.
+    upload, with deposit/UPLOAD.md saying how to publish it on Zenodo; PolyzyMD
+    uploads and publishes nothing. Every gap is a warning, never a refusal.
+    Refreeze after filling a gap, such as the study's or paper's DOI.
     """
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.study_freeze import freeze
 
     try:
-        result = freeze(path, tag=tag, make_zip=make_zip)
+        result = freeze(path, tag=tag)
     except ProtocolError as exc:
         click.echo(f"error: {' '.join(str(exc).split())}", err=True)
         if exc.hint:
@@ -454,12 +459,10 @@ def freeze_command(path: Path, tag: str | None, make_zip: bool) -> None:
         f"manifest: {len(result.manifest['files'])} study files, {len(conditions)} conditions, "
         f"{replicates} replicates hashed"
     )
-    click.echo(
-        f"deposit: {result.deposit}" + (f"; zip {result.zip_path}" if result.zip_path else "")
-    )
+    click.echo(f"deposit: {result.deposit}; files to upload in {result.upload}")
     for warning in result.warnings:
         click.echo(f"warning: {warning}")
     click.echo(
-        "next: upload the trajectories and the files in deposit/ (see "
-        "https://polyzymd.readthedocs.io/en/latest/how_to/study_freeze.html)"
+        f"next: follow {result.guide}, which says how to reserve the DOI, upload and publish "
+        "on Zenodo; PolyzyMD uploads nothing"
     )

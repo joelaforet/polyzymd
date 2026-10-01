@@ -18,9 +18,12 @@ Freezing never stops for something missing; every gap is a warning. It:
 4. commits those files and the stored results in ``results/`` (outputs of
    PolyzyMD, needed to redraw the figures), never your own uncommitted
    inputs, and tags the commit;
-5. lays out ``deposit/`` for upload one file at a time: the tagged study,
-   the engine inputs and final frames, with the manifest, README and
-   ``CITATION.cff`` at the top, and optionally one zip.
+5. lays out ``deposit/``: the tagged study, the engine inputs and final
+   frames, with the manifest, README and ``CITATION.cff`` at the top, and
+   prepares the upload (:mod:`~polyzymd.analyses.study_upload_guide`):
+   ``deposit/upload/`` with exactly the files to add to Zenodo,
+   ``deposit/trajectories.csv`` and the step-by-step ``deposit/UPLOAD.md``.
+   PolyzyMD uploads and publishes nothing.
 
 ``deposit/`` is gitignored. Trajectories are not copied: they are listed in
 the manifest by size and SHA-256 and deposited on their own, with their DOIs
@@ -66,7 +69,8 @@ class FreezeResult:
     deposit: Path
     manifest: dict[str, Any]
     warnings: list[str] = field(default_factory=list)
-    zip_path: Path | None = None
+    guide: Path | None = None
+    upload: Path | None = None
 
 
 class _Hashes:
@@ -554,7 +558,7 @@ def _next_tag(root: Path) -> str:
     return f"study-v{max(numbers, default=0) + 1}"
 
 
-def freeze(root: str | Path, *, tag: str | None = None, make_zip: bool = False) -> FreezeResult:
+def freeze(root: str | Path, *, tag: str | None = None) -> FreezeResult:
     """Freeze the study in ``root`` for publication; see the module docstring.
 
     Raises
@@ -731,10 +735,23 @@ def freeze(root: str | Path, *, tag: str | None = None, make_zip: bool = False) 
     for name in (MANIFEST, CITATION, ZENODO, "README.md"):
         if (root / name).exists():
             shutil.copy2(root / name, deposit / name)
-    zip_path = None
-    if make_zip:
-        base = deposit / f"{root.name}-{version}"
-        zip_path = Path(shutil.make_archive(str(base), "zip", root_dir=deposit, base_dir="."))
+    from polyzymd.analyses.study_upload_guide import prepare_upload
+
+    prepared = prepare_upload(
+        deposit,
+        study_name=root.name,
+        tag=tag if commit else None,
+        manifest=manifest,
+        zenodo=json.loads((root / ZENODO).read_text()),
+        warnings=warnings,
+    )
     return FreezeResult(
-        root, tag if commit else None, commit, deposit, manifest, warnings, zip_path
+        root,
+        tag if commit else None,
+        commit,
+        deposit,
+        manifest,
+        warnings,
+        guide=prepared["guide"],
+        upload=prepared["upload"],
     )

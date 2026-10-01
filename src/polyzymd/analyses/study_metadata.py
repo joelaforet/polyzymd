@@ -22,6 +22,7 @@ from polyzymd.analyses.exceptions import ProtocolError
 
 TODO = "TODO"
 _KEYS = (
+    "doi",
     "title",
     "description",
     "purpose",
@@ -84,6 +85,8 @@ def check_metadata(raw: Any) -> tuple[dict[str, Any], list[str]]:
     Missing ``title``, ``description``, ``purpose`` and ``authors`` become
     ``TODO`` placeholders; a missing licence becomes the default
     (:data:`DEFAULT_LICENSE`); a missing or placeholder paper DOI is noted.
+    ``doi`` is the study's own DOI, reserved in Zenodo before publishing; it
+    is ``None`` until set, with a warning.
 
     Raises
     ------
@@ -124,6 +127,15 @@ def check_metadata(raw: Any) -> tuple[dict[str, Any], list[str]]:
         authors = [{"name": f"{TODO}: add metadata.authors to study.yaml"}]
     meta["authors"] = authors
     meta["contact"] = dict(_mapping(raw.get("contact"), "metadata.contact"))
+    doi = raw.get("doi")
+    if is_placeholder(doi):
+        warnings.append(
+            "metadata.doi is not set: reserve a DOI for the study in Zenodo, add it here and "
+            "refreeze (deposit/UPLOAD.md says how)"
+        )
+        meta["doi"] = None
+    else:
+        meta["doi"] = str(doi).strip()
 
     license_ = _mapping(raw.get("license"), "metadata.license")
     _known(license_, _LICENSE, "metadata.license")
@@ -228,6 +240,8 @@ def citation_cff(
         "license": meta["license"]["data"],
         "keywords": meta["keywords"] or ["molecular dynamics"],
     }
+    if meta.get("doi"):
+        cff["doi"] = meta["doi"]
     if commit:
         cff["commit"] = commit
     paper = meta["related"]["paper"]
@@ -314,6 +328,7 @@ def zenodo_json(
         "license": meta["license"]["data"].lower(),
         "version": version,
         "publication_date": released,
+        **({"doi": meta["doi"]} if meta.get("doi") else {}),
         "keywords": meta["keywords"],
         "method": method,
         "related_identifiers": related,

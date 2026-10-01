@@ -102,7 +102,11 @@ def study(tmp_path: Path) -> Path:
 class TestMetadata:
     def test_complete_block_has_no_gaps_but_the_placeholder_doi(self) -> None:
         meta, warnings = check_metadata(yaml.safe_load(METADATA)["metadata"])
-        assert warnings == ["the paper DOI is missing or a placeholder; refreeze once it is known"]
+        assert warnings == [
+            "metadata.doi is not set: reserve a DOI for the study in Zenodo, add it here and "
+            "refreeze (deposit/UPLOAD.md says how)",
+            "the paper DOI is missing or a placeholder; refreeze once it is known",
+        ]
         assert meta["license"] == {"data": "CC-BY-4.0", "code": "MIT"}
 
     def test_gaps_become_todos(self) -> None:
@@ -217,21 +221,23 @@ class TestFreeze:
         assert str(study.parent) not in json.dumps(manifest)
 
     def test_deposit_layout(self, study: Path) -> None:
-        result = freeze(study, make_zip=True)
+        result = freeze(study)
         deposit = result.deposit
         for name in (
             "manifest.json",
             "CITATION.cff",
             ".zenodo.json",
             "README.md",
+            "UPLOAD.md",
+            "trajectories.csv",
             "study/study.yaml",
             "study/results/rg/report.json",
         ):
             assert (deposit / name).is_file(), name
         assert list((deposit / "engine_inputs" / "polymer" / "replicate_1").glob("*.gz"))
         assert (deposit / "final_frames" / "polymer" / "replicate_1_final.pdb.gz").is_file()
-        assert result.zip_path and result.zip_path.is_file()
         assert not (deposit / "study" / "data.local.yaml").exists()
+        assert result.guide == deposit / "UPLOAD.md" and result.upload == deposit / "upload"
 
     def test_summary_table(self, study: Path) -> None:
         freeze(study)
@@ -331,6 +337,26 @@ class TestReproduce:
         assert located.exit_code == 2
         assert "has another SHA-256" in located.output
 
-    def test_check_reports_metadata_gaps(self, study: Path) -> None:
+    def test_check_reports_metadata_gaps_and_the_next_step(self, study: Path) -> None:
         result = CliRunner().invoke(cli, ["study", "check", str(study)])
-        assert "metadata: 1 gaps" in result.output
+        assert "metadata: 2 gaps" in result.output
+        assert "publish: when the analyses are final, run polyzymd study freeze" in result.output
+        freeze(study)
+        result = CliRunner().invoke(cli, ["study", "check", str(study)])
+        assert "publish: follow" in result.output and "UPLOAD.md" in result.output
+
+    def test_study_doi_reaches_the_citation_files(self, study: Path) -> None:
+        text = (
+            (study / "study.yaml")
+            .read_text()
+            .replace("metadata:\n", 'metadata:\n  doi: "10.5281/zenodo.7654321"\n')
+        )
+        (study / "study.yaml").write_text(text)
+        _git(study, "commit", "-qam", "Add the reserved DOI")
+        result = freeze(study)
+        assert not any("metadata.doi" in w for w in result.warnings)
+        assert (
+            yaml.safe_load((study / "CITATION.cff").read_text())["doi"] == "10.5281/zenodo.7654321"
+        )
+        assert json.loads((study / ".zenodo.json").read_text())["doi"] == "10.5281/zenodo.7654321"
+        assert "already set: `10.5281/zenodo.7654321`" in result.guide.read_text()
