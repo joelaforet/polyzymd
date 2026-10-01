@@ -75,11 +75,35 @@ def check_command(path: Path) -> None:
             f"{role} {label}: runs {found} under {where}"
             + (f"; missing replicates {missing}" if missing else "")
         )
+    from polyzymd.analyses.user_functions import load_function
+
     for run, entry in protocol.analyses.items():
         folder = protocol.results_dir(run)
         stored = any(folder.glob("polyzymd_results/*/*/replicate_*/record.json"))
-        what = entry.analysis if entry.analysis == run else f"{entry.analysis} as {run}"
-        settings = ", ".join(f"{k}={v}" for k, v in entry.settings.items()) or "defaults"
+        if entry.function is not None:
+            user = entry.function
+            try:
+                load_function(user.file, user.qualname)
+            except ProtocolError as exc:
+                click.echo(f"error: analysis {run}: {' '.join(str(exc).split())}")
+                failed = True
+                continue
+            relative = (
+                user.file.relative_to(protocol.root)
+                if user.file.is_relative_to(protocol.root)
+                else user.file
+            )
+            what = f"{run} ({relative}:{user.qualname}, {user.kind})"
+            settings = (
+                ", ".join(
+                    [f"{k}={v!r}" for k, v in user.selections.items()]
+                    + [f"{k}={v}" for k, v in user.settings.items()]
+                )
+                or "no arguments"
+            )
+        else:
+            what = entry.analysis if entry.analysis == run else f"{entry.analysis} as {run}"
+            settings = ", ".join(f"{k}={v}" for k, v in entry.settings.items()) or "defaults"
         click.echo(
             f"analysis {what}: {settings}; "
             + (

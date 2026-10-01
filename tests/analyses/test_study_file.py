@@ -192,7 +192,14 @@ class TestAnalyzeStudy:
     def test_refuses_configs_with_study(self, study_dir: Path) -> None:
         result = _analyze("rg", "--study", str(study_dir), "-c", "x.yaml")
         assert result.exit_code == 2
-        assert "-c and --label cannot be given" in result.output
+        assert "-c cannot be given" in result.output
+
+    def test_label_picks_conditions(self, study_dir: Path) -> None:
+        result = _analyze("rg", "--study", str(study_dir), "--label", "Polymer")
+        assert result.exit_code == 0, result.output
+        report = read_results(study_dir / "results" / "rg").report
+        assert [c.label for c in report.conditions] == ["Polymer"]
+        assert _analyze("rg", "--study", str(study_dir), "--label", "Nope").exit_code == 2
 
     def test_unlisted_shipped_analysis_runs_with_a_note(self, study_dir: Path) -> None:
         protocol = load_study_file(study_dir)
@@ -209,7 +216,7 @@ class TestAnalyzeStudy:
         report = (folder / "report.sbatch").read_text()
         tasks = (folder / "replicates.sbatch").read_text()
         assert "analyze rg_first --study" in report and " -c " not in report
-        assert "analyze rg -c" in tasks and "selection=" in tasks
+        assert "analyze rg_first --study" in tasks and '--label "$label"' in tasks
         assert len((folder / "tasks.tsv").read_text().splitlines()) == 4
 
 
@@ -274,3 +281,145 @@ def test_citation_matches_citation_cff() -> None:
     assert cff["repository-code"] == REPOSITORY
     assert str(cff["version"]) == __version__
     assert cff["authors"][0]["family-names"] == "Laforet"
+
+
+USER_MODULE = """
+def _scale(value):
+    return value * SCALE
+
+
+SCALE = 1.0
+
+
+def mean_rg(atoms, frames, offset=0.0):
+    u = atoms.universe
+    total = 0.0
+    for _ in u.trajectory[frames]:
+        total += atoms.radius_of_gyration()
+    return _scale(total / len(frames)) + offset
+
+
+def frame_rg(atoms):
+    return _scale(atoms.radius_of_gyration())
+
+
+def per_atom(atoms, frames):
+    return list(atoms.indices + 1), [1.0] * len(atoms)
+"""
+
+
+@pytest.fixture()
+def user_study(study_dir: Path) -> Path:
+    (study_dir / "analyses").mkdir()
+    (study_dir / "analyses" / "metrics.py").write_text(USER_MODULE)
+    with (study_dir / "study.yaml").open("a") as handle:
+        handle.write(
+            "  my_rg:\n"
+            "    function: analyses/metrics.py:mean_rg\n"
+            "    kind: per_replicate\n"
+            "    unit: A\n"
+            "    selections: {atoms: all}\n"
+            "    settings: {offset: 10.0}\n"
+            "  my_series:\n"
+            "    function: analyses/metrics.py:frame_rg\n"
+            "    kind: timeseries\n"
+            "    unit: A\n"
+            "    selections: {atoms: all}\n"
+            "  my_atoms:\n"
+            "    function: analyses/metrics.py:per_atom\n"
+            "    kind: per_replicate\n"
+            "    labels: returned\n"
+            "    selections: {atoms: all}\n"
+        )
+    return study_dir
+
+
+class TestUserFunctions:
+    def test_schema(self, user_study: Path) -> None:
+        entry = load_study_file(user_study).analyses["my_rg"]
+        assert entry.analysis is None
+        assert entry.function.file == user_study / "analyses" / "metrics.py"
+        assert entry.function.qualname == "mean_rg"
+        assert entry.function.selections == {"atoms": "all"}
+
+    @pytest.mark.parametrize(
+        ("entry", "message"),
+        [
+            ("{function: analyses/nope.py:f, kind: per_replicate}", "no Python file"),
+            ("{function: analyses/metrics.py, kind: per_replicate}", "file.py:function_name"),
+            ("{function: analyses/metrics.py:mean_rg, kind: frames}", "kind must be"),
+            ("{function: analyses/metrics.py:mean_rg, kind: per_replicate, unti: A}", "'unit'"),
+        ],
+    )
+    def test_schema_refusals(self, user_study: Path, entry: str, message: str) -> None:
+        with (user_study / "study.yaml").open("a") as handle:
+            handle.write(f"  bad: {entry}\n")
+        with pytest.raises(ProtocolError) as caught:
+            load_study_file(user_study)
+        assert message in str(caught.value) + str(caught.value.hint)
+
+    def test_per_replicate(self, user_study: Path) -> None:
+        result = _analyze("my_rg", "--study", str(user_study))
+        assert result.exit_code == 0, result.output
+        means = [c.mean for c in read_results(user_study / "results" / "my_rg").report.conditions]
+        assert means == pytest.approx([11.21, 12.21])
+
+    def test_timeseries(self, user_study: Path) -> None:
+        result = _analyze("my_series", "--study", str(user_study))
+        assert result.exit_code == 0, result.output
+        results = read_results(user_study / "results" / "my_series")
+        assert [c.mean for c in results.report.conditions] == pytest.approx([1.21, 2.21])
+        assert len(results.table) == 2 * 2 * 7
+
+    def test_returned_labels(self, user_study: Path) -> None:
+        result = _analyze("my_atoms", "--study", str(user_study))
+        assert result.exit_code == 0, result.output
+        table = read_results(user_study / "results" / "my_atoms").table
+        assert sorted(set(table["label"])) == [1, 2, 3, 4]
+
+    def test_editing_a_helper_recomputes(self, user_study: Path) -> None:
+        assert _analyze("my_rg", "--study", str(user_study)).exit_code == 0
+        module = user_study / "analyses" / "metrics.py"
+        module.write_text(module.read_text().replace("SCALE = 1.0", "SCALE = 2.0"))
+        assert _analyze("my_rg", "--study", str(user_study)).exit_code == 0
+        means = [c.mean for c in read_results(user_study / "results" / "my_rg").report.conditions]
+        assert means == pytest.approx([2 * 1.21 + 10, 2 * 2.21 + 10])
+        record = json.loads(
+            next(
+                (user_study / "results" / "my_rg").glob("polyzymd_results/*/*/*/record.json")
+            ).read_text()
+        )
+        assert record["function"]["hash_of"] == "module"
+        assert record["function"]["module"] == "polyzymd_study.metrics"
+
+    def test_check_imports_the_function(self, user_study: Path) -> None:
+        result = CliRunner().invoke(cli, ["study", "check", str(user_study)])
+        assert result.exit_code == 0, result.output
+        assert "analysis my_rg (analyses/metrics.py:mean_rg, per_replicate)" in result.output
+        (user_study / "analyses" / "metrics.py").write_text("raise RuntimeError('broken')\n")
+        result = CliRunner().invoke(cli, ["study", "check", str(user_study)])
+        assert result.exit_code == 2
+        assert "RuntimeError: broken" in result.output
+
+    def test_every_run(self, user_study: Path) -> None:
+        result = CliRunner().invoke(
+            cli, ["analyze", "--study", str(user_study), "--no-eq-check", "--no-plots"]
+        )
+        assert result.exit_code == 0, result.output
+        for run in ("rg", "rg_first", "my_rg", "my_series", "my_atoms"):
+            assert f"== {run}" in result.output
+            assert (user_study / "results" / run / "report.json").is_file()
+
+    def test_submit_tasks_run_the_study_function(self, user_study: Path) -> None:
+        result = CliRunner().invoke(
+            cli, ["analyze", "my_rg", "--study", str(user_study), "--dry-run"]
+        )
+        assert result.exit_code == 0, result.output
+        folder = next((user_study / "results" / "my_rg" / "slurm").iterdir())
+        assert "analyze my_rg --study" in (folder / "replicates.sbatch").read_text()
+
+
+def test_no_name_needs_a_study() -> None:
+    result = CliRunner().invoke(cli, ["analyze"])
+    assert result.exit_code == 2
+    assert "needs NAME" in result.output

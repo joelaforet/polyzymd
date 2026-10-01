@@ -123,9 +123,18 @@ def universe() -> UniverseArgument:
 
 
 def _function_record(function: Callable) -> dict[str, Any]:
-    """Name a function and hash its source, or its bytecode when no source exists."""
+    """Name a function and hash its source, or its bytecode when no source exists.
+
+    A function loaded from a study's own file
+    (:func:`~polyzymd.analyses.user_functions.load_function`) is hashed by the
+    whole file, so a change to any helper in it changes the record.
+    """
+    module_file = getattr(function, "__polyzymd_module_file__", None)
     try:
-        code, basis = inspect.getsource(function).encode(), "source"
+        if module_file:
+            code, basis = Path(module_file).read_bytes(), "module"
+        else:
+            code, basis = inspect.getsource(function).encode(), "source"
     except (OSError, TypeError):
         warnings.warn(
             f"No source file for {function!r}, so its bytecode is hashed instead; a changed "

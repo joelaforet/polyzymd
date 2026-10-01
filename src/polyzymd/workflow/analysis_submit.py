@@ -141,7 +141,7 @@ def write_submission(
     report_output: Path | None = None,
     json_report: bool = True,
     environment: Sequence[str] = (),
-    report_name: str | None = None,
+    study_file: Path | None = None,
 ) -> Submission:
     """Write the task list, the array script and the report script of one submission.
 
@@ -153,8 +153,9 @@ def write_submission(
     The files go to ``<output_dir>/slurm/<name>_<time>/``, with the job logs
     under its ``logs/``; the report job writes its report to
     ``report_output``, by default ``report.json`` (or ``report.txt``) there.
-    The report job runs ``report_name`` instead of ``name`` when given, as for
-    a run of a study file whose name differs from the analysis it runs.
+    With ``study_file``, each task runs ``<command> analyze <name> --study
+    <study_file> --label <label> --replicates <replicate> <task_options>``
+    instead, so ``name`` is a run of that study file.
     """
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     folder = Path(output_dir).resolve() / "slurm" / f"{name}_{stamp}"
@@ -177,8 +178,13 @@ def write_submission(
                 "# One condition and replicate per task: measure it and store its result.",
                 *setup,
                 f"IFS=$'\\t' read -r config label replicate < <(sed -n \"$((SLURM_ARRAY_TASK_ID + 1))p\" {shlex.quote(str(task_file))})",
-                f'{command} analyze {shlex.quote(name)} -c "$config" --label "$label" '
-                f'--replicates "$replicate" {options}',
+                f"{command} analyze {shlex.quote(name)} "
+                + (
+                    f"--study {shlex.quote(str(study_file))} "
+                    if study_file is not None
+                    else '-c "$config" '
+                )
+                + f'--label "$label" --replicates "$replicate" {options}',
                 "",
             ]
         )
@@ -199,7 +205,7 @@ def write_submission(
                 "# Every condition: reads the stored results, measures any replicate a",
                 "# task left unmeasured, and writes the report and figures.",
                 *setup,
-                f"{command} analyze {shlex.quote(report_name or name)} "
+                f"{command} analyze {shlex.quote(name)} "
                 + " ".join(shlex.quote(argument) for argument in report_arguments),
                 "",
             ]

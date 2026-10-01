@@ -34,19 +34,67 @@ _TOP_KEYS = (
     "metadata",
 )
 _ENTRY_KEYS = ("analysis",)
+#: Keys of an ``analyses:`` entry that runs your own function.
+USER_KEYS = ("function", "kind", "unit", "selections", "universe", "settings", "labels", "reduce")
+#: How a user function is run: once per replicate, or once per frame.
+USER_KINDS = ("per_replicate", "timeseries")
+
+
+@dataclass(frozen=True)
+class UserFunction:
+    """An ``analyses:`` entry that runs a function from a Python file of the study.
+
+    Attributes
+    ----------
+    file : Path
+        The Python file, ``function:`` before the colon, relative to the study.
+    qualname : str
+        The function's name in that file, after the colon.
+    kind : str
+        ``"per_replicate"``: called once per replicate with ``frames=`` the
+        production frame indices, returning one value (or one per label with
+        ``labels: returned``). ``"timeseries"``: called once per production
+        frame, returning one number, and each replicate's series reduced to
+        one value by ``reduce``.
+    unit : str or None
+        Unit of the values, recorded and printed.
+    selections : dict of str to str
+        Keyword argument to MDAnalysis selection; each is passed as the
+        replicate's ``AtomGroup``.
+    universe : str or None
+        Keyword argument that receives the replicate's ``Universe``.
+    settings : dict
+        Keyword arguments passed as they are.
+    labels : str or None
+        ``"returned"`` when the function returns ``(labels, values)``.
+    reduce : str
+        How a timeseries becomes one value per replicate, ``"mean"`` by default.
+    """
+
+    file: Path
+    qualname: str
+    kind: str
+    unit: str | None = None
+    selections: dict[str, str] = field(default_factory=dict)
+    universe: str | None = None
+    settings: dict[str, Any] = field(default_factory=dict)
+    labels: str | None = None
+    reduce: str = "mean"
 
 
 @dataclass(frozen=True)
 class AnalysisEntry:
-    """One entry of ``analyses:``: a shipped analysis and the settings it runs with.
+    """One entry of ``analyses:``: an analysis and the settings it runs with.
 
-    ``run`` is the entry's key, which names its results folder; ``analysis``
-    is the shipped analysis it runs, the key itself unless given.
+    ``run`` is the entry's key, which names its results folder. ``analysis``
+    is the shipped analysis it runs, the key itself unless given, or
+    ``None`` when ``function`` names your own function instead.
     """
 
     run: str
-    analysis: str
+    analysis: str | None
     settings: dict[str, Any] = field(default_factory=dict)
+    function: UserFunction | None = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +157,8 @@ def _analysis_entry(run: str, raw: Any, path: Path) -> AnalysisEntry:
             f"{path}: analyses.{run} must be a mapping of settings, got {raw!r}.",
             hint=f"Write it as '{run}: {{setting: value}}', or '{run}: {{}}' for the defaults.",
         )
+    if "function" in raw:
+        return AnalysisEntry(run, None, {}, _user_function(run, raw, path))
     settings = dict(raw)
     analysis = str(settings.pop("analysis", run))
     if analysis not in FUNCTION_ANALYSES:
@@ -122,6 +172,70 @@ def _analysis_entry(run: str, raw: Any, path: Path) -> AnalysisEntry:
         )
     _unknown(settings, (*_ENTRY_KEYS, *FUNCTION_ANALYSES[analysis]), f"{path}: analyses.{run}")
     return AnalysisEntry(run, analysis, settings)
+
+
+def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
+    """Check an ``analyses:`` entry that names a function in a Python file of the study."""
+    where = f"{path}: analyses.{run}"
+    _unknown(raw, USER_KEYS, where)
+    spec = str(raw["function"])
+    file, colon, qualname = spec.rpartition(":")
+    if not colon or not file or not qualname:
+        raise ProtocolError(
+            f"{where}: function must be 'path/to/file.py:function_name', got {spec!r}.",
+            hint="For example 'function: analyses/lid.py:lid_distance', relative to study.yaml.",
+        )
+    location = (path.parent / file).resolve()
+    if not location.is_file():
+        raise ProtocolError(
+            f"{where}: no Python file at {location}.",
+            hint="Give the file relative to study.yaml, for example analyses/lid.py.",
+        )
+    kind = raw.get("kind")
+    if kind not in USER_KINDS:
+        raise ProtocolError(
+            f"{where}: kind must be one of {', '.join(USER_KINDS)}, got {kind!r}.",
+            hint="per_replicate calls the function once per replicate with frames=; "
+            "timeseries calls it once per frame and averages each replicate's series.",
+        )
+    for key in ("selections", "settings"):
+        if not isinstance(raw.get(key, {}), Mapping):
+            raise ProtocolError(
+                f"{where}: {key} must be a mapping of keyword argument to value.",
+                hint="For example 'selections: {lid: \"resid 140-150 and name CA\"}'.",
+            )
+    labels = raw.get("labels")
+    if labels not in (None, "returned") or (labels and kind != "per_replicate"):
+        raise ProtocolError(
+            f"{where}: labels can only be 'returned', for a per_replicate function.",
+            hint="Return (labels, values) from the function and write 'labels: returned'.",
+        )
+    reduce = str(raw.get("reduce", "mean"))
+    if reduce != "mean" and kind != "timeseries":
+        raise ProtocolError(
+            f"{where}: reduce applies only to a timeseries function.",
+            hint="Leave reduce out for a per_replicate function.",
+        )
+    clash = set(raw.get("selections") or {}) & set(raw.get("settings") or {})
+    if clash or (
+        raw.get("universe") and raw["universe"] in clash | set(raw.get("selections") or {})
+    ):
+        raise ProtocolError(
+            f"{where}: a keyword argument is given twice: {sorted(clash) or raw['universe']}.",
+            hint="Give each keyword argument in only one of selections, settings and universe.",
+        )
+    unit = raw.get("unit")
+    return UserFunction(
+        file=location,
+        qualname=qualname,
+        kind=kind,
+        unit=None if unit is None else str(unit),
+        selections={str(k): str(v) for k, v in (raw.get("selections") or {}).items()},
+        universe=None if raw.get("universe") is None else str(raw["universe"]),
+        settings=dict(raw.get("settings") or {}),
+        labels=labels,
+        reduce=reduce,
+    )
 
 
 def load_study_file(path: str | Path) -> StudyFile:
