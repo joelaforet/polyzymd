@@ -2123,3 +2123,33 @@ class TestRecordProvenanceFields:
         assert loaded is not None
         assert loaded.segments[0].polyzymd_version is None
         assert loaded.equilibration_stages[0].openmm_version is None
+
+
+def test_upsert_keeps_original_started_at():
+    from polyzymd.simulation.progress import (
+        SegmentRecord,
+        SegmentStatus,
+        SimulationProgress,
+        _update_or_append_segment,
+    )
+
+    progress = SimulationProgress(
+        config_path="c", total_steps_requested=10, total_samples_requested=1
+    )
+    start = "2026-09-29T20:00:00+00:00"
+    _update_or_append_segment(
+        progress, SegmentRecord(index=3, started_at=start, status=SegmentStatus.RUNNING)
+    )
+    _update_or_append_segment(
+        progress,
+        SegmentRecord(
+            index=3,
+            started_at="2026-09-30T19:52:00+00:00",
+            finished_at="2026-09-30T19:52:00+00:00",
+            status=SegmentStatus.INTERRUPTED,
+        ),
+    )
+    (seg,) = progress.segments
+    assert seg.started_at == start
+    assert seg.status == SegmentStatus.INTERRUPTED
+    assert seg.finished_at == "2026-09-30T19:52:00+00:00"

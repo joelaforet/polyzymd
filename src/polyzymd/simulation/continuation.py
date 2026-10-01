@@ -876,6 +876,7 @@ class ContinuationManager:
             SegmentRecord,
             SegmentStatus,
             SimulationStatus,
+            _now_iso,
             _update_or_append_segment,
             load_progress,
             save_progress,
@@ -896,6 +897,7 @@ class ContinuationManager:
             samples_written=0,  # Replaced by the tracker's count when known
             status=SegmentStatus.INTERRUPTED,
             duration_ns=actual_duration_ns,
+            finished_at=_now_iso(),
         )
         self._apply_frame_fields(record)
 
