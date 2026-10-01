@@ -217,12 +217,80 @@ class Condition:
 class Study:
     """A set of simulation conditions loaded as per-replicate universes.
 
-    Build one with :meth:`from_configs`. Iterating yields the conditions in
+    ``Study("study.yaml")`` (or the folder holding it) reads a study file:
+    its conditions, equilibration window, stride, replicates and analysis
+    settings (:mod:`polyzymd.analyses.study_file`). :meth:`from_configs`
+    builds one from config paths instead. Iterating yields the conditions in
     order, and the first one is the default control.
     """
 
-    def __init__(self, conditions: Sequence[Condition]) -> None:
-        self._conditions = {condition.label: condition for condition in conditions}
+    def __init__(self, conditions: Sequence[Condition] | str | Path) -> None:
+        self.protocol: Any = None
+        self._built: dict[str, Condition] | None = None
+        if isinstance(conditions, (str, Path)):
+            from polyzymd.analyses.study_file import load_study_file
+
+            # Conditions are built on first use, so settings() and results()
+            # work on a study folder whose trajectories are not on this machine.
+            self.protocol = load_study_file(conditions)
+        else:
+            self._built = {condition.label: condition for condition in conditions}
+
+    @property
+    def _conditions(self) -> dict[str, Condition]:
+        if self._built is None:
+            protocol = self.protocol
+            self._built = {
+                label: Condition(
+                    label, path, protocol.equilibration, protocol.replicates, protocol.stride
+                )
+                for label, path in protocol.conditions.items()
+            }
+        return self._built
+
+    @property
+    def root(self) -> Path | None:
+        """The study folder, when the study was read from a ``study.yaml``."""
+        return None if self.protocol is None else self.protocol.root
+
+    def settings(self, run: str) -> dict[str, Any]:
+        """Return the settings ``study.yaml`` gives the analysis run ``run``.
+
+        Raises
+        ------
+        ProtocolError
+            If the study has no study file or no such run.
+        """
+        return dict(self._entry(run).settings)
+
+    def results_dir(self, run: str) -> Path:
+        """Return the folder of the run's results: ``<study>/results/<run>``."""
+        self._entry(run)
+        return self.protocol.results_dir(run)
+
+    def results(self, run: str) -> Any:
+        """Return the stored per-replicate values of ``run``, without loading any trajectory.
+
+        See :func:`polyzymd.analyses.results.read_results`; this reads
+        ``<study>/results/<run>``, where ``polyzymd analyze RUN --study``
+        stores them.
+        """
+        from polyzymd.analyses.results import read_results
+
+        return read_results(self.results_dir(run))
+
+    def _entry(self, run: str) -> Any:
+        if self.protocol is None:
+            raise ProtocolError(
+                "This study was built from config paths, so it has no analyses or results folder.",
+                hint="Build it from a study file: pz.Study('study.yaml').",
+            )
+        if run not in self.protocol.analyses:
+            raise ProtocolError(
+                f"{self.protocol.path} lists no analysis run {run!r}.",
+                hint=f"Use one of {', '.join(self.protocol.analyses) or 'none (add one under analyses:)'}.",
+            )
+        return self.protocol.analyses[run]
 
     @classmethod
     def from_configs(
@@ -311,6 +379,8 @@ class Study:
     @property
     def labels(self) -> list[str]:
         """Condition labels in order, control first."""
+        if self._built is None:
+            return list(self.protocol.conditions)
         return list(self._conditions)
 
     @property

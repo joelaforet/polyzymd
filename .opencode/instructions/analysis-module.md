@@ -9,6 +9,9 @@ module, update this list in the same commit.
 ```
 src/polyzymd/analyses/
 ├── study.py             # Study, Condition, Replicate: replicates as MDAnalysis universes
+├── study_file.py        # study.yaml: conditions, equilibration, analysis runs; Study("study.yaml")
+├── results.py           # read_results: stored values and report.json without trajectories
+├── user_functions.py    # a study's own functions (function: file.py:name), hashed by whole file
 ├── timeseries.py        # Study.timeseries, Study.per_replicate, Timeseries, ReplicateValues
 ├── functions.py         # Shipped measurements: radius_of_gyration, rmsd, pair_distance,
 │                        # all_below, native_contacts, rmsf, rmsd_per_residue,
@@ -71,6 +74,9 @@ study API; see `docs/source/explanation/analysis_api.md`.
   per label, such as per residue. Run it with `study.per_replicate(fn, ...,
   labels=..., parts=...)`.
 - Call MDAnalysis or MDTraj for the measurement; do not reimplement them.
+- To run it from a study folder without shipping it, list it in `study.yaml`
+  as `function: analyses/file.py:name` with `kind`, `selections` and
+  `settings`; see `docs/source/how_to/study_yaml.md`.
 - To ship it in `polyzymd analyze`, add it to `FUNCTION_ANALYSES` with its
   settings and a dispatcher in `protocols.py`, as the existing analyses do, with
   its figures, a quick-start page and a real-data parity check.

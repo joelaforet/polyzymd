@@ -67,6 +67,7 @@ If you are adding or reviewing an analysis, read these pages first:
 :maxdepth: 1
 
 Analysing a set of simulations <analysis_api>
+Study folders: publishing a reproducible MD study <study_folders>
 Analysis system concepts <analysis_concepts>
 Which analysis entry point should I use <analysis_entry_points>
 Architecture and design rationale <architecture>

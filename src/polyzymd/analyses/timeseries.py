@@ -123,9 +123,18 @@ def universe() -> UniverseArgument:
 
 
 def _function_record(function: Callable) -> dict[str, Any]:
-    """Name a function and hash its source, or its bytecode when no source exists."""
+    """Name a function and hash its source, or its bytecode when no source exists.
+
+    A function loaded from a study's own file
+    (:func:`~polyzymd.analyses.user_functions.load_function`) is hashed by the
+    whole file, so a change to any helper in it changes the record.
+    """
+    module_file = getattr(function, "__polyzymd_module_file__", None)
     try:
-        code, basis = inspect.getsource(function).encode(), "source"
+        if module_file:
+            code, basis = Path(module_file).read_bytes(), "module"
+        else:
+            code, basis = inspect.getsource(function).encode(), "source"
     except (OSError, TypeError):
         warnings.warn(
             f"No source file for {function!r}, so its bytecode is hashed instead; a changed "
@@ -557,6 +566,10 @@ def run_per_replicate(
                 (folder / "record.json").write_text(
                     json.dumps({**record, "chosen": chosen, "versions": _versions()}, indent=1)
                 )
+            if parts is not None and not (folder / "parts.json").is_file():
+                # The part names, for polyzymd.analyses.results. They are not in
+                # the record, so they decide nothing about reuse.
+                (folder / "parts.json").write_text(json.dumps(list(parts)))
             if given is None:
                 value = float(values) if parts is None else values.tolist()
             else:

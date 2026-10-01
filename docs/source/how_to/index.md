@@ -88,6 +88,7 @@ See also {doc}`../tutorials/sasa_analysis` for a guided SASA walkthrough.
 
 Which Analysis Should I Run? <analysis_chooser>
 Get a Validated Number with One Command <analysis_agent_protocol>
+Run a Study from study.yaml <study_yaml>
 Compare Simulation Conditions <analysis_compare_conditions>
 Run RMSD Analysis <analysis_rmsd_quickstart>
 Run Rg Analysis <analysis_rg_quickstart>

@@ -855,7 +855,13 @@ no `comparison.yaml`.
 
 ```bash
 polyzymd analyze NAME -c config.yaml [-c other/config.yaml ...] [OPTIONS]
+polyzymd analyze [RUN] --study study.yaml [OPTIONS]
 ```
+
+With `--study`, the conditions, equilibration window, stride, replicates and
+settings come from the study file, and `RUN` is one of its `analyses:`
+entries, a shipped analysis or the study's own function; with no `RUN`,
+every entry runs in turn. See {doc}`../how_to/study_yaml`.
 
 `NAME` is one of `rg`, `rmsd`, `rmsf`, `rmsd_per_residue`, `sasa`,
 `secondary_structure`, `contacts`, `native_contacts`, `hydrogen_bonds` and
@@ -871,8 +877,9 @@ distances --set pairs=...` for the triad distances.
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `NAME` | Yes | Canonical analysis name, for example `rg`. |
-| `-c, --config PATH` | Yes | Simulation `config.yaml`. Repeatable; the first one is the control. |
+| `NAME` | Yes, without `--study` | Canonical analysis name, for example `rg`; with `--study`, a run of the study file, and every run when left out. |
+| `-c, --config PATH` | Yes, without `--study` | Simulation `config.yaml`. Repeatable; the first one is the control. Refused with `--study`. |
+| `--study PATH` | No | `study.yaml`, or the folder holding it. Gives the conditions, `--eq`, `--stride`, `--replicates` and the run's settings, and stores the run in `<study>/results/<run>/` with its `report.json`. Options given on the command line override the file; `--label` then picks conditions of the study. |
 | `-f, --file PATH` | No | Retired. With a `comparison.yaml`, the command runs nothing and exits 2: the `error:` line says that `comparison.yaml` is no longer read by `polyzymd analyze`, and the `fix:` line gives the equivalent `polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq ...` command built from the file's conditions, replicates and equilibration (or `--eq`), followed by the address of {doc}`../how_to/analysis_agent_protocol` and `.claude/skills/polyzymd-analyze/SKILL.md`, the skill to point an agent at. A file that cannot be read gives the command with placeholders. |
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
 | `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default `10ns`. |
@@ -977,7 +984,7 @@ The verdict vocabulary is fixed so a caller can branch on it:
 | Code | Meaning |
 |------|---------|
 | 0 | The analysis ran and the report was printed |
-| 2 | A typed analysis error: unknown or retired analysis name, missing config, bad `--replicates` or `--set`, a `-f comparison.yaml`, or a pipeline failure. The message is printed on one line prefixed `error:` and the fix on the next prefixed `fix:`, both on stderr |
+| 2 | A typed analysis error: unknown or retired analysis name, missing config, bad `--replicates` or `--set`, a `-f comparison.yaml`, an invalid study file, or a pipeline failure; with `--study` and no `RUN`, any run that failed. The message is printed on one line prefixed `error:` and the fix on the next prefixed `fix:`, both on stderr |
 
 ### Example
 
@@ -1013,6 +1020,33 @@ polyzymd analyze rg -c A/config.yaml -c B/config.yaml --set selection='protein a
   per condition and replicate, under `polyzymd_results/` in the output
   directory, so a second run with the same inputs and settings reads the
   stored values back; `--recompute` measures again.
+
+---
+
+## polyzymd study
+
+Commands on a study folder; see {doc}`../how_to/study_yaml` and
+{doc}`../explanation/study_folders`.
+
+### polyzymd study check
+
+```bash
+polyzymd study check [PATH]
+```
+
+Reads `study.yaml` (`PATH` is the file or its folder, by default the current
+directory) without loading any trajectory, and prints:
+
+| Line | Fields |
+|---|---|
+| header | `study <path>  equilibration <window>  stride <n>[  replicates <list>]` |
+| condition | `control\|condition <label>: runs <numbers> under <directory>`, or `no runs found under <directory>` |
+| analysis | `analysis <run>: <settings>; stored results in <folder>[ with its report]`, or `no stored results`; for the study's own function, `analysis <run> (<file>:<function>, <kind>)`, after importing it |
+| citation | `cite: <how to cite PolyzyMD>` |
+| warning | `warning: written for PolyzyMD <version>; this is <version>` |
+
+It exits 2 when the study file, a condition's config or a listed function
+cannot be read, and 0 otherwise; missing runs are not errors.
 
 ---
 

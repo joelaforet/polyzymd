@@ -87,7 +87,7 @@ def _one_line(text: str) -> str:
 
 
 @click.command("analyze")
-@click.argument("name", type=str)
+@click.argument("name", type=str, required=False, default=None)
 @click.option(
     "-c",
     "--config",
@@ -95,6 +95,15 @@ def _one_line(text: str) -> str:
     multiple=True,
     type=click.Path(path_type=Path),
     help="Simulation config.yaml. Repeatable; the first one is the control.",
+)
+@click.option(
+    "--study",
+    "study_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="study.yaml, or the study folder holding it: gives the conditions, --eq, --stride, "
+    "--replicates and the settings of NAME, and stores results in <study>/results/NAME/. "
+    "Options given here override it.",
 )
 @click.option(
     "-f",
@@ -159,9 +168,8 @@ def _one_line(text: str) -> str:
 @click.option(
     "--stride",
     type=click.IntRange(min=1),
-    default=1,
-    show_default=True,
-    help="Measure every N-th production frame of every replicate.",
+    default=None,
+    help="Measure every N-th production frame of every replicate. Default 1.",
 )
 @click.option(
     "--recompute", is_flag=True, help="Recompute replicates instead of reusing cached results."
@@ -214,9 +222,12 @@ def _one_line(text: str) -> str:
     default=None,
     help="CPUs of each job for --submit. Default 2.",
 )
+@click.pass_context
 def analyze_command(
-    name: str,
+    ctx: click.Context,
+    name: str | None,
     configs: tuple[Path, ...],
+    study_path: Path | None,
     comparison_file: Path | None,
     replicate_spec: str | None,
     equilibration: str | None,
@@ -226,7 +237,7 @@ def analyze_command(
     output_format: str,
     output_path: Path | None,
     output_dir: Path | None,
-    stride: int,
+    stride: int | None,
     recompute: bool,
     no_eq_check: bool,
     no_plots: bool,
@@ -263,10 +274,45 @@ def analyze_command(
         polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --format json -o hbonds.json
         polyzymd analyze native_contacts -c A/config.yaml -c B/config.yaml --set reference_file=crystal.pdb
         polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --submit --preset blanca-shirts
+        polyzymd analyze contacts --study my_study/study.yaml
     """
     warn_if_wrong_pixi_env("analyze", ANALYSIS_PIXI_ENVS)
 
     from polyzymd.analyses.exceptions import AnalysisError, ProtocolError
+
+    if name is None:
+        _analyze_every_run(ctx, study_path)
+        return
+    run_name = name
+    if study_path is not None:
+        try:
+            (
+                name,
+                configs,
+                labels,
+                equilibration,
+                stride,
+                replicate_spec,
+                setting_overrides,
+                output_dir,
+            ) = _from_study(
+                study_path,
+                name,
+                configs=configs,
+                labels=labels,
+                equilibration=equilibration,
+                stride=stride,
+                replicate_spec=replicate_spec,
+                setting_overrides=setting_overrides,
+                output_dir=output_dir,
+            )
+        except AnalysisError as exc:
+            hint = getattr(exc, "hint", None)
+            click.echo(f"error: {_one_line(str(exc))}", err=True)
+            if hint:
+                click.echo(f"fix: {_one_line(hint)}", err=True)
+            sys.exit(EXIT_ANALYSIS_ERROR)
+    stride = stride or 1
 
     if submit or dry_run:
         try:
@@ -286,6 +332,8 @@ def analyze_command(
                 recompute=recompute,
                 no_eq_check=no_eq_check,
                 no_plots=no_plots,
+                study_path=study_path,
+                run_name=run_name,
                 dry_run=dry_run or not submit,
                 preset=preset,
                 overrides={
@@ -320,6 +368,8 @@ def analyze_command(
             eq_check=not no_eq_check,
             plots=not no_plots,
             stride=stride,
+            study_path=study_path,
+            run_name=run_name,
         )
     except AnalysisError as exc:
         hint = getattr(exc, "hint", None)
@@ -333,6 +383,12 @@ def analyze_command(
         click.echo(f"fix: {wrapped.hint}", err=True)
         sys.exit(EXIT_ANALYSIS_ERROR)
 
+    if study_path is not None:
+        from polyzymd.analyses.results import REPORT_FILE
+
+        saved = Path(output_dir) / REPORT_FILE
+        saved.parent.mkdir(parents=True, exist_ok=True)
+        saved.write_text(report.model_dump_json(indent=2) + "\n")
     rendered = _render(report, output_format)
     click.echo(rendered)
     if output_path is not None:
@@ -340,6 +396,141 @@ def analyze_command(
             Path(output_path).write_text(rendered.rstrip("\n") + "\n")
         except OSError as exc:
             raise click.ClickException(f"Could not write output file: {exc}") from exc
+
+
+def _analyze_every_run(ctx: click.Context, study_path: Path | None) -> None:
+    """Run ``polyzymd analyze RUN`` for every run of ``analyses:`` in the study file, in order.
+
+    Every other option applies to each run. A run that fails is reported and
+    the next one runs; the command then exits 2.
+    """
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.study_file import load_study_file
+
+    if study_path is None:
+        click.echo(
+            "error: polyzymd analyze needs NAME, or --study to run every listed analysis.", err=True
+        )
+        click.echo(
+            "fix: Run polyzymd analyze rg -c A/config.yaml, or polyzymd analyze --study study.yaml.",
+            err=True,
+        )
+        sys.exit(EXIT_ANALYSIS_ERROR)
+    try:
+        runs = list(load_study_file(study_path).analyses)
+    except ProtocolError as exc:
+        click.echo(f"error: {_one_line(str(exc))}", err=True)
+        if exc.hint:
+            click.echo(f"fix: {_one_line(exc.hint)}", err=True)
+        sys.exit(EXIT_ANALYSIS_ERROR)
+    if not runs:
+        click.echo(f"error: {study_path} lists no analyses.", err=True)
+        click.echo("fix: Add runs under analyses: in the study file.", err=True)
+        sys.exit(EXIT_ANALYSIS_ERROR)
+    failed = []
+    for run in runs:
+        click.echo(f"== {run}")
+        try:
+            ctx.invoke(analyze_command, **{**ctx.params, "name": run})
+        except SystemExit as exit_:
+            if exit_.code:
+                failed.append(run)
+    if failed:
+        click.echo(
+            f"error: {len(failed)} of {len(runs)} runs failed: {', '.join(failed)}", err=True
+        )
+        sys.exit(EXIT_ANALYSIS_ERROR)
+
+
+def _from_study(
+    study_path: Path,
+    run_name: str,
+    *,
+    configs: tuple[Path, ...],
+    labels: tuple[str, ...],
+    equilibration: str | None,
+    stride: int | None,
+    replicate_spec: str | None,
+    setting_overrides: tuple[str, ...],
+    output_dir: Path | None,
+) -> tuple:
+    """Resolve ``--study`` into the options of an ordinary ``polyzymd analyze`` command.
+
+    The run ``run_name`` of ``analyses:`` gives the analysis and its settings;
+    a shipped analysis the file does not list runs with its defaults, with a
+    note. Options given on the command line override the file: ``--eq``,
+    ``--stride``, ``--replicates``, ``--output-dir``, and each ``--set``
+    (applied after the file's settings). ``--label`` picks some of the
+    study's conditions, as ``--submit`` tasks do. ``-c`` is refused, because
+    the file names the conditions.
+
+    Returns
+    -------
+    tuple
+        The analysis name (``None`` for the study's own function), configs,
+        labels, equilibration, stride, replicate spec, ``--set`` entries and
+        output directory.
+    """
+    import json
+
+    import polyzymd
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+    from polyzymd.analyses.study_file import load_study_file
+
+    if configs:
+        raise ProtocolError(
+            "--study names the conditions, so -c cannot be given with it.",
+            hint="Leave out -c, or edit conditions: in the study file. --label picks conditions "
+            "of the study.",
+        )
+    protocol = load_study_file(study_path)
+    conditions = dict(protocol.conditions)
+    if labels:
+        unknown = [label for label in labels if label not in conditions]
+        if unknown:
+            raise ProtocolError(
+                f"{protocol.path} has no condition {', '.join(map(repr, unknown))}.",
+                hint=f"Use --label with one of {', '.join(conditions)}.",
+            )
+        conditions = {label: conditions[label] for label in conditions if label in labels}
+    entry = protocol.analyses.get(run_name)
+    if entry is None:
+        if run_name not in FUNCTION_ANALYSES:
+            raise ProtocolError(
+                f"{protocol.path} lists no analysis run {run_name!r}, and PolyzyMD ships no "
+                "analysis of that name.",
+                hint=f"Use one of {', '.join(protocol.analyses) or 'the shipped analyses'}, "
+                f"or add '{run_name}:' under analyses: in the study file.",
+            )
+        click.echo(
+            f"note: {protocol.path} does not list {run_name}; running it with its defaults.",
+            err=True,
+        )
+        analysis, settings = run_name, {}
+    elif entry.function is not None:
+        analysis, settings = None, {}
+    else:
+        analysis, settings = entry.analysis, entry.settings
+    if protocol.polyzymd and protocol.polyzymd != polyzymd.__version__:
+        click.echo(
+            f"warning: {protocol.path} was written for PolyzyMD {protocol.polyzymd}; "
+            f"this is {polyzymd.__version__}.",
+            err=True,
+        )
+    from_file = tuple(f"{key}={json.dumps(value)}" for key, value in settings.items())
+    if replicate_spec is None and protocol.replicates is not None:
+        replicate_spec = ",".join(str(index) for index in protocol.replicates)
+    return (
+        analysis,
+        tuple(conditions.values()),
+        tuple(conditions),
+        equilibration or protocol.equilibration,
+        stride or protocol.stride,
+        replicate_spec,
+        (*from_file, *setting_overrides),
+        output_dir or protocol.results_dir(run_name),
+    )
 
 
 def _submit(
@@ -362,6 +553,8 @@ def _submit(
     dry_run: bool,
     preset: str | None,
     overrides: dict,
+    study_path: Path | None = None,
+    run_name: str | None = None,
 ) -> None:
     """Write, and unless ``dry_run`` submit, the SLURM jobs of one ``polyzymd analyze`` command."""
     import shlex
@@ -377,7 +570,8 @@ def _submit(
 
     if comparison_file is not None:
         _refuse_comparison_file(name, comparison_file, equilibration)
-    _require_known(name)
+    if name is not None:
+        _require_known(name)
     if not configs:
         raise ProtocolError(
             "--submit needs the simulation configs.", hint="Give them with -c config.yaml."
@@ -404,15 +598,23 @@ def _submit(
         common.append("--no-eq-check")
     task_options = [*common, "--no-plots", *(["--recompute"] if recompute else [])]
     report_arguments = []
-    for condition in study:
-        report_arguments += ["-c", str(condition.config_path), "--label", condition.label]
+    if study_path is not None:
+        # The report job reads the study file too, so it saves report.json for
+        # results(); every option below repeats what the file resolved to.
+        report_arguments += ["--study", str(Path(study_path).expanduser().resolve())]
+    else:
+        for condition in study:
+            report_arguments += ["-c", str(condition.config_path), "--label", condition.label]
     if replicate_spec is not None:
         report_arguments += ["--replicates", replicate_spec]
     report_arguments += [*common, "--format", output_format]
     if no_plots:
         report_arguments.append("--no-plots")
+    # With a study, every job runs the study's run by name, so a run of the
+    # study's own function, or a renamed shipped analysis, runs as written there.
+    job_name = run_name if study_path is not None and run_name else name
     submission = write_submission(
-        name,
+        job_name,
         tasks,
         task_options,
         report_arguments,
@@ -423,6 +625,7 @@ def _submit(
         report_output=output_path,
         json_report=output_format == "json",
         environment=environment,
+        study_file=Path(study_path).expanduser().resolve() if study_path is not None else None,
     )
     click.echo(f"wrote {submission.folder}: {submission.n_tasks} replicate tasks and a report job")
     if dry_run:
@@ -455,13 +658,40 @@ def _run(
     eq_check: bool = True,
     plots: bool = True,
     stride: int = 1,
+    study_path: Path | None = None,
+    run_name: str | None = None,
 ) -> "ProtocolReport":
     """Resolve the options and run the protocol on the -c configs.
 
     ``comparison_file`` is retired: :func:`_refuse_comparison_file` raises
-    ``ProtocolError`` with the equivalent ``-c`` command.
+    ``ProtocolError`` with the equivalent ``-c`` command. ``name`` is
+    ``None`` for a study's own function, the run ``run_name`` of
+    ``study_path``, which runs through
+    :func:`~polyzymd.analyses.user_functions.run_user_analysis`.
     """
     from polyzymd.analyses.protocols import analyze
+
+    if name is None:
+        from polyzymd.analyses.study import Study
+        from polyzymd.analyses.study_file import load_study_file
+        from polyzymd.analyses.user_functions import run_user_analysis
+
+        protocol = load_study_file(study_path)
+        study = Study.from_configs(
+            dict(zip(labels, configs, strict=True)),
+            equilibration=equilibration,
+            replicates=_replicates(replicate_spec),
+            stride=stride,
+        )
+        return run_user_analysis(
+            study,
+            run_name,
+            protocol.analyses[run_name].function,
+            settings=_settings(setting_overrides),
+            output_dir=Path(output_dir),
+            recompute=recompute,
+            plots=plots,
+        )
 
     if comparison_file is not None:
         _refuse_comparison_file(name, comparison_file, equilibration)

@@ -46,8 +46,10 @@ study = pz.Study.from_configs(
 )
 ```
 
-A study folder marked by `study.yaml` loads the same way with
-`pz.Study("path/to/study")`. The first condition is the control unless you name
+A study folder loads the same way with `pz.Study("path/to/study.yaml")`: its
+`study.yaml` names the conditions, the equilibration window and the settings
+of every analysis, and `study.results(run)` reads stored results back without
+any trajectory; see {doc}`../how_to/study_yaml`. The first condition is the control unless you name
 another one when you compare. The equilibration window is measured in
 simulation time from the start of each replicate's production trajectory, with
 its segments joined in order.
