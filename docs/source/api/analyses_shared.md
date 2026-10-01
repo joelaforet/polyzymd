@@ -19,6 +19,10 @@ trajectory window of each replicate.
    :show-inheritance:
    :no-index:
 
+.. automodule:: polyzymd.analyses.shared.gromacs
+   :members:
+   :no-index:
+
 .. automodule:: polyzymd.analyses.shared.window
    :members:
    :undoc-members:

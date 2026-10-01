@@ -50,19 +50,27 @@ So backbone and side-chain N-H, Lys NZ, His N-H, Trp NE1 and hydroxyl groups
 donate, and carbonyl, carboxylate, hydroxyl, ether, ester and sulfonate
 oxygens, unprotonated histidine nitrogens and thioether sulfur accept. Amide,
 guanidinium, protonated amine and quaternary nitrogens, such as the ammonium
-nitrogen of sulfobetaine methacrylate, do not accept. The bonds come from the
-OpenMM system that PolyzyMD saves beside each segment's trajectory,
-`<segment>_system.xml`, because the topology PDB records bonds only for
-non-standard residues; the partial charges are read from it too. The atoms
-chosen are recorded in the report; see [What is recorded](#what-is-recorded).
+nitrogen of sulfobetaine methacrylate, do not accept. The bonds and partial
+charges come from the run's force field, because a PDB or GRO topology lacks
+most or all bonds:
+
+| Engine | Bonds and charges read from |
+|---|---|
+| OpenMM | `<segment>_system.xml`, the OpenMM system saved beside each segment's trajectory |
+| GROMACS | `prod.tpr`; when MDAnalysis cannot read its version (GROMACS 2026 with MDAnalysis 2.10), the run's `<prefix>.top` and its `.itp` files |
+
+Either way, bonds to hydrogen that the run constrained, and the O-H bonds of
+rigid water, count as bonds. The atoms chosen are recorded in the report; see
+[What is recorded](#what-is-recorded).
 
 ```{important}
-Keep `<segment>_system.xml` beside the trajectory in any copy of a run you
-analyse, such as a copy thinned to fewer frames. Without it the protein has
-no bonds, and the analysis stops with an error naming the file. A run with no
-system XML, such as a GROMACS run for now, can still be analysed by giving
-`donors`, `hydrogens` and `acceptors` as selections, which pairs each hydrogen
-with a donor within 1.2 Å instead of by bonds.
+Keep these files beside the trajectory in any copy of a run you analyse, such
+as a copy thinned to fewer frames: `<segment>_system.xml` for OpenMM, and
+`prod.tpr` with `<prefix>.top` and its `.itp` files for GROMACS. Without them
+the protein has no bonds, and the analysis stops with an error naming the
+files. A run without them can still be analysed by giving `donors`,
+`hydrogens` and `acceptors` as selections, which pairs each hydrogen with a
+donor within 1.2 Å instead of by bonds.
 ```
 
 ## From the command line

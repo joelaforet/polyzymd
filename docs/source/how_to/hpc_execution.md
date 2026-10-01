@@ -192,8 +192,9 @@ A stored result is read back only when its record matches, so give every
 job the same analysis, `--set` settings, `--label` per condition,
 `--eq` and `--stride`. Each task loads its replicate as a single run would,
 so an analysis's own requirements hold for every task, such as the
-`<segment>_system.xml` that {doc}`hydrogen_bonds` needs beside each
-trajectory.
+force-field files that {doc}`hydrogen_bonds` needs beside each trajectory
+(`<segment>_system.xml` for OpenMM, `prod.tpr` and `<prefix>.top` for
+GROMACS).
 
 ## One job per analysis
 
