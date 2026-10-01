@@ -94,7 +94,7 @@ Freezing:
    | `manifest.json` | Every study file, trajectory, engine input and final frame by size and SHA-256; package versions; each condition's fully resolved config; production length and frames analysed per replicate; the git commit; the warnings |
    | `CITATION.cff` | Citation File Format 1.2.0: the paper as `preferred-citation`; PolyzyMD and the trajectory deposits under `references` |
    | `.zenodo.json` | Zenodo deposit metadata: `isSupplementTo` the paper, `requires` PolyzyMD, `references` the trajectories |
-   | `md_checklist.yaml` | The Communications Biology reliability and reproducibility checklist (2023), filled from the manifest; review each answer |
+   | `md_checklist.yaml` | The Communications Biology reliability and reproducibility checklist (2023), filled from the manifest; review each answer. Distance restraints in a condition's config act in every phase, so item 3c reports those conditions as restrained (biased) sampling, with each restraint's type, atoms, distance and force constant |
    | `system_summary.csv` | Box, atoms, waters, ions and composition of every replicate (checklist 4a) |
 
 4. Commits those files and `results/`, and only those, and tags the commit

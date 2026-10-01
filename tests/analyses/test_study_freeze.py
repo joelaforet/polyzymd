@@ -250,6 +250,37 @@ class TestFreeze:
             "Polymer": 2,
         }
 
+    def test_unrestrained_study_is_unbiased(self, study: Path) -> None:
+        freeze(study)
+        checklist = yaml.safe_load((study / "md_checklist.yaml").read_text())
+        assert checklist["3c_enhanced_sampling"]["answer"].startswith("unbiased")
+
+    def test_distance_restraints_are_reported_as_biased_sampling(self, study: Path) -> None:
+        config = study / "conditions" / "polymer" / "config.yaml"
+        data = yaml.safe_load(config.read_text())
+        data["restraints"] = [
+            {
+                "type": "flat_bottom",
+                "name": "ligand_in_pocket",
+                "atom1": {"selection": "index 0"},
+                "atom2": {"selection": "index 1"},
+                "distance": 4.0,
+                "force_constant": 5000.0,
+            }
+        ]
+        config.write_text(yaml.safe_dump(data, sort_keys=False))
+        _git(study, "commit", "-qam", "Restrain the ligand")
+        manifest = freeze(study).manifest
+        restraint = manifest["conditions"]["Polymer"]["restraints"][0]
+        assert restraint["type"] == "flat_bottom" and restraint["distance_A"] == 4.0
+        assert manifest["conditions"]["No polymer"]["restraints"] == []
+        checklist = yaml.safe_load((study / "md_checklist.yaml").read_text())
+        sampling = checklist["3c_enhanced_sampling"]
+        assert sampling["answer"].startswith("restrained molecular dynamics")
+        assert list(sampling["evidence"]) == ["Polymer"]
+        assert sampling["evidence"]["Polymer"][0]["name"] == "ligand_in_pocket"
+        assert checklist["4b_simulation_parameters"]["evidence"]["Polymer"]["restraints"]
+
     def test_refreeze_makes_the_next_tag(self, study: Path) -> None:
         freeze(study)
         assert freeze(study).tag == "study-v2"

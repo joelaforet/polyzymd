@@ -415,9 +415,53 @@ def condition_slug(label: str) -> str:
     return condition_folder(label)
 
 
+def condition_restraints(protocol: Any) -> dict[str, list[dict[str, Any]]]:
+    """Return each condition's enabled distance restraints, read from its config.
+
+    These restraints are added to the system when it is built, so they act in
+    every phase, production included: a restrained condition samples a
+    biased ensemble. Equilibration-only position restraints are not listed.
+    """
+    from polyzymd.config.schema import SimulationConfig
+
+    found: dict[str, list[dict[str, Any]]] = {}
+    for label, path in protocol.conditions.items():
+        try:
+            config = SimulationConfig.from_yaml(path)
+        except (OSError, ValueError):
+            continue
+        found[label] = [
+            {
+                "name": r.name,
+                "type": r.type.value,
+                "atom1": r.atom1.selection,
+                "atom2": r.atom2.selection,
+                "distance_A": r.distance,
+                "force_constant_kJ_mol_nm2": r.force_constant,
+            }
+            for r in config.restraints
+            if r.enabled
+        ]
+    return found
+
+
+def _sampling(restraints: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    """Answer checklist item 3c from the conditions' distance restraints."""
+    restrained = {label: items for label, items in restraints.items() if items}
+    if not restrained:
+        return {"answer": "unbiased molecular dynamics: no condition has a distance restraint"}
+    return {
+        "answer": "restrained molecular dynamics: the listed distance restraints act in every "
+        "phase, production included, so these conditions sample a biased ensemble; state the "
+        "restraints and their purpose in the methods",
+        "evidence": restrained,
+    }
+
+
 def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) -> dict[str, Any]:
     """Fill the Communications Biology checklist (2023) from the manifest; every answer is informational."""
     counts = {label: len(c["replicates"]) for label, c in manifest["conditions"].items()}
+    restraints = condition_restraints(protocol)
     engines = sorted({c.get("engine") for c in manifest["conditions"].values() if c.get("engine")})
     resolved = [
         c["resolved_config"] for c in manifest["conditions"].values() if "resolved_config" in c
@@ -428,8 +472,9 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
         return {"answer": answer, **({"evidence": evidence} if evidence is not None else {})}
 
     return {
-        "source": "Reliability and reproducibility checklist for molecular dynamics simulations, "
-        "Communications Biology 6:268 (2023), doi:10.1038/s42003-023-04653-0",
+        # An unsigned editorial, so it is cited by its title.
+        "source": "Reliability and reproducibility checklist for molecular dynamics simulations "
+        "(2023). Communications Biology 6:268. doi:10.1038/s42003-023-04653-0",
         "note": "Filled by polyzymd study freeze from manifest.json; informational. Review each answer.",
         "1a_equilibration_evidence": item(
             "per-replicate time series and detected equilibration starts are in each run's report",
@@ -461,13 +506,17 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
         "3b_model_accuracy": item(
             "TODO: justify the force field and water model", first.get("force_field")
         ),
-        "3c_enhanced_sampling": item("unbiased molecular dynamics"),
+        "3c_enhanced_sampling": _sampling(restraints),
         "4a_system_setup_table": item(SUMMARY),
         "4b_simulation_parameters": item(
             "thermodynamics, restraints, cutoffs, thermostat and barostat of each condition",
             {
                 label: {
-                    k: c["resolved_config"].get(k) for k in ("thermodynamics", "simulation_phases")
+                    **{
+                        k: c["resolved_config"].get(k)
+                        for k in ("thermodynamics", "simulation_phases")
+                    },
+                    "restraints": restraints.get(label, []),
                 }
                 for label, c in manifest["conditions"].items()
                 if "resolved_config" in c
@@ -548,6 +597,8 @@ def freeze(root: str | Path, *, tag: str | None = None, make_zip: bool = False) 
     hashes = _Hashes(deposit / _HASH_CACHE)
     conditions, rows = _replicates(protocol, deposit, hashes, warnings)
     hashes.save()
+    for label, items in condition_restraints(protocol).items():
+        conditions[label]["restraints"] = items
 
     released = date.today().isoformat()
     version = tag or "unversioned"

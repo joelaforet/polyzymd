@@ -173,18 +173,18 @@ schema-version reset.
      GROMACS `.top`, `.mdp` and `.tpr`), which freeze the parameters the
      toolkit actually assigned, including generated polymer parameters
      (Thompson et al. 2020);
-   - each replicate's final-frame coordinates (Communications Biology 2023);
+   - each replicate's final-frame coordinates (Reliability and reproducibility checklist 2023);
    - force-field names and versions, the charge method and its toolkit
      version, cutoffs and the long-range method;
    - platform, precision, production length and frames analysed for each
      replicate, and any post-processing such as a stride or stripped solvent
      (Tiemann et al. 2024);
    - a system-setup table: box, atom count, waters, salt and composition
-     (Communications Biology 2023).
+     (Reliability and reproducibility checklist 2023).
 3. Writes `manifest.json`: file hashes and sizes, package versions, the
    provenance above, trajectory DOIs and the git commit.
 4. Writes `md_checklist.yaml`, the Communications Biology reliability and
-   reproducibility checklist (Communications Biology 2023) filled in from the manifest.
+   reproducibility checklist (2023), filled in from the manifest.
    It is informational and can accompany a journal submission.
 5. Writes `CITATION.cff` and `.zenodo.json` from the one `metadata:` block, so
    they cannot disagree (Zenodo ignores `CITATION.cff` when `.zenodo.json`
@@ -253,9 +253,10 @@ published updates every study frozen afterwards.
 - Thompson, M. W. et al. (2020). Towards molecular simulations that are
   transparent, reproducible, usable by others, and extensible (TRUE).
   Molecular Physics 118:e1742938. doi:10.1080/00268976.2020.1742938
-- Communications Biology (2023). Reliability and reproducibility checklist
-  for molecular dynamics simulations. Communications Biology 6:268.
-  doi:10.1038/s42003-023-04653-0
+- Reliability and reproducibility checklist for molecular dynamics
+  simulations (2023). Communications Biology 6:268.
+  doi:10.1038/s42003-023-04653-0 (an unsigned editorial, so cited by its
+  title)
 - Tiemann, J. K. S. et al. (2024). MDverse, shedding light on the dark matter
   of molecular dynamics simulations. eLife 12:RP90061.
   doi:10.7554/eLife.90061
