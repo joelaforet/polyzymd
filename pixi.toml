@@ -241,9 +241,7 @@ clean-pdb = { cmd = "polyzymd clean-pdb" }
 
 # --- Analysis environment tasks ---
 [feature.analysis.tasks]
-compare-validate = { cmd = "polyzymd compare validate" }
-compare-run      = { cmd = "polyzymd compare run" }
-compare-plot-all = { cmd = "polyzymd compare plot-all" }
+analyze = { cmd = "polyzymd analyze", description = "Run one analysis on simulation configs" }
 
 # --- CUDA 12.6 simulation tasks (e.g. PSC Bridges2) ---
 [feature.sim-cuda-12-6.tasks]
