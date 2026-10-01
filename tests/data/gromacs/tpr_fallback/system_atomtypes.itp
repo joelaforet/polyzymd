@@ -1,0 +1,10 @@
+[ atomtypes ]
+; name  bondtype  at.num  mass  charge  ptype  sigma  epsilon
+AT_0    CT   6   12.01078   0.0  A  0.339967  0.457730
+AT_1    HC   1    1.007947  0.0  A  0.264953  0.065689
+AT_2    OH   8   15.99943   0.0  A  0.306647  0.880314
+; name  at.num  mass  charge  ptype  sigma  epsilon
+AT_3     1    1.007947  0.0  A  0.000000  0.000000
+AT_4     8   15.99943   0.0  A  0.315061  0.636386
+AT_5     1    1.007947  0.0  A  0.000000  0.000000
+AT_6    11   22.989769  0.0  A  0.243928  0.365846

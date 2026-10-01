@@ -1252,7 +1252,8 @@ def hbond_atoms(atoms: Any) -> tuple[Any, Any]:
     leaves out amide, guanidinium, protonated amine and quaternary nitrogens
     and keeps unprotonated histidine nitrogens and thioether sulfur. The
     rule reads the universe's bonds, which PolyzyMD takes from the run's
-    OpenMM system, so every hydrogen of ``atoms`` must be bonded.
+    OpenMM system XML or GROMACS ``prod.tpr`` (or ``.top``), so every
+    hydrogen of ``atoms`` must be bonded.
 
     Returns
     -------
@@ -1278,8 +1279,9 @@ def hbond_atoms(atoms: Any) -> tuple[Any, Any]:
         raise ProtocolError(
             f"hydrogen bonds: {orphans} of the {len(hydrogens)} hydrogens have no bonded atom, "
             "so donors cannot be told apart.",
-            hint="Keep the run's <segment>_system.xml beside its trajectory, which PolyzyMD "
-            "reads for bonds, or give donors, hydrogens and acceptors explicitly.",
+            hint="Keep the files PolyzyMD reads bonds from beside the trajectory (OpenMM: "
+            "<segment>_system.xml; GROMACS: prod.tpr and the <prefix>.top with its .itp "
+            "files), or give donors, hydrogens and acceptors explicitly.",
         )
     candidates = atoms[np.isin(elements, sorted(polar))]
     acceptors = [

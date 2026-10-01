@@ -36,6 +36,8 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 _WARNED_GRO_TOPOLOGY_PATHS: set[Path] = set()
+_WARNED_TPR_FALLBACK_PATHS: set[Path] = set()
+_WARNED_CHAIN_ID_PATHS: set[Path] = set()
 _WARNED_ELEMENT_ENRICHMENT_KEYS: set[str] = set()
 
 PBC_POLICIES: tuple[str, ...] = ("as_is", "make_whole")
@@ -393,6 +395,74 @@ def openmm_system_file(trajectory_file: str | Path) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+def open_universe(topology_file: str | Path, trajectory_files: Sequence[str | Path]) -> Any:
+    """Return the MDAnalysis universe of ``trajectory_files`` with ``topology_file``.
+
+    Several trajectory files are read in order as one trajectory. A GROMACS
+    ``prod.tpr`` written by a GROMACS newer than this MDAnalysis can read
+    (GROMACS 2026 for MDAnalysis 2.10) is replaced by the run's ``.top``
+    beside it, laid out as MDAnalysis lays out a TPR
+    (:func:`~polyzymd.analyses.shared.gromacs.universe_from_gromacs_top`),
+    with a warning. A universe read from a TPR or ``.top`` takes PolyzyMD's
+    chain IDs (A protein, B substrate, C polymer) from the build's
+    ``solvated_system.pdb``
+    (:func:`~polyzymd.analyses.shared.gromacs.apply_build_chain_ids`), so
+    chain selections mean what they mean for an OpenMM run. The universe's
+    ``_polyzymd_bond_source`` names where its bonds came from: ``"tpr"``,
+    ``"top"`` or ``None`` for the file format's own bonds.
+    """
+    import MDAnalysis as mda
+
+    from polyzymd.analyses.shared.gromacs import (
+        apply_build_chain_ids,
+        build_pdb_file,
+        gromacs_topology_file,
+        tpr_unsupported,
+        universe_from_gromacs_top,
+    )
+
+    files = [str(path) for path in trajectory_files]
+    coordinates: Any = files[0] if len(files) == 1 else files
+    topology = Path(topology_file)
+    is_tpr = topology.suffix.lower() == ".tpr"
+    try:
+        universe = (
+            mda.Universe(str(topology), coordinates) if files else mda.Universe(str(topology))
+        )
+    except ValueError as error:
+        if not (is_tpr and tpr_unsupported(error)):
+            raise
+        top_file = gromacs_topology_file(topology.parent)
+        if topology not in _WARNED_TPR_FALLBACK_PATHS:
+            _WARNED_TPR_FALLBACK_PATHS.add(topology)
+            LOGGER.warning(
+                "MDAnalysis %s cannot read %s (%s); reading its topology from %s instead, "
+                "laid out as MDAnalysis lays out a TPR.",
+                mda.__version__,
+                topology,
+                str(error.__context__).strip(),
+                top_file.name,
+            )
+        universe = universe_from_gromacs_top(top_file, files)
+        universe._polyzymd_bond_source = "top"
+        universe._polyzymd_topology_source = str(top_file)
+    else:
+        universe._polyzymd_bond_source = "tpr" if is_tpr else None
+        universe._polyzymd_topology_source = str(topology)
+    if is_tpr:
+        metadata = apply_build_chain_ids(universe, build_pdb_file(topology))
+        if not metadata["applied"] and topology not in _WARNED_CHAIN_ID_PATHS:
+            _WARNED_CHAIN_ID_PATHS.add(topology)
+            LOGGER.warning(
+                "Chain IDs of %s are named after molecule types, not PolyzyMD's chains "
+                "(A protein, B substrate, C polymer): %s. Select by chainID MOL0 and so on, "
+                "or by residue name.",
+                topology,
+                metadata["reason"],
+            )
+    return universe
+
+
 def read_openmm_system(path: str | Path) -> tuple[NDArray[np.float64], list[tuple[int, int]]]:
     """Return the partial charges and covalent bonds of a serialized OpenMM system.
 
@@ -466,6 +536,7 @@ def enrich_universe_force_field(universe: Any, system_file: str | Path | None) -
     if hasattr(universe, "bonds") and len(universe.bonds):
         universe.delete_bonds(universe.bonds)
     universe.add_bonds(kept)
+    universe._polyzymd_bond_source = "system_xml"
     metadata = {"applied": True, "source": str(system_file), "bonds": len(kept)}
     universe._polyzymd_force_field = metadata
     return metadata
@@ -849,9 +920,8 @@ def _assert_contiguous_segments(
         return []
 
     _require_mdanalysis("segment lineage validation")
-    import MDAnalysis as mda
 
-    universe = mda.Universe(str(topology_file))
+    universe = open_universe(topology_file, [])
     timings = [_probe_segment_timing(universe, Path(f)) for f in trajectory_files]
 
     if any(t.first_time is None or t.last_time is None for t in timings):
@@ -1615,7 +1685,6 @@ class TrajectoryLoader:
         continuous trajectory using MDAnalysis's ChainReader.
         """
         _require_mdanalysis()
-        import MDAnalysis as mda
 
         cache_key = (replicate, str(pbc_policy), require_complete)
         if cache and cache_key in self._universe_cache:
@@ -1631,10 +1700,7 @@ class TrajectoryLoader:
 
         # Load universe - MDAnalysis handles multiple trajectory files
         if len(info.trajectory_files) == 1:
-            u = mda.Universe(
-                str(info.topology_file),
-                str(info.trajectory_files[0]),
-            )
+            u = open_universe(info.topology_file, info.trajectory_files)
         else:
             # Multiple segments - use ChainReader, but only after checking
             # that the segments actually chain (no branched/duplicate chains).
@@ -1648,10 +1714,7 @@ class TrajectoryLoader:
                 reference_dt = next((t.dt for t in timings if t.dt is not None and t.dt > 0), None)
                 if reference_dt is not None and all(t.first_time is not None for t in timings):
                     self._segment_joins[replicate] = _segment_join(timings, reference_dt)
-            u = mda.Universe(
-                str(info.topology_file),
-                [str(f) for f in info.trajectory_files],
-            )
+            u = open_universe(info.topology_file, info.trajectory_files)
         enrich_universe_elements(u, topology_key=info.topology_file)
         enrich_universe_force_field(u, openmm_system_file(info.trajectory_files[0]))
         apply_pbc_policy(u, pbc_policy, topology=info.topology_file)
