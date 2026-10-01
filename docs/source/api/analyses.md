@@ -13,7 +13,7 @@ listed in {doc}`../reference/analysis_functions`, and
 | `polyzymd.analyses.reference` | Reference structures (frame, centroid, average or file) for RMSD, RMSF and native contacts |
 | `polyzymd.analyses.protocols` | `polyzymd analyze` in Python (`analyze`) and the `ProtocolReport` it returns |
 | `polyzymd.analyses.universe` | `UniverseProvider`, which loads a replicate's `Universe` and records the path, size and modification time of each input file |
-| `polyzymd.analyses.study_file`, `results`, `user_functions`, `study_scaffold`, `study_git`, `study_metadata`, `study_freeze` | `study.yaml` and `data.local.yaml`, reading stored results without trajectories, running a study's own functions, creating a study folder, recording its git state, and freezing it for publication |
+| `polyzymd.analyses.study_file`, `results`, `user_functions`, `study_scaffold`, `study_git`, `study_metadata`, `study_freeze`, `study_upload_guide` | `study.yaml` and `data.local.yaml`, reading stored results without trajectories, running a study's own functions, creating a study folder, recording its git state, freezing it for publication, and preparing its upload |
 | `polyzymd.analyses.identity` | `compute_config_hash`, the hash of a simulation config that every stored result records |
 
 ## Study
@@ -53,6 +53,10 @@ listed in {doc}`../reference/analysis_functions`, and
    :no-index:
 
 .. automodule:: polyzymd.analyses.study_freeze
+   :members:
+   :no-index:
+
+.. automodule:: polyzymd.analyses.study_upload_guide
    :members:
    :no-index:
 ```

@@ -1045,6 +1045,7 @@ directory) without loading any trajectory, and prints:
 | analysis | `analysis <run>: <settings>; stored results in <folder>[ with its report]`, or `no stored results`; for the study's own function, `analysis <run> (<file>:<function>, <kind>)`, after importing it |
 | git | `git: commit <sha>; inputs committed`, `git: commit <sha>; uncommitted inputs: <paths>`, or `git: not a repository` |
 | metadata | `metadata: complete`, or `metadata: <n> gaps for publishing; ...` |
+| publish | `publish: follow <study>/deposit/UPLOAD.md` after a freeze, or `publish: when the analyses are final, run polyzymd study freeze` |
 | citation | `cite: <how to cite PolyzyMD>` |
 | warning | `warning: written for PolyzyMD <version>; this is <version>` |
 
@@ -1093,7 +1094,7 @@ condition is not found or a file is missing or different. See
 ### polyzymd study freeze
 
 ```bash
-polyzymd study freeze [PATH] [--tag NAME] [--zip]
+polyzymd study freeze [PATH] [--tag NAME]
 ```
 
 Prepares the study for publication: checks the metadata, the git state and
@@ -1101,9 +1102,11 @@ whether each analysis's stored results match the study; hashes the
 trajectories and writes their engine inputs and final frames to `deposit/`;
 writes `manifest.json`, `CITATION.cff`, `.zenodo.json`, `md_checklist.yaml`
 and `system_summary.csv`; commits those and `results/`, tags the commit
-(`study-v1`, `study-v2`, ... unless `--tag`), and lays out `deposit/` for
-upload, with `--zip` also as one zip. Every gap is printed as `warning:` and
-none stops it. Exits 2 when the study file or its metadata cannot be read, or
+(`study-v1`, `study-v2`, ... unless `--tag`), and lays out `deposit/`: the
+files to add to a Zenodo upload in `deposit/upload/`, the trajectory files in
+record-sized batches in `deposit/trajectories.csv`, and the steps in
+`deposit/UPLOAD.md`. It uploads and publishes nothing. Every gap is printed as
+`warning:` and none stops it. Exits 2 when the study file or its metadata cannot be read, or
 the tag exists. See {doc}`../how_to/study_freeze`.
 
 ---

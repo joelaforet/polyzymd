@@ -111,7 +111,9 @@ hash; reports record the study's git state (`analyses/study_git.py`).
 checks staleness and metadata, writes `manifest.json`, `CITATION.cff` (citing
 PolyzyMD through `polyzymd/citation.py`), `.zenodo.json`, `md_checklist.yaml` and
 `system_summary.csv`, commits and tags them with `results/`, and lays out the
-gitignored `deposit/`. The design of study folders and
+gitignored `deposit/`, with `deposit/upload/`, `deposit/trajectories.csv` and
+the step-by-step `deposit/UPLOAD.md` (`analyses/study_upload_guide.py`).
+PolyzyMD never uploads or publishes: that is the author's step. The design of study folders and
 the slices still to come are in `docs/source/explanation/study_folders.md`.
 
 ## Key Patterns

@@ -26,6 +26,7 @@ findable and citable:
 
 ```yaml
 metadata:
+  doi: "10.5281/zenodo.NNNNNNN"            # the study's own DOI, reserved in Zenodo (step 3)
   title: "LipA with SBMA-EGMA copolymers at 363 K"
   description: "Lipase A simulated without polymer and with SBMA-EGMA copolymers."
   purpose: "To test whether the copolymer stabilises the lid at high temperature."
@@ -48,6 +49,7 @@ metadata:
 
 | Field | Why |
 |---|---|
+| `doi` | The study's persistent identifier (FAIR F1), written into `CITATION.cff`, `.zenodo.json` and the manifest; reserve it in Zenodo before publishing |
 | `title`, `description`, `keywords`, `authors` | Findability (FAIR F2) and citation |
 | `purpose` | The main purpose of the simulations, part of the minimum metadata of Amaro et al. (2025) |
 | `system_type` | The kinds of molecule simulated, as the Communications Biology checklist asks (3a) |
@@ -66,15 +68,15 @@ Commit your inputs (`study.yaml`, `conditions/`, `analyses/`, `figures/`),
 run every analysis (`polyzymd analyze --study study.yaml`), then:
 
 ```bash
-polyzymd study freeze lipase_363K --zip
+polyzymd study freeze lipase_363K
 ```
 
 ```
 froze /home/me/lipase_363K as study-v1 (dc94243466cf)
 manifest: 21 study files, 2 conditions, 10 replicates hashed
-deposit: /home/me/lipase_363K/deposit; zip /home/me/lipase_363K/deposit/lipase_363K-study-v1.zip
-warning: the paper DOI is missing or a placeholder; refreeze once it is known
-next: upload the trajectories and the files in deposit/ (see ...)
+deposit: /home/me/lipase_363K/deposit; files to upload in /home/me/lipase_363K/deposit/upload
+warning: metadata.doi is not set: reserve a DOI for the study in Zenodo, add it here and refreeze (deposit/UPLOAD.md says how)
+next: follow /home/me/lipase_363K/deposit/UPLOAD.md, which says how to reserve the DOI, upload and publish on Zenodo; PolyzyMD uploads nothing
 ```
 
 Freezing:
@@ -101,32 +103,55 @@ Freezing:
    `study-v1` (then `study-v2`, ...; `--tag NAME` chooses). Your uncommitted
    inputs are never committed: they are listed as a warning and are not part
    of the tagged study.
-5. Lays out `deposit/` for upload.
+5. Lays out `deposit/`, and prepares the upload: `deposit/upload/`,
+   `deposit/trajectories.csv` and `deposit/UPLOAD.md`.
 
-## 3. Upload
+## 3. Upload and publish, by following `deposit/UPLOAD.md`
 
-`deposit/` is gitignored, and holds what to upload, file by file:
+PolyzyMD uploads and publishes nothing: publishing on Zenodo is permanent and
+mints a DOI, so that step is yours. `freeze` prepares everything for it in the
+gitignored `deposit/`:
 
 | Path | Holds |
 |---|---|
-| `manifest.json`, `CITATION.cff`, `.zenodo.json`, `README.md` | At the top, so the deposit is indexed and citable |
-| `study/` | The tagged study, as `git archive` gives it |
-| `engine_inputs/<condition>/replicate_<n>/` | Gzipped engine inputs |
-| `final_frames/<condition>/` | Gzipped final-frame PDBs |
-| `<study>-<tag>.zip` | With `--zip`, all of the above in one file |
+| `UPLOAD.md` | The steps for this study: reserving its DOI, the files to add, the value of every Zenodo form field, reviewing and publishing, and new versions |
+| `upload/` | Exactly the files to add to the Zenodo upload: `README.md`, `CITATION.cff` and `manifest.json` unzipped, so Zenodo previews them, and the study, the engine inputs and the final frames as one zip each, because a record holds at most 100 files and Zenodo shows what is inside a zip |
+| `trajectories.csv` | Every trajectory and topology file by size and SHA-256, grouped into batches that each fit one Zenodo record |
+| `study/`, `engine_inputs/`, `final_frames/`, and the top-level files | The same content, unzipped, for inspection |
 
-Upload the files themselves rather than only the zip: archives whose
-contents cannot be indexed hide data from search (MDverse, Tiemann et al.
-2024). Upload the trajectories as their own deposits and put their DOIs in
-`metadata.related.trajectories`. Zenodo reads `.zenodo.json` when a release
-comes from GitHub; for a deposit made by hand, copy its fields into the
-upload form.
+The steps of `UPLOAD.md`, in short:
 
-## 4. Refreeze when the paper is out
+1. In Zenodo, choose **New upload**, answer that the upload has no DOI yet,
+   and press **Get a DOI now!**. Zenodo reserves a DOI for the draft; it is
+   registered when you publish and lost if you delete the draft.
+2. Set `metadata.doi` in `study.yaml` to it, commit, and freeze again, so the
+   files carry their own DOI.
+3. Add the files of the new `deposit/upload/` to the draft, and fill in the
+   form from the table in `UPLOAD.md`.
+4. Review, and press **Publish**. Files are fixed shortly afterwards (Zenodo's
+   help pages say 30 and 45 days); for a later change, freeze again and upload
+   a **New version**. Each version has its own DOI, and the concept DOI always
+   points to the latest.
+
+`polyzymd study check` prints `publish: follow deposit/UPLOAD.md` once a freeze
+has written it.
+
+## 4. Trajectories
+
+PolyzyMD does not upload trajectories either. `deposit/trajectories.csv` groups
+each condition's run files into batches that fit one Zenodo record: 50 GB and
+100 files by default, up to 200 GB with a quota increase from the draft's
+storage settings. Replicates stay whole, and any single file over Zenodo's
+50 GB file limit is named. Deposit each batch where it suits you, on Zenodo or
+in a data repository; list each DOI under `metadata.related.trajectories`,
+with the conditions it holds, and freeze again.
+
+## 5. Refreeze when the paper is out
 
 Set `metadata.related.paper.doi`, and the trajectory DOIs if they were not
-known yet, commit, and freeze again: the next tag (`study-v2`) carries the
-updated citations, and Zenodo can take it as a new version of the deposit.
+known yet, commit, and freeze again: the next tag carries the updated
+citations, and goes to Zenodo as a new version of the record (edit the
+published record's metadata to add DOIs without changing files).
 
 ## Reproduce a published study
 
