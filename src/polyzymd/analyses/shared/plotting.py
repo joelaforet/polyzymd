@@ -965,41 +965,80 @@ def band_half_widths(
     return sem * float(student_t_coverage_factor(n) or 1.0)
 
 
-def add_uncertainty_footnote(
-    fig: "Figure",
+#: ``gid`` of the text that :func:`add_figure_note` writes, so tests and
+#: readers can find a figure's footnote.
+FIGURE_NOTE_GID = "polyzymd-figure-note"
+
+
+def add_figure_note(fig: "Figure", text: str) -> Any:
+    """Write ``text`` as a footnote under the axes of ``fig`` and return the Text.
+
+    The note hangs from the bottom edge of the figure, left aligned, in 7 pt
+    grey type, wrapped to about the figure width, so it never overlaps an
+    axes, a legend or the watermark. :func:`save_figure` saves with a tight
+    bounding box, which takes the note into the saved image. The text gets
+    the ``gid`` :data:`FIGURE_NOTE_GID`.
+    """
+    import textwrap
+
+    width = max(60, int(fig.get_figwidth() * 17))
+    wrapped = "\n".join(textwrap.fill(line, width) for line in text.split("\n"))
+    return fig.text(
+        0.01,
+        0.0,
+        wrapped,
+        fontsize=7,
+        color="dimgray",
+        ha="left",
+        va="top",
+        gid=FIGURE_NOTE_GID,
+    )
+
+
+def uncertainty_footnote_text(
     *,
     error_bar: str = "ci95",
     n_replicates: int | None = None,
     equilibration: str | None = None,
     drawn: str = "Error bars",
+    of: str = "the mean",
+    method: str = "Student t",
+    counts: str = "n per condition in the labels",
     points: str = "Points are per-replicate values",
 ) -> str:
-    """Write the sentence saying what a figure's error bars mean, and return it.
+    """Return the sentence saying what a figure's uncertainty marks are and what they span.
 
-    Grossfield et al. (2018) ask that every figure describe the meaning and
-    basis of its uncertainties. This is that sentence. ``drawn`` names the
-    mark that shows the interval, such as ``"Band"``, and ``points`` says
-    what the per-replicate marks are.
+    The sentence reads ``"<drawn>: 95% <method> confidence interval of <of>
+    across n = <n> replicates; production window t >= <equilibration>.
+    <points>."``. With ``error_bar="sem"`` it names one standard error and
+    says it is not a 95% interval. When ``n_replicates`` is ``None``, because
+    the conditions have different numbers of replicates, it reads ``across the
+    replicates of each condition (<counts>)``.
     """
+    if error_bar not in ("ci95", "sem"):
+        raise StatisticsError(f"error_bar must be 'ci95' or 'sem', got {error_bar!r}")
     what = (
-        f"{drawn}: 1 SEM (not a 95% interval)"
+        f"{drawn}: 1 SEM (not a 95% interval) of {of}"
         if error_bar == "sem"
-        else f"{drawn}: 95% CI (Student t)"
+        else f"{drawn}: 95% {method} confidence interval of {of}"
     )
     across = (
         f" across n = {n_replicates} replicates"
         if n_replicates and n_replicates >= 2
-        else " across replicates"
+        else f" across the replicates of each condition ({counts})"
     )
     window = f"; production window t >= {equilibration}" if equilibration else ""
-    text = f"{what}{across}{window}. {points}."
-    fig.text(
-        0.01,
-        0.01,
-        text,
-        fontsize=7,
-        color="dimgray",
-        ha="left",
-        va="bottom",
-    )
+    return f"{what}{across}{window}. {points}."
+
+
+def add_uncertainty_footnote(fig: "Figure", **wording: Any) -> str:
+    """Write the footnote saying what a figure's error bars or bands are, and return it.
+
+    Grossfield et al. (2018, LiveCoMS 1:5067) ask that every figure describe
+    the meaning and basis of its uncertainties. The keywords are those of
+    :func:`uncertainty_footnote_text`, which words the sentence, and
+    :func:`add_figure_note` places it under the axes.
+    """
+    text = uncertainty_footnote_text(**wording)
+    add_figure_note(fig, text)
     return text
