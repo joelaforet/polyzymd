@@ -2816,12 +2816,18 @@ def cancel(
     default=None,
     help="Preset name to print in the resubmit hint for dead chains (agent format)",
 )
+@click.option(
+    "--unfinished",
+    is_flag=True,
+    help="agent/json: omit completed replicates; fully completed systems collapse to one line",
+)
 def status(
     configs: tuple[str, ...],
     all_roots: tuple[str, ...],
     output_format: str,
     no_slurm: bool,
     preset_hint: str | None,
+    unfinished: bool,
 ) -> None:
     """Show progress and job state for all replicates.
 
@@ -2851,7 +2857,13 @@ def status(
         raise click.UsageError("Provide at least one -c/--config or --all directory.")
 
     if output_format != "table":
-        _status_report(config_paths, output_format, no_slurm=no_slurm, preset_hint=preset_hint)
+        _status_report(
+            config_paths,
+            output_format,
+            no_slurm=no_slurm,
+            preset_hint=preset_hint,
+            unfinished=unfinished,
+        )
         return
     if len(config_paths) > 1:
         raise click.UsageError(
@@ -2861,7 +2873,12 @@ def status(
 
 
 def _status_report(
-    config_paths: list[str], output_format: str, *, no_slurm: bool, preset_hint: str | None
+    config_paths: list[str],
+    output_format: str,
+    *,
+    no_slurm: bool,
+    preset_hint: str | None,
+    unfinished: bool = False,
 ) -> None:
     """Multi-config, SLURM-aware status (``--format agent|json``)."""
     from datetime import datetime, timezone
@@ -2869,6 +2886,7 @@ def _status_report(
     from polyzymd.cli.status_report import (
         SystemReport,
         build_system_report,
+        fill_end_states,
         jobs_by_name,
         query_user_jobs,
         render_agent,
@@ -2914,12 +2932,22 @@ def _status_report(
             )
         )
 
+    if slurm_available:
+        fill_end_states(reports)
+
     if output_format == "json":
-        click.echo(render_json(reports, now=now, slurm_available=slurm_available), nl=False)
+        click.echo(
+            render_json(reports, now=now, slurm_available=slurm_available, unfinished=unfinished),
+            nl=False,
+        )
     else:
         click.echo(
             render_agent(
-                reports, now=now, slurm_available=slurm_available, preset_hint=preset_hint
+                reports,
+                now=now,
+                slurm_available=slurm_available,
+                preset_hint=preset_hint,
+                unfinished=unfinished,
             ),
             nl=False,
         )
