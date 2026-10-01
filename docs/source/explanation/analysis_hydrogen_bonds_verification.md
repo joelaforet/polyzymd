@@ -13,7 +13,12 @@ values were checked against.
    to hydrogen and rigid water, without the hydrogen-hydrogen constraint of
    water. The topology PDB alone records bonds only for non-standard
    residues: on a lipase with an SBMA-EGMA polymer, 7,720 bonds for 78,410
-   atoms, all in the polymer.
+   atoms, all in the polymer. For a GROMACS run the loader reads `prod.tpr`,
+   whose bonds include constraints and the two O-H bonds of each SETTLE
+   water, or, when MDAnalysis cannot read the TPR's version, the run's
+   `.top`. On a 94,019-atom lysozyme-polymer run the `.top` gave the same
+   63,403 bonds and the same charges as the TPR compiled from it by GROMACS
+   2025, and `hydrogen_bonds` stored identical values from both.
 2. `functions.hbond_atoms` chooses the donatable hydrogens, those bonded to
    N, O or S, and the acceptors, every O and every N or S with at most two
    bonded atoms.

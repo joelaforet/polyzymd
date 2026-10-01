@@ -24,8 +24,8 @@ src/polyzymd/analyses/
 ├── identity.py          # compute_config_hash: recorded by every stored result, never change it
 ├── exceptions.py        # Typed analysis errors
 ├── shared/              # aa_classification, autocorrelation, centroid, diagnostics,
-│                        # inferential_statistics, loader, plotting, selections,
-│                        # statistics, topology, window, groupings/
+│                        # gromacs, inferential_statistics, loader, plotting,
+│                        # selections, statistics, topology, window, groupings/
 ```
 
 There is no plugin class, registry, discovery or scaffold: an analysis is a
@@ -79,7 +79,20 @@ study API; see `docs/source/explanation/analysis_api.md`.
 
 `polyzymd.analyses.shared.loader.TrajectoryLoader` is the canonical universe
 loader. It resolves topology and trajectory files for a replicate, checks
-segment lineage, and builds the MDAnalysis universe.
+segment lineage, and builds the MDAnalysis universe through
+`loader.open_universe`.
+
+Bonds and charges come from the run's force field: OpenMM runs from
+`<segment>_system.xml` (`enrich_universe_force_field`), GROMACS runs from
+`prod.tpr`. When MDAnalysis cannot read the TPR's version (GROMACS 2026 with
+MDAnalysis 2.10), `open_universe` warns and builds the universe from the
+run's `.top` with `shared/gromacs.universe_from_gromacs_top`, laid out
+exactly as MDAnalysis lays out a TPR; `tests/analyses/test_gromacs_topology.py`
+checks that against a GROMACS 2025 TPR. GROMACS universes take PolyzyMD's
+chain IDs (A protein, B substrate, C polymer) from the build's
+`solvated_system.pdb` (`apply_build_chain_ids`). `UniverseProvenance.bond_source`
+names the bond source: `system_xml`, `tpr`, `top`, `conect`, `guessed` or
+`none`.
 
 `polyzymd.analyses.universe.UniverseProvider` wraps `TrajectoryLoader`. It
 takes a `SimulationConfig`, instantiates the loader lazily, and adds input

@@ -1,0 +1,16 @@
+[ defaults ]
+  1  2  yes  0.5  0.833333
+
+#include "system_atomtypes.itp"
+#include "system_MOL0.itp"
+#include "system_water.itp"
+#include "system_ion.itp"
+
+[ system ]
+tpr fallback fixture
+
+[ molecules ]
+MOL0  2
+SOL   4
+MOL1  1
+SOL   1

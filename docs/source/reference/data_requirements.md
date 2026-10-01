@@ -219,6 +219,34 @@ Analyses prefer it over `solvated_system.pdb` and over any `.gro`, which
 carries no bonds at all. No extra step is needed; the run directory keeps
 `prod.tpr` after production.
 
+MDAnalysis reads a TPR only up to the file version it knows: MDAnalysis 2.10
+reads GROMACS 2025 files but not GROMACS 2026 ones. For a TPR it cannot read,
+the loader warns and reads the run's `<prefix>.top`, with the `.itp` files it
+includes, through MDAnalysis's `ITPParser`, laid out as MDAnalysis lays out a
+TPR. Atoms, residue numbers, segments, charges, masses, elements (from the
+atomic numbers in `[ atomtypes ]`), bonds, angles and dihedrals are then the
+same as from the TPR, so results do not depend on the GROMACS version: on a
+94,019-atom lysozyme-polymer run, `hydrogen_bonds`, `rmsd` and `contacts`
+stored identical values from a GROMACS 2026 run read this way and from the
+same run's TPR compiled by GROMACS 2025.
+
+A TPR or `.top` names chains after molecule types (`MOL0`, `MOL1`, ...).
+GROMACS universes take PolyzyMD's chain IDs (A protein, B substrate, C
+polymer) from the build's `solvated_system.pdb` in the replicate directory,
+when its atom count and residue names match, so `chainid A` and the other
+default selections mean what they mean for an OpenMM run. Otherwise the
+loader warns and the chains keep the molecule-type names.
+
+| GROMACS file | Read for |
+|---|---|
+| `prod.tpr` | Atoms, bonds, charges, masses, elements |
+| `<prefix>.top` and its `.itp` files | The same, when MDAnalysis cannot read `prod.tpr` |
+| `solvated_system.pdb` (replicate directory) | Chain IDs |
+| `prod_centered.xtc`, `prod_nojump.xtc` or `prod.xtc` | Coordinates |
+
+The provenance of each replicate names where the bonds came from, as
+`bond_source`: `system_xml`, `tpr`, `top`, `conect`, `guessed` or `none`.
+
 When multiple daisy-chain segments exist (e.g., `production_0/`,
 `production_1/`, `production_2/`), they are automatically stitched together in
 segment-index order using the MDAnalysis `ChainReader`. The resulting

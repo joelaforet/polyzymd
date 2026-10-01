@@ -128,9 +128,11 @@ def topology_bond_source(universe: Universe) -> tuple[bool, str]:
     Returns
     -------
     tuple[bool, str]
-        Whether bonds are present, and the bond source as ``"conect"`` (read
-        from the topology file), ``"guessed"`` (inferred by MDAnalysis), or
-        ``"none"``.
+        Whether bonds are present, and the bond source: ``"system_xml"`` (the
+        run's OpenMM system), ``"tpr"`` (the GROMACS run input), ``"top"``
+        (the GROMACS topology, read when MDAnalysis cannot read the run
+        input), ``"conect"`` (other bonds read from the topology file),
+        ``"guessed"`` (inferred by MDAnalysis), or ``"none"``.
 
     Notes
     -----
@@ -146,6 +148,9 @@ def topology_bond_source(universe: Universe) -> tuple[bool, str]:
         n_bonds = 0
     if n_bonds == 0:
         return False, "none"
+    recorded = getattr(universe, "_polyzymd_bond_source", None)
+    if recorded:
+        return True, str(recorded)
     # MDAnalysis exposes the per-bond guessed flags only as TopologyGroup._guessed.
     # There is no public accessor on the group, so reach it through the public
     # AtomGroup.bonds rather than through universe._topology.

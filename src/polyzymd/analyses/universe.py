@@ -151,7 +151,9 @@ class UniverseProvenance:
         Whether the loaded topology carries bonds. ``None`` before a universe
         has been loaded.
     bond_source : str
-        Where the bonds came from: ``"conect"``, ``"guessed"``, or ``"none"``.
+        Where the bonds came from: ``"system_xml"``, ``"tpr"``, ``"top"``,
+        ``"conect"``, ``"guessed"``, or ``"none"``; see
+        :func:`~polyzymd.analyses.shared.topology.topology_bond_source`.
     trajectory_variant : str or None
         Which trajectory the engine chose. GROMACS writes post-processed
         trajectories, so this is ``"centered"`` for ``prod_centered.xtc``,
