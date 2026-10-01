@@ -1044,6 +1044,7 @@ directory) without loading any trajectory, and prints:
 | condition | `control\|condition <label>: runs <numbers> under <directory> (from data.local.yaml\|config)`, or `no runs found under <directory> ...` |
 | analysis | `analysis <run>: <settings>; stored results in <folder>[ with its report]`, or `no stored results`; for the study's own function, `analysis <run> (<file>:<function>, <kind>)`, after importing it |
 | git | `git: commit <sha>; inputs committed`, `git: commit <sha>; uncommitted inputs: <paths>`, or `git: not a repository` |
+| metadata | `metadata: complete`, or `metadata: <n> gaps for publishing; ...` |
 | citation | `cite: <how to cite PolyzyMD>` |
 | warning | `warning: written for PolyzyMD <version>; this is <version>` |
 
@@ -1076,15 +1077,34 @@ unreadable config.
 ### polyzymd study locate
 
 ```bash
-polyzymd study locate DIRECTORY [--study PATH]
+polyzymd study locate DIRECTORY [--study PATH] [--verify]
 ```
 
 Searches `DIRECTORY` (six levels deep) for each condition's run directories,
 named by its config's `naming_template`, and writes the folder holding the
 most of them to `data.local.yaml` beside `study.yaml`, keeping entries of
-conditions it does not find. Prints `<label>: runs <numbers> under <folder>`
-per condition found. Exits 2 when a condition is not found. See
-{doc}`../how_to/study_folder`.
+conditions it does not find. With a `manifest.json` from `study freeze`, it
+prefers a folder whose files have the recorded sizes (and with `--verify`,
+SHA-256), and prints `<label>: <n> files match manifest.json`. Prints
+`<label>: runs <numbers> under <folder>` per condition found. Exits 2 when a
+condition is not found or a file is missing or different. See
+{doc}`../how_to/study_folder` and {doc}`../how_to/study_freeze`.
+
+### polyzymd study freeze
+
+```bash
+polyzymd study freeze [PATH] [--tag NAME] [--zip]
+```
+
+Prepares the study for publication: checks the metadata, the git state and
+whether each analysis's stored results match the study; hashes the
+trajectories and writes their engine inputs and final frames to `deposit/`;
+writes `manifest.json`, `CITATION.cff`, `.zenodo.json`, `md_checklist.yaml`
+and `system_summary.csv`; commits those and `results/`, tags the commit
+(`study-v1`, `study-v2`, ... unless `--tag`), and lays out `deposit/` for
+upload, with `--zip` also as one zip. Every gap is printed as `warning:` and
+none stops it. Exits 2 when the study file or its metadata cannot be read, or
+the tag exists. See {doc}`../how_to/study_freeze`.
 
 ---
 

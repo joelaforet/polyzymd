@@ -14,6 +14,8 @@ src/polyzymd/analyses/
 ├── user_functions.py    # a study's own functions (function: file.py:name), hashed by whole file
 ├── study_scaffold.py    # polyzymd study init: the study folder layout
 ├── study_git.py         # the study folder's git state, recorded in reports
+├── study_metadata.py    # metadata: block, CITATION.cff and .zenodo.json
+├── study_freeze.py      # polyzymd study freeze: manifest, checklist, tag, deposit/
 ├── timeseries.py        # Study.timeseries, Study.per_replicate, Timeseries, ReplicateValues
 ├── functions.py         # Shipped measurements: radius_of_gyration, rmsd, pair_distance,
 │                        # all_below, native_contacts, rmsf, rmsd_per_residue,

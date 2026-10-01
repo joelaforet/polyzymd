@@ -81,7 +81,7 @@ rows the JSON form holds; every one of them is kept there.
 | `config_hashes` | `dict[str, str]` | `polyzymd.analyses.identity.compute_config_hash` of each simulation config, keyed by condition label: the first 16 hex characters of the SHA-256 of the config fields that locate and describe its trajectories. |
 | `settings_fingerprint` | `str \| None` | `None`: no shipped analysis sets it. |
 | `settings` | `dict` | Settings a study-API analysis ran with. For rmsf and rmsd_per_residue: every setting, the resolved `reference_mode`, and under `residues` the residue IDs of the core and of each region. Empty for other analyses. |
-| `study` | `dict \| None` | Set for a run from a study file: `path` and `sha256` of `study.yaml`, the `run`, and `git`, with the study folder's `commit`, its `uncommitted` files and `inputs_uncommitted`, those outside `results/` and `data.local.yaml`; `git` is `None` outside a repository. |
+| `study` | `dict \| None` | Set for a run from a study file: `path` and `sha256` of `study.yaml`, the `run`, the `settings` it was given (from the file and `--set`), and `git`, with the study folder's `commit`, its `uncommitted` files and `inputs_uncommitted`, those outside `results/` and `data.local.yaml`; `git` is `None` outside a repository. |
 | `output_paths` | `dict[str, str]` | `results` is the `polyzymd_results/<name>/` folder holding every replicate's stored values and record; `figures` is the directory holding the generated plots, absent with `--no-plots`. |
 
 ## Verdict vocabulary
