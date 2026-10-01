@@ -1131,6 +1131,43 @@ the tag exists. See {doc}`../how_to/study_freeze`.
 
 ---
 
+## polyzymd hash-trajectories
+
+```bash
+polyzymd hash-trajectories (-c CONFIG ... | --study PATH) [--replicates SPEC] [--verify] [--dry-run] [--force]
+```
+
+Records, in each run's `progress.json`, the SHA-256 and size of every
+completed or interrupted production segment's trajectory that has none yet:
+for runs that finished before PolyzyMD recorded segment hashes. Stored
+analysis results and frozen studies then identify those trajectories without
+reading them again.
+
+It is idempotent. A segment whose recorded hash has the file's size is left
+as it is without reading the file, so running the command again changes
+nothing, and `progress.json` is written, atomically, only when a hash was
+added. A recorded hash is never overwritten: a recorded size that differs
+from the file's, or with `--verify` a recomputed hash that differs, is printed
+as `conflict:` and exits 2. A run recorded as running is skipped, because its
+job may still write `progress.json`; `--force` hashes it once the job has
+stopped.
+
+| Option | Description |
+|---|---|
+| `-c, --config PATH` | A simulation `config.yaml`; every run it finds is hashed. Repeatable |
+| `--study PATH` | Every condition of a study, using its `data.local.yaml` |
+| `--replicates SPEC` | Only these replicates, for example `1-5` |
+| `--verify` | Also rehash segments with a recorded hash and compare |
+| `--dry-run` | Report what would be hashed, and write nothing |
+| `--force` | Also hash runs recorded as running |
+
+It prints one line per replicate, such as `SBMA 50% replicate 1: hashed 11,
+already recorded 1`, and names segments whose trajectory file is not on disk.
+Reading takes about a second per gigabyte, so on a cluster run it in a batch
+job.
+
+---
+
 ## Retired commands
 
 Two hidden commands accept any arguments, print where their workflow went on

@@ -3797,6 +3797,9 @@ def _register_optional_command_groups() -> None:
     cli.add_command(new_analysis)
     cli.add_command(analyze_command)
     cli.add_command(study_group)
+    from polyzymd.cli.hashes import hash_trajectories_command
+
+    cli.add_command(hash_trajectories_command)
     cli.add_command(analysis_topology_command)
 
 

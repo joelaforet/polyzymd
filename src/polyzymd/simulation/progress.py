@@ -1153,3 +1153,84 @@ def load_or_scan_progress(
         progress.status = SimulationStatus.COMPLETED
 
     return progress
+
+
+def record_trajectory_hashes(
+    working_dir: str | Path, *, verify: bool = False, dry_run: bool = False, force: bool = False
+) -> dict[str, Any]:
+    """Record the SHA-256 of each production segment's trajectory in ``progress.json``.
+
+    For runs that finished before segments recorded their hashes. It is
+    idempotent: a segment whose recorded hash has the file's size is left
+    as it is without reading the file, so a second call changes nothing.
+    Completed and interrupted segments whose trajectory is on disk and that
+    have no recorded hash get one. A recorded hash is never overwritten: a
+    recorded size that differs from the file's, or with ``verify`` a
+    recomputed hash that differs from the recorded one, is reported as a
+    conflict. A run recorded as running, whose job may still be writing
+    ``progress.json``, is left alone unless ``force``. ``progress.json`` is
+    written once, atomically, and only when a hash was added and not
+    ``dry_run``.
+
+    Returns
+    -------
+    dict
+        ``hashed``, ``recorded`` (already present), ``verified``,
+        ``missing`` (no trajectory file) and ``conflicts`` as lists of
+        segment indices or messages, and ``skipped`` with the reason when
+        the run was left alone.
+    """
+    working_dir = Path(working_dir)
+    report: dict[str, Any] = {
+        "hashed": [], "recorded": [], "verified": [], "missing": [], "conflicts": [], "skipped": None,
+    }  # fmt: skip
+    progress = load_progress(working_dir)
+    if progress is None:
+        report["skipped"] = "no progress.json"
+        return report
+    running = progress.status == SimulationStatus.RUNNING or any(
+        s.status == SegmentStatus.RUNNING for s in progress.segments
+    )
+    if running and not force:
+        report["skipped"] = (
+            "recorded as running; its job may still write progress.json (use --force once it has stopped)"
+        )
+        return report
+    changed = False
+    for segment in progress.segments:
+        if segment.status not in (SegmentStatus.COMPLETED, SegmentStatus.INTERRUPTED):
+            continue
+        trajectory = (
+            working_dir
+            / f"production_{segment.index}"
+            / f"production_{segment.index}_trajectory.dcd"
+        )
+        if not trajectory.is_file():
+            report["missing"].append(segment.index)
+            continue
+        size = trajectory.stat().st_size
+        if segment.trajectory_sha256:
+            if segment.trajectory_bytes != size:
+                report["conflicts"].append(
+                    f"segment {segment.index}: progress.json records {segment.trajectory_bytes} bytes, "
+                    f"the file has {size}; the trajectory changed after it was recorded"
+                )
+            elif verify:
+                if trajectory_digest(trajectory)["trajectory_sha256"] == segment.trajectory_sha256:
+                    report["verified"].append(segment.index)
+                else:
+                    report["conflicts"].append(
+                        f"segment {segment.index}: the trajectory's SHA-256 differs from the one recorded"
+                    )
+            else:
+                report["recorded"].append(segment.index)
+            continue
+        if not dry_run:
+            digest = trajectory_digest(trajectory)
+            segment.trajectory_sha256 = digest["trajectory_sha256"]
+            segment.trajectory_bytes = digest["trajectory_bytes"]
+            changed = True
+        report["hashed"].append(segment.index)
+    if changed:
+        save_progress(working_dir, progress)
+    return report
