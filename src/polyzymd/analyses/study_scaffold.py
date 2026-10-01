@@ -37,6 +37,8 @@ data.local.yaml
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+# What polyzymd study freeze lays out for upload.
+deposit/
 # SLURM logs of polyzymd analyze --submit and of the simulations.
 results/*/slurm/*/logs/
 conditions/*/slurm_logs/
@@ -247,6 +249,11 @@ Install the PolyzyMD version named in `study.yaml` (see `environment/`), then:
 2. **Analyses, from the trajectories:** download them, run
    `polyzymd study locate DOWNLOAD_DIR`, check with `polyzymd study check`,
    and run `polyzymd analyze --study study.yaml`.
+To publish, fill in `metadata:` in `study.yaml` and run `polyzymd study freeze`,
+which writes `manifest.json`, `CITATION.cff`, `.zenodo.json` and
+`md_checklist.yaml`, commits and tags the study, and lays out `deposit/` for
+upload.
+
 3. **Simulations:** each `conditions/<name>/config.yaml` builds and runs its
    condition with `polyzymd`; the replicate number is the random seed.
    Results agree within the statistical noise of MD, not bit for bit.
