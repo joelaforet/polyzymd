@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Dead chains in `polyzymd status` carry an action.**  `resubmit`, `resubmit --skip-build` or
+  `inspect`, decided from the last error line. The resubmit footer no longer suggests restarting
+  chains that died on a NaN or a build refusal. The specific "Segment N failed" cause now outranks
+  the generic "FATAL: run-segment failed" line.
+
 - **`polyzymd status --unfinished` and per-condition counts.**  `--unfinished` omits completed
   replicates and collapses finished systems to one line, halving agent output on a 63-replicate
   campaign.  System headers now end with `done/total completed`, and dead chains whose log holds
@@ -37,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `--resume` removes the marker.
 
 ### Fixed
+
+- **Status ETAs no longer spike after a wall-time rollover.**  Rates come from segment file
+  timestamps instead of the progress record, whose start time was rewritten at segment end.
 
 - **A segment resumes from the state of the last written trajectory frame.**
   `restart_state.xml` used to be written only on a wall-clock timer, so after

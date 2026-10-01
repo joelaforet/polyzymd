@@ -654,11 +654,9 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | `NOT_STARTED` | Directory exists but production never began (typically a failed build; the build log is consulted). |
 | `NOT_FOUND` | Expected replicate directory is missing from scratch |
 
-Throughput (`ns/d`) is measured from the newest segment with a known wall
-window (a finished or interrupted segment), falling back to the live segment
-timed from its start to now. Windows under 10 minutes or 1000 steps are
-ignored. The ETA is remaining nanoseconds divided by that rate and is only
-printed for `RUNNING` and `QUEUED` replicates.
+Each `DEAD` row ends with an action. `resubmit` means the cause leaves a valid checkpoint, such as a node failure, preemption, GPU fault, CUDA routing failure or a duplicate chain whose twin has ended. `resubmit --skip-build` means a first segment crashed on the missing `openff` package while the standalone build left its system files. `inspect` covers physics blow-ups, build refusals and anything unrecognised. The footer prints submit commands only for the first two and lists `inspect` chains separately.
+
+Throughput (`ns/d`) is measured from the newest stopped segment, using its file timestamps: the parameters JSON written at segment start and the state-data CSV written on every report. The live segment counts only after it has run for an hour. The ETA is remaining nanoseconds divided by that rate and is only printed for `RUNNING` and `QUEUED` replicates.
 
 If `squeue` is unavailable the header carries a warning and every non-complete
 replicate falls back to `progress.json` alone; treat `DEAD` as unreliable in
