@@ -122,7 +122,8 @@ class SegmentRecord(BaseModel):
     started_at : str
         ISO-format timestamp when the segment started.
     finished_at : str | None
-        ISO-format timestamp when the segment finished (None if interrupted/running).
+        ISO-format timestamp when the segment stopped, by completion or
+        interruption (None while running).
     status : SegmentStatus
         Current status of this segment.
     duration_ns : float
@@ -496,6 +497,10 @@ def _update_or_append_segment(
     """
     for i, existing in enumerate(progress.segments):
         if existing.index == record.index:
+            # A segment starts once. The record written at segment end is
+            # built fresh, so its default started_at is the end time; keep
+            # the start recorded when the segment was marked RUNNING.
+            record.started_at = existing.started_at
             progress.segments[i] = record
             return
     progress.segments.append(record)
