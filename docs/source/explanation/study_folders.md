@@ -146,12 +146,14 @@ ones.
 |---|---|---|
 | A condition's config | Its simulation content: input structures by the SHA-256 of their content; projects and scratch directories left out | Implemented |
 | A function | Its source, or its whole module file for user functions | Implemented |
-| Trajectory and topology files | Their path relative to the folder holding the runs, size and modification time; the freeze manifest adds their SHA-256 | Implemented; records still include modification time |
-| Trajectory files by content in records | SHA-256 and size, cached by path, size and modification time, so copied or downloaded data is not measured again | Planned, with the runner slice |
+| Trajectory and topology files | Their path relative to the folder holding the runs, their size and their SHA-256 | Implemented |
 
-The simulation runner will record each segment's SHA-256 when the segment
-finishes (its own small slice). That is bookkeeping only: trajectories and
-results do not change.
+The SHA-256 of a trajectory comes from `progress.json`, where the simulation
+runner records it when each production segment completes (bookkeeping only:
+trajectories and results do not change), or else is computed once and kept
+in a cache (`~/.cache/polyzymd/hashes`, or `$POLYZYMD_CACHE_DIR/hashes`) for
+as long as the file's size and modification time are unchanged. So copied or
+downloaded data is hashed once and its stored results are reused.
 
 ## Git and provenance (slice B)
 

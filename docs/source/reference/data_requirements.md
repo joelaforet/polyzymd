@@ -244,6 +244,12 @@ loader warns and the chains keep the molecule-type names.
 | `solvated_system.pdb` (replicate directory) | Chain IDs |
 | `prod_centered.xtc`, `prod_nojump.xtc` or `prod.xtc` | Coordinates |
 
+Each completed production segment of an OpenMM run records, in
+`progress.json`, the SHA-256 and size of its trajectory (`trajectory_sha256`,
+`trajectory_bytes`) and the PolyzyMD and OpenMM versions that ran it.
+Stored analysis results identify their input files by SHA-256 and size, taken
+from there or computed once and cached.
+
 The provenance of each replicate names where the bonds came from, as
 `bond_source`: `system_xml`, `tpr`, `top`, `conect`, `guessed` or `none`.
 

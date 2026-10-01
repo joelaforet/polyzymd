@@ -118,12 +118,10 @@ identified by their content, and the projects and scratch directories are not
 part of it. Stored records name their trajectory files relative to the
 folder holding the runs.
 
-```{note}
-Stored records still include each trajectory file's size and modification
-time. Data moved with `mv` keeps them, so nothing is measured again; data that
-was copied or downloaded gets new modification times, and each replicate is
-measured again once.
-```
+Stored records identify each trajectory and topology file by its SHA-256 and
+size, so moved, copied or downloaded data reuses every stored result. The
+first analysis at a new location reads each file once to hash it, about a
+second per gigabyte, unless the run recorded the hash in `progress.json`.
 
 ## Commit as you go
 
