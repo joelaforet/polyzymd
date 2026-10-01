@@ -220,7 +220,9 @@ equilibration: {window}{note}
 #     function: analyses/lid.py:lid_distance
 #     kind: timeseries
 #     unit: A
-#     selections: {{lid: "protein and resid 140-150 and name CA"}}
+#     selections:
+#       lid: "protein and resid 140-150 and name CA"
+#       core: "protein and resid 4-120 and name CA"
 """
 
 

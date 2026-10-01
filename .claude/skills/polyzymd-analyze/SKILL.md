@@ -74,7 +74,11 @@ them all; command-line options override the file, and results go to
 `docs/source/how_to/study_yaml.md`. When `study check` finds no runs for a
 condition, the trajectories are elsewhere: run `polyzymd study locate DIR`
 (writes the gitignored `data.local.yaml`) or pass `--data DIR`; never edit the
-configs' paths to point at moved data. To publish, fill `metadata:` and run
+configs' paths to point at moved data. Read `study check`'s production lengths
+before choosing `--eq`; if a report warns that conditions were analysed up to
+different times, rerun with `--until <shortest>` before comparing them. The
+console shows only reports and warnings; the full log is the `log:` path, so
+read it only when a run fails unexpectedly. To publish, fill `metadata:` and run
 `polyzymd study freeze STUDY`; its `warning:` lines list what is missing or stale
 (`docs/source/how_to/study_freeze.md`). Then hand the author `deposit/UPLOAD.md`:
 uploading and publishing on Zenodo are theirs, never an agent's.

@@ -48,9 +48,10 @@ analyses:
 | `equilibration` | Required. Window removed from the start of every replicate's production trajectory |
 | `conditions` | Required. Condition label to `config.yaml`, control first |
 | `stride`, `replicates` | Optional, as `--stride` and `--replicates` |
+| `until` | Optional end of a common analysis window, such as `38ns`, as `--until`: production after it is left out for every condition |
 | `analyses` | Run name to settings. The settings are those `--set` takes; `analysis:` names the shipped analysis when the run name is not one |
 | `polyzymd` | The PolyzyMD version the study was run with; a different version gives a warning |
-| `metadata` | Publishing metadata, read by `polyzymd study freeze` (not yet implemented) |
+| `metadata` | Publishing metadata, read by `polyzymd study freeze`; see {doc}`study_freeze` |
 
 A key PolyzyMD does not know is refused with the nearest known spelling, so a
 typo never falls back to a default:
@@ -68,16 +69,21 @@ polyzymd study check my_study
 
 ```
 study my_study/study.yaml  equilibration 100ns  stride 1
-control No polymer: runs [1, 2, 3, 4, 5] under /pl/active/.../LipA_363K_REDO
-condition SBMA 50%: runs [1, 2, 3, 4, 5] under /pl/active/.../LipA_363K_REDO
+control No polymer: runs [1, 2, 3, 4, 5] under /pl/active/.../LipA_363K_REDO (from config); production 1000 ns
+condition SBMA 50%: runs [1, 2, 3, 4, 5] under /pl/active/.../LipA_363K_REDO (from config); production 1000 ns
 analysis rg: defaults; no stored results
 analysis contacts as contacts_4A: method=distance, cutoff=4.0; no stored results
+git: commit 53cd9f37d690; inputs committed
+metadata: 3 gaps for publishing; polyzymd study freeze lists them
+publish: when the analyses are final, run polyzymd study freeze
 cite: Laforet, Joseph R., Jr. PolyzyMD: ... (version 1.3.0). https://github.com/joelaforet/polyzymd
 ```
 
-It loads no trajectory. Missing runs are reported but are not errors, so a
-study folder without its trajectories still checks. An unreadable file or
-config exits 2.
+It reads trajectory headers, not frames, so it takes seconds. Each
+condition's production length tells you how long an equilibration window can
+be, and whether the conditions were simulated for the same time. Missing runs
+are reported but are not errors, so a study folder without its trajectories
+still checks. An unreadable file or config exits 2.
 
 ## Run the analyses
 
@@ -88,7 +94,7 @@ polyzymd analyze --study my_study                 # every run, in order
 
 | Option with `--study` | Effect |
 |---|---|
-| `--eq`, `--stride`, `--replicates`, `--output-dir` | Override the file for this command |
+| `--eq`, `--stride`, `--until`, `--replicates`, `--output-dir` | Override the file for this command |
 | `--set KEY=VALUE` | Overrides one setting of the run |
 | `--label LABEL` | Runs only that condition; repeatable |
 | `--submit`, `--dry-run` | One SLURM array task per condition and replicate, then a report job, as in {doc}`hpc_execution` |
@@ -107,6 +113,26 @@ Each run's results go to `my_study/results/<run>/`:
 
 Two runs of one analysis keep separate stored results, so switching between
 `contacts` and `contacts_4A` recomputes nothing.
+
+The console shows only the report and warnings. The full log, with library
+messages, goes to `my_study/logs/polyzymd-analyze-<time>.log`, whose path is
+the first line printed; `polyzymd -v analyze ...` shows it on the console.
+
+### Compare conditions over the same time
+
+When the conditions were simulated, or are on this machine, for different
+lengths, a difference can come from simulated time rather than the
+condition: a structure that drifts late appears only in the longer runs. The
+report then warns:
+
+```
+warning: the conditions were analysed up to different times (No polymer 456.4 ns; SBMA 50% 38.4 ns); a difference may come from simulated time rather than the condition. Compare over a common window with until 38.4ns (--until, or until: in study.yaml)
+```
+
+`until: 38ns` in `study.yaml`, or `--until 38ns`, leaves out production after
+that time for every condition. A replicate whose `progress.json` records
+production segments missing from disk, as in a copy that kept only some
+segments, is named in the report too.
 
 ## Run your own function
 
@@ -143,6 +169,7 @@ analyses:
 | `universe` | Keyword argument that receives the replicate's `Universe` |
 | `settings` | Keyword arguments passed as they are; `--set` overrides them |
 | `labels: returned` | For a `per_replicate` function that returns `(labels, values)`, such as one value per residue |
+| `allow_empty: true` | Leave out, with a warning in the report, every replicate where a selection matches no atoms, such as a polymer selection in a no-polymer control. Without it such a replicate stops the run, with a message saying so |
 
 The stored results are keyed on the whole file, not only the function: edit
 any helper in it and the next run recomputes. The file is compiled from its

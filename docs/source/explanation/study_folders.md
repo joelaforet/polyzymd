@@ -135,24 +135,23 @@ locations in an uncommitted `config.local`; Git LFS commits a pointer holding
 a content hash; the twelve-factor convention keeps deployment settings in a
 gitignored `.env` beside a committed `.env.example`.
 
-## Identity rests on content (final pass)
+## Identity rests on content
 
-Stored results are reused only when what produced them is unchanged. Today
-that test uses absolute paths and modification times, so a moved or
-downloaded study would recompute everything and could not confirm that its
-numbers match the published ones. Identity moves to content:
+Stored results are reused only when what produced them is unchanged, and
+that test must not depend on where the files sit, so a moved or downloaded
+study keeps its results and its numbers can be checked against the published
+ones.
 
-| Input | Identified by |
-|---|---|
-| Trajectory, topology and structure files | SHA-256 and size, cached by path, size and modification time so each file is hashed once per location |
-| A condition's config | Its simulation content, with input structures by content hash and output directories left out |
-| A function | Its source, or its whole module file for user functions |
+| Input | Identified by | Status |
+|---|---|---|
+| A condition's config | Its simulation content: input structures by the SHA-256 of their content; projects and scratch directories left out | Implemented |
+| A function | Its source, or its whole module file for user functions | Implemented |
+| Trajectory and topology files | Their path relative to the folder holding the runs, size and modification time; the freeze manifest adds their SHA-256 | Implemented; records still include modification time |
+| Trajectory files by content in records | SHA-256 and size, cached by path, size and modification time, so copied or downloaded data is not measured again | Planned, with the runner slice |
 
-The simulation runner records each segment's SHA-256 when the segment
+The simulation runner will record each segment's SHA-256 when the segment
 finishes (its own small slice). That is bookkeeping only: trajectories and
-results do not change. Switching stored records to content identity
-recomputes every stored result once, so it lands in the final pass with the
-schema-version reset.
+results do not change.
 
 ## Git and provenance (slice B)
 
