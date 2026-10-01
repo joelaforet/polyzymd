@@ -1791,6 +1791,11 @@ class SimulationRunner:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved system to {system_xml_path}")
 
+        from polyzymd.simulation.progress import flush_reporters
+
+        # The trajectory is hashed into progress.json: make sure it is all on disk.
+        flush_reporters(self._simulation)
+
         # Update progress tracker (successful completion)
         self._update_progress_completed(
             segment_index=segment_index,
@@ -1954,6 +1959,9 @@ class SimulationRunner:
             LOGGER.warning("No progress file found — skipping progress update")
             return
 
+        from polyzymd.simulation.progress import trajectory_digest
+
+        segment_dir = Path(self._working_dir) / f"production_{segment_index}"
         record = SegmentRecord(
             index=segment_index,
             steps_completed=total_steps,
@@ -1962,6 +1970,7 @@ class SimulationRunner:
             status=SegmentStatus.COMPLETED,
             duration_ns=duration_ns,
             **record_provenance(),
+            **trajectory_digest(segment_dir / f"production_{segment_index}_trajectory.dcd"),
         )
         record.finished_at = _now_iso()
 

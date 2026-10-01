@@ -161,22 +161,30 @@ class Replicate:
         -------
         dict
             ``config_hash``, ``equilibration``, ``stride``, and the ``topology`` and
-            ``trajectories`` file records (path, format, size and modification
-            time) from :class:`~polyzymd.analyses.universe.FileIdentity`, each
-            path relative to the folder holding the condition's runs.
+            ``trajectories`` file records: each file's path relative to the
+            folder holding the condition's runs, its format, size and SHA-256
+            (:func:`~polyzymd.analyses.shared.file_hashes.file_sha256`, from
+            ``progress.json`` when the run recorded it).
         """
+        from polyzymd.analyses.shared.file_hashes import file_sha256, recorded_segment_hashes
+
         provenance = self.condition._provider.provenance_for(self.index, refresh=True)
         data_root = Path(self.condition.config.output.effective_scratch_directory).resolve()
+        recorded = recorded_segment_hashes(provenance.working_directory)
 
         def located(item: Any) -> dict[str, Any]:
-            # Relative to the folder holding the condition's runs: a record names
-            # its files, not where this machine keeps them.
-            record = item.as_dict()
-            path = Path(record["path"]).resolve()
-            record["path"] = (
-                str(path.relative_to(data_root)) if path.is_relative_to(data_root) else path.name
-            )
-            return record
+            # A record names its files by content and by their place among the
+            # condition's runs, never by where this machine keeps them or when
+            # they were copied, so a moved or downloaded study keeps its results.
+            path = Path(item.path).resolve()
+            return {
+                "path": str(path.relative_to(data_root))
+                if path.is_relative_to(data_root)
+                else path.name,
+                "format": item.format,
+                "size_bytes": item.size_bytes,
+                "sha256": file_sha256(path, recorded.get(path.name)),
+            }
 
         identity = {
             "config_hash": self.condition.config_hash,

@@ -76,7 +76,7 @@ class FreezeResult:
 
 
 class _Hashes:
-    """SHA-256 of files, cached by path, size and modification time in ``deposit/.hashes.json``."""
+    """SHA-256 of files and their sizes, from the shared hash cache (:mod:`~polyzymd.analyses.shared.file_hashes`)."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -86,21 +86,10 @@ class _Hashes:
             self.cache = {}
 
     def __call__(self, file: Path) -> dict[str, Any]:
-        stat = file.stat()
-        key = str(file.resolve())
-        entry = self.cache.get(key)
-        if not entry or entry["size"] != stat.st_size or entry["mtime_ns"] != stat.st_mtime_ns:
-            digest = hashlib.sha256()
-            with file.open("rb") as handle:
-                for block in iter(lambda: handle.read(1 << 22), b""):
-                    digest.update(block)
-            entry = {
-                "size": stat.st_size,
-                "mtime_ns": stat.st_mtime_ns,
-                "sha256": digest.hexdigest(),
-            }
-            self.cache[key] = entry
-        return {"size": entry["size"], "sha256": entry["sha256"]}
+        from polyzymd.analyses.shared.file_hashes import file_sha256
+
+        # The shared cache, so files hashed by analyses are not hashed again.
+        return {"size": file.stat().st_size, "sha256": file_sha256(file)}
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
