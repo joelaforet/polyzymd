@@ -540,3 +540,15 @@ def test_segment_window_reads_file_mtimes(tmp_path):
     start, end = segment_window(tmp_path, 4)
     assert (end - start) == timedelta(days=1)
     assert segment_window(tmp_path, 5) is None
+
+
+def test_settled_live_segment_beats_older_node():
+    """After a move to a slower GPU, the live rate (not the last node's) drives the ETA."""
+    old = SegmentRecord(index=0, steps_completed=90_000_000, status=SegmentStatus.INTERRUPTED)
+    cur = SegmentRecord(index=1, steps_completed=25_000_000, status=SegmentStatus.RUNNING)  # 50 ns
+    windows = {
+        0: (NOW - timedelta(days=2), NOW - timedelta(days=1)),  # 180 ns/day
+        1: (NOW - timedelta(hours=12), NOW),  # 100 ns/day so far
+    }
+    rate = estimate_rate_ns_per_day(_progress([old, cur]), NOW, live=True, window_fn=windows.get)
+    assert rate is not None and abs(rate - 100.0) < 1.0
