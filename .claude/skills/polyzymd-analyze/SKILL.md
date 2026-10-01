@@ -63,6 +63,16 @@ report lands in `report.txt` there (`report.json` with `--format json`, or
 scripts without submitting. Load the cluster's SLURM module first, such as
 `module load slurm/blanca`. See `docs/source/how_to/hpc_execution.md`.
 
+A study folder with a `study.yaml` needs no `-c` list. Run
+`pixi run -e analysis polyzymd study check STUDY` first: it reads no
+trajectory and prints each condition's runs and each analysis run, with
+whether it has stored results. Then `polyzymd analyze RUN --study STUDY`
+runs one entry of its `analyses:`, and `polyzymd analyze --study STUDY` runs
+them all; command-line options override the file, and results go to
+`STUDY/results/RUN/`. To read results back without trajectories, use
+`pz.Study("STUDY/study.yaml").results(RUN).table`. See
+`docs/source/how_to/study_yaml.md`.
+
 ## 2. Reading the output
 
 ```

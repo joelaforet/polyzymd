@@ -95,6 +95,16 @@ replicate and a report job (`workflow/analysis_submit.py`). The hidden
 `polyzymd compare` and `polyzymd new-analysis` commands (`cli/retired.py`) only
 exit 2 and name their replacements.
 
+A study folder's `study.yaml` (`analyses/study_file.py`) holds the analysis
+protocol: conditions, one equilibration window and each analysis run's
+settings, including the study's own functions (`function: file.py:name`,
+`analyses/user_functions.py`, keyed on the whole file's hash).
+`polyzymd study check` reads it without trajectories (`cli/study.py`);
+`polyzymd analyze [RUN] --study study.yaml` runs one run or all of them into
+`<study>/results/<run>/`; `pz.Study("study.yaml").results(run)` reads them back
+without trajectories (`analyses/results.py`). The design of study folders and
+the slices still to come are in `docs/source/explanation/study_folders.md`.
+
 ## Key Patterns
 
 - **Chain convention:** A=protein, B=substrate, C=polymer, D+=solvent
@@ -131,6 +141,7 @@ shipped analysis, as a `FUNCTION_ANALYSES` entry and an `_analyze_<name>` in
 | Study API | `analyses/study.py`, `analyses/timeseries.py` | `Study.from_configs`, `timeseries`, `per_replicate`, `transform`, `reduce`, `compare`, records under `polyzymd_results/` |
 | API explanation | `docs/source/explanation/analysis_api.md` | How the study API supplies universes, records and statistics |
 | `polyzymd analyze` | `analyses/protocols.py`, `docs/source/how_to/analysis_agent_protocol.md` | `FUNCTION_ANALYSES`, the `_analyze_<name>` functions, `ProtocolReport` |
+| Study folders | `analyses/study_file.py`, `analyses/results.py`, `docs/source/how_to/study_yaml.md` | `study.yaml`, `--study`, `polyzymd study check`, `Study.results` |
 | Figures | `analyses/figures.py` | `ReplicateValues.plot`, profiles, differences, uncertainty footnotes |
 | Worked routine | `docs/source/how_to/analysis_triad_quickstart.md` | Combining shipped functions for a question of your own |
 

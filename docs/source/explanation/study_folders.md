@@ -1,12 +1,14 @@
 # Study folders: publishing a reproducible MD study
 
-```{admonition} Status: design
+```{admonition} Status: design, partly implemented
 :class: warning
 This page is the agreed design of PolyzyMD study folders. It is implemented in
 slices: A (the protocol file), B (the folder), C (publishing) and D (upload to
 Zenodo), plus a small slice that records trajectory hashes when segments
-finish. Each section names its slice. Until a slice lands, its commands do
-not exist.
+finish. Each section names its slice. Slice A is implemented: `study.yaml`,
+`polyzymd analyze --study`, `polyzymd study check` and `Study.results`; see
+{doc}`../how_to/study_yaml`. The commands of the other slices do not exist
+yet.
 ```
 
 A **study folder** holds one MD study: every condition's simulation config,
