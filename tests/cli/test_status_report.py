@@ -408,3 +408,81 @@ class TestStatusAgentCli:
         result = CliRunner().invoke(cli, ["status"])
         assert result.exit_code != 0
         assert "at least one" in result.output
+
+
+# ---------------------------------------------------------------------------
+# --unfinished, per-condition counts, sacct end-state fallback
+# ---------------------------------------------------------------------------
+
+
+def _two_systems():
+    done = SystemReport(
+        "DONE", "d/config.yaml", "/s", [_rep(1, "completed", 1000.0), _rep(2, "completed", 1000.0)]
+    )
+    mixed = SystemReport(
+        "MIX",
+        "m/config.yaml",
+        "/s",
+        [
+            _rep(1, "completed", 1000.0),
+            _rep(2, "running", 500.0, jobs=[SlurmJob("7", "MIX_run2", "R", "1:00", "n1")]),
+        ],
+    )
+    return [done, mixed]
+
+
+def test_header_carries_completed_count():
+    text = render_agent(_two_systems(), now=NOW)
+    assert "## MIX  (m/config.yaml)  1/2 completed" in text
+    assert "## DONE  (d/config.yaml)  2/2 completed" in text
+
+
+def test_unfinished_hides_completed_rows_and_collapses_done_systems():
+    text = render_agent(_two_systems(), now=NOW, unfinished=True)
+    assert "## DONE  2/2 completed" in text
+    assert "COMPLETED" not in text
+    assert "run2   500.0/1000ns" in text
+    assert "2 system(s)  4 replicate(s): 3 completed, 1 running" in text
+
+
+def test_unfinished_json_keeps_counts():
+    from polyzymd.cli.status_report import render_json
+
+    data = json.loads(render_json(_two_systems(), now=NOW, unfinished=True))
+    assert data["systems"][0]["replicates"] == []
+    assert data["systems"][0]["counts"] == {"completed": 2}
+    assert [r["replicate"] for r in data["systems"][1]["replicates"]] == [2]
+
+
+def test_fill_end_states_only_queries_silent_dead_chains():
+    from polyzymd.cli.status_report import fill_end_states
+
+    silent = _rep(1, "dead", last_log="SYS_run1.555.out")
+    noisy = _rep(2, "dead", last_error="FATAL: x", last_log="SYS_run2.666.out")
+    report = SystemReport("SYS", "c.yaml", "/s", [silent, noisy])
+    calls = []
+
+    def fake(ids):
+        calls.append(list(ids))
+        return {"555": "NODE_FAIL exit 0:0"}
+
+    fill_end_states([report], query_fn=fake)
+    assert calls == [["555"]]
+    assert silent.last_error == "slurm: NODE_FAIL exit 0:0"
+    assert noisy.last_error == "FATAL: x"
+    fill_end_states([SystemReport("S", "c", "/s", [noisy])], query_fn=fake)
+    assert len(calls) == 1  # nothing silent -> no sacct call
+
+
+def test_query_end_states_parses_sacct():
+    from polyzymd.cli.status_report import query_end_states
+
+    with patch("polyzymd.cli.status_report.subprocess.run") as run:
+        run.return_value = MagicMock(
+            returncode=0, stdout="555|NODE_FAIL|0:0\n556|CANCELLED by 1|0:15\n"
+        )
+        assert query_end_states(["555", "556"]) == {
+            "555": "NODE_FAIL exit 0:0",
+            "556": "CANCELLED exit 0:15",
+        }
+    assert query_end_states([]) == {}

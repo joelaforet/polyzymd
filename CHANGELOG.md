@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`polyzymd status --unfinished` and per-condition counts.**  `--unfinished` omits completed
+  replicates and collapses finished systems to one line, halving agent output on a 63-replicate
+  campaign.  System headers now end with `done/total completed`, and dead chains whose log holds
+  no error line report their SLURM end state from a single `sacct` call.
+
 - **`polyzymd status --format agent|json`.**  `status` accepts repeated `-c`
   and `--all DIR`, makes one `squeue` call, and prints one line per replicate
   with a fixed verdict (`COMPLETED`, `RUNNING`, `QUEUED`, `DEAD`,

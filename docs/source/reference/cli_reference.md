@@ -610,6 +610,7 @@ polyzymd status -c config.yaml
 | `--format table\|agent\|json` | No | `table` (default) prints progress bars for one config. `agent` prints one compact line per replicate with SLURM state, throughput and ETA. `json` emits the same data as JSON. |
 | `--no-slurm` | No | Skip the `squeue` query. Verdicts then rely on `progress.json` alone and cannot separate dead chains from running ones. |
 | `--preset NAME` | No | Preset name to print in the resubmit hint for dead chains (`agent` format). |
+| `--unfinished` | No | `agent` and `json` only. Omit completed replicates; a fully completed system collapses to its header line. |
 
 ### Agent format
 
@@ -639,6 +640,8 @@ run4     0.0/1000ns    0%  NOT_STARTED  no job  last: Validation error: 354 poly
 # dead chains — resume from checkpoint with:
 polyzymd submit -c RML/noPoly_RML_water_333K/config.yaml -r 3 --preset blanca-shirts
 ```
+
+Each system header ends with `done/total completed`, which answers "does every condition have enough finished replicates" without reading the rows. When a `DEAD` replicate's newest log holds no error line, as after a node failure or power loss, its `last:` field shows the SLURM end state from one `sacct` call, for example `slurm: NODE_FAIL exit 0:0`.
 
 Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 
