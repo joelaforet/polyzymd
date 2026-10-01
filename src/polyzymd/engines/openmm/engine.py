@@ -59,6 +59,27 @@ def _topology_format(path: Path | None) -> str:
     return "pdb"
 
 
+def _missing_completed_segments(working_dir: Path) -> list[int]:
+    """Return the production segments ``progress.json`` records as run that are not on disk.
+
+    A segment recorded as completed or interrupted wrote frames (an
+    interrupted one stopped early, and its sample count is not updated), so
+    its missing folder means missing production. A completed segment that
+    wrote no frame is not counted.
+    """
+    progress = load_progress(working_dir)
+    if progress is None:
+        return []
+    ran = {SegmentStatus.COMPLETED, SegmentStatus.INTERRUPTED}
+    return sorted(
+        segment.index
+        for segment in progress.segments
+        if segment.status in ran
+        and not (segment.status == SegmentStatus.COMPLETED and segment.samples_written == 0)
+        and not (working_dir / f"production_{segment.index}").is_dir()
+    )
+
+
 class OpenMMEngine(SimulationEngine):
     """Thin adapter for the OpenMM execution path."""
 
@@ -261,6 +282,7 @@ class OpenMMEngine(SimulationEngine):
             excluded_segments=skipped if require_complete else [],
             incomplete_segments=[] if require_complete else skipped,
             empty_segments=empty,
+            missing_segments=_missing_completed_segments(working_dir),
         )
 
     @staticmethod

@@ -192,7 +192,9 @@ def _build(value: Any, universe_: Any) -> Any:
         if len(atoms) == 0 and not value.allow_empty:
             raise ProtocolError(
                 f"Selection {value.selection!r} matched no atoms.",
-                hint="Check the selection string against the topology.",
+                hint="Check the selection string against the topology. If some conditions have "
+                "no such atoms (a polymer selection in a no-polymer control), write "
+                "'allow_empty: true' in the study.yaml entry to leave those replicates out.",
             )
         return atoms
     return universe_ if isinstance(value, UniverseArgument) else value
@@ -1215,6 +1217,22 @@ class ReplicateValues:
                     "replicates, or both have one value in every replicate"
                 )
         study, versions = self.source.study, _versions()
+        for label in chosen:
+            # What loading found about each replicate's files, such as segments
+            # missing on disk, belongs in the report, not only in the log.
+            condition = study[label]
+            provider = getattr(condition, "_provider", None)
+            for replicate in getattr(condition, "replicates", []):
+                if provider is None:
+                    break
+                for text in provider.provenance_for(replicate.index).warnings:
+                    note = f"condition {label} replicate {replicate.index}: {text}"
+                    if note not in notes:
+                        notes.append(note)
+        if len(chosen) > 1:
+            from polyzymd.analyses.study import production_length_warnings
+
+            notes.extend(production_length_warnings(study, chosen))
         if self.labels is None:
             verdict = _verdict(self.metric, self.unit, conditions, pairwise)
         else:

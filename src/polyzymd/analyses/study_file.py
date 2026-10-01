@@ -30,6 +30,7 @@ _TOP_KEYS = (
     "polyzymd",
     "equilibration",
     "stride",
+    "until",
     "replicates",
     "conditions",
     "analyses",
@@ -37,7 +38,17 @@ _TOP_KEYS = (
 )
 _ENTRY_KEYS = ("analysis",)
 #: Keys of an ``analyses:`` entry that runs your own function.
-USER_KEYS = ("function", "kind", "unit", "selections", "universe", "settings", "labels", "reduce")
+USER_KEYS = (
+    "function",
+    "kind",
+    "unit",
+    "selections",
+    "universe",
+    "settings",
+    "labels",
+    "reduce",
+    "allow_empty",
+)
 #: How a user function is run: once per replicate, or once per frame.
 USER_KINDS = ("per_replicate", "timeseries")
 
@@ -71,6 +82,10 @@ class UserFunction:
         ``"returned"`` when the function returns ``(labels, values)``.
     reduce : str
         How a timeseries becomes one value per replicate, ``"mean"`` by default.
+    allow_empty : bool
+        Leave out, with a warning, every replicate where a selection matches
+        no atoms, such as a polymer selection in a no-polymer control, as the
+        shipped analyses do; ``False`` refuses such a replicate.
     """
 
     file: Path
@@ -82,6 +97,7 @@ class UserFunction:
     settings: dict[str, Any] = field(default_factory=dict)
     labels: str | None = None
     reduce: str = "mean"
+    allow_empty: bool = False
 
 
 @dataclass(frozen=True)
@@ -112,6 +128,7 @@ class StudyFile:
     replicates: list[int] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     data: dict[str, Path] = field(default_factory=dict)
+    until: str | None = None
 
     @property
     def root(self) -> Path:
@@ -238,6 +255,7 @@ def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
         settings=dict(raw.get("settings") or {}),
         labels=labels,
         reduce=reduce,
+        allow_empty=bool(raw.get("allow_empty", False)),
     )
 
 
@@ -274,6 +292,22 @@ def read_data_file(path: Path, labels: Any) -> dict[str, Path]:
         str(label): (path.parent / Path(str(folder)).expanduser()).resolve()
         for label, folder in raw.items()
     }
+
+
+def _until(value: Any, file: Path) -> str | None:
+    """Check ``until:``, the end of a common analysis window."""
+    if value is None:
+        return None
+    from polyzymd.analyses.shared.loader import parse_time_string
+
+    try:
+        parse_time_string(str(value))
+    except ValueError as exc:
+        raise ProtocolError(
+            f"{file}: cannot read until {value!r}: {exc}",
+            hint="Write it as a time such as '38ns', or leave it out to use every production frame.",
+        ) from exc
+    return str(value)
 
 
 def load_study_file(path: str | Path) -> StudyFile:
@@ -384,4 +418,5 @@ def load_study_file(path: str | Path) -> StudyFile:
         replicates=replicates,
         metadata=dict(metadata),
         data=data,
+        until=_until(raw.get("until"), file),
     )

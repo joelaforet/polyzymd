@@ -17,17 +17,33 @@ if TYPE_CHECKING:
     from polyzymd.config.schema import SimulationConfig
 
 
+def _content(path: object) -> str:
+    """Return the SHA-256 of the file at ``path``, or its file name when it cannot be read."""
+    from pathlib import Path
+
+    file = Path(str(path))
+    try:
+        return hashlib.sha256(file.read_bytes()).hexdigest()
+    except OSError:
+        return file.name
+
+
 def compute_config_hash(config: "SimulationConfig") -> str:
     """Hash the simulation config fields that decide which trajectories an analysis reads.
 
     The hash is the first 16 hex characters of the SHA-256 of the sorted JSON
-    of: the config name; the enzyme name and PDB path; the temperature and
-    pressure; the projects directory, effective scratch directory and naming
-    template; the substrate name and SDF path when there is a substrate; and
-    the polymer type prefix, length, count and monomers (label, probability,
-    name) when polymers are enabled. Simulation phases and force fields are
-    left out: they do not change where a completed run's trajectories are or
-    which system they hold.
+    of: the config name; the enzyme name and the content of its PDB file; the
+    temperature and pressure; the naming template of the run directories; the
+    substrate name and the content of its SDF file when there is a substrate;
+    and the polymer type prefix, length, count and monomers (label,
+    probability, name) when polymers are enabled.
+
+    Locations are left out: input files are identified by their SHA-256, not
+    their path, and the projects and scratch directories are not hashed,
+    because where the files sit is a pointer that changes when a study is
+    moved or downloaded, not part of what was simulated. Simulation phases
+    and force fields are left out too: they do not change which system the
+    trajectories hold.
 
     Parameters
     ----------
@@ -52,15 +68,13 @@ def compute_config_hash(config: "SimulationConfig") -> str:
         "name": config.name,
         "enzyme": {
             "name": config.enzyme.name,
-            "pdb_path": str(config.enzyme.pdb_path),
+            "pdb": _content(config.enzyme.pdb_path),
         },
         "thermodynamics": {
             "temperature": config.thermodynamics.temperature,
             "pressure": config.thermodynamics.pressure,
         },
         "output": {
-            "projects_directory": str(config.output.projects_directory),
-            "scratch_directory": str(config.output.effective_scratch_directory),
             "naming_template": config.output.naming_template,
         },
     }
@@ -69,7 +83,7 @@ def compute_config_hash(config: "SimulationConfig") -> str:
     if config.substrate is not None:
         hash_data["substrate"] = {
             "name": config.substrate.name,
-            "sdf_path": str(config.substrate.sdf_path),
+            "sdf": _content(config.substrate.sdf_path),
         }
 
     # Add polymer config if enabled

@@ -30,6 +30,7 @@ def check_command(path: Path) -> None:
     or a condition's config cannot be read; missing runs are reported but are
     not errors, so a study folder without its trajectories still checks.
     """
+    _study_logging(path, "study-check")
     import polyzymd
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.results import REPORT_FILE
@@ -79,6 +80,7 @@ def check_command(path: Path) -> None:
         click.echo(
             f"{role} {label}: runs {found} under {where}"
             + (f"; missing replicates {missing}" if missing else "")
+            + _production_summary(label, config_path, protocol)
         )
     from polyzymd.analyses.user_functions import load_function
 
@@ -134,8 +136,15 @@ def check_command(path: Path) -> None:
         click.echo(f"error: {' '.join(str(exc).split())}")
         failed = True
     guide = protocol.root / "deposit" / "UPLOAD.md"
+    frozen = protocol.root / "manifest.json"
     if guide.is_file():
         click.echo(f"publish: follow {guide}")
+    elif frozen.is_file():
+        click.echo(
+            "reproduce: this study was frozen (manifest.json); point it at downloaded "
+            "trajectories with polyzymd study locate DIR --verify, then rerun polyzymd analyze "
+            "--study, or redraw figures from results/ without trajectories"
+        )
     elif protocol.analyses:
         click.echo("publish: when the analyses are final, run polyzymd study freeze")
     click.echo(f"cite: {citation_line()}")
@@ -198,6 +207,7 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
     conditions not found are kept as they were. Moving data never changes
     the study or its stored results' config hashes.
     """
+    _study_logging(study_path, "study-locate")
     import yaml
 
     from polyzymd.analyses.exceptions import ProtocolError
@@ -386,6 +396,49 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _production_summary(label: str, config_path: Path, protocol: Any) -> str:
+    """Return ``; production X ns`` for a condition, the range when its replicates differ.
+
+    Choosing an equilibration window or a common window (``until``) needs
+    how far each condition was simulated. This reads trajectory headers, not
+    frames; when the runs cannot be read, nothing is added.
+    """
+    import warnings
+
+    from polyzymd.analyses.study import Condition
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            condition = Condition(
+                label, config_path, "0ns", protocol.replicates, 1, protocol.data.get(label)
+            )
+            lengths = [r.production_ns for r in condition.replicates]
+    except Exception:  # noqa: BLE001 - the summary is a convenience; check reports real errors
+        return ""
+    low, high = min(lengths), max(lengths)
+    return (
+        f"; production {low:.4g} ns"
+        if high - low < 1e-6
+        else f"; production {low:.4g}-{high:.4g} ns"
+    )
+
+
+def _study_logging(path: Path, command: str) -> None:
+    """Keep the console to warnings and log everything to ``<study>/logs/``; see analysis_logging."""
+    import logging
+
+    from polyzymd.cli.logging_utils import analysis_logging
+
+    if any(isinstance(h, logging.FileHandler) for h in logging.getLogger().handlers):
+        return
+    root = Path(path)
+    root = root if root.is_dir() else root.parent
+    context = click.get_current_context(silent=True)
+    verbose = bool(context and context.find_root().params.get("verbose"))
+    click.echo(f"log: {analysis_logging(root / 'logs', command, verbose=verbose)}", err=True)
+
+
 def _check_against_manifest(root: Path, label: str, folder: Path, verify: bool) -> list[str]:
     """Compare located run files with the sizes (and with ``verify``, SHA-256) in manifest.json."""
     import hashlib
@@ -439,6 +492,7 @@ def freeze_command(path: Path, tag: str | None) -> None:
     uploads and publishes nothing. Every gap is a warning, never a refusal.
     Refreeze after filling a gap, such as the study's or paper's DOI.
     """
+    _study_logging(path, "study-freeze")
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.study_freeze import freeze
 
@@ -465,4 +519,50 @@ def freeze_command(path: Path, tag: str | None) -> None:
     click.echo(
         f"next: follow {result.guide}, which says how to reserve the DOI, upload and publish "
         "on Zenodo; PolyzyMD uploads nothing"
+    )
+
+
+@study_group.command("add-condition")
+@click.argument("label")
+@click.option(
+    "--config",
+    "config",
+    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+    default=None,
+    help="Copy this config.yaml, with the input files it names, into conditions/<label>/.",
+)
+@click.option(
+    "--new", is_flag=True, help="Create conditions/<label>/ with polyzymd init, to fill in."
+)
+@click.option(
+    "--study",
+    "study_path",
+    type=click.Path(path_type=Path),
+    default=Path("."),
+    show_default=True,
+    help="study.yaml, or the folder holding it.",
+)
+def add_condition_command(label: str, config: Path | None, new: bool, study_path: Path) -> None:
+    """Add the condition LABEL to an existing study and list it in study.yaml.
+
+    \b
+    Examples:
+        polyzymd study add-condition "SBMA 100%" --config runs/SBMA100/config.yaml
+        polyzymd study add-condition "SBMA 100%" --new
+    """
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.study_scaffold import add_condition
+
+    try:
+        path = add_condition(study_path, label, config=config, new=new)
+    except ProtocolError as exc:
+        click.echo(f"error: {' '.join(str(exc).split())}", err=True)
+        if exc.hint:
+            click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
+        sys.exit(EXIT_STUDY_ERROR)
+    click.echo(f"condition {label}: {path}, listed in study.yaml")
+    click.echo(
+        "next: "
+        + ("fill in the config, then build and run it with polyzymd; " if new else "")
+        + "commit, and run polyzymd study check"
     )

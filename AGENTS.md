@@ -49,8 +49,6 @@ scope, validation, authorship, push, and PR rules.
 
 ## Harness Capabilities and Living Guidance
 
-The GitHub connector lacked PR-write permission, so I used the authenticated gh fallback. I will not merge it.
-
 Treat `AGENTS.md`, `.opencode/instructions/`, and the personal PolyzyMD Skills
 as living guidance. When repository behavior, scientific contracts, branch
 names, tools, permissions, or recurring workflows change, update the affected
@@ -107,6 +105,14 @@ study folder and commits it (`analyses/study_scaffold.py`); a gitignored
 `data.local.yaml`, written by `polyzymd study locate DIR`, or `--data DIR` says
 where this machine keeps each condition's runs without changing its config
 hash; reports record the study's git state (`analyses/study_git.py`).
+`polyzymd study add-condition` adds a condition to an existing study. Reports
+warn when conditions were analysed up to different times (`until`/`--until`
+gives a common window) and name segments `progress.json` records but the disk
+lacks; `analyze` and the `study` commands print only reports and warnings and
+write the full log to `logs/` (`polyzymd -v` for more). A study's own function
+with `allow_empty: true` skips replicates where a selection matches nothing.
+Config hashes identify input structures by content and leave out the
+projects and scratch directories (`analyses/identity.py`).
 `polyzymd study freeze` (`analyses/study_freeze.py`, `analyses/study_metadata.py`)
 checks staleness and metadata, writes `manifest.json`, `CITATION.cff` (citing
 PolyzyMD through `polyzymd/citation.py`), `.zenodo.json`, `md_checklist.yaml` and

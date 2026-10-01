@@ -84,7 +84,17 @@ Freezing:
 1. Checks whether each analysis's stored results still match the study:
    config hashes, equilibration window, stride, the code of each function,
    the settings and the PolyzyMD version. A stale run is a warning naming
-   what changed; rerun it with `polyzymd analyze RUN --study`.
+   what changed; rerun it with `polyzymd analyze RUN --study`. It also warns
+   when:
+   - the conditions' production lengths differ by more than 10%, so that a
+     difference may come from simulated time (analyse with `until`, or
+     extend the short runs);
+   - a replicate's `progress.json` records production segments that are not
+     on disk;
+   - a condition's config disagrees with its topology: a substrate residue
+     missing from the topology, or polymer residues in a condition whose
+     config enables no polymers, or the reverse;
+   - a replicate records no OpenMM version.
 2. Hashes every trajectory and topology file on this machine (SHA-256,
    computed once per file and cached), and writes gzipped copies of each
    replicate's engine inputs (OpenMM system XML and topology, or GROMACS
@@ -98,6 +108,12 @@ Freezing:
    | `.zenodo.json` | Zenodo deposit metadata: `isSupplementTo` the paper, `requires` PolyzyMD, `references` the trajectories |
    | `md_checklist.yaml` | The Communications Biology reliability and reproducibility checklist (2023), filled from the manifest; review each answer. Distance restraints in a condition's config act in every phase, so item 3c reports those conditions as restrained (biased) sampling, with each restraint's type, atoms, distance and force constant |
    | `system_summary.csv` | Box, atoms, waters, ions and composition of every replicate (checklist 4a) |
+
+   The manifest also records, for each replicate, the PolyzyMD and OpenMM
+   versions that built and ran it (`simulated_with`, from `build_manifest.json`
+   and `progress.json`), and follows the JSON Schema `manifest-1.schema.json`,
+   which ships with PolyzyMD and is written into the deposit; `study.yaml`
+   has its own, `study-1.schema.json`.
 
 4. Commits those files and `results/`, and only those, and tags the commit
    `study-v1` (then `study-v2`, ...; `--tag NAME` chooses). Your uncommitted
@@ -117,7 +133,15 @@ gitignored `deposit/`:
 | `UPLOAD.md` | The steps for this study: reserving its DOI, the files to add, the value of every Zenodo form field, reviewing and publishing, and new versions |
 | `upload/` | Exactly the files to add to the Zenodo upload: `README.md`, `CITATION.cff` and `manifest.json` unzipped, so Zenodo previews them, and the study, the engine inputs and the final frames as one zip each, because a record holds at most 100 files and Zenodo shows what is inside a zip |
 | `trajectories.csv` | Every trajectory and topology file by size and SHA-256, grouped into batches that each fit one Zenodo record |
+| `README.md` | Written from `metadata:`: what the study is and why, its authors, how to cite the paper, the dataset and PolyzyMD, its contents, how to reproduce it, and each run's verdict. Your study's own `README.md` stays inside `study/` as written |
 | `study/`, `engine_inputs/`, `final_frames/`, and the top-level files | The same content, unzipped, for inspection |
+
+Nothing in the deposit names a path on your machine. Records and reports
+name files relative to the study or the folder holding the runs, and the
+deposited configs say `projects_directory: .` and `scratch_directory: data`
+with a comment saying how a reproducer points the study at their copy of the
+runs. The config hash does not include either directory, so stored results
+still match.
 
 The steps of `UPLOAD.md`, in short:
 

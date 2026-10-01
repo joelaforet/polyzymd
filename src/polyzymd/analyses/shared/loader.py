@@ -1181,6 +1181,15 @@ def _segment_completeness_warning(layout: "TrajectoryLayout") -> str | None:
         every discovered segment is complete.
     """
 
+    missing = list(getattr(layout, "missing_segments", []))
+    if missing:
+        kept = _segment_indices(getattr(layout, "trajectory_paths", []))
+        return (
+            f"Production segment(s) {missing} are recorded in progress.json as run but "
+            f"are not on disk, so this replicate is read from segment(s) {kept or 'none'} only "
+            "and its production is shorter than simulated; copy the missing segments, or "
+            "compare conditions over a common window with until."
+        )
     excluded = list(getattr(layout, "excluded_segments", []))
     if excluded:
         # Derive the kept segments from the files that will actually be read.
@@ -1612,7 +1621,9 @@ class TrajectoryLoader:
         segment_warning = _segment_completeness_warning(layout)
         if segment_warning is not None:
             warnings.append(segment_warning)
-            LOGGER.warning(segment_warning)
+            # The replicate's provenance carries it into every report, which is
+            # where it is read; the log keeps a copy.
+            LOGGER.info(segment_warning)
         empty = list(getattr(layout, "empty_segments", []))
         if empty:
             # The engine logged each file by name; this keeps the indices in the provenance.

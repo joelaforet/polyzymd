@@ -39,7 +39,7 @@ UPLOAD = "upload"
 GUIDE = "UPLOAD.md"
 TRAJECTORIES = "trajectories.csv"
 #: Top-level files of the upload, kept out of the zips so they stay previewable.
-TOP_FILES = ("README.md", "CITATION.cff", "manifest.json")
+TOP_FILES = ("README.md", "CITATION.cff", "manifest.json", "manifest-1.schema.json")
 
 
 @dataclass(frozen=True)
@@ -144,7 +144,9 @@ def upload_folder(deposit: Path, name: str) -> list[Path]:
     return files
 
 
-def _form_rows(zenodo: dict[str, Any], doi: str | None) -> list[tuple[str, str]]:
+def _form_rows(
+    zenodo: dict[str, Any], doi: str | None, licenses: dict[str, str] | None = None
+) -> list[tuple[str, str]]:
     """Return the Zenodo upload form's fields with the values from ``.zenodo.json``."""
     creators = "; ".join(
         c["name"]
@@ -167,7 +169,13 @@ def _form_rows(zenodo: dict[str, Any], doi: str | None) -> list[tuple[str, str]]
         ("Publication date", zenodo.get("publication_date", "")),
         ("Creators", creators),
         ("Description", zenodo.get("description", "").replace("\n", " ")),
-        ("Licenses", zenodo.get("license", "").upper()),
+        (
+            "Licenses",
+            f"{licenses['data']} (data, results and figures) and {licenses['code']} (code in "
+            "analyses/ and figures/); add both"
+            if licenses
+            else zenodo.get("license", "").upper(),
+        ),
         ("Keywords and subjects", ", ".join(zenodo.get("keywords", []))),
         ("Version", zenodo.get("version", "")),
         ("Related works", related or "none"),
@@ -197,7 +205,9 @@ def write_guide(
 
     doi = meta.get("doi")
     files = "\n".join(f"| `upload/{p.name}` | {_gb(p.stat().st_size)} |" for p in upload)
-    form = "\n".join(f"| {field} | {value} |" for field, value in _form_rows(zenodo, doi))
+    form = "\n".join(
+        f"| {field} | {value} |" for field, value in _form_rows(zenodo, doi, meta.get("license"))
+    )
     batch_rows = (
         "\n".join(
             f"| {b.number} | {b.condition} | {', '.join(b.replicates)} | {len(b.files)} | {_gb(b.size)} |"
@@ -363,3 +373,94 @@ def prepare_upload(
         warnings=warnings,
     )
     return {"upload": deposit / UPLOAD, "trajectories": trajectories, "guide": guide}
+
+
+def deposit_readme(
+    *, study_name: str, tag: str | None, meta: dict[str, Any], analyses: dict[str, Any], root: Path
+) -> str:
+    """Return the README at the top of the deposit, written from the study's metadata.
+
+    It says what the study is and why it was run, who made it, how to cite it
+    and PolyzyMD, what the deposit holds, how to reproduce it at each level,
+    and what each analysis run found, as the verdict lines of its stored
+    report.
+    """
+    import json
+
+    from polyzymd.citation import citation_line
+
+    authors = "; ".join(
+        p.get("name")
+        or ", ".join(x for x in (p.get("family-names"), p.get("given-names")) if x)
+        + (f" (ORCID {p['orcid']})" if p.get("orcid") else "")
+        for p in meta.get("authors", [])
+    )
+    paper = meta.get("related", {}).get("paper", {})
+    doi = meta.get("doi")
+    lines = [
+        f"# {meta.get('title') or study_name}",
+        "",
+        str(meta.get("description", "")),
+        "",
+        f"**Purpose:** {meta.get('purpose', '')}",
+        "",
+        f"**Authors:** {authors}",
+        "",
+        f"**Version:** {tag or 'untagged'}" + (f" · **DOI:** {doi}" if doi else ""),
+        "",
+        "## How to cite",
+        "",
+        "Cite the paper, this dataset, and PolyzyMD, which produced the analyses "
+        "(`CITATION.cff` holds all three):",
+        "",
+    ]
+    if paper.get("title") or paper.get("doi"):
+        lines.append(
+            f"- Paper: {paper.get('title', '')}"
+            + (f", doi:{paper['doi']}" if paper.get("doi") else "")
+        )
+    lines.append(f"- Dataset: {meta.get('title') or study_name}" + (f", doi:{doi}" if doi else ""))
+    lines.append(f"- PolyzyMD: {citation_line()}")
+    lines += [
+        "",
+        "## Contents",
+        "",
+        "| File | Holds |",
+        "|---|---|",
+        "| `manifest.json` | Every file by size and SHA-256, software versions, each condition's resolved config, and the production analysed |",
+        "| `CITATION.cff` | How to cite the paper, this dataset and PolyzyMD |",
+        "| `manifest-1.schema.json` | The JSON Schema `manifest.json` follows |",
+        f"| `{study_name}-{tag or 'untagged'}.zip` | The study: `study.yaml`, `conditions/`, `analyses/`, `figures/`, `results/` |",
+        "| `engine_inputs.zip` | Each replicate's serialized engine inputs |",
+        "| `final_frames.zip` | Each replicate's final frame |",
+        "",
+        "Trajectories are deposited separately; `manifest.json` lists each file with its SHA-256.",
+        "",
+        "## Reproduce",
+        "",
+        "Install the PolyzyMD version named in `study.yaml`, unzip the study, then:",
+        "",
+        "1. **Figures, without trajectories:** run the scripts in `figures/`, which read",
+        '   `pz.Study("study.yaml").results(run)`.',
+        "2. **Analyses, from the trajectories:** download them, run",
+        "   `polyzymd study locate DOWNLOAD_DIR --verify`, then `polyzymd analyze --study study.yaml`.",
+        "3. **Simulations:** build and run each `conditions/<name>/config.yaml` with PolyzyMD;",
+        "   the replicate number is the random seed, so results agree within MD noise.",
+        "",
+        "## Results",
+        "",
+    ]
+    for run in analyses:
+        report = root / "results" / run / "report.json"
+        try:
+            verdicts = json.loads(report.read_text()).get("verdict", [])
+        except (OSError, ValueError):
+            verdicts = ["no stored report"]
+        lines.append(f"- **{run}:** " + " ".join(verdicts))
+    lines += [
+        "",
+        f"Licences: {meta.get('license', {}).get('data', 'CC-BY-4.0')} for data, results and figures; "
+        f"{meta.get('license', {}).get('code', 'MIT')} for code.",
+        "",
+    ]
+    return "\n".join(lines)

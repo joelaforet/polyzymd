@@ -890,6 +890,7 @@ distances --set pairs=...` for the triad distances.
 | `--format agent\|json` | No | `agent` (default) prints one line per condition and comparison; `json` prints the full `ProtocolReport`. |
 | `-o, --output PATH` | No | Also write the rendered output to this file. |
 | `--output-dir PATH` | No | Directory for `polyzymd_results/`, where the measured values are stored, and `figures/`. Default: the current directory. |
+| `--until TIME` | No | End of a common analysis window, for example `38ns`: production frames after it are left out for every condition, so conditions simulated for different lengths are compared over the same time. It is recorded with each stored result. A report comparing conditions whose analysed production ends more than 10% apart warns and suggests it. |
 | `--stride N` | No | Measure every `N`-th production frame of every replicate, starting with the first after the window. Default `1`. The report header then shows `stride N`. |
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
 | `--no-plots` | No | Do not draw figures. By default rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
@@ -1041,11 +1042,17 @@ directory) without loading any trajectory, and prints:
 | Line | Fields |
 |---|---|
 | header | `study <path>  equilibration <window>  stride <n>[  replicates <list>]` |
-| condition | `control\|condition <label>: runs <numbers> under <directory> (from data.local.yaml\|config)`, or `no runs found under <directory> ...` |
+| condition | `control\|condition <label>: runs <numbers> under <directory> (from data.local.yaml\|config); production <ns>` (a range when the replicates differ), or `no runs found under <directory> ...` |
 | analysis | `analysis <run>: <settings>; stored results in <folder>[ with its report]`, or `no stored results`; for the study's own function, `analysis <run> (<file>:<function>, <kind>)`, after importing it |
 | git | `git: commit <sha>; inputs committed`, `git: commit <sha>; uncommitted inputs: <paths>`, or `git: not a repository` |
 | metadata | `metadata: complete`, or `metadata: <n> gaps for publishing; ...` |
 | publish | `publish: follow <study>/deposit/UPLOAD.md` after a freeze, or `publish: when the analyses are final, run polyzymd study freeze` |
+| reproduce | In a downloaded frozen study (a `manifest.json` but no `deposit/`): how to point it at the trajectories and rerun or redraw |
+
+`analyze` and the `study` commands print only reports and warnings on the
+console; the full log, with library messages, goes to `logs/polyzymd-<command>-<time>.log`
+(in the study folder, or the output directory), whose path is printed first
+as `log: <path>`. `polyzymd -v` keeps INFO on the console.
 | citation | `cite: <how to cite PolyzyMD>` |
 | warning | `warning: written for PolyzyMD <version>; this is <version>` |
 
@@ -1074,6 +1081,19 @@ Creates a study folder: `study.yaml`, `conditions/`, `structures/`,
 
 It refuses a folder that already holds a `study.yaml`, and exits 2 on an
 unreadable config.
+
+### polyzymd study add-condition
+
+```bash
+polyzymd study add-condition LABEL (--config CONFIG | --new) [--study PATH]
+```
+
+Adds a condition to an existing study: `--config` copies `CONFIG` and the
+input files it names into `conditions/<label>/`, as `study init --condition`
+does; `--new` creates `conditions/<label>/` with `polyzymd init`. The condition
+is added as one line under `conditions:` in `study.yaml`, keeping the rest of
+the file. Exits 2 when neither or both options are given, or the label or its
+folder is taken.
 
 ### polyzymd study locate
 

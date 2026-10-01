@@ -40,6 +40,10 @@ class TrajectoryLayout(BaseModel):
     empty_segments : list[int]
         Segment indices left out of ``trajectory_paths`` because their
         trajectory file holds no frame.
+    missing_segments : list[int]
+        Segment indices the engine's progress records as completed whose
+        files are not on disk, for example in a copy of a run that kept only
+        some segments.
     """
 
     topology_path: Path | None = None
@@ -50,6 +54,7 @@ class TrajectoryLayout(BaseModel):
     excluded_segments: list[int] = Field(default_factory=list)
     incomplete_segments: list[int] = Field(default_factory=list)
     empty_segments: list[int] = Field(default_factory=list)
+    missing_segments: list[int] = Field(default_factory=list)
 
 
 class EngineSubmitRequest(BaseModel):

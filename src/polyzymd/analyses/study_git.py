@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 #: Folders and files of a study whose changes are outputs, not inputs, of an analysis.
-OUTPUTS = ("results/", "data.local.yaml")
+OUTPUTS = ("results/", "data.local.yaml", "logs/", "deposit/")
 
 
 def _git(root: Path, *arguments: str) -> str | None:
@@ -43,7 +43,8 @@ def git_state(root: str | Path) -> dict[str, Any] | None:
         ``None`` before the first commit), ``uncommitted`` (paths relative to
         ``root`` that are modified, staged or untracked, ignored files left
         out) and ``inputs_uncommitted``, those of ``uncommitted`` that are not
-        analysis outputs (``results/``, ``data.local.yaml``).
+        analysis outputs (``results/``, ``logs/``, ``deposit/``) or the machine's
+        ``data.local.yaml``.
     """
     root = Path(root).resolve()
     if shutil.which("git") is None or _git(root, "rev-parse", "--show-toplevel") is None:

@@ -268,6 +268,29 @@ summarize available sampling; they cannot reveal unsampled states that the
 trajectory never visited. Use them alongside structural inspection and domain
 knowledge.
 
+## Compare conditions over comparable windows
+
+The replicate mean of a per-frame quantity summarises the window it was
+taken over. When one condition was simulated, or is available on this
+machine, for 450 ns and another for 40 ns, their means describe different
+times: a structure that drifts late, such as an active site that opens after
+100 ns, appears only in the longer runs, and the difference looks like an
+effect of the condition. PolyzyMD warns in every report that compares
+conditions whose analysed production ends more than 10% apart, names each
+condition's span, and suggests a common window:
+
+```
+warning: the conditions were analysed up to different times (No polymer 456.4 ns; SBMA 50% 38.4 ns); a difference may come from simulated time rather than the condition. Compare over a common window with until 38.4ns (--until, or until: in study.yaml)
+```
+
+`until` leaves out production after that time for every condition, so the
+comparison is over the same simulated time; alternatively, extend the short
+runs. Say which you did in the methods. The warning does not change any
+value. A replicate whose `progress.json` records production segments that
+are missing from disk is reported too, because its analysed production is
+shorter than what was simulated. `polyzymd study check` prints each
+condition's production length before you choose an equilibration window.
+
 ## Multiple comparison correction
 
 ### Why it matters

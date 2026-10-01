@@ -48,6 +48,17 @@ For a new study, `--new-condition "No polymer"` creates
 `conditions/no_polymer/` with `polyzymd init` instead, for you to fill in
 and simulate.
 
+To add a condition later:
+
+```bash
+polyzymd study add-condition "SBMA 100%" --config runs/SBMA100/config.yaml --study lipase_363K
+polyzymd study add-condition "SBMA 100%" --new --study lipase_363K   # a polyzymd init project
+```
+
+It copies the config and its inputs as `study init` does, and adds one line
+under `conditions:` in `study.yaml`, leaving the rest of the file, comments
+included, as it was.
+
 | Path | Holds |
 |---|---|
 | `study.yaml` | The analysis protocol: conditions, equilibration window, analyses |
@@ -102,10 +113,16 @@ found and whether that came from `data.local.yaml` or from its config.
 Moving data does not change a condition's config hash, which is that of the
 config as written.
 
+Moving data never changes a condition's config hash: input structures are
+identified by their content, and the projects and scratch directories are not
+part of it. Stored records name their trajectory files relative to the
+folder holding the runs.
+
 ```{note}
-Stored results still record each trajectory's path and modification time,
-so analysing data at a new location measures the replicates again once.
-Identity by file content, which removes that, is planned for the release.
+Stored records still include each trajectory file's size and modification
+time. Data moved with `mv` keeps them, so nothing is measured again; data that
+was copied or downloaded gets new modification times, and each replicate is
+measured again once.
 ```
 
 ## Commit as you go
