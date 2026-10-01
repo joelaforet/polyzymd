@@ -44,15 +44,41 @@ _MIN_RATE_STEPS = 1_000
 
 # Lines in a SLURM log that explain why a chain stopped. Ordered so that the
 # most specific wrapper verdicts win over generic Python tracebacks.
+# "FATAL: run-segment failed" only says the Python step exited non-zero, so it
+# ranks below the "Segment N failed: <cause>" line that names the cause.
 _ERROR_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"^FATAL:.*"),
+    re.compile(r"^FATAL: (?!run-segment failed).*"),
     re.compile(r"^CONCURRENT:.*"),
     re.compile(r"^STOP:.*"),
     re.compile(r"^Segment \d+ failed:.*"),
     re.compile(r"^Validation error:.*"),
     re.compile(r"^slurmstepd: error:.*"),
     re.compile(r"^\w*Error: .*"),
+    re.compile(r"^FATAL:.*"),
 )
+
+# What to do about a dead chain, decided from its last error line.
+ACTION_RESUBMIT = "resubmit"
+ACTION_SKIP_BUILD = "resubmit --skip-build"
+ACTION_INSPECT = "inspect"
+# Causes that leave a valid checkpoint behind: node, scheduler or GPU faults.
+_TRANSIENT_MARKERS = (
+    "CUDA routing failed",
+    "CONCURRENT:",
+    "CUDA_ERROR",
+    "Stale file handle",
+    "Invalid input string",
+    "DUE TO PREEMPTION",
+    "DUE TO NODE FAILURE",
+)
+_RESUBMIT_SLURM_STATES = {
+    "NODE_FAIL",
+    "PREEMPTED",
+    "CANCELLED",
+    "TIMEOUT",
+    "COMPLETED",
+    "BOOT_FAIL",
+}
 _LOG_TAIL_LINES = 80
 _ERROR_MAX_CHARS = 160
 
@@ -91,6 +117,7 @@ class ReplicateReport:
     last_error: str | None = None
     last_log: str | None = None
     note: str | None = None
+    action: str | None = None
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -225,6 +252,36 @@ def query_end_states(job_ids: Sequence[str], timeout: int = 20) -> dict[str, str
         if len(parts) == 3 and parts[0]:
             out[parts[0]] = f"{parts[1].split()[0]} exit {parts[2]}"
     return out
+
+
+def death_action(last_error: str | None, directory: str | None) -> str:
+    """Map a dead chain's last error line to resubmit, skip-build or inspect.
+
+    Only causes known to leave a valid checkpoint get ``resubmit``. A first
+    segment that crashed on the missing ``openff`` package is resubmitted with
+    ``--skip-build`` when the standalone build left its system files. Physics
+    blow-ups, build refusals and anything unrecognised need a person.
+    """
+    err = last_error or ""
+    if "No module named 'openff'" in err:
+        d = Path(directory) if directory else None
+        if d and (d / "system.xml").is_file() and (d / "solvated_system.pdb").is_file():
+            return ACTION_SKIP_BUILD
+        return ACTION_INSPECT
+    if err.startswith("slurm: "):
+        state = err.split()[1]
+        return ACTION_RESUBMIT if state in _RESUBMIT_SLURM_STATES else ACTION_INSPECT
+    if any(marker in err for marker in _TRANSIENT_MARKERS):
+        return ACTION_RESUBMIT
+    return ACTION_INSPECT
+
+
+def assign_actions(reports: Sequence["SystemReport"]) -> None:
+    """Set ``action`` on every dead replicate. Run after :func:`fill_end_states`."""
+    for report in reports:
+        for rep in report.replicates:
+            if rep.verdict == VERDICT_DEAD:
+                rep.action = death_action(rep.last_error, rep.directory)
 
 
 def fill_end_states(
@@ -632,6 +689,8 @@ def render_replicate_line(rep: ReplicateReport, label_width: int) -> str:
             fields.append(f"last log {rep.last_log} (no error line found)")
         else:
             fields.append("no slurm log found")
+        if rep.action:
+            fields.append(f"action: {rep.action}")
     return "  ".join(fields)
 
 
@@ -692,16 +751,26 @@ def render_agent(
             lines.append(render_replicate_line(rep, width))
 
     dead = [(r, rep) for r in reports for rep in r.replicates if rep.verdict == VERDICT_DEAD]
-    if dead:
+    restart: dict[tuple[str, str], list[int]] = {}
+    inspect: list[str] = []
+    for report, rep in dead:
+        action = rep.action or ACTION_RESUBMIT
+        if action == ACTION_INSPECT:
+            inspect.append(f"{report.name} run{rep.replicate}")
+        else:
+            restart.setdefault((report.config_path, action), []).append(rep.replicate)
+    if restart:
         lines.append("")
         lines.append("# dead chains — resume from checkpoint with:")
-        by_cfg: dict[str, list[int]] = {}
-        for report, rep in dead:
-            by_cfg.setdefault(report.config_path, []).append(rep.replicate)
         preset = f" --preset {preset_hint}" if preset_hint else " --preset <preset>"
-        for cfg, reps in by_cfg.items():
+        for (cfg, action), reps in restart.items():
+            flag = " --skip-build" if action == ACTION_SKIP_BUILD else ""
             rep_arg = ",".join(str(r) for r in sorted(reps))
-            lines.append(f"polyzymd submit -c {cfg} -r {rep_arg}{preset}")
+            lines.append(f"polyzymd submit -c {cfg} -r {rep_arg}{preset}{flag}")
+    if inspect:
+        lines.append("")
+        lines.append("# dead chains that need a look before restarting:")
+        lines.extend(inspect)
     return "\n".join(lines) + "\n"
 
 

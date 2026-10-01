@@ -170,7 +170,8 @@ def test_error_line_concurrent_and_segment_failed(tmp_path: Path):
         "run-segment exited with code 1\n"
         "FATAL: run-segment failed (exit code 1) — NOT resubmitting\n"
     )
-    assert last_error_line(p).startswith("FATAL: run-segment failed")
+    # The specific cause outranks the generic "run-segment failed" wrapper line.
+    assert last_error_line(p).startswith("Segment 0 failed: Particle coordinate is NaN")
     p.write_text("run-segment exited with code 2\nCONCURRENT: Another job is already running\n")
     assert last_error_line(p).startswith("CONCURRENT:")
 
@@ -540,3 +541,53 @@ def test_segment_window_reads_file_mtimes(tmp_path):
     start, end = segment_window(tmp_path, 4)
     assert (end - start) == timedelta(days=1)
     assert segment_window(tmp_path, 5) is None
+
+
+# ---------------------------------------------------------------------------
+# death actions
+# ---------------------------------------------------------------------------
+
+
+def test_death_action_mapping(tmp_path):
+    from polyzymd.cli.status_report import death_action
+
+    built = tmp_path / "built"
+    built.mkdir()
+    (built / "system.xml").write_text("x")
+    (built / "solvated_system.pdb").write_text("x")
+    openff = "Segment 0 failed: No module named 'openff'"
+    cases = [
+        ("FATAL: CUDA routing failed after 3 retries", None, "resubmit"),
+        ("CONCURRENT: Another job is already running this replicate", None, "resubmit"),
+        (
+            "Segment 10 failed: Error initializing CUDA: CUDA_ERROR_NOT_INITIALIZED",
+            None,
+            "resubmit",
+        ),
+        ("Segment 2 failed: [Errno 116] Stale file handle", None, "resubmit"),
+        ("slurm: NODE_FAIL exit 0:0", None, "resubmit"),
+        ("slurm: OUT_OF_MEMORY exit 0:125", None, "inspect"),
+        ("Segment 0 failed: Particle coordinate is NaN.", None, "inspect"),
+        ("Validation error: 354 polymer atom(s) lie within 1.00 A", None, "inspect"),
+        (openff, str(built), "resubmit --skip-build"),
+        (openff, str(tmp_path / "empty"), "inspect"),
+        (None, None, "inspect"),
+    ]
+    for err, directory, expected in cases:
+        assert death_action(err, directory) == expected, err
+
+
+def test_footer_splits_restart_and_inspect():
+    nan = _rep(
+        1, "dead", last_error="Segment 0 failed: Particle coordinate is NaN.", action="inspect"
+    )
+    gone = _rep(2, "dead", last_error="CONCURRENT: x", action="resubmit")
+    fresh = _rep(3, "dead", last_error="No module named 'openff'", action="resubmit --skip-build")
+    text = render_agent(
+        [SystemReport("SYS", "c.yaml", "/s", [nan, gone, fresh])], now=NOW, preset_hint="p"
+    )
+    assert "polyzymd submit -c c.yaml -r 2 --preset p\n" in text
+    assert "polyzymd submit -c c.yaml -r 3 --preset p --skip-build" in text
+    assert "# dead chains that need a look before restarting:\nSYS run1" in text
+    assert "-r 1" not in text
+    assert "action: inspect" in text
