@@ -1,127 +1,81 @@
-# Analysis Plugin Framework API
+# Study API modules
 
-This reference page summarizes the `polyzymd.analyses` API of the analysis
-plugin framework: plugin discovery, orchestration, statistics, the base facade
-and the public MDAnalysis layer.
+The modules below hold the study API and `polyzymd analyze`. Every analysis
+that `polyzymd analyze` offers is a function in `polyzymd.analyses.functions`,
+listed in {doc}`../reference/analysis_functions`, and
+{doc}`../explanation/analysis_api` shows how to use the modules together.
 
-```{note}
-No shipped analysis is a plugin any more, and the framework is being removed.
-Every analysis that `polyzymd analyze` offers is a function in
-`polyzymd.analyses.functions`, run through `polyzymd.analyses.study.Study`; see
-{doc}`../explanation/analysis_api` and {doc}`../reference/analysis_functions`.
-`list_analyses()` returns only the plugins you register yourself.
-```
+| Module | What it holds |
+|---|---|
+| `polyzymd.analyses.study` | `Study`, `Condition` and `Replicate`: every replicate of every condition as an MDAnalysis `Universe` with its equilibration window removed |
+| `polyzymd.analyses.timeseries` | `Study.timeseries` and `Study.per_replicate`, the stored `Timeseries` and `ReplicateValues`, their summaries and comparisons |
+| `polyzymd.analyses.figures` | Figures drawn from stored values |
+| `polyzymd.analyses.reference` | Reference structures (frame, centroid, average or file) for RMSD, RMSF and native contacts |
+| `polyzymd.analyses.protocols` | `polyzymd analyze` in Python (`analyze`) and the `ProtocolReport` it returns |
+| `polyzymd.analyses.universe` | `UniverseProvider`, which loads a replicate's `Universe` and records the path, size and modification time of each input file |
+| `polyzymd.analyses.identity` | `compute_config_hash`, the hash of a simulation config that every stored result records |
 
-The framework runs trajectory-native work at the replicate level and lifts the
-outputs into condition and comparison artifacts. Its import surfaces are
-`polyzymd.analyses.base`, `polyzymd.analyses.mda` and selected
-`polyzymd.analyses.shared` utilities.
-
-```{eval-rst}
-.. currentmodule:: polyzymd.analyses
-```
-
-## Public package facade
-
-The package root exposes discovery helpers and selected convenience imports. Use
-the narrower modules below for detailed autodoc reference; the package facade is
-summarized here to avoid duplicating class entries from the dedicated pages.
-
-## Discovery
-
-Discovery is package-based and uses importable modules under
-`polyzymd.analyses`. A plugin can be a single module or a package with private
-helper modules for plotting, result models, or MDAnalysis job construction.
-
-| Function | Purpose |
-|----------|---------|
-| `list_analyses()` | Return discovered plugin classes keyed by canonical name. |
-| `list_all_names()` | Return canonical plugin names. |
-| `get_analysis(name)` | Resolve a plugin class by canonical name. |
-| `clear_cache()` | Clear the discovery cache, primarily for tests and dynamic plugin development. |
+## Study
 
 ```{eval-rst}
-.. automodule:: polyzymd.analyses.discovery
+.. automodule:: polyzymd.analyses.study
    :members:
-   :undoc-members:
    :show-inheritance:
+   :no-index:
 ```
 
-## Orchestration
-
-The orchestrator coordinates compute, aggregation, comparison, plotting, cache
-identity, and result persistence for one analysis or a set of analyses defined
-by `ComparisonConfig`.
-
-| Function | Scope |
-|----------|-------|
-| `run_analysis()` | Run compute and aggregation for one analysis on one condition. |
-| `run_comparison()` | Run the full lifecycle for one analysis across all configured conditions. |
-| `run_all_comparisons()` | Run selected or discovered analyses from one comparison configuration. |
+## Timeseries and per-replicate values
 
 ```{eval-rst}
-.. automodule:: polyzymd.analyses.orchestrator
+.. automodule:: polyzymd.analyses.timeseries
    :members:
-   :undoc-members:
    :show-inheritance:
+   :no-index:
 ```
 
-## Public base facade
+## Figures
 
-`polyzymd.analyses.base` is the stable public facade for contributor imports. It
-re-exports the `Analysis` base class, lifecycle context objects, scalar metric
-descriptors, and comparison result models from implementation modules.
+```{eval-rst}
+.. automodule:: polyzymd.analyses.figures
+   :members:
+   :no-index:
+```
 
-For the complete class and context reference, see {doc}`analyses_base`.
+## Reference structures
 
-At a high level, compute-stage plugins implement `build_mda_jobs()` and
-`build_mda_collector()`. Collectors produce `ReplicateArtifact` objects;
-aggregation combines those into `ConditionArtifact` objects; comparison produces
-`ComparisonArtifact` outputs or a custom comparison contract for a plugin that
-needs specialized comparison models.
+```{eval-rst}
+.. automodule:: polyzymd.analyses.reference
+   :members:
+   :no-index:
+```
 
-The detailed autodoc for this facade lives on {doc}`analyses_base`.
+## polyzymd analyze in Python
 
-## Public MDAnalysis layer
+```{eval-rst}
+.. automodule:: polyzymd.analyses.protocols
+   :members: analyze, ProtocolReport, ConditionReport, PairwiseReport, ProtocolProvenance, FUNCTION_ANALYSES
+   :show-inheritance:
+   :no-index:
+```
 
-`polyzymd.analyses.mda` is the public MDAnalysis extension layer for jobs, frame
-selection, collectors, artifact envelopes, artifact storage, default aggregation,
-and artifact-based comparison. The primary contributor surface is documented in
-{doc}`analyses_mda`.
+## Universe loading and input file records
 
-The detailed autodoc for this layer lives on {doc}`analyses_mda`.
+```{eval-rst}
+.. automodule:: polyzymd.analyses.universe
+   :members:
+   :show-inheritance:
+   :no-index:
+```
 
-## Statistics helpers
+## Config hash
 
-`polyzymd.analyses.stats` contains reusable scalar comparison helpers used by
-the default `Analysis.compare()` path and by plugin-specific comparison code.
-
-Key public helpers include `default_scalar_comparison()` and
-`format_scalar_comparison()`.
-
-## Shared utilities
-
-Reusable plugin utilities live in `polyzymd.analyses.shared`. They are documented
-separately on {doc}`analyses_shared`; this overview intentionally omits detailed
-shared-utility autodoc blocks.
-
-## Plugin packages
-
-PolyzyMD ships no plugin package. A plugin package you write exposes its
-public `Analysis` subclass and its settings and result contracts from the
-package root; helper modules with leading underscores inside it are
-implementation details.
-
-## Private framework internals
-
-`polyzymd.analyses._framework` is private/internal infrastructure for lifecycle
-contexts, artifact I/O, comparison models, and plugin contract enforcement. It
-is not a contributor import surface; contributor plugins should import public
-symbols from `polyzymd.analyses.base` and `polyzymd.analyses.mda`.
+```{eval-rst}
+.. automodule:: polyzymd.analyses.identity
+   :members:
+   :no-index:
+```
 
 ## Related API pages
 
-- {doc}`analyses_base` — base class, contexts, metrics, and comparison models
-- {doc}`analyses_mda` — public MDAnalysis job/artifact layer
-- {doc}`analyses_shared` — reusable shared utility modules
-- {doc}`overview` — package-level API overview
+- {doc}`analyses_shared`: trajectory loading, statistics, plotting and selection helpers
+- {doc}`config`: `PlotSettings` and the other plot settings models

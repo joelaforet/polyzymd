@@ -135,4 +135,4 @@ def test_python_analyze_rg_refuses_other_settings_and_names_rg(configs) -> None:
         analyze("rg", [configs["A"]], equilibration=EQUILIBRATION, settings={"runs": []})
     with pytest.raises(ProtocolError) as excinfo:
         analyze("not_an_analysis", [configs["A"]])
-    assert "rg" in excinfo.value.hint.split("Use one of: ")[1].split(", ")
+    assert "rg" in excinfo.value.hint.split("Use one of ")[1].split(".")[0].split(", ")

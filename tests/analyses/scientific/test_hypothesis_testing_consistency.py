@@ -1,16 +1,13 @@
-"""Hypothesis testing must behave the same way on every comparison path.
+"""Properties of the pairwise tests of ``ReplicateValues.compare``.
 
-``ReplicateValues.compare`` in ``polyzymd.analyses.timeseries`` and
-``default_scalar_comparison`` in ``polyzymd.analyses.stats`` run the pairwise
-tests. These tests pin the properties that must not depend on which one was
-asked:
+``ReplicateValues.compare`` in ``polyzymd.analyses.timeseries`` runs the
+pairwise tests. These tests pin:
 
 1. ``test`` selects the variance assumption. With equal group sizes and
    unequal variances Welch's test gives the same t statistic as Student's but
    fewer degrees of freedom, so the Welch p-value is strictly larger.
 2. Every pairwise result carries an adjusted p-value. With a single test in
-   the Benjamini-Hochberg family the adjusted p-value equals the raw one, and
-   all pairs and metrics of one comparison form one family.
+   the Benjamini-Hochberg family the adjusted p-value equals the raw one.
 3. Effect sizes carry Hedges' g and drop the Cohen adjectives when the
    combined sample is smaller than ten replicates.
 
@@ -22,7 +19,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
 import pytest
 
 LOW_VARIANCE = (10.0, 10.1, 9.9)
@@ -77,61 +73,6 @@ def test_public_functions_have_resolvable_annotations() -> None:
     assert functions
     for function in functions:
         typing.get_type_hints(function)
-
-
-def test_correction_family_spans_every_metric(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Three conditions and two metrics make one family of six tests."""
-    from polyzymd.analyses.base import MetricValue
-    from polyzymd.analyses.shared import inferential_statistics
-    from polyzymd.analyses.stats import default_scalar_comparison
-
-    family_sizes: list[int] = []
-    real_benjamini_hochberg = inferential_statistics.benjamini_hochberg
-
-    def _recording_benjamini_hochberg(p_values, alpha=0.05):
-        family_sizes.append(len(p_values))
-        return real_benjamini_hochberg(p_values, alpha=alpha)
-
-    monkeypatch.setattr(inferential_statistics, "benjamini_hochberg", _recording_benjamini_hochberg)
-
-    def _metrics(offset: float) -> dict[str, MetricValue]:
-        first = [1.0 + offset, 1.1 + offset, 0.9 + offset]
-        second = [5.0 + offset, 5.2 + offset, 4.8 + offset]
-        return {
-            "first": MetricValue(
-                name="first",
-                mean=float(np.mean(first)),
-                sem=0.05,
-                replicate_values=first,
-            ),
-            "second": MetricValue(
-                name="second",
-                mean=float(np.mean(second)),
-                sem=0.05,
-                replicate_values=second,
-            ),
-        }
-
-    result = default_scalar_comparison(
-        analysis_name="family",
-        project_name="family",
-        metrics_by_condition={
-            "A": _metrics(0.0),
-            "B": _metrics(1.0),
-            "C": _metrics(2.0),
-        },
-        control_label=None,
-    )
-
-    # Three conditions give three pairs, and both metrics join the same family.
-    assert len(result.pairwise_comparisons) == 6
-    assert family_sizes == [6]
-    assert all(comp.p_value_adjusted is not None for comp in result.pairwise_comparisons)
-
-    # The omnibus ANOVA is outside the family and stays uncorrected.
-    assert result.anova is not None
-    assert len(result.anova) == 2
-    assert all(anova.p_value_adjusted is None for anova in result.anova)
 
 
 def _function_path(test: str) -> Any:

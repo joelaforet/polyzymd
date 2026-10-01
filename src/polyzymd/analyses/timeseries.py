@@ -753,7 +753,7 @@ class Timeseries:
         to ``<output_dir>/<name>.<format>``; ``output_dir`` defaults to the
         ``figures`` folder next to ``polyzymd_results`` and ``name`` to
         ``<name>_timeseries``. ``plot_settings`` is a
-        :class:`~polyzymd.config.comparison.PlotSettings`, by default its
+        :class:`~polyzymd.config.analysis_settings.PlotSettings`, by default its
         defaults. Returns the path of the figure file.
         """
         from polyzymd.analyses.figures import plot_timeseries
@@ -1144,7 +1144,7 @@ class ReplicateValues:
             values = self._column(position)
             for label in chosen:
                 rows = self.rows[label]
-                item = _condition(label, values[label], {}, self.metric)
+                item = _condition(label, values[label])
                 item.entry = entry
                 item.replicates = [row[0] for row in rows]
                 if rows and rows[0][2] is not None:

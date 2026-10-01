@@ -102,7 +102,7 @@ def test_mixed_frame_intervals_still_raise_across_a_skipped_segment(tmp_path) ->
 
 
 def test_universe_provenance_records_the_empty_segment(tmp_path) -> None:
-    from polyzymd.analyses.mda.universe import UniverseProvider
+    from polyzymd.analyses.universe import UniverseProvider
 
     config = write_simulation_config(tmp_path / "cond", scratch=tmp_path / "scratch")
     run_dir = SimulationConfig.from_yaml(config).get_working_directory(1)

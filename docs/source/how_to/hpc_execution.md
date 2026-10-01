@@ -2,7 +2,8 @@
 
 This guide shows you how to run `polyzymd analyze` as a SLURM batch job, so
 that trajectory analysis runs on a compute node instead of a login node, and
-how to rerun it cheaply once replicate results are stored.
+how to rerun it cheaply once replicate results are stored, and how to measure
+the replicates in parallel with `--submit`.
 
 ```{note}
 This guide covers **analysis** jobs. For submitting **simulation** jobs, see
@@ -79,10 +80,19 @@ replicates that changed.
 
 ## Measure replicates in parallel
 
-A long campaign takes too long to measure in one job. Because every replicate's
-result is stored and read back, one job per condition and replicate can
-measure them at the same time, and a last job, run after them, reads every
-stored result and computes the statistics and figures:
+A long campaign takes too long to measure in one job. Add `--submit` and a
+cluster preset to the command, and PolyzyMD submits one SLURM array task per
+condition and replicate and a report job that runs after them:
+
+```bash
+module load slurm/blanca        # CU Boulder: put Blanca's sbatch on PATH
+pixi run -e analysis polyzymd analyze hydrogen_bonds \
+    -c noPoly_CALB_pNPB/config.yaml \
+    -c SBMA_100_CALB_pNPB/config.yaml \
+    --label "No Polymer" --label "SBMA-100" \
+    --eq 10ns --output-dir analysis_results \
+    --submit --preset blanca-shirts
+```
 
 ```text
   condition × replicate jobs (SLURM array)          report job
@@ -96,9 +106,53 @@ stored result and computes the statistics and figures:
                                    --dependency=afterany
 ```
 
-List the conditions in a file, one config and its label per line, the labels
-exactly as in the report script, and write the array script, whose task
-number picks a condition and a replicate:
+The command writes `analysis_results/slurm/hydrogen_bonds_<YYYYmmdd-HHMMSS>/`:
+
+| File | What it holds |
+|---|---|
+| `tasks.tsv` | One line per array task: config, label and replicate |
+| `replicates.sbatch` | The array. Each task runs `polyzymd analyze hydrogen_bonds -c <config> --label <label> --replicates <n>` with the same `--eq`, `--stride`, `--set`, `--run` and `--output-dir` and `--no-plots`, and stores its replicate's result under `analysis_results/polyzymd_results/` |
+| `report.sbatch` | The full command with every `-c`, which reads every stored result, measures any replicate a task left unmeasured, draws the figures and writes the report |
+| `logs/` | `replicate.<array>_<task>.out` and `report.<job>.out` |
+| `report.txt` | The report, written by the report job; `report.json` with `--format json`, or the path given with `-o` |
+
+It submits the array, then the report job with
+`--dependency=afterany:<array>`, so the report starts once every task has
+ended, whether or not each one succeeded, and prints both job IDs. A task that
+fails leaves its replicate unmeasured, and the report job measures it itself;
+check `logs/` for the failure.
+
+- **`--dry-run`** writes the folder and prints the two `sbatch` commands
+  without submitting, so you can read the scripts first.
+- **Environment.** Both jobs run the Python interpreter and `PYTHONPATH` of
+  the submitting process, in the directory you submitted from, so they measure
+  with the same PolyzyMD and packages and resolve relative `-c` paths as the
+  command did. Submit through `pixi run -e analysis` and the jobs use the
+  analysis environment.
+- **Presets.** `--preset` sets the partition, QoS and account:
+
+  | Preset | Partition | QoS | Account |
+  |---|---|---|---|
+  | `alpine-cpu` | `acpu` | `cpu-normal` | none |
+  | `blanca-shirts` | `blanca-shirts` | `blanca-shirts` | `blanca-shirts` |
+  | `blanca-chbe-rdi` | `blanca-chbe-rdi` | `blanca-chbe-rdi` | `blanca-chbe-rdi` |
+  | `bridges2-rm` | `RM-shared` | none | none |
+
+  `--partition`, `--account` and `--qos` replace the preset's values, or give
+  all three without a preset. Each job gets `--time 12:00:00`, `--mem 16G`
+  and `--cpus 2` unless you pass others.
+
+Run on Blanca with two LipA conditions of five replicates each, the submitted
+hydrogen-bond analysis gave the same report as one job measuring every
+replicate in turn.
+
+### What `--submit` writes, and other schedulers
+
+The submitted scripts do what the hand-written ones below do, and these work
+on a cluster no preset covers or adapt to another scheduler. List the
+conditions in a file, one config and its label per line, the labels exactly
+as in the report script, and write the array script, whose task number picks
+a condition and a replicate:
 
 ```bash
 # conditions.txt
@@ -136,17 +190,10 @@ sbatch --dependency=afterany:$array hbonds.sbatch
 
 A stored result is read back only when its record matches, so give every
 job the same analysis, `--set` settings, `--label` per condition,
-`--eq` and `--stride`. A task that fails leaves its replicate unmeasured,
-and the report job, which starts once every task has ended, measures it
-itself; check the array's logs for the failure. Each task loads its replicate
-as a single run would, so an analysis's own requirements hold for every task,
-such as the `<segment>_system.xml` that {doc}`hydrogen_bonds` needs beside
-each trajectory.
-
-```{note}
-A `polyzymd analyze ... --submit` option that writes and submits these jobs
-from cluster presets is planned; until then, the scripts above do the same.
-```
+`--eq` and `--stride`. Each task loads its replicate as a single run would,
+so an analysis's own requirements hold for every task, such as the
+`<segment>_system.xml` that {doc}`hydrogen_bonds` needs beside each
+trajectory.
 
 ## One job per analysis
 
@@ -173,8 +220,10 @@ the same stride.
 
 Every cluster needs its own partition, account and QoS flags in the
 `#SBATCH` lines. The settings below are those of CU Boulder Research
-Computing; for simulation jobs, `polyzymd submit --preset` carries such
-settings for several clusters, see {doc}`hpc_slurm`.
+Computing. For analysis jobs, `polyzymd analyze --submit --preset` carries
+them for the clusters in the table under
+[Measure replicates in parallel](#measure-replicates-in-parallel); for
+simulation jobs, `polyzymd submit --preset` does, see {doc}`hpc_slurm`.
 
 CU Boulder's Research Computing provides two SLURM clusters: **Alpine**
 (shared campus resource) and **Blanca** (condo model with PI-owned nodes).
@@ -232,15 +281,6 @@ sacctmgr show association user=$USER format=account,partition,qos
 
 This lists every account/partition/QoS combination available to your user.
 :::
-
-## Analysis plugins you register yourself
-
-`polyzymd compare submit` and `submit-all` submit one SLURM job per
-replicate, condition and comparison for an analysis plugin registered with the
-plugin framework, and `polyzymd compare status` and `finalize` follow and
-finish those jobs. No shipped analysis is such a plugin,
-so these commands run only plugins you register yourself, and they are being
-removed. See `polyzymd compare submit --help` for their options.
 
 ## See Also
 

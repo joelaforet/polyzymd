@@ -60,7 +60,7 @@ polyzymd/
 │   ├── utils/                # Shared utilities
 │   └── workflow/             # SLURM and orchestration helpers
 ├── tests/
-│   ├── analyses/             # Plugin and analysis-framework tests
+│   ├── analyses/             # Study API, analysis function and polyzymd analyze tests
 │   ├── cli/                  # CLI tests
 │   ├── config/               # Configuration tests
 │   ├── engines/              # Engine integration/export tests

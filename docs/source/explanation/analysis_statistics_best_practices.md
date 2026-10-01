@@ -279,15 +279,14 @@ increases rapidly, even when every null hypothesis is true.
 
 ### Benjamini-Hochberg FDR control
 
-When `posthoc_method` is `"ttest_bh"`, PolyzyMD uses the
-Benjamini-Hochberg procedure to control the false discovery rate: the expected
-proportion of false positives among rejected hypotheses. This is less
+PolyzyMD uses the Benjamini-Hochberg procedure to control the false discovery
+rate: the expected proportion of false positives among rejected hypotheses. This is less
 conservative than controlling the probability of any false positive, and is
 often appropriate when many related comparisons are screened together.
 
 Conceptually, the procedure ranks p-values, compares them to rank-dependent
 thresholds, and marks discoveries only up to the largest rank that satisfies the
-threshold. Adjusted p-values and CLI significance markers are based on this
+threshold. Adjusted p-values and the `significant` flag are based on this
 correction rather than on raw p-values alone.
 
 ### Why the family is one comparison
@@ -361,8 +360,8 @@ positives are expected when many hypotheses are tested.
 Both matter. A corrected p-value does not fix poor sampling, and a careful SEM
 does not control the false-positive rate across many condition pairs.
 
-For field-level details on post-hoc methods, configuration keys, and output
-fields, see {doc}`../reference/posthoc_testing`.
+For the tests, the correction family and the fields of each comparison row,
+see {doc}`../reference/posthoc_testing`.
 
 ## References
 

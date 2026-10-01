@@ -100,8 +100,9 @@ def figures(monkeypatch) -> dict[str, object]:
 
 
 def _footnote(fig) -> str:
-    """Return the footnote text of ``fig``, the text drawn at the bottom left."""
-    return next(text.get_text() for text in fig.texts if text.get_position() == (0.01, 0.01))
+    """Return the footnote of ``fig``, unwrapped into one line."""
+    note = next(text for text in fig.texts if text.get_gid() == plotting.FIGURE_NOTE_GID)
+    return " ".join(note.get_text().split())
 
 
 def test_timeseries_plot_draws_every_replicate_and_the_mean(series, tmp_path, figures) -> None:
@@ -124,8 +125,10 @@ def test_timeseries_plot_draws_every_replicate_and_the_mean(series, tmp_path, fi
     assert legend == ["A (n = 3)", "B (n = 3)", "equilibration window"]
     assert ax.get_xlabel() == "Time (ns)" and ax.get_ylabel() == "rg (Å)"
     note = _footnote(figures["rg_timeseries"])
-    assert "Band: 95% CI (Student t) across n = 3 replicates" in note
-    assert "production window t >= 0.25ns" in note
+    assert (
+        "Band: 95% Student t confidence interval of the condition mean at each time across "
+        "n = 3 replicates; production window t >= 0.25ns." in note
+    )
 
 
 def test_distribution_plot_draws_pooled_and_replicate_kdes(series, tmp_path, figures) -> None:
@@ -170,8 +173,11 @@ def test_values_plot_draws_means_intervals_and_every_replicate(series, tmp_path,
     ticks = [text.get_text() for text in ax.get_xticklabels()]
     assert ticks == ["A\nn = 3", "B\nn = 3"]
     note = _footnote(fig)
-    assert "Error bars: 95% CI (Student t) across n = 3 replicates" in note
-    assert "production window t >= 0.25ns" in note
+    assert note == (
+        "Error bars: 95% Student t confidence interval of the condition mean across n = 3 "
+        "replicates; production window t >= 0.25ns. Bars: condition means; points: "
+        "per-replicate values."
+    )
 
 
 def test_single_replicates_get_no_interval_claim(tmp_path, figures) -> None:

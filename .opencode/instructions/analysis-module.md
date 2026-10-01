@@ -3,7 +3,7 @@
 ## The real tree
 
 Verified against `src/polyzymd/analyses/` on 2026-09-30, after the
-hydrogen-bonds slice of the v1.3 analysis refactor. Every file named here exists. If you add or delete a
+plugin framework was removed in the v1.3 analysis refactor. Every file named here exists. If you add or delete a
 module, update this list in the same commit.
 
 ```
@@ -19,24 +19,18 @@ src/polyzymd/analyses/
 │                        # residue_hbond_occupancy, residue_pair_hbond_occupancy, hbond_count
 ├── reference.py         # pz.reference: external, frame, average and centroid references
 ├── figures.py           # Figures drawn from stored study results
-├── protocols.py         # polyzymd analyze: FUNCTION_ANALYSES, ProtocolReport, plugin path
-├── base.py              # Plugin framework: public import surface for plugin authors
-├── discovery.py         # pkgutil auto-discovery of plugins
-├── orchestrator.py      # Plugin engine: compute, aggregate, compare, plot
-├── stats.py             # default_scalar_comparison, format_scalar_comparison
+├── protocols.py         # polyzymd analyze: FUNCTION_ANALYSES, _analyze_*, ProtocolReport
+├── universe.py          # UniverseProvider, UniverseProvenance, FileIdentity
+├── identity.py          # compute_config_hash: recorded by every stored result, never change it
 ├── exceptions.py        # Typed analysis errors
-├── _framework/          # aggregate_validation, cache_identity, compare,
-│                        # comparison_models, contexts, contract, io,
-│                        # lifecycle, results_base
-├── mda/                 # aggregation, artifacts, base, comparison,
-│                        # frame_selection, job, lifecycle, plugin, store, universe
 ├── shared/              # aa_classification, autocorrelation, centroid, diagnostics,
-│                        # inferential_statistics, loader, multi_run_formatting,
-│                        # paths, plotting, selections, statistics, topology,
-│                        # window, groupings/, selectors/
+│                        # inferential_statistics, loader, plotting, selections,
+│                        # statistics, topology, window, groupings/
 ```
 
-There is no plugin package under `analyses/` any more.
+There is no plugin class, registry, discovery or scaffold: an analysis is a
+function. `polyzymd analyze NAME -c ... --submit` writes and submits the SLURM
+jobs of one command through `workflow/analysis_submit.py`.
 
 rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, secondary_structure,
 native_contacts, contacts and hydrogen_bonds are not plugins. They are functions in
@@ -53,26 +47,18 @@ summary's counts, `functions.hbond_lifetimes` its lifetimes,
 `functions.residue_hbond_occupancy` its `_residues` and
 `functions.residue_pair_hbond_occupancy` (with `labels="returned"`) its `_pairs`.
 
-Retired names: a `plugins.<name>` or `plot_settings.<name>` block for any of
-them in `comparison.yaml` is ignored with a warning
-(`config.comparison.RETIRED_PLUGINS`, `RETIRED_PLUGIN_WARNING`) that names the
-command, the Python function, the analyze protocol page and the agent skill,
-and `polyzymd compare run <name>` exits with the `polyzymd analyze` command
-(`cli._compare_utils.analyze_command_for`). `catalytic_triad` is a routine on
-the study API (`docs/source/how_to/analysis_triad_quickstart.md`), not an
-analysis: `polyzymd analyze catalytic_triad` raises `ProtocolError`
+Retired names and commands: `catalytic_triad` is a routine on the study API
+(`docs/source/how_to/analysis_triad_quickstart.md`), not an analysis:
+`polyzymd analyze catalytic_triad` raises `ProtocolError`
 (`protocols._refuse_retired`) pointing to that page and to
-`polyzymd analyze distances --set pairs=...`. `polyzymd analyze -f
+`polyzymd analyze distances --set pairs=...`. Any other name outside
+`FUNCTION_ANALYSES` raises `ProtocolError` listing them. `polyzymd analyze -f
 comparison.yaml` raises `ProtocolError` with the equivalent `-c` command
-(`cli.analyze._refuse_comparison_file`). Warnings for retired things name the
-replacement, the docs page to read and what to point an agent at.
-
-No shipped analysis is a plugin any more. The plugin framework (`base.py`,
-`discovery.py`, `orchestrator.py`, `stats.py`, `mda/`, `_framework/`, the
-`polyzymd compare` commands, `polyzymd new-analysis` and
-`workflow/analysis_slurm.py`) stays until a later slice removes it; its tests
-register the toy plugin of `tests/analyses/test_protocols.py` (`_install_toy`).
-Do not add plugins.
+(`cli.analyze._refuse_comparison_file`, which reads the file with
+`yaml.safe_load`). The hidden `polyzymd compare` and `polyzymd new-analysis`
+commands (`cli/retired.py`) accept any arguments and exit 2. Messages for
+retired things name the replacement, the docs page to read and what to point
+an agent at.
 
 ## Adding a measurement
 
@@ -95,51 +81,11 @@ study API; see `docs/source/explanation/analysis_api.md`.
 loader. It resolves topology and trajectory files for a replicate, checks
 segment lineage, and builds the MDAnalysis universe.
 
-`polyzymd.analyses.mda.universe.UniverseProvider` wraps `TrajectoryLoader`. It
+`polyzymd.analyses.universe.UniverseProvider` wraps `TrajectoryLoader`. It
 takes a `SimulationConfig`, instantiates the loader lazily, and adds input
-provenance (`UniverseProvenance`) to each load. Plugins and framework code use
-`UniverseProvider`. Nothing else should build a `Universe` directly, and no
-code should construct file paths by hand.
-
-## Plugin framework (being removed)
-
-The rest of this file describes the plugin framework for the code that still
-uses it. Import from `polyzymd.analyses.base`; it re-exports `Analysis`, the
-four lifecycle contexts, `MetricValue`, the comparison models,
-`PluginContractError` and `SlurmResourceHint`. Discovery is automatic through
-`pkgutil`.
-
-## Lifecycle hooks and contexts
-
-| Hook | When | Context | Returns |
-|------|------|---------|---------|
-| `build_mda_jobs()` plus `build_mda_collector()` | `has_compute_stage=True` | `ReplicateContext` | `ReplicateArtifact` through the collector |
-| `aggregate()` | `has_aggregate_stage=True` | `AggregateContext` | Pydantic model or dict |
-| `compare()` | Once per analysis | `ComparisonContext` | Pydantic model, or `None` |
-| `plot()` | Once per analysis | `PlotContext` | `list[Path]` |
-| `extract_metrics()` | Default compare path | `ComparisonContext` | `dict[str, MetricValue]` |
-| `filter_conditions()` | Optional | conditions | filtered conditions |
-| `format()` | Optional | comparison result | CLI text |
-
-Contexts carry what a plugin needs. Never load a config inside a plugin.
-`PlotContext.plot_settings` is always a valid `PlotSettings`, so do not guard
-against `None`. A hook that returns a type outside the contract raises
-`PluginContractError`.
-
-## Two comparison paths
-
-The simple path implements `extract_metrics()` and lets `stats.py` run the
-t-tests, the ANOVA, the Benjamini-Hochberg correction and the ranking. The
-custom path overrides `compare()` and returns its own saveable model.
-
-## Results and plotting
-
-Persist replicate, condition and comparison artifacts through `ArtifactStore`.
-Large arrays and event tables go in validated sidecars that the artifact
-payload refers to. Do not invent a plugin-specific cache filename scheme.
-
-`plot()` reads cached artifacts and sidecars. It must not reload a trajectory
-or rerun an analysis.
+provenance (`UniverseProvenance`) to each load. `Study` uses one provider per
+condition. Nothing else should build a `Universe` directly, and no code should
+construct file paths by hand.
 
 ## Statistical contract
 

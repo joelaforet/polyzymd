@@ -42,7 +42,7 @@ import yaml
 
 import polyzymd as pz
 from polyzymd.analyses.functions import HBOND_PARTS, hydrogen_bonds
-from polyzymd.config.comparison import PlotSettings
+from polyzymd.config.analysis_settings import PlotSettings
 
 settings = PlotSettings(**yaml.safe_load(Path("plot_settings.yaml").read_text()))
 study = pz.Study.from_configs(
@@ -110,17 +110,18 @@ Final manuscript figures may still need custom plotting from the stored
 per-replicate values, {doc}`custom_artifact_plotting`, when a journal, panel
 layout, or statistical annotation requires bespoke styling.
 
-You can also set these optional global fields:
+You can also set these optional fields:
 
-- `output_dir` (default: `figures/`), which the `plot` methods of the study
-  API do not read: they take the folder as their first argument
 - `color_palette` (default: `tab10`)
 - `theme` (fine-grained visual overrides)
+- `semantic_colors` (condition colors, below)
 
-Example with all global fields:
+Any other key is refused with a validation error. The folder of a figure is
+the first argument of the `plot` methods, not a setting.
+
+Example with the scalar fields:
 
 ```yaml
-output_dir: "figures/"
 format: "png"
 dpi: 300
 style: "compact"

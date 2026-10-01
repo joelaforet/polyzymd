@@ -2,16 +2,15 @@
 
 This reference page documents contributor-facing utilities in
 `polyzymd.analyses.shared`. These modules provide reusable building blocks for
-the shipped analysis functions and your own; framework internals are documented
-with their owning packages.
+the shipped analysis functions and your own.
 
-The package root re-exports common helpers for convenience. Import specialized
-selectors, grouping classes, and module-specific helpers from their submodules.
+The package root re-exports common helpers for convenience. Import grouping
+classes and module-specific helpers from their submodules.
 
 ## Trajectory loading and windows
 
 Use these modules to locate trajectories, parse time values, and resolve the
-trajectory window passed into MDAnalysis job lifecycles.
+trajectory window of each replicate.
 
 ```{eval-rst}
 .. automodule:: polyzymd.analyses.shared.loader
@@ -82,44 +81,15 @@ grouped bars, and matrix annotations.
    :no-index:
 ```
 
-## Selections, selectors, and grouping
+## Selections and residue grouping
 
-Selection helpers extend MDAnalysis selections. Selector and grouping packages
-provide reusable abstractions for selecting molecules or classifying residues in
-analysis settings and analysis code.
+Selection helpers extend MDAnalysis selections with midpoints and centres of
+mass. The grouping and amino-acid classification modules classify protein
+residues (for example aromatic, polar, charged) and give the maximum solvent
+accessible surface area of each residue type.
 
 ```{eval-rst}
 .. automodule:: polyzymd.analyses.shared.selections
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
-.. automodule:: polyzymd.analyses.shared.selectors
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
-.. automodule:: polyzymd.analyses.shared.selectors.base
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
-.. automodule:: polyzymd.analyses.shared.selectors.protein
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
-.. automodule:: polyzymd.analyses.shared.selectors.polymer
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-
-.. automodule:: polyzymd.analyses.shared.selectors.solvent
    :members:
    :undoc-members:
    :show-inheritance:
@@ -144,29 +114,7 @@ analysis settings and analysis code.
    :no-index:
 ```
 
-## Diagnostics and path helpers
+## Diagnostics
 
-Diagnostics helpers validate selections and analysis inputs. The module is
-`polyzymd.analyses.shared.diagnostics`. Path helpers standardize
-artifact-oriented file locations used by the plugin framework.
-
-```{eval-rst}
-.. automodule:: polyzymd.analyses.shared.paths
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-```
-
-## Multi-run formatting
-
-Multi-run formatting helpers write the interval and single-replicate notes of
-the scalar comparison tables in `polyzymd.analyses.stats`.
-
-```{eval-rst}
-.. automodule:: polyzymd.analyses.shared.multi_run_formatting
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :no-index:
-```
+Diagnostics helpers validate selections and the equilibration window. The
+module is `polyzymd.analyses.shared.diagnostics`.

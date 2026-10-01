@@ -1,17 +1,12 @@
 """One-call, self-describing analysis protocol for scripts and coding agents.
 
-:func:`analyze` takes an analysis name and one or more simulation config paths,
-builds a comparison in memory, runs the existing plugin pipeline and returns a
-:class:`ProtocolReport` in which every number states what it is. Every field is
-described in ``docs/source/reference/analysis_protocol_report.md``.
-
-Plugins store their statistics in three shapes: the MDAnalysis comparison
-artifact, the framework scalar ``ComparisonResult``, and a plugin's own
-``BaseComparisonResult``, which may group rows by run label or pair label and
-may nest them one level deeper. :func:`_read` maps all three onto the report
-models themselves, so the rest of the module has one shape to render. A result
-grouped by run reports one group at a time, named in ``run``, the rest listed
-in ``all_runs``.
+:func:`analyze` takes the name of one of the analyses in
+:data:`FUNCTION_ANALYSES` and one or more simulation config paths, builds a
+:class:`~polyzymd.analyses.study.Study` of them, measures the analysis with
+:meth:`~polyzymd.analyses.study.Study.timeseries` or
+:meth:`~polyzymd.analyses.study.Study.per_replicate`, and returns a
+:class:`ProtocolReport` in which every number states what it is. Every field
+is described in ``docs/source/reference/analysis_protocol_report.md``.
 
 The replicate is the sampling unit throughout: every mean, interval and test
 uses replicates, never frames, as its sample.
@@ -34,19 +29,35 @@ References
 
 from __future__ import annotations
 
-import hashlib
 import math
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator, Mapping, Sequence
+from typing import Any, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from polyzymd.analyses.exceptions import AnalysisError, ProtocolError
+from polyzymd.analyses.exceptions import ProtocolError
 
-if TYPE_CHECKING:
-    from polyzymd.analyses.base import Analysis
-    from polyzymd.config.comparison import ComparisonConfig
+#: Published page of the polyzymd analyze protocol.
+ANALYZE_PROTOCOL_URL = (
+    "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html"
+)
+
+#: Agent skill that teaches the polyzymd analyze protocol.
+ANALYZE_AGENT_SKILL = ".claude/skills/polyzymd-analyze/SKILL.md"
+
+#: Published page on writing an analysis as a function for the study API.
+ANALYSIS_API_URL = "https://polyzymd.readthedocs.io/en/latest/explanation/analysis_api.html"
+
+#: Published page of the catalytic triad routine on the study API.
+TRIAD_ROUTINE_URL = (
+    "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html"
+)
+
+#: Where a retirement message sends a reader, and what to point an agent at.
+RETIRED_DOCS_POINTER = (
+    f"Read {ANALYZE_PROTOCOL_URL}, or point an agent at {ANALYZE_AGENT_SKILL} or that page "
+    "to learn the protocol."
+)
 
 # Verdict vocabulary. Kept small so a caller can branch on it without parsing
 # the rest of the sentence.
@@ -65,8 +76,8 @@ VERDICT_VOCABULARY = (
     VERDICT_NOT_TESTABLE,
 )
 
-#: Analyses that run through Study.timeseries instead of a plugin, with the
-#: settings each one takes and their defaults.
+#: The analyses polyzymd analyze runs, each through Study.timeseries or
+#: Study.per_replicate, with the settings each one takes and their defaults.
 FUNCTION_ANALYSES = {
     "rg": {"selection": "protein"},
     "rmsd": {
@@ -154,9 +165,6 @@ __all__ = [
     "ProtocolProvenance",
     "ProtocolReport",
     "analyze",
-    "build_report",
-    "get_analysis_class",
-    "run_protocol",
 ]
 
 
@@ -175,8 +183,7 @@ class ConditionReport(BaseModel):
     ``eq_detected_frame`` and ``eq_detected_ns`` give, for each, the start of
     the equilibrated region that pymbar ``detect_equilibration`` finds in the
     production series, as a production frame index from 0 and as simulation
-    time. They are diagnostics and change no value. All are empty for a result
-    read from a plugin artifact. ``entry`` is the label of this row in a
+    time. They are diagnostics and change no value. ``entry`` is the label of this row in a
     labelled result, such as a residue ID, and ``None`` otherwise.
     """
 
@@ -201,7 +208,7 @@ class PairwiseReport(BaseModel):
     """One comparison of the primary metric, control against one condition.
 
     ``delta`` is ``mean(b) - mean(a)`` and ``cohens_d`` is oriented to match it.
-    ``p_adjusted`` of ``None`` means the plugin stored no corrected p value, so
+    ``p_adjusted`` of ``None`` means no corrected p value was computed, so
     the row describes a difference rather than deciding it; ``testable`` of
     ``False`` means a condition has fewer than two replicates. ``family_size``
     is the number of tests in the Benjamini-Hochberg family this row was
@@ -232,9 +239,8 @@ class PairwiseReport(BaseModel):
 class ProtocolProvenance(BaseModel):
     """Versions, config hashes, output paths and settings of one protocol run.
 
-    ``settings`` holds the analysis settings a function analysis ran with and
-    what they resolved to, such as the residues of an rmsf core, and is empty
-    for a plugin.
+    ``settings`` holds the analysis settings the analysis ran with and what
+    they resolved to, such as the residues of an rmsf core.
     """
 
     polyzymd_version: str
@@ -248,9 +254,9 @@ class ProtocolProvenance(BaseModel):
 class ProtocolReport(BaseModel):
     """A validated answer to "what is this metric, and does it differ?".
 
-    ``run`` names the selected run or pair label for a plugin that measures one
-    metric on several selections; ``all_metrics`` and ``all_runs`` list the
-    rest, the selected one first.
+    ``run`` names the selected value of an analysis that measures several,
+    such as a pair label of ``distances``; ``all_metrics`` and ``all_runs``
+    list the rest, the selected one first.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -349,30 +355,27 @@ def analyze(
         Window discarded from every replicate, for example ``"10ns"``. Applied
         uniformly; defaults to the package default.
     settings : dict, optional
-        Plugin settings, validated against the plugin's ``Settings`` model.
+        Settings of the analysis; the keys it takes and their defaults are in
+        :data:`FUNCTION_ANALYSES`.
     labels : sequence of str, optional
         One label per config. Defaults to each config's directory name.
     output_dir : Path, optional
-        Where ``polyzymd_results/`` and ``figures/`` are written, and for a
-        registered plugin ``analysis/`` and ``comparison/``.
+        Where ``polyzymd_results/`` and ``figures/`` are written.
     recompute : bool, optional
         Recompute replicates instead of reusing cached results.
     run : str, optional
-        Run or pair label to report, for a plugin that measures one metric on
-        several selections. Defaults to the first one.
+        Value to report, for an analysis that measures several (for example
+        ``contact_fraction_residues`` of ``contacts``). Defaults to the first
+        one; ``all_runs`` lists the others.
     eq_check : bool, optional
-        For the analyses in :data:`FUNCTION_ANALYSES`, report the pymbar
-        detected start of the equilibrated region of each replicate. ``False`` skips it. It changes
-        no value either way.
+        Report the pymbar detected start of the equilibrated region of each
+        replicate. ``False`` skips it. It changes no value either way.
     plots : bool, optional
-        For the analyses in :data:`FUNCTION_ANALYSES`, draw the figures into
-        ``<output_dir>/figures/<name>/`` and record that folder in
-        ``provenance.output_paths["figures"]``. ``False`` draws none.
+        Draw the figures into ``<output_dir>/figures/<name>/`` and record that
+        folder in ``provenance.output_paths["figures"]``. ``False`` draws none.
     stride : int, optional
-        For the analyses in :data:`FUNCTION_ANALYSES`, measure every
-        ``stride``-th production frame of every replicate, 1 by default; see
-        :meth:`~polyzymd.analyses.study.Study.from_configs`. The plugin
-        analyses take every frame and refuse another stride.
+        Measure every ``stride``-th production frame of every replicate, 1 by
+        default; see :meth:`~polyzymd.analyses.study.Study.from_configs`.
 
     Returns
     -------
@@ -382,153 +385,49 @@ def analyze(
     Raises
     ------
     ProtocolError
-        If the name is unknown, a config is missing, the labels do not match
-        the configs, the settings are invalid, or no replicates are found.
-
-    Notes
-    -----
-    The analyses in :data:`FUNCTION_ANALYSES` run through
-    :func:`_analyze_function` instead of a plugin.
+        If the name is not in :data:`FUNCTION_ANALYSES` (``catalytic_triad``
+        gets the triad routine instead), a config is missing, the labels do
+        not match the configs, the settings are invalid, or no replicates are
+        found.
     """
-    _refuse_retired(name)
-    if name in FUNCTION_ANALYSES:
-        return _analyze_function(
-            name,
-            configs,
-            replicates=replicates,
-            equilibration=equilibration,
-            settings=settings,
-            labels=labels,
-            output_dir=output_dir,
-            recompute=recompute,
-            run=run,
-            eq_check=eq_check,
-            plots=plots,
-            stride=stride,
-        )
-    if stride != 1:
-        raise ProtocolError(
-            f"{name} runs as a comparison plugin, which measures every production frame.",
-            hint=f"Drop --stride, or use one of {', '.join(FUNCTION_ANALYSES)}.",
-        )
-    analysis_cls = get_analysis_class(name)
-    config = _build_config(
-        analysis_cls,
+    _require_known(name)
+    return _analyze_function(
+        name,
         configs,
         replicates=replicates,
         equilibration=equilibration,
         settings=settings,
         labels=labels,
         output_dir=output_dir,
+        recompute=recompute,
+        run=run,
+        eq_check=eq_check,
+        plots=plots,
+        stride=stride,
     )
-    return run_protocol(
-        analysis_cls(), config, equilibration=equilibration, recompute=recompute, run=run
-    )
 
 
-def run_protocol(
-    analysis: "str | Analysis",
-    config: "ComparisonConfig",
-    *,
-    equilibration: str | None = None,
-    recompute: bool = False,
-    run: str | None = None,
-) -> ProtocolReport:
-    """Run the pipeline for an existing comparison config and report it.
+def _require_known(name: str) -> None:
+    """Raise ``ProtocolError`` unless ``name`` is in :data:`FUNCTION_ANALYSES`.
 
-    ``analysis`` is a plugin instance or a canonical analysis name. This is what
-    :func:`analyze` calls for a registered plugin once it has built a config in
-    memory. Raises ``ProtocolError`` if the
-    name is unknown or the pipeline produced no comparable result.
+    ``catalytic_triad`` gets :func:`_refuse_retired`; any other unknown name
+    gets the list of analyses and the page on writing a function instead.
     """
-    from polyzymd.analyses.orchestrator import run_comparison
-
-    if isinstance(analysis, str) and analysis in FUNCTION_ANALYSES:
+    _refuse_retired(name)
+    if name not in FUNCTION_ANALYSES:
         raise ProtocolError(
-            f"{analysis} reads simulation configs, not a comparison.yaml.",
-            hint=f"Run polyzymd analyze {analysis} -c A/config.yaml -c B/config.yaml.",
-        )
-    if isinstance(analysis, str):
-        analysis = get_analysis_class(analysis)()
-    resolved = equilibration or config.defaults.equilibration_time
-    try:
-        result = run_comparison(analysis, config, recompute=recompute, equilibration=resolved)
-    except AnalysisError:
-        raise
-    except (FileNotFoundError, ValueError, OSError) as exc:
-        raise ProtocolError(
-            f"{analysis.name}: the analysis pipeline failed: {exc}",
+            f"No analysis named {name!r}.",
             hint=(
-                "Check that every config path is right and that the replicate "
-                "directories hold production trajectories."
-            ),
-        ) from exc
-    return build_report(analysis, config, result, equilibration=resolved, run=run)
-
-
-def build_report(
-    analysis: "Analysis",
-    config: "ComparisonConfig",
-    pipeline_result: Mapping[str, Any],
-    *,
-    equilibration: str | None = None,
-    run: str | None = None,
-) -> ProtocolReport:
-    """Turn a finished comparison pipeline result into a report.
-
-    ``polyzymd compare run --format agent`` renders a comparison it has already
-    run through this, so both commands report the same fields. Raises
-    ``ProtocolError`` if no condition carries a usable metric, or if ``run``
-    names a group the plugin did not report.
-    """
-    comparison = pipeline_result.get("comparison")
-    if comparison is None:
-        raise ProtocolError(
-            f"{analysis.name}: the comparison produced no result.",
-            hint=(
-                "At least one condition must have aggregated replicate results; "
-                "run with --recompute after checking the replicate directories."
+                f"Use one of {', '.join(FUNCTION_ANALYSES)}. For another measurement, "
+                f"write a function and run it with Study.timeseries or Study.per_replicate: "
+                f"{ANALYSIS_API_URL}."
             ),
         )
-
-    read = _read(comparison, analysis.name)
-    group = _select_group(read, run, analysis.name)
-    conditions = [item for name, item in read.series if name == group]
-    by_label = {item.label: item for item in conditions}
-    pairwise = [
-        _complete(row, by_label, read.test)
-        for name, row in read.rows
-        if name == group and row.a in by_label and row.b in by_label
-    ]
-    by_run = read.grouped_by_run
-    metric = read.metric if by_run else group
-    unit = read.units.get(group) or read.units.get(read.metric)
-    aggregated = dict(pipeline_result.get("aggregated") or {})
-    ordered = [group] + [name for name in read.groups if name != group]
-
-    return ProtocolReport(
-        analysis=analysis.name,
-        protocol_version=str(getattr(analysis, "protocol_version", "1")),
-        metric=metric,
-        unit=unit,
-        run=group if by_run else None,
-        all_metrics=[metric] if by_run else ordered,
-        all_runs=ordered if by_run else [],
-        equilibration=equilibration or config.defaults.equilibration_time,
-        frames_per_replicate=_frames(aggregated, conditions),
-        conditions=conditions,
-        pairwise=pairwise,
-        warnings=_warnings(comparison, aggregated, conditions, pairwise, group, read),
-        provenance=_provenance(analysis, config, pipeline_result),
-        verdict=_verdict(metric, unit, conditions, pairwise),
-    )
 
 
 def _refuse_retired(name: str) -> None:
     """Raise ``ProtocolError`` for ``catalytic_triad``, which is now a routine on the study API."""
     if name == "catalytic_triad":
-        from polyzymd.config.comparison import TRIAD_ROUTINE_URL
-
         raise ProtocolError(
             "catalytic_triad is no longer a polyzymd analyze analysis: the triad is now a "
             "routine on the study API, which counts each triad hydrogen bond with "
@@ -540,20 +439,6 @@ def _refuse_retired(name: str) -> None:
                 "--set pairs=<pairs.yaml>."
             ),
         )
-
-
-def get_analysis_class(name: str) -> type["Analysis"]:
-    """Look up an analysis plugin class by name, raising ``ProtocolError`` if unknown."""
-    from polyzymd.analyses.discovery import get_analysis, list_all_names
-
-    _refuse_retired(name)
-    try:
-        return get_analysis(name)
-    except KeyError as exc:
-        raise ProtocolError(
-            f"Unknown analysis {name!r}.",
-            hint=f"Use one of: {', '.join(sorted([*list_all_names(), *FUNCTION_ANALYSES]))}.",
-        ) from exc
 
 
 def _analyze_function(
@@ -582,8 +467,7 @@ def _analyze_function(
     summarises it; with several it compares each one with the first by
     Welch's t test. With ``plots``, ``rg`` and ``rmsd`` draw
     ``<name>_timeseries`` and ``<name>_comparison``, and ``rg`` also
-    ``rg_distribution``, into ``<output_dir>/figures/<name>/``, as the legacy
-    plugins did. ``rmsf`` and ``rmsd_per_residue`` go to :func:`_analyze_rmsf`, and ``distances``
+    ``rg_distribution``, into ``<output_dir>/figures/<name>/``. ``rmsf`` and ``rmsd_per_residue`` go to :func:`_analyze_rmsf`, and ``distances``
     to :func:`_analyze_pairs`. Raises
     ``ProtocolError`` for a setting the analysis does not take, or a ``run``
     for ``rg`` or ``rmsd``.
@@ -1836,7 +1720,7 @@ def _study(
 ) -> Any:
     """Build the Study of ``configs``, with the package default equilibration window."""
     from polyzymd.analyses.study import Study
-    from polyzymd.config.comparison import AnalysisDefaults
+    from polyzymd.config.analysis_settings import AnalysisDefaults
 
     paths = [Path(item).expanduser().resolve() for item in configs]
     return Study.from_configs(
@@ -1972,7 +1856,7 @@ def _analyze_pairs(
     return report.model_copy(update={"analysis": name, "run": run, "all_runs": list(results)})
 
 
-# Config construction
+# Condition labels
 
 
 def _labels(configs: Sequence[Path], labels: Sequence[str] | None) -> list[str]:
@@ -1999,351 +1883,30 @@ def _labels(configs: Sequence[Path], labels: Sequence[str] | None) -> list[str]:
     return unique
 
 
-def _replicates_on_disk(config_path: Path, label: str) -> list[int]:
-    """Find the replicates with directories under the config's scratch directory."""
-    from polyzymd.config.schema import SimulationConfig
-
-    try:
-        found = [
-            int(replicate)
-            for replicate, _ in SimulationConfig.from_yaml(config_path).discover_replicate_dirs()
-        ]
-    except (OSError, ValueError, KeyError) as exc:
-        raise ProtocolError(
-            f"Condition {label!r}: could not read {config_path}: {exc}",
-            hint="Point -c at a PolyzyMD simulation config.yaml.",
-        ) from exc
-    if not found:
-        raise ProtocolError(
-            f"Condition {label!r}: no replicate directories under the scratch directory of "
-            f"{config_path}.",
-            hint="Pass --replicates 1-3 to state which replicates to analyze.",
-        )
-    return sorted(found)
+# Report rows
 
 
-def _build_config(
-    analysis_cls: type["Analysis"],
-    configs: Sequence[Path | str],
-    *,
-    replicates: Sequence[int] | None,
-    equilibration: str | None,
-    settings: dict | None,
-    labels: Sequence[str] | None,
-    output_dir: Path | None,
-) -> "ComparisonConfig":
-    """Build the in-memory equivalent of a hand-written comparison.yaml."""
-    from pydantic import ValidationError
+def _condition(label: str, values: Sequence[float]) -> ConditionReport:
+    """Summarise one condition's replicate values as n, mean, sem and 95 percent interval.
 
-    from polyzymd.config.comparison import ComparisonConfig
+    The statistics come from :func:`~polyzymd.analyses.shared.statistics.mean_sem_ci`.
+    A condition without values gets n 0, a NaN mean and no sem or interval.
+    """
+    from polyzymd.analyses.shared.statistics import mean_sem_ci
 
-    if not configs:
-        raise ProtocolError(
-            "No simulation configs given.",
-            hint="Pass at least one -c config.yaml; the first one is the control.",
-        )
-    paths = [Path(item).expanduser().resolve() for item in configs]
-    missing = [str(path) for path in paths if not path.is_file()]
-    if missing:
-        raise ProtocolError(
-            f"Config file(s) not found: {', '.join(missing)}.",
-            hint="Check the -c paths; each one must be a simulation config.yaml.",
-        )
-
-    chosen = _labels(paths, labels)
-    try:
-        config = ComparisonConfig(
-            name=f"{analysis_cls.name}_protocol",
-            description="Comparison built in memory by polyzymd.analyses.protocols.analyze",
-            control=chosen[0],
-            conditions=[
-                {
-                    "label": label,
-                    "config": path,
-                    "replicates": (
-                        [int(value) for value in replicates]
-                        if replicates
-                        else _replicates_on_disk(path, label)
-                    ),
-                }
-                for label, path in zip(chosen, paths, strict=True)
-            ],
-            defaults={"equilibration_time": equilibration} if equilibration else {},
-            plugins={analysis_cls.name: dict(settings)} if settings else {},
-        )
-    except (ValidationError, ValueError) as exc:
-        fields = ", ".join(sorted(analysis_cls.Settings.model_fields)) or "none"
-        raise ProtocolError(
-            f"Invalid settings for {analysis_cls.name}: {exc}",
-            hint=f"Settable keys for this plugin: {fields}.",
-        ) from exc
-
-    root = Path(output_dir).expanduser().resolve() if output_dir else Path.cwd()
-    config.source_path = root / "comparison.yaml"
-    return config
-
-
-# Normalization: three stored shapes onto the report models
-
-
-@dataclass
-class _Read:
-    """What :func:`_read` recovered, with each entry tagged by its group."""
-
-    metric: str
-    groups: list[str] = field(default_factory=list)
-    series: list[tuple[str, ConditionReport]] = field(default_factory=list)
-    rows: list[tuple[str, PairwiseReport]] = field(default_factory=list)
-    units: dict[str, str | None] = field(default_factory=dict)
-    test: str = "student_t"
-    correction: str = "BH"
-    grouped_by_run: bool = False
-
-
-def _dump(obj: Any) -> dict[str, Any]:
-    """Return a plain dictionary for a pydantic model or a mapping."""
-    return dict(obj.model_dump()) if hasattr(obj, "model_dump") else dict(obj or {})
-
-
-def _metric_keys(summary: Mapping[str, Any]) -> list[str]:
-    """Name every metric in a condition mapping by pairing a mean key with its sem."""
-    names = []
-    for key in summary:
-        if key.endswith("_mean") and f"{key[:-5]}_sem" in summary:
-            names.append(key[:-5])
-        elif f"{key}_sem" in summary:
-            names.append(key)
-    return names
-
-
-def _lookup(summary: Mapping[str, Any], metric: str, suffix: str) -> Any:
-    """Read one statistic of a metric, accepting the key spellings plugins use."""
-    for key in (f"{metric}_{suffix}", f"{suffix}_{metric}"):
-        if key in summary:
-            return summary[key]
-    return None
-
-
-def _condition(
-    label: str, values: Sequence[float], summary: Mapping[str, Any], metric: str
-) -> ConditionReport:
-    """Summarise one condition from replicate values, or from a stored mean and sem."""
-    from polyzymd.analyses.shared.statistics import (
-        CI_METHOD_STUDENT_T,
-        mean_sem_ci,
-        student_t_coverage_factor,
-    )
-
-    if values:
-        stats = mean_sem_ci(values)
-        limits = None if stats.ci_low is None else (stats.ci_low, stats.ci_high)
-        return ConditionReport(
-            label=label,
-            n_replicates=len(values),
-            mean=stats.mean,
-            sem=stats.sem,
-            ci95=limits,
-            ci_method=stats.ci_method,
-            replicate_values=list(values),
-        )
-
-    mean = _float(summary[metric] if metric in summary else _lookup(summary, metric, "mean"))
-    sem = _optional_float(_lookup(summary, metric, "sem"))
-    n = int(summary.get("n_replicates", 0) or 0)
-    factor = student_t_coverage_factor(n) if sem is not None and n > 1 else None
-    limits = None if factor is None else (mean - factor * sem, mean + factor * sem)
+    if not values:
+        return ConditionReport(label=label, n_replicates=0, mean=float("nan"))
+    stats = mean_sem_ci(values)
+    limits = None if stats.ci_low is None else (stats.ci_low, stats.ci_high)
     return ConditionReport(
         label=label,
-        n_replicates=n,
-        mean=mean,
-        sem=sem,
+        n_replicates=len(values),
+        mean=stats.mean,
+        sem=stats.sem,
         ci95=limits,
-        ci_method=f"{CI_METHOD_STUDENT_T}_from_sem" if limits else None,
+        ci_method=stats.ci_method,
+        replicate_values=list(values),
     )
-
-
-def _group_summaries(summary: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    """Return a condition's per-run or per-pair summaries, empty when it has none."""
-    for key, value in summary.items():
-        if key.endswith("_summaries") and isinstance(value, list) and value:
-            entries = [_dump(entry) for entry in value]
-            if "label" in entries[0] and "per_replicate_means" in entries[0]:
-                return entries
-    return []
-
-
-def _iter_rows(source: Mapping[str, Any]) -> Iterator[dict[str, Any]]:
-    """Yield every pairwise row, flattening the one level some plugins nest."""
-    for row in source.get("pairwise_comparisons") or []:
-        row = _dump(row)
-        nested = row.get("aggregate_comparisons")
-        if isinstance(nested, list) and nested:
-            yield from (_dump(inner) for inner in nested)
-        else:
-            yield row
-
-
-def _row(raw: Mapping[str, Any], stem: str, test: str, correction: str) -> PairwiseReport:
-    """Build one comparison, trying the plain field name then the prefixed one.
-
-    ``delta`` is NaN when the row stores no condition means; :func:`_complete`
-    fills it from the condition summaries.
-    """
-
-    def get(name: str) -> Any:
-        return raw.get(name, raw.get(f"{stem}_{name}"))
-
-    mean_a = _optional_float(raw.get("condition_a_mean"))
-    mean_b = _optional_float(raw.get("condition_b_mean"))
-    testable = get("testable")
-    testable = True if testable is None else bool(testable)
-    return PairwiseReport(
-        a=str(raw.get("condition_a", "")),
-        b=str(raw.get("condition_b", "")),
-        delta=float("nan") if mean_a is None or mean_b is None else mean_b - mean_a,
-        p=_optional_float(get("p_value")),
-        p_adjusted=_optional_float(get("p_value_adjusted")),
-        test=test,
-        correction=correction,
-        cohens_d=_negate(_optional_float(get("cohens_d"))),
-        hedges_g=_negate(_optional_float(get("hedges_g"))),
-        direction=str(get("direction") or "unchanged"),
-        significant=bool(get("significant")) and testable,
-        testable=testable,
-    )
-
-
-def _complete(
-    row: PairwiseReport, by_label: Mapping[str, ConditionReport], test: str
-) -> PairwiseReport:
-    """Fill in the difference and its interval from the two condition summaries."""
-    first, second = by_label[row.a], by_label[row.b]
-    delta = second.mean - first.mean if math.isnan(row.delta) else row.delta
-    return row.model_copy(
-        update={
-            "delta": delta,
-            "delta_ci95": _difference_ci(first.replicate_values, second.replicate_values, test),
-        }
-    )
-
-
-def _read(comparison: Any, analysis_name: str) -> _Read:
-    """Map any comparison result shape onto groups, condition summaries and rows."""
-    raw = getattr(comparison, "payload", None)
-    payload = dict(raw) if isinstance(raw, Mapping) and "condition_summaries" in raw else None
-    body = _dump(comparison)
-    source = payload or body
-    key = "condition_summaries" if payload else "conditions"
-    summaries = [_dump(item) for item in source.get(key) or []]
-    if not summaries:
-        raise ProtocolError(
-            f"{analysis_name}: the comparison reported no conditions.",
-            hint="Check that each condition has aggregated replicate results on disk.",
-        )
-
-    metric = str(body.get("metric") or "")
-    stem = metric[5:] if metric.startswith("mean_") else metric
-    read = _Read(metric=metric or analysis_name)
-    read.test, read.correction = _tests(payload, body)
-
-    if _group_summaries(summaries[0]):
-        read.grouped_by_run = True
-        for summary in summaries:
-            label = str(summary.get("label", ""))
-            for entry in _group_summaries(summary):
-                group = str(entry.get("label", ""))
-                if group not in read.groups:
-                    read.groups.append(group)
-                values = [_float(value) for value in entry.get("per_replicate_means") or []]
-                read.series.append((group, _condition(label, values, entry, metric)))
-    else:
-        for summary in summaries:
-            label = str(summary.get("label", ""))
-            names = _metric_keys(summary)
-            if not names and summary.get("replicate_values"):
-                # BaseConditionSummary declares one metric, named at the top
-                # level, with its values on the condition itself.
-                names = [read.metric]
-            for name in names:
-                if name not in read.groups:
-                    read.groups.append(name)
-                key = "replicate_values" if name == read.metric else f"{name}_replicate_values"
-                values = [_float(value) for value in summary.get(key) or []]
-                read.series.append((name, _condition(label, values, summary, name)))
-        if not read.groups:
-            raise ProtocolError(
-                f"{analysis_name}: no condition reported a usable metric.",
-                hint="Run 'polyzymd compare run --format json' to inspect the raw result.",
-            )
-        read.metric = read.groups[0]
-
-    label_key = _group_key(source)
-    for entry in _iter_rows(source):
-        group = str(entry.get("metric") or entry.get(label_key) or read.groups[0])
-        read.rows.append((group, _row(entry, stem, read.test, read.correction)))
-
-    read.units = _units(source, summaries, read.groups)
-    return read
-
-
-def _group_key(source: Mapping[str, Any]) -> str:
-    """Name the row field carrying the run or pair label, if there is one."""
-    for row in source.get("pairwise_comparisons") or []:
-        for key in _dump(row):
-            if key.endswith("_label"):
-                return key
-    return "metric"
-
-
-def _units(
-    source: Mapping[str, Any], summaries: Sequence[Mapping[str, Any]], groups: Sequence[str]
-) -> dict[str, str | None]:
-    """Collect each group's unit from the metric metadata and the conditions."""
-    units: dict[str, str | None] = dict.fromkeys(groups)
-    metadata = source.get("metric_metadata") or {}
-    if isinstance(metadata, Mapping):
-        for name, entry in metadata.items():
-            if isinstance(entry, Mapping) and entry.get("unit"):
-                units[str(name)] = str(entry["unit"])
-    for summary in summaries:
-        for group in list(units):
-            value = _lookup(summary, group, "unit")
-            if value:
-                units[group] = str(value)
-    return units
-
-
-def _tests(payload: Mapping[str, Any] | None, body: Mapping[str, Any]) -> tuple[str, str]:
-    """Name the two-sample test and the multiplicity correction the plugin used."""
-    parameters = (payload or {}).get("statistical_parameters") or {}
-    ttest = parameters.get("ttest_method") or body.get("ttest_method") or "student"
-    posthoc = parameters.get("posthoc_method") or body.get("posthoc_method") or "ttest_bh"
-    if posthoc == "tukey_hsd":
-        return "tukey_hsd", "tukey_hsd"
-    return (
-        "welch_t" if ttest == "welch" else "student_t",
-        "BH" if posthoc == "ttest_bh" else str(posthoc),
-    )
-
-
-def _select_group(read: _Read, run: str | None, analysis_name: str) -> str:
-    """Choose the group to report, defaulting to the first one the plugin listed."""
-    if not read.groups:
-        raise ProtocolError(
-            f"{analysis_name}: the comparison reported no metric.",
-            hint="Run 'polyzymd compare run --format json' to inspect the raw result.",
-        )
-    if run is None:
-        return read.groups[0]
-    if run not in read.groups:
-        raise ProtocolError(
-            f"{analysis_name}: no run or metric named {run!r}.",
-            hint=f"Use one of: {', '.join(read.groups)}.",
-        )
-    return run
-
-
-# Statistics, provenance and wording
 
 
 def _difference_ci(
@@ -2373,108 +1936,6 @@ def _difference_ci(
     if not (math.isfinite(low) and math.isfinite(high)) or low == high:
         return None
     return (low, high)
-
-
-def _frames(
-    aggregated: Mapping[str, Any], conditions: Sequence[ConditionReport]
-) -> dict[str, int | None]:
-    """Read the frames each replicate contributed from the condition provenance."""
-    frames: dict[str, int | None] = {}
-    for condition in conditions:
-        provenance = getattr(aggregated.get(condition.label), "provenance", None)
-        selection = provenance.get("frame_selection") if isinstance(provenance, Mapping) else None
-        count = selection.get("n_frames_selected") if isinstance(selection, Mapping) else None
-        frames[condition.label] = int(count) if isinstance(count, (int, float)) else None
-    return frames
-
-
-def _warnings(
-    comparison: Any,
-    aggregated: Mapping[str, Any],
-    conditions: Sequence[ConditionReport],
-    pairwise: Sequence[PairwiseReport],
-    group: str,
-    read: _Read,
-) -> list[str]:
-    """Gather the sampling caveats first, then the warnings the artifacts carry."""
-    warnings = []
-    for item in conditions:
-        if item.n_replicates < 2:
-            warnings.append(
-                f"condition {item.label} has one replicate, so {group} has no "
-                "standard error and no interval"
-            )
-        elif item.n_replicates < 3:
-            warnings.append(
-                f"condition {item.label} has {item.n_replicates} replicates, so its "
-                "95 percent interval is about 12.7 times its standard error"
-            )
-    if any(not pair.testable for pair in pairwise):
-        warnings.append(
-            "a comparison is not testable because a condition has fewer than two "
-            "replicates; not testable is not the same as not different"
-        )
-    if pairwise and all(pair.p_adjusted is None for pair in pairwise):
-        warnings.append(
-            "these comparisons carry no multiplicity-corrected p value, so each "
-            "describes a difference rather than deciding it"
-        )
-    if conditions and not any(item.replicate_values for item in conditions):
-        warnings.append(
-            "this plugin stored no per-replicate values, so intervals were rebuilt "
-            "from stored standard errors and differences get none"
-        )
-    if len(read.groups) > 1:
-        kind = "runs" if read.grouped_by_run else "metrics"
-        others = ", ".join(name for name in read.groups if name != group)
-        warnings.append(f"reporting {group}; this analysis also reported {kind} {others}")
-    for origin in (comparison, *aggregated.values()):
-        warnings.extend(str(text) for text in getattr(origin, "warnings", []) or [])
-
-    seen: set[str] = set()
-    return [text for text in warnings if not (text in seen or seen.add(text))]
-
-
-def _provenance(
-    analysis: "Analysis", config: "ComparisonConfig", pipeline_result: Mapping[str, Any]
-) -> ProtocolProvenance:
-    """Record package versions, config hashes and the paths the run wrote."""
-    from importlib.metadata import PackageNotFoundError, version
-
-    from polyzymd import __version__
-    from polyzymd.analyses._framework.lifecycle import _resolve_settings
-
-    hashes = {}
-    for condition in getattr(config, "conditions", []):
-        try:
-            hashes[condition.label] = hashlib.sha256(
-                Path(condition.config).read_bytes()
-            ).hexdigest()
-        except OSError:
-            continue
-    try:
-        fingerprint = analysis.aggregate_settings_fingerprint(_resolve_settings(analysis, config))
-    except (AnalysisError, ValueError, TypeError):
-        fingerprint = None
-    try:
-        mdanalysis = version("MDAnalysis")
-    except PackageNotFoundError:
-        mdanalysis = None
-
-    paths = {}
-    if pipeline_result.get("comparison_path") is not None:
-        paths["comparison_result"] = str(pipeline_result["comparison_path"])
-    plots = list(pipeline_result.get("plots") or [])
-    if plots:
-        paths["figures"] = str(Path(plots[0]).parent)
-
-    return ProtocolProvenance(
-        polyzymd_version=__version__,
-        mdanalysis_version=mdanalysis,
-        config_hashes=hashes,
-        settings_fingerprint=fingerprint,
-        output_paths=paths,
-    )
 
 
 def _verdict(
@@ -2511,8 +1972,8 @@ def _verdict(
             )
         elif pair.p_adjusted is None:
             sentences.append(
-                f"{VERDICT_NO_TEST} for {metric} between {pair.a} and {pair.b}; the plugin "
-                f"stored no multiplicity-corrected p value ({evidence})"
+                f"{VERDICT_NO_TEST} for {metric} between {pair.a} and {pair.b}; no "
+                f"multiplicity-corrected p value was computed ({evidence})"
             )
         elif not pair.significant:
             sentences.append(
@@ -2529,30 +1990,6 @@ def _verdict(
 
 
 # Formatting helpers
-
-
-def _float(value: Any) -> float:
-    """Coerce to float, mapping anything unusable to NaN."""
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float("nan")
-
-
-def _optional_float(value: Any) -> float | None:
-    """Coerce to float, keeping ``None``, NaN and unusable values as ``None``."""
-    if value is None:
-        return None
-    try:
-        result = float(value)
-    except (TypeError, ValueError):
-        return None
-    return None if math.isnan(result) else result
-
-
-def _negate(value: float | None) -> float | None:
-    """Reorient an effect size from control minus treatment to b minus a."""
-    return None if value is None else -value
 
 
 def _num(value: float | None) -> str:

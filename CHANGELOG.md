@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`polyzymd analyze NAME -c ... --submit`.**  Runs the same command as a
+  SLURM array: one task per condition and replicate, each measuring and
+  storing its replicate's result with `--no-plots`, and a report job,
+  submitted with `--dependency=afterany`, that runs the full command, reads
+  every stored result, measures any replicate a task left unmeasured and
+  writes the report and figures.  The scripts go to
+  `<output-dir>/slurm/<analysis>_<YYYYmmdd-HHMMSS>/` (`tasks.tsv`,
+  `replicates.sbatch`, `report.sbatch`, `logs/`, and `report.txt`,
+  `report.json` with `--format json`, or the `-o` path).  `--preset` takes `alpine-cpu`, `blanca-shirts`,
+  `blanca-chbe-rdi` or `bridges2-rm`; `--partition`, `--account`, `--qos`,
+  `--time` (default `12:00:00`), `--mem` (`16G`) and `--cpus` (`2`) override
+  it; `--dry-run` writes the scripts without submitting.  The jobs run the
+  submitting Python interpreter and `PYTHONPATH` in the submitting directory
+  (`polyzymd.workflow.analysis_submit`).  On Blanca, two LipA conditions of
+  five replicates each gave the same report as one job.
+
 - **Hydrogen-bond functions on the study API.**  `polyzymd.analyses.functions`
   gains `hbond_atoms` (the hydrogens bonded to N, O or S that can be donated,
   and the acceptors: every O, and N or S bonded to at most two atoms),
@@ -361,10 +377,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still load), and `production_N_parameters.json` gains a `provenance` block
   with those values plus hostname and SLURM job id.  New helpers
   `polyzymd.utils.version.runtime_provenance()` / `record_provenance()`;
-  `get_polyzymd_version()` moved there and is re-exported from
-  `analyses/_framework/results_base.py`.
+  `get_polyzymd_version()` moved there.
 
 ### Changed
+
+- **Modules moved out of the plugin framework.**  `UniverseProvider`,
+  `UniverseProvenance` and `FileIdentity` are in `polyzymd.analyses.universe`;
+  `compute_config_hash` is in `polyzymd.analyses.identity`, with the same
+  hash, so stored study results stay valid; `PlotSettings`, `PlotTheme`, the
+  semantic colour models and `AnalysisDefaults` are in
+  `polyzymd.config.analysis_settings` (`polyzymd.config` still exports
+  `PlotSettings` and `PlotTheme`).
+
+- **`PlotSettings` takes no per-analysis blocks and no `output_dir`.**  It
+  holds `format`, `dpi`, `style`, `color_palette`, `theme` and
+  `semantic_colors`, and refuses any other key.
+
+- **`scripts/convert_legacy.py --print-commands`** replaces
+  `--generate-comparison`, `--comparison-name` and `--enzyme-pdb`.  It groups
+  the converted runs into conditions and prints the `polyzymd analyze -c`
+  commands for rmsf, distances and contacts, control first, without writing
+  `comparison.yaml`; `--triad-pairs PATH` writes the CalB triad pairs the
+  distances command reads.
 
 - **`n_independent_frames` is now a real number, not a truncated integer.**
   It is `N/g`, so a replicate with 9000 frames and `g = 260.4` reports
@@ -388,6 +422,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The analysis plugin framework.**  `polyzymd.analyses.base`,
+  `discovery`, `orchestrator`, `stats`, `polyzymd.analyses._framework`, the
+  `polyzymd.analyses.mda` package (jobs, collectors, artifacts, artifact
+  store, aggregation and comparison), `polyzymd.analyses.shared.selectors`,
+  `shared.paths` and `shared.multi_run_formatting` are removed, with
+  `protocols.build_report`, `run_protocol` and `get_analysis_class` and the
+  stored plugin comparison artifacts under `tests/data/comparison_artifacts/`.
+  So are the `shared` helpers only plugins called: from `shared.plotting`
+  `load_canonical_plot_artifacts`, `plugin_plot_settings`, `resolve_error_bar`,
+  `get_theme`, `get_condition_colors`, `annotate_cells`, `symmetric_clim`,
+  `annotate_uncertainty`, `suppress_singleton_errors`,
+  `scatter_stacked_segment_replicates` and `has_replicate_uncertainty`; from
+  `shared.statistics` `compute_sem`, `StatResult`, `PerResidueStats`,
+  `aggregate_per_residue_stats`, `aggregate_region_stats`,
+  `weighted_mean_with_sem`, `uncertainty_block` and `metric_summary_payload`;
+  the amino acid class tables and helpers of `shared.aa_classification`
+  (`get_max_asa` and its tables stay); `CustomGrouping`; and the exceptions
+  `PluginContractError`, `ReplicateSkippedError`, `ReplicateError`,
+  `AggregationError`, `ComparisonError`, `PlotError`, `DependencyError`,
+  `StaleCacheError` and `SelectionError`.
+  Every analysis is a function of an MDAnalysis `Universe` run with
+  `Study.timeseries` or `Study.per_replicate`
+  (https://polyzymd.readthedocs.io/en/latest/explanation/analysis_api.html).
+  `polyzymd analyze` refuses a name outside `FUNCTION_ANALYSES` with the list
+  of names, and `--stride` applies to every analysis.
+
+- **`polyzymd compare`.**  `init`, `validate`, `run`, `plot-all`, `run-all`,
+  `submit`, `submit-all`, `status`, `finalize` and the hidden worker
+  commands are removed.  A hidden `polyzymd compare` accepts any arguments,
+  exits 2 and prints `polyzymd analyze NAME -c config.yaml ... --eq 10ns`,
+  `polyzymd analyze ... --submit --preset <cluster>`,
+  https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html
+  and `.claude/skills/polyzymd-analyze/SKILL.md`.
+
+- **`polyzymd new-analysis` and its plugin scaffold.**  A hidden
+  `polyzymd new-analysis` accepts any arguments, exits 2 and points to the
+  study API page, `Study.per_replicate` and `Study.timeseries`, and the
+  agent skill.
+
+- **`comparison.yaml` and `polyzymd.config.comparison`.**  `ComparisonConfig`,
+  `ConditionConfig`, `PluginSettingsContainer`, `MDABackendPolicyConfig`,
+  `generate_comparison_template` and the comparison template are removed;
+  `polyzymd analyze -f comparison.yaml` still prints the equivalent `-c`
+  command.
+
+- **`polyzymd.workflow.analysis_slurm`**, the SLURM jobs of
+  `polyzymd compare submit`.  `polyzymd analyze --submit` replaces it.
+
 - **The `contacts` comparison plugin (`polyzymd.analyses.contacts`).**
   `polyzymd analyze contacts -c A/config.yaml -c B/config.yaml` measures
   polymer-protein contacts instead, through
@@ -397,25 +479,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cutoff` Å) and `contact_lifetimes` (`--run mean_lifetime`,
   `lifetime_events` and `censored_fraction`, how long contacts last).
   `--set method=distance --set cutoff=4.5 --set heavy_atoms=false` gives the
-  coverage and contact fractions the plugin computed.  A `comparison.yaml`
-  with a `plugins.contacts` or `plot_settings.contacts` block still loads: the
-  block is ignored with a warning naming the `polyzymd analyze contacts`
-  command, and `polyzymd compare run contacts` exits with that command for the
-  file's conditions.  `polyzymd new-analysis` refuses the names of analyses
-  that `polyzymd analyze` runs from functions, such as `contacts`.
-  `polyzymd.analyses.protocols.build_report` still reads comparison results
-  the plugin stored.
+  coverage and contact fractions the plugin computed.
 
 - **The `hydrogen_bonds` comparison plugin (`polyzymd.analyses.hydrogen_bonds`,
   `HydrogenBondsAnalysis`).**  `polyzymd analyze hydrogen_bonds -c
   A/config.yaml -c B/config.yaml` measures hydrogen bonds instead, through the
   functions listed under Added.  Given the plugin's donor and acceptor atoms
   and a 3.0 Å cutoff, it reproduces the plugin's 8.849 bonds per frame on a
-  real replicate.  A `plugins.hydrogen_bonds` or `plot_settings.hydrogen_bonds`
-  block in `comparison.yaml` is ignored with a warning naming the command and
-  the functions, and `polyzymd compare run hydrogen_bonds` exits with the
-  command for the file's conditions.  No shipped analysis is a comparison
-  plugin any more; the plugin framework is being removed.
+  real replicate.
 
 - **`polyzymd analyze catalytic_triad`.**  The catalytic triad is a routine on
   the study API: count each triad hydrogen bond with `functions.hbond_count`
@@ -423,9 +494,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html
   shows, and measure the triad distances with `polyzymd analyze distances
   --set pairs=pairs.yaml`.  `polyzymd analyze catalytic_triad` and
-  `analyze("catalytic_triad", ...)` raise a `ProtocolError` pointing to both,
-  a `catalytic_triad` block in `comparison.yaml` warns with the same pointers,
-  and `polyzymd compare run catalytic_triad` prints the distances command.
+  `analyze("catalytic_triad", ...)` raise a `ProtocolError` pointing to both.
 
 - **`polyzymd analyze -f comparison.yaml`.**  Every analysis reads the
   simulation configs given with `-c`, control first.  `-f` now exits 2 with a
@@ -433,12 +502,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq
   ...` command built from the file, and points to
   https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html
-  and to `.claude/skills/polyzymd-analyze/SKILL.md` for an agent.  The
-  `plugins` and `plot_settings` sections of `comparison.yaml` are retired: the
-  warning for a retired block gives the same pointers, `polyzymd compare init`
-  writes neither section, and `scripts/convert_legacy.py --generate-comparison`
-  writes the CalB triad pairs to `triad_pairs.yaml` and prints `polyzymd
-  analyze -c` commands.
+  and to `.claude/skills/polyzymd-analyze/SKILL.md` for an agent.  It reads
+  only the file's `conditions` and `defaults.equilibration_time`.
 
 ## [1.3.0] - 2026-04-09 — Analysis Plugin System & OCP Compliance
 

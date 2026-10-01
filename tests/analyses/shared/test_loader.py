@@ -872,10 +872,10 @@ class TestEngineOverride:
 
 
 class TestFindTopologyCompat:
-    """find_topology(working_dir) works for direct plugin callers."""
+    """find_topology(working_dir) works for a caller that passes its own working_dir."""
 
     def test_arbitrary_working_dir(self, tmp_path):
-        """Plugin passes an explicit working_dir, not from config."""
+        """An explicit working_dir, not from the config, is searched."""
         arbitrary_dir = tmp_path / "some_other_dir"
         arbitrary_dir.mkdir()
         (arbitrary_dir / "solvated_system.pdb").write_text("ATOM")

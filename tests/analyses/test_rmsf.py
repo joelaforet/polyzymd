@@ -447,17 +447,6 @@ def test_core_values_keep_the_identity_and_follow_core_and_regions(configs, tmp_
         )
 
 
-def test_comparison_yaml_rmsf_block_is_retired(tmp_path) -> None:
-    from polyzymd.config.comparison import PlotSettings, PluginSettingsContainer
-
-    with pytest.warns(
-        UserWarning, match="study.per_replicate with polyzymd.analyses.functions.rmsf"
-    ):
-        PluginSettingsContainer(rmsf={"selection": "name CA"})
-    with pytest.warns(UserWarning, match="plot_settings.rmsf block, which is ignored"):
-        PlotSettings(rmsf={"highlight_residues": [1]})
-
-
 def test_bounds_warn_per_label_and_carry_to_the_mean(study, tmp_path) -> None:
     """An interval below the lower bound of one label is flagged at that label only."""
     from polyzymd.analyses.timeseries import ReplicateValues

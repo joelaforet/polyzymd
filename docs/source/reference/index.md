@@ -36,7 +36,7 @@ OpenFF chemistry requirements and PolyzyMD chain conventions for enzyme PDBs.
 :link: analysis_functions
 :link-type: doc
 
-Shipped analysis functions, analysis settings, the report schema, comparison YAML schema, and post-hoc testing options.
+Shipped analysis functions, the report schema, the comparison tests, and the archive of experimental analyses.
 :::
 
 :::{grid-item-card} API Documentation
@@ -73,12 +73,9 @@ Benchmarks <benchmarks>
 ```{toctree}
 :maxdepth: 1
 
-Comparison YAML Schema <comparison_yaml>
 ProtocolReport Schema <analysis_protocol_report>
 Shipped analysis functions <analysis_functions>
-Analysis Settings Reference <analysis_plugin_settings>
-Comparison and Plotting Reference <analysis_comparison_reference>
-Post-Hoc Testing Reference <posthoc_testing>
+Comparison Tests Reference <posthoc_testing>
 Experimental Analyses Archive <experimental_analyses_archive>
 ```
 
@@ -92,5 +89,4 @@ Full Python API documentation.
 API Reference <../api/index>
 Package and workflow APIs <../api/package_api>
 Analysis APIs <../api/analysis_api>
-MDAnalysis extension-layer APIs <../api/mda_api>
 ```

@@ -3782,138 +3782,6 @@ def info() -> None:
 
 
 # =============================================================================
-# Scaffold Command
-# =============================================================================
-
-
-@cli.command("new-analysis")
-@click.argument("name")
-@click.option(
-    "--class-name",
-    default=None,
-    help="PascalCase class prefix (default: auto-derived from NAME).",
-)
-@click.option(
-    "--style",
-    type=click.Choice(["dict"], case_sensitive=False),
-    default=None,
-    help="Advanced package style; only dict canonical artifacts are supported.",
-)
-@click.option(
-    "--advanced",
-    is_flag=True,
-    default=False,
-    help="Request the advanced MDAnalysis-native package scaffold.",
-)
-@click.option(
-    "--project-root",
-    type=click.Path(exists=True, file_okay=False, resolve_path=True),
-    default=None,
-    help="Repository root. Default: auto-detected from this file's location.",
-)
-@click.option(
-    "--force",
-    is_flag=True,
-    default=False,
-    help="Overwrite existing files.",
-)
-@click.option(
-    "--dry-run",
-    is_flag=True,
-    default=False,
-    help="Print what would be created without writing files.",
-)
-def new_analysis(
-    name: str,
-    class_name: str | None,
-    style: str | None,
-    advanced: bool,
-    project_root: str | None,
-    force: bool,
-    dry_run: bool,
-) -> None:
-    """Scaffold an analysis plugin.
-
-    NAME is the snake_case plugin name (e.g. 'solvent_shell').
-
-    Default creates:
-
-    \b
-      src/polyzymd/analyses/<NAME>.py             — simple MDAnalysis-native plugin
-      tests/analyses/plugins/test_<NAME>.py       — contributor-focused tests
-
-    Advanced package scaffolds create:
-
-    \b
-      src/polyzymd/analyses/<NAME>/__init__.py     — plugin lifecycle wiring
-      src/polyzymd/analyses/<NAME>/_mda.py         — lazy AnalysisBase helper
-      tests/analyses/plugins/test_<NAME>.py        — generated plugin tests
-
-    Run the generated tests with:
-
-    \b
-      pixi run -e build pytest tests/analyses/plugins/test_<NAME>.py -v
-    """
-    from polyzymd.cli._scaffold.models import DEFAULT_STYLE
-    from polyzymd.cli.scaffold import generate_scaffold, validate_class_name, validate_name
-
-    # Force needs scaffold-level ownership checks before registered-name rejection
-    error = validate_name(name, check_existing=not force)
-    if error:
-        raise click.BadParameter(error, param_hint="'NAME'")
-
-    # Validate class name if provided
-    if class_name is not None:
-        cls_error = validate_class_name(class_name)
-        if cls_error:
-            raise click.BadParameter(cls_error, param_hint="'--class-name'")
-
-    # Resolve project root
-    if project_root is None:
-        # Walk up from this file to find pyproject.toml
-        root = Path(__file__).resolve().parent
-        for _ in range(10):
-            if (root / "pyproject.toml").exists():
-                break
-            root = root.parent
-        else:
-            raise click.UsageError(
-                "Could not auto-detect project root. Pass --project-root explicitly."
-            )
-    else:
-        root = Path(project_root)
-
-    try:
-        effective_style = style or DEFAULT_STYLE
-        created = generate_scaffold(
-            name,
-            root,
-            class_name=class_name,
-            style=effective_style,
-            advanced=advanced,
-            force=force,
-            dry_run=dry_run,
-        )
-    except (FileExistsError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
-
-    verb = "Would create" if dry_run else "Created"
-    for p in created:
-        try:
-            display = p.relative_to(root)
-        except ValueError:
-            display = p
-        colored_echo(f"  {verb}: {display}", phase="cli")
-
-    if not dry_run:
-        colored_echo(f"\nPlugin '{name}' scaffolded successfully!", phase="cli")
-        colored_echo(
-            f"Run tests: pixi run -e build pytest tests/analyses/plugins/test_{name}.py -v",
-            phase="cli",
-        )
-
-
-# =============================================================================
 # Analysis Commands (from analysis module)
 # =============================================================================
 
@@ -3922,9 +3790,10 @@ def _register_optional_command_groups() -> None:
     """Register optional command groups when deps are importable."""
     from polyzymd.cli.analysis_topology import analysis_topology_command
     from polyzymd.cli.analyze import analyze_command
-    from polyzymd.cli.compare import compare
+    from polyzymd.cli.retired import compare, new_analysis
 
     cli.add_command(compare)
+    cli.add_command(new_analysis)
     cli.add_command(analyze_command)
     cli.add_command(analysis_topology_command)
 

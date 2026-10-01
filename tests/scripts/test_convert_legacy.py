@@ -11,7 +11,6 @@ from types import ModuleType
 import pytest
 import yaml
 
-from polyzymd.config.comparison import ComparisonConfig
 from polyzymd.config.schema import SimulationConfig
 
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "convert_legacy.py"
@@ -305,33 +304,35 @@ def test_generate_config_yaml_includes_engine_and_loads(
     assert config.engine == "openmm"
 
 
-def test_generate_comparison_yaml_configures_no_retired_plugin(
+def test_analyze_commands_write_the_triad_pairs_and_no_comparison_yaml(
     convert_legacy: ModuleType, tmp_path: Path
 ) -> None:
-    """comparison.yaml lists the conditions only; the triad pairs go to triad_pairs.yaml."""
+    """The commands read the converted configs; only the triad pairs file is written."""
     converted = tmp_path / "converted"
     sim_dir = converted / (
         "10A_RESTRAINT_LipA_Resorufin-Butyrate_363.0K_0.5ns-NVT_1000.0ns-NPT_run1"
     )
     sim_dir.mkdir(parents=True)
     (sim_dir / "config.yaml").write_text("name: legacy\n", encoding="utf-8")
+    pairs_path = tmp_path / "analysis" / "triad_pairs.yaml"
 
-    comparison_yaml = convert_legacy.generate_comparison_yaml(
+    commands = convert_legacy.analyze_commands(
         output_dir=converted,
-        comparison_dir=tmp_path / "comparison",
-        project_name="legacy_compare",
         control_label="No Polymer (Control)",
+        pairs_path=pairs_path,
     )
 
-    data = yaml.safe_load(comparison_yaml.read_text(encoding="utf-8"))
-    assert "plugins" not in data
-    assert set(data["plot_settings"]) == {"output_dir", "format", "dpi", "style", "color_palette"}
-    pairs = yaml.safe_load((comparison_yaml.parent / "triad_pairs.yaml").read_text())
+    pairs = yaml.safe_load(pairs_path.read_text())
     assert [pair["label"] for pair in pairs] == ["Ser77-His156", "His156-Asp133"]
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        config = ComparisonConfig.from_yaml(comparison_yaml)
-    assert config.validate_config() == []
+    assert sorted(path.name for path in tmp_path.rglob("*.yaml")) == [
+        "config.yaml",
+        "triad_pairs.yaml",
+    ]
+    config = (sim_dir / "config.yaml").resolve()
+    assert commands[1] == (
+        f"polyzymd analyze distances -c {config} --label 'No Polymer (Control)' "
+        f"--replicates 1 --eq 10ns --set pairs={pairs_path}"
+    )
 
 
 def _write_converted_config(root: Path, folder_name: str) -> Path:
@@ -416,10 +417,10 @@ def test_group_conditions_separates_duplicate_polymer_chain_counts(
     assert sorted(cond["replicates"] for cond in conditions.values()) == [[1], [1, 2]]
 
 
-def test_generate_comparison_yaml_preserves_disambiguated_entries(
+def test_analyze_commands_keep_every_disambiguated_condition(
     convert_legacy: ModuleType, tmp_path: Path
 ) -> None:
-    """Comparison YAML should include all disambiguated duplicate-label conditions."""
+    """Every disambiguated duplicate-label condition gets a -c pair, control first."""
     converted = tmp_path / "converted"
     control_config = _write_converted_config(
         converted,
@@ -436,30 +437,23 @@ def test_generate_comparison_yaml_preserves_disambiguated_entries(
         "363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
     )
 
-    comparison_yaml = convert_legacy.generate_comparison_yaml(
+    rmsf, distances, contacts = convert_legacy.analyze_commands(
         output_dir=converted,
-        comparison_dir=tmp_path / "comparison",
-        project_name="legacy_compare",
         control_label="No Polymer (Control)",
     )
 
-    data = yaml.safe_load(comparison_yaml.read_text(encoding="utf-8"))
-    entries = {entry["label"]: entry for entry in data["conditions"]}
-    assert list(entries)[0] == "No Polymer (Control)"
-    assert len(entries) == 3
-    assert entries["No Polymer (Control)"]["replicates"] == [1]
-    assert any(label.startswith("SBMA-EGMA 50% (") for label in entries)
-    assert any("38 chains" in label for label in entries)
-    assert any("77 chains" in label for label in entries)
-    config_values = {entry["config"] for entry in entries.values()}
-    assert f"../{control_config.relative_to(tmp_path)}" in config_values
-    assert f"../{polymer_38.relative_to(tmp_path)}" in config_values
-    assert f"../{polymer_77.relative_to(tmp_path)}" in config_values
-    config = ComparisonConfig.from_yaml(comparison_yaml)
-    assert config.validate_config() == []
+    assert contacts.startswith(
+        f"polyzymd analyze contacts -c {control_config.resolve()} --label 'No Polymer (Control)' "
+    )
+    assert f"-c {polymer_38.resolve()} --label 'SBMA-EGMA 50% (" in contacts
+    assert f"-c {polymer_77.resolve()} --label 'SBMA-EGMA 50% (" in contacts
+    assert "38 chains" in contacts and "77 chains" in contacts
+    assert contacts.endswith("--replicates 1 --eq 10ns")
+    assert rmsf.endswith("--set reference_mode=average --set 'highlight_residues=[77,133,156]'")
+    assert distances.endswith("--set pairs=<pairs.yaml>")
 
 
-def test_generate_comparison_yaml_rejects_ambiguous_control_base_label(
+def test_analyze_commands_reject_ambiguous_control_base_label(
     convert_legacy: ModuleType, tmp_path: Path
 ) -> None:
     """Ambiguous base control labels should ask for an exact disambiguated label."""
@@ -474,12 +468,7 @@ def test_generate_comparison_yaml_rejects_ambiguous_control_base_label(
     )
 
     with pytest.raises(ValueError, match="--control") as exc_info:
-        convert_legacy.generate_comparison_yaml(
-            output_dir=converted,
-            comparison_dir=tmp_path / "comparison",
-            project_name="legacy_compare",
-            control_label="No Polymer (Control)",
-        )
+        convert_legacy.analyze_commands(output_dir=converted, control_label="No Polymer (Control)")
 
     message = str(exc_info.value)
     assert "No Polymer (Control) (10A, CALB" in message
@@ -487,31 +476,26 @@ def test_generate_comparison_yaml_rejects_ambiguous_control_base_label(
     assert 'Pass --control "<exact label>"' in message
 
 
-def test_generate_comparison_yaml_accepts_explicit_disambiguated_control(
+def test_analyze_commands_accept_explicit_disambiguated_control(
     convert_legacy: ModuleType, tmp_path: Path
 ) -> None:
-    """An exact disambiguated control label should be accepted and written."""
+    """An exact disambiguated control label is accepted and comes first."""
     converted = tmp_path / "converted"
     _write_converted_config(
         converted,
         "10A_RESTRAINT_CALB_Resorufin-Butyrate_conf1_363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
     )
-    _write_converted_config(
+    control = _write_converted_config(
         converted,
         "12A_RESTRAINT_CALB_Resorufin-Butyrate_conf2_363.0K_0.5ns-NVT_1000.0ns-NPT_run1",
     )
     control_label = "No Polymer (Control) (12A, CALB, Resorufin-Butyrate, conf2, 363K, no polymer)"
 
-    comparison_yaml = convert_legacy.generate_comparison_yaml(
-        output_dir=converted,
-        comparison_dir=tmp_path / "comparison",
-        project_name="legacy_compare",
-        control_label=control_label,
-    )
+    commands = convert_legacy.analyze_commands(output_dir=converted, control_label=control_label)
 
-    data = yaml.safe_load(comparison_yaml.read_text(encoding="utf-8"))
-    assert data["control"] == control_label
-    assert data["conditions"][0]["label"] == control_label
+    assert commands[2].startswith(
+        f"polyzymd analyze contacts -c {control.resolve()} --label '{control_label}' "
+    )
 
 
 def test_validate_output_config_validation_failure_returns_false(
@@ -902,10 +886,13 @@ def test_convert_simulation_returns_false_for_empty_trajectory_single_production
     assert "Empty production trajectory" in caplog.text
 
 
-def test_conversion_guidance_uses_canonical_compare_commands(
-    convert_legacy: ModuleType, caplog: pytest.LogCaptureFixture, tmp_path: Path
+def test_print_commands_logs_the_analyze_commands_only(
+    convert_legacy: ModuleType,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    """Generated guidance uses current comparison and analyze commands only."""
+    """--print-commands logs polyzymd analyze commands and the triad routine, nothing else."""
     caplog.set_level("INFO", logger=convert_legacy.logger.name)
     converted = tmp_path / "converted"
     sim_dir = converted / (
@@ -913,21 +900,28 @@ def test_conversion_guidance_uses_canonical_compare_commands(
     )
     sim_dir.mkdir(parents=True)
     (sim_dir / "config.yaml").write_text("name: legacy\n", encoding="utf-8")
-
-    convert_legacy.generate_comparison_yaml(
-        output_dir=converted,
-        comparison_dir=tmp_path / "comparison",
-        project_name="legacy_compare",
-        control_label="No Polymer (Control)",
+    pairs = tmp_path / "triad_pairs.yaml"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "convert_legacy.py",
+            "--output-dir",
+            str(converted),
+            "--print-commands",
+            "--triad-pairs",
+            str(pairs),
+        ],
     )
 
+    with pytest.raises(SystemExit) as exit_info:
+        convert_legacy.main()
+
+    assert exit_info.value.code == 0
     guidance = caplog.text
-    assert "polyzymd compare validate -f" in guidance
     for name in ("rmsf", "distances", "contacts"):
         assert f"polyzymd analyze {name} -c " in guidance
-    assert "triad_pairs.yaml" in guidance
+    assert f"--set pairs={pairs}" in guidance
     assert "how_to/analysis_triad_quickstart.html" in guidance
-    assert "compare run" not in guidance
-    assert "plot-all" not in guidance
-    assert "catalytic_triad" not in guidance
-    assert "analysis.yaml" not in guidance
+    assert "compare" not in guidance
+    assert "comparison.yaml" not in guidance
+    assert not (tmp_path / "comparison").exists()

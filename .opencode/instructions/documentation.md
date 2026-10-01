@@ -132,7 +132,9 @@ autodoc-pydantic's `pydantic_field` directives for Pydantic models).
 | `api/config.md` | `polyzymd.config.schema` | 24 Pydantic BaseModel classes |
 | `api/workflow.md` | `polyzymd.workflow.slurm` | SlurmConfig, JobContext dataclasses |
 | `api/workflow.md` | `polyzymd.workflow.daisy_chain` | DaisyChainConfig, SubmissionResult dataclasses |
-| `api/workflow.md` | `polyzymd.workflow.analysis_slurm` | Dataclasses for analysis SLURM jobs |
+| `api/workflow.md` | `polyzymd.workflow.analysis_submit` | Resources, Submission dataclasses of `analyze --submit` |
+| `api/config.md` | `polyzymd.config.analysis_settings` | PlotSettings, PlotTheme and the other plot settings models |
+| `api/analyses.md` | every study API module | Pydantic report models and dataclasses (Source, UniverseProvenance, ...) |
 | `api/core.md` | `polyzymd.core.parameters` | SimulationParameters and related dataclasses |
 | `api/core.md` | `polyzymd.core.restraints` | RestraintDefinition, AtomSelection dataclasses |
 | `api/builders.md` | `polyzymd.builders.solvent` | SolventComposition, SolvationCounts dataclasses |
@@ -183,7 +185,7 @@ docs/source/
 ├── how_to/              # Task-oriented practical guides
 ├── reference/           # Lookup-oriented factual docs
 │   ├── data_requirements.md    # Data & directory layout reference
-│   ├── comparison_yaml.md      # comparison.yaml schema (conditions; plugins retired)
+│   ├── analysis_protocol_report.md  # ProtocolReport fields
 │   └── cli_reference.md        # CLI command reference
 ├── explanation/         # Conceptual "why" discussions
 ├── contributor_guide/   # Contributor landing page and setup
@@ -193,7 +195,7 @@ docs/source/
 │   ├── workflow.md      # workflow/ (has :no-index: for dataclasses)
 │   ├── core.md          # core/ (has :no-index: for dataclasses)
 │   ├── builders.md      # builders/ (solvent has :no-index:)
-│   ├── analyses.md      # analyses/: study API, functions and the plugin framework being removed
+│   ├── analyses.md      # analyses/: study, timeseries, figures, reference, protocols, universe, identity
 │   └── *.rst            # Per-module stubs
 └── _static/             # Static assets (CSS, images)
 ```
@@ -208,30 +210,19 @@ rendering in Sphinx. See `code-style.md` for the full docstring template.
 Use MyST roles for cross-referencing:
 - `{doc}path/to/page` — link to another page
 - `{ref}label` — link to a labeled section
-- `{func}polyzymd.analyses.discovery.get_analysis` — link to API docs
-- `{class}polyzymd.analyses.base.Analysis` — link to class docs
+- `{func}polyzymd.analyses.functions.radius_of_gyration` — link to API docs
+- `{class}polyzymd.analyses.study.Study` — link to class docs
 
 ## Key API Classes for Documentation
 
-| Class | Location | Role |
+| Class or function | Location | Role |
 |-------|----------|------|
-| `Analysis` | `analyses/base.py` | Plugin base class |
-| `ReplicateContext` | `analyses/base.py` | Context for per-replicate execution |
-| `AggregateContext` | `analyses/base.py` | Context for aggregate |
-| `ComparisonContext` | `analyses/base.py` | Context for compare |
-| `PlotContext` | `analyses/base.py` | Context for plot |
-| `MetricValue` | `analyses/base.py` | Scalar metric descriptor |
-| `ComparisonResult` | `analyses/base.py` | Universal comparison result |
-| `get_analysis()` | `analyses/discovery.py` | Plugin lookup |
-| `list_analyses()` | `analyses/discovery.py` | Plugin enumeration |
-| `run_comparison()` | `analyses/orchestrator.py` | Run one analysis |
-| `run_all_comparisons()` | `analyses/orchestrator.py` | Run all analyses |
-
-`polyzymd.analyses.base` is a public facade. It re-exports context and result
-models from private framework modules so contributor documentation can keep a
-single stable import path. Do not document private `_framework/` modules as
-user-facing API pages unless explicitly writing
-internal developer reference material.
+| `Study`, `Condition`, `Replicate` | `analyses/study.py` | Every replicate of every condition as a `Universe` |
+| `Timeseries`, `ReplicateValues` | `analyses/timeseries.py` | Stored per-frame and per-replicate values, `summary()`, `compare()` |
+| `analyze`, `ProtocolReport` | `analyses/protocols.py` | `polyzymd analyze` in Python and its report |
+| `UniverseProvider` | `analyses/universe.py` | Replicate loading and input file records |
+| `compute_config_hash` | `analyses/identity.py` | Config hash recorded by every stored result |
+| `PlotSettings`, `PlotTheme` | `config/analysis_settings.py` | Figure format, style, theme and condition colours |
 
 ## ReadTheDocs
 

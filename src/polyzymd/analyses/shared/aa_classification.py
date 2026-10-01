@@ -1,10 +1,4 @@
-"""Amino acid classification and SASA reference data.
-
-This module provides centralized reference data for amino acid properties:
-
-- Maximum accessible surface area (maxASA) from Tien et al. 2013
-- Standard amino acid classification by physicochemical properties
-- Default MDAnalysis selection strings for each AA class
+"""Maximum accessible surface area of each amino acid, from Tien et al. 2013.
 
 :func:`get_max_asa` supplies the maximum ASA that
 :func:`polyzymd.analyses.functions.residue_occlusion` compares each residue's
@@ -20,18 +14,7 @@ doi: 10.1371/journal.pone.0080635. PMID: 24278298; PMCID: PMC3836772.
 
 from __future__ import annotations
 
-from enum import Enum
 from typing import Final
-
-# Canonical ordering of amino acid classes for consistent display across plots.
-CANONICAL_AA_CLASS_ORDER: Final[list[str]] = [
-    "aromatic",
-    "polar",
-    "nonpolar",
-    "charged_positive",
-    "charged_negative",
-]
-
 
 #: Residue names of protonation states and disulfide-bonded cysteine, mapped to
 #: the standard residue name.
@@ -49,17 +32,6 @@ PROTONATION_VARIANTS: Final[dict[str, str]] = {
     "GLH": "GLU",
     "LYN": "LYS",
 }
-
-
-class AAClass(str, Enum):
-    """Standard amino acid classifications."""
-
-    AROMATIC = "aromatic"
-    POLAR = "polar"
-    NONPOLAR = "nonpolar"
-    CHARGED_POSITIVE = "charged_positive"
-    CHARGED_NEGATIVE = "charged_negative"
-    UNKNOWN = "unknown"
 
 
 # =============================================================================
@@ -119,98 +91,8 @@ MAX_ASA_TABLE: Final[dict[str, float]] = {
 
 
 # =============================================================================
-# Amino Acid Classification
-# =============================================================================
-
-# Standard classification by physicochemical properties
-# Note: Histidine is classified as aromatic (contains imidazole ring)
-AA_CLASSIFICATION_TABLE: Final[dict[str, str]] = {
-    # Aromatic (contain aromatic rings)
-    "PHE": "aromatic",
-    "TRP": "aromatic",
-    "TYR": "aromatic",
-    "HIS": "aromatic",  # Imidazole ring
-    # Polar (uncharged, can form H-bonds)
-    "SER": "polar",
-    "THR": "polar",
-    "ASN": "polar",
-    "GLN": "polar",
-    "CYS": "polar",
-    # Nonpolar (hydrophobic)
-    "ALA": "nonpolar",
-    "VAL": "nonpolar",
-    "ILE": "nonpolar",
-    "LEU": "nonpolar",
-    "MET": "nonpolar",
-    "GLY": "nonpolar",
-    "PRO": "nonpolar",
-    # Charged positive (basic)
-    "ARG": "charged_positive",
-    "LYS": "charged_positive",
-    # Charged negative (acidic)
-    "ASP": "charged_negative",
-    "GLU": "charged_negative",
-}
-
-# All standard 3-letter amino acid codes
-STANDARD_AA_CODES: Final[list[str]] = list(AA_CLASSIFICATION_TABLE.keys())
-
-
-# =============================================================================
-# MDAnalysis Selection Strings
-# =============================================================================
-
-# Default MDAnalysis selections for each AA class
-DEFAULT_AA_CLASS_SELECTIONS: Final[dict[str, str]] = {
-    "aromatic": "protein and resname PHE TRP TYR HIS",
-    "polar": "protein and resname SER THR ASN GLN CYS",
-    "nonpolar": "protein and resname ALA VAL ILE LEU MET GLY PRO",
-    "charged_positive": "protein and resname ARG LYS",
-    "charged_negative": "protein and resname ASP GLU",
-}
-
-# Residue names for each class (for programmatic access)
-AA_CLASS_RESIDUES: Final[dict[str, list[str]]] = {
-    "aromatic": ["PHE", "TRP", "TYR", "HIS"],
-    "polar": ["SER", "THR", "ASN", "GLN", "CYS"],
-    "nonpolar": ["ALA", "VAL", "ILE", "LEU", "MET", "GLY", "PRO"],
-    "charged_positive": ["ARG", "LYS"],
-    "charged_negative": ["ASP", "GLU"],
-}
-
-
-# =============================================================================
 # Helper Functions
 # =============================================================================
-
-
-def get_aa_class(resname: str) -> str:
-    """Get amino acid classification for a residue name.
-
-    Parameters
-    ----------
-    resname : str
-        3-letter amino acid code (case-insensitive)
-
-    Returns
-    -------
-    str
-        Classification: 'aromatic', 'polar', 'nonpolar',
-        'charged_positive', 'charged_negative', or 'unknown'
-
-    Examples
-    --------
-    >>> get_aa_class("PHE")
-    'aromatic'
-    >>> get_aa_class("lys")
-    'charged_positive'
-    >>> get_aa_class("UNK")
-    'unknown'
-    """
-    normalized = resname.upper().strip()
-    normalized = PROTONATION_VARIANTS.get(normalized, normalized)
-
-    return AA_CLASSIFICATION_TABLE.get(normalized, "unknown")
 
 
 def get_max_asa(resname: str, table: str = "theoretical") -> float | None:
@@ -243,63 +125,3 @@ def get_max_asa(resname: str, table: str = "theoretical") -> float | None:
         raise ValueError(f"table must be 'theoretical' or 'empirical', got {table!r}")
     normalized = resname.upper().strip()
     return tables[table].get(PROTONATION_VARIANTS.get(normalized, normalized))
-
-
-def get_residues_for_class(aa_class: str) -> list[str]:
-    """Get all residue names belonging to an amino acid class.
-
-    Parameters
-    ----------
-    aa_class : str
-        One of: 'aromatic', 'polar', 'nonpolar',
-        'charged_positive', 'charged_negative'
-
-    Returns
-    -------
-    list[str]
-        List of 3-letter amino acid codes in this class
-
-    Raises
-    ------
-    ValueError
-        If aa_class is not a valid classification
-
-    Examples
-    --------
-    >>> get_residues_for_class("aromatic")
-    ['PHE', 'TRP', 'TYR', 'HIS']
-    """
-    if aa_class not in AA_CLASS_RESIDUES:
-        valid = list(AA_CLASS_RESIDUES.keys())
-        raise ValueError(f"Unknown AA class '{aa_class}'. Valid: {valid}")
-    return AA_CLASS_RESIDUES[aa_class].copy()
-
-
-def get_selection_for_class(aa_class: str) -> str:
-    """Get MDAnalysis selection string for an amino acid class.
-
-    Parameters
-    ----------
-    aa_class : str
-        One of: 'aromatic', 'polar', 'nonpolar',
-        'charged_positive', 'charged_negative'
-
-    Returns
-    -------
-    str
-        MDAnalysis selection string
-
-    Raises
-    ------
-    ValueError
-        If aa_class is not a valid classification
-
-    Examples
-    --------
-    >>> get_selection_for_class("aromatic")
-    'protein and resname PHE TRP TYR HIS'
-    """
-    if aa_class not in DEFAULT_AA_CLASS_SELECTIONS:
-        valid = list(DEFAULT_AA_CLASS_SELECTIONS.keys())
-        raise ValueError(f"Unknown AA class '{aa_class}'. Valid: {valid}")
-    return DEFAULT_AA_CLASS_SELECTIONS[aa_class]

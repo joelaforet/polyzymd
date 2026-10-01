@@ -143,7 +143,7 @@ def test_python_analyze_rmsd_refuses_other_settings(configs) -> None:
         analyze("rmsd", [configs["A"]], equilibration=EQUILIBRATION, settings={"runs": []})
     with pytest.raises(ProtocolError) as excinfo:
         analyze("not_an_analysis", [configs["A"]])
-    assert "rmsd" in excinfo.value.hint.split("Use one of: ")[1].split(", ")
+    assert "rmsd" in excinfo.value.hint.split("Use one of ")[1].split(".")[0].split(", ")
 
 
 @pytest.mark.skipif(GMX is None, reason="needs the GROMACS gmx binary")

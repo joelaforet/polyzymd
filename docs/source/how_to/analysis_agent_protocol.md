@@ -110,6 +110,10 @@ error: comparison.yaml is no longer read by polyzymd analyze: every analysis rea
 fix: Run polyzymd analyze hydrogen_bonds -c /study/A/config.yaml --label 'No Polymer' -c /study/B/config.yaml --label SBMA --replicates 1,2,3 --eq 100ns. Read https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html, or point an agent at .claude/skills/polyzymd-analyze/SKILL.md or that page to learn the protocol.
 ```
 
+`polyzymd compare`, with any arguments, exits 2 in the same way and prints
+`polyzymd analyze NAME -c config.yaml ...`, the `--submit --preset <cluster>`
+form for SLURM, this page and the agent skill.
+
 The catalytic triad is not an analysis of this command: `polyzymd analyze
 catalytic_triad` exits 2 and points to {doc}`analysis_triad_quickstart`, the
 routine on the analysis API, and to `polyzymd analyze distances

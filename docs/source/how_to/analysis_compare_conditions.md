@@ -203,10 +203,10 @@ To measure a function of your own on the same conditions, build a
 `polyzymd analyze` does not read `comparison.yaml`. `polyzymd analyze NAME -f
 comparison.yaml` exits with an error that prints the equivalent
 `polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq ...`
-command built from the file's conditions. Loading a `comparison.yaml` that
-still has `plugins:` or per-analysis `plot_settings:` blocks warns once per
-block with the `polyzymd analyze` command and the analysis function that
-replace it.
+command built from the file's conditions, labels, replicates and
+equilibration window. `polyzymd compare`, with any arguments, exits 2 and
+prints the `polyzymd analyze` and `polyzymd analyze ... --submit` commands
+that replace it.
 
 ## Troubleshooting
 

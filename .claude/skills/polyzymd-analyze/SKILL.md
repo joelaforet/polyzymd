@@ -17,7 +17,9 @@ prints one line per condition and comparison, every one of them. Use
 `--format json` when you need every field of the report.
 `polyzymd analyze` does not read `comparison.yaml`: `-f comparison.yaml` exits 2
 and prints the equivalent `-c ... --label ... --replicates ... --eq ...` command
-built from the file, which is the command to run.
+built from the file, which is the command to run. `polyzymd compare` and
+`polyzymd new-analysis` are retired: with any arguments they exit 2 and print
+the replacement. An unknown analysis name exits 2 with the list of names.
 
 Environment: only the `analysis` and `sim-cuda-12-4` pixi envs have the CLI. The
 bare `polyzymd` on PATH points at a system Python without click. Always go
@@ -51,13 +53,23 @@ the triad distances. For any other question, write a function of an MDAnalysis
 `docs/source/reference/analysis_functions.md` and
 `docs/source/how_to/analysis_agent_protocol.md`.
 
+Many replicates: add `--submit --preset <cluster>` (`alpine-cpu`,
+`blanca-shirts`, `blanca-chbe-rdi`, `bridges2-rm`; `--partition`, `--account`,
+`--qos`, `--time`, `--mem`, `--cpus` override) to the same command. It submits
+one SLURM array task per condition and replicate and a report job that starts
+after them all (`afterany`), from `<output-dir>/slurm/<name>_<time>/`, and the
+report lands in `report.txt` there (`report.json` with `--format json`, or
+`-o PATH`). `--dry-run` writes the
+scripts without submitting. Load the cluster's SLURM module first, such as
+`module load slurm/blanca`. See `docs/source/how_to/hpc_execution.md`.
+
 ## 2. Reading the output
 
 ```
-# polyzymd analyze rg  metric mean_rg  unit A  eq 10ns  conditions 2  replicates 3,3  protocol rg/1
+# polyzymd analyze rg  metric mean_rg  unit A  eq 10ns  conditions 2  replicates 3,3  protocol rg/2
 A  n 3  mean 18.42  sem 0.05  ci95 18.2 to 18.64  values 18.4, 18.5, 18.36
 B  n 3  mean 18.73  sem 0.06  ci95 18.47 to 18.99  values 18.71, 18.8, 18.68
-A vs B  delta +0.31  ci95 0.02 to 0.6  p 0.041  p_adj 0.041  test student_t  correction BH  d 1.9  significant
+A vs B  delta +0.31  ci95 0.02 to 0.6  p 0.041  p_adj 0.041  test welch_t  correction BH  d 1.9  significant
 verdict: B larger mean_rg than A (delta +0.31 A, 95% CI 0.02 to 0.6, p_adj 0.041, n 3 vs 3)
 ```
 
@@ -66,7 +78,8 @@ verdict: B larger mean_rg than A (delta +0.31 A, 95% CI 0.02 to 0.6, p_adj 0.041
 - `ci95` on a condition is the Student t interval on its mean. On a comparison
   it is the interval on the difference, uncorrected for multiplicity.
 - `delta` is `mean(b) - mean(a)`, and `d` has the same sign.
-- `significant` uses `p_adj` against the configured alpha, 0.05 by default.
+- `significant` means `p_adj` is at most 0.05 (Benjamini-Hochberg over the
+  comparisons of the report).
 - `run` in the header names the selection when an analysis measures several
   (rg does protein and polymer); `--run LABEL` picks another.
 
@@ -76,7 +89,7 @@ Verdict vocabulary, fixed so you can branch on it:
 |---|---|
 | `larger` / `smaller` | the second condition differs from the control after correction |
 | `no significant difference` | the test ran and did not clear alpha; read the CI before calling it "the same" |
-| `no test recorded` | the result stored no corrected p value; the line describes, it does not decide |
+| `no test recorded` | the row has no corrected p value; the line describes, it does not decide |
 | `not testable` | a condition has fewer than two replicates, so no test exists |
 
 Report the verdict sentence verbatim, with the unit and the replicate counts.
@@ -86,6 +99,7 @@ Report the verdict sentence verbatim, with the unit and the replicate counts.
 - Do not write your own MDAnalysis loop for an analysis that exists. Run the
   protocol and cite its provenance: the `analysis`, the `protocol_version`, the
   equilibration window, and the `config_hashes` from `--format json`.
-- Do not read `_mda.py` to find out what an error bar means. The report says.
+- Do not read the source to find out what an error bar means. The report says,
+  and `docs/source/reference/analysis_protocol_report.md` defines every field.
 - Warnings are part of the answer. A `warning:` line about two replicates
   changes how the number should be read.

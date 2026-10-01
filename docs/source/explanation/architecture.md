@@ -58,7 +58,8 @@ or analysis policy.
 
 `simulation/` runs local minimization, equilibration, checkpointing,
 continuation, and production segments. `workflow/` handles orchestration around
-those runs, especially SLURM job generation, resubmission, and recovery flows.
+those runs, especially SLURM job generation, resubmission, and recovery flows,
+and writes the SLURM jobs of `polyzymd analyze --submit`.
 
 `engines/` isolates engine-specific integration details such as OpenMM or
 GROMACS support. This keeps high-level workflows from depending directly on one
@@ -89,11 +90,9 @@ src/polyzymd/analyses/
 ├── reference.py     # reference structures for RMSD, RMSF and native contacts
 ├── figures.py       # figures drawn from stored values
 ├── protocols.py     # polyzymd analyze: runs a shipped analysis and builds the report
-├── mda/             # MDAnalysis loading and file identity
-├── shared/          # selections, statistics, plotting and loader utilities
-├── base.py, discovery.py, orchestrator.py, stats.py, _framework/
-│                    # the analysis plugin framework, which no shipped analysis
-│                    # uses any more and which is being removed
+├── universe.py      # UniverseProvider: loads each replicate, records its input files
+├── identity.py      # compute_config_hash, recorded by every stored result
+└── shared/          # selections, statistics, plotting and loader utilities
 ```
 
 The public surface for analysis code is `polyzymd.Study` (also
@@ -241,7 +240,7 @@ into module-level details or API reference pages.
 ## Related pages
 
 - contributor workflows: {doc}`../contributor_guide/contributing`
-- extending analyses: {doc}`../contributor_guide/extending_analyses`
+- adding an analysis: {doc}`../contributor_guide/adding_an_analysis`
 - chain conventions: {doc}`residue_assignment`
 - SLURM usage: {doc}`../how_to/hpc_slurm`
 - API reference: {doc}`../api/index`

@@ -10,7 +10,6 @@ footnote saying what it is.
 from __future__ import annotations
 
 import math
-from pathlib import Path
 
 import matplotlib
 import numpy as np
@@ -20,17 +19,14 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 
-from polyzymd.analyses._framework.comparison_models import BasePlotSettings  # noqa: E402
 from polyzymd.analyses.exceptions import StatisticsError  # noqa: E402
 from polyzymd.analyses.shared.plotting import (  # noqa: E402
     add_uncertainty_footnote,
     band_half_widths,
     error_bar_half_widths,
-    resolve_error_bar,
 )
 from tests.analyses.conftest import (  # noqa: E402
     figure_draws_uncertainty,
-    figure_has_uncertainty_footnote,
 )
 
 T_FACTOR_N3 = 4.302652729749462
@@ -141,27 +137,6 @@ class TestErrorBarWidths:
             band_half_widths(np.array([[1.0], [1.1]]), error_bar=bad)
 
 
-class TestErrorBarSetting:
-    """The plugin's own setting must reach the plotter."""
-
-    def test_default_is_the_confidence_interval(self) -> None:
-        """A plugin that declares no preference gets the 95 percent interval."""
-
-        assert BasePlotSettings().error_bar == "ci95"
-
-    def test_plugin_settings_win_over_the_global_object(self) -> None:
-        """A user's per-analysis choice is honoured, not silently dropped."""
-
-        plugin = BasePlotSettings(error_bar="sem")
-
-        assert resolve_error_bar(plugin, object()) == "sem"
-
-    def test_missing_settings_fall_back_to_the_default(self) -> None:
-        """A plugin with no plot settings model still gets a valid choice."""
-
-        assert resolve_error_bar(None, object()) == "ci95"
-
-
 class TestFootnote:
     """Every figure that draws an uncertainty says what it is."""
 
@@ -222,28 +197,3 @@ class TestFootnote:
             assert not figure_draws_uncertainty(fig)
         finally:
             plt.close(fig)
-
-
-class TestEveryPluginFigureIsAudited:
-    """Each plugin must render at least one audited uncertainty figure.
-
-    The conftest audit only sees figures that reach the real ``save_figure``.
-    A test that installs its own stub bypasses it, so this records which plugin
-    modules the audit actually inspected during the session and fails if any
-    plugin that draws uncertainty is never covered.
-    """
-
-    def test_conftest_audit_covers_the_plotter_modules(self) -> None:
-        """The audit must be installed on every plotter module."""
-
-        import importlib
-
-        from tests.analyses.conftest import _PLOTTER_MODULES
-
-        for module_name in _PLOTTER_MODULES:
-            module = importlib.import_module(module_name)
-            assert hasattr(module, "save_figure"), module_name
-            assert module.save_figure.__name__ == "_checked", (
-                f"{module_name} save_figure is not wrapped by the footnote audit; "
-                "a test in this session replaced it"
-            )

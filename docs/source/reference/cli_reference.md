@@ -843,53 +843,6 @@ Example configs: polyzymd/templates/examples/
 
 ---
 
-(polyzymd-new-analysis)=
-## polyzymd new-analysis
-
-Scaffold an analysis plugin and matching tests.
-
-```{note}
-No shipped analysis uses the plugin framework any more: every analysis of
-`polyzymd analyze` runs on the study API, and the framework is being removed.
-To measure something of your own, write a function of an MDAnalysis
-`Universe` and run it with `Study.timeseries` or `Study.per_replicate`; see
-{doc}`../explanation/analysis_api`.
-```
-
-```bash
-polyzymd new-analysis NAME [OPTIONS]
-
-Options:
-  --class-name TEXT                 PascalCase class prefix
-  --style [dict]                    Advanced package style
-  --advanced                        Request the advanced MDAnalysis-native package scaffold
-  --project-root DIRECTORY          Repository root
-  --force                           Overwrite existing files
-  --dry-run                         Print paths without writing files
-```
-
-By default, the command creates a single-file MDAnalysis-native plugin at
-`src/polyzymd/analyses/<NAME>.py`. The generated analysis subclasses `Analysis`,
-builds an `MDAAnalysisJob.from_function()` job, returns a `ReplicateArtifact`
-with explicit `payload["metrics"]`, and relies on the default artifact
-aggregation path.
-
-Omit `--style` to use the default single-file scaffold.
-
-`--advanced` and `--style dict` create an advanced package scaffold at
-`src/polyzymd/analyses/<NAME>/` with lifecycle wiring in `__init__.py`, a
-lazy-imported `AnalysisBase` helper in `_mda.py`, and dict metrics stored in
-canonical artifacts.
-
-```bash
-polyzymd new-analysis solvent_shell
-polyzymd new-analysis solvent_shell --advanced
-polyzymd new-analysis solvent_shell --style dict
-pixi run -e build pytest tests/analyses/plugins/test_solvent_shell.py -v
-```
-
----
-
 (cli-analyze)=
 ## polyzymd analyze
 
@@ -922,7 +875,7 @@ distances --set pairs=...` for the triad distances.
 | `-c, --config PATH` | Yes | Simulation `config.yaml`. Repeatable; the first one is the control. |
 | `-f, --file PATH` | No | Retired. With a `comparison.yaml`, the command runs nothing and exits 2: the `error:` line says that `comparison.yaml` is no longer read by `polyzymd analyze`, and the `fix:` line gives the equivalent `polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq ...` command built from the file's conditions, replicates and equilibration (or `--eq`), followed by the address of {doc}`../how_to/analysis_agent_protocol` and `.claude/skills/polyzymd-analyze/SKILL.md`, the skill to point an agent at. A file that cannot be read gives the command with placeholders. |
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
-| `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default: the comparison default, `10ns`. |
+| `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default `10ns`. |
 | `--label TEXT` | No | Condition label, one per `-c` in the same order. Default: the name of the directory holding the config. |
 | `--run LABEL` | No | Run or pair label to report when the analysis measures one metric on several selections, for example one atom pair for distances. Default: the first one the analysis lists; the rest appear in `all_runs`. |
 | `--set KEY=VALUE` | No | Top-level analysis setting. Repeatable. The value is read as YAML, so `--set threshold=3.0` gives a number and `--set groups='{protein: chainid A, polymer: chainid C}'` a mapping. A dotted key such as `groups.protein` is refused; give the whole top-level setting as a mapping instead. |
@@ -933,6 +886,42 @@ distances --set pairs=...` for the triad distances.
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
 | `--no-plots` | No | Do not draw figures. By default rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
 | `--no-eq-check` | No | Skip the pymbar equilibration diagnostic, which rg, rmsd, native_contacts, distances and the totals of sasa report for each replicate's per-frame series. Values and statistics are the same either way. |
+| `--submit` | No | Submit to SLURM instead of running here: one array task per condition and replicate, then a report job; see [SLURM submission](#cli-analyze-submit). |
+| `--dry-run` | No | With `--submit`, or alone, write the SLURM scripts and print the two `sbatch` commands without submitting. |
+| `--preset NAME` | No | SLURM partition, QoS and account of a cluster for `--submit`: `alpine-cpu`, `blanca-shirts`, `blanca-chbe-rdi` or `bridges2-rm`. |
+| `--partition TEXT` | No | SLURM partition for `--submit`, replacing the preset's. |
+| `--account TEXT` | No | SLURM account for `--submit`, replacing the preset's. |
+| `--qos TEXT` | No | SLURM QoS for `--submit`, replacing the preset's. |
+| `--time TEXT` | No | Time limit of each job for `--submit`. Default `12:00:00`. |
+| `--mem TEXT` | No | Memory of each job for `--submit`. Default `16G`. |
+| `--cpus N` | No | CPUs of each job for `--submit`. Default `2`. |
+
+(cli-analyze-submit)=
+### SLURM submission
+
+`--submit` runs the same analysis as a SLURM array instead of in the current
+process:
+
+```bash
+polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --eq 10ns \
+  --submit --preset blanca-shirts
+```
+
+It writes `<output-dir>/slurm/<analysis>_<YYYYmmdd-HHMMSS>/` holding
+`tasks.tsv` (one config, label and replicate per line), `replicates.sbatch`
+(the array: each task measures one replicate with `--no-plots` and stores it
+under `polyzymd_results/`), `report.sbatch` (the full command, which reads
+every stored result, measures any replicate a task left unmeasured, draws the
+figures and writes the report) and `logs/`. The report goes to `-o PATH`, or
+by default to `report.txt` (`report.json` with `--format json`) in that
+folder. The report job is submitted with `--dependency=afterany:<array>`, so it
+starts once every task has ended, whether or not each succeeded.
+
+Both jobs run the Python interpreter and `PYTHONPATH` of the submitting
+process, in the submitting directory, so they measure with the same PolyzyMD
+and resolve relative paths as the command did. `--dry-run` writes the folder
+and prints the two `sbatch` commands without submitting. Every name
+`polyzymd analyze` runs can be submitted; see {doc}`../how_to/hpc_execution`.
 
 ### Agent format
 
@@ -1027,409 +1016,18 @@ polyzymd analyze rg -c A/config.yaml -c B/config.yaml --set selection='protein a
 
 ---
 
-## polyzymd compare
-
-Run analysis plugins that you register yourself over the conditions of a
-`comparison.yaml`, with statistical testing.
-
-```{note}
-No shipped analysis runs through `polyzymd compare` any more: every shipped
-analysis runs with {ref}`polyzymd analyze <cli-analyze>` on the `-c`
-simulation configs, and the plugin framework behind these commands is being
-removed. `polyzymd compare run NAME` for a shipped name, such as `rmsf` or
-`my_analysis`, exits 1 and prints the equivalent `polyzymd analyze NAME -c
-<config> --label <label> ... --replicates ... --eq ...` command built from the
-file, the address of {doc}`../how_to/analysis_agent_protocol` and the agent
-skill `.claude/skills/polyzymd-analyze/SKILL.md`; for `catalytic_triad` it
-also names the triad routine, {doc}`../how_to/analysis_triad_quickstart`, and
-prints the `polyzymd analyze distances` command. `polyzymd compare init` and
-`polyzymd compare validate` still write and check the conditions of a
-`comparison.yaml`.
-```
-
-```bash
-polyzymd compare COMMAND [OPTIONS]
-
-Commands:
-  init      Initialize a new comparison project
-  validate  Validate comparison configuration
-  run       Run a comparison by analysis type
-  run-all   Run all enabled comparisons
-  plot-all  Generate comparison plots from a workspace
-  submit    Submit analysis as SLURM job DAG (HPC)
-  submit-all Submit all enabled analyses as dependency-ordered SLURM DAGs
-  status    Show status of submitted SLURM analysis jobs
-  finalize  Run comparison + plotting from aggregated on-disk results
-```
-
-### polyzymd compare init
-
-Create a new comparison project with template configuration.
-
-```bash
-polyzymd compare init -n NAME [OPTIONS]
-
-Options:
-  -n, --name TEXT       Project name (creates directory) [required]
-  --eq-time TEXT         Default equilibration time [default: 10ns]
-  -o, --output-dir PATH  Parent directory [default: current]
-```
-
-#### Example
-
-```bash
-polyzymd compare init -n polymer_study
-cd polymer_study
-# Edit comparison.yaml to add your conditions
-```
-
-The command prints the `polyzymd analyze -c` commands to run next.
-
-### polyzymd compare run
-
-Run a single analysis comparison by type. This is a generic command that works
-with any discovered analysis plugin.
-
-```bash
-polyzymd compare run COMPARISON_TYPE [OPTIONS]
-
-Arguments:
-  COMPARISON_TYPE        Registered analysis plugin name (e.g. my_analysis)
-
-Options:
-  -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
-  --eq-time TEXT          Override equilibration time (e.g. '10ns', '5000ps')
-  --recompute            Force recompute even if cached results exist
-  --format TEXT           Output format: table, markdown, json, agent [default: table]
-  -o, --output PATH      Save formatted output to file
-  -q, --quiet            Suppress INFO messages
-  --debug                Enable DEBUG logging
-  --list                 List available comparison types and exit
-```
-
-Without `--recompute`, a cached `run_<replicate>/result.json` is reused only
-when the trajectory files it records still have the same size and modification
-time and the settings fingerprint matches; otherwise that replicate is
-recomputed. See the cache reuse section of the comparison reference for the
-rules that apply to the other commands.
-
-#### Example
-
-```bash
-# Run a registered plugin (uses plugins.my_analysis)
-polyzymd compare run my_analysis
-
-# Override equilibration time
-polyzymd compare run my_analysis --eq-time 20ns
-
-# Markdown output
-polyzymd compare run my_analysis --format markdown -o report.md
-
-# Print the compact agent report instead of the plugin's table
-polyzymd compare run my_analysis --format agent
-
-# List all available analysis types
-polyzymd compare run --list
-```
-
-`--format agent` renders the finished comparison through the same
-`ProtocolReport` renderer as {ref}`polyzymd analyze <cli-analyze>`: a header,
-one line per condition, one line per comparison, any warnings and one
-`verdict:` line per comparison. Use it when a script or an
-agent has to read the result; use `--format json` when it needs the full
-comparison artifact, which carries more per-plugin detail than the report does.
-The line shapes and the verdict vocabulary are documented under
-{ref}`polyzymd analyze <cli-analyze>`, and the report fields in
-{doc}`analysis_protocol_report`.
-
-### polyzymd compare validate
-
-Validate a comparison.yaml configuration file without running analyses.
-
-```bash
-polyzymd compare validate [OPTIONS]
-
-Options:
-  -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
-  --format [table|json]  Output format [default: table]
-```
-
-#### What It Checks
-
-- YAML syntax and structure
-- Required fields present
-- At least 1 condition defined
-- Condition labels are unique
-- Control label matches a condition (if specified)
-- Config files exist for each condition
-
-#### Example
-
-```bash
-# Basic validation
-polyzymd compare validate
-
-# Validate specific file
-polyzymd compare validate -f path/to/comparison.yaml
-
-# JSON output for CI integration
-polyzymd compare validate --format json
-```
-
-**Output (success):**
-```
-Validating: /path/to/comparison.yaml
-
-✓ Configuration is valid
-
-  Name: polymer_study
-  Conditions: 3
-    - WT, PEG, SBMA
-  Control: WT
-```
-
-**Output (errors):**
-```
-Validating: /path/to/comparison.yaml
-
-✗ Configuration has errors
-
-  • Control 'NoPolymer' not found in conditions: ['WT', 'PEG']
-  • Config file not found: /path/to/missing/config.yaml
-```
-
-**JSON output:**
-```json
-{
-  "file": "/path/to/comparison.yaml",
-  "valid": true,
-  "errors": [],
-  "summary": {
-    "name": "polymer_study",
-    "conditions_count": 3,
-    "condition_labels": ["WT", "PEG", "SBMA"],
-    "control": "WT",
-    "sections_configured": []
-  }
-}
-```
-
-### polyzymd compare plot-all
-
-Generate configured plots from a comparison workspace.
-
-```bash
-polyzymd compare plot-all [OPTIONS]
-
-Options:
-  -f, --file PATH                 Path to comparison.yaml [default: comparison.yaml]
-  -o, --output-dir PATH           Override plot output directory
-  -a, --analysis TEXT             Plot one analysis type only
-  --list-available                List registered/available plots and exit
-  -q, --quiet                     Suppress INFO messages
-  --debug                         Enable DEBUG logging
-```
-
-#### Example
-
-```bash
-# Generate all configured plots
-polyzymd compare plot-all
-
-# High-level availability check
-polyzymd compare plot-all --list-available
-
-# One analysis only
-polyzymd compare plot-all -a my_analysis
-```
-
-### polyzymd compare submit
-
-Submit a replicate-level SLURM analysis DAG for one plugin. Each replicate runs
-as an independent SLURM job, followed by per-condition aggregation jobs and a
-final comparison + plotting job.
-
-Before submission, this command runs a dependency preflight check: if the
-target plugin declares `dependencies`, required upstream comparison results must
-already exist on disk (or use `compare submit-all` instead).
-
-```bash
-polyzymd compare submit ANALYSIS [OPTIONS]
-
-Arguments:
-  ANALYSIS               Registered analysis plugin name (e.g. my_analysis)
-
-Options:
-  -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
-  --partition TEXT        SLURM partition [default: cluster default]
-  --qos TEXT             SLURM QoS
-  --account TEXT         SLURM account/allocation
-  --pixi-path TEXT       Path to pixi executable [default: pixi]
-  --ntasks INT           SLURM ntasks [default: 1]
-  --cpus-per-task INT    SLURM cpus-per-task [default: 1]
-  --mem TEXT             SLURM memory request [default: 4G]
-  --time TEXT            SLURM walltime [default: 01:00:00]
-  --max-retries INT      Max retries for failed jobs [default: 3]
-  --mail-user TEXT       Email for failure notifications
-  --recompute            Force recomputation in workers
-  --allow-partial        Allow finalize when some conditions are missing results
-  --equilibration TEXT   Override equilibration time
-  --dry-run              Generate scripts without submitting jobs
-  --job-arrays           Submit one SLURM array job per condition
-```
-
-#### Example
-
-```bash
-# Submit a registered plugin to SLURM
-polyzymd compare submit my_analysis --partition gpu --account my_alloc
-
-# Dry run to inspect generated scripts
-polyzymd compare submit my_analysis --dry-run
-
-# Use job arrays for efficiency
-polyzymd compare submit my_analysis --job-arrays --partition aa100
-
-# Rely on plugin memory hints and cluster default partition
-polyzymd compare submit my_analysis --qos normal
-
-# Blanca condo nodes at CU Boulder
-module load slurm/blanca
-polyzymd compare submit my_analysis \
-    -f comparison.yaml \
-    --partition blanca-shirts \
-    --account blanca-shirts \
-    --qos blanca-shirts \
-    --mem 8G \
-    --time 02:00:00
-```
-
-### polyzymd compare submit-all
-
-Submit all enabled analyses from `comparison.yaml` in dependency order with
-cross-plugin finalize dependencies.
-
-```bash
-polyzymd compare submit-all [OPTIONS]
-
-Options:
-  -f, --file PATH         Path to comparison.yaml [default: comparison.yaml]
-  --partition TEXT        SLURM partition [default: cluster default]
-  --qos TEXT              SLURM QoS
-  --account TEXT          SLURM account/allocation
-  --pixi-path TEXT        Path to pixi executable [default: pixi]
-  --ntasks INT            SLURM ntasks [default: 1]
-  --cpus-per-task INT     SLURM cpus-per-task [default: 1]
-  --mem TEXT              SLURM memory request [default: 4G]
-  --time TEXT             SLURM walltime [default: 01:00:00]
-  --max-retries INT       Max retries for failed jobs [default: 3]
-  --mail-user TEXT        Email for failure notifications
-  --recompute             Force recomputation in workers
-  --allow-partial         Allow finalize when some conditions are missing results
-  --equilibration TEXT    Override equilibration time
-  --dry-run               Generate scripts without submitting jobs
-  --exclude TEXT          Exclude one analysis (repeatable)
-```
-
-#### Example
-
-```bash
-# Submit everything enabled in comparison.yaml
-polyzymd compare submit-all -f comparison.yaml --partition aa100 --qos normal
-
-# Skip selected plugins
-polyzymd compare submit-all -f comparison.yaml --exclude my_analysis
-
-# Dry-run planning only
-polyzymd compare submit-all -f comparison.yaml --dry-run
-```
-
-### polyzymd compare status
-
-Show the status of a submitted SLURM analysis DAG. Reports counts of pending,
-running, succeeded, and failed jobs.
-
-```bash
-polyzymd compare status ANALYSIS [OPTIONS]
-
-Arguments:
-  ANALYSIS               Analysis plugin name
-
-Options:
-  -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
-  --reconcile            Reconcile status files with sacct before reporting
-  --json                 Print machine-readable JSON status
-```
-
-#### Example
-
-```bash
-# Check status of the plugin's SLURM jobs
-polyzymd compare status my_analysis
-
-# Reconcile with SLURM scheduler and get JSON output
-polyzymd compare status my_analysis --reconcile --json
-```
-
-### polyzymd compare finalize
-
-Run comparison and plotting from aggregated on-disk results. Use this after
-SLURM jobs complete, or to re-run comparison/plotting without recomputing
-per-replicate results.
-
-```bash
-polyzymd compare finalize ANALYSIS [OPTIONS]
-
-Arguments:
-  ANALYSIS               Analysis plugin name
-
-Options:
-  -f, --file PATH        Path to comparison.yaml [default: comparison.yaml]
-  --recompute            Regenerate comparison and plot outputs
-  --allow-partial        Allow finalize when some conditions are missing results
-```
-
-#### Example
-
-```bash
-# Finalize after SLURM jobs complete
-polyzymd compare finalize my_analysis
-
-# Allow partial results (some conditions may have failed)
-polyzymd compare finalize my_analysis --allow-partial
-```
-
----
-
-## Plotting comparisons (`polyzymd compare plot-all`)
-
-The standalone `polyzymd plot` command group was removed.
-Use `polyzymd compare plot-all` for all comparison plotting workflows.
-
-```bash
-polyzymd compare plot-all [OPTIONS]
-
-Options:
-  -f, --file PATH                 Path to comparison.yaml [default: comparison.yaml]
-  -o, --output-dir PATH           Override plot output directory
-  -a, --analysis TEXT             Plot one analysis type only
-  --list-available                List registered/available plots and exit
-  -q, --quiet                     Suppress INFO messages
-  --debug                         Enable DEBUG logging
-```
-
-### Example
-
-```bash
-# Generate all configured plots
-polyzymd compare plot-all
-
-# Show available plots
-polyzymd compare plot-all --list-available
-
-# Plot one plugin only
-polyzymd compare plot-all -a my_analysis
-```
+## Retired commands
+
+Two hidden commands accept any arguments, print where their workflow went on
+stderr and exit 2:
+
+- `polyzymd compare ...` prints `polyzymd analyze NAME -c config.yaml ...
+  --eq 10ns` for running an analysis, `polyzymd analyze ... --submit --preset
+  <cluster>` for SLURM, the address of {doc}`../how_to/analysis_agent_protocol`
+  and `.claude/skills/polyzymd-analyze/SKILL.md`, the skill to point an agent at.
+- `polyzymd new-analysis ...` says to write a function of an MDAnalysis
+  `Universe` and run it with `Study.per_replicate` or `Study.timeseries`, and
+  prints the address of {doc}`../explanation/analysis_api` and the same skill.
 
 ---
 
@@ -1460,7 +1058,7 @@ output:
 |------|---------|
 | 0 | Success |
 | 1 | Error (validation failure, build failure, etc.) |
-| 2 | Typed analysis error from {ref}`polyzymd analyze <cli-analyze>`; the message and the fix are printed on stderr, one line each |
+| 2 | Typed analysis error from {ref}`polyzymd analyze <cli-analyze>`, whose message and fix are printed on stderr, one line each; also the exit code of the retired `compare` and `new-analysis` commands |
 | 99 | Graceful shutdown — simulation was interrupted but interrupted state was saved (see {doc}`../how_to/hpc_slurm`) |
 
 ---

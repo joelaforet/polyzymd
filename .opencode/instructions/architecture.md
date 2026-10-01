@@ -4,13 +4,13 @@
 
 ```
 src/polyzymd/
-├── cli/          # Click CLI entry point, command groups, scaffold generator
+├── cli/          # Click CLI entry point, polyzymd analyze, hidden retired-command stubs
 ├── config/       # Pydantic v2 configuration models
 ├── builders/     # System construction pipeline
 ├── simulation/   # OpenMM simulation execution
-├── workflow/     # Orchestration layer
+├── workflow/     # Orchestration layer, SLURM scripts, analyze --submit jobs
 ├── core/         # Shared base classes and types
-├── analyses/     # ★ Study API (functions over replicate universes) and the plugin framework being removed
+├── analyses/     # ★ Study API: functions over replicate universes, and polyzymd analyze
 │   └── shared/   #   Reusable utilities (TrajectoryLoader, alignment, statistics, etc.)
 ├── exporters/    # Format converters (GROMACS, etc.)
 ├── data/         # Bundled data files (force fields, templates)
@@ -24,15 +24,14 @@ src/polyzymd/
 |-------|-------|------|
 | **Study API** (public) | `study.py`, `timeseries.py`, `functions.py`, `reference.py`, `figures.py`, `protocols.py` | Replicates as MDAnalysis universes, shipped measurement functions, statistics, reports and `polyzymd analyze`; where new measurements go |
 | **Shared utilities** | `shared/loader.py`, `shared/window.py`, etc. | `TrajectoryLoader`, frame windows, statistics |
-| **Plugin framework** | `base.py`, `discovery.py`, `orchestrator.py`, `stats.py`, `mda/`, `_framework/` | The `Analysis` lifecycle behind `polyzymd compare`; no shipped analysis is a plugin any more, and it is being removed |
+| **Loading and identity** | `universe.py`, `identity.py` | `UniverseProvider` loads replicates and records input files; `compute_config_hash` identifies a condition's config in every stored result |
 
 Every shipped analysis is a function in `functions.py` run through the study
 API: polymer-protein contacts (`residue_occlusion`, `residue_contacts`,
 `contact_lifetimes`) by `protocols._analyze_contacts`, hydrogen bonds
 (`hydrogen_bonds`, `hbond_lifetimes`, `residue_hbond_occupancy`,
-`residue_pair_hbond_occupancy`) by `protocols._analyze_hydrogen_bonds`. Do not
-add plugins; `polyzymd.analyses.base` stays the import surface of the framework
-until it is removed.
+`residue_pair_hbond_occupancy`) by `protocols._analyze_hydrogen_bonds`. There
+is no plugin class or registry.
 
 ## Chain Convention (Critical)
 
@@ -62,17 +61,17 @@ config = SimulationConfig.from_yaml("config.yaml")
 ```
 
 ### ABC + Strategy Pattern
-Molecular selectors and molecule chargers use abstract base classes:
+Molecule chargers use an abstract base class:
 
 ```python
-# Abstract base (analyses/shared/selectors/base.py)
-class MolecularSelector(ABC):
+# Abstract base (utils/charging.py)
+class MoleculeCharger(ABC):
     @abstractmethod
-    def select(self, universe: Universe) -> SelectionResult: ...
+    def charge_molecule(self, molecule): ...
 
-# Concrete strategy (analyses/shared/selectors/polymer.py)
-class PolymerChains(MolecularSelector):
-    def select(self, universe: Universe) -> SelectionResult: ...
+# Concrete strategy (utils/charging.py)
+class NAGLCharger(MoleculeCharger):
+    def charge_molecule(self, molecule): ...
 ```
 
 ### Function Pattern

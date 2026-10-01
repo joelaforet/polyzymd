@@ -10,17 +10,18 @@ reads back exactly what `model_dump_json()` wrote.
 | Field | Type | Meaning |
 |---|---|---|
 | `analysis` | `str` | Canonical analysis name, for example `rg`. |
-| `protocol_version` | `str` | The plugin's `Analysis.protocol_version`. With `analysis` it identifies the code that defined the metric. Every plugin starts at `"1"` and bumps it when the meaning, unit or estimator of a reported metric changes. |
-| `metric` | `str` | Primary metric key: the first key the plugin's `extract_metrics()` returns. |
-| `unit` | `str \| None` | Unit of `metric`, for example `A` or `%`. `None` marks a dimensionless metric, and also a plugin that declares no unit. |
+| `protocol_version` | `str` | Version of the report protocol, `"2"` for every report of the study API. With `analysis` it identifies the code that defined the metric; it changes when the meaning, unit or estimator of a reported metric changes. |
+| `metric` | `str` | Name of the reported values, for example `mean_rg`. |
+| `unit` | `str \| None` | Unit of `metric`, for example `A` or `%`. `None` marks a dimensionless metric, such as a fraction. |
 | `run` | `str \| None` | Selected result when the analysis reports several: for sasa each context's total and per-residue SASA; for distances each pair's mean distance (`<label>`) and fraction below threshold; for hydrogen_bonds each summary's counts, lifetimes, per-residue and per-pair occupancies; for rmsf and rmsd_per_residue the core, region and plain-mean values and the per-residue profiles. `None` when the analysis reports one result. |
-| `all_metrics` | `list[str]` | Every metric key the plugin reported, `metric` first. Only `metric` is summarised in `conditions` and `pairwise`. |
-| `all_runs` | `list[str]` | Every run or pair label the plugin reported, `run` first. Empty when the plugin reports one run. Select another with `--run LABEL`. |
+| `all_metrics` | `list[str]` | Other metric names of the result, `metric` first. Empty in the reports of the shipped analyses, which name each result in `all_runs` instead. |
+| `all_runs` | `list[str]` | Every result the analysis measured, the reported one first. Empty when it measures one. Select another with `--run LABEL`. |
 | `equilibration` | `str` | Equilibration window discarded from the start of every replicate, for example `10ns`. Applied uniformly to every replicate of every condition. |
-| `frames_per_replicate` | `dict[str, int \| None]` | Frames each replicate of a condition contributed, keyed by condition label, from the condition artifact's frame-selection provenance. `None` for a plugin that records no frame selection. |
+| `stride` | `int` | Every `stride`-th production frame was measured, 1 by default. |
+| `frames_per_replicate` | `dict[str, int \| list[int] \| None]` | Production frames each replicate of a condition contributed after the equilibration window and stride, keyed by condition label, one number per replicate in replicate order. |
 | `conditions` | `list[ConditionReport]` | One entry per condition, in the order the configs were given; for a labelled result such as a per-residue profile, one entry per condition and label. |
 | `pairwise` | `list[PairwiseReport]` | One entry per comparison of the primary metric, or per comparison and label for a labelled result. Empty for a single condition. |
-| `warnings` | `list[str]` | Sampling warnings first, then warnings carried by the comparison and condition artifacts. Deduplicated. |
+| `warnings` | `list[str]` | Sampling and interval warnings: conditions with one replicate or the same value in every replicate, intervals that cross the bounds of a bounded quantity, untestable comparisons, and pymbar equilibration diagnostics. |
 | `provenance` | `ProtocolProvenance` | Versions, config hashes and output paths. |
 | `verdict` | `list[str]` | One sentence per pairwise comparison, or one sentence describing the single condition. |
 
@@ -43,8 +44,13 @@ rows the JSON form holds; every one of them is kept there.
 | `mean` | `float` | Mean of the primary metric across replicates. |
 | `sem` | `float \| None` | Standard error of that mean across replicates, `s / sqrt(n)` with `ddof = 1`. `None` for one replicate, where it does not exist. |
 | `ci95` | `tuple[float, float] \| None` | Limits of the 95 percent Student t interval on the mean. `None` for one replicate. |
-| `ci_method` | `str \| None` | `student_t` when the interval came from `replicate_values`; `student_t_from_sem` when the plugin stored only a mean and a standard error and the interval was rebuilt as `mean` plus or minus `t(0.975, n - 1)` times `sem`. `None` when no interval exists. |
-| `replicate_values` | `list[float]` | The per-replicate values behind the mean, in replicate order. Empty for a stored comparison result that holds only summary statistics, such as a contacts comparison result stored before this version. |
+| `ci_method` | `str \| None` | `student_t` when the interval came from `replicate_values`; `not_estimable` when every replicate has the same value. `None` when no interval exists. |
+| `replicate_values` | `list[float]` | The per-replicate values behind the mean, in replicate order. |
+| `replicates` | `list[int]` | The replicate number of each entry of `replicate_values`. |
+| `statistical_inefficiency` | `list[float]` | For a value reduced from a per-frame series, the pymbar statistical inefficiency of each replicate's series. Empty otherwise. |
+| `n_effective` | `list[float]` | The effective sample size of each replicate's series, alongside `statistical_inefficiency`. |
+| `eq_detected_frame` | `list[int]` | Start of the equilibrated region that pymbar `detect_equilibration` finds in each checked replicate's production series, as a production frame index from 0. A diagnostic: it changes no value. |
+| `eq_detected_ns` | `list[float]` | The same start as simulation time in ns. |
 
 ## PairwiseReport
 
@@ -54,17 +60,17 @@ rows the JSON form holds; every one of them is kept there.
 | `b` | `str` | Compared condition label. |
 | `entry` | `str \| None` | Label compared in a labelled result, such as a residue ID. `None` for a result with one value per replicate. |
 | `delta` | `float` | `mean(b) - mean(a)`, in the metric's unit. |
-| `delta_ci95` | `tuple[float, float] \| None` | 95 percent Student t interval on `delta`, uncorrected for multiplicity. Pooled variance with `n_a + n_b - 2` degrees of freedom for `student_t`, separate variances with Welch-Satterthwaite degrees of freedom (passed to the quantile unrounded) for `welch_t`. `None` for `tukey_hsd`, whose simultaneous intervals are not computed by the report, when a condition has fewer than two replicate values, or when the plugin stored no replicate values. |
+| `delta_ci95` | `tuple[float, float] \| None` | 95 percent Student t interval on `delta`, uncorrected for multiplicity. Pooled variance with `n_a + n_b - 2` degrees of freedom for `student_t`, separate variances with Welch-Satterthwaite degrees of freedom (passed to the quantile unrounded) for `welch_t`. `None` when a condition has fewer than two replicate values, or when both conditions have zero variance. |
 | `p` | `float \| None` | Unadjusted p value of the two-sample test. |
-| `p_adjusted` | `float \| None` | p value after the correction named by `correction`. `None` when the plugin stored no corrected value, which makes the comparison a description rather than a decision; the verdict then reads `no test recorded`. |
-| `test` | `str` | `student_t`, `welch_t` or `tukey_hsd`. |
-| `correction` | `str` | `BH` (Benjamini-Hochberg), `tukey_hsd`, or the configured post-hoc name. |
-| `family_size` | `int \| None` | Number of tests in the Benjamini-Hochberg family this row was corrected in: the conditions compared with the control for this one outcome, or for a labelled result every tested label of every compared condition. `None` for a row that was not tested, or for a stored plugin result that does not record it. Printed as `family <m>` on the comparison line. |
-| `cohens_d` | `float \| None` | Standardised mean difference, oriented like `delta`: positive means `b` is larger. The comparison code computes d as control minus compared, positive when the control is larger. It is negated in the report, together with `hedges_g`, so both have the same sign as `delta`. |
-| `hedges_g` | `float \| None` | Small-sample-corrected standardised mean difference, oriented like `cohens_d`, when the plugin reports one. Otherwise `None`. |
-| `direction` | `str` | The plugin's own direction word, for example `increased`. |
-| `significant` | `bool` | Whether `p_adjusted` cleared the configured alpha (0.05 by default). Always `False` when `testable` is `False`. |
-| `testable` | `bool` | `False` when a condition has fewer than two replicates, which makes the test undefined rather than non-significant. |
+| `p_adjusted` | `float \| None` | Benjamini-Hochberg adjusted p value. `None` for a row that was not tested. |
+| `test` | `str` | `welch_t` (the default of `polyzymd analyze` and `compare()`) or `student_t`. |
+| `correction` | `str` | `BH` (Benjamini-Hochberg). |
+| `family_size` | `int \| None` | Number of tests in the Benjamini-Hochberg family this row was corrected in: the conditions compared with the control for this one outcome, or for a labelled result every tested label of every compared condition. `None` for a row that was not tested. Printed as `family <m>` on the comparison line. |
+| `cohens_d` | `float \| None` | Standardised mean difference, the difference of the means over the pooled standard deviation, oriented like `delta`: positive means `b` is larger. |
+| `hedges_g` | `float \| None` | `cohens_d` with the Hedges small-sample correction, oriented like `cohens_d`. |
+| `direction` | `str` | `increased` or `decreased` for a significant row, otherwise `no significant change`. |
+| `significant` | `bool` | Whether `p_adjusted` is at most 0.05. Always `False` when `testable` is `False`. |
+| `testable` | `bool` | `False` when a condition has fewer than two replicates, or both conditions have the same value in every replicate, which makes the test undefined rather than non-significant. |
 
 ## ProtocolProvenance
 
@@ -72,10 +78,10 @@ rows the JSON form holds; every one of them is kept there.
 |---|---|---|
 | `polyzymd_version` | `str` | Version of the package that ran the protocol. |
 | `mdanalysis_version` | `str \| None` | Installed MDAnalysis version, `None` when it cannot be determined. |
-| `config_hashes` | `dict[str, str]` | SHA-256 of each simulation config file, keyed by condition label. |
-| `settings_fingerprint` | `str \| None` | Fingerprint of the resolved plugin settings, the same one the aggregate cache is validated against. |
+| `config_hashes` | `dict[str, str]` | `polyzymd.analyses.identity.compute_config_hash` of each simulation config, keyed by condition label: the first 16 hex characters of the SHA-256 of the config fields that locate and describe its trajectories. |
+| `settings_fingerprint` | `str \| None` | `None`: no shipped analysis sets it. |
 | `settings` | `dict` | Settings a study-API analysis ran with. For rmsf and rmsd_per_residue: every setting, the resolved `reference_mode`, and under `residues` the residue IDs of the core and of each region. Empty for other analyses. |
-| `output_paths` | `dict[str, str]` | `comparison_result` is the cached comparison JSON; `figures` is the directory holding the generated plots. Either may be absent. |
+| `output_paths` | `dict[str, str]` | `results` is the `polyzymd_results/<name>/` folder holding every replicate's stored values and record; `figures` is the directory holding the generated plots, absent with `--no-plots`. |
 
 ## Verdict vocabulary
 
@@ -87,7 +93,7 @@ branch on them without parsing the rest.
 | `larger` | `b` differs from `a` after correction and `delta` is positive |
 | `smaller` | `b` differs from `a` after correction and `delta` is negative |
 | `no significant difference` | the test ran and `p_adjusted` did not clear alpha |
-| `no test recorded` | the plugin stored no multiplicity-corrected p value, so the row describes a difference without deciding it |
+| `no test recorded` | the row has no multiplicity-corrected p value, so it describes a difference without deciding it |
 | `changed` | the difference is significant but the two means are equal at the stored precision |
 | `not testable` | a condition has fewer than two replicates, so no test exists |
 

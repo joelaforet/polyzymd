@@ -8,7 +8,7 @@
 ``pz.plot_values`` and ``pz.plot_distributions``, draw several results in
 one figure. They read the values already held by those objects,
 style each figure through :mod:`polyzymd.analyses.shared.plotting` and a
-:class:`~polyzymd.config.comparison.PlotSettings`, and save it with
+:class:`~polyzymd.config.analysis_settings.PlotSettings`, and save it with
 :func:`~polyzymd.analyses.shared.plotting.save_figure`. Every condition and
 every replicate is drawn. matplotlib is imported only when a figure is drawn.
 """
@@ -20,13 +20,13 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 if TYPE_CHECKING:
     from polyzymd.analyses.timeseries import ReplicateValues, Timeseries
-    from polyzymd.config.comparison import PlotSettings
+    from polyzymd.config.analysis_settings import PlotSettings
 
 
 def _setup(source: Timeseries, plot_settings: PlotSettings | None) -> tuple[Any, list, dict]:
     """Return the plot settings, the condition labels in plot order and their colours."""
     from polyzymd.analyses.shared.plotting import get_condition_color_map, order_condition_labels
-    from polyzymd.config.comparison import PlotSettings
+    from polyzymd.config.analysis_settings import PlotSettings
 
     settings = plot_settings or PlotSettings()
     labels = list(source.series)
@@ -40,23 +40,36 @@ def _label(quantity: str, unit: str | None) -> str:
     return f"{text} ({'Å' if unit == 'A' else unit})" if unit else text
 
 
-def _footnote(fig: Any, counts: set[int], equilibration: str, **wording: str) -> None:
-    """Footnote the interval with n, or say that no interval is drawn with one replicate each."""
+def _footnote(
+    fig: Any, replicates: set[int], equilibration: str | None, window: str, **wording: str
+) -> None:
+    """Footnote what the interval is and its n, or say that no interval is drawn.
+
+    ``replicates`` holds the replicate counts of the conditions drawn. With one
+    count the footnote gives that n, and with several it says that n is per
+    condition. A condition with one replicate has no interval, and the
+    footnote says so.
+    """
     from polyzymd.analyses.shared.plotting import add_uncertainty_footnote
 
-    if max(counts) < 2:
-        _note(
-            fig,
-            f"No interval: every condition has one replicate; production window t >= {equilibration}.",
-        )
+    if max(replicates) < 2:
+        _note(fig, f"No interval: every condition has one replicate; {window}.")
         return
-    n = counts.pop() if len(counts) == 1 else None
+    if min(replicates) < 2:
+        wording["points"] += "; a condition with one replicate has no interval"
+    n = next(iter(replicates)) if len(replicates) == 1 else None
     add_uncertainty_footnote(fig, n_replicates=n, equilibration=equilibration, **wording)
 
 
 def _note(fig: Any, text: str) -> None:
-    """Write ``text`` at the bottom left of ``fig`` in the footnote style."""
-    fig.text(0.01, 0.01, text, fontsize=7, color="dimgray", ha="left", va="bottom")
+    """Write ``text`` under the axes of ``fig`` in the footnote style."""
+    from polyzymd.analyses.shared.plotting import add_figure_note
+
+    add_figure_note(fig, text)
+
+
+#: How the footnote of :func:`plot_differences` names the test of each interval.
+_TESTS = {"welch_t": "Welch t", "student_t": "Student t (pooled variance)"}
 
 
 def _save(fig: Any, output_dir: Path, name: str, settings: Any) -> Path:
@@ -78,7 +91,7 @@ def plot_timeseries(
     Each replicate is a thin line. Where every replicate of a condition has
     the same times over its first frames, a thick line gives their mean over
     those frames, with a band of the 95 percent Student t interval across
-    replicates at each time, as the legacy rg and rmsd plugins drew it. The
+    replicates at each time. The
     equilibration window, which is not stored, is shaded from the start of
     each trajectory, found from the frame indices and times, to the end of
     the window.
@@ -137,13 +150,17 @@ def plot_timeseries(
         ax, settings, title=source.name, xlabel="Time (ns)", ylabel=_label(source.name, source.unit)
     )
     apply_legend(ax, settings, loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0)
-    fig.tight_layout(rect=[0, 0.04, 0.78, 1])
+    fig.tight_layout(rect=[0, 0, 0.78, 1])
     _footnote(
         fig,
         counts,
         equilibration,
+        f"production window t >= {equilibration}",
         drawn="Band",
-        points="Thin lines are per-replicate series; the thick line is their mean",
+        of="the condition mean at each time",
+        counts="n per condition in the legend",
+        points="Thin lines: per-replicate series; thick lines: condition means; grey: the "
+        "equilibration window, whose frames are not in the series",
     )
     return _save(fig, output_dir, name, settings)
 
@@ -205,8 +222,7 @@ def plot_distribution(
     """Draw the distribution of the per-frame values of each condition.
 
     For each condition, a thick line is the Gaussian KDE of every production
-    frame of every replicate pooled, as the legacy distances and catalytic
-    triad plugins drew it, and a thin line of the same colour is the KDE of
+    frame of every replicate pooled, and a thin line of the same colour is the KDE of
     each replicate alone, so the spread between replicates shows. A
     ``threshold`` is drawn as a red dashed vertical line. ``title``, by
     default the series name, also names the quantity on the x axis.
@@ -277,7 +293,7 @@ def plot_distributions(
     Each panel shows, for every condition, the Gaussian KDE of every frame
     of every replicate pooled as a thick line and the KDE of each replicate
     as a thin line, with the series' threshold from ``thresholds`` as a red
-    dashed line, as the legacy catalytic triad KDE panel stacked its pairs.
+    dashed line.
     The panels share the x axis, labelled ``quantity`` and the unit of the
     series. ``titles`` default to the series names, and ``output_dir`` to
     the ``figures`` folder next to ``polyzymd_results``.
@@ -314,7 +330,7 @@ def plot_distributions(
         apply_axis_style(ax, settings, title=title, ylabel="Density")
         apply_legend(ax, settings, loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0)
     apply_axis_style(axes[-1, 0], settings, xlabel=_label(quantity, unit))
-    fig.tight_layout(rect=[0, 0.04, 0.78, 1])
+    fig.tight_layout(rect=[0, 0, 0.78, 1])
     _note(
         fig,
         "Thick lines: Gaussian KDE of all replicates' frames pooled; thin lines: each "
@@ -390,8 +406,17 @@ def plot_condition_values(
     apply_axis_style(
         ax, settings, title=title or values.source.name, ylabel=_label(values.metric, values.unit)
     )
-    fig.tight_layout(rect=[0, 0.04, 1, 1])
-    _footnote(fig, {len(entry) for entry in data}, values.source.study[labels[0]].equilibration)
+    fig.tight_layout()
+    equilibration = values.source.study[labels[0]].equilibration
+    _footnote(
+        fig,
+        {len(entry) for entry in data},
+        equilibration,
+        f"production window t >= {equilibration}",
+        of="the condition mean",
+        counts="n per condition under each bar",
+        points="Bars: condition means; points: per-replicate values",
+    )
     return _save(fig, output_dir, name, settings)
 
 
@@ -409,7 +434,7 @@ def plot_profile(
     Each replicate's value at every label is a thin line. A thick line gives
     each condition's mean at every label, with a band of the 95 percent
     Student t interval across replicates, the values that ``summary()``
-    reports, as the legacy rmsf profile drew each condition's mean and band.
+    reports.
     Numeric labels, such as residue IDs, are placed at their value on the x
     axis and other labels in order. Each ``highlight`` label is marked with a
     red dashed vertical line.
@@ -457,13 +482,17 @@ def plot_profile(
         ylabel=_label(values.metric, values.unit),
     )
     apply_legend(ax, settings, loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0)
-    fig.tight_layout(rect=[0, 0.04, 0.84, 1])
+    fig.tight_layout(rect=[0, 0, 0.84, 1])
+    equilibration = values.source.study[labels[0]].equilibration
     _footnote(
         fig,
         counts,
-        values.source.study[labels[0]].equilibration,
+        equilibration,
+        f"production window t >= {equilibration}",
         drawn="Band",
-        points="Thin lines are per-replicate values; the thick line is their mean",
+        of=f"the condition mean at each {xlabel.lower()}",
+        counts="n per condition in the legend",
+        points="Thin lines: per-replicate values; thick lines: condition means",
     )
     return _save(fig, output_dir, name, settings)
 
@@ -524,13 +553,17 @@ def plot_decomposition(
     apply_axis_style(axes[-1, 0], settings, xlabel=xlabel)
     if title:
         fig.suptitle(title)
-    fig.tight_layout(rect=[0, 0.04, 0.86, 1])
+    fig.tight_layout(rect=[0, 0, 0.86, 1])
+    equilibration = results[0].source.study[labels[0]].equilibration
     _footnote(
         fig,
         counts,
-        results[0].source.study[labels[0]].equilibration,
-        drawn="Band",
-        points="Lines are condition means over replicates",
+        equilibration,
+        f"production window t >= {equilibration}",
+        drawn="Bands",
+        of=f"each line's condition mean at each {xlabel.lower()}",
+        counts="n in each panel title",
+        points="Lines: condition means over replicates",
     )
     return _save(fig, output_dir, name, settings)
 
@@ -562,7 +595,7 @@ def plot_differences(
     import matplotlib.pyplot as plt
     import numpy as np
 
-    from polyzymd.analyses.shared.plotting import apply_axis_style
+    from polyzymd.analyses.shared.plotting import apply_axis_style, uncertainty_footnote_text
 
     settings, _, colors = _setup(values.source, plot_settings)
     try:
@@ -603,13 +636,20 @@ def plot_differences(
     apply_axis_style(axes[-1, 0], settings, xlabel=xlabel)
     if title:
         fig.suptitle(title)
-    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    fig.tight_layout()
     family = next((row.family_size for row in report.pairwise if row.family_size), None)
     _note(
         fig,
-        f"Band: 95% interval of the difference ({report.pairwise[0].test}); points: significant "
-        f"after Benjamini-Hochberg over a family of {family}; production window t >= "
-        f"{report.equilibration}.",
+        uncertainty_footnote_text(
+            equilibration=report.equilibration,
+            drawn="Bands",
+            of=f"the difference of condition means at each {xlabel.lower()}",
+            method=_TESTS.get(report.pairwise[0].test, report.pairwise[0].test),
+            counts="n of both conditions in each panel title",
+            points="Lines: condition mean minus control mean; red points: significant after "
+            f"the Benjamini-Hochberg correction over a family of {family} tests; a label with "
+            "fewer than two replicates in either condition, or no variance, has no interval",
+        ),
     )
     return _save(fig, output_dir, name, settings)
 
@@ -627,8 +667,7 @@ def plot_values(
     Each bar is the condition's mean with its 95 percent Student t interval
     from :func:`~polyzymd.analyses.shared.statistics.mean_sem_ci`, drawn by
     :func:`~polyzymd.analyses.shared.plotting.grouped_bars` with every
-    replicate value as a point, as the legacy distances and catalytic triad
-    threshold bar charts drew each pair's fraction. ``labels`` name the
+    replicate value as a point. ``labels`` name the
     groups and default to the source names. ``output_dir`` defaults to the
     ``figures`` folder next to ``polyzymd_results``.
 
@@ -688,8 +727,17 @@ def plot_values(
         ax.set_ylim(0, 1.05)
     apply_axis_style(ax, settings, title=title, ylabel=_label(quantity, unit))
     apply_legend(ax, settings, loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0)
-    fig.tight_layout(rect=[0, 0.04, 0.78, 1])
+    fig.tight_layout(rect=[0, 0, 0.78, 1])
     counts = {len(entry) for row in data for entry in row}
-    _footnote(fig, counts, results[0].source.study[conditions[0]].equilibration)
+    equilibration = results[0].source.study[conditions[0]].equilibration
+    _footnote(
+        fig,
+        counts,
+        equilibration,
+        f"production window t >= {equilibration}",
+        of="the condition mean",
+        counts="n per condition in the legend",
+        points="Bars: condition means; points: per-replicate values",
+    )
     folder = output_dir or results[0].source.path.parent.parent / "figures"
     return _save(fig, folder, name, settings)

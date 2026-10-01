@@ -13,7 +13,7 @@ the command you are troubleshooting:
 | Project setup, PDB preparation, `polyzymd validate`, `polyzymd build` | `build` |
 | OpenMM `polyzymd submit` or `recover --submit` | `build`; the Slurm job activates the site runtime |
 | Direct OpenMM `polyzymd run-segment` | `sim-cuda-12-4` or `sim-cuda-12-6` |
-| Trajectory comparison, plotting, `polyzymd compare ...` | `analysis` |
+| Trajectory analysis and plotting, `polyzymd analyze ...` | `analysis` |
 
 Use `pixi shell -e <env>` to activate an environment, or prefix a command with
 `pixi run -e <env>`.
@@ -597,7 +597,7 @@ interval changed part way through the chain.
 
 ### Analysis supports OpenMM trajectories only
 
-The `polyzymd compare` analysis workflow currently expects OpenMM-produced
+The `polyzymd analyze` workflow currently expects OpenMM-produced
 trajectories (DCD format) in PolyzyMD's standard directory layout
 (`production_N/production_N_trajectory.dcd`). GROMACS XTC trajectories
 are not yet supported.
@@ -607,7 +607,7 @@ are not yet supported.
 - Use native GROMACS analysis tools (`gmx rms`, `gmx rmsf`, etc.)
 - Use MDAnalysis directly with your GROMACS topology and XTC files
 
-GROMACS trajectory support in `polyzymd compare` is planned
+GROMACS trajectory support in `polyzymd analyze` is planned
 ([#47](https://github.com/joelaforet/polyzymd/issues/47)).
 
 ---

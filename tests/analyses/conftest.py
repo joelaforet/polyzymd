@@ -1,15 +1,10 @@
-"""Shared fixtures for the analyses test suite."""
+"""Shared fixtures for the analyses tests, and the footnote audit of every saved figure."""
 
 from __future__ import annotations
 
-import importlib
 from typing import Any
 
 import pytest
-
-#: Plugin plotter modules whose ``save_figure`` the footnote audit wraps. No
-#: shipped analysis is a plugin any more, so none is left to wrap.
-_PLOTTER_MODULES: tuple[str, ...] = ()
 
 
 def figure_draws_uncertainty(fig: Any) -> bool:
@@ -38,36 +33,28 @@ def figure_has_uncertainty_footnote(fig: Any) -> bool:
 
 @pytest.fixture(autouse=True)
 def audit_plot_uncertainty_footnotes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail any test whose plotter saves an uncertainty figure with no footnote.
+    """Fail any test that saves a figure drawing an uncertainty with no footnote.
 
-    Grossfield et al. (2018) require every figure to describe the meaning and
-    basis of its uncertainties. Wrapping ``save_figure`` in every plotter module
-    turns the existing body of plot tests into that check on real rendered
-    figures. A test that installs its own ``save_figure`` stub bypasses the
-    audit; ``tests/analyses/scientific/test_uncertainty_plots.py`` renders those
-    paths directly instead.
+    Grossfield et al. (2018, LiveCoMS 1:5067) require every figure to describe
+    the meaning and basis of its uncertainties. Every study figure in
+    :mod:`polyzymd.analyses.figures` is saved through
+    :func:`polyzymd.analyses.shared.plotting.save_figure`, which this fixture
+    wraps, so each test that draws a figure also checks its footnote. A test
+    that replaces ``save_figure`` with a stub that does not call the one it
+    found bypasses the audit.
     """
 
     pytest.importorskip("matplotlib")
+    from polyzymd.analyses.shared import plotting
 
-    for module_name in _PLOTTER_MODULES:
-        module = importlib.import_module(module_name)
-        original = getattr(module, "save_figure", None)
-        if original is None:
-            continue
+    original = plotting.save_figure
 
-        def _checked(
-            fig: Any,
-            *args: Any,
-            _original: Any = original,
-            _name: str = module_name,
-            **kwargs: Any,
-        ) -> Any:
-            if figure_draws_uncertainty(fig) and not figure_has_uncertainty_footnote(fig):
-                raise AssertionError(
-                    f"{_name} saved a figure that draws an uncertainty "
-                    "without a footnote saying what it is"
-                )
-            return _original(fig, *args, **kwargs)
+    def checked(fig: Any, *args: Any, **kwargs: Any) -> Any:
+        if figure_draws_uncertainty(fig) and not figure_has_uncertainty_footnote(fig):
+            raise AssertionError(
+                "A figure that draws an uncertainty was saved without a footnote saying "
+                "what it is and what it is computed across"
+            )
+        return original(fig, *args, **kwargs)
 
-        monkeypatch.setattr(module, "save_figure", _checked)
+    monkeypatch.setattr(plotting, "save_figure", checked)

@@ -403,7 +403,7 @@ def _trajectory_info(tmp_path: Path, trajectory_name: str = "prod_centered.xtc")
 def test_universe_provenance_records_pbc_policy_and_bond_source(tmp_path: Path) -> None:
     """Provenance must state the PBC policy, bond source, and trajectory variant."""
 
-    from polyzymd.analyses.mda import UniverseProvider
+    from polyzymd.analyses.universe import UniverseProvider
 
     universe = _two_chain_universe()
     loader = _ProvenanceLoader(_trajectory_info(tmp_path), universe)
@@ -426,7 +426,7 @@ def test_universe_provenance_records_pbc_policy_and_bond_source(tmp_path: Path) 
 def test_universe_provider_forwards_make_whole_policy(tmp_path: Path) -> None:
     """A make_whole request reaches the loader and is recorded in provenance."""
 
-    from polyzymd.analyses.mda import UniverseProvider
+    from polyzymd.analyses.universe import UniverseProvider
 
     universe = _two_chain_universe()
     loader = _ProvenanceLoader(_trajectory_info(tmp_path, "prod.xtc"), universe)
@@ -447,7 +447,7 @@ def test_universe_provider_forwards_make_whole_policy(tmp_path: Path) -> None:
 def test_provenance_refresh_keeps_bond_facts(tmp_path: Path) -> None:
     """Rediscovering input files must not forget what loading established."""
 
-    from polyzymd.analyses.mda import UniverseProvider
+    from polyzymd.analyses.universe import UniverseProvider
 
     universe = _two_chain_universe()
     loader = _ProvenanceLoader(_trajectory_info(tmp_path), universe)
@@ -458,27 +458,6 @@ def test_provenance_refresh_keeps_bond_facts(tmp_path: Path) -> None:
 
     assert refreshed.topology_has_bonds is True
     assert refreshed.bond_source == "conect"
-
-
-def test_every_condition_failing_the_same_way_is_reported(tmp_path: Path) -> None:
-    """A typed error shared by every condition reaches the raised message."""
-
-    from polyzymd.analyses._framework.lifecycle import _no_conditions_message
-    from polyzymd.analyses.exceptions import TopologyBondsMissingError
-
-    error = TopologyBondsMissingError(
-        context="contacts polymer chain detection",
-        n_atoms=512000,
-        topology=tmp_path / "solvated_system.pdb",
-    )
-    message = _no_conditions_message("contacts", [("no_polymer", error), ("sbma", error)])
-
-    assert "TopologyBondsMissingError" in message
-    assert "guess bonds" in message
-    assert "512000 atoms" in message
-
-    mixed = _no_conditions_message("contacts", [("a", error), ("b", ValueError("other"))])
-    assert mixed == "contacts: no conditions succeeded analysis."
 
 
 def test_loader_make_whole_requires_bonds(tmp_path: Path) -> None:

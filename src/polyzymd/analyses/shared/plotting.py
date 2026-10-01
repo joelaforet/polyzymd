@@ -1,13 +1,11 @@
-"""Shared plotting utilities for analysis plugins.
+"""Plotting helpers that the figures of :mod:`polyzymd.analyses.figures` are drawn with.
 
-This module provides reusable plotting helper functions extracted from the
-plotter infrastructure.  Analysis plugins import these functions to apply
-consistent styling, save figures with watermarks, and render common chart
-elements (grouped bars, heatmap annotations, etc.) without inheriting from
-a base class.
+They style axes and legends, pick and order condition colours, draw grouped
+bars with every replicate value, work out error bar and band half-widths,
+add the uncertainty footnote, and save figures with the PolyzyMD watermark.
 
 All functions accept a ``PlotSettings`` object (from
-``polyzymd.config.comparison``) so that user-configured themes, palettes,
+``polyzymd.config.analysis_settings``) so that user-configured themes, palettes,
 and DPI settings are respected automatically.
 
 Examples
@@ -27,7 +25,6 @@ Examples
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
@@ -38,110 +35,13 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
-    from polyzymd.config.comparison import PlotSettings, PlotTheme
+    from polyzymd.config.analysis_settings import PlotSettings
 
 from polyzymd.analyses.exceptions import StatisticsError
 
 logger = logging.getLogger(__name__)
 
 _UNSET = object()  # sentinel for apply_legend defaults
-
-
-@dataclass(frozen=True)
-class ArtifactPlotData:
-    """Canonical artifacts loaded for plot-time data access."""
-
-    analysis_dir: Path
-    condition_artifact: Any | None
-    replicate_artifacts: dict[int, Any]
-    aggregated_dir: Path
-    run_dirs: dict[int, Path]
-
-
-def load_canonical_plot_artifacts(
-    analysis_dir: Path,
-    replicates: Sequence[int],
-    *,
-    require_condition: bool = False,
-    require_replicates: bool = True,
-) -> ArtifactPlotData:
-    """Load plot inputs from canonical MDAnalysis artifacts only.
-
-    The loader reads ``aggregated/result.json`` and the configured
-    ``run_N/result.json`` files through :class:`ArtifactStore`. It never scans
-    directories, opens non-canonical JSON files, or imports trajectory packages.
-
-    Parameters
-    ----------
-    analysis_dir : Path
-        Condition-level analysis directory containing ``aggregated`` and
-        ``run_N`` subdirectories.
-    replicates : sequence of int
-        Configured replicate IDs to load. Extra run directories are ignored.
-    require_condition : bool, optional
-        Raise when ``aggregated/result.json`` is absent, by default False.
-    require_replicates : bool, optional
-        Raise when any configured ``run_N/result.json`` is absent, by default
-        True.
-
-    Returns
-    -------
-    ArtifactPlotData
-        Loaded canonical condition and replicate artifacts.
-    """
-
-    from polyzymd.analyses.mda import ArtifactStore, ArtifactStoreError
-
-    root = Path(analysis_dir)
-    aggregated_dir = root / "aggregated"
-    condition_artifact = None
-    condition_path = aggregated_dir / "result.json"
-    if condition_path.exists():
-        condition_artifact = ArtifactStore(aggregated_dir).read_condition_result("result.json")
-    elif require_condition:
-        raise ArtifactStoreError(f"Missing canonical condition artifact: {condition_path}")
-
-    replicate_artifacts: dict[int, Any] = {}
-    run_dirs: dict[int, Path] = {}
-    for replicate in replicates:
-        replicate_id = int(replicate)
-        run_dir = root / f"run_{replicate_id}"
-        run_dirs[replicate_id] = run_dir
-        replicate_path = run_dir / "result.json"
-        if replicate_path.exists():
-            replicate_artifacts[replicate_id] = ArtifactStore(run_dir).read_replicate_result(
-                "result.json"
-            )
-        elif require_replicates:
-            raise ArtifactStoreError(f"Missing canonical replicate artifact: {replicate_path}")
-
-    return ArtifactPlotData(
-        analysis_dir=root,
-        condition_artifact=condition_artifact,
-        replicate_artifacts=replicate_artifacts,
-        aggregated_dir=aggregated_dir,
-        run_dirs=run_dirs,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Theme access
-# ---------------------------------------------------------------------------
-
-
-def get_theme(plot_settings: "PlotSettings") -> "PlotTheme":
-    """Return the resolved ``PlotTheme`` from *plot_settings*.
-
-    Parameters
-    ----------
-    plot_settings : PlotSettings
-        Global plot settings (carries a ``.theme`` property).
-
-    Returns
-    -------
-    PlotTheme
-    """
-    return plot_settings.theme
 
 
 # ---------------------------------------------------------------------------
@@ -348,32 +248,6 @@ def order_condition_labels(labels: Sequence[str], plot_settings: "PlotSettings")
     ordered.extend(label for _, label, _ in sorted(with_order, key=lambda item: (item[0], item[2])))
     ordered.extend(label for _, label in without_order)
     return ordered
-
-
-def get_condition_colors(
-    labels: Sequence[str],
-    plot_settings: "PlotSettings",
-    *,
-    control_label: str | None = None,
-) -> list:
-    """Return colors for condition labels using semantic settings if enabled.
-
-    Parameters
-    ----------
-    labels : sequence of str
-        Condition labels in plot order.
-    plot_settings : PlotSettings
-        Global plot settings carrying optional semantic color settings.
-    control_label : str, optional
-        Label that should use the configured semantic control color.
-
-    Returns
-    -------
-    list
-        Color values aligned to ``labels``.
-    """
-    color_map = get_condition_color_map(labels, plot_settings, control_label=control_label)
-    return [color_map[label] for label in labels]
 
 
 def get_condition_color_map(
@@ -771,69 +645,6 @@ def replicate_jitter_offsets(n_values: int, bar_width: float) -> "np.ndarray":
     return np.linspace(-max_jitter, max_jitter, n_values)
 
 
-def has_replicate_uncertainty(
-    replicate_values: Any = None,
-    *,
-    n_replicates: int | None = None,
-) -> bool:
-    """Return whether replicate-level uncertainty can be displayed.
-
-    Parameters
-    ----------
-    replicate_values : Any, optional
-        Per-condition or per-bar replicate values. Finite numeric entries are
-        counted after coercion.
-    n_replicates : int or None, optional
-        Explicit replicate count when the raw replicate values are not
-        available.
-
-    Returns
-    -------
-    bool
-        True when at least two finite independent replicate values are present.
-    """
-
-    if n_replicates is not None:
-        return n_replicates >= 2
-    return finite_numeric_values(replicate_values).size >= 2
-
-
-def suppress_singleton_errors(
-    errors: Sequence[float],
-    replicate_values: Sequence[Any] | None,
-) -> list[float] | None:
-    """Return errors with singleton replicate uncertainties suppressed.
-
-    Parameters
-    ----------
-    errors : sequence of float
-        SEM or uncertainty values aligned to ``replicate_values``.
-    replicate_values : sequence or None
-        Per-bar replicate values used to decide whether an error bar is
-        statistically displayable.
-
-    Returns
-    -------
-    list of float or None
-        Sanitized error values. Returns ``None`` when no bar has replicate
-        uncertainty, allowing callers to omit error bars entirely.
-    """
-
-    if replicate_values is None:
-        return list(errors)
-
-    sanitized: list[float] = []
-    has_any_uncertainty = False
-    for error, values in zip(errors, replicate_values, strict=False):
-        if has_replicate_uncertainty(values):
-            sanitized.append(float(error))
-            has_any_uncertainty = True
-        else:
-            sanitized.append(0.0)
-
-    return sanitized if has_any_uncertainty else None
-
-
 def scatter_replicate_values(
     ax: "Axes",
     bar_positions: "Sequence[float] | np.ndarray",
@@ -935,147 +746,6 @@ def scatter_replicate_values(
         n_scattered += 1
 
     return n_scattered
-
-
-def scatter_stacked_segment_replicates(
-    ax: "Axes",
-    x_position: float,
-    bottom_value: float,
-    replicate_values: Sequence[Any],
-    plot_settings: "PlotSettings",
-    *,
-    replicate_base_values: Sequence[Any] | None = None,
-    positive_base_values: Sequence[Any] | None = None,
-    negative_base_values: Sequence[Any] | None = None,
-    bar_width: float = 0.8,
-    dot_color: Any | None = None,
-    dot_size: float | None = None,
-    dot_alpha: float | None = None,
-    placement: str = "center",
-    zorder: float = 5,
-) -> int:
-    """Overlay replicate dots on stacked segments.
-
-    The per-component replicate value is a segment height, not an absolute
-    stacked coordinate. Plotting at ``base + replicate / 2`` places each dot at
-    the center of the component-specific replicate segment. Callers should pass
-    replicate-specific bases when earlier stacked components vary by replicate.
-    Signed stacks may pass separate positive and negative bases so each dot is
-    placed on the same sign stack as its own replicate value.
-
-    Parameters
-    ----------
-    ax : matplotlib.axes.Axes
-        Axes containing the stacked bar chart.
-    x_position : float
-        Center x-coordinate of the condition bar.
-    bottom_value : float
-        Aggregate stack baseline for the current segment.
-    replicate_values : sequence of Any
-        Component-specific per-replicate segment heights.
-    plot_settings : PlotSettings
-        Plot configuration used for dot styling.
-    replicate_base_values : sequence of Any, optional
-        Per-replicate cumulative stack bases for unsigned stacks. When omitted,
-        ``bottom_value`` is used for every replicate for backward compatibility.
-    positive_base_values : sequence of Any, optional
-        Per-replicate cumulative positive stack bases for signed stacks.
-    negative_base_values : sequence of Any, optional
-        Per-replicate cumulative negative stack bases for signed stacks.
-    bar_width : float, optional
-        Width used for deterministic jitter, by default ``0.8``.
-    dot_color : Any, optional
-        Override for theme dot colour.
-    dot_size : float, optional
-        Override for theme dot size.
-    dot_alpha : float, optional
-        Override for theme dot alpha.
-    placement : {"center", "end"}, optional
-        Dot placement within each replicate segment. ``"center"`` uses
-        ``base + replicate / 2`` and ``"end"`` uses ``base + replicate``.
-    zorder : float, optional
-        Matplotlib z-order for dot overlays, by default ``5``.
-
-    Returns
-    -------
-    int
-        Number of scatter calls emitted.
-
-    Raises
-    ------
-    ValueError
-        If replicate base arrays do not align with ``replicate_values``.
-    """
-    import math
-
-    import numpy as np
-
-    if placement not in {"center", "end"}:
-        raise ValueError("placement must be 'center' or 'end'")
-
-    raw_values = list(replicate_values)
-    if positive_base_values is not None or negative_base_values is not None:
-        if positive_base_values is None or negative_base_values is None:
-            raise ValueError(
-                "positive_base_values and negative_base_values must be provided together"
-            )
-        positive_bases = list(positive_base_values)
-        negative_bases = list(negative_base_values)
-        if len(positive_bases) != len(raw_values) or len(negative_bases) != len(raw_values):
-            raise ValueError("signed replicate base lengths must match replicate_values length")
-        base_values: list[float] = []
-        segment_values_list: list[float] = []
-        for value, positive_base, negative_base in zip(raw_values, positive_bases, negative_bases):
-            try:
-                segment_value = float(value)
-                base_value = float(positive_base if segment_value >= 0.0 else negative_base)
-            except (TypeError, ValueError):
-                continue
-            if math.isfinite(segment_value) and math.isfinite(base_value):
-                segment_values_list.append(segment_value)
-                base_values.append(base_value)
-        segment_values = np.asarray(segment_values_list, dtype=float)
-        bases = np.asarray(base_values, dtype=float)
-    elif replicate_base_values is not None:
-        raw_bases = list(replicate_base_values)
-        if len(raw_bases) != len(raw_values):
-            raise ValueError("replicate_base_values length must match replicate_values length")
-        base_values = []
-        segment_values_list = []
-        for value, base in zip(raw_values, raw_bases):
-            try:
-                segment_value = float(value)
-                base_value = float(base)
-            except (TypeError, ValueError):
-                continue
-            if math.isfinite(segment_value) and math.isfinite(base_value):
-                segment_values_list.append(segment_value)
-                base_values.append(base_value)
-        segment_values = np.asarray(segment_values_list, dtype=float)
-        bases = np.asarray(base_values, dtype=float)
-    else:
-        segment_values = finite_numeric_values(raw_values)
-        bases = np.full(segment_values.shape, float(bottom_value), dtype=float)
-
-    if segment_values.size == 0:
-        return 0
-
-    divisor = 2.0 if placement == "center" else 1.0
-    segment_positions = [
-        float(base) + float(value) / divisor for base, value in zip(bases, segment_values)
-    ]
-    return scatter_replicate_values(
-        ax,
-        [x_position],
-        [segment_positions],
-        plot_settings,
-        orientation="vertical",
-        bar_width=bar_width,
-        dot_color=dot_color,
-        dot_size=dot_size,
-        dot_alpha=dot_alpha,
-        zorder=zorder,
-    )
 
 
 def grouped_bars(
@@ -1220,114 +890,6 @@ def grouped_bars(
 
 
 # ---------------------------------------------------------------------------
-# Heatmap cell annotation
-# ---------------------------------------------------------------------------
-
-
-def annotate_cells(
-    ax: "Axes",
-    matrix: "np.ndarray",
-    plot_settings: "PlotSettings",
-    *,
-    fmt: str = ".2f",
-    fontsize: int | None = None,
-    threshold: float = 0.3,
-    sem_matrix: "np.ndarray | None" = None,
-    show_sign: bool = True,
-    linespacing: float | None = None,
-) -> None:
-    """Annotate heatmap cells with formatted values.
-
-    Iterates over every element of *matrix* and places a text label at
-    the corresponding (col, row) position on *ax*.  NaN cells are
-    skipped.  Text colour flips between black and white depending on
-    the background intensity (controlled by *threshold*).
-
-    Parameters
-    ----------
-    ax : matplotlib Axes
-        The axes containing the heatmap image.
-    matrix : np.ndarray
-        2-D array of values (rows x cols) matching the heatmap.
-    plot_settings : PlotSettings
-        Global plot settings.
-    fmt : str, optional
-        Format spec for the value, by default ``".2f"``.
-    fontsize : int | None, optional
-        Annotation font size.  When ``None`` (default), uses
-        ``plot_settings.theme.annotation_fontsize``.
-    threshold : float, optional
-        Absolute-value threshold above which text turns white.
-    sem_matrix : np.ndarray | None, optional
-        If provided, a second line ``±{sem}`` is appended when the
-        SEM value is finite.
-    show_sign : bool, optional
-        Prefix positive values with ``"+"`` , by default ``True``.
-    linespacing : float | None, optional
-        Passed to ``ax.text(linespacing=...)`` when SEM is shown.
-    """
-    import numpy as np
-
-    fs = fontsize if fontsize is not None else plot_settings.theme.annotation_fontsize
-
-    n_rows, n_cols = matrix.shape
-    for i in range(n_rows):
-        for j in range(n_cols):
-            val = matrix[i, j]
-            if not np.isfinite(val):
-                continue
-            text_color = "white" if abs(val) > threshold else "black"
-            sign = "+" if show_sign and val > 0 else ""
-            label_str = f"{sign}{val:{fmt}}"
-            if sem_matrix is not None:
-                sem = sem_matrix[i, j]
-                if not np.isnan(sem):
-                    label_str = f"{label_str}\n\u00b1{sem:{fmt}}"
-            kwargs: dict = {
-                "ha": "center",
-                "va": "center",
-                "color": text_color,
-                "fontsize": fs,
-            }
-            if linespacing is not None:
-                kwargs["linespacing"] = linespacing
-            ax.text(j, i, label_str, **kwargs)
-
-
-# ---------------------------------------------------------------------------
-# Symmetric colour-limit helper
-# ---------------------------------------------------------------------------
-
-
-def symmetric_clim(
-    values: "Sequence[float] | np.ndarray",
-    pad: float = 0.1,
-) -> tuple[float, float]:
-    """Compute symmetric colour limits centred on zero.
-
-    Parameters
-    ----------
-    values : sequence of float or ndarray
-        Finite data values to derive limits from.
-    pad : float, optional
-        Extra padding added to both sides, by default ``0.1``.
-
-    Returns
-    -------
-    tuple[float, float]
-        ``(vmin, vmax)`` with ``vmin == -vmax`` (before padding).
-    """
-    import numpy as np
-
-    arr = np.asarray(values, dtype=float)
-    arr = arr[np.isfinite(arr)]
-    if len(arr) == 0:
-        return (-pad, pad)
-    max_abs = float(max(abs(arr.min()), abs(arr.max())))
-    return (-(max_abs + pad), max_abs + pad)
-
-
-# ---------------------------------------------------------------------------
 # Uncertainty intervals on figures
 # ---------------------------------------------------------------------------
 
@@ -1375,33 +937,6 @@ def error_bar_half_widths(
     return half_widths if any_uncertainty else None
 
 
-def plugin_plot_settings(plot_settings: Any, analysis_name: str) -> Any | None:
-    """Return one plugin's plot settings from the global settings object.
-
-    The global ``PlotSettings`` exposes each discovered analysis as an
-    attribute, default-constructed when the YAML omits its block. A plugin with
-    no ``PlotSettingsModel`` has no such attribute and yields ``None``.
-    """
-    try:
-        return getattr(plot_settings, analysis_name)
-    except AttributeError:
-        return None
-
-
-def resolve_error_bar(*candidates: Any, default: str = "ci95") -> str:
-    """Return the first declared ``error_bar`` setting among *candidates*.
-
-    Plugin plot settings carry ``error_bar``; the global plot settings do not.
-    Pass the plugin's own settings first, usually from
-    :func:`plugin_plot_settings`, so a user's choice is honoured.
-    """
-    for candidate in candidates:
-        value = getattr(candidate, "error_bar", None)
-        if value in ("ci95", "sem"):
-            return str(value)
-    return default
-
-
 def band_half_widths(
     matrix: Any,
     *,
@@ -1430,77 +965,80 @@ def band_half_widths(
     return sem * float(student_t_coverage_factor(n) or 1.0)
 
 
-def annotate_uncertainty(
-    fig: "Figure",
-    plot_settings: Any,
-    analysis_name: str,
-    *,
-    replicate_values: "Sequence[Any] | None" = None,
-    n_replicates: int | None = None,
-    equilibration: str | None = None,
-) -> str:
-    """Resolve a plugin's error-bar setting and footnote the figure with it.
+#: ``gid`` of the text that :func:`add_figure_note` writes, so tests and
+#: readers can find a figure's footnote.
+FIGURE_NOTE_GID = "polyzymd-figure-note"
 
-    This is the one call every plotter makes after laying out a figure that
-    draws an uncertainty. It reads the plugin's own ``error_bar`` choice,
-    counts the replicates behind the narrowest interval shown, and writes the
-    footnote. Pass ``replicate_values`` when the per-bar values are available,
-    otherwise ``n_replicates``.
+
+def add_figure_note(fig: "Figure", text: str) -> Any:
+    """Write ``text`` as a footnote under the axes of ``fig`` and return the Text.
+
+    The note hangs from the bottom edge of the figure, left aligned, in 7 pt
+    grey type, wrapped to about the figure width, so it never overlaps an
+    axes, a legend or the watermark. :func:`save_figure` saves with a tight
+    bounding box, which takes the note into the saved image. The text gets
+    the ``gid`` :data:`FIGURE_NOTE_GID`.
     """
-    if n_replicates is None:
-        n_replicates = min(
-            (
-                int(finite_numeric_values(values).size)
-                for values in replicate_values or []
-                if finite_numeric_values(values).size
-            ),
-            default=0,
-        )
-    return add_uncertainty_footnote(
-        fig,
-        error_bar=resolve_error_bar(
-            plugin_plot_settings(plot_settings, analysis_name), plot_settings
-        ),
-        n_replicates=n_replicates,
-        equilibration=equilibration,
+    import textwrap
+
+    width = max(60, int(fig.get_figwidth() * 17))
+    wrapped = "\n".join(textwrap.fill(line, width) for line in text.split("\n"))
+    return fig.text(
+        0.01,
+        0.0,
+        wrapped,
+        fontsize=7,
+        color="dimgray",
+        ha="left",
+        va="top",
+        gid=FIGURE_NOTE_GID,
     )
 
 
-def add_uncertainty_footnote(
-    fig: "Figure",
+def uncertainty_footnote_text(
     *,
     error_bar: str = "ci95",
     n_replicates: int | None = None,
     equilibration: str | None = None,
     drawn: str = "Error bars",
+    of: str = "the mean",
+    method: str = "Student t",
+    counts: str = "n per condition in the labels",
     points: str = "Points are per-replicate values",
 ) -> str:
-    """Write the sentence saying what a figure's error bars mean, and return it.
+    """Return the sentence saying what a figure's uncertainty marks are and what they span.
 
-    Grossfield et al. (2018) ask that every figure describe the meaning and
-    basis of its uncertainties. This is that sentence. ``drawn`` names the
-    mark that shows the interval, such as ``"Band"``, and ``points`` says
-    what the per-replicate marks are.
+    The sentence reads ``"<drawn>: 95% <method> confidence interval of <of>
+    across n = <n> replicates; production window t >= <equilibration>.
+    <points>."``. With ``error_bar="sem"`` it names one standard error and
+    says it is not a 95% interval. When ``n_replicates`` is ``None``, because
+    the conditions have different numbers of replicates, it reads ``across the
+    replicates of each condition (<counts>)``.
     """
+    if error_bar not in ("ci95", "sem"):
+        raise StatisticsError(f"error_bar must be 'ci95' or 'sem', got {error_bar!r}")
     what = (
-        f"{drawn}: 1 SEM (not a 95% interval)"
+        f"{drawn}: 1 SEM (not a 95% interval) of {of}"
         if error_bar == "sem"
-        else f"{drawn}: 95% CI (Student t)"
+        else f"{drawn}: 95% {method} confidence interval of {of}"
     )
     across = (
         f" across n = {n_replicates} replicates"
         if n_replicates and n_replicates >= 2
-        else " across replicates"
+        else f" across the replicates of each condition ({counts})"
     )
     window = f"; production window t >= {equilibration}" if equilibration else ""
-    text = f"{what}{across}{window}. {points}."
-    fig.text(
-        0.01,
-        0.01,
-        text,
-        fontsize=7,
-        color="dimgray",
-        ha="left",
-        va="bottom",
-    )
+    return f"{what}{across}{window}. {points}."
+
+
+def add_uncertainty_footnote(fig: "Figure", **wording: Any) -> str:
+    """Write the footnote saying what a figure's error bars or bands are, and return it.
+
+    Grossfield et al. (2018, LiveCoMS 1:5067) ask that every figure describe
+    the meaning and basis of its uncertainties. The keywords are those of
+    :func:`uncertainty_footnote_text`, which words the sentence, and
+    :func:`add_figure_note` places it under the axes.
+    """
+    text = uncertainty_footnote_text(**wording)
+    add_figure_note(fig, text)
     return text
