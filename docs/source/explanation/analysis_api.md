@@ -370,8 +370,13 @@ bar at each condition's mean with its 95 percent Student t interval and every
 replicate value as a point. For a labelled result it draws a profile instead:
 each replicate's value at every label as a thin line and each condition's mean
 with its interval as a thick line and band, numeric labels such as residue IDs
-placed at their value, and `highlight=` labels marked. Each figure carries a footnote naming the interval,
-the number of replicates and the production window.
+placed at their value, and `highlight=` labels marked. Every figure that draws
+error bars or a band is footnoted under its axes with what they are, what they
+are the interval of and the replicates they are computed across, as Grossfield
+et al. (2018) ask, for example "Error bars: 95% Student t confidence interval
+of the condition mean across n = 5 replicates; production window t >= 10ns."
+When the conditions have different numbers of replicates, the footnote says
+that n is given per condition.
 
 Several results that share a unit can go in one figure:
 
@@ -388,7 +393,8 @@ with different units are refused, because they cannot share an axis.
 For labelled results, `polyzymd.analyses.figures.plot_differences(values,
 report, output_dir, name)` draws one panel per condition with its difference
 from the control at every label, the 95 percent interval of the difference
-from the `compare()` report's test, and a point on each label that is
+from the `compare()` report's test (Welch's t by default, which the footnote
+names), and a point on each label that is
 significant after the correction, so the figure shows the numbers of the
 report. `plot_decomposition(parts, output_dir, name)` draws several labelled
 results of one unit together, one panel per condition, such as the deviation,

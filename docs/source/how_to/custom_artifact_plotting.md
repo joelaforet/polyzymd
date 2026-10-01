@@ -115,15 +115,21 @@ ax.set_xticks(x, [f"Residue {residue}" for residue in residues])
 ax.set_ylabel("Fraction of frames with a hydrogen bond to the polymer")
 ax.set_ylim(0, 1.05)
 ax.legend(frameon=False)
+counts = frame["n"].unique()
 add_uncertainty_footnote(
-    fig, n_replicates=int(frame["n"].min()), equilibration=study[conditions[0]].equilibration
+    fig,
+    n_replicates=int(counts[0]) if len(counts) == 1 else None,
+    equilibration=study[conditions[0]].equilibration,
 )
-fig.tight_layout(rect=(0, 0.05, 1, 1))
+fig.tight_layout()
 ```
 
-`add_uncertainty_footnote` writes a sentence at the bottom of the figure
-saying that the error bars are Student t 95% intervals across the replicates
-and that the points are the per-replicate values, as on every PolyzyMD figure.
+`add_uncertainty_footnote` writes a sentence under the axes saying that the
+error bars are the 95% Student t confidence interval of the mean across the
+replicates and that the points are the per-replicate values, as on every
+PolyzyMD figure; with `n_replicates=None` it says that n is per condition.
+Its `drawn=` and `of=` keywords name the mark and the
+quantity, for example `drawn="Band", of="the condition mean at each residue"`.
 
 ## Save outside the results folder
 
