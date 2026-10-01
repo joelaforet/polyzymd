@@ -486,3 +486,57 @@ def test_query_end_states_parses_sacct():
             "556": "CANCELLED exit 0:15",
         }
     assert query_end_states([]) == {}
+
+
+# ---------------------------------------------------------------------------
+# ETA from file windows (rollover regression)
+# ---------------------------------------------------------------------------
+
+
+def test_rate_uses_file_window_not_bogus_started_at():
+    """Replays CALB 75/25 run3 segment 10: 180 ns recorded as starting at its end."""
+    seg10 = SegmentRecord(
+        index=10,
+        steps_completed=90_000_000,  # 180 ns
+        started_at=(NOW - timedelta(minutes=5)).isoformat(),
+        status=SegmentStatus.INTERRUPTED,
+    )
+    seg11 = SegmentRecord(
+        index=11, steps_completed=10_000, started_at=(NOW - timedelta(minutes=4)).isoformat()
+    )
+    windows = {10: (NOW - timedelta(days=1, minutes=5), NOW - timedelta(minutes=5))}
+    rate = estimate_rate_ns_per_day(
+        _progress([seg10, seg11]), NOW, live=True, window_fn=windows.get
+    )
+    assert rate is not None and abs(rate - 180.0) < 1.0
+    # Without the file window the old path would time 180 ns over 5 minutes.
+    assert estimate_rate_ns_per_day(_progress([seg10, seg11]), NOW, live=True) is None
+
+
+def test_live_rate_needs_an_hour():
+    seg = SegmentRecord(
+        index=0,
+        steps_completed=2_000_000,
+        started_at=(NOW - timedelta(minutes=30)).isoformat(),
+        status=SegmentStatus.RUNNING,
+    )
+    assert estimate_rate_ns_per_day(_progress([seg]), NOW, live=True) is None
+    window = {0: (NOW - timedelta(minutes=30), NOW)}
+    assert estimate_rate_ns_per_day(_progress([seg]), NOW, live=True, window_fn=window.get) is None
+
+
+def test_segment_window_reads_file_mtimes(tmp_path):
+    import os
+
+    from polyzymd.cli.status_report import segment_window
+
+    seg = tmp_path / "production_4"
+    seg.mkdir()
+    (seg / "production_4_parameters.json").write_text("{}")
+    (seg / "production_4_state_data.csv").write_text("x")
+    t = NOW.timestamp()
+    os.utime(seg / "production_4_parameters.json", (t - 86400, t - 86400))
+    os.utime(seg / "production_4_state_data.csv", (t, t))
+    start, end = segment_window(tmp_path, 4)
+    assert (end - start) == timedelta(days=1)
+    assert segment_window(tmp_path, 5) is None

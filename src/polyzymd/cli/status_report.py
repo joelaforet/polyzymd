@@ -37,6 +37,8 @@ LOGGER = logging.getLogger(__name__)
 
 # Minimum wall time a segment must have run before its throughput is trusted.
 _MIN_RATE_WINDOW = timedelta(minutes=10)
+# A live segment's rate is noisy until it has run this long.
+_MIN_LIVE_WINDOW = timedelta(hours=1)
 # Minimum steps a segment must have advanced before its throughput is trusted.
 _MIN_RATE_STEPS = 1_000
 
@@ -269,7 +271,32 @@ def _parse_iso(value: str | None) -> datetime | None:
     return parsed
 
 
-def estimate_rate_ns_per_day(progress, now: datetime, *, live: bool) -> float | None:
+def segment_window(engine_dir: Path, index: int) -> tuple[datetime, datetime] | None:
+    """Wall window of ``production_<index>`` from its files.
+
+    The parameters JSON is written when the segment starts and the state-data
+    CSV on every report, so their mtimes bracket the segment. Unlike the
+    progress record, they survive rewrites of ``progress.json``.
+    """
+    seg = Path(engine_dir) / f"production_{index}"
+    try:
+        start = (seg / f"production_{index}_parameters.json").stat().st_mtime
+        end = (seg / f"production_{index}_state_data.csv").stat().st_mtime
+    except OSError:
+        return None
+    if end <= start:
+        return None
+    tz = timezone.utc
+    return datetime.fromtimestamp(start, tz), datetime.fromtimestamp(end, tz)
+
+
+def estimate_rate_ns_per_day(
+    progress,
+    now: datetime,
+    *,
+    live: bool,
+    window_fn: Callable[[int], tuple[datetime, datetime] | None] | None = None,
+) -> float | None:
     """Estimate throughput from the most recent informative segment.
 
     Preference order:
@@ -293,6 +320,23 @@ def estimate_rate_ns_per_day(progress, now: datetime, *, live: bool) -> float | 
         ns = steps * timestep_fs / 1e6
         return ns / (window.total_seconds() / 86400.0)
 
+    if window_fn is not None:
+        # File timestamps first: newest stopped segment, then the live one.
+        for seg in reversed(segments):
+            if getattr(seg.status, "value", seg.status) == "running":
+                continue
+            window = window_fn(seg.index)
+            if window is not None:
+                rate = _rate(seg.steps_completed, *window)
+                if rate is not None:
+                    return rate
+        if live and segments:
+            window = window_fn(segments[-1].index)
+            if window is not None and now - window[0] >= _MIN_LIVE_WINDOW:
+                rate = _rate(segments[-1].steps_completed, window[0], now)
+                if rate is not None:
+                    return rate
+
     for seg in reversed(segments):
         start = _parse_iso(seg.started_at)
         end = _parse_iso(seg.finished_at)
@@ -308,6 +352,8 @@ def estimate_rate_ns_per_day(progress, now: datetime, *, live: bool) -> float | 
                 continue
             start = _parse_iso(seg.started_at)
             if start is None:
+                continue
+            if now - start < _MIN_LIVE_WINDOW:
                 continue
             rate = _rate(seg.steps_completed, start, now)
             if rate is not None:
@@ -481,7 +527,12 @@ def build_system_report(
         rate = None
         eta = None
         if verdict != VERDICT_COMPLETED:
-            rate = estimate_rate_ns_per_day(progress, now, live=live)
+            rate = estimate_rate_ns_per_day(
+                progress,
+                now,
+                live=live,
+                window_fn=lambda idx, d=engine_dir: segment_window(d, idx),
+            )
             if verdict in (VERDICT_RUNNING, VERDICT_QUEUED):
                 eta = estimate_eta_days(total_ns - completed_ns, rate)
 
