@@ -30,7 +30,7 @@ EXIT_CONFLICT = 2
     "--replicates", "replicate_spec", default=None, help="Replicates, e.g. 1-5. Default: all found."
 )
 @click.option(
-    "--verify", is_flag=True, help="Also rehash segments that have a recorded hash and compare."
+    "--verify", is_flag=True, help="Also rehash files that have a recorded hash and compare."
 )
 @click.option(
     "--dry-run", "dry_run", is_flag=True, help="Report what would be hashed; write nothing."
@@ -48,14 +48,15 @@ def hash_trajectories_command(
     dry_run: bool,
     force: bool,
 ) -> None:
-    """Record each production segment's trajectory SHA-256 in progress.json.
+    """Record the SHA-256 of each run's finished trajectory files in its progress.json.
 
-    For runs that finished before PolyzyMD recorded segment hashes. Running
-    it again changes nothing: segments with a recorded hash are skipped
-    without reading their files, and a recorded hash is never overwritten;
-    a disagreement is printed as a conflict and exits 2. Reading the
-    trajectories takes about a second per gigabyte, so on a cluster run it
-    in a batch job.
+    For runs that finished before PolyzyMD recorded trajectory hashes, with
+    any simulation engine: each config's engine (OpenMM, GROMACS) says which
+    files are its trajectories and where their hashes are recorded. Running
+    it again changes nothing: files with a recorded hash are skipped without
+    being read, and a recorded hash is never overwritten; a disagreement is
+    printed as a conflict and exits 2. Reading the trajectories takes about a
+    second per gigabyte, so on a cluster run it in a batch job.
 
     \b
     Examples:
@@ -64,7 +65,7 @@ def hash_trajectories_command(
     """
     from polyzymd.analyses.study import with_data_dir
     from polyzymd.config.schema import SimulationConfig
-    from polyzymd.simulation.progress import record_trajectory_hashes
+    from polyzymd.engines import create_engine
     from polyzymd.utils.replicates import parse_replicate_range
 
     targets: list[tuple[str, SimulationConfig]] = []
@@ -84,11 +85,23 @@ def hash_trajectories_command(
     wanted = set(parse_replicate_range(replicate_spec)) if replicate_spec else None
     conflicts = 0
     for label, config in targets:
-        for index, working_dir in config.discover_replicate_dirs():
-            if wanted is not None and int(index) not in wanted:
-                continue
-            report = record_trajectory_hashes(
-                working_dir, verify=verify, dry_run=dry_run, force=force
+        # Hashing reads files only, so no engine binary is needed.
+        engine = create_engine(config, defer_binary=True)
+        runs = [
+            (index, root)
+            for index, root in config.discover_replicate_dirs()
+            if wanted is None or int(index) in wanted
+        ]
+        if not runs:
+            scratch = config.output.effective_scratch_directory
+            click.echo(f"{label}: no runs found in {scratch}")
+        for index, root in runs:
+            report = engine.record_trajectory_hashes(
+                engine.resolve_engine_working_directory(root),
+                int(index),
+                verify=verify,
+                dry_run=dry_run,
+                force=force,
             )
             name = f"{label} replicate {index}"
             if report["skipped"]:
@@ -100,9 +113,9 @@ def hash_trajectories_command(
             ]
             if verify:
                 parts.append(f"verified {len(report['verified'])}")
-            if report["missing"]:
-                parts.append(f"no file for segments {report['missing']}")
-            click.echo(f"{name}: " + ", ".join(parts))
+            if report["created"]:
+                parts.append("progress.json written from a scan of the run")
+            click.echo(f"{name} ({engine.name}): " + ", ".join(parts))
             for message in report["conflicts"]:
                 click.echo(f"conflict: {name} {message}")
                 conflicts += 1

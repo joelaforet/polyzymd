@@ -212,6 +212,161 @@ class SimulationEngine(ABC):
         """
 
     @abstractmethod
+    def trajectory_files(
+        self, working_dir: Path, progress: SimulationProgress | None
+    ) -> list[Path]:
+        """Return the finished trajectory files of a run, whose content identifies it.
+
+        Parameters
+        ----------
+        working_dir : Path
+            Engine working directory of one replicate.
+        progress : SimulationProgress or None
+            The run's progress, when known, to leave out files still being
+            written.
+
+        Returns
+        -------
+        list of Path
+            Existing trajectory files, in the engine's order.
+        """
+
+    def recorded_trajectory_hashes(
+        self, working_dir: Path, progress: SimulationProgress | None = None
+    ) -> dict[Path, tuple[str, int]]:
+        """Return the SHA-256 and size the run recorded for its trajectory files, by path.
+
+        The default reads the engine-neutral ``trajectory_hashes`` of
+        ``progress.json``; an engine that also records hashes elsewhere, such
+        as per segment, adds them by overriding this method.
+        """
+        from polyzymd.simulation.progress import load_progress
+
+        working_dir = Path(working_dir)
+        progress = progress if progress is not None else load_progress(working_dir)
+        if progress is None:
+            return {}
+        return {
+            (working_dir / key).resolve(): (item.sha256, item.bytes)
+            for key, item in progress.trajectory_hashes.items()
+        }
+
+    def store_trajectory_hash(
+        self, progress: SimulationProgress, working_dir: Path, path: Path, sha256: str, size: int
+    ) -> None:
+        """Record one file's hash in ``progress``: in the engine-neutral ``trajectory_hashes``."""
+        from polyzymd.simulation.progress import TrajectoryHash
+
+        key = str(Path(path).resolve().relative_to(Path(working_dir).resolve()))
+        progress.trajectory_hashes[key] = TrajectoryHash(sha256=sha256, bytes=size)
+
+    def record_trajectory_hashes(
+        self,
+        working_dir: Path,
+        replicate: int,
+        *,
+        verify: bool = False,
+        dry_run: bool = False,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Record the SHA-256 of each finished trajectory file of a run in its ``progress.json``.
+
+        The same for every engine; each engine says which files
+        (:meth:`trajectory_files`) and what was recorded
+        (:meth:`recorded_trajectory_hashes`, :meth:`store_trajectory_hash`).
+        It is idempotent: a file whose recorded hash has the file's size is
+        left as it is without reading it, so a second call changes nothing.
+        A recorded hash is never overwritten: a recorded size that differs
+        from the file's, or with ``verify`` a recomputed hash that differs, is
+        reported as a conflict. A run recorded as running, whose job may still
+        write ``progress.json``, is left alone unless ``force``.
+        ``progress.json`` is written once, atomically, only when a hash was
+        added and not ``dry_run``, and nothing else in it changes; a run
+        without one gets one from the engine's scan of its files.
+
+        Returns
+        -------
+        dict
+            ``hashed``, ``recorded`` (already present), ``verified`` and
+            ``conflicts`` as lists of paths relative to ``working_dir`` or
+            messages, ``created`` (whether ``progress.json`` was written for the
+            first time), and ``skipped`` with the reason when the run was left
+            alone.
+        """
+        from polyzymd.simulation.progress import (
+            SegmentStatus,
+            SimulationStatus,
+            load_progress,
+            save_progress,
+            trajectory_digest,
+        )
+
+        working_dir = Path(working_dir)
+        report: dict[str, Any] = {
+            "hashed": [],
+            "recorded": [],
+            "verified": [],
+            "conflicts": [],
+            "created": False,
+            "skipped": None,
+        }
+        if not working_dir.is_dir():
+            report["skipped"] = f"no engine working directory {working_dir.name}"
+            return report
+        # The stored progress is used as it is, so only hashes are added to it;
+        # the engine scans the files only for a run that has none.
+        progress = load_progress(working_dir)
+        existed = progress is not None
+        if progress is None:
+            progress = self.load_or_scan_progress(working_dir, replicate)
+        running = progress.status == SimulationStatus.RUNNING or any(
+            s.status == SegmentStatus.RUNNING for s in progress.segments
+        )
+        if running and not force:
+            report["skipped"] = (
+                "recorded as running; its job may still write progress.json "
+                "(use --force once it has stopped)"
+            )
+            return report
+        recorded = self.recorded_trajectory_hashes(working_dir, progress)
+        changed = False
+        for path in self.trajectory_files(working_dir, progress):
+            name = str(path.relative_to(working_dir))
+            size = path.stat().st_size
+            known = recorded.get(path.resolve())
+            if known is not None:
+                if known[1] != size:
+                    report["conflicts"].append(
+                        f"{name}: progress.json records {known[1]} bytes, the file has {size}; "
+                        "the trajectory changed after it was recorded"
+                    )
+                elif verify:
+                    if trajectory_digest(path)["trajectory_sha256"] == known[0]:
+                        report["verified"].append(name)
+                    else:
+                        report["conflicts"].append(
+                            f"{name}: the SHA-256 differs from the one recorded"
+                        )
+                else:
+                    report["recorded"].append(name)
+                continue
+            if not dry_run:
+                digest = trajectory_digest(path)
+                self.store_trajectory_hash(
+                    progress,
+                    working_dir,
+                    path,
+                    digest["trajectory_sha256"],
+                    digest["trajectory_bytes"],
+                )
+                changed = True
+            report["hashed"].append(name)
+        if changed:
+            save_progress(working_dir, progress)
+            report["created"] = not existed
+        return report
+
+    @abstractmethod
     def resolve_trajectory_layout(
         self,
         working_dir: Path,

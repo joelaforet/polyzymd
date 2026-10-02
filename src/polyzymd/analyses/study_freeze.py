@@ -359,19 +359,23 @@ def composition_warnings(label: str, config: Any, universe: Any) -> list[str]:
     return notes
 
 
-def _hashes_recorded(provenance: Any) -> bool:
-    """Return whether progress.json records the hash of every trajectory file the replicate reads.
+def _hashes_recorded(condition: Any, replicate: int, provenance: Any) -> bool:
+    """Return whether the run recorded the hash of every trajectory file the replicate reads.
 
-    A run with no ``progress.json`` has nowhere to record them, so it counts
-    as recorded and freeze does not ask for ``polyzymd hash-trajectories``.
+    Read through the condition's simulation engine. A run with no
+    ``progress.json`` has nowhere to record them, so it counts as recorded
+    and freeze does not ask for ``polyzymd hash-trajectories``.
     """
-    from polyzymd.analyses.shared.file_hashes import recorded_segment_hashes
-
-    if not (Path(provenance.working_directory) / "progress.json").is_file():
+    get_engine = getattr(condition._provider._get_loader(), "_get_engine", None)
+    if not callable(get_engine):
         return True
-    recorded = recorded_segment_hashes(provenance.working_directory)
-    names = [Path(item.path).name for item in provenance.trajectories]
-    return bool(names) and all(name in recorded for name in names)
+    engine = get_engine()
+    working_dir = engine.resolve_engine_working_directory(Path(provenance.working_directory))
+    if not (working_dir / "progress.json").is_file():
+        return True
+    recorded = condition._provider.recorded_trajectory_hashes(replicate)
+    paths = [Path(item.path).resolve() for item in provenance.trajectories]
+    return bool(paths) and all(path in recorded for path in paths)
 
 
 def simulated_with(working_dir: Path) -> dict[str, Any]:
@@ -561,7 +565,7 @@ def _replicates(
                 "bond_source": provenance.bond_source,
                 "warnings": list(provenance.warnings),
                 "simulated_with": simulated_with(Path(provenance.working_directory)),
-                "hashes_recorded": _hashes_recorded(provenance),
+                "hashes_recorded": _hashes_recorded(condition, replicate.index, provenance),
             }
         conditions[label] = {**record, "replicates": replicates}
         for index, replicate_record in replicates.items():

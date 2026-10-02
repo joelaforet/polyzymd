@@ -125,8 +125,8 @@ second per gigabyte, unless the run recorded the hash in `progress.json`.
 
 ### Record the hashes of older runs
 
-Runs that finished before PolyzyMD recorded segment hashes have none in
-`progress.json`, so each machine that analyses them hashes them again. Record
+Runs that finished before PolyzyMD recorded trajectory hashes, and GROMACS
+runs, have none in `progress.json`, so each machine that analyses them hashes them again. Record
 them once, where the runs are:
 
 ```bash
@@ -135,8 +135,8 @@ polyzymd hash-trajectories --study lipase_363K             # record them
 ```
 
 ```
-No polymer replicate 1: hashed 3, already recorded 0
-SBMA 50% replicate 1: hashed 12, already recorded 0
+No polymer replicate 1 (openmm): hashed 3, already recorded 0
+SBMA 50% replicate 1 (gromacs): hashed 2, already recorded 0
 ```
 
 Running it again prints `hashed 0` and changes nothing; a hash already in

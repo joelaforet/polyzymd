@@ -3,7 +3,9 @@
 Stored results and frozen studies identify trajectory and topology files by
 their content, so a copied or downloaded study keeps its results. Hashing a
 large trajectory takes about a second per gigabyte, so :func:`file_sha256`
-does it once: it uses the hash the simulation recorded in ``progress.json``
+does it once: it uses the hash the run recorded in ``progress.json`` (read
+through the simulation engine,
+:meth:`~polyzymd.engines.base.SimulationEngine.recorded_trajectory_hashes`)
 when the size matches, and otherwise the cache, one small JSON file per
 hashed path in ``$POLYZYMD_CACHE_DIR/hashes`` (default
 ``~/.cache/polyzymd/hashes``), valid while the file's size and modification
@@ -71,20 +73,3 @@ def file_sha256(path: str | Path, known: tuple[str, int] | None = None) -> str:
     except OSError:
         pass  # an unwritable cache only costs hashing again
     return value
-
-
-def recorded_segment_hashes(working_dir: str | Path) -> dict[str, tuple[str, int]]:
-    """Return the trajectory hashes ``progress.json`` recorded, by trajectory file name."""
-    from polyzymd.simulation.progress import load_progress
-
-    try:
-        progress = load_progress(working_dir)
-    except Exception:  # noqa: BLE001 - an unreadable progress file records nothing
-        return {}
-    if progress is None:
-        return {}
-    return {
-        f"production_{s.index}_trajectory.dcd": (s.trajectory_sha256, s.trajectory_bytes)
-        for s in progress.segments
-        if s.trajectory_sha256 and s.trajectory_bytes is not None
-    }

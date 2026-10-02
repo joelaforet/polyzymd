@@ -66,7 +66,7 @@ when the gaps are filled. `polyzymd study check` prints how many gaps remain.
 
 Commit your inputs (`study.yaml`, `conditions/`, `analyses/`, `figures/`),
 run every analysis (`polyzymd analyze --study study.yaml`), and, if the runs
-predate recorded segment hashes, record them once with
+have no recorded trajectory hashes, record them once with
 `polyzymd hash-trajectories --study study.yaml` (freeze warns when they are
 missing; see {doc}`study_folder`). Then:
 

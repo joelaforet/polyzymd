@@ -377,6 +377,25 @@ class UniverseProvider:
 
         return {} if self.require_complete else {"require_complete": False}
 
+    def recorded_trajectory_hashes(self, replicate: int) -> dict[Path, tuple[str, int]]:
+        """Return the SHA-256 and size the replicate's run recorded for its trajectory files.
+
+        Read through the engine of the config
+        (:meth:`~polyzymd.engines.base.SimulationEngine.recorded_trajectory_hashes`),
+        so every engine's way of recording them is honoured. Empty when the
+        loader has no engine or the run recorded none.
+        """
+        provenance = self.provenance_for(replicate)
+        get_engine = getattr(self._get_loader(), "_get_engine", None)
+        if not callable(get_engine):
+            return {}
+        try:
+            engine = get_engine()
+        except Exception:  # noqa: BLE001 - without an engine, files are hashed from the cache
+            return {}
+        working_dir = engine.resolve_engine_working_directory(Path(provenance.working_directory))
+        return engine.recorded_trajectory_hashes(working_dir)
+
     def _get_loader(self) -> _TrajectoryLoaderLike:
         """Return the lazily instantiated trajectory loader.
 

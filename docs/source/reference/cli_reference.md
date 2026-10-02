@@ -1138,15 +1138,27 @@ polyzymd hash-trajectories (-c CONFIG ... | --study PATH) [--replicates SPEC] [-
 ```
 
 Records, in each run's `progress.json`, the SHA-256 and size of every
-completed or interrupted production segment's trajectory that has none yet:
-for runs that finished before PolyzyMD recorded segment hashes. Stored
-analysis results and frozen studies then identify those trajectories without
-reading them again.
+finished trajectory file that has none yet: for runs that finished before
+PolyzyMD recorded trajectory hashes. Stored analysis results and frozen
+studies then identify those trajectories without reading them again.
 
-It is idempotent. A segment whose recorded hash has the file's size is left
-as it is without reading the file, so running the command again changes
-nothing, and `progress.json` is written, atomically, only when a hash was
-added. A recorded hash is never overwritten: a recorded size that differs
+It works for every simulation engine; the engine of each config says which
+files are trajectories:
+
+| Engine | Trajectory files hashed |
+|---|---|
+| OpenMM | `production_<n>/production_<n>_trajectory.dcd` of each production segment not recorded as running |
+| GROMACS | `gromacs/prod.xtc`, and `prod_nojump.xtc` and `prod_centered.xtc` when present |
+
+The hashes go in the `trajectory_hashes` map of `progress.json`, keyed by the
+path relative to the engine's working directory; OpenMM segments also keep
+them as `trajectory_sha256` and `trajectory_bytes`. A GROMACS run with no
+`progress.json` gets one from a scan of its files.
+
+It is idempotent. A file whose recorded hash has the file's size is left as
+it is without reading it, so running the command again changes nothing, and
+`progress.json` is written, atomically, only when a hash was added; nothing
+else in it changes. A recorded hash is never overwritten: a recorded size that differs
 from the file's, or with `--verify` a recomputed hash that differs, is printed
 as `conflict:` and exits 2. A run recorded as running is skipped, because its
 job may still write `progress.json`; `--force` hashes it once the job has
@@ -1157,13 +1169,13 @@ stopped.
 | `-c, --config PATH` | A simulation `config.yaml`; every run it finds is hashed. Repeatable |
 | `--study PATH` | Every condition of a study, using its `data.local.yaml` |
 | `--replicates SPEC` | Only these replicates, for example `1-5` |
-| `--verify` | Also rehash segments with a recorded hash and compare |
+| `--verify` | Also rehash files with a recorded hash and compare |
 | `--dry-run` | Report what would be hashed, and write nothing |
 | `--force` | Also hash runs recorded as running |
 
-It prints one line per replicate, such as `SBMA 50% replicate 1: hashed 11,
-already recorded 1`, and names segments whose trajectory file is not on disk.
-Reading takes about a second per gigabyte, so on a cluster run it in a batch
+It prints one line per replicate, such as `SBMA 50% replicate 1 (openmm):
+hashed 11, already recorded 1`. A GROMACS `prod.xtc` that mdrun appended to
+after its hash was recorded is reported as a conflict. Reading takes about a second per gigabyte, so on a cluster run it in a batch
 job.
 
 ---
