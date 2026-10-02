@@ -404,6 +404,44 @@ class GromacsEngine(SimulationEngine):
             "returncode": result.returncode,
         }
 
+    #: Production trajectories a GROMACS run leaves: the raw ``mdrun`` output and the
+    #: post-processed whole-molecule and centred copies that analyses read.
+    TRAJECTORY_NAMES: ClassVar[tuple[str, ...]] = (
+        "prod.xtc",
+        "prod_nojump.xtc",
+        "prod_centered.xtc",
+    )
+
+    def trajectory_files(
+        self, working_dir: Path, progress: SimulationProgress | None
+    ) -> list[Path]:
+        """Return the production XTC files that exist, none while the run is still running.
+
+        ``mdrun`` appends every restart to ``prod.xtc``, so the run's files are
+        finished only when it is; a run recorded as running gives none.
+
+        Parameters
+        ----------
+        working_dir : Path
+            GROMACS working directory of one replicate.
+        progress : SimulationProgress or None
+            The run's progress.
+
+        Returns
+        -------
+        list of Path
+            The existing files of :attr:`TRAJECTORY_NAMES`, in that order.
+        """
+        from polyzymd.simulation.progress import SimulationStatus
+
+        if progress is not None and progress.status == SimulationStatus.RUNNING:
+            return []
+        return [
+            Path(working_dir) / name
+            for name in self.TRAJECTORY_NAMES
+            if (Path(working_dir) / name).is_file()
+        ]
+
     def load_or_scan_progress(self, working_dir: Path, replicate: int) -> SimulationProgress:
         """Load or reconstruct GROMACS progress state.
 

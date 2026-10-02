@@ -132,6 +132,11 @@ class SegmentRecord(BaseModel):
         for records written by PolyzyMD versions that predate these fields.
         A change between consecutive segments means the restart chain
         switched environment (see the CUDA-driver routing history).
+    trajectory_sha256, trajectory_bytes : str | None, int | None
+        SHA-256 and size of the segment's trajectory file, recorded when the
+        segment completes, so analyses and published studies identify the
+        trajectory by its content. ``None`` for segments that were interrupted
+        or ran under PolyzyMD versions that predate these fields.
     """
 
     index: int
@@ -145,6 +150,50 @@ class SegmentRecord(BaseModel):
     polyzymd_version: str | None = None
     openmm_version: str | None = None
     pixi_environment: str | None = None
+    trajectory_sha256: str | None = None
+    trajectory_bytes: int | None = None
+
+
+def flush_reporters(simulation: Any) -> None:
+    """Flush the files of a simulation's reporters to disk, so a finished trajectory is complete.
+
+    OpenMM's DCD reporter writes through a buffered file object, which it
+    closes only when the reporter is deleted; a trajectory read or hashed
+    before then can miss its last frames.
+    """
+    for reporter in getattr(simulation, "reporters", []):
+        out = getattr(reporter, "_out", None)
+        if out is not None and not getattr(out, "closed", True):
+            out.flush()
+            try:
+                os.fsync(out.fileno())
+            except (OSError, ValueError, AttributeError):
+                pass
+
+
+def trajectory_digest(path: str | Path) -> dict[str, Any]:
+    """Return ``trajectory_sha256`` and ``trajectory_bytes`` of a finished trajectory file.
+
+    An absent file gives ``None`` for both. Reading a 10 GB trajectory takes
+    of order ten seconds, once, when its segment completes.
+    """
+    import hashlib
+
+    file = Path(path)
+    if not file.is_file():
+        return {"trajectory_sha256": None, "trajectory_bytes": None}
+    digest = hashlib.sha256()
+    with file.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 22), b""):
+            digest.update(block)
+    return {"trajectory_sha256": digest.hexdigest(), "trajectory_bytes": file.stat().st_size}
+
+
+class TrajectoryHash(BaseModel):
+    """SHA-256 and size of one trajectory file, recorded in ``progress.json``."""
+
+    sha256: str
+    bytes: int
 
 
 class SimulationProgress(BaseModel):
@@ -181,6 +230,9 @@ class SimulationProgress(BaseModel):
     timestep_fs: float = 2.0
     equilibration_stages: List[EquilibrationStageRecord] = Field(default_factory=list)
     segments: List[SegmentRecord] = Field(default_factory=list)
+    #: Engine-neutral trajectory hashes: path relative to the engine working
+    #: directory to SHA-256 and size (see SimulationEngine.record_trajectory_hashes).
+    trajectory_hashes: Dict[str, TrajectoryHash] = Field(default_factory=dict)
     status: SimulationStatus = SimulationStatus.NOT_STARTED
     last_updated: str = Field(default_factory=lambda: _now_iso())
     replicate: int = 1

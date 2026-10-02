@@ -756,6 +756,10 @@ class ContinuationManager:
             LOGGER.warning("No progress file found — skipping progress update")
             return
 
+        from polyzymd.simulation.progress import trajectory_digest
+        from polyzymd.utils.version import record_provenance
+
+        segment_dir = self._working_dir / f"production_{self._segment_index}"
         record = SegmentRecord(
             index=self._segment_index,
             steps_completed=total_steps,
@@ -763,6 +767,8 @@ class ContinuationManager:
             samples_written=num_samples,
             status=SegmentStatus.COMPLETED,
             duration_ns=duration_ns,
+            **record_provenance(),
+            **trajectory_digest(segment_dir / f"production_{self._segment_index}_trajectory.dcd"),
         )
         from polyzymd.simulation.progress import _now_iso
 
@@ -1111,6 +1117,11 @@ class ContinuationManager:
 
         # Save final state
         self._save_final_state(output_dir)
+
+        from polyzymd.simulation.progress import flush_reporters
+
+        # The trajectory is hashed into progress.json: make sure it is all on disk.
+        flush_reporters(self._simulation)
 
         # Update progress tracker
         self._update_progress_completed(

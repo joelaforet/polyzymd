@@ -76,7 +76,7 @@ class FreezeResult:
 
 
 class _Hashes:
-    """SHA-256 of files, cached by path, size and modification time in ``deposit/.hashes.json``."""
+    """SHA-256 of files and their sizes, from the shared hash cache (:mod:`~polyzymd.analyses.shared.file_hashes`)."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -86,21 +86,10 @@ class _Hashes:
             self.cache = {}
 
     def __call__(self, file: Path) -> dict[str, Any]:
-        stat = file.stat()
-        key = str(file.resolve())
-        entry = self.cache.get(key)
-        if not entry or entry["size"] != stat.st_size or entry["mtime_ns"] != stat.st_mtime_ns:
-            digest = hashlib.sha256()
-            with file.open("rb") as handle:
-                for block in iter(lambda: handle.read(1 << 22), b""):
-                    digest.update(block)
-            entry = {
-                "size": stat.st_size,
-                "mtime_ns": stat.st_mtime_ns,
-                "sha256": digest.hexdigest(),
-            }
-            self.cache[key] = entry
-        return {"size": entry["size"], "sha256": entry["sha256"]}
+        from polyzymd.analyses.shared.file_hashes import file_sha256
+
+        # The shared cache, so files hashed by analyses are not hashed again.
+        return {"size": file.stat().st_size, "sha256": file_sha256(file)}
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -370,6 +359,25 @@ def composition_warnings(label: str, config: Any, universe: Any) -> list[str]:
     return notes
 
 
+def _hashes_recorded(condition: Any, replicate: int, provenance: Any) -> bool:
+    """Return whether the run recorded the hash of every trajectory file the replicate reads.
+
+    Read through the condition's simulation engine. A run with no
+    ``progress.json`` has nowhere to record them, so it counts as recorded
+    and freeze does not ask for ``polyzymd hash-trajectories``.
+    """
+    get_engine = getattr(condition._provider._get_loader(), "_get_engine", None)
+    if not callable(get_engine):
+        return True
+    engine = get_engine()
+    working_dir = engine.resolve_engine_working_directory(Path(provenance.working_directory))
+    if not (working_dir / "progress.json").is_file():
+        return True
+    recorded = condition._provider.recorded_trajectory_hashes(replicate)
+    paths = [Path(item.path).resolve() for item in provenance.trajectories]
+    return bool(paths) and all(path in recorded for path in paths)
+
+
 def simulated_with(working_dir: Path) -> dict[str, Any]:
     """Return the software versions that built and ran a replicate, as the run recorded them.
 
@@ -557,6 +565,7 @@ def _replicates(
                 "bond_source": provenance.bond_source,
                 "warnings": list(provenance.warnings),
                 "simulated_with": simulated_with(Path(provenance.working_directory)),
+                "hashes_recorded": _hashes_recorded(condition, replicate.index, provenance),
             }
         conditions[label] = {**record, "replicates": replicates}
         for index, replicate_record in replicates.items():
@@ -573,6 +582,14 @@ def _replicates(
                 ]
             )
         ]
+        unhashed = [index for index, r in replicates.items() if not r["hashes_recorded"]]
+        if unhashed:
+            warnings.append(
+                f"{label}: replicates {', '.join(unhashed)} have no trajectory hashes in "
+                "progress.json (the runs predate them); record them, once, by running polyzymd "
+                "hash-trajectories --study . in the study folder, so anyone can check the "
+                "trajectories without hashing them again"
+            )
         if unknown:
             warnings.append(
                 f"{label}: replicates {', '.join(unknown)} record no OpenMM version (no "

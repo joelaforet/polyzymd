@@ -112,7 +112,17 @@ lacks; `analyze` and the `study` commands print only reports and warnings and
 write the full log to `logs/` (`polyzymd -v` for more). A study's own function
 with `allow_empty: true` skips replicates where a selection matches nothing.
 Config hashes identify input structures by content and leave out the
-projects and scratch directories (`analyses/identity.py`).
+projects and scratch directories (`analyses/identity.py`); stored records
+identify trajectory and topology files by SHA-256 and size
+(`analyses/shared/file_hashes.py`, from `progress.json`'s `trajectory_sha256`
+when the runner recorded it), so moved or downloaded data reuses results.
+`polyzymd hash-trajectories` (`cli/hashes.py`) records missing trajectory
+hashes for older runs of any engine, idempotently and without ever overwriting
+a recorded hash. The logic is `SimulationEngine.record_trajectory_hashes` in
+`engines/base.py`; each engine implements `trajectory_files` (and may extend
+`recorded_trajectory_hashes`/`store_trajectory_hash`), and records and freeze
+read hashes through `UniverseProvider.recorded_trajectory_hashes`. Anything
+new about a run's outputs belongs on the engine in the same way.
 `polyzymd study freeze` (`analyses/study_freeze.py`, `analyses/study_metadata.py`)
 checks staleness and metadata, writes `manifest.json`, `CITATION.cff` (citing
 PolyzyMD through `polyzymd/citation.py`), `.zenodo.json`, `md_checklist.yaml` and
