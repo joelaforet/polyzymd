@@ -35,6 +35,7 @@ from __future__ import annotations
 import csv
 import gzip
 import json
+import os
 import shutil
 import subprocess
 from collections import Counter
@@ -772,8 +773,19 @@ def _next_tag(root: Path) -> str:
     return f"study-v{max(numbers, default=0) + 1}"
 
 
-def freeze(root: str | Path, *, tag: str | None = None) -> FreezeResult:
+def freeze(
+    root: str | Path,
+    *,
+    tag: str | None = None,
+    publish: bool = True,
+) -> FreezeResult:
     """Freeze the study in ``root`` for publication; see the module docstring.
+
+    With ``publish=False``, as :func:`~polyzymd.analyses.project_freeze.freeze_project`
+    freezes each study of a project, only the study's own files are written
+    (``manifest.json``, ``md_checklist.yaml``, ``system_summary.csv``, and the
+    engine inputs and final frames under ``deposit/``); the metadata,
+    citation, commit, tag and upload are the project's.
 
     Raises
     ------
@@ -796,10 +808,13 @@ def freeze(root: str | Path, *, tag: str | None = None) -> FreezeResult:
     protocol = load_study_file(root)
     root = protocol.root
     meta, warnings = check_metadata(protocol.metadata)
-    state = git_state(root)
-    if state is None:
+    if not publish:
+        # The project checks and publishes the metadata once, for every study.
+        warnings = []
+    state = git_state(root) if publish else None
+    if publish and state is None:
         warnings.append("the study is not a git repository, so freeze cannot commit or tag it")
-    elif state["inputs_uncommitted"]:
+    elif state is not None and state["inputs_uncommitted"]:
         warnings.append(
             "uncommitted inputs are not part of the tagged study: "
             + ", ".join(state["inputs_uncommitted"])
@@ -866,7 +881,8 @@ def freeze(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         "analyses": {
             run: {
                 "analysis": entry.analysis,
-                "function": f"{entry.function.file.relative_to(root)}:{entry.function.qualname}"
+                # A project's shared function lies outside the study: ../analyses/f.py.
+                "function": f"{os.path.relpath(entry.function.file, root)}:{entry.function.qualname}"
                 if entry.function
                 else None,
                 "settings": entry.settings or (entry.function.settings if entry.function else {}),
@@ -893,6 +909,8 @@ def freeze(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         "# The Communications Biology MD checklist, filled by polyzymd study freeze. Informational.\n"
         + yaml.safe_dump(_checklist(protocol, manifest, meta), sort_keys=False)
     )
+    if not publish:
+        return FreezeResult(root, None, None, deposit, manifest, warnings)
     (root / CITATION).write_text(
         dump_cff(
             citation_cff(meta, version=version, released=released, commit=manifest["git"]["commit"])

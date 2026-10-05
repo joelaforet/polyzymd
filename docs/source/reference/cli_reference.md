@@ -1040,8 +1040,37 @@ polyzymd project check [PATH]
 Reads `project.yaml` (`PATH` is the file or its folder, by default the
 current directory) and each study's `study.yaml` without loading any
 trajectory. Prints `analysis <run>: studies <labels>` for each project
-analysis, then `== study <label>` and the `polyzymd study check` of each
-study. Exits 2 when the project file or a study cannot be read.
+analysis, `stats <function>: up to date|stale: ...|not run` when it names a
+plan, then `== study <label>` and the `polyzymd study check` of each study.
+Exits 2 when the project file or a study cannot be read.
+
+### polyzymd project init
+
+```bash
+polyzymd project init PATH --study LABEL[=OLD_STUDY] [--study ...] [--holder NAME] [--no-git]
+```
+
+Writes a project folder at `PATH`: `project.yaml`, `analyses/`, `stats/`,
+`figures/`, licences, and one study folder per `--study`. `LABEL` alone makes
+a new study; `LABEL=path` copies in the study whose `study.yaml` is at that
+path or in that folder (configs and input files, `data.local.yaml` from where
+its runs are, `analyses/`, `results/`; file settings become `structure
+<name>`), reading it only. Analyses every moved study defines alike go into
+`project.yaml`. Labels must be folder names (lower case, digits, `_`).
+Without `--no-git` the project becomes a git repository with one commit.
+
+### polyzymd project freeze
+
+```bash
+polyzymd project freeze [PATH] [--tag TAG]
+```
+
+Freezes every study of the project, then writes the project's
+`manifest.json`, `CITATION.cff` and `.zenodo.json`, commits the generated
+files and every study's results, tags the project (`project-v<n>` by
+default), and lays out `deposit/` with `deposit/UPLOAD.md`. Every gap is a
+warning, prefixed with the study's label when it is a study's. Exits 2 only
+when a file cannot be read or the tag exists.
 
 ---
 

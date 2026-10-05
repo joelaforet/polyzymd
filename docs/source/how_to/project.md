@@ -40,6 +40,44 @@ Paper_1/
 └── rml333/study.yaml
 ```
 
+## Start a project
+
+```bash
+polyzymd project init Paper_1 --study lipa363 --study calb343 --study rml333
+```
+
+writes `project.yaml`, `analyses/`, `stats/`, `figures/`, licences and one
+study folder per protein, each with a `study.yaml` to fill in, and makes the
+project a git repository. Add each protein's conditions with
+`polyzymd study add-condition Paper_1/lipa363 ...`.
+
+### Move existing studies in
+
+Studies made before projects existed, one `study.yaml` per protein, move in
+with `LABEL=path`:
+
+```bash
+polyzymd project init Paper_1 \
+    --study lipa363=Paper_1_REDO/lipa363 \
+    --study calb343=Paper_1_REDO/calb343 \
+    --study rml333=Paper_1_REDO/rml333
+```
+
+Each old study is only read. Its conditions' configs and input files are
+copied into `conditions/`, where its runs are today goes into the study's
+`data.local.yaml`, and its `analyses/` code and `results/` are copied. A
+setting that names a file, such as a `reference_file`, is copied into the
+study's `structures/` and written as `structure reference` (or the file's
+name, when the study names several). Analyses that every study defines alike
+move into `project.yaml`. The command lists settings it left as absolute
+paths. Stored results stay valid: the next `polyzymd analyze --project`
+reuses them, unless they were written by a PolyzyMD version that identified
+input files differently, in which case they are measured again once.
+
+Then name each protein's regions and replace residue lists that differ only
+by numbering with `region <name>`, so the analysis can move into
+`project.yaml`.
+
 ## Write each protein's `study.yaml`
 
 Name the protein's structures and residue regions, so the project's analyses
@@ -174,3 +212,18 @@ file and of every report it could read. `polyzymd project check` then says
 whether it is up to date, or stale because its code or the analyses changed.
 The plan lives in the folder, so it is committed and published with the
 paper.
+
+## Publish
+
+```bash
+polyzymd project freeze Paper_1
+```
+
+freezes every study (its manifest, checklist, system summary, engine inputs
+and final frames), then writes the project's `manifest.json`, which lists
+each study's manifest by SHA-256 and every condition as `<study> /
+<condition>`, and one `CITATION.cff` and `.zenodo.json` from
+`project.yaml`'s `metadata:`. It commits and tags the project
+(`project-v1`, ...) and lays out one `deposit/` with `deposit/UPLOAD.md`, as
+`polyzymd study freeze` does for a study ({doc}`study_freeze`): one dataset,
+one DOI, for the paper.

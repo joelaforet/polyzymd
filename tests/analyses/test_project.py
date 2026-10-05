@@ -255,3 +255,114 @@ def test_a_moved_project_reuses_its_results(project: Path, tmp_path: Path) -> No
     assert "lid" not in stale_runs(load_study_file(moved / "lipa"))
     record = next((moved / "lipa" / "results" / "lid").rglob("record.json")).read_text()
     assert str(project) not in record
+
+
+def _old_study(tmp_path: Path, name: str) -> Path:
+    """A study as Paper_1_REDO's: absolute condition paths and an absolute reference file."""
+    outside = tmp_path / "configs" / name
+    configs = {}
+    for condition, offset in (("none", 1.0), ("half", 2.0)):
+        config = write_simulation_config(
+            outside / condition, scratch=tmp_path / "data" / name / condition
+        )
+        for replicate in (1, 2):
+            write_openmm_replicate(config, replicate, [offset + 0.01 * k for k in range(5)])
+        configs[condition] = config
+    reference = tmp_path / "refs" / f"{name}_crystal.pdb"
+    reference.parent.mkdir(parents=True, exist_ok=True)
+    reference.write_text(f"REMARK {name}\nEND\n")
+    root = tmp_path / "old" / name
+    (root / "analyses").mkdir(parents=True)
+    (root / "analyses" / "shared.py").write_text(
+        "def size(atoms, reference):\n    return float(len(atoms))\n"
+    )
+    (root / "study.yaml").write_text(
+        "equilibration: 0ns\n"
+        f"conditions: {{No polymer: {configs['none']}, Half: {configs['half']}}}\n"
+        "analyses:\n"
+        "  rg: {selection: all}\n"
+        "  size:\n"
+        "    function: analyses/shared.py:size\n"
+        "    kind: timeseries\n"
+        "    selections: {atoms: all}\n"
+        f"    settings: {{reference: {reference}}}\n"
+        "metadata: {title: Old paper}\n"
+    )
+    return root
+
+
+class TestProjectInit:
+    def test_new_project_scaffold(self, tmp_path: Path) -> None:
+        result = CliRunner().invoke(
+            cli,
+            ["project", "init", str(tmp_path / "P"), "--study", "lipa363", "--study", "rml333"]
+            + ["--no-git"],
+        )
+        assert result.exit_code == 0, result.output
+        text = (tmp_path / "P" / "project.yaml").read_text()
+        assert "studies:\n  lipa363: lipa363\n  rml333: rml333" in text
+        assert "title: TODO" in text
+        study = (tmp_path / "P" / "lipa363" / "study.yaml").read_text()
+        assert "description: TODO" in study and "regions: {}" in study
+
+    def test_moving_studies_in_keeps_their_results(self, tmp_path: Path) -> None:
+        import yaml
+
+        old = {name: _old_study(tmp_path, name) for name in ("lipa", "rml")}
+        for path in old.values():
+            assert _analyze("--study", str(path)).exit_code == 0
+        result = CliRunner().invoke(
+            cli,
+            ["project", "init", str(tmp_path / "P")]
+            + [arg for name, path in old.items() for arg in ("--study", f"{name}={path}")]
+            + ["--no-git"],
+        )
+        assert result.exit_code == 0, result.output
+        project = tmp_path / "P"
+        lipa = yaml.safe_load((project / "lipa" / "study.yaml").read_text())
+        assert lipa["structures"] == {"reference": "structures/lipa_crystal.pdb"}
+        assert lipa["conditions"]["Half"] == "conditions/half/config.yaml"
+        shared = yaml.safe_load((project / "project.yaml").read_text())
+        assert set(shared["analyses"]) == {"rg", "size"}
+        assert shared["analyses"]["size"]["settings"] == {"reference": "structure reference"}
+        assert shared["metadata"] == {"title": "Old paper"}
+        assert (project / "analyses" / "shared.py").is_file()
+        data = yaml.safe_load((project / "lipa" / "data.local.yaml").read_text())
+        assert data["Half"] == str((tmp_path / "data" / "lipa" / "half").resolve())
+        records = sorted((project / "lipa" / "results").rglob("record.json"))
+        before = {p: p.stat().st_mtime_ns for p in records}
+        assert records and _analyze("--project", str(project)).exit_code == 0
+        # Every stored result was reused: nothing was measured again.
+        assert {p: p.stat().st_mtime_ns for p in records} == before
+        assert (old["lipa"] / "study.yaml").read_text().startswith("equilibration: 0ns")
+
+
+class TestProjectFreeze:
+    def test_one_manifest_citation_tag_and_deposit(self, project: Path, monkeypatch) -> None:
+        import json
+        import subprocess
+
+        from polyzymd.analyses.project_freeze import freeze_project
+        from polyzymd.analyses.study_git import init_repository
+
+        for key in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+            monkeypatch.setenv(key, "Test")
+        for key in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+            monkeypatch.setenv(key, "test@example.com")
+        assert _analyze("--project", str(project)).exit_code == 0
+        init_repository(project, "start")
+        result = freeze_project(project)
+        assert result.tag == "project-v1" and result.commit
+        manifest = json.loads((project / "manifest.json").read_text())
+        assert set(manifest["studies"]) == {"lipa", "rml"}
+        assert "lipa / Half" in manifest["conditions"]
+        assert manifest["analyses"]["lid"] == ["lipa"]
+        assert (project / "lipa" / "manifest.json").is_file()
+        assert (project / "CITATION.cff").is_file()
+        assert (result.deposit / "study" / "rml" / "study.yaml").is_file()
+        readme = (result.deposit / "README.md").read_text()
+        assert "### lipa" in readme and "protein rml" in readme
+        log = subprocess.run(
+            ["git", "-C", str(project), "tag", "--list"], capture_output=True, text=True
+        ).stdout
+        assert "project-v1" in log and "study-v" not in log

@@ -7,7 +7,7 @@ built in three slices: P1 (the project file, shared analyses, regions and
 structures, `Project.results`), P2 (statistics: `replicate_table`, trend
 tests and the `stats:` hook) and P3 (`project init`, `project freeze` and
 moving an existing study into a project). Each section names its slice.
-P1 and P2 are implemented ({doc}`../how_to/project`).
+P1, P2 and P3 are implemented ({doc}`../how_to/project`).
 ```
 
 ## The hierarchy
