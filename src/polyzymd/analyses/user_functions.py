@@ -87,10 +87,11 @@ def run_user_analysis(
     from polyzymd.analyses.timeseries import select, universe
 
     function = load_function(user.file, user.qualname)
-    skipped: list[str] = []
-    if user.allow_empty and user.selections:
-        study, skipped = _without_empty_replicates(study, user.selections)
-    kwargs: dict[str, Any] = {key: select(value) for key, value in user.selections.items()}
+    # With allow_empty, a selection matching no atoms reaches the function as
+    # an empty AtomGroup, so a no-polymer control is measured, not dropped.
+    kwargs: dict[str, Any] = {
+        key: select(value, allow_empty=user.allow_empty) for key, value in user.selections.items()
+    }
     if user.universe:
         kwargs[user.universe] = universe()
     kwargs.update(user.settings)
@@ -119,41 +120,4 @@ def run_user_analysis(
         )
     if plots:
         values.plot()
-    report = values.compare() if len(study) > 1 else values.summary()
-    report.warnings = [*skipped, *report.warnings]
-    return report
-
-
-def _without_empty_replicates(study: Any, selections: dict[str, str]) -> tuple[Any, list[str]]:
-    """Return ``study`` without the replicates where a selection matches no atoms, and why.
-
-    A condition left with no replicate is left out of the study; when none is
-    left, ``ProtocolError`` says which selections matched nothing.
-    """
-    from polyzymd.analyses.study import Study
-
-    kept, notes = [], []
-    for condition in study:
-        replicates = []
-        for replicate in condition.replicates:
-            universe = replicate.universe()
-            empty = [k for k, sel in selections.items() if len(universe.select_atoms(sel)) == 0]
-            if empty:
-                notes.append(
-                    f"condition {condition.label} replicate {replicate.index}: "
-                    f"{', '.join(f'{k} {selections[k]!r}' for k in empty)} matched no atoms, so "
-                    "the replicate is left out (allow_empty)"
-                )
-            else:
-                replicates.append(replicate)
-        if replicates:
-            condition.replicates = replicates
-            kept.append(condition)
-        else:
-            notes.append(f"condition {condition.label} has no replicate left and is left out")
-    if not kept:
-        raise ProtocolError(
-            "Every replicate has a selection that matches no atoms.",
-            hint="Check the selections in the study.yaml entry against the topology.",
-        )
-    return Study(kept), notes
+    return values.compare() if len(study) > 1 else values.summary()

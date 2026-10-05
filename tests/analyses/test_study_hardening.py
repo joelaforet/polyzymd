@@ -191,16 +191,24 @@ class TestAllowEmpty:
         assert result.exit_code == 2
         assert "allow_empty: true" in result.output
 
-    def test_allow_empty_leaves_replicates_out(self, tmp_path: Path) -> None:
-        from polyzymd.analyses.study_file import load_study_file
-        from polyzymd.analyses.user_functions import _without_empty_replicates
+    def test_allow_empty_passes_empty_groups(self, tmp_path: Path) -> None:
+        """A no-polymer control is measured with an empty group, also in one submit task."""
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
 
         root = self._study(tmp_path, True)
-        assert load_study_file(root).analyses["count"].function.allow_empty is True
-        with pytest.raises(ProtocolError, match="Every replicate"):
-            _without_empty_replicates(pz.Study(root), {"atoms": "index 99"})
-        kept, notes = _without_empty_replicates(pz.Study(root), {"atoms": "index 0"})
-        assert kept.labels == ["A", "B"] and notes == []
+        task = CliRunner().invoke(
+            cli,
+            ["analyze", "count", "--study", str(root), "--label", "A", "--replicates", "1"]
+            + ["--no-plots"],
+        )
+        assert task.exit_code == 0, task.output
+        result = CliRunner().invoke(cli, ["analyze", "count", "--study", str(root), "--no-plots"])
+        assert result.exit_code == 0, result.output
+        table = pz.Study(root).results("count").table
+        assert sorted(set(table["condition"])) == ["A", "B"]
+        assert (table["value"] == 0.0).all()
 
 
 class TestAnalysisLogging:

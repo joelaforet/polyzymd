@@ -194,7 +194,8 @@ def _build(value: Any, universe_: Any) -> Any:
                 f"Selection {value.selection!r} matched no atoms.",
                 hint="Check the selection string against the topology. If some conditions have "
                 "no such atoms (a polymer selection in a no-polymer control), write "
-                "'allow_empty: true' in the study.yaml entry to leave those replicates out.",
+                "'allow_empty: true' in the study.yaml entry to pass the function an empty "
+                "AtomGroup there.",
             )
         return atoms
     return universe_ if isinstance(value, UniverseArgument) else value

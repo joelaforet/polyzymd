@@ -169,7 +169,7 @@ analyses:
 | `universe` | Keyword argument that receives the replicate's `Universe` |
 | `settings` | Keyword arguments passed as they are; `--set` overrides them |
 | `labels: returned` | For a `per_replicate` function that returns `(labels, values)`, such as one value per residue |
-| `allow_empty: true` | Leave out, with a warning in the report, every replicate where a selection matches no atoms, such as a polymer selection in a no-polymer control. Without it such a replicate stops the run, with a message saying so |
+| `allow_empty: true` | Pass a selection that matches no atoms, such as a polymer selection in a no-polymer control, to the function as an empty AtomGroup, so the function decides the value there (for example `0.0` when `len(polymer) == 0`). Without it such a replicate stops the run, with a message saying so |
 
 The stored results are keyed on the whole file, not only the function: edit
 any helper in it and the next run recomputes. The file is compiled from its

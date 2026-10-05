@@ -83,9 +83,9 @@ class UserFunction:
     reduce : str
         How a timeseries becomes one value per replicate, ``"mean"`` by default.
     allow_empty : bool
-        Leave out, with a warning, every replicate where a selection matches
-        no atoms, such as a polymer selection in a no-polymer control, as the
-        shipped analyses do; ``False`` refuses such a replicate.
+        Pass a selection that matches no atoms, such as a polymer selection
+        in a no-polymer control, to the function as an empty AtomGroup, as
+        the shipped analyses do; ``False`` refuses such a replicate.
     """
 
     file: Path

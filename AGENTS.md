@@ -110,7 +110,8 @@ warn when conditions were analysed up to different times (`until`/`--until`
 gives a common window) and name segments `progress.json` records but the disk
 lacks; `analyze` and the `study` commands print only reports and warnings and
 write the full log to `logs/` (`polyzymd -v` for more). A study's own function
-with `allow_empty: true` skips replicates where a selection matches nothing.
+with `allow_empty: true` gets an empty AtomGroup where a selection matches
+nothing (a polymer selection in a no-polymer control), so it must handle one.
 Config hashes identify input structures by content and leave out the
 projects and scratch directories (`analyses/identity.py`); stored records
 identify trajectory and topology files by SHA-256 and size
