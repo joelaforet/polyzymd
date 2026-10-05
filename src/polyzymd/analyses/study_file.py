@@ -378,9 +378,11 @@ def _equilibration(value: Any, where: Any) -> str:
 
 
 def _until(value: Any, file: Any) -> str | None:
-    """Check ``until:``, the end of a common analysis window."""
+    """Check ``until:``, the end of a common analysis window, or ``common``."""
     if value is None:
         return None
+    if str(value) == "common":
+        return "common"
     from polyzymd.analyses.shared.loader import parse_time_string
 
     try:
@@ -388,7 +390,8 @@ def _until(value: Any, file: Any) -> str | None:
     except ValueError as exc:
         raise ProtocolError(
             f"{file}: cannot read until {value!r}: {exc}",
-            hint="Write it as a time such as '38ns', or leave it out to use every production frame.",
+            hint="Write it as a time such as '38ns', 'common' to end every replicate at the "
+            "shortest one's last time, or leave it out to use every production frame.",
         ) from exc
     return str(value)
 

@@ -199,9 +199,13 @@ class Replicate:
         return identity
 
 
+#: ``until`` value that ends every replicate at the shortest replicate's last time.
+COMMON_UNTIL = "common"
+
+
 def _parse_until(label: str, until: str | None) -> float | None:
-    """Return the common window end ``until`` in ns, or ``None``."""
-    if until is None:
+    """Return the common window end ``until`` in ns, or ``None`` (also for ``common``, set later)."""
+    if until is None or until == COMMON_UNTIL:
         return None
     from polyzymd.analyses.shared.loader import convert_time, parse_time_string
 
@@ -213,6 +217,27 @@ def _parse_until(label: str, until: str | None) -> float | None:
             f"Condition {label!r}: cannot read until {until!r}: {exc}",
             hint="Write it as a time such as '38ns'.",
         ) from exc
+
+
+def resolve_common_until(conditions: Sequence[Condition]) -> None:
+    """Replace ``until: common`` with the earliest last production time of any replicate.
+
+    Every replicate of every condition then ends at the same time, so the
+    replicates share their time points. The time is written back as each
+    condition's ``until`` and ``until_ns``, so records name it.
+    """
+    if not any(condition.until == COMMON_UNTIL for condition in conditions):
+        return
+    ends = [r.production_ns for condition in conditions for r in condition.replicates]
+    if not ends:
+        raise ProtocolError(
+            "until: common found no replicate to take the common end from.",
+            hint="Check that the conditions' runs are where the configs or data.local.yaml say.",
+        )
+    end = f"{min(ends):.6g}ns"
+    for condition in conditions:
+        condition.until = end
+        condition.until_ns = _parse_until(condition.label, end)
 
 
 #: Relative difference in production length above which conditions are flagged.
@@ -410,6 +435,7 @@ class Study:
                 )
                 for label, path in protocol.conditions.items()
             }
+            resolve_common_until(list(self._built.values()))
         return self._built
 
     @property
@@ -536,20 +562,20 @@ class Study:
                 f"Cannot read the equilibration window {equilibration!r}: {exc}",
                 hint="Write it as a time such as '100ns', '500ps' or '0ns'.",
             ) from exc
-        return cls(
-            [
-                Condition(
-                    label,
-                    path,
-                    str(equilibration),
-                    replicates,
-                    stride,
-                    (data or {}).get(label, (data or {}).get("*")),
-                    until,
-                )
-                for label, path in zip(labels, paths, strict=True)
-            ]
-        )
+        conditions = [
+            Condition(
+                label,
+                path,
+                str(equilibration),
+                replicates,
+                stride,
+                (data or {}).get(label, (data or {}).get("*")),
+                until,
+            )
+            for label, path in zip(labels, paths, strict=True)
+        ]
+        resolve_common_until(conditions)
+        return cls(conditions)
 
     def __getitem__(self, label: str) -> Condition:
         if label not in self._conditions:

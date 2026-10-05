@@ -228,6 +228,9 @@ def _same_until(recorded_ns: Any, until: str | None) -> bool:
     """Return whether a record's ``until_ns`` is the window end ``until`` (None: no end)."""
     if until is None or recorded_ns is None:
         return until is None and recorded_ns is None
+    if until == "common":
+        # Resolved to the shortest replicate's end when the results were made.
+        return True
     from polyzymd.analyses.shared.loader import convert_time, parse_time_string
 
     value, unit = parse_time_string(until)

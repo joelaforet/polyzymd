@@ -51,7 +51,7 @@ analyses:
 | `equilibration` | Required. Window removed from the start of every replicate's production trajectory |
 | `conditions` | Required. Condition label to `config.yaml`, control first |
 | `stride`, `replicates` | Optional, as `--stride` and `--replicates` |
-| `until` | Optional end of a common analysis window, such as `38ns`, as `--until`: production after it is left out for every condition |
+| `until` | Optional end of a common analysis window, such as `38ns`, as `--until`: production after it is left out for every condition. `common` ends every replicate at the shortest one's last time |
 | `analyses` | Run name to settings. The settings are those `--set` takes; `analysis:` names the shipped analysis when the run name is not one |
 | `polyzymd` | The PolyzyMD version the study was run with; a different version gives a warning |
 | `metadata` | Publishing metadata, read by `polyzymd study freeze`; see {doc}`study_freeze` |
@@ -133,7 +133,11 @@ warning: the conditions were analysed up to different times (No polymer 456.4 ns
 ```
 
 `until: 38ns` in `study.yaml`, or `--until 38ns`, leaves out production after
-that time for every condition.
+that time for every condition. `until: common` (or `--until common`) ends
+every replicate at the earliest last production time of any replicate, so
+runs that restart stitching left a frame or two apart share the same time
+points; the time it stands for is worked out once over every condition and
+recorded in each result.
 
 ### Give one analysis its own window
 

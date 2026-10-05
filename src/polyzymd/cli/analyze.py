@@ -74,6 +74,29 @@ def _replicates(spec: str | None) -> list[int] | None:
         ) from exc
 
 
+def _common_until(
+    configs: tuple[Path, ...],
+    labels: tuple[str, ...],
+    equilibration: str | None,
+    replicate_spec: str | None,
+    stride: int,
+    data: dict | None,
+) -> str:
+    """Return the time ``until: common`` stands for: the earliest last time of any replicate."""
+    from polyzymd.analyses.study import Study
+    from polyzymd.config.analysis_settings import AnalysisDefaults
+
+    study = Study.from_configs(
+        dict(zip(labels, configs, strict=True)) if labels else list(configs),
+        equilibration=equilibration or str(AnalysisDefaults().equilibration_time),
+        replicates=_replicates(replicate_spec),
+        stride=stride,
+        data=data,
+        until="common",
+    )
+    return next(iter(study)).until
+
+
 def _partial_report(options: dict[str, Any], error: Exception) -> "ProtocolReport | None":
     """Build a report from the conditions that can be reported, after the whole run failed.
 
@@ -423,6 +446,17 @@ def analyze_command(
     stride = stride or 1
     if study_path is not None and until is None:
         until = study_until
+    if until == "common":
+        # Resolved once over every condition, so --submit tasks and a partial
+        # report, which each run some of them, end at the same time.
+        try:
+            until = _common_until(configs, labels, equilibration, replicate_spec, stride, data)
+        except AnalysisError as exc:
+            hint = getattr(exc, "hint", None)
+            click.echo(f"error: {_one_line(str(exc))}", err=True)
+            if hint:
+                click.echo(f"fix: {_one_line(hint)}", err=True)
+            sys.exit(EXIT_ANALYSIS_ERROR)
     study_record = (
         _study_record(study_path, run_name, _settings(setting_overrides))
         if study_path is not None
