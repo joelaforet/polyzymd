@@ -1134,35 +1134,38 @@ the tag exists. See {doc}`../how_to/study_freeze`.
 ## polyzymd hash-trajectories
 
 ```bash
-polyzymd hash-trajectories (-c CONFIG ... | --study PATH) [--replicates SPEC] [--verify] [--dry-run] [--force]
+polyzymd hash-trajectories (-c CONFIG ... | --study PATH) [--replicates SPEC] [--verify] [--dry-run] [--rehash-changed]
 ```
 
-Records, in each run's `progress.json`, the SHA-256 and size of every
-finished trajectory file that has none yet: for runs that finished before
-PolyzyMD recorded trajectory hashes. Stored analysis results and frozen
-studies then identify those trajectories without reading them again.
+Records the SHA-256 and size of every finished trajectory file that has
+none yet in `trajectory_hashes.json`, in the run's engine working directory:
+for runs whose runner did not record them, such as runs that finished before
+PolyzyMD recorded hashes, downsampled copies, and GROMACS runs. Stored
+analysis results and frozen studies then identify those trajectories
+without reading them again.
 
-It works for every simulation engine; the engine of each config says which
-files are trajectories:
+It never writes `progress.json`, which only the runner writes, so it cannot
+change which segments analyses read. It works for every simulation engine;
+the engine of each config says which files are finished trajectories:
 
 | Engine | Trajectory files hashed |
 |---|---|
-| OpenMM | `production_<n>/production_<n>_trajectory.dcd` of each production segment not recorded as running |
-| GROMACS | `gromacs/prod.xtc`, and `prod_nojump.xtc` and `prod_centered.xtc` when present |
+| OpenMM | `production_<n>/production_<n>_trajectory.dcd` of each segment analyses read: with `progress.json`, the completed and interrupted ones; without it, every one |
+| GROMACS | `gromacs/prod.xtc`, and `prod_nojump.xtc` and `prod_centered.xtc` when present, once the run has completed or when it has no `progress.json` |
 
-The hashes go in the `trajectory_hashes` map of `progress.json`, keyed by the
-path relative to the engine's working directory; OpenMM segments also keep
-them as `trajectory_sha256` and `trajectory_bytes`. A GROMACS run with no
-`progress.json` gets one from a scan of its files.
+`trajectory_hashes.json` maps each file's path, relative to the engine
+working directory, to its SHA-256 and size. A hash the OpenMM runner
+recorded for a segment in `progress.json` takes precedence over it.
 
 It is idempotent. A file whose recorded hash has the file's size is left as
 it is without reading it, so running the command again changes nothing, and
-`progress.json` is written, atomically, only when a hash was added; nothing
-else in it changes. A recorded hash is never overwritten: a recorded size that differs
-from the file's, or with `--verify` a recomputed hash that differs, is printed
-as `conflict:` and exits 2. A run recorded as running is skipped, because its
-job may still write `progress.json`; `--force` hashes it once the job has
-stopped.
+`trajectory_hashes.json` is written, atomically, only when a hash was added.
+A recorded hash is never overwritten: a recorded size that differs from the
+file's, or with `--verify` a recomputed hash that differs, is printed as
+`conflict:` and exits 2. When the file was legitimately extended, such as a
+GROMACS run continued after it was hashed, `--rehash-changed` hashes it
+again and replaces the entry in `trajectory_hashes.json`; a hash the runner
+recorded is never replaced.
 
 | Option | Description |
 |---|---|
@@ -1171,12 +1174,12 @@ stopped.
 | `--replicates SPEC` | Only these replicates, for example `1-5` |
 | `--verify` | Also rehash files with a recorded hash and compare |
 | `--dry-run` | Report what would be hashed, and write nothing |
-| `--force` | Also hash runs recorded as running |
+| `--rehash-changed` | Hash again the entries of `trajectory_hashes.json` whose file size changed |
 
 It prints one line per replicate, such as `SBMA 50% replicate 1 (openmm):
-hashed 11, already recorded 1`. A GROMACS `prod.xtc` that mdrun appended to
-after its hash was recorded is reported as a conflict. Reading takes about a second per gigabyte, so on a cluster run it in a batch
-job.
+hashed 11, already recorded 1`, and `<label>: no runs found in <folder>` for
+a config whose runs are not where it says. Reading takes about a second per
+gigabyte, so on a cluster run it in a batch job.
 
 ---
 

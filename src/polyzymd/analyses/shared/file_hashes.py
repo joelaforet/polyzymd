@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 
 
@@ -58,18 +59,20 @@ def file_sha256(path: str | Path, known: tuple[str, int] | None = None) -> str:
     value = digest.hexdigest()
     try:
         entry.parent.mkdir(parents=True, exist_ok=True)
-        temporary = entry.with_suffix(f".{os.getpid()}.tmp")
-        temporary.write_text(
-            json.dumps(
+        # A unique temporary name, so nodes sharing the cache never collide.
+        with tempfile.NamedTemporaryFile(
+            "w", dir=entry.parent, prefix=f".{entry.name}.", suffix=".tmp", delete=False
+        ) as handle:
+            json.dump(
                 {
                     "path": str(file),
                     "size": stat.st_size,
                     "mtime_ns": stat.st_mtime_ns,
                     "sha256": value,
-                }
+                },
+                handle,
             )
-        )
-        temporary.replace(entry)
+        os.replace(handle.name, entry)
     except OSError:
         pass  # an unwritable cache only costs hashing again
     return value

@@ -121,13 +121,14 @@ folder holding the runs.
 Stored records identify each trajectory and topology file by its SHA-256 and
 size, so moved, copied or downloaded data reuses every stored result. The
 first analysis at a new location reads each file once to hash it, about a
-second per gigabyte, unless the run recorded the hash in `progress.json`.
+second per gigabyte, unless the run's hashes are recorded.
 
 ### Record the hashes of older runs
 
-Runs that finished before PolyzyMD recorded trajectory hashes, and GROMACS
-runs, have none in `progress.json`, so each machine that analyses them hashes them again. Record
-them once, where the runs are:
+Runs that finished before PolyzyMD recorded trajectory hashes, downsampled
+copies, and GROMACS runs have no recorded hashes, so each machine that
+analyses them hashes them again. Record them once, where the runs are; the
+command writes only `trajectory_hashes.json` beside each run's files:
 
 ```bash
 polyzymd hash-trajectories --study lipase_363K --dry-run   # what it would hash
@@ -139,9 +140,10 @@ No polymer replicate 1 (openmm): hashed 3, already recorded 0
 SBMA 50% replicate 1 (gromacs): hashed 2, already recorded 0
 ```
 
-Running it again prints `hashed 0` and changes nothing; a hash already in
-`progress.json` is never overwritten, and a disagreement is reported as
-`conflict:` with exit code 2. `--verify` rehashes and compares. On a cluster,
+Running it again prints `hashed 0` and changes nothing; a recorded hash is
+never overwritten, and a disagreement is reported as `conflict:` with exit
+code 2. `--verify` rehashes and compares, and `--rehash-changed` records
+again a file that was extended after it was hashed. On a cluster,
 run it in a batch job: it reads every trajectory once. `-c config.yaml` works
 for runs outside a study. See {doc}`../reference/cli_reference`.
 

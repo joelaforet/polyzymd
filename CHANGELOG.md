@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Trajectory hashes, and `polyzymd hash-trajectories`.**  Each completed
+  OpenMM production segment records its trajectory's SHA-256 and size in
+  `progress.json` (`trajectory_sha256`, `trajectory_bytes`) after flushing the
+  reporters' buffered files.  `polyzymd hash-trajectories (-c CONFIG ... |
+  --study PATH) [--replicates] [--verify] [--dry-run] [--rehash-changed]`
+  records the hashes of finished trajectories of any engine that has none
+  (older OpenMM runs, downsampled copies, GROMACS runs) in
+  `trajectory_hashes.json` beside the run's files, and never writes
+  `progress.json`.  It is idempotent, writes atomically, and never overwrites
+  a recorded hash (a disagreement is a `conflict:` and exits 2;
+  `--rehash-changed` records again a file of its own that was extended).
+  `freeze` names the conditions whose runs still lack hashes.  Engines say
+  which files are their finished trajectories with
+  `SimulationEngine.trajectory_files`.
+
 - **`polyzymd analyze NAME -c ... --submit`.**  Runs the same command as a
   SLURM array: one task per condition and replicate, each measuring and
   storing its replicate's result with `--no-plots`, and a report job,
@@ -106,6 +121,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `--resume` removes the marker.
 
 ### Fixed
+
+- **Continuation segments record their software provenance.**  Only segment 0
+  recorded `polyzymd_version`, `openmm_version` and `pixi_environment`;
+  segments 1 and later now do too.
+- **Segment trajectory hashes survive progress reconciliation.**
+  `run-segment`, `status`, `check-progress` and `recover` re-check
+  `progress.json` and dropped each segment's recorded hash.
+- **`hash-trajectories` no longer makes runs without `progress.json`
+  unanalysable.**  It wrote a `progress.json` built from a scan of the run,
+  which marked segments of downsampled copies as failed, so `analyze` then
+  found no trajectories.  It now writes only `trajectory_hashes.json`.
 
 - **The correlation estimator every analysis plugin called was wrong.**
   `estimate_correlation_time(method="integration")` trapezoid-integrated the
@@ -306,6 +332,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   concatenated.
 
 ### Changed
+
+- **Stored analysis results identify their inputs by content.**  Records name
+  trajectory and topology files by path relative to the runs folder, size and
+  SHA-256, with no modification time, so moved, copied or downloaded data
+  reuses its results.  Hashes come from the runner's segment record or
+  `trajectory_hashes.json` when the recorded size matches, otherwise from a
+  per-file cache in `$POLYZYMD_CACHE_DIR/hashes` (default
+  `~/.cache/polyzymd/hashes`), valid while size and modification time are
+  unchanged; `freeze` uses the same cache.  **Every stored result recomputes
+  once** after upgrading, because the record identity changed.
 
 - **The periodic box is computed first, from the protein and substrate alone.**
   `SolventBuilder.compute_box_vectors()` derives the cell from the solute

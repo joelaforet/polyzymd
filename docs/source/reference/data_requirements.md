@@ -248,10 +248,11 @@ Each completed production segment of an OpenMM run records, in
 `progress.json`, the SHA-256 and size of its trajectory (`trajectory_sha256`,
 `trajectory_bytes`) and the PolyzyMD and OpenMM versions that ran it.
 Stored analysis results identify their input files by SHA-256 and size, taken
-from `progress.json` or computed once and cached. For GROMACS runs, and runs
-that finished before segments recorded their hashes,
-`polyzymd hash-trajectories -c config.yaml` records them in the
-`trajectory_hashes` map of `progress.json`; running it again changes nothing.
+from there or computed once and cached. For GROMACS runs, downsampled
+copies, and runs that finished before segments recorded their hashes,
+`polyzymd hash-trajectories -c config.yaml` records them in
+`trajectory_hashes.json` in the engine working directory, and never writes
+`progress.json`; running it again changes nothing.
 
 The provenance of each replicate names where the bonds came from, as
 `bond_source`: `system_xml`, `tpr`, `top`, `conect`, `guessed` or `none`.

@@ -415,17 +415,18 @@ class GromacsEngine(SimulationEngine):
     def trajectory_files(
         self, working_dir: Path, progress: SimulationProgress | None
     ) -> list[Path]:
-        """Return the production XTC files that exist, none while the run is still running.
+        """Return the production XTC files that exist, once the run has completed.
 
         ``mdrun`` appends every restart to ``prod.xtc``, so the run's files are
-        finished only when it is; a run recorded as running gives none.
+        finished only when it is: a run whose ``progress.json`` records it as
+        anything but completed gives none. A run without one gives its files.
 
         Parameters
         ----------
         working_dir : Path
             GROMACS working directory of one replicate.
         progress : SimulationProgress or None
-            The run's progress.
+            The run's progress, or None when it has no ``progress.json``.
 
         Returns
         -------
@@ -434,7 +435,7 @@ class GromacsEngine(SimulationEngine):
         """
         from polyzymd.simulation.progress import SimulationStatus
 
-        if progress is not None and progress.status == SimulationStatus.RUNNING:
+        if progress is not None and progress.status != SimulationStatus.COMPLETED:
             return []
         return [
             Path(working_dir) / name

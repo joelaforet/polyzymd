@@ -170,7 +170,7 @@ class Replicate:
 
         provenance = self.condition._provider.provenance_for(self.index, refresh=True)
         data_root = Path(self.condition.config.output.effective_scratch_directory).resolve()
-        recorded = self.condition._provider.recorded_trajectory_hashes(self.index)
+        recorded = self.condition._provider.recorded_trajectory_hashes(self.index) or {}
 
         def located(item: Any) -> dict[str, Any]:
             # A record names its files by content and by their place among the

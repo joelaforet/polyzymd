@@ -204,31 +204,33 @@ class OpenMMEngine(SimulationEngine):
     def trajectory_files(
         self, working_dir: Path, progress: SimulationProgress | None
     ) -> list[Path]:
-        """Return each production segment's DCD that exists, leaving out segments still running.
+        """Return the DCD of each production segment that analyses read.
+
+        With ``progress.json``, a segment recorded as running or failed is left
+        out, as :meth:`resolve_trajectory_layout` leaves it out. Without one,
+        as in a downsampled copy, every segment's DCD is returned.
 
         Parameters
         ----------
         working_dir : Path
             Replicate working directory.
         progress : SimulationProgress or None
-            The run's progress; a segment it records as running is left out.
+            The run's progress, or None when it has no ``progress.json``.
 
         Returns
         -------
         list of Path
             ``production_<n>/production_<n>_trajectory.dcd`` files, by segment index.
         """
-        from polyzymd.simulation.progress import SegmentStatus
-
-        running = {
+        left_out = {
             s.index
             for s in (progress.segments if progress else [])
-            if s.status == SegmentStatus.RUNNING
+            if s.status in _INCOMPLETE_STATUSES
         }
         found = []
         for folder in Path(working_dir).glob("production_*"):
             match = re.fullmatch(r"production_(\d+)", folder.name)
-            if match is None or int(match.group(1)) in running:
+            if match is None or int(match.group(1)) in left_out:
                 continue
             dcd = folder / f"{folder.name}_trajectory.dcd"
             if dcd.is_file():
@@ -238,7 +240,12 @@ class OpenMMEngine(SimulationEngine):
     def recorded_trajectory_hashes(
         self, working_dir: Path, progress: SimulationProgress | None = None
     ) -> dict[Path, tuple[str, int]]:
-        """Return recorded hashes: the engine-neutral map, and the hash each segment recorded on completion."""
+        """Return recorded hashes, the runner's hash of each segment taking precedence.
+
+        The runner records a segment's hash when the segment completes, so it
+        is newer than an entry ``hash-trajectories`` wrote before the segment
+        was resumed.
+        """
         from polyzymd.simulation.progress import load_progress
 
         working_dir = Path(working_dir)
@@ -251,18 +258,8 @@ class OpenMMEngine(SimulationEngine):
                     / f"production_{segment.index}"
                     / f"production_{segment.index}_trajectory.dcd"
                 ).resolve()
-                recorded.setdefault(path, (segment.trajectory_sha256, segment.trajectory_bytes))
+                recorded[path] = (segment.trajectory_sha256, segment.trajectory_bytes)
         return recorded
-
-    def store_trajectory_hash(
-        self, progress: SimulationProgress, working_dir: Path, path: Path, sha256: str, size: int
-    ) -> None:
-        """Record a DCD's hash in the engine-neutral map and on its segment, when recorded."""
-        super().store_trajectory_hash(progress, working_dir, path, sha256, size)
-        match = re.fullmatch(r"production_(\d+)_trajectory\.dcd", Path(path).name)
-        for segment in progress.segments:
-            if match and segment.index == int(match.group(1)):
-                segment.trajectory_sha256, segment.trajectory_bytes = sha256, size
 
     def load_or_scan_progress(self, working_dir: Path, replicate: int) -> SimulationProgress:
         """Load OpenMM progress from progress.json or filesystem scan.
