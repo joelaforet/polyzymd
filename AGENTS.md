@@ -94,7 +94,8 @@ replicate and a report job (`workflow/analysis_submit.py`). The hidden
 exit 2 and name their replacements.
 
 A study folder's `study.yaml` (`analyses/study_file.py`) holds the analysis
-protocol: conditions, one equilibration window and each analysis run's
+protocol: conditions, the equilibration window (an entry may set its own
+`equilibration:`/`until:`, `StudyFile.window`) and each analysis run's
 settings, including the study's own functions (`function: file.py:name`,
 `analyses/user_functions.py`, keyed on the whole file's hash).
 `polyzymd study check` reads it without trajectories (`cli/study.py`);

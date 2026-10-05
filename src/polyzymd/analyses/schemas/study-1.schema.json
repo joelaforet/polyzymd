@@ -37,13 +37,19 @@
               "labels": {"const": "returned"},
               "reduce": {"type": "string"},
               "allow_empty": {"type": "boolean"},
-              "missing": {"type": "number"}
+              "missing": {"type": "number"},
+              "equilibration": {"type": "string", "description": "This analysis's own equilibration window, e.g. 0ns."},
+              "until": {"type": "string", "description": "This analysis's own end of the analysis window, e.g. 500ns."}
             }
           },
           {
             "type": "object",
             "not": {"required": ["function"]},
-            "properties": {"analysis": {"type": "string"}}
+            "properties": {
+              "analysis": {"type": "string"},
+              "equilibration": {"type": "string", "description": "This analysis's own equilibration window, e.g. 0ns."},
+              "until": {"type": "string", "description": "This analysis's own end of the analysis window, e.g. 500ns."}
+            }
           },
           {"type": "null"}
         ]

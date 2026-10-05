@@ -127,8 +127,15 @@ def check_command(path: Path) -> None:
         else:
             what = entry.analysis if entry.analysis == run else f"{entry.analysis} as {run}"
             settings = ", ".join(f"{k}={v}" for k, v in entry.settings.items()) or "defaults"
+        equilibration, until = protocol.window(run)
+        own = entry.equilibration is not None or entry.until is not None
+        window = (
+            f"window eq {equilibration}"
+            + (f" until {until}" if until else "")
+            + (" (its own)" if own else "")
+        )
         click.echo(
-            f"analysis {what}: {settings}; "
+            f"analysis {what}: {settings}; {window}; "
             + (
                 f"stored results in {folder}" + _report_status(folder / REPORT_FILE)
                 if stored

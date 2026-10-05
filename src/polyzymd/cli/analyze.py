@@ -726,17 +726,19 @@ def _from_study(
     from_file = tuple(f"{key}={json.dumps(value)}" for key, value in settings.items())
     if replicate_spec is None and protocol.replicates is not None:
         replicate_spec = ",".join(str(index) for index in protocol.replicates)
+    # The command line wins, then the analysis entry, then the study.
+    window_equilibration, window_until = protocol.window(run_name)
     return (
         analysis,
         tuple(conditions.values()),
         tuple(conditions),
-        equilibration or protocol.equilibration,
+        equilibration or window_equilibration,
         stride or protocol.stride,
         replicate_spec,
         (*from_file, *setting_overrides),
         output_dir or protocol.results_dir(run_name),
         dict(protocol.data),
-        protocol.until,
+        window_until,
     )
 
 

@@ -27,7 +27,7 @@ the folder can be moved as a whole.
 
 ```yaml
 polyzymd: 1.3.0                 # the version that produced the results
-equilibration: 100ns            # one window for every condition and replicate
+equilibration: 100ns            # the window for every analysis that sets none
 stride: 1                       # optional
 replicates: 1-5                 # optional; default: every run found
 conditions:                     # control first
@@ -41,6 +41,9 @@ analyses:
     analysis: contacts
     method: distance
     cutoff: 4.0
+  rg_full:                      # the same analysis over its own window
+    analysis: rg
+    equilibration: 0ns          # from the start of production
 ```
 
 | Key | Meaning |
@@ -130,7 +133,17 @@ warning: the conditions were analysed up to different times (No polymer 456.4 ns
 ```
 
 `until: 38ns` in `study.yaml`, or `--until 38ns`, leaves out production after
-that time for every condition. A replicate whose `progress.json` records
+that time for every condition.
+
+### Give one analysis its own window
+
+An analysis entry may set its own `equilibration:` and `until:`. A
+time-resolved analysis of a system still changing at the end of production
+can start at 0 ns, while a steady-state analysis keeps the study's window.
+Two entries of the same analysis with different windows store their results
+side by side, each record names its window, and `polyzymd study check`
+prints each analysis's window. A window on the command line (`--eq`,
+`--until`) overrides the entry's, which overrides the study's. A replicate whose `progress.json` records
 production segments missing from disk, as in a copy that kept only some
 segments, is named in the report too.
 

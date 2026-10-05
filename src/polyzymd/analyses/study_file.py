@@ -2,8 +2,8 @@
 
 A study folder holds one MD study; see the "Study folders" explanation page.
 ``study.yaml`` names the conditions (each a simulation ``config.yaml``,
-control first), the one equilibration window applied to every replicate,
-and the settings of every analysis. :func:`load_study_file` reads and
+control first), the equilibration window applied to every replicate (an
+analysis may set its own), and the settings of every analysis. :func:`load_study_file` reads and
 checks it: every key must be one this module knows, and a misspelt key is
 refused with the nearest known spelling, so a typo never falls back to a
 default silently.
@@ -37,6 +37,8 @@ _TOP_KEYS = (
     "metadata",
 )
 _ENTRY_KEYS = ("analysis",)
+#: Keys of any ``analyses:`` entry that set its own analysis window.
+WINDOW_KEYS = ("equilibration", "until")
 #: Keys of an ``analyses:`` entry that runs your own function.
 USER_KEYS = (
     "function",
@@ -113,12 +115,16 @@ class AnalysisEntry:
     ``run`` is the entry's key, which names its results folder. ``analysis``
     is the shipped analysis it runs, the key itself unless given, or
     ``None`` when ``function`` names your own function instead.
+    ``equilibration`` and ``until`` are the entry's own analysis window, or
+    ``None`` to use the study's.
     """
 
     run: str
     analysis: str | None
     settings: dict[str, Any] = field(default_factory=dict)
     function: UserFunction | None = None
+    equilibration: str | None = None
+    until: str | None = None
 
 
 @dataclass(frozen=True)
@@ -144,6 +150,19 @@ class StudyFile:
     def results_dir(self, run: str) -> Path:
         """The folder of one analysis run's stored results, report and figures."""
         return self.root / RESULTS_FOLDER / run
+
+    def window(self, run: str) -> tuple[str, str | None]:
+        """Return the equilibration and ``until`` of ``run``: its entry's, else the study's.
+
+        A run the file does not list runs with the study's window.
+        """
+        entry = self.analyses.get(run)
+        if entry is None:
+            return self.equilibration, self.until
+        return (
+            entry.equilibration or self.equilibration,
+            entry.until if entry.until is not None else self.until,
+        )
 
 
 def find_study_file(path: str | Path) -> Path:
@@ -183,8 +202,18 @@ def _analysis_entry(run: str, raw: Any, path: Path) -> AnalysisEntry:
             f"{path}: analyses.{run} must be a mapping of settings, got {raw!r}.",
             hint=f"Write it as '{run}: {{setting: value}}', or '{run}: {{}}' for the defaults.",
         )
+    raw = dict(raw)
+    window = {key: raw.pop(key) for key in WINDOW_KEYS if key in raw}
+    equilibration = (
+        None
+        if window.get("equilibration") is None
+        else _equilibration(window["equilibration"], f"{path}: analyses.{run}")
+    )
+    until = _until(window.get("until"), f"{path}: analyses.{run}")
     if "function" in raw:
-        return AnalysisEntry(run, None, {}, _user_function(run, raw, path))
+        return AnalysisEntry(
+            run, None, {}, _user_function(run, raw, path), equilibration=equilibration, until=until
+        )
     settings = dict(raw)
     analysis = str(settings.pop("analysis", run))
     if analysis not in FUNCTION_ANALYSES:
@@ -196,8 +225,12 @@ def _analysis_entry(run: str, raw: Any, path: Path) -> AnalysisEntry:
             + ("" if "analysis" in raw else f", or add 'analysis: NAME' to the {run!r} entry")
             + ".",
         )
-    _unknown(settings, (*_ENTRY_KEYS, *FUNCTION_ANALYSES[analysis]), f"{path}: analyses.{run}")
-    return AnalysisEntry(run, analysis, settings)
+    _unknown(
+        settings,
+        (*_ENTRY_KEYS, *WINDOW_KEYS, *FUNCTION_ANALYSES[analysis]),
+        f"{path}: analyses.{run}",
+    )
+    return AnalysisEntry(run, analysis, settings, equilibration=equilibration, until=until)
 
 
 def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
@@ -313,7 +346,22 @@ def read_data_file(path: Path, labels: Any) -> dict[str, Path]:
     }
 
 
-def _until(value: Any, file: Path) -> str | None:
+def _equilibration(value: Any, where: Any) -> str:
+    """Check an equilibration window, such as ``100ns``."""
+    from polyzymd.analyses.shared.loader import parse_time_string
+
+    text = str(value)
+    try:
+        parse_time_string(text)
+    except ValueError as exc:
+        raise ProtocolError(
+            f"{where}: cannot read equilibration {text!r}: {exc}",
+            hint="Write it as a time such as '100ns', '500ps' or '0ns'.",
+        ) from exc
+    return text
+
+
+def _until(value: Any, file: Any) -> str | None:
     """Check ``until:``, the end of a common analysis window."""
     if value is None:
         return None
@@ -366,16 +414,7 @@ def load_study_file(path: str | Path) -> StudyFile:
                 "window, for example 'equilibration: 100ns'.",
             )
 
-    from polyzymd.analyses.shared.loader import parse_time_string
-
-    equilibration = str(raw["equilibration"])
-    try:
-        parse_time_string(equilibration)
-    except ValueError as exc:
-        raise ProtocolError(
-            f"{file}: cannot read equilibration {equilibration!r}: {exc}",
-            hint="Write it as a time such as '100ns', '500ps' or '0ns'.",
-        ) from exc
+    equilibration = _equilibration(raw["equilibration"], file)
 
     conditions_raw = raw["conditions"]
     if not isinstance(conditions_raw, Mapping) or not conditions_raw:
