@@ -89,6 +89,8 @@ class TestRunnerBookkeeping:
         manager = object.__new__(ContinuationManager)
         manager._working_dir = working
         manager._segment_index = 1
+        manager._frame_record = {}
+        manager._tracker = None
         manager._update_progress_completed(
             total_steps=1000, num_samples=10, duration_ns=1.0, timestep_fs=2.0
         )
@@ -114,6 +116,7 @@ class TestRunnerBookkeeping:
         )
         runner = object.__new__(SimulationRunner)
         runner._working_dir = working
+        runner._production_tracker = None
         runner._update_progress_completed(
             segment_index=0, total_steps=1000, num_samples=10, duration_ns=1.0, timestep_fs=2.0
         )
