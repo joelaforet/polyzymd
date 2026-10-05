@@ -1239,6 +1239,10 @@ def validate_progress(
                 openmm_version=file_rec.openmm_version or fs_rec.openmm_version,
                 pixi_environment=file_rec.pixi_environment or fs_rec.pixi_environment,
                 **{name: getattr(file_rec, name) for name in SEGMENT_FRAME_FIELDS},
+                # A scan cannot recompute the trajectory hash cheaply: keep
+                # the one the segment recorded when it completed.
+                trajectory_sha256=file_rec.trajectory_sha256,
+                trajectory_bytes=file_rec.trajectory_bytes,
             )
             reconciled.append(merged)
         elif fs_rec is not None:

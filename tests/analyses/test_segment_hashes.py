@@ -415,3 +415,46 @@ class TestFreezeNudge:
         assert str(tmp_path) not in (root / "manifest.json").read_text()
         _engine(tmp_path, "openmm").record_trajectory_hashes(working, 1)
         assert not any("hash-trajectories" in w for w in freeze(root).warnings)
+
+
+def test_reconciliation_keeps_segment_hashes(tmp_path: Path) -> None:
+    """run-segment and status reload progress through validate_progress and save it."""
+    from polyzymd.simulation.progress import SegmentRecord, SegmentStatus, load_or_scan_progress
+
+    seg = tmp_path / "production_0"
+    seg.mkdir()
+    (seg / "production_0_state.xml").write_text("<State/>")
+    (seg / "production_0_trajectory.dcd").write_bytes(b"x" * 100)
+    save_progress(
+        tmp_path,
+        SimulationProgress(
+            config_path="c.yaml",
+            total_steps_requested=2000,
+            total_samples_requested=20,
+            timestep_fs=2.0,
+            segments=[
+                SegmentRecord(
+                    index=0,
+                    steps_completed=1000,
+                    steps_requested=1000,
+                    samples_written=10,
+                    status=SegmentStatus.COMPLETED,
+                    duration_ns=0.002,
+                    trajectory_sha256="ab" * 32,
+                    trajectory_bytes=100,
+                )
+            ],
+        ),
+    )
+    progress = load_or_scan_progress(
+        working_dir=tmp_path,
+        config_path="c.yaml",
+        total_steps=2000,
+        total_samples=20,
+        timestep_fs=2.0,
+        replicate=1,
+    )
+    save_progress(tmp_path, progress)
+    segment = load_progress(tmp_path).segments[0]
+    assert segment.trajectory_sha256 == "ab" * 32
+    assert segment.trajectory_bytes == 100
