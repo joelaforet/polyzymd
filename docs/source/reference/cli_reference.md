@@ -880,6 +880,7 @@ distances --set pairs=...` for the triad distances.
 | `NAME` | Yes, without `--study` | Canonical analysis name, for example `rg`; with `--study`, a run of the study file, and every run when left out. |
 | `-c, --config PATH` | Yes, without `--study` | Simulation `config.yaml`. Repeatable; the first one is the control. Refused with `--study`. |
 | `--data DIR` | No | Directory holding the run directories of every condition, for this command only, in place of each config's `scratch_directory` and of a study's `data.local.yaml`. The config hash is that of the config as written. |
+| `--project PATH` | No | `project.yaml`, or the project folder. Runs `RUN` (or every analysis) in each study of the project that runs it, as `--study` would, one study after another; a study that fails is reported and the next runs, then the command exits 2. Refused with `--study` or `-c`. |
 | `--study PATH` | No | `study.yaml`, or the folder holding it. Gives the conditions, `--eq`, `--stride`, `--replicates` and the run's settings, and stores the run in `<study>/results/<run>/` with its `report.json`. Options given on the command line override the file; `--label` then picks conditions of the study. |
 | `-f, --file PATH` | No | Retired. With a `comparison.yaml`, the command runs nothing and exits 2: the `error:` line says that `comparison.yaml` is no longer read by `polyzymd analyze`, and the `fix:` line gives the equivalent `polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq ...` command built from the file's conditions, replicates and equilibration (or `--eq`), followed by the address of {doc}`../how_to/analysis_agent_protocol` and `.claude/skills/polyzymd-analyze/SKILL.md`, the skill to point an agent at. A file that cannot be read gives the command with placeholders. |
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
@@ -1025,6 +1026,25 @@ polyzymd analyze rg -c A/config.yaml -c B/config.yaml --set selection='protein a
 
 ---
 
+## polyzymd project
+
+Commands on a project folder: one paper's studies, one per protein; see
+{doc}`../how_to/project` and {doc}`../explanation/projects`.
+
+### polyzymd project check
+
+```bash
+polyzymd project check [PATH]
+```
+
+Reads `project.yaml` (`PATH` is the file or its folder, by default the
+current directory) and each study's `study.yaml` without loading any
+trajectory. Prints `analysis <run>: studies <labels>` for each project
+analysis, then `== study <label>` and the `polyzymd study check` of each
+study. Exits 2 when the project file or a study cannot be read.
+
+---
+
 ## polyzymd study
 
 Commands on a study folder; see {doc}`../how_to/study_yaml` and
@@ -1042,6 +1062,9 @@ directory) without loading any trajectory, and prints:
 | Line | Fields |
 |---|---|
 | header | `study <path>  equilibration <window>  stride <n>[  replicates <list>]` |
+| system | `system: <description>`, when the study has one |
+| project | `project <project.yaml> as study <label>`, when a project lists the study |
+| names | `structure <name>: <path>` and `region <name>: <selection>`, one line each |
 | condition | `control\|condition <label>: runs <numbers> under <directory> (from data.local.yaml\|config); production <ns>` (a range when the replicates differ), or `no runs found under <directory> ...` |
 | analysis | `analysis <run>: <settings>; stored results in <folder>[ with its report]`, or `no stored results`; for the study's own function, `analysis <run> (<file>:<function>, <kind>)`, after importing it |
 | git | `git: commit <sha>; inputs committed`, `git: commit <sha>; uncommitted inputs: <paths>`, or `git: not a repository` |

@@ -188,6 +188,14 @@ def _one_line(text: str) -> str:
     help="Simulation config.yaml. Repeatable; the first one is the control.",
 )
 @click.option(
+    "--project",
+    "project_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="project.yaml, or the project folder: run NAME (or every analysis) in each study "
+    "that runs it, as --study would, one study after another.",
+)
+@click.option(
     "--study",
     "study_path",
     type=click.Path(path_type=Path),
@@ -339,6 +347,7 @@ def analyze_command(
     ctx: click.Context,
     name: str | None,
     configs: tuple[Path, ...],
+    project_path: Path | None,
     study_path: Path | None,
     data_dir: Path | None,
     comparison_file: Path | None,
@@ -395,6 +404,9 @@ def analyze_command(
 
     from polyzymd.analyses.exceptions import AnalysisError, ProtocolError
 
+    if project_path is not None:
+        _analyze_project(ctx, project_path, name, study_path, configs)
+        return
     if name is None:
         _analyze_every_run(ctx, study_path)
         return
@@ -600,6 +612,55 @@ def _quiet_console(
     verbose = bool(ctx.find_root().params.get("verbose"))
     path = analysis_logging(root / "logs", command, verbose=verbose)
     click.echo(f"log: {path}", err=True)
+
+
+def _analyze_project(
+    ctx: click.Context,
+    project_path: Path,
+    name: str | None,
+    study_path: Path | None,
+    configs: tuple[Path, ...],
+) -> None:
+    """Run ``polyzymd analyze NAME --study S`` for each study S of the project that runs NAME.
+
+    Without NAME, every study runs every analysis it has. A study that fails
+    is reported and the next one runs; the command then exits 2.
+    """
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.project import Project
+
+    if study_path is not None or configs:
+        click.echo("error: --project runs every study; give it without --study or -c.", err=True)
+        click.echo("fix: Use --study to run one study of the project.", err=True)
+        sys.exit(EXIT_ANALYSIS_ERROR)
+    try:
+        project = Project(project_path)
+        labels = project.runs_in(name) if name is not None else project.labels
+    except ProtocolError as exc:
+        click.echo(f"error: {_one_line(str(exc))}", err=True)
+        if exc.hint:
+            click.echo(f"fix: {_one_line(exc.hint)}", err=True)
+        sys.exit(EXIT_ANALYSIS_ERROR)
+    if not labels:
+        click.echo(f"error: no study of {project.protocol.path} runs {name}.", err=True)
+        click.echo("fix: Add it under analyses: in project.yaml or a study.yaml.", err=True)
+        sys.exit(EXIT_ANALYSIS_ERROR)
+    failed = []
+    for label in labels:
+        click.echo(f"== study {label}")
+        folder = project.protocol.studies[label]
+        try:
+            ctx.invoke(
+                analyze_command, **{**ctx.params, "project_path": None, "study_path": folder}
+            )
+        except SystemExit as exit_:
+            if exit_.code:
+                failed.append(label)
+    if failed:
+        click.echo(
+            f"error: {len(failed)} of {len(labels)} studies failed: {', '.join(failed)}", err=True
+        )
+        sys.exit(EXIT_ANALYSIS_ERROR)
 
 
 def _analyze_every_run(ctx: click.Context, study_path: Path | None) -> None:

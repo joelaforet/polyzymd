@@ -468,16 +468,26 @@ class Study:
         from polyzymd.analyses.results import read_results
 
         if folder is not None:
-            return read_results(Path(folder).expanduser())
+            return self._with_factors(read_results(Path(folder).expanduser()))
         default = self.results_dir(run)
         try:
-            return read_results(default)
+            return self._with_factors(read_results(default))
         except ProtocolError as exc:
             raise ProtocolError(
                 str(exc),
                 hint=f"Run polyzymd analyze {run} --study {self.protocol.path} first. Results "
                 "written with --output-dir are read with Study.results(run, folder=<that folder>).",
             ) from exc
+
+    def _with_factors(self, stored: Any) -> Any:
+        """Add a column for each factor the study's conditions declare, empty where one has none."""
+        factors = getattr(self.protocol, "factors", None) or {}
+        names = list(dict.fromkeys(name for values in factors.values() for name in values))
+        for name in names:
+            stored.table[name] = stored.table["condition"].map(
+                lambda label, name=name: factors.get(label, {}).get(name)
+            )
+        return stored
 
     def _entry(self, run: str) -> Any:
         if self.protocol is None:

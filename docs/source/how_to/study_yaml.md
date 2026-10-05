@@ -1,9 +1,11 @@
 # Run a study from `study.yaml`
 
 Use this when a study has several conditions and analyses that you rerun
-often, or that someone else must reproduce. `study.yaml` holds the analysis
-protocol: the conditions, the equilibration window and every analysis
-setting. Each condition's simulation stays in its own `config.yaml`. For the
+often, or that someone else must reproduce. A study is one protein (or other
+system) under its conditions. `study.yaml` holds the analysis protocol: the
+conditions, the equilibration window and every analysis setting. To analyse
+several proteins the same way, put one study per protein in a project
+({doc}`project`). Each condition's simulation stays in its own `config.yaml`. For the
 design of study folders and how they are published, see
 {doc}`../explanation/study_folders`.
 

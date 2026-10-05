@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/joelaforet/polyzymd/schemas/project-1.schema.json",
+  "title": "PolyzyMD project.yaml",
+  "description": "One paper: its studies, one per protein, the analyses each study runs with its own regions and structures, and publishing metadata. See docs/source/explanation/projects.md.",
+  "type": "object",
+  "required": [
+    "studies"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "polyzymd": {
+      "type": "string",
+      "description": "PolyzyMD version that produced the results."
+    },
+    "studies": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Study label to the folder holding its study.yaml, relative to project.yaml.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "analyses": {
+      "type": "object",
+      "description": "Run name to an analysis entry as in study.yaml, plus an optional studies: list of the studies that run it.",
+      "additionalProperties": {
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "studies": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Publishing metadata; see docs/source/how_to/study_freeze.md.",
+      "additionalProperties": false,
+      "properties": {
+        "doi": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "system_type": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "authors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "family-names"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "family-names": {
+                "type": "string"
+              },
+              "given-names": {
+                "type": "string"
+              },
+              "name-suffix": {
+                "type": "string"
+              },
+              "orcid": {
+                "type": "string"
+              },
+              "affiliation": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "contact": {
+          "type": "object"
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "data": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            }
+          }
+        },
+        "funding": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "related": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "paper": {
+              "type": "object"
+            },
+            "trajectories": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "experimental": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "zenodo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "communities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "access_right": {
+              "enum": [
+                "open",
+                "embargoed",
+                "restricted",
+                "closed"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -67,6 +67,14 @@ def check_command(path: Path) -> None:
         f"study {protocol.path}  equilibration {protocol.equilibration}  stride {protocol.stride}"
         + (f"  replicates {protocol.replicates}" if protocol.replicates else "")
     )
+    if protocol.description:
+        click.echo(f"system: {protocol.description}")
+    if protocol.project is not None:
+        click.echo(f"project {protocol.project.path} as study {protocol.project_label}")
+    for name, where in protocol.structures.items():
+        click.echo(f"structure {name}: {where}")
+    for name, selection in protocol.regions.items():
+        click.echo(f"region {name}: {selection}")
     if protocol.polyzymd and protocol.polyzymd != polyzymd.__version__:
         click.echo(
             f"warning: written for PolyzyMD {protocol.polyzymd}; this is {polyzymd.__version__}"
@@ -93,8 +101,10 @@ def check_command(path: Path) -> None:
             )
             continue
         missing = sorted(set(protocol.replicates or []) - set(found))
+        factors = protocol.factors.get(label)
         click.echo(
             f"{role} {label}: runs {found} under {where}"
+            + (f"; factors {', '.join(f'{k}={v}' for k, v in factors.items())}" if factors else "")
             + (f"; missing replicates {missing}" if missing else "")
             + _production_summary(label, config_path, protocol)
         )

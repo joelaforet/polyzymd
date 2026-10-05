@@ -71,7 +71,13 @@ runs one entry of its `analyses:`, and `polyzymd analyze --study STUDY` runs
 them all; command-line options override the file, and results go to
 `STUDY/results/RUN/`. To read results back without trajectories, use
 `pz.Study("STUDY/study.yaml").results(RUN).table`. See
-`docs/source/how_to/study_yaml.md`. When `study check` finds no runs for a
+`docs/source/how_to/study_yaml.md`. A study is one protein; a paper with
+several proteins is a project folder (`project.yaml` lists the studies and
+the analyses each runs): use `polyzymd project check PROJECT`,
+`polyzymd analyze RUN --project PROJECT`, and
+`pz.Project("PROJECT").results(RUN).table` (one table, a `study` column),
+never a loop over study folders by hand (`docs/source/how_to/project.md`).
+When `study check` finds no runs for a
 condition, the trajectories are elsewhere: run `polyzymd study locate DIR`
 (writes the gitignored `data.local.yaml`) or pass `--data DIR`; never edit the
 configs' paths to point at moved data. Read `study check`'s production lengths

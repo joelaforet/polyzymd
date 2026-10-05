@@ -98,6 +98,12 @@ protocol: conditions, the equilibration window (an entry may set its own
 `equilibration:`/`until:`, `StudyFile.window`) and each analysis run's
 settings, including the study's own functions (`function: file.py:name`,
 `analyses/user_functions.py`, keyed on the whole file's hash).
+A study is one protein (or system); a project (`project.yaml`,
+`analyses/project_file.py`, `analyses/project.py`, `cli/project.py`) lists a
+paper's studies and the analyses each runs, with each study's `regions:` and
+`structures:` resolved into `region <name>` / `structure <name>`
+(`resolve_names`); `analyze --project`, `project check` and
+`pz.Project(...).results(run)` (a `study` column, factor columns).
 `polyzymd study check` reads it without trajectories (`cli/study.py`);
 `polyzymd analyze [RUN] --study study.yaml` runs one run or all of them into
 `<study>/results/<run>/`; `pz.Study("study.yaml").results(run)` reads them back

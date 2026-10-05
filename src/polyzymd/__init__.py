@@ -40,6 +40,7 @@ __all__ = [
     "SimulationConfig",
     # Analysis (lazy loaded; building a study imports MDAnalysis)
     "Study",
+    "Project",
     "select",
     "universe",
     "reference",
@@ -82,6 +83,11 @@ def __getattr__(name: str):
         from polyzymd.analyses.study import Study
 
         return Study
+
+    if name == "Project":
+        from polyzymd.analyses.project import Project
+
+        return Project
 
     if name in ("select", "universe"):
         from polyzymd.analyses import timeseries

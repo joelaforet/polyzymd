@@ -28,14 +28,19 @@ DATA_FILE = "data.local.yaml"
 
 _TOP_KEYS = (
     "polyzymd",
+    "description",
     "equilibration",
     "stride",
     "until",
     "replicates",
     "conditions",
+    "structures",
+    "regions",
     "analyses",
     "metadata",
 )
+#: Keys of a condition written as a mapping.
+_CONDITION_KEYS = ("config", "factors")
 _ENTRY_KEYS = ("analysis",)
 #: Keys of any ``analyses:`` entry that set its own analysis window.
 WINDOW_KEYS = ("equilibration", "until")
@@ -148,6 +153,17 @@ class StudyFile:
     metadata: dict[str, Any] = field(default_factory=dict)
     data: dict[str, Path] = field(default_factory=dict)
     until: str | None = None
+    #: What the study simulates, such as the protein and temperature.
+    description: str | None = None
+    #: Named structure files, used as ``structure <name>``.
+    structures: dict[str, Path] = field(default_factory=dict)
+    #: Named selections, used as ``region <name>``.
+    regions: dict[str, str] = field(default_factory=dict)
+    #: Each condition's factors, such as ``{"sbma_fraction": 0.5}``.
+    factors: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: The project this study belongs to, and its label there.
+    project: Any = None
+    project_label: str | None = None
 
     @property
     def root(self) -> Path:
@@ -362,6 +378,49 @@ def read_data_file(path: Path, labels: Any) -> dict[str, Path]:
     }
 
 
+def _condition(label: str, value: Any, file: Path) -> tuple[Path, dict[str, Any]]:
+    """Read one condition: a config path (or its folder), or ``{config: ..., factors: {...}}``."""
+    factors: dict[str, Any] = {}
+    if isinstance(value, Mapping):
+        _unknown(value, _CONDITION_KEYS, f"{file}: conditions.{label}")
+        if "config" not in value:
+            raise ProtocolError(
+                f"{file}: conditions.{label} has no config.",
+                hint="Write it as '{config: conditions/<name>, factors: {name: value}}'.",
+            )
+        factors = value.get("factors") or {}
+        if not isinstance(factors, Mapping) or any(
+            isinstance(v, (Mapping, list)) for v in factors.values()
+        ):
+            raise ProtocolError(
+                f"{file}: conditions.{label}.factors must map names to single values.",
+                hint="For example 'factors: {sbma_fraction: 0.5}'.",
+            )
+        factors = {str(k): v for k, v in factors.items()}
+        value = value["config"]
+    path = (file.parent / Path(str(value)).expanduser()).resolve()
+    if path.is_dir():
+        path = path / "config.yaml"
+    return path, factors
+
+
+def _named(value: Any, key: str, file: Path) -> dict[str, Any]:
+    """Read ``structures:`` or ``regions:``: a mapping of names to values."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping) or any(
+        not isinstance(name, str) or not name.replace("_", "a").replace("-", "a").isalnum()
+        for name in value
+    ):
+        raise ProtocolError(
+            f"{file}: {key} must map names (letters, digits, _ and -) to values.",
+            hint=f"For example '{key}: {{core: resid 5-120}}'."
+            if key == "regions"
+            else f"For example '{key}: {{reference: structures/ref.pdb}}'.",
+        )
+    return dict(value)
+
+
 def _equilibration(value: Any, where: Any) -> str:
     """Check an equilibration window, such as ``100ns``."""
     from polyzymd.analyses.shared.loader import parse_time_string
@@ -441,9 +500,24 @@ def load_study_file(path: str | Path) -> StudyFile:
             f"{file}: conditions must map each condition label to its config.yaml.",
             hint="For example 'conditions: {No polymer: conditions/no_polymer/config.yaml}'.",
         )
-    conditions = {
-        str(label): (file.parent / Path(str(config)).expanduser()).resolve()
-        for label, config in conditions_raw.items()
+    conditions: dict[str, Path] = {}
+    factors: dict[str, dict[str, Any]] = {}
+    for label, value in conditions_raw.items():
+        conditions[str(label)], factors[str(label)] = _condition(str(label), value, file)
+
+    structures = _named(raw.get("structures"), "structures", file)
+    structures = {
+        name: (file.parent / Path(str(where)).expanduser()).resolve()
+        for name, where in structures.items()
+    }
+    for name, where in structures.items():
+        if not where.is_file():
+            raise ProtocolError(
+                f"{file}: structure {name} is not a file: {where}.",
+                hint="Give each structure's path relative to study.yaml, such as structures/ref.pdb.",
+            )
+    regions = {
+        name: str(text) for name, text in _named(raw.get("regions"), "regions", file).items()
     }
 
     stride = raw.get("stride", 1)
@@ -475,9 +549,28 @@ def load_study_file(path: str | Path) -> StudyFile:
             f"{file}: analyses must map each run name to its settings.",
             hint="For example 'analyses: {contacts: {method: occlusion}}'.",
         )
-    analyses = {
-        str(run): _analysis_entry(str(run), entry, file) for run, entry in analyses_raw.items()
-    }
+    from polyzymd.analyses.project_file import find_project, resolve_names
+
+    found = find_project(file.parent)
+    project, project_label = found if found is not None else (None, None)
+    analyses: dict[str, AnalysisEntry] = {}
+    if project is not None:
+        # The project's analyses, for this protein: its regions and structures resolved.
+        for run, entry in project.analyses.items():
+            listed = project.runs_in[run]
+            if listed is not None and project_label not in listed:
+                continue
+            where = f"{project.path}: analyses.{run} (in study {project_label})"
+            resolved = resolve_names(entry, regions, structures, where)
+            analyses[run] = _analysis_entry(run, resolved, project.path)
+    for run, entry in analyses_raw.items():
+        if str(run) in analyses:
+            raise ProtocolError(
+                f"{file}: analyses.{run} is also an analysis of {project.path}.",
+                hint="Give the study's own analysis another name, or change it in project.yaml.",
+            )
+        resolved = resolve_names(entry, regions, structures, f"{file}: analyses.{run}")
+        analyses[str(run)] = _analysis_entry(str(run), resolved, file)
 
     metadata = raw.get("metadata") or {}
     if not isinstance(metadata, Mapping):
@@ -490,10 +583,17 @@ def load_study_file(path: str | Path) -> StudyFile:
         equilibration=equilibration,
         conditions=conditions,
         analyses=analyses,
-        polyzymd=None if version is None else str(version),
+        polyzymd=str(version) if version is not None else (project.polyzymd if project else None),
         stride=stride,
         replicates=replicates,
-        metadata=dict(metadata),
+        # A study of a project publishes with the project's metadata unless it has its own.
+        metadata=dict(metadata) or (dict(project.metadata) if project is not None else {}),
         data=data,
         until=_until(raw.get("until"), file),
+        description=None if raw.get("description") is None else str(raw["description"]),
+        structures=structures,
+        regions=regions,
+        factors={label: value for label, value in factors.items() if value},
+        project=project,
+        project_label=project_label,
     )
