@@ -14,6 +14,7 @@ interval) and the overlap and gap bookkeeping in ``progress.json``.
 """
 
 import json
+import logging
 import re
 import struct
 from pathlib import Path
@@ -229,6 +230,8 @@ class TestReportIntervalCheck:
             check_report_interval_unchanged(progress, tmp_path, 1, 200000)
 
     def test_override_allows_the_change(self, tmp_path, caplog):
+        # `polyzymd status` raises this logger to ERROR for the process.
+        caplog.set_level(logging.WARNING, logger="polyzymd.simulation.progress")
         progress = self._progress(report_interval=20000)
         check_report_interval_unchanged(progress, tmp_path, 1, 200000, allow_change=True)
         assert "explicitly allowed" in caplog.text
