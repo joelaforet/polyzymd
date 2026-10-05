@@ -211,6 +211,37 @@ class TestAllowEmpty:
         assert (table["value"] == 0.0).all()
 
 
+class TestLabelledVerdict:
+    def _rows(self, testable: bool):
+        from polyzymd.analyses.protocols import ConditionReport, PairwiseReport
+
+        conditions = [
+            ConditionReport(label=c, entry=e, n_replicates=n, mean=m)
+            for c, n in (("A", 1), ("B", 1))
+            for e, m in (("1", 1.0), ("2", float("nan")))
+        ]
+        pairwise = [
+            PairwiseReport(a="A", b="B", entry=e, delta=0.0, testable=testable) for e in ("1", "2")
+        ]
+        return conditions, pairwise
+
+    def test_one_replicate_is_not_testable(self) -> None:
+        from polyzymd.analyses.timeseries import _labelled_verdict
+
+        conditions, pairwise = self._rows(False)
+        (sentence,) = _labelled_verdict("q", None, ["A", "B"], conditions, pairwise)
+        assert sentence.startswith("not testable: q for A vs B") and "(n 1 vs 1)" in sentence
+        assert "0 of 0" not in sentence
+
+    def test_label_means_ignore_nan(self) -> None:
+        from polyzymd.analyses.timeseries import _labelled_verdict
+
+        conditions, _ = self._rows(True)
+        sentence = _labelled_verdict("q", None, ["A"], conditions, [])[0]
+        assert "nan" not in sentence and "from 1 to 1" in sentence
+        assert "1 labels without a mean" in sentence
+
+
 class TestAnalysisLogging:
     def test_console_quiet_and_file_complete(self, tmp_path: Path, capsys) -> None:
         from polyzymd.cli.logging_utils import analysis_logging

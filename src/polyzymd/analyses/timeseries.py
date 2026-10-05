@@ -1210,8 +1210,21 @@ class ReplicateValues:
                         "where a t interval is not reliable"
                     )
                 conditions.append(item)
+        untestable: dict[tuple[str, str], list] = {}
         for row in pairwise:
+            untestable.setdefault((row.a, row.b), [])
             if not row.testable:
+                untestable[(row.a, row.b)].append(row)
+        for (a, b), rows in untestable.items():
+            total = sum(1 for row in pairwise if (row.a, row.b) == (a, b))
+            if rows and len(rows) == total and total > 1:
+                # One note for the pair; its rows stay in the report's pairwise table.
+                notes.append(
+                    f"{a} vs {b} is not testable at any of its {total} labels: a condition has "
+                    "fewer than two replicates, or both have one value in every replicate"
+                )
+                continue
+            for row in rows:
                 at = "" if row.entry is None else f" at {row.entry}"
                 notes.append(
                     f"{row.a} vs {row.b}{at} is not testable: a condition has fewer than two "
@@ -1263,22 +1276,39 @@ def _labelled_verdict(
     metric: str, unit: str | None, chosen: list[str], conditions: list, pairwise: list
 ) -> list[str]:
     """Write one sentence per condition, or per comparison, naming every significant label."""
-    from polyzymd.analyses.protocols import _num
+    from polyzymd.analyses.protocols import VERDICT_NOT_TESTABLE, _num
 
     unit_text = f" {unit}" if unit else ""
     if not pairwise:
         sentences = []
         for label in chosen:
             means = [item.mean for item in conditions if item.label == label]
+            finite = [mean for mean in means if math.isfinite(mean)]
+            if not finite:
+                sentences.append(f"{label} {metric} over {len(means)} labels, no finite label mean")
+                continue
             sentences.append(
                 f"{label} {metric} over {len(means)} labels, label means from "
-                f"{_num(min(means))} to {_num(max(means))}{unit_text}"
+                f"{_num(min(finite))} to {_num(max(finite))}{unit_text}"
+                + (
+                    f" ({len(means) - len(finite)} labels without a mean)"
+                    if len(finite) < len(means)
+                    else ""
+                )
             )
         return sentences
+    replicates = {item.label: item.n_replicates for item in conditions}
     sentences = []
     for label in dict.fromkeys(row.b for row in pairwise):
         rows = [row for row in pairwise if row.b == label]
         tested = [row for row in rows if row.p_adjusted is not None]
+        if not tested:
+            n_text = f"n {replicates.get(rows[0].a, 0)} vs {replicates.get(label, 0)}"
+            sentences.append(
+                f"{VERDICT_NOT_TESTABLE}: {metric} for {rows[0].a} vs {label} needs at least two "
+                f"replicates per condition and values that vary ({n_text})"
+            )
+            continue
         larger = [row.entry for row in tested if row.significant and row.delta > 0]
         smaller = [row.entry for row in tested if row.significant and row.delta < 0]
         family = tested[0].family_size if tested else 0
