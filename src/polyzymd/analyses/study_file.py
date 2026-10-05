@@ -48,6 +48,7 @@ USER_KEYS = (
     "labels",
     "reduce",
     "allow_empty",
+    "missing",
 )
 #: How a user function is run: once per replicate, or once per frame.
 USER_KINDS = ("per_replicate", "timeseries")
@@ -86,6 +87,10 @@ class UserFunction:
         Pass a selection that matches no atoms, such as a polymer selection
         in a no-polymer control, to the function as an empty AtomGroup, as
         the shipped analyses do; ``False`` refuses such a replicate.
+    missing : float or None
+        For ``labels: returned``, the value a replicate gets for a label that
+        other replicates returned and it did not, such as ``nan``; ``None``
+        refuses such a replicate.
     """
 
     file: Path
@@ -98,6 +103,7 @@ class UserFunction:
     labels: str | None = None
     reduce: str = "mean"
     allow_empty: bool = False
+    missing: float | None = None
 
 
 @dataclass(frozen=True)
@@ -244,6 +250,18 @@ def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
             f"{where}: a keyword argument is given twice: {sorted(clash) or raw['universe']}.",
             hint="Give each keyword argument in only one of selections, settings and universe.",
         )
+    missing = raw.get("missing")
+    if missing is not None:
+        if labels != "returned":
+            raise ProtocolError(
+                f"{where}: missing applies only to a per_replicate function with labels: returned.",
+                hint="Leave missing out, or return (labels, values) and write labels: returned.",
+            )
+        if isinstance(missing, bool) or not isinstance(missing, (int, float)):
+            raise ProtocolError(
+                f"{where}: missing must be a number, not {missing!r}.",
+                hint="Write a number, or .nan for a label without a value.",
+            )
     unit = raw.get("unit")
     return UserFunction(
         file=location,
@@ -256,6 +274,7 @@ def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
         labels=labels,
         reduce=reduce,
         allow_empty=bool(raw.get("allow_empty", False)),
+        missing=None if missing is None else float(missing),
     )
 
 

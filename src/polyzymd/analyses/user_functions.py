@@ -113,6 +113,7 @@ def run_user_analysis(
             function,
             unit=user.unit,
             labels=user.labels,
+            missing=user.missing,
             name=run,
             recompute=recompute,
             output_dir=output_dir,

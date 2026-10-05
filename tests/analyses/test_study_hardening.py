@@ -388,3 +388,61 @@ class TestPartialReport:
         )
         assert task.exit_code == 0, task.output
         assert not (root / "results" / "first" / "report.json").exists()
+
+
+class TestMissingLabels:
+    def _study(self, tmp_path: Path, missing: str | None) -> Path:
+        configs = {}
+        for label in ("A", "B"):
+            config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "s")
+            for replicate, n_frames in ((1, 6), (2, 4)):
+                write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(n_frames)])
+            configs[label] = config
+        root = tmp_path / "study"
+        (root / "analyses").mkdir(parents=True)
+        (root / "analyses" / "m.py").write_text(
+            "def per_frame(atoms, frames):\n"
+            "    n = len(frames)\n"
+            "    return [f'f{i}' for i in range(n)], [float(i) for i in range(n)]\n"
+        )
+        (root / "study.yaml").write_text(
+            "equilibration: 0ns\n"
+            f"conditions: {{A: {configs['A']}, B: {configs['B']}}}\n"
+            "analyses:\n"
+            "  byf:\n"
+            "    function: analyses/m.py:per_frame\n"
+            "    kind: per_replicate\n"
+            "    labels: returned\n"
+            "    selections: {atoms: all}\n" + (f"    missing: {missing}\n" if missing else "")
+        )
+        return root
+
+    def test_missing_labels_name_the_study_yaml_key(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path, None)
+        result = CliRunner().invoke(cli, ["analyze", "byf", "--study", str(root), "--no-plots"])
+        assert result.exit_code == 2
+        assert "missing: .nan in the study.yaml entry" in result.output
+
+    def test_missing_fills_labels_a_replicate_lacks(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path, ".nan")
+        result = CliRunner().invoke(cli, ["analyze", "byf", "--study", str(root), "--no-plots"])
+        assert result.exit_code == 0, result.output
+        table = pz.Study(root).results("byf").table
+        assert set(table["label"]) == {f"f{i}" for i in range(6)}
+
+    def test_missing_needs_returned_labels(self, tmp_path: Path) -> None:
+        from polyzymd.analyses.study_file import load_study_file
+
+        root = self._study(tmp_path, ".nan")
+        text = (root / "study.yaml").read_text().replace("    labels: returned\n", "")
+        (root / "study.yaml").write_text(text)
+        with pytest.raises(ProtocolError, match="missing applies only"):
+            load_study_file(root)

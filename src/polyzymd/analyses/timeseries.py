@@ -618,7 +618,9 @@ def _label_order(rows: dict[str, list[tuple]], missing: float | None, name: str)
                 raise ProtocolError(
                     f"{name}: condition {condition} replicate {row[0]} has no value for "
                     f"labels {absent}, which other replicates have.",
-                    hint="Measure the same labels in every replicate, or pass missing=<value>.",
+                    hint="Measure the same labels in every replicate, or give the value a "
+                    "replicate gets for a label it lacks: missing: .nan in the study.yaml entry "
+                    "(missing=<value> in Python).",
                 )
             values = np.array([row[1].get(key, missing) for key in order], dtype=np.float64)
             items[position] = (row[0], values, *row[2:])
