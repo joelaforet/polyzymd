@@ -201,6 +201,69 @@ class OpenMMEngine(SimulationEngine):
         submitter = DaisyChainSubmitter(self._config, dc_config)
         return submitter.submit_replicate(request.replicate)
 
+    def trajectory_files(
+        self, working_dir: Path, progress: SimulationProgress | None
+    ) -> list[Path]:
+        """Return each production segment's DCD that exists, leaving out segments still running.
+
+        Parameters
+        ----------
+        working_dir : Path
+            Replicate working directory.
+        progress : SimulationProgress or None
+            The run's progress; a segment it records as running is left out.
+
+        Returns
+        -------
+        list of Path
+            ``production_<n>/production_<n>_trajectory.dcd`` files, by segment index.
+        """
+        from polyzymd.simulation.progress import SegmentStatus
+
+        running = {
+            s.index
+            for s in (progress.segments if progress else [])
+            if s.status == SegmentStatus.RUNNING
+        }
+        found = []
+        for folder in Path(working_dir).glob("production_*"):
+            match = re.fullmatch(r"production_(\d+)", folder.name)
+            if match is None or int(match.group(1)) in running:
+                continue
+            dcd = folder / f"{folder.name}_trajectory.dcd"
+            if dcd.is_file():
+                found.append((int(match.group(1)), dcd))
+        return [path for _, path in sorted(found)]
+
+    def recorded_trajectory_hashes(
+        self, working_dir: Path, progress: SimulationProgress | None = None
+    ) -> dict[Path, tuple[str, int]]:
+        """Return recorded hashes: the engine-neutral map, and the hash each segment recorded on completion."""
+        from polyzymd.simulation.progress import load_progress
+
+        working_dir = Path(working_dir)
+        progress = progress if progress is not None else load_progress(working_dir)
+        recorded = super().recorded_trajectory_hashes(working_dir, progress)
+        for segment in progress.segments if progress else []:
+            if segment.trajectory_sha256 and segment.trajectory_bytes is not None:
+                path = (
+                    working_dir
+                    / f"production_{segment.index}"
+                    / f"production_{segment.index}_trajectory.dcd"
+                ).resolve()
+                recorded.setdefault(path, (segment.trajectory_sha256, segment.trajectory_bytes))
+        return recorded
+
+    def store_trajectory_hash(
+        self, progress: SimulationProgress, working_dir: Path, path: Path, sha256: str, size: int
+    ) -> None:
+        """Record a DCD's hash in the engine-neutral map and on its segment, when recorded."""
+        super().store_trajectory_hash(progress, working_dir, path, sha256, size)
+        match = re.fullmatch(r"production_(\d+)_trajectory\.dcd", Path(path).name)
+        for segment in progress.segments:
+            if match and segment.index == int(match.group(1)):
+                segment.trajectory_sha256, segment.trajectory_bytes = sha256, size
+
     def load_or_scan_progress(self, working_dir: Path, replicate: int) -> SimulationProgress:
         """Load OpenMM progress from progress.json or filesystem scan.
 
