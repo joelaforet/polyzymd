@@ -567,10 +567,11 @@ def test_the_task_options(configs, tmp_path) -> None:
         "mean_rg",
         "--no-eq-check",
         "--no-plots",
+        "--task",
         "--recompute",
     ]
     report = _report_words(folder)
-    assert "--recompute" not in report
+    assert "--recompute" not in report and "--task" not in report
     assert report[report.index("--run") + 1] == "mean_rg"
     assert "--no-eq-check" in report
     assert report[report.index("--stride") + 1] == "2"

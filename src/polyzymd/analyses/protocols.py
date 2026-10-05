@@ -262,12 +262,17 @@ class ProtocolReport(BaseModel):
 
     ``run`` names the selected value of an analysis that measures several,
     such as a pair label of ``distances``; ``all_metrics`` and ``all_runs``
-    list the rest, the selected one first.
+    list the rest, the selected one first. ``status`` is ``"complete"``, or
+    ``"partial"`` when a condition could not be measured or compared;
+    ``problems`` then names each condition left out of the report, or the
+    comparison that failed, with its error.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
 
     analysis: str
+    status: str = "complete"
+    problems: list[str] = Field(default_factory=list)
     protocol_version: str
     metric: str
     unit: str | None = None
@@ -304,6 +309,7 @@ class ProtocolReport(BaseModel):
             + f"  conditions {len(counts)}"
             f"  replicates {','.join(str(n) for n in counts.values()) or 'none'}"
             f"  protocol {self.analysis}/{self.protocol_version}"
+            + (f"  status {self.status}" if self.status != "complete" else "")
         )
         if any(pair.entry is not None for pair in self.pairwise):
             body = [
@@ -318,6 +324,7 @@ class ProtocolReport(BaseModel):
             ]
         lines = [
             header,
+            *(f"problem: {text}" for text in self.problems),
             *body,
             *(f"warning: {text}" for text in self.warnings),
             *(f"verdict: {text}" for text in self.verdict),

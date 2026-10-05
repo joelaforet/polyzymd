@@ -74,6 +74,74 @@ def _replicates(spec: str | None) -> list[int] | None:
         ) from exc
 
 
+def _partial_report(options: dict[str, Any], error: Exception) -> "ProtocolReport | None":
+    """Build a report from the conditions that can be reported, after the whole run failed.
+
+    Each condition is run alone, which reuses its stored results, and the
+    conditions that fail are named in ``problems`` with their error. The
+    comparison is then run over the conditions that worked, control first;
+    without the control, or when that comparison fails too, the report holds
+    each condition's summary. Returns ``None`` when there is no second
+    condition to fall back on or no condition works, so the original error
+    stands.
+    """
+    configs, labels = tuple(options["configs"]), tuple(options["labels"])
+    if len(configs) < 2:
+        return None
+    names = labels or tuple(str(config) for config in configs)
+
+    def run(indices: list[int]) -> "ProtocolReport":
+        return _run(
+            **{
+                **options,
+                "configs": tuple(configs[i] for i in indices),
+                "labels": tuple(labels[i] for i in indices) if labels else (),
+            }
+        )
+
+    def reason(exc: Exception) -> str:
+        hint = getattr(exc, "hint", None)
+        return f"{type(exc).__name__}: {_one_line(str(exc))}" + (
+            f" (fix: {_one_line(hint)})" if hint else ""
+        )
+
+    alone: dict[int, "ProtocolReport"] = {}
+    problems = []
+    for index in range(len(configs)):
+        try:
+            alone[index] = run([index])
+        except Exception as exc:  # noqa: BLE001 - recorded in the report
+            problems.append(f"condition {names[index]} is left out: {reason(exc)}")
+    if not alone:
+        return None
+    good = sorted(alone)
+    report = None
+    if 0 in alone and len(good) > 1:
+        try:
+            report = run(good)
+            if len(good) < len(configs):
+                problems.append(f"the comparison covers {', '.join(names[i] for i in good)} only")
+        except Exception as exc:  # noqa: BLE001 - recorded in the report
+            problems.append(f"the comparison failed: {reason(exc)}")
+    if report is None:
+        if 0 not in alone:
+            problems.append(f"no comparison: the control {names[0]} is left out")
+        first = alone[good[0]]
+        report = first.model_copy(
+            update={
+                "conditions": [item for i in good for item in alone[i].conditions],
+                "pairwise": [],
+                "frames_per_replicate": {
+                    key: value for i in good for key, value in alone[i].frames_per_replicate.items()
+                },
+                "warnings": [text for i in good for text in alone[i].warnings],
+                "verdict": [text for i in good for text in alone[i].verdict],
+            }
+        )
+    problems.insert(0, f"the run over every condition failed: {reason(error)}")
+    return report.model_copy(update={"status": "partial", "problems": problems})
+
+
 def _render(report: "ProtocolReport", output_format: str) -> str:
     """Render the report in the requested format."""
     if output_format == "json":
@@ -195,6 +263,13 @@ def _one_line(text: str) -> str:
     help="Skip the pymbar detected equilibration start of each replicate. No value changes.",
 )
 @click.option(
+    "--task",
+    "is_task",
+    is_flag=True,
+    hidden=True,
+    help="Set by --submit on its array tasks: store the results, leave the run's report.json.",
+)
+@click.option(
     "--no-plots",
     "no_plots",
     is_flag=True,
@@ -256,6 +331,7 @@ def analyze_command(
     until: str | None,
     recompute: bool,
     no_eq_check: bool,
+    is_task: bool,
     no_plots: bool,
     submit: bool,
     dry_run: bool,
@@ -397,26 +473,32 @@ def analyze_command(
             sys.exit(EXIT_ANALYSIS_ERROR)
         return
 
+    run_options = {
+        "name": name,
+        "configs": configs,
+        "comparison_file": comparison_file,
+        "replicate_spec": replicate_spec,
+        "equilibration": equilibration,
+        "labels": labels,
+        "run": run,
+        "setting_overrides": setting_overrides,
+        "output_dir": output_dir,
+        "recompute": recompute,
+        "eq_check": not no_eq_check,
+        "plots": not no_plots,
+        "stride": stride,
+        "study_path": study_path,
+        "run_name": run_name,
+        "data": data,
+        "until": until,
+    }
     try:
-        report = _run(
-            name=name,
-            configs=configs,
-            comparison_file=comparison_file,
-            replicate_spec=replicate_spec,
-            equilibration=equilibration,
-            labels=labels,
-            run=run,
-            setting_overrides=setting_overrides,
-            output_dir=output_dir,
-            recompute=recompute,
-            eq_check=not no_eq_check,
-            plots=not no_plots,
-            stride=stride,
-            study_path=study_path,
-            run_name=run_name,
-            data=data,
-            until=until,
-        )
+        try:
+            report = _run(**run_options)
+        except Exception as exc:  # noqa: BLE001 - a partial report replaces a lost one
+            report = _partial_report(run_options, exc)
+            if report is None:
+                raise
     except AnalysisError as exc:
         hint = getattr(exc, "hint", None)
         click.echo(f"error: {_one_line(str(exc))}", err=True)
@@ -443,9 +525,12 @@ def analyze_command(
             )
             for key, value in report.provenance.output_paths.items()
         }
-        saved = Path(output_dir) / REPORT_FILE
-        saved.parent.mkdir(parents=True, exist_ok=True)
-        saved.write_text(report.model_dump_json(indent=2) + "\n")
+        # A --submit task measures one condition and replicate; its report
+        # must not replace the run's.
+        if not is_task:
+            saved = Path(output_dir) / REPORT_FILE
+            saved.parent.mkdir(parents=True, exist_ok=True)
+            saved.write_text(report.model_dump_json(indent=2) + "\n")
     rendered = _render(report, output_format)
     click.echo(rendered)
     if output_path is not None:
@@ -731,7 +816,7 @@ def _submit(
         common += ["--run", run]
     if no_eq_check:
         common.append("--no-eq-check")
-    task_options = [*common, "--no-plots", *(["--recompute"] if recompute else [])]
+    task_options = [*common, "--no-plots", "--task", *(["--recompute"] if recompute else [])]
     report_arguments = []
     if study_path is not None:
         # The report job reads the study file too, so it saves report.json for

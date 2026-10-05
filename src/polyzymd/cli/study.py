@@ -11,6 +11,22 @@ import click
 EXIT_STUDY_ERROR = 2
 
 
+def _report_status(path: Path) -> str:
+    """Return how ``study check`` describes a run's ``report.json``: absent, complete or partial."""
+    import json
+
+    if not path.is_file():
+        return ""
+    try:
+        report = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return " with an unreadable report"
+    problems = report.get("problems") or []
+    if report.get("status", "complete") == "complete":
+        return " with its report"
+    return f" with a partial report ({len(problems)} problems): " + "; ".join(problems)
+
+
 @click.group("study")
 def study_group() -> None:
     """Work with a study folder: one MD study's conditions, protocol and results.
@@ -114,8 +130,7 @@ def check_command(path: Path) -> None:
         click.echo(
             f"analysis {what}: {settings}; "
             + (
-                f"stored results in {folder}"
-                + (" with its report" if (folder / REPORT_FILE).is_file() else "")
+                f"stored results in {folder}" + _report_status(folder / REPORT_FILE)
                 if stored
                 else "no stored results"
             )

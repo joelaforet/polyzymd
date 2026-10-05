@@ -306,3 +306,68 @@ class TestOutputDirResults:
             study.results("count")
         assert "folder=" in error.value.hint
         assert len(study.results("count", folder=elsewhere).table) > 0
+
+
+class TestPartialReport:
+    def _study(self, tmp_path: Path) -> Path:
+        configs = {}
+        for label in ("A", "B", "C"):
+            config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "s")
+            write_openmm_replicate(config, 1, [1.0 + 0.01 * k for k in range(10)])
+            write_openmm_replicate(config, 2, [1.1 + 0.01 * k for k in range(10)])
+            configs[label] = config
+        root = tmp_path / "study"
+        (root / "analyses").mkdir(parents=True)
+        (root / "analyses" / "m.py").write_text(
+            "def n(atoms):\n"
+            "    if '/C/' in atoms.universe.filename:\n"
+            "        raise RuntimeError('boom in C')\n"
+            "    return float(atoms.positions[0, 0])\n"
+        )
+        (root / "study.yaml").write_text(
+            "equilibration: 0ns\n"
+            "conditions: {"
+            + ", ".join(f"{label}: {config}" for label, config in configs.items())
+            + "}\n"
+            "analyses:\n"
+            "  first:\n"
+            "    function: analyses/m.py:n\n"
+            "    kind: timeseries\n"
+            "    selections: {atoms: all}\n"
+        )
+        return root
+
+    def test_failing_condition_leaves_a_partial_report(self, tmp_path: Path) -> None:
+        import json
+
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path)
+        result = CliRunner().invoke(cli, ["analyze", "first", "--study", str(root), "--no-plots"])
+        assert result.exit_code == 0, result.output
+        assert "status partial" in result.output
+        report = json.loads((root / "results" / "first" / "report.json").read_text())
+        assert report["status"] == "partial"
+        assert [c["label"] for c in report["conditions"]] == ["A", "B"]
+        assert any(
+            "condition C is left out: RuntimeError: boom in C" in p for p in report["problems"]
+        )
+        assert any(p["a"] == "A" and p["b"] == "B" for p in report["pairwise"])
+        check = CliRunner().invoke(cli, ["study", "check", str(root)])
+        assert "with a partial report" in check.output
+
+    def test_a_task_does_not_replace_the_study_report(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path)
+        task = CliRunner().invoke(
+            cli,
+            ["analyze", "first", "--study", str(root), "--label", "A", "--replicates", "1"]
+            + ["--no-plots", "--task"],
+        )
+        assert task.exit_code == 0, task.output
+        assert not (root / "results" / "first" / "report.json").exists()
