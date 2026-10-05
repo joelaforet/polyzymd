@@ -21,6 +21,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from polyzymd.simulation.report_state import write_text_atomic
+
 LOGGER = logging.getLogger(__name__)
 
 # Exit code that means "interrupted cleanly, state was saved"
@@ -152,7 +154,8 @@ def save_interrupted_state(
 ) -> Path:
     """Save checkpoint files after an interrupt signal.
 
-    Writes three files into *output_dir*:
+    Writes these files into *output_dir*, the XML files through a temporary
+    file and ``os.replace``:
 
     - ``interrupted_state.xml``  — portable OpenMM state (positions, velocities)
     - ``interrupted_checkpoint.chk`` — binary checkpoint (fast reload)
@@ -191,8 +194,7 @@ def save_interrupted_state(
         getParameters=True,
     )
     state_xml_path = output_dir / "interrupted_state.xml"
-    with open(state_xml_path, "w") as f:
-        f.write(XmlSerializer.serialize(state))
+    write_text_atomic(state_xml_path, XmlSerializer.serialize(state))
     LOGGER.info(f"Saved interrupted state to {state_xml_path}")
 
     # Save binary checkpoint (faster to reload than XML)
@@ -202,23 +204,52 @@ def save_interrupted_state(
 
     # Save system XML (needed for recovery to rebuild simulation)
     system_xml_path = output_dir / "interrupted_system.xml"
-    with open(system_xml_path, "w") as f:
-        f.write(XmlSerializer.serialize(simulation.system))
+    write_text_atomic(system_xml_path, XmlSerializer.serialize(simulation.system))
     LOGGER.info(f"Saved interrupted system to {system_xml_path}")
 
-    # Write INTERRUPTED marker with metadata
-    marker_path = output_dir / "INTERRUPTED"
-    marker_path.write_text(
+    return write_interrupted_marker(output_dir, segment_index, steps_completed, total_steps)
+
+
+def write_interrupted_marker(
+    output_dir: Path,
+    segment_index: int,
+    steps_completed: int,
+    total_steps: int,
+) -> Path:
+    """Write the ``INTERRUPTED`` marker read by the recovery scan.
+
+    The marker holds ``segment_index``, ``steps_completed``, ``total_steps``
+    and ``remaining_steps`` as ``key=value`` lines.  ``steps_completed``
+    must count the steps up to the state the next segment will load.
+
+    Parameters
+    ----------
+    output_dir : Path
+        Segment directory.
+    segment_index : int
+        Current segment index.
+    steps_completed : int
+        Steps from the segment start to the saved state.
+    total_steps : int
+        Total steps that were planned for this segment.
+
+    Returns
+    -------
+    Path
+        Path to the marker file.
+    """
+    marker_path = Path(output_dir) / "INTERRUPTED"
+    write_text_atomic(
+        marker_path,
         f"segment_index={segment_index}\n"
         f"steps_completed={steps_completed}\n"
         f"total_steps={total_steps}\n"
-        f"remaining_steps={total_steps - steps_completed}\n"
+        f"remaining_steps={total_steps - steps_completed}\n",
     )
     LOGGER.info(
         f"Wrote INTERRUPTED marker: {steps_completed}/{total_steps} steps "
         f"({total_steps - steps_completed} remaining)"
     )
-
     return marker_path
 
 
@@ -233,6 +264,9 @@ def save_restart_checkpoint(
 
     - ``restart_state.xml``  — portable OpenMM state (positions, velocities)
     - ``restart_system.xml`` — serialized OpenMM System for recovery
+
+    Both files are written through a temporary file and ``os.replace``, so a
+    kill mid-write leaves the previous complete file in place.
 
     Unlike ``save_interrupted_state``, this does **not** write a binary
     ``.chk`` file (non-portable across heterogeneous clusters) and does
@@ -264,14 +298,12 @@ def save_restart_checkpoint(
         getParameters=True,
     )
     state_xml_path = output_dir / "restart_state.xml"
-    with open(state_xml_path, "w") as f:
-        f.write(XmlSerializer.serialize(state))
+    write_text_atomic(state_xml_path, XmlSerializer.serialize(state))
     LOGGER.info(f"Saved restart state to {state_xml_path}")
 
     # Save system XML (for self-containedness — cheap to write)
     system_xml_path = output_dir / "restart_system.xml"
-    with open(system_xml_path, "w") as f:
-        f.write(XmlSerializer.serialize(simulation.system))
+    write_text_atomic(system_xml_path, XmlSerializer.serialize(simulation.system))
     LOGGER.info(f"Saved restart system to {system_xml_path}")
 
     return state_xml_path

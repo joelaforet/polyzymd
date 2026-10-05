@@ -111,14 +111,15 @@ class SystemReport:
             out[rep.verdict] = out.get(rep.verdict, 0) + 1
         return out
 
-    def to_dict(self) -> dict:
+    def to_dict(self, unfinished: bool = False) -> dict:
+        reps = [r for r in self.replicates if not (unfinished and r.verdict == VERDICT_COMPLETED)]
         return {
             "name": self.name,
             "config_path": self.config_path,
             "scratch_directory": self.scratch_directory,
             "error": self.error,
             "counts": self.counts(),
-            "replicates": [r.to_dict() for r in self.replicates],
+            "replicates": [r.to_dict() for r in reps],
         }
 
 
@@ -199,6 +200,49 @@ def parse_squeue_output(text: str) -> list[SlurmJob]:
             )
         )
     return jobs
+
+
+def query_end_states(job_ids: Sequence[str], timeout: int = 20) -> dict[str, str]:
+    """Return ``{job_id: "STATE exit N"}`` from one ``sacct`` call.
+
+    Used when a dead chain's log holds no error line, which is what a node
+    failure, power loss or hard preemption leaves behind. Empty on any error.
+    """
+    if not job_ids:
+        return {}
+    cmd = ["sacct", "-n", "-X", "-P", "-j", ",".join(job_ids), "-o", "JobID,State,ExitCode"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return {}
+    if result.returncode != 0:
+        return {}
+    out: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        parts = line.strip().split("|")
+        if len(parts) == 3 and parts[0]:
+            out[parts[0]] = f"{parts[1].split()[0]} exit {parts[2]}"
+    return out
+
+
+def fill_end_states(
+    reports: Sequence["SystemReport"],
+    query_fn: Callable[[Sequence[str]], dict[str, str]] = query_end_states,
+) -> None:
+    """Give dead replicates without a log error line their SLURM end state."""
+    pending: dict[str, ReplicateReport] = {}
+    for report in reports:
+        for rep in report.replicates:
+            if rep.verdict != VERDICT_DEAD or rep.last_error or not rep.last_log:
+                continue
+            m = re.search(r"\.(\d+)\.out$", rep.last_log)
+            if m:
+                pending[m.group(1)] = rep
+    if not pending:
+        return
+    for job_id, state in query_fn(list(pending)).items():
+        if job_id in pending:
+            pending[job_id].last_error = f"slurm: {state}"
 
 
 def jobs_by_name(jobs: Iterable[SlurmJob]) -> dict[str, list[SlurmJob]]:
@@ -546,8 +590,14 @@ def render_agent(
     now: datetime | None = None,
     slurm_available: bool = True,
     preset_hint: str | None = None,
+    unfinished: bool = False,
 ) -> str:
-    """Compact, colour-free, fixed-vocabulary text for agents and terminals."""
+    """Compact, colour-free, fixed-vocabulary text for agents and terminals.
+
+    Each system header carries ``done/total completed``. With *unfinished*,
+    completed replicates are omitted and fully completed systems collapse to
+    their header line.
+    """
     if now is None:
         now = datetime.now(timezone.utc)
 
@@ -572,16 +622,22 @@ def render_agent(
         )
 
     for report in reports:
+        reps = report.replicates
+        done = sum(r.verdict == VERDICT_COMPLETED for r in reps)
+        shown = [r for r in reps if r.verdict != VERDICT_COMPLETED] if unfinished else reps
+        if unfinished and reps and not shown and not report.error:
+            lines.append(f"## {report.name}  {done}/{len(reps)} completed")
+            continue
         lines.append("")
-        lines.append(f"## {report.name}  ({report.config_path})")
+        lines.append(f"## {report.name}  ({report.config_path})  {done}/{len(reps)} completed")
         if report.error:
             lines.append(f"ERROR {report.error}")
             continue
-        if not report.replicates:
+        if not reps:
             lines.append(f"no replicate directories in {report.scratch_directory}")
             continue
-        width = max(len(f"run{r.replicate}") for r in report.replicates)
-        for rep in report.replicates:
+        width = max(len(f"run{r.replicate}") for r in shown)
+        for rep in shown:
             lines.append(render_replicate_line(rep, width))
 
     dead = [(r, rep) for r in reports for rep in r.replicates if rep.verdict == VERDICT_DEAD]
@@ -599,14 +655,18 @@ def render_agent(
 
 
 def render_json(
-    reports: Sequence[SystemReport], *, now: datetime | None = None, slurm_available: bool = True
+    reports: Sequence[SystemReport],
+    *,
+    now: datetime | None = None,
+    slurm_available: bool = True,
+    unfinished: bool = False,
 ) -> str:
     if now is None:
         now = datetime.now(timezone.utc)
     payload = {
         "generated_at": now.isoformat(),
         "slurm_available": slurm_available,
-        "systems": [r.to_dict() for r in reports],
+        "systems": [r.to_dict(unfinished=unfinished) for r in reports],
     }
     return json.dumps(payload, indent=1, default=str) + "\n"
 
