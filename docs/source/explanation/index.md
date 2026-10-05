@@ -68,6 +68,7 @@ If you are adding or reviewing an analysis, read these pages first:
 
 Analysing a set of simulations <analysis_api>
 Study folders: publishing a reproducible MD study <study_folders>
+Projects and studies: one paper, one study per protein <projects>
 Analysis system concepts <analysis_concepts>
 Which analysis entry point should I use <analysis_entry_points>
 Architecture and design rationale <architecture>
