@@ -76,13 +76,16 @@ def run_user_analysis(
     output_dir: Path,
     recompute: bool = False,
     plots: bool = True,
+    part: str | None = None,
 ) -> Any:
     """Run a study's user function over every replicate and return its ProtocolReport.
 
     ``user`` is the :class:`~polyzymd.analyses.study_file.UserFunction` of
     the entry ``run``; ``settings`` (from ``--set``) override its
     ``settings``. With one condition the report summarises it, and with
-    several it compares each with the first.
+    several it compares each with the first. With ``parts``, every part is
+    stored and plotted, and the report covers ``part`` (``--run``), the first
+    part by default, naming the others in ``all_runs``.
     """
     from polyzymd.analyses.timeseries import select, universe
 
@@ -96,20 +99,32 @@ def run_user_analysis(
         kwargs[user.universe] = universe()
     kwargs.update(user.settings)
     kwargs.update(settings or {})
+    parts = user.parts
+    if part is not None and part not in (parts or []):
+        raise ProtocolError(
+            f"{run} has no part {part!r}.",
+            hint=f"Use --run with one of {', '.join(parts)}."
+            if parts
+            else "Leave --run out; this function measures one quantity.",
+        )
+    extra = {} if parts is None else {"parts": parts}
     if user.kind == "timeseries":
-        series = study.timeseries(
+        measured = study.timeseries(
             function,
             unit=user.unit,
             name=run,
             recompute=recompute,
             output_dir=output_dir,
+            **extra,
             **kwargs,
         )
+        every = measured if parts is not None else {None: measured}
         if plots:
-            series.plot()
-        values = series.reduce(user.reduce)
+            for series in every.values():
+                series.plot()
+        results = {key: series.reduce(user.reduce) for key, series in every.items()}
     else:
-        values = study.per_replicate(
+        measured = study.per_replicate(
             function,
             unit=user.unit,
             labels=user.labels,
@@ -117,8 +132,16 @@ def run_user_analysis(
             name=run,
             recompute=recompute,
             output_dir=output_dir,
+            **extra,
             **kwargs,
         )
+        results = measured if parts is not None else {None: measured}
     if plots:
-        values.plot()
-    return values.compare() if len(study) > 1 else values.summary()
+        for values in results.values():
+            values.plot()
+    chosen = part or (parts[0] if parts else None)
+    values = results[chosen]
+    report = values.compare() if len(study) > 1 else values.summary()
+    if parts is None:
+        return report
+    return report.model_copy(update={"analysis": run, "run": chosen, "all_runs": list(parts)})

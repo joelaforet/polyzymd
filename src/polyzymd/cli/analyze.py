@@ -917,6 +917,7 @@ def _run(
             output_dir=Path(output_dir),
             recompute=recompute,
             plots=plots,
+            part=run,
         )
 
     if comparison_file is not None:

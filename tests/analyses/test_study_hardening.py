@@ -446,3 +446,88 @@ class TestMissingLabels:
         (root / "study.yaml").write_text(text)
         with pytest.raises(ProtocolError, match="missing applies only"):
             load_study_file(root)
+
+
+class TestTimeseriesParts:
+    """Issue 2: a timeseries function returns several named values per frame."""
+
+    def _study(self, tmp_path: Path, parts: str | None) -> Path:
+        configs = {}
+        for label in ("A", "B"):
+            config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "s")
+            for replicate in (1, 2):
+                write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(6)])
+            configs[label] = config
+        root = tmp_path / "study"
+        (root / "analyses").mkdir(parents=True)
+        (root / "analyses" / "m.py").write_text(
+            "def shape(atoms):\n"
+            "    x = float(atoms.positions[0, 0])\n"
+            "    return {'x': x, 'double': 2 * x, 'one': 1.0}\n"
+        )
+        (root / "study.yaml").write_text(
+            "equilibration: 0ns\n"
+            f"conditions: {{A: {configs['A']}, B: {configs['B']}}}\n"
+            "analyses:\n"
+            "  shape:\n"
+            "    function: analyses/m.py:shape\n"
+            "    kind: timeseries\n"
+            "    selections: {atoms: all}\n" + (f"    parts: {parts}\n" if parts else "")
+        )
+        return root
+
+    def test_each_part_is_its_own_series(self, tmp_path: Path) -> None:
+        import json
+
+        import numpy as np
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path, "[x, double, one]")
+        result = CliRunner().invoke(cli, ["analyze", "shape", "--study", str(root)])
+        assert result.exit_code == 0, result.output
+        stored = root / "results" / "shape" / "polyzymd_results" / "shape" / "A" / "replicate_1"
+        with np.load(stored / "series.npz") as data:
+            assert data["values"].shape == (6, 3) and len(data["times"]) == 6
+        assert json.loads((stored / "parts.json").read_text()) == ["x", "double", "one"]
+        results = pz.Study(root).results("shape")
+        table = results.table
+        assert sorted(set(table["part"])) == ["double", "one", "x"]
+        x = table.query("part == 'x'")["value"].to_numpy()
+        double = table.query("part == 'double'")["value"].to_numpy()
+        assert np.allclose(double, 2 * x)
+        assert results.report.run == "x" and results.report.all_runs == ["x", "double", "one"]
+        figures = root / "results" / "shape" / "figures"
+        assert {"x_timeseries", "double_timeseries", "one_timeseries"} <= {
+            p.stem for p in figures.rglob("*")
+        }
+        chosen = CliRunner().invoke(
+            cli, ["analyze", "shape", "--study", str(root), "--run", "double", "--no-plots"]
+        )
+        assert chosen.exit_code == 0, chosen.output
+        assert pz.Study(root).results("shape").report.run == "double"
+        wrong = CliRunner().invoke(
+            cli, ["analyze", "shape", "--study", str(root), "--run", "nope", "--no-plots"]
+        )
+        assert wrong.exit_code == 2 and "Use --run with one of x, double, one" in wrong.output
+
+    def test_a_dict_without_parts_says_how(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path, None)
+        result = CliRunner().invoke(cli, ["analyze", "shape", "--study", str(root), "--no-plots"])
+        assert result.exit_code == 2
+        assert "parts: [...]" in result.output
+
+    def test_parts_must_match(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path, "[x, other]")
+        result = CliRunner().invoke(cli, ["analyze", "shape", "--study", str(root), "--no-plots"])
+        assert result.exit_code == 2
+        assert "returned the parts" in result.output

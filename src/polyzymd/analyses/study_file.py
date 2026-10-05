@@ -51,6 +51,7 @@ USER_KEYS = (
     "reduce",
     "allow_empty",
     "missing",
+    "parts",
 )
 #: How a user function is run: once per replicate, or once per frame.
 USER_KINDS = ("per_replicate", "timeseries")
@@ -89,6 +90,11 @@ class UserFunction:
         Pass a selection that matches no atoms, such as a polymer selection
         in a no-polymer control, to the function as an empty AtomGroup, as
         the shipped analyses do; ``False`` refuses such a replicate.
+    parts : list of str or None
+        Names of several quantities the function measures in one pass: a
+        timeseries function returns, per frame, a dict with these keys (or
+        a sequence in this order), a per_replicate function one row per
+        part. Each part is stored and reported as its own result.
     missing : float or None
         For ``labels: returned``, the value a replicate gets for a label that
         other replicates returned and it did not, such as ``nan``; ``None``
@@ -106,6 +112,7 @@ class UserFunction:
     reduce: str = "mean"
     allow_empty: bool = False
     missing: float | None = None
+    parts: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -295,6 +302,14 @@ def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
                 f"{where}: missing must be a number, not {missing!r}.",
                 hint="Write a number, or .nan for a label without a value.",
             )
+    parts = raw.get("parts")
+    if parts is not None:
+        if not isinstance(parts, list) or not parts or len(set(map(str, parts))) != len(parts):
+            raise ProtocolError(
+                f"{where}: parts must be a list of distinct names, not {parts!r}.",
+                hint="For example 'parts: [area, contacts, gyration]'.",
+            )
+        parts = [str(part) for part in parts]
     unit = raw.get("unit")
     return UserFunction(
         file=location,
@@ -308,6 +323,7 @@ def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
         reduce=reduce,
         allow_empty=bool(raw.get("allow_empty", False)),
         missing=None if missing is None else float(missing),
+        parts=parts,
     )
 
 

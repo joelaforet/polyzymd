@@ -63,6 +63,14 @@ def _rows(record: dict[str, Any], folder: Path) -> list[tuple]:
     if series.is_file():
         with np.load(series) as data:
             values, frames, times = data["values"], data["frames"], data["times"]
+        if values.ndim == 2:
+            # Several quantities per frame, one column per part.
+            parts = json.loads((folder / "parts.json").read_text())
+            return [
+                (*base, part, None, int(f), float(t), float(v), unit)
+                for i, part in enumerate(parts)
+                for f, t, v in zip(frames, times, values[:, i], strict=True)
+            ]
         return [
             (*base, None, None, int(f), float(t), float(v), unit)
             for f, t, v in zip(frames, times, values, strict=True)

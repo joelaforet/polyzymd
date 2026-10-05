@@ -41,7 +41,7 @@ import math
 import re
 import sys
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
@@ -257,8 +257,9 @@ def run_timeseries(
     recompute: bool = False,
     output_dir: str | Path | None = None,
     bounds: tuple[float | None, float | None] = (None, None),
+    parts: Sequence[str] | None = None,
     **kwargs: Any,
-) -> Timeseries:
+) -> Timeseries | dict[str, Timeseries]:
     """Measure ``function`` on every production frame of every replicate.
 
     Each replicate runs ``AnalysisFromFunction(function, *args, **kwargs)``
@@ -300,13 +301,20 @@ def run_timeseries(
         Lowest and highest value the quantity can take, ``None`` for no
         limit, such as ``(0.0, None)`` for a distance. Recorded with the
         result and used to correct distribution figures at the limits.
+    parts : sequence of str, optional
+        Names of several quantities ``function`` measures per frame, for
+        example ``["area", "contacts"]``. ``function`` then returns, per
+        frame, a dict with exactly these keys or a sequence in this order.
+        They are stored as one ``(frames, parts)`` array; each part becomes
+        its own series, named by its part.
     **kwargs
         Keyword arguments of ``function``, recorded like ``args``.
 
     Returns
     -------
-    Timeseries
-        Every replicate's series, by condition.
+    Timeseries or dict of str to Timeseries
+        Every replicate's series, by condition, or with ``parts`` one such
+        result per part.
 
     Raises
     ------
@@ -341,19 +349,32 @@ def run_timeseries(
                 u = replicate.universe()
                 built, chosen = _build_arguments({**dict(enumerate(args)), **kwargs}, replicate)
                 analysis = AnalysisFromFunction(
-                    function,
+                    function if parts is None else _per_part(function, list(parts), name),
                     # MDAnalysis passes anything that is not its own reader to
                     # the function as an argument, so hand it the unwrapped one.
                     underlying_reader(u.trajectory),
                     *(built[index] for index in range(len(args))),
                     **{key: built[key] for key in kwargs},
                 ).run(frames=replicate.frames)
-                values = np.asarray(analysis.results.timeseries, dtype=np.float64)
-                if values.shape != (len(record["frames"]),):
+                n_frames = len(record["frames"])
+                expected = (n_frames,) if parts is None else (n_frames, len(parts))
+                several = (
+                    "Return one float per frame, or name the quantities with parts: [...] in "
+                    "the study.yaml entry (parts= in Python) and return a dict of them."
+                )
+                try:
+                    values = np.asarray(analysis.results.timeseries, dtype=np.float64)
+                except (TypeError, ValueError) as exc:
+                    raise ProtocolError(
+                        f"{name}: {function!r} returned something other than numbers per "
+                        f"frame: {exc}",
+                        hint=several,
+                    ) from exc
+                if values.shape != expected:
                     raise ProtocolError(
                         f"{name}: {function!r} returned values of shape {values.shape[1:]} per "
-                        "frame; this version takes one number per frame.",
-                        hint="Return a single float from the function.",
+                        f"frame, not {expected[1:] or 'one number'}.",
+                        hint=several,
                     )
                 folder.mkdir(parents=True, exist_ok=True)
                 np.savez(
@@ -366,6 +387,10 @@ def run_timeseries(
                 (folder / "record.json").write_text(
                     json.dumps({**stored, "versions": _versions()}, indent=1)
                 )
+                if parts is not None:
+                    # The part names, for polyzymd.analyses.results; the function's
+                    # source, in the record, already decides reuse.
+                    (folder / "parts.json").write_text(json.dumps(list(parts)))
             else:
                 stored = json.loads((folder / "record.json").read_text())
                 if stored.get("bounds") != list(bounds):
@@ -382,7 +407,37 @@ def run_timeseries(
                     folder,
                 )
             )
-    return Timeseries(name, unit, study, series, root, tuple(bounds))
+    if parts is None:
+        return Timeseries(name, unit, study, series, root, tuple(bounds))
+    return {
+        part: Timeseries(
+            part,
+            unit,
+            study,
+            {c: [replace(s, values=s.values[:, i]) for s in items] for c, items in series.items()},
+            root,
+            tuple(bounds),
+        )
+        for i, part in enumerate(parts)
+    }
+
+
+def _per_part(function: Callable, parts: list[str], name: str) -> Callable:
+    """Wrap ``function`` so a dict it returns per frame becomes its values in ``parts`` order."""
+    from collections.abc import Mapping
+
+    def per_frame(*args: Any, **kwargs: Any) -> Any:
+        out = function(*args, **kwargs)
+        if not isinstance(out, Mapping):
+            return out
+        if set(out) != set(parts):
+            raise ProtocolError(
+                f"{name}: {function!r} returned the parts {sorted(out)}, not {parts}.",
+                hint="Return a dict with exactly the names listed under parts.",
+            )
+        return [out[part] for part in parts]
+
+    return per_frame
 
 
 def _replicate_record(base: dict[str, Any], replicate: Replicate) -> dict[str, Any]:

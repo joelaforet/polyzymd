@@ -203,7 +203,7 @@ class TestTimeseries:
         assert _run(fresh, tmp_path).series["A"][0].values == pytest.approx([5.0] * 7)
 
     def test_array_output_is_rejected(self, study: pz.Study, tmp_path: Path) -> None:
-        with pytest.raises(ProtocolError, match="one number per frame"):
+        with pytest.raises(ProtocolError, match="per frame, not one number"):
             study.timeseries(lambda atoms: atoms.positions[0], pz.select("all"), unit=None)
 
     def test_universe_argument(self, study: pz.Study, tmp_path: Path) -> None:

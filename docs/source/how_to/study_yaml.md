@@ -182,6 +182,7 @@ analyses:
 | `universe` | Keyword argument that receives the replicate's `Universe` |
 | `settings` | Keyword arguments passed as they are; `--set` overrides them |
 | `labels: returned` | For a `per_replicate` function that returns `(labels, values)`, such as one value per residue |
+| `parts: [area, contacts]` | For a function that measures several quantities in one pass: a `timeseries` function returns a dict with these keys each frame (or a sequence in this order), a `per_replicate` function one row per part. Each part is stored and plotted as its own result, has its own `part` in `Study.results().table`, and the report covers the part given with `--run`, the first by default |
 | `missing: .nan` | With `labels: returned`, the value a replicate gets for a label that other replicates returned and it did not, such as a frame index past the end of a shorter run. Without it such a replicate stops the report, with a message saying so |
 | `allow_empty: true` | Pass a selection that matches no atoms, such as a polymer selection in a no-polymer control, to the function as an empty AtomGroup, so the function decides the value there (for example `0.0` when `len(polymer) == 0`). Without it such a replicate stops the run, with a message saying so |
 
