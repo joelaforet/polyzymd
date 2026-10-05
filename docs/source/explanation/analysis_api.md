@@ -157,9 +157,10 @@ frame `frame`, counted from 1 after the equilibration window; `average` is the
 mean structure after superposing the `alignment` atoms; and `centroid` is the
 production frame closest to the MDAnalysis `align.iterative_average` of the
 `alignment` atoms. The record holds the mode, the selections, the frame the
-reference used and, for a file, its SHA-256 hash. Any argument that names an
-existing file is recorded with its hash the same way, so editing the file
-measures the replicates again.
+reference used and, for a file, its name and SHA-256 hash. Any argument that
+names an existing file is recorded the same way, by name and content and not
+by location, so editing the file measures the replicates again while moving
+the study folder does not.
 
 ## Use an MDAnalysis analysis you already run
 

@@ -153,9 +153,14 @@ def _function_record(function: Callable) -> dict[str, Any]:
 
 
 def _file_record(path: str | Path) -> dict[str, str]:
-    """Record a file by its absolute path and the SHA-256 hash of its content."""
+    """Record a file by its name and the SHA-256 hash of its content.
+
+    Not by its location, so a study folder moved, copied or migrated to
+    another machine reuses its stored results, while a changed file changes
+    the record.
+    """
     path = Path(path).expanduser().resolve()
-    return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    return {"name": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
 def _argument_record(value: Any) -> Any:
