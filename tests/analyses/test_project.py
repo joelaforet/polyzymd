@@ -243,3 +243,15 @@ class TestStatistics:
     def test_stats_without_a_plan(self, project: Path) -> None:
         result = CliRunner().invoke(cli, ["stats", str(project)])
         assert result.exit_code == 2 and "has no stats: plan" in result.output
+
+
+def test_a_moved_project_reuses_its_results(project: Path, tmp_path: Path) -> None:
+    import shutil
+
+    from polyzymd.analyses.study_freeze import stale_runs
+
+    assert _analyze("lid", "--project", str(project)).exit_code == 0
+    moved = Path(shutil.copytree(project, tmp_path / "elsewhere" / "Paper"))
+    assert "lid" not in stale_runs(load_study_file(moved / "lipa"))
+    record = next((moved / "lipa" / "results" / "lid").rglob("record.json")).read_text()
+    assert str(project) not in record

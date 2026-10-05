@@ -204,13 +204,24 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
         ran_with = (provenance.get("study") or {}).get("settings")
         if ran_with is not None:
             for key in sorted(set(expected) | set(ran_with)):
-                if json.dumps(expected.get(key), sort_keys=True) != json.dumps(
-                    ran_with.get(key), sort_keys=True
+                if json.dumps(_located(expected.get(key)), sort_keys=True) != json.dumps(
+                    _located(ran_with.get(key)), sort_keys=True
                 ):
                     found.append(f"setting {key} differs from the one the results were made with")
         if found:
             reasons[run] = sorted(set(found))
     return reasons
+
+
+def _located(value: Any) -> Any:
+    """Compare an absolute file path by its name, so a moved study is not stale for it."""
+    if isinstance(value, dict):
+        return {key: _located(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_located(item) for item in value]
+    if isinstance(value, str) and Path(value).is_absolute():
+        return Path(value).name
+    return value
 
 
 def _own_windows(protocol: Any) -> str:
