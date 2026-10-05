@@ -195,6 +195,12 @@ results.table                  # one row per stored value
 results.table.groupby(["condition", "replicate"])["value"].mean()
 ```
 
+`study.results` reads `results/<run>` in the study folder. Results that
+`polyzymd analyze` wrote elsewhere with `--output-dir` are read with
+`study.results("lid_opening", folder="that/folder")`; `analyze` warns when
+`--output-dir` takes them out of the study folder, because `study check` and
+`study freeze` see only `results/`.
+
 `results.table` has the columns `name`, `condition`, `replicate`, `part`,
 `label`, `frame`, `time_ns`, `value` and `unit`. A per-frame series fills
 `frame` and `time_ns`; a per-residue result fills `label`; a result with

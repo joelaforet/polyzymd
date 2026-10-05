@@ -417,16 +417,26 @@ class Study:
         self._entry(run)
         return self.protocol.results_dir(run)
 
-    def results(self, run: str) -> Any:
+    def results(self, run: str, *, folder: str | Path | None = None) -> Any:
         """Return the stored per-replicate values of ``run``, without loading any trajectory.
 
-        See :func:`polyzymd.analyses.results.read_results`; this reads
+        See :func:`polyzymd.analyses.results.read_results`. This reads
         ``<study>/results/<run>``, where ``polyzymd analyze RUN --study``
-        stores them.
+        stores them, or ``folder`` when the run was given ``--output-dir``.
         """
         from polyzymd.analyses.results import read_results
 
-        return read_results(self.results_dir(run))
+        if folder is not None:
+            return read_results(Path(folder).expanduser())
+        default = self.results_dir(run)
+        try:
+            return read_results(default)
+        except ProtocolError as exc:
+            raise ProtocolError(
+                str(exc),
+                hint=f"Run polyzymd analyze {run} --study {self.protocol.path} first. Results "
+                "written with --output-dir are read with Study.results(run, folder=<that folder>).",
+            ) from exc
 
     def _entry(self, run: str) -> Any:
         if self.protocol is None:

@@ -284,3 +284,25 @@ def test_logs_and_deposit_are_outputs() -> None:
     from polyzymd.analyses.study_git import OUTPUTS
 
     assert "logs/" in OUTPUTS and "deposit/" in OUTPUTS and "results/" in OUTPUTS
+
+
+class TestOutputDirResults:
+    def test_results_written_elsewhere_are_found_with_folder(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = TestAllowEmpty()._study(tmp_path, True)
+        elsewhere = tmp_path / "elsewhere"
+        result = CliRunner().invoke(
+            cli,
+            ["analyze", "count", "--study", str(root), "--output-dir", str(elsewhere)]
+            + ["--no-plots"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Study.results('count', folder=...)" in result.output
+        study = pz.Study(root)
+        with pytest.raises(ProtocolError) as error:
+            study.results("count")
+        assert "folder=" in error.value.hint
+        assert len(study.results("count", folder=elsewhere).table) > 0

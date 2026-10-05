@@ -303,6 +303,7 @@ def analyze_command(
     run_name = name
     data: dict | None = None
     if study_path is not None:
+        requested_output = output_dir
         try:
             (
                 name,
@@ -332,6 +333,17 @@ def analyze_command(
             if hint:
                 click.echo(f"fix: {_one_line(hint)}", err=True)
             sys.exit(EXIT_ANALYSIS_ERROR)
+        if requested_output is not None:
+            from polyzymd.analyses.study_file import load_study_file
+
+            default = load_study_file(study_path).results_dir(run_name)
+            if Path(requested_output).expanduser().resolve() != Path(default).resolve():
+                click.echo(
+                    f"warning: results go to {requested_output}, not the study's {default}, so "
+                    f"study check, study freeze and Study.results({run_name!r}) do not see "
+                    f"them; read them with Study.results({run_name!r}, folder=...)",
+                    err=True,
+                )
     stride = stride or 1
     if study_path is not None and until is None:
         until = study_until
