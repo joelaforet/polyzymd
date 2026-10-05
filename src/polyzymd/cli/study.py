@@ -75,6 +75,13 @@ def check_command(path: Path) -> None:
         click.echo(f"structure {name}: {where}")
     for name, selection in protocol.regions.items():
         click.echo(f"region {name}: {selection}")
+    if protocol.stats is not None:
+        from polyzymd.analyses.statistics_plan import stats_status
+        from polyzymd.analyses.study import Study
+
+        click.echo(
+            f"stats {protocol.stats.qualname}: {stats_status(Study(protocol.path), protocol.stats)}"
+        )
     if protocol.polyzymd and protocol.polyzymd != polyzymd.__version__:
         click.echo(
             f"warning: written for PolyzyMD {protocol.polyzymd}; this is {polyzymd.__version__}"

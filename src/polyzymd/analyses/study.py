@@ -479,6 +479,16 @@ class Study:
                 "written with --output-dir are read with Study.results(run, folder=<that folder>).",
             ) from exc
 
+    def replicate_table(self, run: str) -> Any:
+        """Return one row per replicate of ``run``, from its stored results.
+
+        See :func:`polyzymd.analyses.statistics_plan.replicate_table`: the
+        sampling unit of every test, with a column for each factor.
+        """
+        from polyzymd.analyses.statistics_plan import replicate_table
+
+        return replicate_table(self, run)
+
     def _with_factors(self, stored: Any) -> Any:
         """Add a column for each factor the study's conditions declare, empty where one has none."""
         factors = getattr(self.protocol, "factors", None) or {}

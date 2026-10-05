@@ -77,6 +77,9 @@ the analyses each runs): use `polyzymd project check PROJECT`,
 `polyzymd analyze RUN --project PROJECT`, and
 `pz.Project("PROJECT").results(RUN).table` (one table, a `study` column),
 never a loop over study folders by hand (`docs/source/how_to/project.md`).
+For statistics beyond the report, use `replicate_table(RUN)` (one row per
+replicate) and put the plan in the project's `stats:` function, run with
+`polyzymd stats PROJECT`, rather than a standalone script.
 When `study check` finds no runs for a
 condition, the trajectories are elsewhere: run `polyzymd study locate DIR`
 (writes the gitignored `data.local.yaml`) or pass `--data DIR`; never edit the

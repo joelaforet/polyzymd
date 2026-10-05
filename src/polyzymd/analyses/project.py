@@ -87,6 +87,23 @@ class Project:
         """Return the labels of the studies that run the analysis ``run``."""
         return [label for label in self.labels if run in self[label].protocol.analyses]
 
+    def replicate_table(self, run: str) -> Any:
+        """Return one row per replicate of ``run`` in every study that runs it.
+
+        Each study's :meth:`Study.replicate_table
+        <polyzymd.analyses.study.Study.replicate_table>`, with its ``study``
+        column, one after another. A study that runs ``run`` without stored
+        results is an error naming it.
+        """
+        import pandas as pd
+
+        self.results(run)  # names any study without stored results
+        return pd.concat(
+            [self[label].replicate_table(run) for label in self.runs_in(run)],
+            ignore_index=True,
+            sort=False,
+        )
+
     def results(self, run: str) -> ProjectResults:
         """Return the stored results of ``run`` in every study that runs it, in one table.
 

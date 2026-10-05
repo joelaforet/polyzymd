@@ -118,3 +118,59 @@ rmsf.reports        # each study's report: comparisons stay within a protein
 
 A study that runs the analysis but has no stored results is named in the
 error, so no protein is left out of a figure silently.
+
+## Statistics
+
+**One row per replicate.** The replicate is the sampling unit of every test
+(Grossfield et al. 2018). `replicate_table` gives exactly that, from stored
+results, with a column per factor:
+
+```python
+paper.replicate_table("rmsf")          # every study; or pz.Study(...).replicate_table("rmsf")
+```
+
+Per-frame results are reduced over each replicate's frames as the analysis
+reduces them (the entry's `reduce`, otherwise the mean).
+
+**Trend over a factor.** When a study's conditions declare a numeric factor,
+such as `sbma_fraction`, every report of that study adds the slope of the
+replicate values against it, over the conditions that declare it (a control
+without the factor is left out), with a 95 percent interval and a t test of
+zero slope; several numeric factors are one Benjamini-Hochberg family:
+
+```
+trend sbma_fraction  slope 2  ci95 1.977 to 2.023  p 1.7e-15  p_adj 1.9e-14  r2 0.99  n 15  conditions 5
+verdict: core_rmsf falls with sbma_fraction (slope ...)
+```
+
+It is a straight-line fit: look at the per-condition means before reading it
+as a dose response. Labelled results (one value per residue) get none.
+
+**Your own statistical plan.** A plan that goes further, such as Paper 1's
+gatekeeping (Welch against the control, then a trend, then bootstrap
+intervals), is a function in the project (or study) folder:
+
+```yaml
+stats:
+  plan: stats/plan.py:plan
+```
+
+```python
+# stats/plan.py
+def plan(project):
+    table = project.replicate_table("core_rmsf")
+    ...
+    return {"tier1": tier1_table, "tier2": tier2_table, "alpha": 0.05}
+```
+
+```bash
+polyzymd stats Paper_1
+```
+
+It receives the `Project` (or `Study`) and returns a dict of tables and
+values, written to `results/stats/<function>/` (`<name>.csv` per table,
+`values.json` for the rest) with `record.json`: the SHA-256 of the plan's
+file and of every report it could read. `polyzymd project check` then says
+whether it is up to date, or stale because its code or the analyses changed.
+The plan lives in the folder, so it is committed and published with the
+paper.

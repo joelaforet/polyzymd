@@ -17,11 +17,12 @@ from pathlib import Path
 from typing import Any
 
 from polyzymd.analyses.exceptions import ProtocolError
+from polyzymd.analyses.statistics_plan import read_stats_plan
 
 #: File name that marks a project folder.
 PROJECT_FILE = "project.yaml"
 
-_TOP_KEYS = ("polyzymd", "studies", "analyses", "metadata")
+_TOP_KEYS = ("polyzymd", "studies", "analyses", "stats", "metadata")
 #: Key of a project analysis that limits it to some studies.
 STUDIES_KEY = "studies"
 _REGION = re.compile(r"\bregion\s+([A-Za-z_][\w-]*)")
@@ -43,6 +44,8 @@ class ProjectFile:
     runs_in: dict[str, list[str] | None]
     polyzymd: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    #: The paper's statistical plan (``stats: {plan: file.py:function}``).
+    stats: Any = None
 
     @property
     def root(self) -> Path:
@@ -150,6 +153,7 @@ def load_project_file(path: str | Path) -> ProjectFile:
         runs_in=runs_in,
         polyzymd=None if version is None else str(version),
         metadata=dict(metadata),
+        stats=read_stats_plan(raw.get("stats"), f"{file}: stats", file.parent),
     )
 
 

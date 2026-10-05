@@ -164,3 +164,82 @@ def test_files_validate_against_the_schemas(project: Path) -> None:
         validator = jsonschema.Draft202012Validator(json.loads((schemas / name).read_text()))
         for file in files:
             validator.validate(yaml.safe_load(file.read_text()))
+
+
+@pytest.fixture()
+def graded(tmp_path: Path) -> Path:
+    """A project of one study whose Rg rises by 2 per unit of sbma_fraction, with a stats plan."""
+    root = tmp_path / "Graded"
+    folder = root / "prot"
+    levels = {"none": None, "q1": 0.25, "q3": 0.75, "full": 1.0}
+    for name, level in levels.items():
+        config = write_simulation_config(
+            folder / "conditions" / name, scratch=tmp_path / "data" / name
+        )
+        base = 1.0 if level is None else 1.0 + 2.0 * level
+        for replicate in (1, 2, 3):
+            write_openmm_replicate(
+                config, replicate, [base + 0.01 * replicate + 0.001 * k for k in range(5)]
+            )
+    conditions = "".join(
+        f"  {name}: conditions/{name}\n"
+        if level is None
+        else f"  {name}: {{config: conditions/{name}, factors: {{sbma_fraction: {level}}}}}\n"
+        for name, level in levels.items()
+    )
+    (folder / "study.yaml").write_text(f"equilibration: 0ns\nconditions:\n{conditions}")
+    (root / "stats").mkdir(parents=True)
+    (root / "stats" / "plan.py").write_text(
+        "def plan(project):\n"
+        "    table = project.replicate_table('rg')\n"
+        "    means = table.groupby('condition', sort=False)['value'].mean().reset_index()\n"
+        "    return {'condition_means': means, 'n_replicates': int(len(table))}\n"
+    )
+    (root / "project.yaml").write_text(
+        "studies: {prot: prot}\n"
+        "analyses: {rg: {selection: all}}\n"
+        "stats: {plan: stats/plan.py:plan}\n"
+    )
+    return root
+
+
+class TestStatistics:
+    def test_replicate_table(self, graded: Path) -> None:
+        assert _analyze("rg", "--project", str(graded)).exit_code == 0
+        table = pz.Project(graded).replicate_table("rg")
+        assert len(table) == 4 * 3
+        assert list(table.columns[:3]) == ["study", "condition", "replicate"]
+        row = table.query("condition == 'q3' and replicate == 2").iloc[0]
+        assert row["value"] == pytest.approx(1.0 + 1.5 + 0.02 + 0.002, abs=1e-6)
+        assert row["sbma_fraction"] == 0.75
+        assert table.query("condition == 'none'")["sbma_fraction"].isna().all()
+
+    def test_trend_over_a_numeric_factor(self, graded: Path) -> None:
+        assert _analyze("rg", "--study", str(graded / "prot")).exit_code == 0
+        report = pz.Study(graded / "prot").results("rg").report
+        (trend,) = report.trends
+        assert trend.factor == "sbma_fraction" and trend.conditions == ["q1", "q3", "full"]
+        assert trend.n_replicates == 9
+        assert trend.slope == pytest.approx(2.0, abs=1e-6) and trend.significant
+        assert any(v.startswith("mean_rg rises with sbma_fraction") for v in report.verdict)
+
+    def test_stats_plan_runs_and_tracks_its_inputs(self, graded: Path) -> None:
+        import pandas as pd
+
+        assert _analyze("rg", "--project", str(graded)).exit_code == 0
+        result = CliRunner().invoke(cli, ["stats", str(graded)])
+        assert result.exit_code == 0, result.output
+        folder = graded / "results" / "stats" / "plan"
+        means = pd.read_csv(folder / "condition_means.csv")
+        assert list(means["condition"]) == ["none", "q1", "q3", "full"]
+        assert '"n_replicates": 12' in (folder / "values.json").read_text()
+        check = CliRunner().invoke(cli, ["project", "check", str(graded)])
+        assert "stats plan: up to date" in check.output
+        with (graded / "stats" / "plan.py").open("a") as handle:
+            handle.write("# edited\n")
+        check = CliRunner().invoke(cli, ["project", "check", str(graded)])
+        assert "stats plan: stale: its code changed" in check.output
+
+    def test_stats_without_a_plan(self, project: Path) -> None:
+        result = CliRunner().invoke(cli, ["stats", str(project)])
+        assert result.exit_code == 2 and "has no stats: plan" in result.output

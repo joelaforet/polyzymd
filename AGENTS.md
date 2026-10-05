@@ -104,6 +104,11 @@ paper's studies and the analyses each runs, with each study's `regions:` and
 `structures:` resolved into `region <name>` / `structure <name>`
 (`resolve_names`); `analyze --project`, `project check` and
 `pz.Project(...).results(run)` (a `study` column, factor columns).
+Statistics (`analyses/statistics_plan.py`): `replicate_table(run)` (one row
+per replicate, the test unit), a slope test per numeric condition factor in
+every `--study` report (`TrendReport`), and `stats: {plan: file.py:fn}` run
+by `polyzymd stats` (`cli/stats.py`), stored with a record that check uses
+to say when it is stale.
 `polyzymd study check` reads it without trajectories (`cli/study.py`);
 `polyzymd analyze [RUN] --study study.yaml` runs one run or all of them into
 `<study>/results/<run>/`; `pz.Study("study.yaml").results(run)` reads them back

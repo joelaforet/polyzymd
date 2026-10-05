@@ -236,6 +236,32 @@ class PairwiseReport(BaseModel):
     testable: bool = True
 
 
+class TrendReport(BaseModel):
+    """The slope of the replicate values against one numeric factor of the conditions.
+
+    ``conditions`` are those that declare the factor; ``n_replicates`` the
+    points fitted, one per replicate. ``slope`` is in the metric's unit per
+    unit of the factor, with a 95 percent t interval; ``p`` tests zero slope
+    and ``p_adjusted`` corrects it over the study's numeric factors
+    (Benjamini-Hochberg). ``testable`` is ``False`` with fewer than two
+    factor levels, three replicates, or values that all agree.
+    """
+
+    model_config = ConfigDict(ser_json_inf_nan="strings")
+
+    factor: str
+    conditions: list[str] = Field(default_factory=list)
+    n_replicates: int = 0
+    slope: float | None = None
+    slope_ci95: tuple[float, float] | None = None
+    p: float | None = None
+    p_adjusted: float | None = None
+    family_size: int | None = None
+    r_squared: float | None = None
+    significant: bool = False
+    testable: bool = False
+
+
 class ProtocolProvenance(BaseModel):
     """Versions, config hashes, output paths and settings of one protocol run.
 
@@ -273,6 +299,7 @@ class ProtocolReport(BaseModel):
     analysis: str
     status: str = "complete"
     problems: list[str] = Field(default_factory=list)
+    trends: list[TrendReport] = Field(default_factory=list)
     protocol_version: str
     metric: str
     unit: str | None = None
@@ -326,6 +353,7 @@ class ProtocolReport(BaseModel):
             header,
             *(f"problem: {text}" for text in self.problems),
             *body,
+            *(_trend_line(item) for item in self.trends),
             *(f"warning: {text}" for text in self.warnings),
             *(f"verdict: {text}" for text in self.verdict),
         ]
@@ -1965,6 +1993,17 @@ def _difference_ci(
     if not (math.isfinite(low) and math.isfinite(high)) or low == high:
         return None
     return (low, high)
+
+
+def _trend_line(trend: TrendReport) -> str:
+    """One report line per trend test."""
+    if not trend.testable:
+        return f"trend {trend.factor}  not testable  n {trend.n_replicates}"
+    return (
+        f"trend {trend.factor}  slope {_num(trend.slope)}  ci95 {_interval(trend.slope_ci95)}"
+        f"  p {_num(trend.p)}  p_adj {_num(trend.p_adjusted)}  r2 {_num(trend.r_squared)}"
+        f"  n {trend.n_replicates}  conditions {len(trend.conditions)}"
+    )
 
 
 def _verdict(

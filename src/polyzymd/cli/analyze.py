@@ -559,7 +559,21 @@ def analyze_command(
 
     if study_path is not None:
         from polyzymd.analyses.results import REPORT_FILE
+        from polyzymd.analyses.statistics_plan import trend_sentence, trend_tests
+        from polyzymd.analyses.study_file import load_study_file
 
+        # A numeric factor of the conditions gets a slope test over them.
+        trends = trend_tests(report, load_study_file(study_path).factors)
+        if trends:
+            report = report.model_copy(
+                update={
+                    "trends": trends,
+                    "verdict": [
+                        *report.verdict,
+                        *(trend_sentence(report.metric, report.unit, t) for t in trends),
+                    ],
+                }
+            )
         report.provenance.study = study_record
         study_root = Path(study_path).expanduser().resolve()
         study_root = study_root if study_root.is_dir() else study_root.parent

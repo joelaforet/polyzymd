@@ -41,6 +41,11 @@ def check_command(ctx: click.Context, path: Path) -> None:
         if exc.hint:
             click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
         sys.exit(EXIT_PROJECT_ERROR)
+    if project.protocol.stats is not None:
+        from polyzymd.analyses.statistics_plan import stats_status
+
+        plan = project.protocol.stats
+        click.echo(f"stats {plan.qualname}: {stats_status(project, plan)}")
     failed = []
     for label, folder in project.protocol.studies.items():
         click.echo(f"== study {label}")
