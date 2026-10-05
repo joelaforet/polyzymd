@@ -55,6 +55,23 @@ class TestProductionLength:
         assert "Short 0.9 ns" in notes[0] and "Long 2.9 ns" in notes[0]
         assert "until 0.9ns" in notes[0]
 
+    def test_replicates_differing_the_same_way_are_not_blamed_on_conditions(
+        self, tmp_path: Path
+    ) -> None:
+        configs = {}
+        for label in ("A", "B"):
+            config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "s")
+            for replicate, n_frames in ((1, 10), (2, 30)):
+                write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(n_frames)])
+            configs[label] = config
+        study = pz.Study.from_configs(configs, equilibration="0ns")
+        report = (
+            study.timeseries(rg, pz.select("all"), unit="A", output_dir=tmp_path).reduce().compare()
+        )
+        notes = [w for w in report.warnings if "different times" in w]
+        assert len(notes) == 1
+        assert notes[0].startswith("the replicates within each condition")
+
     def test_until_gives_a_common_window(self, unequal, tmp_path: Path) -> None:
         study = pz.Study.from_configs(unequal, equilibration="0ns", until="0.9ns")
         assert [len(r.frames) for r in study["Long"].replicates] == [10, 10]

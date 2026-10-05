@@ -246,14 +246,29 @@ def production_length_warnings(study: Any, labels: Sequence[str] | None = None) 
     shortest = min(min(v) for v in ends.values())
     if longest <= 0 or (longest - shortest) / longest <= PRODUCTION_LENGTH_TOLERANCE:
         return []
+
+    def differ(values: list[float]) -> bool:
+        return (max(values) - min(values)) / longest > PRODUCTION_LENGTH_TOLERANCE
+
     described = "; ".join(
         f"{label} {min(v):.4g}" + (f"-{max(v):.4g}" if max(v) != min(v) else "") + " ns"
         for label, v in ends.items()
     )
+    remedy = (
+        f"Compare over a common window with until {shortest:.4g}ns (--until, or until: in "
+        "study.yaml)"
+    )
+    # Conditions differ when their shortest or their longest replicates do;
+    # otherwise only replicates within each condition differ, the same way.
+    if differ([min(v) for v in ends.values()]) or differ([max(v) for v in ends.values()]):
+        return [
+            f"the conditions were analysed up to different times ({described}); a difference "
+            f"may come from simulated time rather than the condition. {remedy}"
+        ]
     return [
-        f"the conditions were analysed up to different times ({described}); a difference may "
-        f"come from simulated time rather than the condition. Compare over a common window with "
-        f"until {shortest:.4g}ns (--until, or until: in study.yaml)"
+        f"the replicates within each condition were analysed up to different times "
+        f"({described}), the same range in every condition; a replicate's value may depend on "
+        f"how long it ran. {remedy}"
     ]
 
 
