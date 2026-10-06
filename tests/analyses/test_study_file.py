@@ -21,7 +21,11 @@ from polyzymd.analyses.exceptions import ProtocolError
 from polyzymd.analyses.results import read_results
 from polyzymd.analyses.study_file import load_study_file
 from polyzymd.cli.main import cli
-from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+from tests._support.analysis_testkit import (
+    write_committed_study,
+    write_openmm_replicate,
+    write_simulation_config,
+)
 
 pytest.importorskip("MDAnalysis")
 pytestmark = [
@@ -540,3 +544,15 @@ def test_an_analysis_sets_its_own_stride(study_dir: Path) -> None:
     assert "rg_sparse" not in stale_runs(protocol)
     check = CliRunner().invoke(cli, ["study", "check", str(study_dir)])
     assert "window eq 0.25ns stride 2 (its own)" in check.output
+
+
+@pytest.mark.usefixtures("git_identity")
+def test_relative_files_of_shipped_analyses_follow_the_study(tmp_path: Path) -> None:
+    """reference_file: structures/ref.pdb is relative to study.yaml, not the shell."""
+    root = write_committed_study(
+        tmp_path, "  rmsd: {selection: all, reference_file: structures/ref.pdb}\n"
+    )
+    (root / "structures").mkdir(exist_ok=True)
+    (root / "structures" / "ref.pdb").write_text("END\n")
+    entry = load_study_file(root).analyses["rmsd"]
+    assert Path(entry.settings["reference_file"]) == (root / "structures" / "ref.pdb").resolve()

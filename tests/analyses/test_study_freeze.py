@@ -18,7 +18,7 @@ from click.testing import CliRunner
 import polyzymd as pz
 from polyzymd.analyses.exceptions import ProtocolError
 from polyzymd.analyses.study_file import load_study_file
-from polyzymd.analyses.study_freeze import freeze, stale_runs
+from polyzymd.analyses.study_freeze import freeze, stale_runs, without_machine_paths
 from polyzymd.analyses.study_metadata import (
     check_metadata,
     citation_cff,
@@ -27,7 +27,11 @@ from polyzymd.analyses.study_metadata import (
 )
 from polyzymd.analyses.study_scaffold import condition_folder, create_study
 from polyzymd.cli.main import cli
-from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+from tests._support.analysis_testkit import (
+    write_committed_study,
+    write_openmm_replicate,
+    write_simulation_config,
+)
 
 pytest.importorskip("MDAnalysis")
 pytestmark = [
@@ -388,3 +392,65 @@ class TestReproduce:
         )
         assert json.loads((study / ".zenodo.json").read_text())["doi"] == "10.5281/zenodo.7654321"
         assert "already set: `10.5281/zenodo.7654321`" in result.guide.read_text()
+
+
+def test_freeze_needs_a_git_identity_before_writing(tmp_path: Path, monkeypatch) -> None:
+    """Without a git name and email nothing is written that names a tag."""
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    for key in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    with pytest.raises(ProtocolError, match="no user name and email"):
+        freeze(root)
+    assert not (root / "manifest.json").exists()
+
+
+def test_a_flow_style_output_loses_its_machine_paths() -> None:
+    """Flow-style and block-scalar output paths are rewritten through YAML."""
+    flow = "output: {projects_directory: /home/u/p, scratch_directory: /scratch/u/r}\nx: 1\n"
+    block = "output:\n  projects_directory: >-\n    /home/u/p\n  scratch_directory: /s/u\n"
+    for text in (flow, block):
+        output = yaml.safe_load(without_machine_paths(text))["output"]
+        assert output == {"projects_directory": ".", "scratch_directory": "data"}
+
+
+def test_the_freeze_warning_names_no_machine_path(tmp_path: Path) -> None:
+    """The manifest is published, so its warnings hold no scratch path."""
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    shutil.rmtree(tmp_path / "scratch")
+    result = freeze(root)
+    assert not any(str(tmp_path) in warning for warning in result.warnings)
+
+
+def test_a_study_of_a_project_is_frozen_with_the_project(tmp_path: Path) -> None:
+    """study freeze inside a project refuses, since it would leave out project.yaml and analyses/."""
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n", name="lipa")
+    (tmp_path / "project.yaml").write_text("studies: {lipa: lipa}\n")
+    with pytest.raises(ProtocolError, match="is a study of the project") as info:
+        freeze(root)
+    assert "polyzymd project freeze" in info.value.hint
+
+
+def test_freeze_names_cosolvents_and_missing_build_files(tmp_path: Path) -> None:
+    """Freeze recognises co-solvents in the composition check and names a listed build file that is missing."""
+    from types import SimpleNamespace
+
+    from polyzymd.analyses.study_freeze import _missing_build_files, composition_warnings
+
+    config = SimpleNamespace(
+        substrate=None,
+        polymers=None,
+        solvent=SimpleNamespace(co_solvents=[SimpleNamespace(name="sds", residue_name="SDS")]),
+    )
+
+    class Residues:
+        resnames = ["SDS", "SDS"]
+
+    universe = SimpleNamespace(select_atoms=lambda selection: SimpleNamespace(residues=Residues()))
+    assert composition_warnings("SDS", config, universe) == []
+    (tmp_path / "build_manifest.json").write_text(
+        json.dumps({"artifacts": {"system.prmtop": {}, "system.xml": {}}})
+    )
+    (tmp_path / "system.xml").write_text("<x/>")
+    assert _missing_build_files(tmp_path) == ["system.prmtop"]
