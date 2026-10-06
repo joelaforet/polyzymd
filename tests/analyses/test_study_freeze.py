@@ -705,3 +705,22 @@ def test_the_gitignore_written_by_a_first_freeze_is_deposited(study: Path) -> No
     result = freeze(study)
     assert ".gitignore" in _git(study, "ls-tree", "--name-only", "study-v1")
     assert ".gitignore" in _zip_names(result.deposit, "study")
+
+
+def test_freeze_refuses_a_condition_config_outside_the_study(tmp_path: Path) -> None:
+    """Analysis reads a config outside the study, but freeze could not deposit it."""
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    outside = tmp_path / "runs" / "polymer" / "config.yaml"
+    text = (root / "study.yaml").read_text().replace("conditions/polymer/config.yaml", str(outside))
+    (root / "study.yaml").write_text(text)
+    _git(root, "commit", "-qam", "Polymer config outside")
+    result = CliRunner().invoke(
+        cli, ["analyze", "rg", "--study", str(root), "--no-eq-check", "--no-plots"]
+    )
+    assert result.exit_code == 0, result.output
+    check = CliRunner().invoke(cli, ["study", "check", str(root)])
+    assert "freeze will refuse" in check.output
+    with pytest.raises(ProtocolError, match="outside the study") as caught:
+        freeze(root)
+    assert "conditions:" in caught.value.hint
+    assert 'polyzymd study add-condition "Polymer" --config' in caught.value.hint

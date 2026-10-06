@@ -179,9 +179,7 @@ class TestAllowEmpty:
     def _study(self, tmp_path: Path, allow_empty: bool) -> Path:
         configs = {}
         for label in ("A", "B"):
-            config = write_simulation_config(
-                tmp_path / "study" / "conditions" / label, scratch=tmp_path / label / "s"
-            )
+            config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "s")
             write_openmm_replicate(config, 1, [1.0 + 0.01 * k for k in range(10)])
             configs[label] = config
         root = tmp_path / "study"
@@ -331,9 +329,7 @@ class TestPartialReport:
     def _study(self, tmp_path: Path) -> Path:
         configs = {}
         for label in ("A", "B", "C"):
-            config = write_simulation_config(
-                tmp_path / "study" / "conditions" / label, scratch=tmp_path / label / "s"
-            )
+            config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "s")
             write_openmm_replicate(config, 1, [1.0 + 0.01 * k for k in range(10)])
             write_openmm_replicate(config, 2, [1.1 + 0.01 * k for k in range(10)])
             configs[label] = config
@@ -396,9 +392,7 @@ class TestMissingLabels:
     def _study(self, tmp_path: Path, missing: str | None) -> Path:
         configs = {}
         for label in ("A", "B"):
-            config = write_simulation_config(
-                tmp_path / "study" / "conditions" / label, scratch=tmp_path / label / "s"
-            )
+            config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "s")
             for replicate, n_frames in ((1, 6), (2, 4)):
                 write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(n_frames)])
             configs[label] = config
@@ -460,9 +454,7 @@ class TestTimeseriesParts:
     def _study(self, tmp_path: Path, parts: str | None) -> Path:
         configs = {}
         for label in ("A", "B"):
-            config = write_simulation_config(
-                tmp_path / "study" / "conditions" / label, scratch=tmp_path / label / "s"
-            )
+            config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "s")
             for replicate in (1, 2):
                 write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(6)])
             configs[label] = config

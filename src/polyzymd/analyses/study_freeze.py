@@ -1519,13 +1519,14 @@ def freeze(
     Raises
     ------
     ProtocolError
-        Only when the study file or its metadata cannot be read, or the tag
+        Only when the study file or its metadata cannot be read, a condition
+        config is outside the study folder and its project folder, or the tag
         already exists. Everything else is a warning in the result.
     """
     import yaml
 
     import polyzymd
-    from polyzymd.analyses.study_file import load_study_file, portable
+    from polyzymd.analyses.study_file import load_study_file, outside_configs, portable
     from polyzymd.analyses.study_metadata import check_metadata
 
     protocol = load_study_file(root)
@@ -1535,6 +1536,14 @@ def freeze(
             f"{root.name} is a study of the project {protocol.project.root}, whose "
             "project.yaml and shared analyses/ its results depend on.",
             hint=f"Freeze the whole project: polyzymd project freeze {protocol.project.root}",
+        )
+    for label, config in outside_configs(protocol).items():
+        raise ProtocolError(
+            f"The config of condition {label} is {config}, outside the study folder, "
+            "so the deposit would not hold it.",
+            hint=f"Remove {label} from conditions: in study.yaml, then copy it in with: "
+            f'polyzymd study add-condition "{label}" --config {config}. Or move its folder '
+            "under conditions/ and give the new path in study.yaml.",
         )
     meta, warnings = check_metadata(protocol.metadata)
     if publish:
