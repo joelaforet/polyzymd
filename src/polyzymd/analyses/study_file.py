@@ -457,10 +457,18 @@ def _resolve_files(value: Any, folder: Path) -> Any:
         and "\n" not in value
         and len(value) < 1024
         and not Path(value).is_absolute()
-        and (folder / value).exists()
+        and _exists(folder / value)
     ):
         return str((folder / value).resolve())
     return value
+
+
+def _exists(path: Path) -> bool:
+    """Whether ``path`` exists; False for a string that cannot be a file name (too long)."""
+    try:
+        return path.exists()
+    except OSError:
+        return False
 
 
 def missing_files(value: Any) -> list[str]:
