@@ -894,9 +894,6 @@ every entry runs in turn. See {doc}`../how_to/study_yaml`.
 of their distance from the reference; `rmsd_per_residue` is one value per residue,
 the root mean square over frames of each atom's distance from the reference,
 as `gmx rmsf -od` reports. An unknown name is refused with the list of all of them.
-`catalytic_triad` is refused with a pointer to the triad routine on the study
-API, {doc}`../how_to/analysis_triad_quickstart`, and to `polyzymd analyze
-distances --set pairs=...` for the triad distances.
 
 ### Options
 

@@ -439,10 +439,9 @@ def analyze(
     Raises
     ------
     ProtocolError
-        If the name is not in :data:`FUNCTION_ANALYSES` (``catalytic_triad``
-        gets the triad routine instead), a config is missing, the labels do
-        not match the configs, the settings are invalid, or no replicates are
-        found.
+        If the name is not in :data:`FUNCTION_ANALYSES`, a config is missing,
+        the labels do not match the configs, the settings are invalid, or no
+        replicates are found.
     """
     _require_known(name)
     return _analyze_function(
