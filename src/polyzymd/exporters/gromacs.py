@@ -262,6 +262,8 @@ class MDPParameters:
         lines.append(f"emtol           = {self.emtol}")
         lines.append(f"emstep          = {self.emstep}")
         lines.append(f"nsteps          = {self.nsteps}")
+        if self.define:
+            lines.append(f"define          = {self.define}")
         lines.append("")
 
         # Output
@@ -488,12 +490,16 @@ class MDPGenerator:
         self,
         nsteps: int = 50000,
         emtol: float = 500.0,
+        define: str = "",
     ) -> MDPParameters:
         """Generate MDP parameters for energy minimization.
 
         Args:
             nsteps: Maximum number of minimization steps.
             emtol: Energy tolerance (kJ/mol/nm) for convergence.
+            define: Preprocessor defines, such as ``"-DPOSRES_EM"`` when the
+                topology holds the minimization restraints that
+                :class:`PositionRestraintGenerator` writes.
 
         Returns:
             MDPParameters configured for steepest descent minimization.
@@ -507,6 +513,7 @@ class MDPGenerator:
             emstep=0.01,
             nstlog=500,
             nstenergy=500,
+            define=define,
         )
 
     def generate_equilibration_stages(self) -> List[Tuple[str, MDPParameters]]:
@@ -883,6 +890,14 @@ class PositionRestraintGenerator:
     >>> generator.add_posres_to_itp_files(config, output_dir, "MySystem")
     """
 
+    #: Restraint force constant during minimization, in kJ/mol/nm^2. With it,
+    #: a typical steepest-descent force moves a restrained heavy atom by
+    #: about 0.01 nm, so the solute holds its place as OpenMM's frozen
+    #: minimization holds it.
+    MINIMIZATION_FORCE_CONSTANT = 1.0e5
+    #: Define of the minimization restraints on the protein and ligand heavy atoms.
+    MINIMIZATION_DEFINE = "POSRES_EM"
+
     # Maps atom group names to (component_type, posres_define)
     GROUP_MAPPING: Dict[str, Tuple[str, str]] = {
         "protein_heavy": ("protein", "POSRES_PROTEIN"),
@@ -939,6 +954,28 @@ class PositionRestraintGenerator:
         """
         phases = config.simulation_phases
         posres_defines: Dict[str, str] = {}
+
+        # With freeze_solute, minimization restrains the protein and ligand
+        # heavy atoms, whatever the equilibration stages restrain: OpenMM
+        # freezes those atoms.
+        if phases.minimization.freeze_solute:
+            written = sum(
+                self._add_posres_to_component_itps(
+                    output_dir,
+                    prefix,
+                    component_type,
+                    group_name,
+                    self.MINIMIZATION_FORCE_CONSTANT,
+                    self.MINIMIZATION_DEFINE,
+                )
+                for component_type, group_name in (
+                    ("protein", "protein_heavy"),
+                    ("ligand", "ligand_heavy"),
+                )
+                if self._find_component_itps(output_dir, prefix, component_type)
+            )
+            if written:
+                posres_defines["minimization"] = self.MINIMIZATION_DEFINE
 
         # Collect all unique (group, force_constant) pairs, keeping max fc
         restraints_needed: Dict[str, float] = {}
@@ -2000,6 +2037,10 @@ class GromacsExporter:
                 self._config, output_dir, prefix
             )
             result["posres_defines"] = posres_defines
+            em_define = posres_defines.get("minimization")
+            if em_define:
+                em_params = mdp_generator.generate_energy_minimization(define=f"-D{em_define}")
+                em_path.write_text(em_params.to_mdp_string())
 
             # Track which components have posres for user info
             if posres_defines:
