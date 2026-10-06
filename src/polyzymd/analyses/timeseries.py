@@ -125,14 +125,17 @@ def universe() -> UniverseArgument:
 def _function_record(function: Callable) -> dict[str, Any]:
     """Name a function and hash its source, or its bytecode when no source exists.
 
-    A function loaded from a study's own file
-    (:func:`~polyzymd.analyses.user_functions.load_function`) is hashed by the
-    whole file, so a change to any helper in it changes the record.
+    A function loaded from a study's or project's own file
+    (:func:`~polyzymd.analyses.user_functions.load_function`) is hashed with
+    every Python file in that file's folder, by name and content: the folder
+    is on ``sys.path`` while the function runs, so a helper module it imports
+    from there is part of what produced the result. Editing any of those files
+    changes the record.
     """
     module_file = getattr(function, "__polyzymd_module_file__", None)
     try:
         if module_file:
-            code, basis = Path(module_file).read_bytes(), "module"
+            code, basis = _folder_code(Path(module_file)), "module_folder"
         else:
             code, basis = inspect.getsource(function).encode(), "source"
     except (OSError, TypeError):
@@ -150,6 +153,14 @@ def _function_record(function: Callable) -> dict[str, Any]:
         "hash": hashlib.sha256(code).hexdigest(),
         "hash_of": basis,
     }
+
+
+def _folder_code(module_file: Path) -> bytes:
+    """Return the name and content of every Python file beside ``module_file``, in name order."""
+    parts = []
+    for path in sorted(module_file.parent.glob("*.py")):
+        parts.append(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
+    return b"".join(parts)
 
 
 def _file_record(path: str | Path) -> dict[str, str]:

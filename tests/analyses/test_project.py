@@ -338,3 +338,125 @@ def test_names_may_start_with_a_digit_and_unknown_ones_are_errors(project: Path)
         resolve_names("structure 3TGL", {}, structures, "here")
     with pytest.raises(ProtocolError, match="one name"):
         resolve_names("structure a b", {}, structures, "here")
+
+
+class TestAuditFindings:
+    """Regressions for the pre-release reproducibility audit."""
+
+    def test_editing_a_helper_module_recomputes(self, project: Path) -> None:
+        (project / "analyses" / "helper.py").write_text("K = 1.0\n")
+        (project / "analyses" / "lid.py").write_text(
+            "from helper import K\n\n"
+            "def lid_size(lid, reference):\n    return K * float(len(lid))\n"
+        )
+        assert _analyze("lid", "--project", str(project)).exit_code == 0
+        assert set(pz.Project(project).results("lid").table["value"]) == {1.0}
+        (project / "analyses" / "helper.py").write_text("K = 2.0\n")
+        from polyzymd.analyses.study_freeze import stale_runs
+
+        assert any("code" in w for w in stale_runs(load_study_file(project / "lipa"))["lid"])
+        assert _analyze("lid", "--project", str(project)).exit_code == 0
+        assert set(pz.Project(project).results("lid").table["value"]) == {2.0}
+
+    def test_freeze_sees_factor_selection_file_and_replicate_changes(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        from polyzymd.analyses.study_freeze import stale_runs
+
+        assert _analyze("--project", str(project)).exit_code == 0
+        lipa = project / "lipa"
+        assert stale_runs(load_study_file(lipa)) == {}
+        text = (lipa / "study.yaml").read_text()
+        (lipa / "study.yaml").write_text(
+            text.replace("sbma_fraction: 0.5", "sbma_fraction: 0.6").replace(
+                "lid: name C3", "lid: name C3 C4"
+            )
+        )
+        (lipa / "structures" / "ref.pdb").write_text("REMARK changed\nEND\n")
+        config = load_study_file(lipa).conditions["Half"]
+        write_openmm_replicate(config, 3, [2.0 + 0.01 * k for k in range(6)])
+        why = " | ".join(" | ".join(v) for v in stale_runs(load_study_file(lipa)).values())
+        assert "factors changed" in why
+        assert "selections differ" in why
+        assert "content of ref.pdb changed" in why
+        assert "replicates [1, 2, 3] on disk" in why
+
+    def test_reports_and_manifests_hold_no_machine_paths(self, project: Path, monkeypatch) -> None:
+        from polyzymd.analyses.project_freeze import freeze_project
+        from polyzymd.analyses.study_git import init_repository
+
+        for key in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+            monkeypatch.setenv(key, "Test")
+        for key in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+            monkeypatch.setenv(key, "test@example.com")
+        assert _analyze("--project", str(project)).exit_code == 0
+        report = (project / "lipa" / "results" / "lid" / "report.json").read_text()
+        assert str(project) not in report and '"structures/ref.pdb"' in report
+        init_repository(project, "start")
+        result = freeze_project(project)
+        for name in ("manifest.json", "lipa/manifest.json"):
+            assert str(project) not in (project / name).read_text(), name
+        assert "analyses/lid.py" in result.manifest["files"]
+
+    def test_freeze_names_partial_reports_and_stale_stats(self, graded: Path, monkeypatch) -> None:
+        import json
+
+        from polyzymd.analyses.project_freeze import freeze_project
+        from polyzymd.analyses.study_git import init_repository
+
+        for key in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+            monkeypatch.setenv(key, "Test")
+        for key in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+            monkeypatch.setenv(key, "test@example.com")
+        assert _analyze("rg", "--project", str(graded)).exit_code == 0
+        report = graded / "prot" / "results" / "rg" / "report.json"
+        data = json.loads(report.read_text())
+        data.update(status="partial", problems=["condition q1 is left out: boom"])
+        report.write_text(json.dumps(data))
+        init_repository(graded, "start")
+        warnings = " | ".join(freeze_project(graded).warnings)
+        assert "partial report: condition q1 is left out: boom" in warnings
+        assert "stats plan plan is not run" in warnings
+        assert "PARTIAL REPORT" in (graded / "deposit" / "README.md").read_text()
+
+    def test_trend_refuses_non_finite_values_and_two_levels(self) -> None:
+        from polyzymd.analyses.protocols import ConditionReport
+        from polyzymd.analyses.statistics_plan import trend_sentence, trend_tests
+
+        def report(values):
+            class R:
+                conditions = [
+                    ConditionReport(
+                        label=f"c{i}", n_replicates=len(v), mean=0.0, replicate_values=v
+                    )
+                    for i, v in enumerate(values)
+                ]
+
+            return R()
+
+        factors = {"c0": {"x": 0.1}, "c1": {"x": 0.5}, "c2": {"x": 0.9}}
+        (nan,) = trend_tests(report([[1.0, 2.0], [1.5, float("nan")], [2.0, 3.0]]), factors)
+        assert not nan.testable and "not finite" in nan.reason
+        assert "not finite" in trend_sentence("m", None, nan)
+        two = {"c0": {"x": 0.1}, "c1": {"x": 0.5}}
+        (pair,) = trend_tests(report([[1.0, 1.1], [2.0, 2.1]]), two)
+        assert not pair.testable and "at least three" in pair.reason
+
+    def test_report_records_uncommitted_project_files(self, project: Path, monkeypatch) -> None:
+        from polyzymd.analyses.study_git import init_repository
+
+        for key in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+            monkeypatch.setenv(key, "Test")
+        for key in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+            monkeypatch.setenv(key, "test@example.com")
+        init_repository(project, "start")
+        with (project / "analyses" / "lid.py").open("a") as handle:
+            handle.write("# edited\n")
+        assert _analyze("lid", "--project", str(project)).exit_code == 0
+        import json
+
+        study = json.loads((project / "lipa" / "results" / "lid" / "report.json").read_text())[
+            "provenance"
+        ]["study"]
+        assert "analyses/lid.py" in study["git"]["inputs_uncommitted"]
+        assert study["project"]["label"] == "lipa" and len(study["project"]["sha256"]) == 64

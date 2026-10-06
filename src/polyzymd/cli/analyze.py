@@ -732,27 +732,45 @@ def _study_record(study_path: Path, run: str, settings: dict) -> dict:
     """
     import hashlib
 
-    from polyzymd.analyses.study_file import find_study_file, load_study_file
+    from polyzymd.analyses.study_file import find_study_file, load_study_file, portable
     from polyzymd.analyses.study_git import git_state
 
     file = find_study_file(study_path)
-    entry = load_study_file(file).analyses.get(run)
+    protocol = load_study_file(file)
+    entry = protocol.analyses.get(run)
+    selections: dict = {}
     if entry is not None and entry.function is not None:
         settings = {**entry.function.settings, **settings}
-    state = git_state(file.parent)
+        selections = dict(entry.function.selections)
+    project = protocol.project
+    # A study of a project takes its analyses from project.yaml and its code
+    # from the project's analyses/, so the git state is the whole project's.
+    state = git_state(project.root if project is not None else file.parent)
     if state and state["inputs_uncommitted"]:
         click.echo(
-            f"warning: the study has uncommitted changes ({', '.join(state['inputs_uncommitted'])}); "
-            "the report records them, and committing them makes it reproducible.",
+            f"warning: the {'project' if project is not None else 'study'} has uncommitted "
+            f"changes ({', '.join(state['inputs_uncommitted'])}); the report records them, "
+            "and committing them makes it reproducible.",
             err=True,
         )
-    return {
+    root = protocol.root
+    project_root = project.root if project is not None else None
+    record = {
         "path": file.name,
         "sha256": hashlib.sha256(file.read_bytes()).hexdigest(),
         "run": run,
-        "settings": settings,
+        "settings": portable(settings, root, project_root),
+        "selections": selections,
+        "factors": protocol.factors,
         "git": state,
     }
+    if project is not None:
+        record["project"] = {
+            "path": portable(str(project.path), root, project_root),
+            "label": protocol.project_label,
+            "sha256": hashlib.sha256(project.path.read_bytes()).hexdigest(),
+        }
+    return record
 
 
 def _from_study(

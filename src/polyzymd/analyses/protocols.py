@@ -243,8 +243,10 @@ class TrendReport(BaseModel):
     points fitted, one per replicate. ``slope`` is in the metric's unit per
     unit of the factor, with a 95 percent t interval; ``p`` tests zero slope
     and ``p_adjusted`` corrects it over the study's numeric factors
-    (Benjamini-Hochberg). ``testable`` is ``False`` with fewer than two
-    factor levels, three replicates, or values that all agree.
+    (Benjamini-Hochberg). ``testable`` is ``False``, with the ``reason``,
+    when a replicate value is not finite, there are fewer than three factor
+    levels (two levels make the trend a pairwise comparison), fewer than four
+    replicate values, or the values all agree.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -260,6 +262,7 @@ class TrendReport(BaseModel):
     r_squared: float | None = None
     significant: bool = False
     testable: bool = False
+    reason: str | None = None
 
 
 class ProtocolProvenance(BaseModel):
@@ -1998,7 +2001,7 @@ def _difference_ci(
 def _trend_line(trend: TrendReport) -> str:
     """One report line per trend test."""
     if not trend.testable:
-        return f"trend {trend.factor}  not testable  n {trend.n_replicates}"
+        return f"trend {trend.factor}  not testable: {trend.reason}  n {trend.n_replicates}"
     return (
         f"trend {trend.factor}  slope {_num(trend.slope)}  ci95 {_interval(trend.slope_ci95)}"
         f"  p {_num(trend.p)}  p_adj {_num(trend.p_adjusted)}  r2 {_num(trend.r_squared)}"

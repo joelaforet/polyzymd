@@ -18,6 +18,18 @@ from typing import Any
 OUTPUTS = ("results/", "data.local.yaml", "logs/", "deposit/")
 
 
+def is_output(path: str) -> bool:
+    """Return whether ``path`` is an analysis output or machine file, at any depth.
+
+    ``results/``, ``logs/`` and ``deposit/`` folders and ``data.local.yaml``
+    count wherever they are, so a project's ``<study>/results/`` is an output too.
+    """
+    parts = Path(path).parts
+    return bool(parts) and (
+        parts[-1] == "data.local.yaml" or any(f"{part}/" in OUTPUTS for part in parts[:-1])
+    )
+
+
 def _git(root: Path, *arguments: str) -> str | None:
     """Run git in ``root`` and return its output, or ``None`` if it fails."""
     try:
@@ -59,7 +71,7 @@ def git_state(root: str | Path) -> dict[str, Any] | None:
             uncommitted.append(str((top / path).resolve().relative_to(root)))
         except ValueError:
             uncommitted.append(path)
-    inputs = [path for path in uncommitted if not path.startswith(OUTPUTS)]
+    inputs = [path for path in uncommitted if not is_output(path)]
     return {
         "commit": head.strip() if head else None,
         "uncommitted": sorted(uncommitted),

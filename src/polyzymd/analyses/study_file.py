@@ -393,6 +393,29 @@ def read_data_file(path: Path, labels: Any) -> dict[str, Path]:
     }
 
 
+def portable(value: Any, root: Path, project_root: Path | None = None) -> Any:
+    """Return ``value`` with absolute paths made fit to publish, for reports and manifests.
+
+    A path inside the study folder ``root`` or its project folder becomes a
+    path relative to ``root`` (``structures/ref.pdb``, ``../analyses/f.py``);
+    any other absolute path, which names a place on one machine, becomes its
+    file name. Mappings and lists are converted item by item.
+    """
+    import os
+
+    if isinstance(value, Mapping):
+        return {key: portable(item, root, project_root) for key, item in value.items()}
+    if isinstance(value, list):
+        return [portable(item, root, project_root) for item in value]
+    if isinstance(value, str) and Path(value).is_absolute():
+        path = Path(value)
+        for base in (root, project_root):
+            if base is not None and path.is_relative_to(Path(base).resolve()):
+                return Path(os.path.relpath(path, Path(root).resolve())).as_posix()
+        return path.name
+    return value
+
+
 def _condition(label: str, value: Any, file: Path) -> tuple[Path, dict[str, Any]]:
     """Read one condition: a config path (or its folder), or ``{config: ..., factors: {...}}``."""
     factors: dict[str, Any] = {}

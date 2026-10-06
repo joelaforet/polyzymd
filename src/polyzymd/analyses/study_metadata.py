@@ -79,14 +79,15 @@ def _sequence(value: Any, where: str) -> list:
     return list(value)
 
 
-def check_metadata(raw: Any) -> tuple[dict[str, Any], list[str]]:
+def check_metadata(raw: Any, what: str = "study") -> tuple[dict[str, Any], list[str]]:
     """Check the ``metadata:`` block and return it completed, with a warning per gap.
 
     Missing ``title``, ``description``, ``purpose`` and ``authors`` become
     ``TODO`` placeholders; a missing licence becomes the default
     (:data:`DEFAULT_LICENSE`); a missing or placeholder paper DOI is noted.
-    ``doi`` is the study's own DOI, reserved in Zenodo before publishing; it
-    is ``None`` until set, with a warning.
+    ``doi`` is the dataset's own DOI, reserved in Zenodo before publishing;
+    it is ``None`` until set, with a warning that names ``what`` is published
+    (``"study"``, or ``"project"`` for a project's metadata).
 
     Raises
     ------
@@ -130,7 +131,7 @@ def check_metadata(raw: Any) -> tuple[dict[str, Any], list[str]]:
     doi = raw.get("doi")
     if is_placeholder(doi):
         warnings.append(
-            "metadata.doi is not set: reserve a DOI for the study in Zenodo, add it here and "
+            f"metadata.doi is not set: reserve a DOI for the {what} in Zenodo, add it here and "
             "refreeze (deposit/UPLOAD.md says how)"
         )
         meta["doi"] = None

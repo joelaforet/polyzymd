@@ -391,7 +391,7 @@ class TestUserFunctions:
                 (user_study / "results" / "my_rg").glob("polyzymd_results/*/*/*/record.json")
             ).read_text()
         )
-        assert record["function"]["hash_of"] == "module"
+        assert record["function"]["hash_of"] == "module_folder"
         assert record["function"]["module"] == "polyzymd_study.metrics"
 
     def test_check_imports_the_function(self, user_study: Path) -> None:

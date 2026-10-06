@@ -195,9 +195,10 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
     -------
     list of TrendReport
         One :class:`~polyzymd.analyses.protocols.TrendReport` per numeric
-        factor. A factor with fewer than two levels, fewer than three
-        replicate values, or values that are all equal has
-        ``testable=False`` and no slope. The list is empty when the report
+        factor. A factor with a replicate value that is not finite, fewer
+        than three levels (two make it a pairwise comparison), fewer than
+        four replicate values, or values that are all equal has
+        ``testable=False``, its ``reason``, and no slope. The list is empty when the report
         holds labelled results (any condition with an ``entry``, such as one
         value per residue).
 
@@ -236,7 +237,20 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
                 x.append(float(level))
                 y.append(float(value))
         trend = TrendReport(factor=name, conditions=used, n_replicates=len(y))
-        if len(set(x)) >= 2 and len(y) >= 3 and len(set(y)) > 1:
+        bad = sum(1 for value in y if not math.isfinite(value))
+        if bad:
+            reason = f"{bad} replicate values are not finite"
+        elif len(set(x)) < 3:
+            reason = f"{len(set(x))} levels; a trend needs at least three"
+        elif len(y) < 4:
+            reason = f"{len(y)} replicate values; a trend needs at least four"
+        elif len(set(y)) == 1:
+            reason = "the values do not vary"
+        else:
+            reason = None
+        if reason is not None:
+            trend = trend.model_copy(update={"reason": reason})
+        else:
             fit = stats.linregress(x, y)
             half = stats.t.ppf(0.975, len(y) - 2) * fit.stderr
             trend = trend.model_copy(
@@ -288,8 +302,8 @@ def trend_sentence(metric: str, unit: str | None, trend: Any) -> str:
 
     if not trend.testable:
         return (
-            f"{VERDICT_NOT_TESTABLE}: trend of {metric} with {trend.factor} needs at least two "
-            f"levels, three replicates and values that vary (n {trend.n_replicates})"
+            f"{VERDICT_NOT_TESTABLE}: trend of {metric} with {trend.factor}: {trend.reason} "
+            f"(n {trend.n_replicates} replicates over {len(trend.conditions)} conditions)"
         )
     per = f" {unit} per unit {trend.factor}" if unit else f" per unit {trend.factor}"
     evidence = (
@@ -328,6 +342,34 @@ def _report_hashes(target: Any) -> dict[str, str]:
             if report.is_file():
                 hashes[f"{label}/{run}" if label else run] = _file_hash(report)
     return hashes
+
+
+def _protocol_hashes(target: Any) -> dict[str, str]:
+    """Return the SHA-256 of the files that define the target's factors and analyses.
+
+    Every study's ``study.yaml`` (keyed ``<study label>/study.yaml`` for a
+    Project) and, for a Project, ``project.yaml``: editing a factor, a region
+    or an analysis changes what :func:`replicate_table` gives a plan.
+    """
+    if hasattr(target, "runs_in"):
+        hashes = {"project.yaml": _file_hash(target.protocol.path)}
+        for label in target.labels:
+            hashes[f"{label}/study.yaml"] = _file_hash(target[label].protocol.path)
+        return hashes
+    return {"study.yaml": _file_hash(target.protocol.path)}
+
+
+def _plan_hash(plan: StatsPlan) -> str:
+    """Return the SHA-256 of the plan's file with every Python file beside it.
+
+    The plan's folder is on ``sys.path`` while it runs, so a helper it imports
+    from there is part of the plan.
+    """
+    import hashlib
+
+    from polyzymd.analyses.timeseries import _folder_code
+
+    return hashlib.sha256(_folder_code(plan.file)).hexdigest()
 
 
 def stats_folder(target: Any, plan: StatsPlan) -> Path:
@@ -386,6 +428,7 @@ def run_stats_plan(target: Any, plan: StatsPlan) -> Path:
     import pandas as pd
 
     import polyzymd
+    from polyzymd.analyses.study_file import portable
     from polyzymd.analyses.user_functions import load_function
 
     function = load_function(plan.file, plan.qualname)
@@ -412,13 +455,13 @@ def run_stats_plan(target: Any, plan: StatsPlan) -> Path:
         json.dumps(
             {
                 "plan": {
-                    "file": str(plan.file.relative_to(root))
-                    if plan.file.is_relative_to(root)
-                    else str(plan.file),
+                    "file": portable(str(plan.file), root),
                     "function": plan.qualname,
-                    "sha256": _file_hash(plan.file),
+                    "sha256": _plan_hash(plan),
+                    "hash_of": "module_folder",
                 },
                 "inputs": inputs,
+                "protocol": _protocol_hashes(target),
                 "polyzymd_version": polyzymd.__version__,
             },
             indent=1,
@@ -431,8 +474,10 @@ def run_stats_plan(target: Any, plan: StatsPlan) -> Path:
 def stats_status(target: Any, plan: StatsPlan) -> str:
     """Return whether a stats plan's stored output matches its code and the current reports.
 
-    Compares the SHA-256 of the plan's file and of the target's stored
-    reports with those in the plan's ``record.json``.
+    Compares the SHA-256 of the plan's code (its file and every Python file
+    beside it), of the target's stored reports, and of its ``study.yaml`` and
+    ``project.yaml`` files (factors, regions, analyses) with those in the
+    plan's ``record.json``.
 
     Parameters
     ----------
@@ -453,10 +498,12 @@ def stats_status(target: Any, plan: StatsPlan) -> str:
         return "not run"
     record = json.loads(record_path.read_text())
     reasons = []
-    if record.get("plan", {}).get("sha256") != _file_hash(plan.file):
+    if record.get("plan", {}).get("sha256") != _plan_hash(plan):
         reasons.append("its code changed")
     if record.get("inputs") != _report_hashes(target):
         reasons.append("the analysis reports changed")
+    if record.get("protocol") != _protocol_hashes(target):
+        reasons.append("the study or project files changed")
     return "up to date" if not reasons else "stale: " + " and ".join(reasons)
 
 

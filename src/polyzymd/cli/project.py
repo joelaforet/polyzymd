@@ -30,7 +30,10 @@ def check_command(ctx: click.Context, path: Path) -> None:
     """
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.project import Project
+    from polyzymd.cli.study import _study_logging
     from polyzymd.cli.study import check_command as study_check
+
+    _study_logging(path, "project-check")
 
     try:
         project = Project(path)
@@ -121,6 +124,9 @@ def freeze_command(path: Path, tag: str | None) -> None:
     """
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.project_freeze import freeze_project
+    from polyzymd.cli.study import _study_logging
+
+    _study_logging(path, "project-freeze")
 
     try:
         result = freeze_project(path, tag=tag)

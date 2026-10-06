@@ -149,10 +149,14 @@ def _function_hash(record: dict[str, Any], entry: Any) -> str | None:
 def stale_runs(protocol: Any) -> dict[str, list[str]]:
     """Return, for each analysis run, why its stored results may not match the study now.
 
-    A run with no stored results, or whose stored records differ from the
-    study in config hash, equilibration window, stride or function hash, or
-    whose report differs in a listed setting or in the PolyzyMD version, has
-    one reason per difference. No trajectory is read.
+    A run has one reason per difference between what produced its stored
+    results and the study now: no stored results; a record's config hash,
+    equilibration window, ``until`` (``until: common`` included, worked out
+    from the runs when they are here), stride, function hash (with its
+    folder's helper modules), or the content of a file it was given; the
+    replicates found on disk; or the report's settings, selections, condition
+    factors (which its trend tests used) or PolyzyMD version. Trajectories are
+    read only to work out ``until: common``.
     """
     import polyzymd
     from polyzymd.analyses.identity import compute_config_hash
@@ -164,6 +168,10 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
             hashes[label] = compute_config_hash(SimulationConfig.from_yaml(path))
         except (OSError, ValueError):
             hashes[label] = None
+    from polyzymd.analyses.study_file import portable
+
+    project_root = protocol.project.root if protocol.project is not None else None
+    found_replicates = _replicates_on_disk(protocol)
     reasons: dict[str, list[str]] = {}
     for run, entry in protocol.analyses.items():
         folder = protocol.results_dir(run)
@@ -174,9 +182,23 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
             reasons[run] = [f"no stored results; run polyzymd analyze {run} --study"]
             continue
         current_hashes: dict[tuple, str | None] = {}
+        current_files = _named_files(
+            entry.function.settings if entry.function is not None else entry.settings
+        )
+        common_end = _common_end(protocol, run)
+        recorded_replicates: dict[str, set[int]] = {}
         for path in records:
             record = json.loads(path.read_text())
             label = record.get("condition")
+            recorded_replicates.setdefault(label, set()).add(int(record.get("replicate", 0)))
+            for name, sha in _recorded_files(record.get("arguments")).items():
+                if name in current_files and current_files[name] != sha:
+                    found.append(f"the content of {name} changed")
+            if common_end is not None and record.get("until_ns") is not None:
+                if abs(float(record["until_ns"]) - common_end) > 1e-6:
+                    found.append(
+                        f"until common is now {common_end:g}ns, not {record['until_ns']:g}ns"
+                    )
             if label in hashes and hashes[label] and record.get("config_hash") != hashes[label]:
                 found.append(f"the config of {label} changed")
             equilibration, until = protocol.window(run)
@@ -201,28 +223,151 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
             found.append(
                 f"made with PolyzyMD {provenance.get('polyzymd_version')}, not {polyzymd.__version__}"
             )
+        for label, replicates in found_replicates.items():
+            if label in recorded_replicates and replicates != recorded_replicates[label]:
+                found.append(
+                    f"{label} has replicates {sorted(replicates)} on disk, the results "
+                    f"{sorted(recorded_replicates[label])}"
+                )
+        study = provenance.get("study") or {}
         expected = entry.function.settings if entry.function is not None else entry.settings
-        ran_with = (provenance.get("study") or {}).get("settings")
+        expected = portable(expected, protocol.root, project_root)
+        ran_with = study.get("settings")
         if ran_with is not None:
+            ran_with = portable(ran_with, protocol.root, project_root)
             for key in sorted(set(expected) | set(ran_with)):
-                if json.dumps(_located(expected.get(key)), sort_keys=True) != json.dumps(
-                    _located(ran_with.get(key)), sort_keys=True
+                if json.dumps(expected.get(key), sort_keys=True) != json.dumps(
+                    ran_with.get(key), sort_keys=True
                 ):
                     found.append(f"setting {key} differs from the one the results were made with")
+        if entry.function is not None and "selections" in study:
+            if study["selections"] != dict(entry.function.selections):
+                found.append("the selections differ from the ones the results were made with")
+        if "factors" in study:
+            labels = [c.get("label") for c in report.get("conditions", [])]
+            now = {k: v for k, v in protocol.factors.items() if k in labels}
+            then = {k: v for k, v in study["factors"].items() if k in labels}
+            if now != then:
+                found.append("the condition factors changed since the report's trend tests")
         if found:
             reasons[run] = sorted(set(found))
     return reasons
 
 
-def _located(value: Any) -> Any:
-    """Compare an absolute file path by its name, so a moved study is not stale for it."""
+def report_problems(protocol: Any) -> list[str]:
+    """Return one warning per stored report marked partial, naming its problems.
+
+    A partial report covers only some conditions (``polyzymd analyze`` names
+    the others in ``problems``); freezing it as if complete would hide that.
+    """
+    warnings = []
+    for run in protocol.analyses:
+        path = protocol.results_dir(run) / "report.json"
+        try:
+            report = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if report.get("status", "complete") != "complete":
+            warnings.append(
+                f"run {run} has a {report.get('status')} report: "
+                + "; ".join(report.get("problems") or ["no problems listed"])
+            )
+    return warnings
+
+
+def stats_warnings(root: Path, plan: Any, *, project: bool) -> list[str]:
+    """Return a warning when the stats plan of a study or project is stale or was never run."""
+    from polyzymd.analyses.statistics_plan import stats_status
+
+    if project:
+        from polyzymd.analyses.project import Project
+
+        target: Any = Project(root)
+    else:
+        from polyzymd.analyses.study import Study
+
+        target = Study(root)
+    status = stats_status(target, plan)
+    if status == "up to date":
+        return []
+    return [f"stats plan {plan.qualname} is {status}; run polyzymd stats before freezing"]
+
+
+def _named_files(value: Any) -> dict[str, str]:
+    """Return the SHA-256 of every existing file a setting names, by file name."""
+    import hashlib
+
+    files: dict[str, str] = {}
     if isinstance(value, dict):
-        return {key: _located(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_located(item) for item in value]
-    if isinstance(value, str) and Path(value).is_absolute():
-        return Path(value).name
-    return value
+        for item in value.values():
+            files.update(_named_files(item))
+    elif isinstance(value, list):
+        for item in value:
+            files.update(_named_files(item))
+    elif isinstance(value, str) and len(value) < 4096 and Path(value).is_file():
+        files[Path(value).name] = hashlib.sha256(Path(value).read_bytes()).hexdigest()
+    return files
+
+
+def _recorded_files(value: Any) -> dict[str, str]:
+    """Return the SHA-256 of every file a record's arguments name, by file name."""
+    files: dict[str, str] = {}
+    if isinstance(value, dict):
+        if set(value) == {"name", "sha256"}:
+            return {value["name"]: value["sha256"]}
+        for item in value.values():
+            files.update(_recorded_files(item))
+    elif isinstance(value, list):
+        for item in value:
+            files.update(_recorded_files(item))
+    return files
+
+
+def _replicates_on_disk(protocol: Any) -> dict[str, set[int]]:
+    """Return each condition's replicates found on this machine, within ``replicates:``.
+
+    A condition whose runs are not here is left out, so a study without its
+    trajectories is not stale for it.
+    """
+    from polyzymd.analyses.study import with_data_dir
+    from polyzymd.config.schema import SimulationConfig
+
+    wanted = set(protocol.replicates) if protocol.replicates else None
+    found: dict[str, set[int]] = {}
+    for label, path in protocol.conditions.items():
+        try:
+            config = with_data_dir(SimulationConfig.from_yaml(path), protocol.data.get(label))
+            indices = {int(i) for i, _ in config.discover_replicate_dirs()}
+        except (OSError, ValueError):
+            continue
+        indices = indices & wanted if wanted is not None else indices
+        if indices:
+            found[label] = indices
+    return found
+
+
+def _common_end(protocol: Any, run: str) -> float | None:
+    """Return the time ``until: common`` stands for now, in ns, or ``None``.
+
+    ``None`` when the run's ``until`` is not ``common`` or the runs are not
+    here to work it out.
+    """
+    if protocol.window(run)[1] != "common":
+        return None
+    from polyzymd.analyses.study import Study
+
+    try:
+        study = Study.from_configs(
+            dict(protocol.conditions),
+            equilibration=protocol.window(run)[0],
+            replicates=protocol.replicates,
+            stride=protocol.stride_of(run),
+            data=dict(protocol.data),
+            until="common",
+        )
+        return next(iter(study)).until_ns
+    except Exception:  # noqa: BLE001 - without the runs, until: common cannot be checked
+        return None
 
 
 def _own_windows(protocol: Any) -> str:
@@ -245,7 +390,7 @@ def _same_until(recorded_ns: Any, until: str | None) -> bool:
     if until is None or recorded_ns is None:
         return until is None and recorded_ns is None
     if until == "common":
-        # Resolved to the shortest replicate's end when the results were made.
+        # Compared with the end worked out from the runs, by _common_end.
         return True
     from polyzymd.analyses.shared.loader import convert_time, parse_time_string
 
@@ -614,11 +759,16 @@ def _replicates(
         ]
         unhashed = [index for index, r in replicates.items() if not r["hashes_recorded"]]
         if unhashed:
+            # From a project's folder the study is named; from the study's, it is ".".
+            where = (
+                f"--study {protocol.root.relative_to(protocol.project.root)} in the project folder"
+                if protocol.project is not None
+                else "--study . in the study folder"
+            )
             warnings.append(
                 f"{label}: replicates {', '.join(unhashed)} have no recorded trajectory "
-                "hashes; record them, once, by running polyzymd "
-                "hash-trajectories --study . in the study folder, so anyone can check the "
-                "trajectories without hashing them again"
+                f"hashes; record them, once, by running polyzymd hash-trajectories {where}, "
+                "so anyone can check the trajectories without hashing them again"
             )
         if unknown:
             warnings.append(
@@ -800,7 +950,7 @@ def freeze(
     import yaml
 
     import polyzymd
-    from polyzymd.analyses.study_file import load_study_file
+    from polyzymd.analyses.study_file import load_study_file, portable
     from polyzymd.analyses.study_git import git_state
     from polyzymd.analyses.study_metadata import (
         check_metadata,
@@ -828,6 +978,9 @@ def freeze(
         raise ProtocolError(f"The tag {tag} already exists.", hint="Give another with --tag.")
     for run, why in stale_runs(protocol).items():
         warnings.append(f"run {run} may be stale: {'; '.join(why)}")
+    warnings.extend(report_problems(protocol))
+    if protocol.stats is not None:
+        warnings.extend(stats_warnings(protocol.root, protocol.stats, project=False))
 
     deposit = root / DEPOSIT
     deposit.mkdir(exist_ok=True)
@@ -889,7 +1042,12 @@ def freeze(
                 "function": f"{os.path.relpath(entry.function.file, root)}:{entry.function.qualname}"
                 if entry.function
                 else None,
-                "settings": entry.settings or (entry.function.settings if entry.function else {}),
+                "settings": portable(
+                    entry.settings or (entry.function.settings if entry.function else {}),
+                    root,
+                    protocol.project.root if protocol.project is not None else None,
+                ),
+                "selections": dict(entry.function.selections) if entry.function else {},
                 "equilibration": protocol.window(run)[0],
                 "until": protocol.window(run)[1],
                 "stride": protocol.stride_of(run),

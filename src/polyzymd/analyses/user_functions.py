@@ -10,7 +10,9 @@ source, so editing a helper the function calls recomputes them.
 
 from __future__ import annotations
 
+import shutil
 import sys
+import tempfile
 import types
 from pathlib import Path
 from typing import Any, Callable
@@ -39,7 +41,18 @@ def load_function(file: Path, qualname: str) -> Callable:
     module_name = f"polyzymd_study.{file.stem}"
     module = types.ModuleType(module_name)
     module.__file__ = str(file)
+    # A helper module imported from the file's folder earlier in this process
+    # may have been edited since; drop it so the import reads it again, as
+    # its current content is what the stored results' hash covers.
+    for name, loaded in list(sys.modules.items()):
+        origin = getattr(loaded, "__file__", None)
+        if origin and Path(origin).resolve().parent == file.parent:
+            del sys.modules[name]
     sys.path.insert(0, str(file.parent))
+    # Helpers it imports are compiled into a fresh cache: a .pyc beside them is
+    # trusted by modification second and size, so an edit of the same size
+    # within one second would otherwise run the old helper.
+    saved_prefix, sys.pycache_prefix = sys.pycache_prefix, tempfile.mkdtemp(prefix="pzpyc")
     try:
         # Compile the file's current text rather than importing it, so a
         # cached .pyc that predates an edit is never run: the code that runs
@@ -52,6 +65,8 @@ def load_function(file: Path, qualname: str) -> Callable:
         ) from exc
     finally:
         sys.path.remove(str(file.parent))
+        shutil.rmtree(sys.pycache_prefix, ignore_errors=True)
+        sys.pycache_prefix = saved_prefix
     function: Any = module
     for part in qualname.split("."):
         function = getattr(function, part, None)

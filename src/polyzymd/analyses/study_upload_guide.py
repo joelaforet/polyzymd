@@ -375,6 +375,21 @@ def prepare_upload(
     return {"upload": deposit / UPLOAD, "trajectories": trajectories, "guide": guide}
 
 
+def report_summary(path: Path) -> str:
+    """Return a stored report's verdicts on one line, saying first when the report is partial."""
+    import json
+
+    try:
+        report = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return "no stored report"
+    text = " ".join(report.get("verdict", []))
+    if report.get("status", "complete") != "complete":
+        problems = "; ".join(report.get("problems") or [])
+        text = f"PARTIAL REPORT ({problems}). " + text
+    return text
+
+
 def deposit_readme(
     *, study_name: str, tag: str | None, meta: dict[str, Any], analyses: dict[str, Any], root: Path
 ) -> str:
@@ -451,12 +466,7 @@ def deposit_readme(
         "",
     ]
     for run in analyses:
-        report = root / "results" / run / "report.json"
-        try:
-            verdicts = json.loads(report.read_text()).get("verdict", [])
-        except (OSError, ValueError):
-            verdicts = ["no stored report"]
-        lines.append(f"- **{run}:** " + " ".join(verdicts))
+        lines.append(f"- **{run}:** " + report_summary(root / "results" / run / "report.json"))
     lines += [
         "",
         f"Licences: {meta.get('license', {}).get('data', 'CC-BY-4.0')} for data, results and figures; "

@@ -30,6 +30,7 @@ from polyzymd.analyses.study_freeze import (
     _git,
     _versions,
     freeze,
+    stats_warnings,
     without_machine_paths,
 )
 
@@ -117,7 +118,7 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
 
     project = Project(root)
     root = project.root
-    meta, warnings = check_metadata(project.protocol.metadata)
+    meta, warnings = check_metadata(project.protocol.metadata, what="project")
     state = git_state(root)
     if state is None:
         warnings.append("the project is not a git repository, so freeze cannot commit or tag it")
@@ -129,6 +130,9 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
     tag = tag or (_next_project_tag(root) if state else None)
     if state and tag and _git(root, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}"):
         raise ProtocolError(f"The tag {tag} already exists.", hint="Give another with --tag.")
+
+    if project.protocol.stats is not None:
+        warnings.extend(stats_warnings(root, project.protocol.stats, project=True))
 
     studies: dict[str, Any] = {}
     conditions: dict[str, Any] = {}
@@ -164,6 +168,9 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         "studies": studies,
         "conditions": conditions,
         "analyses": {run: project.runs_in(run) for run in project.protocol.analyses},
+        # The project's own files (project.yaml, shared analyses/ and stats/
+        # code, figures, the stats plan's output); each study's are in its manifest.
+        "files": _project_files(project, state),
         "trajectory_deposits": meta["related"]["trajectories"],
         "cite": {"polyzymd": citation_line()},
         "warnings": warnings,
@@ -274,13 +281,47 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
     )
 
 
+def _project_files(project: Any, state: dict | None) -> dict[str, dict[str, Any]]:
+    """Return the size and SHA-256 of every project file outside the study folders.
+
+    Tracked files and untracked ``results/`` files in a git repository,
+    otherwise every file; ``deposit/``, ``logs/``, ``data.local.yaml`` and the
+    files freeze writes are left out.
+    """
+    root = project.root
+    studies = {project[label].root.relative_to(root).parts[0] for label in project.labels}
+    if state is not None:
+        listed = (_git(root, "ls-files") or "").splitlines() + (
+            _git(root, "ls-files", "--others", "--exclude-standard", "--", "results") or ""
+        ).splitlines()
+    else:
+        listed = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
+    files = {}
+    for name in sorted(set(listed)):
+        parts = Path(name).parts
+        if (
+            not parts
+            or parts[0] in studies
+            or parts[0] in (DEPOSIT, ".git", "logs")
+            or name in (*PROJECT_GENERATED, "data.local.yaml")
+            or not (root / name).is_file()
+        ):
+            continue
+        path = root / name
+        files[name] = {"size": path.stat().st_size, "sha256": _sha256(path)}
+    return files
+
+
 def _studies_section(project: Any) -> str:
     """Return the deposit README's ``## Studies`` section: each study's description and verdicts.
 
     For every study it gives the study's description and, for each of its
-    analyses, the ``verdict`` lines of the stored ``report.json``, or
-    ``no stored report`` when that file is missing or unreadable.
+    analyses, the ``verdict`` lines of the stored ``report.json``, led by
+    ``PARTIAL REPORT (...)`` when the report is partial, or ``no stored
+    report`` when that file is missing or unreadable.
     """
+    from polyzymd.analyses.study_upload_guide import report_summary
+
     lines = [
         "## Studies",
         "",
@@ -294,11 +335,8 @@ def _studies_section(project: Any) -> str:
         study = project[label]
         lines += [f"### {label}", "", str(study.protocol.description or ""), ""]
         for run in study.protocol.analyses:
-            report = study.protocol.results_dir(run) / "report.json"
-            try:
-                verdicts = json.loads(report.read_text()).get("verdict", [])
-            except (OSError, ValueError):
-                verdicts = ["no stored report"]
-            lines.append(f"- **{run}:** " + " ".join(verdicts))
+            lines.append(
+                f"- **{run}:** " + report_summary(study.protocol.results_dir(run) / "report.json")
+            )
         lines.append("")
     return "\n".join(lines)

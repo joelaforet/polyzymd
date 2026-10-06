@@ -29,8 +29,10 @@ def stats_command(path: Path) -> None:
     from polyzymd.analyses.exceptions import AnalysisError
     from polyzymd.analyses.project_file import PROJECT_FILE
     from polyzymd.analyses.statistics_plan import run_stats_plan
+    from polyzymd.cli.study import _study_logging
 
     path = Path(path).expanduser().resolve()
+    _study_logging(path, "stats")
     is_project = path.name == PROJECT_FILE or (path / PROJECT_FILE).is_file()
     try:
         if is_project:
