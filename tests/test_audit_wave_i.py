@@ -70,3 +70,53 @@ def test_a_project_applies_the_rule_inside_each_study(tmp_path: Path) -> None:
         (root / name).write_text("x")
     assert _listed_files(root, None) == ["lipa/study.yaml", "project.yaml", "stats/plan.py"]
     assert left_out_files(root, None).startswith("not deposited: lipa/notes.docx, todo.md.")
+
+
+class TestGromacsRunFiles:
+    """Joe's 2c: GROMACS files are chosen by the names PolyzyMD writes; the user can override."""
+
+    def _run(self, tmp_path: Path) -> Path:
+        run = tmp_path / "run"
+        run.mkdir()
+        (run / "LipA.top").write_text('#include "LipA_posre.itp"\n#include "amber.ff/forcefield.itp"\n')
+        (run / "LipA_posre.itp").write_text("; restraints\n")
+        for name in ("prod.tpr", "em.mdp", "eq_01_nvt.mdp", "prod.mdp", "backup.top", "old.mdp", "x.itp"):
+            (run / name).write_text("x")
+        return run
+
+    def _config(self, top=None):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            enzyme=SimpleNamespace(name="LipA"),
+            polymers=None,
+            gromacs=SimpleNamespace(analysis_topology=top),
+            simulation_phases=SimpleNamespace(equilibration_stages=[SimpleNamespace(name="nvt")]),
+        )
+
+    def test_a_backup_top_does_not_stop_the_analysis(self, tmp_path: Path) -> None:
+        from polyzymd.analyses.shared.gromacs import gromacs_topology_file, topology_name
+
+        run = self._run(tmp_path)
+        assert gromacs_topology_file(run, topology_name(self._config())) == run / "LipA.top"
+
+    def test_freeze_deposits_only_the_files_polyzymd_wrote(self, tmp_path: Path) -> None:
+        from polyzymd.analyses.shared.gromacs import run_input_files
+
+        run = self._run(tmp_path)
+        assert [p.name for p in run_input_files(run, self._config())] == [
+            "prod.tpr",
+            "em.mdp",
+            "eq_01_nvt.mdp",
+            "prod.mdp",
+            "LipA.top",
+            "LipA_posre.itp",
+        ]
+
+    def test_the_user_can_name_another_topology(self, tmp_path: Path) -> None:
+        from polyzymd.analyses.shared.gromacs import gromacs_topology_file, run_input_files, topology_name
+
+        run = self._run(tmp_path)
+        config = self._config(top="backup.top")
+        assert gromacs_topology_file(run, topology_name(config)) == run / "backup.top"
+        assert "backup.top" in [p.name for p in run_input_files(run, config)]

@@ -481,16 +481,20 @@ def _gzip_copy(source: Path, target: Path) -> Path:
     return target
 
 
-def _engine_inputs(provenance: Any) -> list[Path]:
-    """Return the engine input files of a replicate: OpenMM system XML and topology, or GROMACS files."""
+def _engine_inputs(provenance: Any, config: Any = None) -> list[Path]:
+    """Return the engine input files of a replicate: OpenMM system XML and topology, or GROMACS files.
+
+    GROMACS files are those PolyzyMD writes, by name
+    (:func:`~polyzymd.analyses.shared.gromacs.run_input_files`): another
+    ``.top`` or ``.mdp`` left in the run folder is not deposited.
+    """
+    from polyzymd.analyses.shared.gromacs import run_input_files
     from polyzymd.analyses.shared.loader import openmm_system_file
 
     topology = Path(provenance.topology.path)
     files: list[Path] = []
     if (provenance.config_engine or "openmm") == "gromacs":
-        folder = topology.parent
-        for pattern in ("prod.tpr", "*.top", "*.itp", "*.mdp"):
-            files.extend(sorted(folder.glob(pattern)))
+        files.extend(run_input_files(topology.parent, config))
     else:
         files.append(topology)
         for trajectory in provenance.trajectories:
@@ -822,7 +826,7 @@ def _replicates(
                 / f"replicate_{replicate.index}"
             )
             inputs = []
-            for source in _engine_inputs(provenance):
+            for source in _engine_inputs(provenance, condition.config):
                 target = _gzip_copy(source, protocol.root / folder / (source.name + ".gz"))
                 inputs.append(
                     {
