@@ -4,7 +4,7 @@ PolyzyMD organizes experiments in four levels:
 
 | Level | Is | Holds | File |
 |---|---|---|---|
-| Project | One paper | The analyses every study runs, the statistical plan, publishing metadata, figures | `project.yaml` |
+| Project | One paper | The analyses every study runs, statistics and figures code, publishing metadata | `project.yaml` |
 | **Study** | **One protein (or other system) under its conditions**, such as protein X | Its equilibration window, its structures, its named residue regions, its conditions | `study.yaml` |
 | Condition | One simulated variant of that protein, such as a polymer composition or a different temperature | A simulation `config.yaml`, optionally its `factors:` | `conditions/<name>/config.yaml` |
 | Replicate | One run of a condition | Trajectories; its number is its random seed | the run directory |
@@ -103,9 +103,9 @@ match across studies: each study tests the factors its conditions declare.
 
 A paper's statistical plan often goes further, for example a hierarchy of
 tests with multiplicity control across them, or comparisons across proteins
-made deliberately. That plan is a function in the project folder, named by
-`stats:` and run on the stored results, so it is versioned, rerun and
-published with the paper instead of living in a script beside it.
+made deliberately. That plan is a script in the project's `stats/` folder,
+reading the stored results with `replicate_table`, so it is committed and
+published with the paper instead of living beside it.
 
 ## Reproducing and publishing
 

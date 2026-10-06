@@ -81,8 +81,8 @@ never a loop over study folders by hand (`docs/source/how_to/project.md`).
 Before writing your own function, run `polyzymd analyze --list`: it names each
 shipped analysis, what it measures and its settings keys with defaults.
 For statistics beyond the report, use `replicate_table(RUN)` (one row per
-replicate) and put the plan in the project's `stats:` function, run with
-`polyzymd stats PROJECT`, rather than a standalone script.
+replicate) in a script in the project's `stats/` folder, which freeze
+publishes with the paper.
 When `study check` finds no runs for a
 condition, the trajectories are elsewhere: run `polyzymd study locate DIR`
 (writes the gitignored `data.local.yaml`) or pass `--data DIR`; never edit the

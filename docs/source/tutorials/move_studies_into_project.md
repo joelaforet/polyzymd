@@ -231,8 +231,8 @@ are measured once more.
 
 - Fill `metadata:` in `project.yaml` (title, authors with `family-names`,
   `given-names` and ORCID, licences).
-- Move any standalone statistics script into `stats/` as a `stats:` plan
-  ({doc}`../how_to/project`).
+- Move any standalone statistics script into `stats/`, reading results with
+  `pz.Project(".").replicate_table(run)` ({doc}`../how_to/project`).
 - Commit: `git -C Paper_1 add -A && git -C Paper_1 commit -m "Move the studies into a project"`.
 
 Read every protein's results in one table:

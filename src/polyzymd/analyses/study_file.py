@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 from polyzymd.analyses.exceptions import ProtocolError
-from polyzymd.analyses.statistics_plan import read_stats_plan
 
 #: File name that marks a study folder.
 STUDY_FILE = "study.yaml"
@@ -38,7 +37,6 @@ _TOP_KEYS = (
     "structures",
     "regions",
     "analyses",
-    "stats",
     "metadata",
 )
 #: Keys of a condition written as a mapping.
@@ -166,8 +164,6 @@ class StudyFile:
     #: The project this study belongs to, and its label there.
     project: Any = None
     project_label: str | None = None
-    #: The study's own statistical plan (``stats: {plan: file.py:function}``).
-    stats: Any = None
 
     @property
     def root(self) -> Path:
@@ -737,5 +733,4 @@ def load_study_file(path: str | Path) -> StudyFile:
         factors={label: value for label, value in factors.items() if value},
         project=project,
         project_label=project_label,
-        stats=read_stats_plan(raw.get("stats"), f"{file}: stats", file.parent),
     )

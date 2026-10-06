@@ -369,24 +369,6 @@ def report_problems(protocol: Any) -> list[str]:
     return warnings
 
 
-def stats_warnings(root: Path, plan: Any, *, project: bool) -> list[str]:
-    """Return a warning when the stats plan of a study or project is stale or was never run."""
-    from polyzymd.analyses.statistics_plan import stats_status
-
-    if project:
-        from polyzymd.analyses.project import Project
-
-        target: Any = Project(root)
-    else:
-        from polyzymd.analyses.study import Study
-
-        target = Study(root)
-    status = stats_status(target, plan)
-    if status == "up to date":
-        return []
-    return [f"stats plan {plan.qualname} is {status}; run polyzymd stats before freezing"]
-
-
 def _named_files(value: Any) -> dict[str, str]:
     """Return the SHA-256 of every existing file a setting names, by file name."""
     import hashlib
@@ -1015,10 +997,210 @@ def _method(protocol: Any) -> str:
     )
 
 
-def _next_tag(root: Path) -> str:
-    existing = (_git(root, "tag", "--list", "study-v*") or "").split()
+def _next_tag(root: Path, prefix: str = "study") -> str:
+    """Return ``<prefix>-v<n>``, with ``n`` one more than the highest existing such tag."""
+    existing = (_git(root, "tag", "--list", f"{prefix}-v*") or "").split()
     numbers = [int(t.split("v")[-1]) for t in existing if t.split("v")[-1].isdigit()]
-    return f"study-v{max(numbers, default=0) + 1}"
+    return f"{prefix}-v{max(numbers, default=0) + 1}"
+
+
+def _git_preflight(
+    root: Path, tag: str | None, what: str
+) -> tuple[dict[str, Any] | None, str | None, list[str]]:
+    """Return the git state of ``root``, the tag to freeze it as, and warnings about both.
+
+    ``what`` is ``"study"`` or ``"project"``: it names the folder in the
+    warnings and prefixes the default tag, the next ``<what>-v<n>``. The
+    warnings say when ``root`` is not a git repository and which inputs are
+    uncommitted.
+
+    Raises
+    ------
+    ProtocolError
+        If the tag already exists.
+    """
+    from polyzymd.analyses.study_git import git_state
+
+    state = git_state(root)
+    warnings = []
+    if state is None:
+        warnings.append(f"the {what} is not a git repository, so freeze cannot commit or tag it")
+    elif state["inputs_uncommitted"]:
+        warnings.append(
+            f"uncommitted inputs are not part of the tagged {what}: "
+            + ", ".join(state["inputs_uncommitted"])
+        )
+    tag = tag or (_next_tag(root, what) if state else None)
+    if state and tag and _git(root, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}"):
+        raise ProtocolError(f"The tag {tag} already exists.", hint="Give another with --tag.")
+    return state, tag, warnings
+
+
+def _listed_files(root: Path, state: dict[str, Any] | None) -> list[str]:
+    """Return the files under ``root`` that freeze hashes and deposits, relative to it.
+
+    In a git repository (``state`` given), the tracked files and the untracked
+    files under ``results/``; otherwise every file. Job, log and hidden files
+    (:func:`is_machine_file`), anything under a ``deposit/`` folder and
+    ``data.local.yaml`` are left out.
+    """
+    if state is not None:
+        listed = (_git(root, "ls-files") or "").splitlines() + (
+            _git(root, "ls-files", "--others", "--exclude-standard", "--", "results") or ""
+        ).splitlines()
+    else:
+        listed = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
+    return sorted(
+        {
+            p
+            for p in listed
+            if p
+            and DEPOSIT not in Path(p).parts
+            and Path(p).name != "data.local.yaml"
+            and not is_machine_file(p)
+            and (root / p).is_file()
+        }
+    )
+
+
+#: Entries freeze adds to ``.gitignore``, each with the comment above it.
+_IGNORED = (
+    (f"{DEPOSIT}/", "What polyzymd freeze lays out for upload."),
+    ("logs/", "Full logs of polyzymd commands; the console shows only warnings."),
+    ("data.local.yaml", "Where this machine keeps the trajectories."),
+)
+
+
+def _write_citation(
+    root: Path,
+    meta: dict[str, Any],
+    *,
+    version: str,
+    released: str,
+    commit: str | None,
+    method: str,
+) -> None:
+    """Write ``CITATION.cff`` and ``.zenodo.json`` from ``meta``, and ignore freeze's outputs in git."""
+    from polyzymd.analyses.study_metadata import citation_cff, dump_cff, zenodo_json
+
+    (root / CITATION).write_text(
+        dump_cff(citation_cff(meta, version=version, released=released, commit=commit))
+    )
+    (root / ZENODO).write_text(
+        json.dumps(zenodo_json(meta, version=version, released=released, method=method), indent=2)
+        + "\n"
+    )
+    gitignore = root / ".gitignore"
+    lines = gitignore.read_text().splitlines() if gitignore.exists() else []
+    missing = [(entry, why) for entry, why in _IGNORED if entry not in lines]
+    if missing:
+        lines += [line for entry, why in missing for line in (f"# {why}", entry)]
+        gitignore.write_text("\n".join([*lines, ""]))
+
+
+def _commit_and_tag(
+    root: Path, paths: list[str], tag: str, what: str, warnings: list[str]
+) -> str | None:
+    """Commit ``paths`` of ``root`` and tag the commit; return it, or ``None`` with a warning.
+
+    Job and log files under the paths are never committed
+    (:data:`EXCLUDE_MACHINE_FILES`). ``what`` (``"study"`` or ``"project"``)
+    names the folder in the commit and tag messages.
+    """
+    import polyzymd
+
+    paths = [*paths, *EXCLUDE_MACHINE_FILES]
+    _git(root, "add", "--", *paths)
+    paths = committable(root, paths)
+    message = f"Freeze {what} as {tag} with polyzymd {what} freeze"
+    if _git(root, "commit", "--quiet", "-m", message, "--", *paths) is None:
+        warnings.append("git could not commit the frozen files (is user.name set?)")
+        return None
+    note = f"{what.capitalize()} frozen by PolyzyMD {polyzymd.__version__}"
+    if _git(root, "tag", "-a", tag, "-m", note) is None:
+        warnings.append(f"git could not create the tag {tag}")
+        return None
+    return (_git(root, "rev-parse", "HEAD") or "").strip() or None
+
+
+def _copy_frozen_folder(
+    root: Path,
+    deposit: Path,
+    tag: str | None,
+    commit: str | None,
+    files: list[str],
+    configs: list[str],
+) -> None:
+    """Write ``deposit/study``: the frozen folder, without job, log or hidden folders.
+
+    It is the tagged commit (from ``git archive``) or, without a commit, a
+    copy of ``files``. The condition configs ``configs`` (relative to
+    ``root``) are written there without machine paths
+    (:func:`without_machine_paths`).
+    """
+    copy = deposit / "study"
+    if copy.exists():
+        shutil.rmtree(copy)
+    copy.mkdir(parents=True)
+    if commit:
+        archive = subprocess.run(
+            ["git", "-C", str(root), "archive", "--format=tar", tag], capture_output=True
+        )
+        subprocess.run(["tar", "-x", "-C", str(copy)], input=archive.stdout, check=False)
+    else:
+        for name in files:
+            target = copy / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(root / name, target)
+    drop_machine_files(copy)
+    for config in configs:
+        copied = copy / config
+        if copied.is_file():
+            copied.write_text(without_machine_paths(copied.read_text()))
+
+
+def _finish_deposit(
+    root: Path,
+    deposit: Path,
+    tag: str | None,
+    commit: str | None,
+    manifest: dict[str, Any],
+    readme: str,
+    warnings: list[str],
+) -> FreezeResult:
+    """Copy the manifest, citation files and manifest schema into ``deposit``, write its README and upload guide.
+
+    The upload folder and ``UPLOAD.md`` come from
+    :func:`~polyzymd.analyses.study_upload_guide.prepare_upload`.
+    """
+    from polyzymd.analyses.study_upload_guide import prepare_upload
+
+    for name in (MANIFEST, CITATION, ZENODO):
+        if (root / name).exists():
+            shutil.copy2(root / name, deposit / name)
+    shutil.copy2(
+        Path(__file__).parent / "schemas" / MANIFEST_SCHEMA_FILE, deposit / MANIFEST_SCHEMA_FILE
+    )
+    (deposit / "README.md").write_text(readme)
+    tag = tag if commit else None
+    prepared = prepare_upload(
+        deposit,
+        study_name=root.name,
+        tag=tag,
+        manifest=manifest,
+        zenodo=json.loads((root / ZENODO).read_text()),
+        warnings=warnings,
+    )
+    return FreezeResult(
+        root,
+        tag,
+        commit,
+        deposit,
+        manifest,
+        warnings,
+        guide=prepared["guide"],
+        upload=prepared["upload"],
+    )
 
 
 def freeze(
@@ -1045,36 +1227,22 @@ def freeze(
 
     import polyzymd
     from polyzymd.analyses.study_file import load_study_file, portable
-    from polyzymd.analyses.study_git import git_state
-    from polyzymd.analyses.study_metadata import (
-        check_metadata,
-        citation_cff,
-        dump_cff,
-        zenodo_json,
-    )
+    from polyzymd.analyses.study_metadata import check_metadata
 
     protocol = load_study_file(root)
     root = protocol.root
     meta, warnings = check_metadata(protocol.metadata)
-    if not publish:
-        # The project checks and publishes the metadata once, for every study.
-        warnings = []
-    state = git_state(root) if publish else None
-    if publish and state is None:
-        warnings.append("the study is not a git repository, so freeze cannot commit or tag it")
-    elif state is not None and state["inputs_uncommitted"]:
-        warnings.append(
-            "uncommitted inputs are not part of the tagged study: "
-            + ", ".join(state["inputs_uncommitted"])
-        )
-    tag = tag or (_next_tag(root) if state else None)
-    if state and tag and _git(root, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}"):
-        raise ProtocolError(f"The tag {tag} already exists.", hint="Give another with --tag.")
+    state = None
+    if publish:
+        state, tag, found = _git_preflight(root, tag, "study")
+        warnings += found
+    else:
+        # The project checks and publishes the metadata once, for every study,
+        # and commits and tags them together.
+        warnings, tag = [], None
     for run, why in stale_runs(protocol).items():
         warnings.append(f"run {run} may be stale: {'; '.join(why)}")
     warnings.extend(report_problems(protocol))
-    if protocol.stats is not None:
-        warnings.extend(stats_warnings(protocol.root, protocol.stats, project=False))
 
     deposit = root / DEPOSIT
     deposit.mkdir(exist_ok=True)
@@ -1100,25 +1268,7 @@ def freeze(
 
     from polyzymd.analyses.study_file import STUDY_FILE
 
-    if state:
-        tracked = (_git(root, "ls-files") or "").splitlines()
-        results = (
-            _git(root, "ls-files", "--others", "--exclude-standard", "--", "results") or ""
-        ).splitlines()
-        candidates = {p for p in (*tracked, *results) if p}
-    else:
-        candidates = {
-            str(p.relative_to(root))
-            for p in root.rglob("*")
-            if p.is_file()
-            and p.relative_to(root).parts[0] not in (DEPOSIT, "data.local.yaml")
-            and not is_machine_file(str(p.relative_to(root)))
-        }
-    study_files = sorted(
-        p
-        for p in candidates
-        if p not in GENERATED and (root / p).is_file() and not is_machine_file(p)
-    )
+    study_files = [p for p in _listed_files(root, state) if p not in GENERATED]
     manifest: dict[str, Any] = {
         "$schema": MANIFEST_SCHEMA_FILE,
         "schema": MANIFEST_SCHEMA,
@@ -1173,111 +1323,31 @@ def freeze(
     )
     if not publish:
         return FreezeResult(root, None, None, deposit, manifest, warnings)
-    (root / CITATION).write_text(
-        dump_cff(
-            citation_cff(meta, version=version, released=released, commit=manifest["git"]["commit"])
-        )
+    _write_citation(
+        root,
+        meta,
+        version=version,
+        released=released,
+        commit=manifest["git"]["commit"],
+        method=_method(protocol),
     )
-    (root / ZENODO).write_text(
-        json.dumps(
-            zenodo_json(meta, version=version, released=released, method=_method(protocol)),
-            indent=2,
-        )
-        + "\n"
-    )
-    gitignore = root / ".gitignore"
-    lines = gitignore.read_text().splitlines() if gitignore.exists() else []
-    added = False
-    for entry, why in (
-        (f"{DEPOSIT}/", "What polyzymd study freeze lays out for upload."),
-        ("logs/", "Full logs of polyzymd commands; the console shows only warnings."),
-    ):
-        if entry not in lines:
-            lines, added = [*lines, f"# {why}", entry], True
-    if added:
-        gitignore.write_text("\n".join([*lines, ""]))
-
     commit = None
     if state and tag:
         paths = [p for p in (*GENERATED, ".gitignore", "results") if (root / p).exists()]
-        paths += EXCLUDE_MACHINE_FILES
-        _git(root, "add", "--", *paths)
-        paths = committable(root, paths)
-        if (
-            _git(
-                root,
-                "commit",
-                "--quiet",
-                "-m",
-                f"Freeze study as {tag} with polyzymd study freeze",
-                "--",
-                *paths,
-            )
-            is None
-        ):
-            warnings.append("git could not commit the frozen files (is user.name set?)")
-        elif (
-            _git(root, "tag", "-a", tag, "-m", f"Study frozen by PolyzyMD {polyzymd.__version__}")
-            is None
-        ):
-            warnings.append(f"git could not create the tag {tag}")
-        else:
-            commit = (_git(root, "rev-parse", "HEAD") or "").strip() or None
-
-    study_copy = deposit / "study"
-    if study_copy.exists():
-        shutil.rmtree(study_copy)
-    study_copy.mkdir(parents=True)
-    if commit:
-        archive = subprocess.run(
-            ["git", "-C", str(root), "archive", "--format=tar", tag], capture_output=True
-        )
-        subprocess.run(["tar", "-x", "-C", str(study_copy)], input=archive.stdout, check=False)
-    else:
-        for name in (*study_files, *(p for p in GENERATED if (root / p).exists())):
-            target = study_copy / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(root / name, target)
-    drop_machine_files(study_copy)
-    for config in _condition_configs(protocol):
-        copied = study_copy / config
-        if copied.is_file():
-            copied.write_text(without_machine_paths(copied.read_text()))
-    for name in (MANIFEST, CITATION, ZENODO):
-        if (root / name).exists():
-            shutil.copy2(root / name, deposit / name)
-    shutil.copy2(
-        Path(__file__).parent / "schemas" / MANIFEST_SCHEMA_FILE, deposit / MANIFEST_SCHEMA_FILE
+        commit = _commit_and_tag(root, paths, tag, "study", warnings)
+    generated = [p for p in GENERATED if (root / p).exists()]
+    _copy_frozen_folder(
+        root, deposit, tag, commit, [*study_files, *generated], _condition_configs(protocol)
     )
-    from polyzymd.analyses.study_upload_guide import deposit_readme, prepare_upload
+    from polyzymd.analyses.study_upload_guide import deposit_readme
 
     # The deposit's README describes the study from its metadata; the study's
     # own README.md stays as written, inside the study.
-    (deposit / "README.md").write_text(
-        deposit_readme(
-            study_name=root.name,
-            tag=tag if commit else None,
-            meta=meta,
-            analyses=protocol.analyses,
-            root=root,
-        )
-    )
-
-    prepared = prepare_upload(
-        deposit,
+    readme = deposit_readme(
         study_name=root.name,
         tag=tag if commit else None,
-        manifest=manifest,
-        zenodo=json.loads((root / ZENODO).read_text()),
-        warnings=warnings,
+        meta=meta,
+        analyses=protocol.analyses,
+        root=root,
     )
-    return FreezeResult(
-        root,
-        tag if commit else None,
-        commit,
-        deposit,
-        manifest,
-        warnings,
-        guide=prepared["guide"],
-        upload=prepared["upload"],
-    )
+    return _finish_deposit(root, deposit, tag, commit, manifest, readme, warnings)

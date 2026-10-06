@@ -1073,24 +1073,6 @@ when a file cannot be read or the tag exists.
 
 ---
 
-## polyzymd stats
-
-```bash
-polyzymd stats [PATH]
-```
-
-Runs the `stats: {plan: file.py:function}` of a project or study (`PATH` is
-its folder or file, by default the current directory) on its stored results,
-without loading any trajectory. The function receives the `Project` or
-`Study` and returns a dict; each `pandas.DataFrame` is written to
-`results/stats/<function>/<name>.csv` and the other values to `values.json`,
-with `record.json` holding the SHA-256 of the plan's file and of every stored
-report. `project check` and `study check` print `stats <function>: up to
-date`, `stale: ...` or `not run`. Exits 2 without a plan or when the plan
-fails with a PolyzyMD error.
-
----
-
 ## polyzymd study
 
 Commands on a study folder; see {doc}`../how_to/study_yaml` and

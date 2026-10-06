@@ -485,14 +485,7 @@ def deposit_readme(
     ]
     if project:
         # The project's results are each study's; the Studies section that
-        # follows gives them, with any statistics in results/stats/.
-        stats = root / "results" / "stats"
-        if stats.is_dir():
-            lines += [
-                "The statistical plan's output is in `results/stats/<function>/`, with "
-                "`record.json` naming the plan's code and the reports it read.",
-                "",
-            ]
+        # follows gives them.
         lines += [
             f"Licences: {meta.get('license', {}).get('data', 'CC-BY-4.0')} for data, results "
             f"and figures; {meta.get('license', {}).get('code', 'MIT')} for code.",

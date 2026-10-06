@@ -22,12 +22,11 @@ from pathlib import Path
 from typing import Any
 
 from polyzymd.analyses.exceptions import ProtocolError
-from polyzymd.analyses.statistics_plan import read_stats_plan
 
 #: File name that marks a project folder.
 PROJECT_FILE = "project.yaml"
 
-_TOP_KEYS = ("studies", "analyses", "stats", "metadata")
+_TOP_KEYS = ("studies", "analyses", "metadata")
 #: Key of a project analysis that limits it to some studies.
 STUDIES_KEY = "studies"
 # Names are letters, digits, _ and -, and may start with a digit (4TGL_open).
@@ -53,9 +52,6 @@ class ProjectFile:
         ``None`` when the analysis runs in every study.
     metadata : dict
         The ``metadata:`` mapping, used for citation and deposit files.
-    stats : StatsPlan or None
-        The paper's statistical plan (``stats: {plan: file.py:function}``),
-        or ``None`` when the file has none.
     """
 
     path: Path
@@ -63,8 +59,6 @@ class ProjectFile:
     analyses: dict[str, dict[str, Any]]
     runs_in: dict[str, list[str] | None]
     metadata: dict[str, Any] = field(default_factory=dict)
-    #: The paper's statistical plan (``stats: {plan: file.py:function}``).
-    stats: Any = None
 
     @property
     def root(self) -> Path:
@@ -123,12 +117,11 @@ def find_project_file(path: str | Path) -> Path:
 def load_project_file(path: str | Path) -> ProjectFile:
     """Read and check ``project.yaml``.
 
-    The top-level keys may be ``studies``, ``analyses``, ``stats`` and
+    The top-level keys may be ``studies``, ``analyses`` and
     ``metadata``; ``studies`` is required and must not be empty. Study
     folders are resolved against the project folder and must each hold a
     ``study.yaml``. Every ``studies:`` list of an analysis must be a
-    non-empty list of listed study labels. The ``stats:`` entry is read
-    with :func:`~polyzymd.analyses.statistics_plan.read_stats_plan`.
+    non-empty list of listed study labels.
 
     Parameters
     ----------
@@ -147,7 +140,7 @@ def load_project_file(path: str | Path) -> ProjectFile:
         unknown, ``studies`` is missing or empty, a study folder has no
         ``study.yaml``, ``analyses`` or ``metadata`` is not a mapping, an
         analysis's ``studies:`` is not a non-empty list or names an unknown
-        study, or the ``stats:`` entry is invalid.
+        study.
     """
     import yaml
 
@@ -214,7 +207,6 @@ def load_project_file(path: str | Path) -> ProjectFile:
         analyses=analyses,
         runs_in=runs_in,
         metadata=dict(metadata),
-        stats=read_stats_plan(raw.get("stats"), f"{file}: stats", file.parent),
     )
 
 

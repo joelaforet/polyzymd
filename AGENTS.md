@@ -104,11 +104,10 @@ paper's studies and the analyses each runs, with each study's `regions:` and
 `structures:` resolved into `region <name>` / `structure <name>`
 (`resolve_names`); `analyze --project`, `project check` and
 `pz.Project(...).results(run)` (a `study` column, factor columns).
-Statistics (`analyses/statistics_plan.py`): `replicate_table(run)` (one row
-per replicate, the test unit), a slope test per numeric condition factor in
-every `--study` report (`TrendReport`), and `stats: {plan: file.py:fn}` run
-by `polyzymd stats` (`cli/stats.py`), stored with a record that check uses
-to say when it is stale.
+Statistics (`analyses/study_statistics.py`): `replicate_table(run)` (one row
+per replicate, the test unit) and a slope test per numeric condition factor
+in every `--study` report (`TrendReport`). A paper's own statistics are
+scripts in the project's `stats/` folder; freeze hashes and publishes them.
 `polyzymd project init` (`analyses/project_scaffold.py`) writes a project
 with empty studies (existing studies are moved in by hand, following
 `docs/source/tutorials/move_studies_into_project.md`), and `polyzymd project freeze`

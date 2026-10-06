@@ -539,10 +539,10 @@ class Study:
     def replicate_table(self, run: str) -> Any:
         """Return one row per replicate of ``run``, from its stored results.
 
-        See :func:`polyzymd.analyses.statistics_plan.replicate_table`: the
+        See :func:`polyzymd.analyses.study_statistics.replicate_table`: the
         sampling unit of every test, with a column for each factor.
         """
-        from polyzymd.analyses.statistics_plan import replicate_table
+        from polyzymd.analyses.study_statistics import replicate_table
 
         return replicate_table(self, run)
 

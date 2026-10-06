@@ -17,7 +17,7 @@ from polyzymd.analyses.exceptions import ProtocolError
 #: Folders of a new project, with what each holds.
 PROJECT_FOLDERS = {
     "analyses": "Measurement functions every study uses, listed in project.yaml as file.py:function",
-    "stats": "The statistical plan, named by stats: in project.yaml and run by polyzymd stats",
+    "stats": "Statistics scripts that read pz.Project('.').replicate_table(run); freeze publishes them",
     "figures": "Notebooks and scripts that read results with pz.Project('.').results(run)",
 }
 
@@ -66,9 +66,6 @@ analyses: {{}}                  # run in every study, with that study's regions 
 #     selections:
 #       lid: region lid
 #       core: region core
-
-# stats:                      # your own statistics, run with polyzymd stats
-#   plan: stats/plan.py:plan  # receives the project; use project.replicate_table(run)
 
 metadata:                     # TODO before polyzymd project freeze
   title: TODO
@@ -211,7 +208,7 @@ def create_project(
         f"({', '.join(studies)}).\n`project.yaml` lists the studies and the analyses each "
         "runs; each study's `study.yaml` holds that protein's conditions, structures and "
         "regions.\n\n```bash\npolyzymd project check .\npolyzymd analyze --project .\n"
-        "polyzymd stats .\npolyzymd project freeze .\n```\n"
+        "polyzymd project freeze .\n```\n"
     )
     if git:
         created.commit = init_repository(root, "Create project with polyzymd project init")

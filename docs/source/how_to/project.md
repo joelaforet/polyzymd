@@ -197,32 +197,21 @@ a replicate value is not finite. Labelled results (one value per residue) get
 none. A different model, such as a dose response that is not a straight
 line, belongs in your statistical plan.
 
-**Your own statistical plan.** A plan that goes further is a function in the project (or study) folder:
-
-```yaml
-stats:
-  plan: stats/plan.py:plan
-```
+**Your own statistics.** Tests that go further are a script in the
+project's `stats/` folder that reads the stored values, one row per
+replicate:
 
 ```python
-# stats/plan.py
-def plan(project):
-    table = project.replicate_table("core_rmsf")
-    ...
-    return {"tier1": tier1_table, "tier2": tier2_table, "alpha": 0.05}
+# stats/tiers.py
+import polyzymd as pz
+
+table = pz.Project("Paper_1").replicate_table("core_rmsf")
+...
+tier1.to_csv("stats/tier1.csv", index=False)
 ```
 
-```bash
-polyzymd stats Paper_1
-```
-
-It receives the `Project` (or `Study`) and returns a dict of tables and
-values, written to `results/stats/<function>/` (`<name>.csv` per table,
-`values.json` for the rest) with `record.json`: the SHA-256 of the plan's
-file and of every report it could read. `polyzymd project check` then says
-whether it is up to date, or stale because its code or the analyses changed.
-The plan lives in the folder, so it is committed and published with the
-paper.
+The script and what it writes are project files, so `project freeze` hashes
+them in the manifest and publishes them with the paper.
 
 ## Publish
 
@@ -234,8 +223,8 @@ freezes every study (its manifest, checklist, system summary, engine inputs
 and final frames), then writes the project's `manifest.json`, which lists
 each study's manifest by SHA-256, every condition as `<study> /
 <condition>`, and the size and SHA-256 of every project file outside the
-studies (`project.yaml`, the shared `analyses/` and `stats/` code, figures,
-the stats plan's output), and one `CITATION.cff` and `.zenodo.json` from
+studies (`project.yaml`, the shared `analyses/` and `stats/` code, figures
+and what they wrote), and one `CITATION.cff` and `.zenodo.json` from
 `project.yaml`'s `metadata:` (the keys are those of a study's metadata,
 listed in {ref}`study-metadata`). It commits and tags the project
 (`project-v1`, ...) and lays out one `deposit/` with `deposit/UPLOAD.md`, as
@@ -246,5 +235,5 @@ Before writing anything, freeze warns about every run whose stored results no
 longer match the project (a changed config, window, stride, function or
 anything in its folder, any key of the analysis entry, setting, selection,
 file content, factor, condition, or replicate set),
-every partial report, and a stats plan that is stale or was never run. Each
+and every partial report. Each
 warning names what to rerun; freezing anyway is your call.

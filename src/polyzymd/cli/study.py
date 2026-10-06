@@ -82,13 +82,6 @@ def check_command(path: Path, production: bool = False) -> None:
         click.echo(f"structure {name}: {where}")
     for name, selection in protocol.regions.items():
         click.echo(f"region {name}: {selection}")
-    if protocol.stats is not None:
-        from polyzymd.analyses.statistics_plan import stats_status
-        from polyzymd.analyses.study import Study
-
-        click.echo(
-            f"stats {protocol.stats.qualname}: {stats_status(Study(protocol.path), protocol.stats)}"
-        )
     failed = False
     for index, (label, config_path) in enumerate(protocol.conditions.items()):
         role = "control" if index == 0 else "condition"

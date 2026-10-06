@@ -597,8 +597,8 @@ def analyze_command(
 
     if study_path is not None:
         from polyzymd.analyses.results import REPORT_FILE
-        from polyzymd.analyses.statistics_plan import trend_sentence, trend_tests
         from polyzymd.analyses.study_file import load_study_file
+        from polyzymd.analyses.study_statistics import trend_sentence, trend_tests
 
         # A numeric factor of the conditions gets a slope test over them.
         trends = trend_tests(report, load_study_file(study_path).factors)

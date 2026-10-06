@@ -10,32 +10,29 @@ project, in the same form as a study's deposit.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
-import subprocess
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from polyzymd.analyses.exceptions import ProtocolError
 from polyzymd.analyses.study_freeze import (
     CHECKLIST,
     CITATION,
     DEPOSIT,
-    EXCLUDE_MACHINE_FILES,
     MANIFEST,
-    MANIFEST_SCHEMA_FILE,
     SUMMARY,
     ZENODO,
     FreezeResult,
-    _git,
+    _commit_and_tag,
+    _copy_frozen_folder,
+    _finish_deposit,
+    _git_preflight,
+    _listed_files,
     _versions,
-    committable,
-    drop_machine_files,
+    _write_citation,
     freeze,
-    is_machine_file,
-    stats_warnings,
-    without_machine_paths,
 )
 
 #: Value of the ``schema`` key of a project's ``manifest.json``.
@@ -48,16 +45,7 @@ STUDY_GENERATED = (MANIFEST, CHECKLIST, SUMMARY)
 
 def _sha256(path: Path) -> str:
     """Return the SHA-256 hex digest of the bytes of ``path``."""
-    import hashlib
-
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _next_project_tag(root: Path) -> str:
-    """Return ``project-v<n>``, with ``n`` one more than the highest existing such tag."""
-    existing = (_git(root, "tag", "--list", "project-v*") or "").split()
-    numbers = [int(t.split("v")[-1]) for t in existing if t.split("v")[-1].isdigit()]
-    return f"project-v{max(numbers, default=0) + 1}"
 
 
 def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
@@ -115,28 +103,15 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
     """
     import polyzymd
     from polyzymd.analyses.project import Project
-    from polyzymd.analyses.study_git import git_state
-    from polyzymd.analyses.study_metadata import check_metadata, citation_cff, dump_cff, zenodo_json
-    from polyzymd.analyses.study_upload_guide import deposit_readme, prepare_upload
+    from polyzymd.analyses.study_metadata import check_metadata
+    from polyzymd.analyses.study_upload_guide import deposit_readme
     from polyzymd.citation import citation_line
 
     project = Project(root)
     root = project.root
     meta, warnings = check_metadata(project.protocol.metadata, what="project")
-    state = git_state(root)
-    if state is None:
-        warnings.append("the project is not a git repository, so freeze cannot commit or tag it")
-    elif state["inputs_uncommitted"]:
-        warnings.append(
-            "uncommitted inputs are not part of the tagged project: "
-            + ", ".join(state["inputs_uncommitted"])
-        )
-    tag = tag or (_next_project_tag(root) if state else None)
-    if state and tag and _git(root, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}"):
-        raise ProtocolError(f"The tag {tag} already exists.", hint="Give another with --tag.")
-
-    if project.protocol.stats is not None:
-        warnings.extend(stats_warnings(root, project.protocol.stats, project=True))
+    state, tag, found = _git_preflight(root, tag, "project")
+    warnings += found
 
     studies: dict[str, Any] = {}
     conditions: dict[str, Any] = {}
@@ -173,7 +148,7 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         "conditions": conditions,
         "analyses": {run: project.runs_in(run) for run in project.protocol.analyses},
         # The project's own files (project.yaml, shared analyses/ and stats/
-        # code, figures, the stats plan's output); each study's are in its manifest.
+        # code, figures and what they wrote); each study's are in its manifest.
         "files": _project_files(project, state),
         "trajectory_deposits": meta["related"]["trajectories"],
         "cite": {"polyzymd": citation_line()},
@@ -185,23 +160,13 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         f"protein ({', '.join(studies)}), each against its own control; the replicate is "
         "the sampling unit."
     )
-    (root / CITATION).write_text(
-        dump_cff(citation_cff(meta, version=version, released=released, commit=None))
+    _write_citation(
+        root, meta, version=version, released=released, commit=None, method=method
     )
-    (root / ZENODO).write_text(
-        json.dumps(zenodo_json(meta, version=version, released=released, method=method), indent=2)
-        + "\n"
-    )
-    gitignore = root / ".gitignore"
-    lines = gitignore.read_text().splitlines() if gitignore.exists() else []
-    for entry in (f"{DEPOSIT}/", "logs/", "data.local.yaml"):
-        if entry not in lines:
-            lines.append(entry)
-    gitignore.write_text("\n".join([*lines, ""]))
 
     commit = None
     if state and tag:
-        paths = [p for p in (*PROJECT_GENERATED, ".gitignore") if (root / p).exists()]
+        paths = [p for p in (*PROJECT_GENERATED, ".gitignore", "results") if (root / p).exists()]
         for label in project.labels:
             folder = project[label].root.relative_to(root)
             paths += [
@@ -209,61 +174,23 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
                 for p in (*STUDY_GENERATED, "results")
                 if (root / folder / p).exists()
             ]
-        results = root / "results"
-        if results.exists():
-            paths.append("results")
-        paths += EXCLUDE_MACHINE_FILES
-        _git(root, "add", "--", *paths)
-        paths = committable(root, paths)
-        if _git(root, "commit", "--quiet", "-m", f"Freeze project as {tag}", "--", *paths) is None:
-            warnings.append("git could not commit the frozen files (is user.name set?)")
-        elif (
-            _git(root, "tag", "-a", tag, "-m", f"Project frozen by PolyzyMD {polyzymd.__version__}")
-            is None
-        ):
-            warnings.append(f"git could not create the tag {tag}")
-        else:
-            commit = (_git(root, "rev-parse", "HEAD") or "").strip() or None
+        commit = _commit_and_tag(root, paths, tag, "project", warnings)
 
     deposit = root / DEPOSIT
     if deposit.exists():
         shutil.rmtree(deposit)
-    copy = deposit / "study"
-    copy.mkdir(parents=True)
-    if commit:
-        archive = subprocess.run(
-            ["git", "-C", str(root), "archive", "--format=tar", tag], capture_output=True
-        )
-        subprocess.run(["tar", "-x", "-C", str(copy)], input=archive.stdout, check=False)
-    else:
-        for path in root.rglob("*"):
-            relative = path.relative_to(root)
-            if (
-                path.is_file()
-                and relative.parts[0] not in (DEPOSIT, ".git")
-                and DEPOSIT not in relative.parts
-                and path.name != "data.local.yaml"
-                and not is_machine_file(str(relative))
-            ):
-                target = copy / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(path, target)
-    drop_machine_files(copy)
+    configs = [
+        str(config.relative_to(root))
+        for label in project.labels
+        for config in project[label].protocol.conditions.values()
+        if config.is_relative_to(root)
+    ]
+    _copy_frozen_folder(root, deposit, tag, commit, _listed_files(root, None), configs)
     for label in project.labels:
-        study = project[label]
-        for config in study.protocol.conditions.values():
-            if config.is_relative_to(root) and (copy / config.relative_to(root)).is_file():
-                deposited = copy / config.relative_to(root)
-                deposited.write_text(without_machine_paths(deposited.read_text()))
         for part in ("engine_inputs", "final_frames"):
-            source = study.root / DEPOSIT / part
+            source = project[label].root / DEPOSIT / part
             if source.is_dir():
                 shutil.copytree(source, deposit / part / label, dirs_exist_ok=True)
-    for name in (MANIFEST, CITATION, ZENODO):
-        shutil.copy2(root / name, deposit / name)
-    shutil.copy2(
-        Path(__file__).parent / "schemas" / MANIFEST_SCHEMA_FILE, deposit / MANIFEST_SCHEMA_FILE
-    )
     readme = deposit_readme(
         study_name=root.name,
         tag=tag if commit else None,
@@ -272,24 +199,8 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         root=root,
         project=True,
     )
-    (deposit / "README.md").write_text(readme + _studies_section(project))
-    prepared = prepare_upload(
-        deposit,
-        study_name=root.name,
-        tag=tag if commit else None,
-        manifest=manifest,
-        zenodo=json.loads((root / ZENODO).read_text()),
-        warnings=warnings,
-    )
-    return FreezeResult(
-        root,
-        tag if commit else None,
-        commit,
-        deposit,
-        manifest,
-        warnings,
-        guide=prepared["guide"],
-        upload=prepared["upload"],
+    return _finish_deposit(
+        root, deposit, tag, commit, manifest, readme + _studies_section(project), warnings
     )
 
 
@@ -302,31 +213,11 @@ def _project_files(project: Any, state: dict | None) -> dict[str, dict[str, Any]
     """
     root = project.root
     studies = {project[label].root.relative_to(root).parts[0] for label in project.labels}
-    if state is not None:
-        listed = (_git(root, "ls-files") or "").splitlines() + (
-            _git(root, "ls-files", "--others", "--exclude-standard", "--", "results") or ""
-        ).splitlines()
-    else:
-        listed = [
-            str(p.relative_to(root))
-            for p in root.rglob("*")
-            if p.is_file() and not is_machine_file(str(p.relative_to(root)))
-        ]
-    files = {}
-    for name in sorted(set(listed)):
-        parts = Path(name).parts
-        if (
-            not parts
-            or parts[0] in studies
-            or parts[0] in (DEPOSIT, ".git", "logs")
-            or is_machine_file(name)
-            or name in (*PROJECT_GENERATED, "data.local.yaml")
-            or not (root / name).is_file()
-        ):
-            continue
-        path = root / name
-        files[name] = {"size": path.stat().st_size, "sha256": _sha256(path)}
-    return files
+    return {
+        name: {"size": (root / name).stat().st_size, "sha256": _sha256(root / name)}
+        for name in _listed_files(root, state)
+        if Path(name).parts[0] not in studies and name not in PROJECT_GENERATED
+    }
 
 
 def _studies_section(project: Any) -> str:

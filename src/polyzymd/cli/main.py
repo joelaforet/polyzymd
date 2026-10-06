@@ -3798,10 +3798,8 @@ def _register_optional_command_groups() -> None:
     cli.add_command(analyze_command)
     cli.add_command(study_group)
     from polyzymd.cli.project import project_group
-    from polyzymd.cli.stats import stats_command
 
     cli.add_command(project_group)
-    cli.add_command(stats_command)
     from polyzymd.cli.hashes import hash_trajectories_command
 
     cli.add_command(hash_trajectories_command)

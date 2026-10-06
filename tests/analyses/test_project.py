@@ -167,7 +167,7 @@ def test_files_validate_against_the_schemas(project: Path) -> None:
 
 @pytest.fixture()
 def graded(tmp_path: Path) -> Path:
-    """A project of one study whose Rg rises by 2 per unit of sbma_fraction, with a stats plan."""
+    """A project of one study whose Rg rises by 2 per unit of sbma_fraction."""
     root = tmp_path / "Graded"
     folder = root / "prot"
     levels = {"none": None, "q1": 0.25, "q3": 0.75, "full": 1.0}
@@ -187,18 +187,7 @@ def graded(tmp_path: Path) -> Path:
         for name, level in levels.items()
     )
     (folder / "study.yaml").write_text(f"equilibration: 0ns\nconditions:\n{conditions}")
-    (root / "stats").mkdir(parents=True)
-    (root / "stats" / "plan.py").write_text(
-        "def plan(project):\n"
-        "    table = project.replicate_table('rg')\n"
-        "    means = table.groupby('condition', sort=False)['value'].mean().reset_index()\n"
-        "    return {'condition_means': means, 'n_replicates': int(len(table))}\n"
-    )
-    (root / "project.yaml").write_text(
-        "studies: {prot: prot}\n"
-        "analyses: {rg: {selection: all}}\n"
-        "stats: {plan: stats/plan.py:plan}\n"
-    )
+    (root / "project.yaml").write_text("studies: {prot: prot}\nanalyses: {rg: {selection: all}}\n")
     return root
 
 
@@ -221,31 +210,6 @@ class TestStatistics:
         assert trend.n_replicates == 9
         assert trend.slope == pytest.approx(2.0, abs=1e-6) and trend.significant
         assert any(v.startswith("mean_rg rises with sbma_fraction") for v in report.verdict)
-
-    def test_stats_plan_runs_and_tracks_its_inputs(self, graded: Path) -> None:
-        import pandas as pd
-
-        assert _analyze("rg", "--project", str(graded)).exit_code == 0
-        result = CliRunner().invoke(cli, ["stats", str(graded)])
-        assert result.exit_code == 0, result.output
-        folder = graded / "results" / "stats" / "plan"
-        means = pd.read_csv(folder / "condition_means.csv")
-        assert list(means["condition"]) == ["none", "q1", "q3", "full"]
-        assert '"n_replicates": 12' in (folder / "values.json").read_text()
-        check = CliRunner().invoke(cli, ["project", "check", str(graded)])
-        assert "stats plan: up to date" in check.output
-        text = (graded / "project.yaml").read_text()
-        (graded / "project.yaml").write_text(text + "metadata: {title: Filled in later}\n")
-        check = CliRunner().invoke(cli, ["project", "check", str(graded)])
-        assert "stats plan: up to date" in check.output
-        with (graded / "stats" / "plan.py").open("a") as handle:
-            handle.write("# edited\n")
-        check = CliRunner().invoke(cli, ["project", "check", str(graded)])
-        assert "stats plan: stale: its code changed" in check.output
-
-    def test_stats_without_a_plan(self, project: Path) -> None:
-        result = CliRunner().invoke(cli, ["stats", str(project)])
-        assert result.exit_code == 2 and "has no stats: plan" in result.output
 
 
 def test_a_moved_project_reuses_its_results(project: Path, tmp_path: Path) -> None:
@@ -402,7 +366,7 @@ class TestAuditFindings:
             assert str(project) not in (project / name).read_text(), name
         assert "analyses/lid.py" in result.manifest["files"]
 
-    def test_freeze_names_partial_reports_and_stale_stats(self, graded: Path, monkeypatch) -> None:
+    def test_freeze_names_partial_reports(self, graded: Path, monkeypatch) -> None:
         import json
 
         from polyzymd.analyses.project_freeze import freeze_project
@@ -420,12 +384,11 @@ class TestAuditFindings:
         init_repository(graded, "start")
         warnings = " | ".join(freeze_project(graded).warnings)
         assert "partial report: condition q1 is left out: boom" in warnings
-        assert "stats plan plan is not run" in warnings
         assert "PARTIAL REPORT" in (graded / "deposit" / "README.md").read_text()
 
     def test_trend_refuses_non_finite_values_and_two_levels(self) -> None:
         from polyzymd.analyses.protocols import ConditionReport
-        from polyzymd.analyses.statistics_plan import trend_sentence, trend_tests
+        from polyzymd.analyses.study_statistics import trend_sentence, trend_tests
 
         def report(values):
             class R:
