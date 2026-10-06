@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
-from polyzymd.workflow.daisy_chain import is_within_run_dir
+from polyzymd.workflow.daisy_chain import is_within_run_dir, job_belongs_to_run
 
 LOGGER = logging.getLogger(__name__)
 
@@ -392,8 +392,8 @@ def build_system_report(
         and ``load_or_scan_progress``.
     jobs
         The user's live jobs, or ``None`` when SLURM could not be queried.
-        A job belongs to a replicate when it works in the replicate's run
-        directory.
+        A job belongs to a replicate as decided by
+        :func:`~polyzymd.workflow.daisy_chain.job_belongs_to_run`.
     """
     from polyzymd.simulation.progress import SimulationStatus
 
@@ -419,7 +419,11 @@ def build_system_report(
     for rep_num, rep_path in sorted(dict(sim_config.discover_replicate_dirs()).items()):
         job_name = job_name_fn(sim_config, rep_num)
         run_dir = rep_path or sim_config.get_working_directory(rep_num)
-        rep_jobs = [job for job in jobs or [] if is_within_run_dir(job.work_dir, run_dir)]
+        rep_jobs = [
+            job
+            for job in jobs or []
+            if job_belongs_to_run(job.name, job.work_dir, run_dir, job_name)
+        ]
 
         if rep_path is None:
             replicates.append(

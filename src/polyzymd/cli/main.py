@@ -1301,8 +1301,9 @@ def _warn_job_hardware(
         )
     elif not job_gpus and not partition and preset_slurm.gpus:
         colored_echo(
-            f"  warning: the job asks for no GPU, but preset {preset} uses the GPU "
-            f"partition {preset_slurm.partition}; choose a CPU partition with --partition",
+            f"  warning: the job asks for no GPU, but preset {preset} is set up for GPU "
+            f"jobs on partition {preset_slurm.partition}; pass --partition with a "
+            "partition that has CPU nodes",
             phase="workflow",
         )
     gromacs_cfg = getattr(sim_config, "gromacs", None)
@@ -1779,7 +1780,9 @@ def submit(
             job_name = create_job_name(sim_config, rep)
 
             if not force:
-                existing = check_existing_slurm_jobs(sim_config.get_working_directory(rep))
+                existing = check_existing_slurm_jobs(
+                    sim_config.get_working_directory(rep), job_name
+                )
                 if existing:
                     ids = ", ".join(existing)
                     colored_echo(
@@ -2789,7 +2792,11 @@ def cancel(
       polyzymd cancel -c config.yaml -r 1-3 --resume
     """
     from polyzymd.config.schema import SimulationConfig
-    from polyzymd.workflow.daisy_chain import cancel_slurm_jobs, check_existing_slurm_jobs
+    from polyzymd.workflow.daisy_chain import (
+        cancel_slurm_jobs,
+        check_existing_slurm_jobs,
+        create_job_name,
+    )
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
@@ -2829,7 +2836,11 @@ def cancel(
                 )
             continue
 
-        job_ids = [] if stop_only else check_existing_slurm_jobs(working_dir)
+        job_ids = (
+            []
+            if stop_only
+            else check_existing_slurm_jobs(working_dir, create_job_name(sim_config, replicate))
+        )
 
         if dry_run:
             queued = ", ".join(job_ids) if job_ids else "none"
@@ -3677,7 +3688,7 @@ def recover(
 
     # Best-effort duplicate guard
     if not force:
-        existing = check_existing_slurm_jobs(working_dir)
+        existing = check_existing_slurm_jobs(working_dir, job_name)
         if existing:
             ids = ", ".join(existing)
             colored_echo(

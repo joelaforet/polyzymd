@@ -1876,8 +1876,25 @@ class SimulationConfig(_ConfigModel):
         Returns:
             Path to the working directory (in scratch)
         """
-        dir_name = self.format_run_directory_name(replicate)
-        return self.output.effective_scratch_directory / dir_name
+        scratch = self.output.effective_scratch_directory
+        path = scratch / self.format_run_directory_name(replicate)
+        old_path = self._zero_duration_run_directory(replicate)
+        if not path.exists() and old_path is not None and old_path.is_dir():
+            return old_path
+        return path
+
+    def _zero_duration_run_directory(self, replicate: int | str) -> Path | None:
+        """The run directory as named before durations below 1 ns kept their value.
+
+        Earlier versions wrote a production shorter than 1 ns as ``0``
+        (``..._0ns_...``). Returns that path, or None when the duration is
+        1 ns or longer.
+        """
+        values = self._run_directory_template_values(replicate)
+        if values["duration"] >= 1:
+            return None
+        values["duration"] = 0
+        return self.output.effective_scratch_directory / self.output.format_directory_name(**values)
 
     def get_projects_directory(self) -> Path:
         """Get the projects directory path.
@@ -1893,7 +1910,9 @@ class SimulationConfig(_ConfigModel):
         """Auto-detect all replicate directories on disk.
 
         Builds a glob pattern from the naming template with
-        ``replicate="*"`` and scans the effective scratch directory.
+        ``replicate="*"`` and scans the effective scratch directory. For a
+        production shorter than 1 ns it also finds folders with the earlier
+        ``0`` duration name; a folder with the current name wins.
 
         Returns:
             Sorted list of ``(replicate_number, directory_path)`` tuples.
@@ -1907,21 +1926,26 @@ class SimulationConfig(_ConfigModel):
                 "include the {replicate} placeholder."
             )
 
-        glob_pattern = self.format_run_directory_name(replicate="*")
-        regex_pattern = "^" + re.escape(glob_pattern).replace(r"\*", r"(?P<replicate>\d+)") + "$"
-        replicate_regex = re.compile(regex_pattern)
+        glob_patterns = [self.format_run_directory_name(replicate="*")]
+        old_path = self._zero_duration_run_directory("*")
+        if old_path is not None:
+            glob_patterns.insert(0, old_path.name)
 
         scratch = self.output.effective_scratch_directory
-        results: list[tuple[int, Path]] = []
-        for path in scratch.glob(glob_pattern):
-            if not path.is_dir():
-                continue
-            match = replicate_regex.fullmatch(path.name)
-            if match:
-                results.append((int(match.group("replicate")), path))
+        found: dict[int, Path] = {}
+        for glob_pattern in glob_patterns:
+            regex_pattern = (
+                "^" + re.escape(glob_pattern).replace(r"\*", r"(?P<replicate>\d+)") + "$"
+            )
+            replicate_regex = re.compile(regex_pattern)
+            for path in scratch.glob(glob_pattern):
+                if not path.is_dir():
+                    continue
+                match = replicate_regex.fullmatch(path.name)
+                if match:
+                    found[int(match.group("replicate"))] = path
 
-        results.sort(key=lambda t: t[0])
-        return results
+        return sorted(found.items())
 
     def _format_run_directory_name(self, replicate: int | str) -> str:
         """Format the run directory name for a replicate.

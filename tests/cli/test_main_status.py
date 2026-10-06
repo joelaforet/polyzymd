@@ -53,6 +53,7 @@ def _make_mock_config(scratch_dir: Path, template: str | None = None):
         cosolvent_composition="none",
         solvent_composition="water_tip3p",
     )
+    mock._zero_duration_run_directory.return_value = None
 
     return mock
 

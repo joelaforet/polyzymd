@@ -409,6 +409,47 @@ class TestStatusAgentCli:
         assert replicate["verdict"] == "dead"
         assert replicate["last_log"] is None
 
+    def test_chain_working_in_the_folder_it_was_submitted_from_is_running(self, tmp_path: Path):
+        """A chain from an older version works where it was submitted; its name matches."""
+        logs = tmp_path / "slurm_logs"
+        logs.mkdir()
+        rep = tmp_path / "scratch" / "SYS_run1"
+        progress = _write_progress(
+            rep, 60_000_000, SimulationStatus.INTERRUPTED, SegmentStatus.INTERRUPTED
+        )
+
+        cfg = _mock_cfg(rep.parent, logs)
+        cfg.discover_replicate_dirs.return_value = [(1, rep)]
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("name: x\n")
+        engine = MagicMock()
+        engine.resolve_engine_working_directory.side_effect = lambda p: p
+        engine.load_or_scan_progress.return_value = progress
+
+        with (
+            patch("polyzymd.config.schema.SimulationConfig.from_yaml", return_value=cfg),
+            patch("polyzymd.engines.create_engine", return_value=engine),
+            patch("polyzymd.cli.main._resolve_engine_name", return_value="openmm"),
+            patch("polyzymd.cli.main.warn_if_wrong_pixi_env"),
+            patch("polyzymd.simulation.progress.save_progress"),
+            patch(
+                "polyzymd.workflow.daisy_chain.create_job_name",
+                side_effect=lambda c, r: f"SYS_run{r}",
+            ),
+            patch("polyzymd.cli.status_report.subprocess.run") as run,
+        ):
+            run.return_value = MagicMock(
+                returncode=0,
+                stdout=f"555|SYS_run1|R|2:00:00|nodeA|None|{tmp_path / 'projects'}\n",
+                stderr="",
+            )
+            result = CliRunner().invoke(cli, ["status", "--format", "json", "-c", str(config_path)])
+
+        assert result.exit_code == 0, result.output
+        replicate = json.loads(result.output)["systems"][0]["replicates"][0]
+        assert [job["job_id"] for job in replicate["jobs"]] == ["555"]
+        assert replicate["verdict"] == "running"
+
     def test_json_format(self, tmp_path: Path):
         scratch = tmp_path / "scratch"
         rep1 = scratch / "SYS_run1"

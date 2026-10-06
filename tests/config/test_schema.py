@@ -395,6 +395,26 @@ class TestRunDirectoryNaming:
         minimal_config_data["simulation_phases"]["production"]["duration"] = 100.0
         assert "_100ns_" in SimulationConfig(**minimal_config_data).format_run_directory_name(1)
 
+    def test_existing_run_folder_named_0ns_is_reused_for_a_short_run(
+        self, minimal_config_data, tmp_path
+    ):
+        """Folders named with 0ns by earlier versions are found; a 0.005ns folder wins."""
+        from polyzymd.config.schema import SimulationConfig
+
+        minimal_config_data["output"] = {"scratch_directory": str(tmp_path)}
+        minimal_config_data["simulation_phases"]["production"]["duration"] = 0.005
+        config = SimulationConfig(**minimal_config_data)
+        old = tmp_path / "TestEnzyme_apo_none_0ns_300K_run1"
+        new = tmp_path / "TestEnzyme_apo_none_0.005ns_300K_run1"
+
+        assert config.get_working_directory(1) == new
+        old.mkdir()
+        assert config.get_working_directory(1) == old
+        assert config.discover_replicate_dirs() == [(1, old)]
+        new.mkdir()
+        assert config.get_working_directory(1) == new
+        assert config.discover_replicate_dirs() == [(1, new)]
+
     def test_format_run_directory_name_and_working_directory_match(
         self, minimal_config_data, tmp_path
     ):

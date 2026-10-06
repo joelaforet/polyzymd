@@ -197,7 +197,7 @@ class TestJobNameGeneration:
         checked_dirs = []
         monkeypatch.setattr(
             "polyzymd.workflow.daisy_chain.check_existing_slurm_jobs",
-            lambda run_dir: checked_dirs.append(run_dir) or [],
+            lambda run_dir, job_name: checked_dirs.append(run_dir) or [],
         )
 
         dc_config = MagicMock(spec=DaisyChainConfig)
@@ -270,17 +270,22 @@ class TestJobsMatchedByRunDirectory:
 
         config_a, config_b = self._configs(tmp_path)
         run_a = config_a.get_working_directory(1)
-        self._fake_squeue(monkeypatch, f"111|{run_a}\n112|{run_a / 'gromacs'}\n")
+        self._fake_squeue(monkeypatch, f"111|x|{run_a}\n112|x|{run_a / 'gromacs'}\n")
 
         assert check_existing_slurm_jobs(run_a) == ["111", "112"]
         assert check_existing_slurm_jobs(config_b.get_working_directory(1)) == []
 
     def test_submit_of_b_proceeds_while_a_has_a_job(self, tmp_path, monkeypatch):
-        from polyzymd.workflow.daisy_chain import DaisyChainConfig, DaisyChainSubmitter
+        from polyzymd.workflow.daisy_chain import (
+            DaisyChainConfig,
+            DaisyChainSubmitter,
+            create_job_name,
+        )
         from polyzymd.workflow.slurm import SlurmConfig
 
         config_a, config_b = self._configs(tmp_path)
-        calls = self._fake_squeue(monkeypatch, f"111|{config_a.get_working_directory(1)}\n")
+        name = create_job_name(config_a, 1)
+        calls = self._fake_squeue(monkeypatch, f"111|{name}|{config_a.get_working_directory(1)}\n")
         dc_config = DaisyChainConfig(
             slurm_config=SlurmConfig.from_preset("testing"),
             total_production_time_ns=100.0,
@@ -293,6 +298,44 @@ class TestJobsMatchedByRunDirectory:
         assert result.job_id == "222"
         assert [cmd[0] for cmd in calls] == ["squeue", "sbatch"]
         assert config_b.get_working_directory(1).is_dir()
+
+    def test_chain_submitted_from_another_folder_is_matched_by_name(self, tmp_path, monkeypatch):
+        """A chain from an older version works where it was submitted; its name still matches."""
+        from polyzymd.workflow.daisy_chain import check_existing_slurm_jobs, create_job_name
+
+        config_a, config_b = self._configs(tmp_path)
+        name = create_job_name(config_a, 1)
+        run_b = config_b.get_working_directory(1)
+        self._fake_squeue(
+            monkeypatch,
+            f"111|{name}|{tmp_path / 'projects'}\n112|{name}|{run_b}\n"
+            f"113|{name}|{run_b / 'gromacs'}\n114|other|{tmp_path / 'projects'}\n",
+        )
+
+        assert check_existing_slurm_jobs(config_a.get_working_directory(1), name) == ["111"]
+
+    def test_submit_refuses_while_a_chain_from_another_folder_runs(self, tmp_path, monkeypatch):
+        from polyzymd.workflow.daisy_chain import (
+            DaisyChainConfig,
+            DaisyChainSubmitter,
+            create_job_name,
+        )
+        from polyzymd.workflow.slurm import SlurmConfig
+
+        config_a, _ = self._configs(tmp_path)
+        name = create_job_name(config_a, 1)
+        calls = self._fake_squeue(monkeypatch, f"111|{name}|{tmp_path / 'projects'}\n")
+        dc_config = DaisyChainConfig(
+            slurm_config=SlurmConfig.from_preset("testing"),
+            total_production_time_ns=100.0,
+            output_script_dir=tmp_path / "scripts",
+            config_path="/fake/config.yaml",
+        )
+
+        submitter = DaisyChainSubmitter(sim_config=config_a, dc_config=dc_config)
+        with pytest.raises(RuntimeError, match="already has RUNNING/PENDING SLURM job"):
+            submitter.submit_replicate(1)
+        assert [cmd[0] for cmd in calls] == ["squeue"]
 
 
 class TestSubmissionResultStateSemantics:
@@ -339,7 +382,7 @@ class TestCheckExistingSlurmJobs:
 
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = "12345|/runs/a\n67890|/runs/a/gromacs\n55555|/runs/b\n"
+        mock_result.stdout = "12345|x|/runs/a\n67890|x|/runs/a/gromacs\n55555|x|/runs/b\n"
 
         monkeypatch.setattr(
             "polyzymd.workflow.daisy_chain.subprocess.run", lambda *a, **kw: mock_result
@@ -447,7 +490,7 @@ class TestDuplicateJobGuardIntegration:
 
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = "12345|/runs/a\n"
+        mock_result.stdout = "12345|x|/runs/a\n"
         monkeypatch.setattr(
             "polyzymd.workflow.daisy_chain.subprocess.run", lambda *a, **kw: mock_result
         )

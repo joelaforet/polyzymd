@@ -2072,7 +2072,9 @@ class TestSubmitDryRunHardwareWarnings:
 
     def test_cpu_gromacs_config_is_warned_about_gpu_partition_and_gmx(self) -> None:
         output = self._dry_run("config_gromacs.yaml")
-        assert "the job asks for no GPU, but preset aa100 uses the GPU partition" in output
+        assert "the job asks for no GPU, but preset aa100 is set up for GPU jobs" in output
+        assert "pass --partition with a partition that has CPU nodes" in output
+        assert "choose a CPU partition" not in output
         assert "neither gromacs.module_load nor gromacs.command_prefix is set" in output
 
 
