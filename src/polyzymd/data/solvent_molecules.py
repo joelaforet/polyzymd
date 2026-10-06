@@ -107,7 +107,8 @@ def get_solvent_molecule(
     with consistent partial charges. It follows this lookup order:
 
     1. In-memory cache (already loaded this session)
-    2. Bundled library SDFs (src/polyzymd/data/solvents/)
+    2. Bundled library SDFs (src/polyzymd/data/solvents/), when no SMILES
+       is given or the SMILES is the library molecule's
     3. User cache (~/.polyzymd/solvent_cache/), keyed by the name, the
        canonical SMILES and the charge method
     4. Generate from SMILES, assign charges with ``charge_method``, cache for future use
@@ -143,33 +144,32 @@ def get_solvent_molecule(
     # Normalize name
     name_key = name.lower().strip()
 
-    # Check in-memory cache first (water models and library molecules)
-    if name_key in _loaded_molecules:
-        LOGGER.debug(f"Returning {name_key} from in-memory cache")
+    from rdkit import Chem
+
+    # Water models (hardcoded literature charges)
+    if name_key in ("tip3p", "water_tip3p", "water"):
+        if name_key not in _loaded_molecules:
+            _loaded_molecules[name_key] = _create_tip3p_water()
         return _loaded_molecules[name_key]
 
-    # Handle water models specially (hardcoded literature charges)
-    if name_key in ("tip3p", "water_tip3p", "water"):
-        mol = _create_tip3p_water()
-        _loaded_molecules[name_key] = mol
-        return mol
-
     if name_key in ("spce", "spc_e", "spc/e"):
-        mol = _create_spce_water()
-        _loaded_molecules[name_key] = mol
-        return mol
+        if name_key not in _loaded_molecules:
+            _loaded_molecules[name_key] = _create_spce_water()
+        return _loaded_molecules[name_key]
 
     # Set default residue name
     if residue_name is None:
         residue_name = name[:3].upper()
 
-    # Try bundled library
+    # The bundled library molecule, unless a different SMILES is given
     library_path = _SOLVENTS_DIR / f"{name_key}.sdf"
     if library_path.exists():
-        LOGGER.info(f"Loading {name_key} from library: {library_path}")
-        mol = _load_molecule_from_sdf(library_path)
-        _loaded_molecules[name_key] = mol
-        return mol
+        if name_key not in _loaded_molecules:
+            LOGGER.info(f"Loading {name_key} from library: {library_path}")
+            _loaded_molecules[name_key] = _load_molecule_from_sdf(library_path)
+        library = _loaded_molecules[name_key]
+        if smiles is None or Chem.CanonSmiles(smiles) == Chem.CanonSmiles(library.to_smiles()):
+            return library
 
     if smiles is None:
         # Try to get from cosolvent library
@@ -187,8 +187,6 @@ def get_solvent_molecule(
 
     # A generated molecule depends on its SMILES and charge method, so both
     # are part of every cache key.
-    from rdkit import Chem
-
     method = str(charge_method).lower().strip()
     digest = hashlib.sha256(f"{Chem.CanonSmiles(smiles)} {method}".encode()).hexdigest()[:12]
     cache_key = f"{name_key}.{method}.{digest}"
@@ -313,7 +311,7 @@ def _generate_charged_molecule(smiles: str, residue_name: str, method: str = "na
     return mol
 
 
-def split_counter_ions(smiles: str) -> tuple[str, int, int]:
+def split_counter_ions(smiles: str, name: str = "") -> tuple[str, int, int]:
     """Split Na+ and Cl- counter-ions off a co-solvent SMILES.
 
     Returns the SMILES of the molecule and the numbers of Na+ and Cl- written
@@ -321,21 +319,26 @@ def split_counter_ions(smiles: str) -> tuple[str, int, int]:
     SMILES, 1 and 0. A SMILES with one part is returned unchanged.
 
     Raises:
-        ValueError: If the SMILES holds a part that is neither Na+ nor Cl-
-            besides the molecule.
+        ValueError: If RDKit cannot read the SMILES, or the SMILES holds a
+            part that is neither Na+ nor Cl- besides the molecule. The message
+            names the co-solvent ``name``.
     """
     from rdkit import Chem
 
     if "." not in smiles:
         return smiles, 0, 0
-    fragments = Chem.GetMolFrags(Chem.MolFromSmiles(smiles), asMols=True)
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError(f"Co-solvent {name!r}: RDKit cannot read the SMILES {smiles!r}.")
+    fragments = Chem.GetMolFrags(mol, asMols=True)
     parts = [Chem.MolToSmiles(part) for part in fragments]
     molecules = [part for part in parts if part not in ("[Na+]", "[Cl-]")]
     if len(molecules) != 1:
         raise ValueError(
-            f"Co-solvent SMILES {smiles!r} has the parts {', '.join(parts)}. Only Na+ and Cl- "
-            "may be written beside the molecule. Give each other molecule its own co_solvents "
-            "entry, and leave other counter-ions out: solvent.ions.neutralize adds Na+ or Cl-."
+            f"Co-solvent {name!r}: SMILES {smiles!r} has the parts {', '.join(parts)}. Only "
+            "Na+ and Cl- may be written beside the molecule. Give each other molecule its own "
+            "co_solvents entry, and leave other counter-ions out: solvent.ions.neutralize adds "
+            "Na+ or Cl-."
         )
     return molecules[0], parts.count("[Na+]"), parts.count("[Cl-]")
 
@@ -434,11 +437,13 @@ def clear_cache(name: Optional[str] = None) -> None:
     if name is not None:
         # Clear specific solvent
         name_key = name.lower().strip()
-        for key in [key for key in _loaded_molecules if key.split(".")[0] == name_key]:
+        # Cache keys are the name, or "<name>.<method>.<hash>".
+        for key in [k for k in _loaded_molecules if name_key in (k, k.rsplit(".", 2)[0])]:
             del _loaded_molecules[key]
         for cache_path in _USER_CACHE_DIR.glob(f"{name_key}.*.sdf"):
-            cache_path.unlink()
-            LOGGER.info(f"Removed {cache_path.name} from cache")
+            if cache_path.stem.rsplit(".", 2)[0] == name_key:
+                cache_path.unlink()
+                LOGGER.info(f"Removed {cache_path.name} from cache")
     else:
         # Clear all
         _loaded_molecules.clear()

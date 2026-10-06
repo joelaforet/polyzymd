@@ -44,3 +44,28 @@ def test_other_parts_of_a_smiles_are_refused(smiles) -> None:
     """A SMILES with a part that is not the molecule, Na+ or Cl- is refused with a hint."""
     with pytest.raises(ValueError, match="own co_solvents entry"):
         solvent_molecules.split_counter_ions(smiles)
+
+
+def test_a_malformed_smiles_with_a_dot_is_a_value_error() -> None:
+    """A SMILES RDKit cannot read names the co-solvent and the SMILES."""
+    with pytest.raises(ValueError, match=r"surf.*CC\(=O\.\[Na\+\]"):
+        solvent_molecules.split_counter_ions("CC(=O.[Na+]", name="surf")
+
+
+def test_a_custom_smiles_under_a_library_name_gives_the_custom_molecule(empty_caches) -> None:
+    """The bundled file is used only for the library molecule's own SMILES."""
+    custom = solvent_molecules.get_solvent_molecule("dmso", smiles="CCO")
+    assert custom.n_atoms == 9
+    assert len(list(empty_caches.glob("dmso.*.sdf"))) == 1
+    library = solvent_molecules.get_solvent_molecule("dmso", smiles="CS(C)=O")
+    assert library is solvent_molecules.get_solvent_molecule("dmso")
+    assert library.n_atoms == 10
+    assert len(list(empty_caches.glob("*.sdf"))) == 1
+
+
+def test_clear_cache_forgets_a_name_with_a_dot(empty_caches) -> None:
+    """clear_cache(name) drops the in-memory molecule even when the name holds a dot."""
+    solvent_molecules.get_solvent_molecule("my.solv", smiles="CCO")
+    solvent_molecules.clear_cache("my.solv")
+    assert solvent_molecules._loaded_molecules == {}
+    assert list(empty_caches.glob("*.sdf")) == []

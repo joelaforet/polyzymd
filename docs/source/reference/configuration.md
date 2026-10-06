@@ -483,7 +483,7 @@ PolyzyMD solves this by computing charges **once** and reusing them:
 ```
 # Lookup order for get_solvent_molecule("dmso")
 1. Check in-memory cache (fastest)
-2. Check bundled library: src/polyzymd/data/solvents/dmso.sdf
+2. Check bundled library: src/polyzymd/data/solvents/dmso.sdf (used when no SMILES or the library SMILES is given)
 3. Check user cache: ~/.polyzymd/solvent_cache/<name>.<charge method>.<SMILES hash>.sdf
 4. Generate from SMILES + AM1BCC, save to user cache
 ```

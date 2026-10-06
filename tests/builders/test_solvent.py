@@ -326,20 +326,17 @@ def test_solvate_without_box_centres_and_derives_the_box(monkeypatch) -> None:
     )
 
 
-def _solvate_counts(
-    monkeypatch, tmp_path, co_solvent_smiles: str, neutralize: bool = True, nacl: float = 0.0
-) -> dict:
-    """Solvate methane with one co-solvent at 0.5 M, Packmol replaced, and return what it was asked."""
+def _packmol_counts(monkeypatch, tmp_path, composition, runs: int = 1) -> list[dict]:
+    """Solvate methane `runs` times with Packmol replaced; return what it was asked each time."""
     from openff.toolkit import Molecule, Topology
 
     import polyzymd.utils.packmol as packmol_utils
-    from polyzymd.builders.solvent import CoSolvent, SolventComposition
     from polyzymd.data import solvent_molecules
 
-    captured: dict = {}
+    calls: list[dict] = []
 
     def fake_solvate_with_packmol(**kwargs):
-        captured.update(kwargs)
+        calls.append(kwargs)
         return kwargs["solute"]
 
     monkeypatch.setattr(packmol_utils, "solvate_with_packmol", fake_solvate_with_packmol)
@@ -347,15 +344,27 @@ def _solvate_counts(
     monkeypatch.setattr(solvent_molecules, "_loaded_molecules", {})
     solute = Molecule.from_smiles("C")
     solute.generate_conformers(n_conformers=1)
+    results = []
+    for _ in range(runs):
+        SolventBuilder().solvate(Topology.from_molecules([solute]), composition, padding=1.5)
+        names = ["water", "na", "cl", "cosolvent"]
+        counts = dict(zip(names, calls[-1]["number_of_copies"]))
+        counts["molecule"] = calls[-1]["molecules"][3]
+        results.append(counts)
+    return results
+
+
+def _solvate_counts(
+    monkeypatch, tmp_path, co_solvent_smiles: str, neutralize: bool = True, nacl: float = 0.0
+) -> dict:
+    """Solvate methane with one co-solvent at 0.5 M, Packmol replaced, and return what it was asked."""
+    from polyzymd.builders.solvent import CoSolvent, SolventComposition
+
     cosolvent = CoSolvent(name="surf", smiles=co_solvent_smiles, concentration=0.5)
     composition = SolventComposition(
         co_solvents=[cosolvent], neutralize=neutralize, nacl_concentration=nacl
     )
-    SolventBuilder().solvate(Topology.from_molecules([solute]), composition, padding=1.5)
-    names = ["water", "na", "cl", "cosolvent"]
-    counts = dict(zip(names, captured["number_of_copies"]))
-    counts["molecule"] = captured["molecules"][3]
-    return counts
+    return _packmol_counts(monkeypatch, tmp_path, composition)[0]
 
 
 class TestCoSolventCharge:
@@ -394,3 +403,31 @@ class TestCoSolventCharge:
         with caplog.at_level(logging.WARNING):
             _solvate_counts(monkeypatch, tmp_path, "CC(=O)[O-]", neutralize=False)
         assert any("net charge" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.parametrize("neutralize", [True, False])
+    def test_a_reused_composition_gives_the_same_counts(
+        self, monkeypatch, tmp_path, neutralize
+    ) -> None:
+        """A second solvate() with the same composition adds the same counter-ions."""
+        from polyzymd.builders.solvent import CoSolvent, SolventComposition
+
+        cosolvent = CoSolvent(name="surf", smiles="CC(=O)[O-].[Na+]", count=3)
+        composition = SolventComposition(
+            co_solvents=[cosolvent], neutralize=neutralize, nacl_concentration=0.15
+        )
+        first, second = _packmol_counts(monkeypatch, tmp_path, composition, runs=2)
+        assert first["na"] == first["cl"] + 3
+        assert [second[k] for k in ("water", "na", "cl", "cosolvent")] == [
+            first[k] for k in ("water", "na", "cl", "cosolvent")
+        ]
+
+    def test_a_mole_fraction_with_counter_ions_is_met(self, monkeypatch, tmp_path) -> None:
+        """Counter-ion mass comes out of the budget before the co-solvent count is taken."""
+        from polyzymd.builders.solvent import CoSolvent, SolventComposition
+
+        cosolvent = CoSolvent(name="surf", smiles="CC(=O)[O-].[Na+]", mole_fraction=0.1)
+        composition = SolventComposition(co_solvents=[cosolvent], nacl_concentration=0.0)
+        counts = _packmol_counts(monkeypatch, tmp_path, composition)[0]
+        assert counts["na"] == counts["cosolvent"] and counts["cl"] == 0
+        achieved = counts["cosolvent"] / (counts["cosolvent"] + counts["water"])
+        assert achieved == pytest.approx(0.1, abs=0.002)
