@@ -3757,38 +3757,6 @@ def recover(
             sys.exit(1)
 
 
-def _find_topology_pdb(working_dir: Path) -> Path:
-    """Find a suitable topology PDB in the working directory.
-
-    Parameters
-    ----------
-    working_dir : Path
-        Working directory to search.
-
-    Returns
-    -------
-    Path
-        Path to the PDB file.
-
-    Raises
-    ------
-    FileNotFoundError
-        If no suitable PDB is found.
-    """
-    allowed_paths = (
-        working_dir / "solvated_system.pdb",
-        working_dir / "production_0" / "production_0_topology.pdb",
-        working_dir / "production" / "production_topology.pdb",
-    )
-    for pdb_path in allowed_paths:
-        if pdb_path.exists():
-            return pdb_path
-
-    # Arbitrary recursive PDB discovery is disallowed to avoid selecting decoys or inputs
-
-    raise FileNotFoundError(f"Could not find topology PDB in {working_dir}")
-
-
 # =============================================================================
 # Info Command
 # =============================================================================

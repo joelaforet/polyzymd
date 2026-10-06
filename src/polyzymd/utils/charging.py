@@ -328,33 +328,3 @@ def get_charger(method: str, **kwargs) -> MoleculeCharger:
 
     charger_class = _CHARGER_REGISTRY[method_lower]
     return charger_class(**kwargs)
-
-
-def register_charger(name: str, charger_class: Type[MoleculeCharger]) -> None:
-    """Register a custom charger class.
-
-    This allows users to add their own charging methods that integrate
-    with the get_charger() factory function.
-
-    Args:
-        name: Name to register the charger under (case-insensitive).
-        charger_class: A subclass of MoleculeCharger.
-
-    Raises:
-        TypeError: If charger_class is not a subclass of MoleculeCharger.
-
-    Example:
-        >>> class MyCustomCharger(MoleculeCharger):
-        ...     method_name = "custom"
-        ...     def charge_molecule(self, molecule):
-        ...         # Custom charging logic
-        ...         return molecule
-        >>> register_charger("custom", MyCustomCharger)
-        >>> charger = get_charger("custom")
-    """
-    if not isinstance(charger_class, type) or not issubclass(charger_class, MoleculeCharger):
-        raise TypeError(
-            f"charger_class must be a subclass of MoleculeCharger, got {type(charger_class)}"
-        )
-
-    _CHARGER_REGISTRY[name.lower().strip()] = charger_class

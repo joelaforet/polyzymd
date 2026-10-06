@@ -182,12 +182,3 @@ def get_cosolvent(name: str) -> Optional[CoSolventData]:
             return data
 
     return None
-
-
-def list_cosolvents() -> Dict[str, CoSolventData]:
-    """Return a copy of the full co-solvent library.
-
-    Returns:
-        Dictionary of all available co-solvents.
-    """
-    return dict(COSOLVENT_LIBRARY)

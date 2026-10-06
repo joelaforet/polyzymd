@@ -228,27 +228,3 @@ def save_config(
             allow_unicode=True,
             width=100,
         )
-
-
-def load_config_dict(data: Dict[str, Any], base_path: Path = Path.cwd()) -> SimulationConfig:
-    """Create a SimulationConfig from a dictionary.
-
-    This is useful for programmatic configuration creation.
-
-    Args:
-        data: Configuration dictionary
-        base_path: Base path for resolving relative paths
-
-    Returns:
-        Validated SimulationConfig instance
-
-    Example:
-        >>> data = {
-        ...     "name": "test_sim",
-        ...     "enzyme": {"name": "LipA", "pdb_path": "enzyme.pdb"},
-        ...     ...
-        ... }
-        >>> config = load_config_dict(data)
-    """
-    expanded = _expand_paths(data, base_path)
-    return SimulationConfig.model_validate(expanded)
