@@ -314,7 +314,7 @@ All fields in the `gromacs:` block of your `config.yaml`:
 | `mdrun_flags` | `str` | `""` | Extra flags for `gmx mdrun` (applied to all stages). |
 | `mdrun_flags_equilibration` | `str \| null` | `null` | Override `mdrun_flags` for equilibration only. Falls back to `mdrun_flags` if null. |
 | `mdrun_flags_production` | `str \| null` | `null` | Override `mdrun_flags` for production only. Falls back to `mdrun_flags` if null. |
-| `grompp_flags` | `str` | `"-maxwarn 1"` | Extra flags for `gmx grompp`. |
+| `grompp_flags` | `str` | `""` | Extra flags for `gmx grompp`, such as `-maxwarn 1` to accept a warning you have read. By default every warning stops the run. |
 | `command_prefix` | `str \| null` | `null` | Prefix prepended to all GROMACS commands (e.g., Singularity wrapper). |
 | `mpi_launcher_flags` | `str` | `""` | Extra flags for the MPI launcher (`mpirun`). Only used with real-MPI binaries. |
 | `module_load` | `str \| null` | `null` | Module load command inserted into SLURM scripts verbatim. |
@@ -806,12 +806,16 @@ gromacs:
 flags during EM. If it does, check that you are using PolyzyMD v1.3.0 or
 later.
 
-### "grompp warnings about charge groups"
+### "grompp stops with a warning"
 
-**Cause**: OpenFF generates systems without charge groups.
+**Cause**: PolyzyMD passes no `-maxwarn`, so every `grompp` warning stops the
+run. A neutral system built by PolyzyMD gives none. A common one is "You are
+using Ewald electrostatics in a system with net charge": the system is not
+neutral.
 
-**Fix**: This is expected and safe. The `grompp_flags: "-maxwarn 1"` default
-suppresses it.
+**Fix**: Read the warning. For a net charge, set `solvent.ions.neutralize:
+true`. To accept a warning on purpose, set `grompp_flags: "-maxwarn 1"`. See
+{doc}`../reference/gromacs_openmm`.
 
 ### "Fatal error: Number of atoms does not match"
 

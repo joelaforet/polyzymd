@@ -39,6 +39,7 @@ def write_analysis_topology(topology: Any, system: Any, positions: Any, path: Pa
 
         structure = parmed.openmm.load_topology(topology, system, xyz=positions)
         _type_constrained_bonds(structure, system, unit, parmed)
+        _name_unnamed_atoms(structure)
         path.parent.mkdir(parents=True, exist_ok=True)
         structure.save(str(path), format="amber", overwrite=True)
     except Exception as exc:  # ParmEd raises a mix of its own and builtin errors
@@ -51,6 +52,23 @@ def write_analysis_topology(topology: Any, system: Any, positions: Any, path: Pa
         return None
     LOGGER.info("Wrote analysis topology %s", path)
     return path
+
+
+def _name_unnamed_atoms(structure: Any) -> int:
+    """Name each atom that has no name after its element (NA, CL), and return how many.
+
+    Molecules made from SMILES, such as ions, have blank atom names. The Amber
+    format writes names in fixed columns, so a blank one makes MDAnalysis and
+    ParmEd misread the file.
+    """
+    from parmed.periodic_table import Element
+
+    named = 0
+    for atom in structure.atoms:
+        if not str(atom.name).strip():
+            atom.name = str(Element[atom.atomic_number]).upper()
+            named += 1
+    return named
 
 
 def _type_constrained_bonds(structure: Any, system: Any, unit: Any, parmed: Any) -> int:

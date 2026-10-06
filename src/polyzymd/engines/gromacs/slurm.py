@@ -51,7 +51,7 @@ class GromacsSlurmScriptGenerator:
         slurm_config: SlurmConfig,
         pixi_env: str = "build",
         gmx_binary: str = "gmx",
-        grompp_flags: str = "-maxwarn 1",
+        grompp_flags: str = "",
         mdrun_flags: str = "",
         mdrun_flags_eq: str | None = None,
         mdrun_flags_prod: str | None = None,

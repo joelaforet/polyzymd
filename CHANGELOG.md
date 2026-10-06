@@ -122,6 +122,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Simulation correctness (1.3 audit, wave B).**
+  - Ions get atom names (`NA`, `CL`) in the built system and in `system.prmtop`. Their blank names made MDAnalysis refuse the Amber topology, so analysis of any system with ions failed. `analysis-topology --overwrite` repairs older runs.
+  - A topology that cannot be loaded is reported as such, not as an equilibration-window problem.
+  - `neutralize` counts the charge of co-solvents. A charged SMILES (`...OS(=O)(=O)[O-]`) gets counter-ions; one that carries its counter-ion (`...[O-].[Na+]`) needs none. A system left charged is an error with `neutralize: true` and a warning without it.
+  - `gmx grompp` gets no blanket `-maxwarn 1`, which hid the net-charge warning. Set `grompp_flags: "-maxwarn 1"` to accept a warning you have read.
+  - GROMACS runs the Langevin thermostats as Langevin dynamics (`integrator = sd`, `tau-t` = the thermostat timescale), as OpenMM does, not as `v-rescale`. Approximate mappings (the Monte Carlo barostat as `c-rescale`) and thermostats OpenMM does not implement are warned about. The new reference page "GROMACS and OpenMM" records how each setting runs on each engine.
+  - The deposit and checklist no longer say the replicate number seeds the dynamics: it seeds the starting structure. Velocities and thermostat noise are drawn afresh in every run, on both engines.
+  - Solvent chain IDs never repeat those of the solute. A system that would need more chain IDs is refused, instead of solvent being labelled as protein or polymer.
+  - `pdbindex N` selects the N-th atom of the system in analyses (`bynum`), as it does in restraints.
+  - `projects_directory` and `scratch_directory` are relative to the config's folder, so commands find the runs from any folder.
+  - `checkpoint_interval` defaults to 60 s, and the quickstart config validates.
+  - Every config section refuses keys it does not define, so a misspelled key is an error instead of a silent default. Older configs with `simulation_phases.segments` must drop it.
+  - `freeze` recognises co-solvents, names a build file `build_manifest.json` lists that is missing, asks GROMACS studies to state the GROMACS version instead of reporting a missing OpenMM version, and mentions polymer parameters in the checklist only for systems with polymers.
+
 - **Stored results and replicate tables (1.3 audit, wave A).**
   - Reordering `parts:` recomputes instead of giving one part the values of another; `parts` is now part of the stored record.
   - `replicate_table` keeps a `name` column, so two quantities stored in one run (two hydrogen-bond summaries) are no longer counted as two replicates.

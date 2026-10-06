@@ -80,16 +80,15 @@ def translate_selection(selection: str) -> str:
 
     Translations
     ------------
-    - ``pdbindex N`` → ``id N`` (PDB ATOM serial number)
+    - ``pdbindex N`` → ``bynum N``: the N-th atom of the system, counted
+      from 1
 
-    The ``pdbindex`` keyword refers to the 1-indexed atom serial number
-    from the PDB ATOM record (column 7-11), which is what PyMOL displays
-    as "id". In MDAnalysis, this is accessed via the ``id`` selection keyword.
-
-    Note: MDAnalysis also has ``bynum`` which is 1-indexed *positional*
-    (i.e., bynum 1 = first atom, bynum 2 = second atom), but this does NOT
-    correspond to PDB serial numbers when there are gaps in numbering.
-    We use ``id`` because it matches actual PDB serial numbers.
+    ``pdbindex`` means the same as in a config's restraints
+    (:mod:`polyzymd.core.restraints`): the atom at position N - 1 of the
+    built system, which is the PDB ATOM serial PolyzyMD writes and PyMOL
+    shows. MDAnalysis's ``bynum`` selects by that position. ``id`` would
+    select by the serial read from the topology file, which differs from the
+    position when serials wrap above 99,999 atoms.
 
     Parameters
     ----------
@@ -104,16 +103,15 @@ def translate_selection(selection: str) -> str:
     Examples
     --------
     >>> translate_selection("pdbindex 100 and name CA")
-    "id 100 and name CA"
+    "bynum 100 and name CA"
 
     >>> translate_selection("midpoint(pdbindex 100 and name OD1 OD2)")
-    "midpoint(id 100 and name OD1 OD2)"
+    "midpoint(bynum 100 and name OD1 OD2)"
     """
-    # pdbindex N → id N (PDB ATOM serial number)
-    translated = re.sub(r"\bpdbindex\b", "id", selection, flags=re.IGNORECASE)
+    translated = re.sub(r"\bpdbindex\b", "bynum", selection, flags=re.IGNORECASE)
 
     if translated != selection:
-        LOGGER.debug("Translated selection keyword: 'pdbindex' → 'id' (PDB ATOM serial number)")
+        LOGGER.debug("Translated selection keyword: 'pdbindex' → 'bynum' (position from 1)")
 
     return translated
 
@@ -167,7 +165,7 @@ def parse_selection_string(selection: str) -> ParsedSelection:
         - "resid 77 and name OG" - standard MDAnalysis
         - "midpoint(resid 133 and name OD1 OD2)" - midpoint mode
         - "com(resid 50-75)" - center of mass mode
-        - "pdbindex 100 and name CA" - PolyzyMD pdbindex (translated to id)
+        - "pdbindex 100 and name CA" - PolyzyMD pdbindex (translated to bynum)
 
     Returns
     -------

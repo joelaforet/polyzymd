@@ -133,7 +133,17 @@ class RestraintType(str, Enum):
 # =============================================================================
 
 
-class EnzymeConfig(BaseModel):
+class _ConfigModel(BaseModel):
+    """Base of every config section: a key the section does not define is an error.
+
+    A misspelled or unsupported key (``chrage_method``) would otherwise be
+    dropped without a word, and the build would use the default.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class EnzymeConfig(_ConfigModel):
     """Configuration for the enzyme/protein component.
 
     Attributes:
@@ -160,7 +170,7 @@ class EnzymeConfig(BaseModel):
 # =============================================================================
 
 
-class SubstrateConfig(BaseModel):
+class SubstrateConfig(_ConfigModel):
     """Configuration for the docked substrate/ligand.
 
     Attributes:
@@ -191,7 +201,7 @@ class SubstrateConfig(BaseModel):
 # =============================================================================
 
 
-class PolymerPackingConfig(BaseModel):
+class PolymerPackingConfig(_ConfigModel):
     """Settings for packing polymers around the solute.
 
     Controls the box size and PACKMOL behavior when packing polymers
@@ -278,7 +288,7 @@ class PolymerPackingConfig(BaseModel):
 # =============================================================================
 
 
-class MonomerSpec(BaseModel):
+class MonomerSpec(_ConfigModel):
     """Specification for a single monomer type in a co-polymer.
 
     For dynamic polymer generation, provide the raw (unactivated) monomer SMILES.
@@ -321,7 +331,7 @@ class PolymerGenerationMode(str, Enum):
     DYNAMIC = "dynamic"  # Generate polymers on-the-fly using Polymerist
 
 
-class ReactionConfig(BaseModel):
+class ReactionConfig(_ConfigModel):
     """Paths to reaction templates for ATRP polymer generation.
 
     These .rxn files define the chemical transformations used to create
@@ -384,7 +394,7 @@ class ReactionConfig(BaseModel):
         return v
 
 
-class PolymerConfig(BaseModel):
+class PolymerConfig(_ConfigModel):
     """Configuration for polymer components.
 
     Supports two generation modes:
@@ -498,7 +508,7 @@ class PolymerConfig(BaseModel):
 # =============================================================================
 
 
-class CoSolventSpec(BaseModel):
+class CoSolventSpec(_ConfigModel):
     """Specification for a co-solvent component.
 
     You must specify either ``mole_fraction`` or ``concentration``, not both.
@@ -598,7 +608,7 @@ class CoSolventSpec(BaseModel):
         return self
 
 
-class PrimarySolventConfig(BaseModel):
+class PrimarySolventConfig(_ConfigModel):
     """Configuration for the primary solvent (usually water).
 
     Attributes:
@@ -610,7 +620,7 @@ class PrimarySolventConfig(BaseModel):
     model: WaterModel = Field(WaterModel.TIP3P, description="Water model")
 
 
-class IonConfig(BaseModel):
+class IonConfig(_ConfigModel):
     """Configuration for ions in the solvent.
 
     ``nacl_concentration`` is a NaCl-equivalent target for the final ion
@@ -630,7 +640,7 @@ class IonConfig(BaseModel):
     mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L)")
 
 
-class BoxConfig(BaseModel):
+class BoxConfig(_ConfigModel):
     """Configuration for the simulation box.
 
     Attributes:
@@ -646,7 +656,7 @@ class BoxConfig(BaseModel):
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
 
 
-class SolventConfig(BaseModel):
+class SolventConfig(_ConfigModel):
     """Complete solvent configuration."""
 
     primary: PrimarySolventConfig = Field(
@@ -670,7 +680,7 @@ class SolventConfig(BaseModel):
 # =============================================================================
 
 
-class AtomSelectionConfig(BaseModel):
+class AtomSelectionConfig(_ConfigModel):
     """Configuration for selecting atoms for restraints.
 
     Uses MDAnalysis-compatible selection syntax for flexibility.
@@ -684,7 +694,7 @@ class AtomSelectionConfig(BaseModel):
     description: str | None = Field(None, description="Human-readable description")
 
 
-class RestraintConfig(BaseModel):
+class RestraintConfig(_ConfigModel):
     """Configuration for a single restraint.
 
     Attributes:
@@ -711,7 +721,7 @@ class RestraintConfig(BaseModel):
 # =============================================================================
 
 
-class ThermodynamicsConfig(BaseModel):
+class ThermodynamicsConfig(_ConfigModel):
     """Thermodynamic conditions for the simulation.
 
     Attributes:
@@ -729,7 +739,7 @@ class ThermodynamicsConfig(BaseModel):
 # =============================================================================
 
 
-class SimulationPhaseConfig(BaseModel):
+class SimulationPhaseConfig(_ConfigModel):
     """Configuration for a single simulation phase (equilibration or production).
 
     Attributes:
@@ -756,10 +766,10 @@ class SimulationPhaseConfig(BaseModel):
     barostat: BarostatType | None = Field(None, description="Barostat type")
     barostat_frequency: int = Field(25, ge=1, description="Barostat update frequency")
     checkpoint_interval: float = Field(
-        ...,
+        60.0,
         gt=0.0,
         description=(
-            "Wall-time interval in seconds between restart checkpoints. "
+            "Wall-time interval in seconds between restart checkpoints (default 60). "
             "Controls how frequently simulation state is saved for automatic "
             "restart on SLURM preemption or hard kill. Independent of "
             "trajectory/reporter output frequency. Must be positive so "
@@ -792,7 +802,7 @@ class SimulationPhaseConfig(BaseModel):
 # =============================================================================
 
 
-class PositionRestraintConfig(BaseModel):
+class PositionRestraintConfig(_ConfigModel):
     """Configuration for positional restraints on an atom group.
 
     Position restraints apply a harmonic potential to keep atoms near their
@@ -830,7 +840,7 @@ class PositionRestraintConfig(BaseModel):
         return v
 
 
-class EquilibrationStageConfig(BaseModel):
+class EquilibrationStageConfig(_ConfigModel):
     """Configuration for a single equilibration stage.
 
     Supports two temperature modes:
@@ -1119,7 +1129,7 @@ class EquilibrationStageConfig(BaseModel):
         )
 
 
-class MinimizationConfig(BaseModel):
+class MinimizationConfig(_ConfigModel):
     """Energy-minimisation settings.
 
     Attributes:
@@ -1141,7 +1151,7 @@ class MinimizationConfig(BaseModel):
     tolerance: float = Field(10.0, gt=0, description="Energy tolerance in kJ/mol/nm")
 
 
-class SimulationPhasesConfig(BaseModel):
+class SimulationPhasesConfig(_ConfigModel):
     """Configuration for all simulation phases.
 
     Attributes:
@@ -1224,7 +1234,7 @@ def expand_path(path: Path) -> Path:
     return Path(expanded)
 
 
-class OutputConfig(BaseModel):
+class OutputConfig(_ConfigModel):
     """Configuration for simulation output.
 
     Supports separate directories for:
@@ -1383,7 +1393,7 @@ class OutputConfig(BaseModel):
 # =============================================================================
 
 
-class ForceFieldConfig(BaseModel):
+class ForceFieldConfig(_ConfigModel):
     """Configuration for force field selection.
 
     Attributes:
@@ -1401,7 +1411,7 @@ class ForceFieldConfig(BaseModel):
 # =============================================================================
 
 
-class OpenMMEngineConfig(BaseModel):
+class OpenMMEngineConfig(_ConfigModel):
     """OpenMM-specific engine settings.
 
     These settings control OpenMM platform selection and device configuration.
@@ -1418,7 +1428,7 @@ class OpenMMEngineConfig(BaseModel):
     precision: str = Field("mixed", description="Floating-point precision")
 
 
-class GromacsEngineConfig(BaseModel):
+class GromacsEngineConfig(_ConfigModel):
     """GROMACS-specific engine settings.
 
     These settings control how GROMACS binaries are located and invoked,
@@ -1453,7 +1463,11 @@ class GromacsEngineConfig(BaseModel):
 
     gmx_binary: str | None = Field(None, description="GROMACS binary path or name")
     mdrun_flags: str = Field("", description="Extra flags for gmx mdrun (all stages)")
-    grompp_flags: str = Field("-maxwarn 1", description="Extra flags for gmx grompp")
+    grompp_flags: str = Field(
+        "",
+        description="Extra flags for gmx grompp, such as '-maxwarn 1' to accept a warning "
+        "you have read; by default every grompp warning stops the run",
+    )
     mdrun_flags_equilibration: str | None = Field(
         None,
         description=(
@@ -1594,7 +1608,7 @@ class GromacsEngineConfig(BaseModel):
 # =============================================================================
 
 
-class SimulationConfig(BaseModel):
+class SimulationConfig(_ConfigModel):
     """Complete simulation configuration.
 
     This is the top-level configuration model that contains all settings

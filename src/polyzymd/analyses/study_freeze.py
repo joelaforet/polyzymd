@@ -625,7 +625,15 @@ def composition_warnings(label: str, config: Any, universe: Any) -> list[str]:
             f"{label}: the config names substrate residue {substrate_name}, which the topology "
             "does not contain"
         )
-    others = {name: n for name, n in found.items() if name != substrate_name}
+    # Co-solvents (a surfactant, DMSO) are named by their residue_name, or
+    # the first three letters of their name, as the builder names them.
+    cosolvents = {
+        str(cs.residue_name or cs.name[:3]).upper()
+        for cs in getattr(getattr(config, "solvent", None), "co_solvents", None) or []
+    }
+    others = {
+        name: n for name, n in found.items() if name != substrate_name and name not in cosolvents
+    }
     polymers = getattr(config, "polymers", None)
     expects_polymer = bool(polymers is not None and getattr(polymers, "enabled", False))
     described = ", ".join(f"{name} {n}" for name, n in sorted(others.items()))
@@ -636,8 +644,8 @@ def composition_warnings(label: str, config: Any, universe: Any) -> list[str]:
         )
     elif not expects_polymer and others:
         notes.append(
-            f"{label}: the topology contains residues {described} besides protein, water and "
-            f"ions{' and the substrate' if substrate_name else ''}, but the config "
+            f"{label}: the topology contains residues {described} besides protein, water, "
+            f"ions, co-solvents{' and the substrate' if substrate_name else ''}, but the config "
             f"{'has no substrate and ' if not substrate_name else ''}enables no polymers; the "
             "deposited config may not describe the simulated system"
         )
@@ -656,6 +664,17 @@ def _hashes_recorded(condition: Any, replicate: int, provenance: Any) -> bool:
         return True
     paths = [Path(item.path).resolve() for item in provenance.trajectories]
     return bool(paths) and all(path in recorded for path in paths)
+
+
+def _missing_build_files(working_dir: Path) -> list[str]:
+    """Return the files ``build_manifest.json`` lists that are not in the run directory."""
+    try:
+        manifest = json.loads((working_dir / "build_manifest.json").read_text())
+    except (OSError, ValueError):
+        return []
+    return sorted(
+        name for name in (manifest.get("artifacts") or {}) if not (working_dir / name).exists()
+    )
 
 
 def simulated_with(working_dir: Path) -> dict[str, Any]:
@@ -845,16 +864,19 @@ def _replicates(
                 "bond_source": provenance.bond_source,
                 "warnings": list(provenance.warnings),
                 "simulated_with": simulated_with(Path(provenance.working_directory)),
+                "missing_build_files": _missing_build_files(Path(provenance.working_directory)),
                 "hashes_recorded": _hashes_recorded(condition, replicate.index, provenance),
             }
         conditions[label] = {**record, "replicates": replicates}
         for index, replicate_record in replicates.items():
             for text in replicate_record["warnings"]:
                 warnings.append(f"{label} replicate {index}: {text}")
+        engine = record.get("engine", "openmm")
         unknown = [
             index
             for index, r in replicates.items()
-            if not any(
+            if engine == "openmm"
+            and not any(
                 v.get("openmm_version")
                 for v in [
                     r["simulated_with"].get("build", {}),
@@ -881,6 +903,17 @@ def _replicates(
                 "build_manifest.json, and progress.json predates version recording); state the "
                 "engine version in the methods"
             )
+        if engine != "openmm" and replicates:
+            warnings.append(
+                f"{label}: PolyzyMD does not record the {engine} version that ran the "
+                "replicates; state it in the methods"
+            )
+        for index, replicate_record in replicates.items():
+            for name in replicate_record.get("missing_build_files", []):
+                warnings.append(
+                    f"{label} replicate {index}: build_manifest.json lists {name}, which is "
+                    "missing from the run directory"
+                )
     return conditions, rows
 
 
@@ -971,7 +1004,10 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
             },
         ),
         "1d_independent_starting_configurations": item(
-            "each replicate is built with its replicate number as the random seed", None
+            "each replicate's starting structure is built with its replicate number as the "
+            "seed of Packmol and of polymer draws; velocities and thermostat noise are drawn "
+            "afresh in every run",
+            None,
         ),
         "2a_connection_to_experiment": item(
             [e.get("description") or e.get("doi") for e in meta["related"]["experimental"]]
@@ -1003,10 +1039,25 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
             None,
         ),
         "4e_custom_code_and_parameters": item(
-            "analyses/ and figures/ hold the custom code; generated polymer parameters are in the "
-            "serialized engine inputs in deposit/engine_inputs/"
+            "analyses/ and figures/ hold the custom code; the parameters of every molecule"
+            + (", generated polymers included," if _has_polymers(protocol) else "")
+            + " are in the serialized engine inputs in deposit/engine_inputs/"
         ),
     }
+
+
+def _has_polymers(protocol: Any) -> bool:
+    """Return whether any condition's config enables polymers."""
+    from polyzymd.config.schema import SimulationConfig
+
+    for path in protocol.conditions.values():
+        try:
+            polymers = SimulationConfig.from_yaml(path).polymers
+        except Exception:  # noqa: BLE001 - an unreadable config is reported elsewhere
+            continue
+        if polymers is not None and getattr(polymers, "enabled", False):
+            return True
+    return False
 
 
 def _method(protocol: Any) -> str:

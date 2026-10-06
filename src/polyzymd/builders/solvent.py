@@ -525,6 +525,54 @@ class SolventBuilder:
             solvent_counts.append(n_cosolvent)
             cosolvent_counts_list.append((cosolvent.name, n_cosolvent))
 
+        # A charged co-solvent (a SMILES such as dodecyl sulfate without its
+        # counter-ion) carries charge the first ion count did not know. A
+        # SMILES that holds its counter-ion ("...[O-].[Na+]") is neutral.
+        solute_int = self._charge_to_integer(solute_charge)
+        cosolvent_int = sum(
+            self._charge_to_integer(cosolvent.molecule.total_charge) * count
+            for cosolvent, (_, count) in zip(composition.co_solvents, cosolvent_counts_list)
+        )
+        if composition.neutralize and cosolvent_int:
+            na_to_add, cl_to_add = self._calculate_ion_counts(
+                nacl_to_add=nacl_to_add,
+                solute_charge=solute_int + cosolvent_int,
+                neutralize=True,
+            )
+            neutral_solvent_mass = self._calculate_neutral_solvent_mass(
+                solvent_mass=solvent_mass,
+                na_count=na_to_add,
+                cl_count=cl_to_add,
+                na_mass=na_mass,
+                cl_mass=cl_mass,
+            )
+            if cosolvent_masses:
+                water_to_add, _ = self._calculate_mole_fraction_counts(
+                    neutral_solvent_mass=neutral_solvent_mass,
+                    water_mass=water_mass,
+                    cosolvent_mole_fractions=cosolvent_masses,
+                )
+            else:
+                water_to_add = self._round_dimensionless_to_int(neutral_solvent_mass / water_mass)
+            solvent_counts[:3] = [int(water_to_add), na_to_add, cl_to_add]
+            LOGGER.info(
+                f"Co-solvents carry charge {cosolvent_int:+d}: now {int(water_to_add)} water, "
+                f"{na_to_add} Na+, {cl_to_add} Cl-"
+            )
+        net_charge = solute_int + cosolvent_int + na_to_add - cl_to_add
+        if net_charge and composition.neutralize:
+            raise ValueError(
+                f"The solvated system would carry net charge {net_charge:+d} although neutralize "
+                "is on; check the charges of the solute and co-solvents."
+            )
+        if net_charge:
+            LOGGER.warning(
+                f"The solvated system carries net charge {net_charge:+d} (solute {solute_int:+d}, "
+                f"co-solvents {cosolvent_int:+d}, ions {na_to_add - cl_to_add:+d}) because "
+                "solvent.ions.neutralize is false. Periodic electrostatics then add a uniform "
+                "neutralizing background; set neutralize: true unless you mean this."
+            )
+
         # Pack the box using PACKMOL (with CONECT-record overflow protection)
         solvated_top = solvate_with_packmol(
             molecules=solvent_molecules,
@@ -978,6 +1026,14 @@ class SolventBuilder:
                 residue_name = smiles_to_residue[mol_smiles]
                 for atom in mol.atoms:
                     atom.metadata["residue_name"] = residue_name
+            # A molecule made from SMILES has blank atom names, which the
+            # Amber topology analyses read cannot hold: ions get their element
+            # (NA, CL), other molecules OpenFF's unique names.
+            if any(not atom.name.strip() for atom in mol.atoms):
+                if mol.n_atoms == 1:
+                    mol.atoms[0].name = mol.atoms[0].symbol.upper()
+                else:
+                    mol.generate_unique_atom_names()
 
     @property
     def packmol_seed(self) -> Optional[int]:

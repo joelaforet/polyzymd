@@ -1132,7 +1132,7 @@ class TestEnergyMinimizationHelpers:
         assert 'PREFIX="system"' in script_content
         assert (
             "$GMX grompp -f em.mdp -c ${PREFIX}.gro -r ${PREFIX}.gro "
-            "-p ${PREFIX}.top -o em.tpr -maxwarn 1"
+            "-p ${PREFIX}.top -o em.tpr"
         ) in script_content
         assert "$GMX mdrun -deffnm em -v" in script_content
         assert "$GMX grompp -f eq_01_nvt.mdp -c em.gro -r em.gro" in script_content

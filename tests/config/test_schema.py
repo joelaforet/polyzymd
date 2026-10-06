@@ -766,7 +766,7 @@ class TestEngineConfig:
         """GROMACS engine config should have sensible defaults."""
         config = SimulationConfig(**minimal_config_data)
         assert config.gromacs.gmx_binary is None
-        assert config.gromacs.grompp_flags == "-maxwarn 1"
+        assert config.gromacs.grompp_flags == ""
         assert config.gromacs.mdrun_flags_equilibration is None
         assert config.gromacs.mdrun_flags_production is None
         assert config.gromacs.command_prefix is None

@@ -54,7 +54,18 @@ class Replicate:
             segment records again. Use :attr:`frames` to skip both.
         """
         if self._universe is None:
-            self._universe = self.condition._provider.load_universe(self.index)
+            try:
+                self._universe = self.condition._provider.load_universe(self.index)
+            except (ValueError, IndexError, KeyError, OSError) as exc:
+                # MDAnalysis and ParmEd raise these for a topology they cannot
+                # read; say so, rather than leaving a bare parser error.
+                raise ProtocolError(
+                    f"Cannot load the topology and trajectory of {self!r}: "
+                    f"{type(exc).__name__}: {exc}",
+                    hint="Check the run's system.prmtop (or solvated_system.pdb). polyzymd "
+                    "analysis-topology --overwrite RUN_DIR writes system.prmtop again from the "
+                    "PDB and system.xml.",
+                ) from exc
         return self._universe
 
     def _production_window(self) -> TrajectoryWindow:
@@ -62,12 +73,14 @@ class Replicate:
         if self._window is None:
             from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
 
+            # Loaded first, so a topology that cannot be read is reported as such.
+            n_frames = len(self.universe().trajectory)
             try:
                 self._window = resolve_replicate_trajectory_window(
                     loader=self.condition._provider._get_loader(),
                     replicate=self.index,
                     equilibration=self.condition.equilibration,
-                    n_frames_total=len(self.universe().trajectory),
+                    n_frames_total=n_frames,
                 )
             except ValueError as exc:
                 raise ProtocolError(

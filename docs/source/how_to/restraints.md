@@ -45,7 +45,7 @@ PolyzyMD uses MDAnalysis-style selections. The most useful selectors are:
 | `resid` | residue number | `resid 77` |
 | `resname` | residue name | `resname LIG` |
 | `name` | atom name | `name OG` |
-| `pdbindex` | PDB atom serial, 1-indexed | `pdbindex 2740` |
+| `pdbindex` | Position in the built system, counted from 1: the PDB ATOM serial PolyzyMD writes. Analyses read it the same way. | `pdbindex 2740` |
 | `index` | OpenMM atom index, 0-indexed | `index 2739` |
 | `chain` | chain identifier | `chain A` |
 

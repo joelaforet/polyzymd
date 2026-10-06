@@ -31,6 +31,10 @@ PATH_KEYS = frozenset(
         "termination",
     }
 )
+#: Where runs and job files go. They are resolved against the config's folder,
+#: as the input files are, so a command finds the runs from any folder; they
+#: are never copied or hashed as inputs.
+OUTPUT_PATH_KEYS = frozenset({"projects_directory", "scratch_directory"})
 
 
 def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
@@ -49,7 +53,7 @@ def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
     Returns:
         Configuration with expanded paths
     """
-    path_keys = PATH_KEYS
+    path_keys = PATH_KEYS | OUTPUT_PATH_KEYS
 
     # Sentinel values that should be forwarded to Pydantic validators as-is,
     # not treated as filesystem paths.
@@ -86,7 +90,7 @@ def _convert_paths_to_relative(data: Dict[str, Any], base_path: Path) -> Dict[st
     Returns:
         Configuration with relative paths
     """
-    path_keys = PATH_KEYS
+    path_keys = PATH_KEYS | OUTPUT_PATH_KEYS
 
     # Sentinel values that should be forwarded as-is (see _expand_paths).
     _SENTINEL_VALUES = {"default"}

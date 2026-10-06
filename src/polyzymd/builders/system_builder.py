@@ -863,11 +863,13 @@ class SystemBuilder:
                 residue_num = 1
 
                 if chain_idx >= len(chain_letters):
-                    LOGGER.warning(
-                        f"Exceeded {len(chain_letters)} chain letters - cycling. "
-                        "Consider using a topology format with larger chain ID capacity."
+                    # Cycling back would give solvent the chain IDs that mark the
+                    # protein, substrate and polymer, which analyses select on.
+                    raise ValueError(
+                        f"The solvent needs more than {len(chain_letters) - start_chain_idx} "
+                        f"chains of {max_residue} residues each ({n_solvent} solvent "
+                        "molecules), and chain IDs would repeat those of the solute."
                     )
-                    chain_idx = chain_idx % len(chain_letters)
 
             chain_id = chain_letters[chain_idx]
             mol = self._solvated_topology.molecule(mol_idx)

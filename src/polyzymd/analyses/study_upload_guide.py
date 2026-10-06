@@ -480,7 +480,9 @@ def deposit_readme(
         if project
         else "   `polyzymd study locate DOWNLOAD_DIR --verify`, then `polyzymd analyze --study study.yaml`.",
         "3. **Simulations:** build and run each `conditions/<name>/config.yaml` with PolyzyMD;",
-        "   the replicate number is the random seed, so results agree within MD noise.",
+        "   the replicate number seeds each replicate's starting structure (Packmol and",
+        "   polymer draws) and the dynamics draw fresh random noise, so results agree",
+        "   within MD noise, not frame by frame.",
         "",
     ]
     if project:
