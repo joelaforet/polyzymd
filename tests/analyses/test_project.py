@@ -366,3 +366,15 @@ class TestProjectFreeze:
             ["git", "-C", str(project), "tag", "--list"], capture_output=True, text=True
         ).stdout
         assert "project-v1" in log and "study-v" not in log
+
+
+def test_names_may_start_with_a_digit_and_unknown_ones_are_errors(project: Path) -> None:
+    from polyzymd.analyses.project_file import resolve_names
+
+    structures = {"4TGL_open": Path("/x/4tgl.pdb")}
+    assert resolve_names("structure 4TGL_open", {}, structures, "here") == "/x/4tgl.pdb"
+    assert resolve_names("region 1st", {"1st": "resid 1"}, {}, "here") == "(resid 1)"
+    with pytest.raises(ProtocolError, match="uses structure 3TGL"):
+        resolve_names("structure 3TGL", {}, structures, "here")
+    with pytest.raises(ProtocolError, match="one name"):
+        resolve_names("structure a b", {}, structures, "here")

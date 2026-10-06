@@ -25,8 +25,9 @@ PROJECT_FILE = "project.yaml"
 _TOP_KEYS = ("polyzymd", "studies", "analyses", "stats", "metadata")
 #: Key of a project analysis that limits it to some studies.
 STUDIES_KEY = "studies"
-_REGION = re.compile(r"\bregion\s+([A-Za-z_][\w-]*)")
-_STRUCTURE = re.compile(r"^\s*structure\s+([A-Za-z_][\w-]*)\s*$")
+# Names are letters, digits, _ and -, and may start with a digit (4TGL_open).
+_REGION = re.compile(r"\bregion\s+([\w][\w-]*)")
+_STRUCTURE = re.compile(r"^\s*structure\s+(\S+)\s*$")
 
 
 @dataclass(frozen=True)
@@ -188,6 +189,11 @@ def resolve_names(
         return [resolve_names(item, regions, structures, where) for item in value]
     if not isinstance(value, str):
         return value
+    if value.strip().startswith("structure ") and not _STRUCTURE.match(value):
+        raise ProtocolError(
+            f"{where}: {value!r} must be 'structure <name>' with one name.",
+            hint="Write the value as structure followed by one name from structures:.",
+        )
     structure = _STRUCTURE.match(value)
     if structure:
         name = structure.group(1)

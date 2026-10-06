@@ -158,6 +158,11 @@
               "until": {
                 "type": "string",
                 "description": "This analysis's own end of the analysis window, e.g. 500ns."
+              },
+              "stride": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "This analysis's own frame stride."
               }
             }
           },
@@ -179,6 +184,11 @@
               "until": {
                 "type": "string",
                 "description": "This analysis's own end of the analysis window, e.g. 500ns."
+              },
+              "stride": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "This analysis's own frame stride."
               }
             }
           },

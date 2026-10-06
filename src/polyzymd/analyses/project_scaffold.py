@@ -110,7 +110,7 @@ analyses: {}                  # run in every study, with that study's regions an
 metadata:                     # TODO before polyzymd project freeze
   title: TODO
   authors:
-    - {name: TODO, orcid: TODO, affiliation: TODO}
+    - {family-names: TODO, given-names: TODO, orcid: TODO, affiliation: TODO}
   license: {code: MIT, data: CC-BY-4.0}
   keywords: []
 """

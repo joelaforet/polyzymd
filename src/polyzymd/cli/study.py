@@ -145,10 +145,12 @@ def check_command(path: Path) -> None:
             what = entry.analysis if entry.analysis == run else f"{entry.analysis} as {run}"
             settings = ", ".join(f"{k}={v}" for k, v in entry.settings.items()) or "defaults"
         equilibration, until = protocol.window(run)
-        own = entry.equilibration is not None or entry.until is not None
+        own = any(x is not None for x in (entry.equilibration, entry.until, entry.stride))
+        stride = protocol.stride_of(run)
         window = (
             f"window eq {equilibration}"
             + (f" until {until}" if until else "")
+            + (f" stride {stride}" if stride != 1 else "")
             + (" (its own)" if own else "")
         )
         click.echo(

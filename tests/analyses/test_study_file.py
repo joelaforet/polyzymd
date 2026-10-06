@@ -520,3 +520,20 @@ class TestCommonUntil:
         record = next((root / "results" / "rg").rglob("record.json"))
         assert json.loads(record.read_text())["until_ns"] == pytest.approx(0.5)
         assert "rg" not in stale_runs(load_study_file(root))
+
+
+def test_an_analysis_sets_its_own_stride(study_dir: Path) -> None:
+    from polyzymd.analyses.study_freeze import stale_runs
+
+    text = (study_dir / "study.yaml").read_text()
+    _write(
+        study_dir / "study.yaml", text + "  rg_sparse: {analysis: rg, selection: all, stride: 2}\n"
+    )
+    protocol = load_study_file(study_dir)
+    assert protocol.stride_of("rg_sparse") == 2 and protocol.stride_of("rg") == 1
+    assert _analyze("rg_sparse", "--study", str(study_dir)).exit_code == 0
+    table = pz.Study(study_dir).results("rg_sparse").table
+    assert len(table.query("condition == 'Polymer' and replicate == 1")) == 4
+    assert "rg_sparse" not in stale_runs(protocol)
+    check = CliRunner().invoke(cli, ["study", "check", str(study_dir)])
+    assert "window eq 0.25ns stride 2 (its own)" in check.output

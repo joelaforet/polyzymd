@@ -45,7 +45,7 @@ _TOP_KEYS = (
 _CONDITION_KEYS = ("config", "factors")
 _ENTRY_KEYS = ("analysis",)
 #: Keys of any ``analyses:`` entry that set its own analysis window.
-WINDOW_KEYS = ("equilibration", "until")
+WINDOW_KEYS = ("equilibration", "until", "stride")
 #: Keys of an ``analyses:`` entry that runs your own function.
 USER_KEYS = (
     "function",
@@ -129,8 +129,8 @@ class AnalysisEntry:
     ``run`` is the entry's key, which names its results folder. ``analysis``
     is the shipped analysis it runs, the key itself unless given, or
     ``None`` when ``function`` names your own function instead.
-    ``equilibration`` and ``until`` are the entry's own analysis window, or
-    ``None`` to use the study's.
+    ``equilibration``, ``until`` and ``stride`` are the entry's own analysis
+    window and frame stride, or ``None`` to use the study's.
     """
 
     run: str
@@ -139,6 +139,7 @@ class AnalysisEntry:
     function: UserFunction | None = None
     equilibration: str | None = None
     until: str | None = None
+    stride: int | None = None
 
 
 @dataclass(frozen=True)
@@ -191,6 +192,11 @@ class StudyFile:
             entry.until if entry.until is not None else self.until,
         )
 
+    def stride_of(self, run: str) -> int:
+        """Return the frame stride of ``run``: its entry's, else the study's."""
+        entry = self.analyses.get(run)
+        return entry.stride if entry is not None and entry.stride is not None else self.stride
+
 
 def find_study_file(path: str | Path) -> Path:
     """Return the ``study.yaml`` that ``path`` names: the file itself, or the one in that folder."""
@@ -237,10 +243,17 @@ def _analysis_entry(run: str, raw: Any, path: Path) -> AnalysisEntry:
         else _equilibration(window["equilibration"], f"{path}: analyses.{run}")
     )
     until = _until(window.get("until"), f"{path}: analyses.{run}")
-    if "function" in raw:
-        return AnalysisEntry(
-            run, None, {}, _user_function(run, raw, path), equilibration=equilibration, until=until
+    stride = window.get("stride")
+    if stride is not None and (
+        isinstance(stride, bool) or not isinstance(stride, int) or stride < 1
+    ):
+        raise ProtocolError(
+            f"{path}: analyses.{run}: stride must be a whole number of at least 1, got {stride!r}.",
+            hint="Leave it out to use the study's stride.",
         )
+    own = {"equilibration": equilibration, "until": until, "stride": stride}
+    if "function" in raw:
+        return AnalysisEntry(run, None, {}, _user_function(run, raw, path), **own)
     settings = dict(raw)
     analysis = str(settings.pop("analysis", run))
     if analysis not in FUNCTION_ANALYSES:
@@ -257,7 +270,7 @@ def _analysis_entry(run: str, raw: Any, path: Path) -> AnalysisEntry:
         (*_ENTRY_KEYS, *WINDOW_KEYS, *FUNCTION_ANALYSES[analysis]),
         f"{path}: analyses.{run}",
     )
-    return AnalysisEntry(run, analysis, settings, equilibration=equilibration, until=until)
+    return AnalysisEntry(run, analysis, settings, **own)
 
 
 def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:

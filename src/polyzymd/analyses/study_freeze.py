@@ -188,8 +188,8 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
                     f"until {'none' if recorded is None else f'{recorded}ns'} is not "
                     f"{until or 'none'}"
                 )
-            if int(record.get("stride", 1)) != protocol.stride:
-                found.append(f"stride {record.get('stride')} is not {protocol.stride}")
+            if int(record.get("stride", 1)) != protocol.stride_of(run):
+                found.append(f"stride {record.get('stride')} is not {protocol.stride_of(run)}")
             key = (record["function"]["module"], record["function"]["qualname"])
             if key not in current_hashes:
                 current_hashes[key] = _function_hash(record, entry)
@@ -229,10 +229,14 @@ def _own_windows(protocol: Any) -> str:
     """Name the analyses that set their own window, for the checklist and methods text."""
     own = []
     for run, entry in protocol.analyses.items():
-        if entry.equilibration is None and entry.until is None:
+        if entry.equilibration is None and entry.until is None and entry.stride is None:
             continue
         equilibration, until = protocol.window(run)
-        own.append(f"{run} {equilibration}" + (f" until {until}" if until else ""))
+        own.append(
+            f"{run} {equilibration}"
+            + (f" until {until}" if until else "")
+            + (f" stride {entry.stride}" if entry.stride else "")
+        )
     return f" (analyses with their own window: {', '.join(own)})" if own else ""
 
 
@@ -888,6 +892,7 @@ def freeze(
                 "settings": entry.settings or (entry.function.settings if entry.function else {}),
                 "equilibration": protocol.window(run)[0],
                 "until": protocol.window(run)[1],
+                "stride": protocol.stride_of(run),
                 "report": f"results/{run}/report.json",
             }
             for run, entry in protocol.analyses.items()

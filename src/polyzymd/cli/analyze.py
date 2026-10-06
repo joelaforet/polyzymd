@@ -842,7 +842,7 @@ def _from_study(
         tuple(conditions.values()),
         tuple(conditions),
         equilibration or window_equilibration,
-        stride or protocol.stride,
+        stride or protocol.stride_of(run_name),
         replicate_spec,
         (*from_file, *setting_overrides),
         output_dir or protocol.results_dir(run_name),

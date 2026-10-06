@@ -143,13 +143,16 @@ recorded in each result.
 
 ### Give one analysis its own window
 
-An analysis entry may set its own `equilibration:` and `until:`. A
+An analysis entry may set its own `equilibration:`, `until:` and `stride:`
+(for an analysis too costly to run on every frame). A
 time-resolved analysis of a system still changing at the end of production
 can start at 0 ns, while a steady-state analysis keeps the study's window.
 Two entries of the same analysis with different windows store their results
 side by side, each record names its window, and `polyzymd study check`
-prints each analysis's window. A window on the command line (`--eq`,
-`--until`) overrides the entry's, which overrides the study's. A replicate whose `progress.json` records
+prints each analysis's window. A window or stride on the command line
+(`--eq`, `--until`, `--stride`) overrides the entry's, which overrides the
+study's; give it in the entry instead when it is part of the protocol, so
+the results are not stale against `study.yaml`. A replicate whose `progress.json` records
 production segments missing from disk, as in a copy that kept only some
 segments, is named in the report too.
 
