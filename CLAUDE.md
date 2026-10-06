@@ -21,15 +21,15 @@ Repository skills live in `.claude/skills/`:
 
 `analyses_refactor` is the trunk of the 1.3 work. Pull requests on it form a
 stack: `analyses/project-studies` (#163) targets `analyses_refactor`, and each
-later branch (`analyses/contacts-zero-control`, then
-`analyses/audit-wave-a` and the other `analyses/audit-wave-*` branches) targets
-the branch before it. `feature/v1.3.0-rc5` and `main` have commits that
+later branch (`analyses/contacts-zero-control` and the branches stacked on
+it) targets the branch before it. `feature/v1.3.0-rc5` and `main` have commits that
 `analyses_refactor` lacks; Joe syncs the trunks before the 1.3.0 tag.
 
 - Branch from the top of the stack, or from the branch the maintainer names,
   as `analyses/<item>`. Open the pull request as a draft against that branch,
   never against `feature/v1.3.0-rc5` or `main`.
 - Never commit on `analyses_refactor` itself. Joe merges.
-- The maintainer keeps the audit log and friction log outside the repository
-  and names the finding IDs (for example NOV-6) to fix. Name those IDs in the
-  tests and the CHANGELOG entry.
+- Never put plan, wave or slice names or finding IDs in files. Name tests
+  and CHANGELOG entries by the behavior they check, and put each test in the
+  module that mirrors the source module it checks (`tests/` mirrors
+  `src/polyzymd/`).

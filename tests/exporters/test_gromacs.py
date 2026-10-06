@@ -1229,3 +1229,50 @@ def test_grompp_gets_no_blanket_maxwarn() -> None:
 
     assert GromacsEngineConfig().grompp_flags == ""
     assert "-maxwarn" not in inspect.getsource(gromacs)
+
+
+def _seeded_generator(tmp_path: Path, replicate):
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    return MDPGenerator(SimulationConfig.from_yaml(path), replicate=replicate)
+
+
+def test_gromacs_stages_take_seeds_from_the_replicate(tmp_path: Path) -> None:
+    """Production ld_seed is the replicate's dynamics seed and differs between replicates."""
+    from polyzymd.simulation.seeds import dynamics_seed
+
+    production = _seeded_generator(tmp_path, 2).generate_production()
+    assert production.ld_seed == dynamics_seed(2, "production:0")
+    assert f"ld_seed         = {production.ld_seed}" in production.to_mdp_string()
+    other = _seeded_generator(tmp_path / "other", 3).generate_production()
+    assert other.ld_seed != production.ld_seed
+
+
+def test_gromacs_without_a_replicate_keeps_random_seeds(tmp_path: Path) -> None:
+    """Without a replicate number, gen_seed and ld_seed stay -1 (random)."""
+    production = _seeded_generator(tmp_path, None).generate_production()
+    assert production.ld_seed == -1 and production.gen_seed == -1
+
+
+def test_gromacs_equilibration_stages_do_not_share_noise(tmp_path: Path) -> None:
+    """Two equilibration stages get different ld_seed values."""
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    (stage,) = data["simulation_phases"]["equilibration_stages"]
+    data["simulation_phases"]["equilibration_stages"] = [stage, {**stage, "name": "eq2"}]
+    path.write_text(yaml.safe_dump(data))
+    generator = MDPGenerator(SimulationConfig.from_yaml(path), replicate=1)
+    stages = [params for _, params in generator.generate_equilibration_stages()]
+    assert len(stages) == 2
+    assert stages[0].ld_seed != stages[1].ld_seed
