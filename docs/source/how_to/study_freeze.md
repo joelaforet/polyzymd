@@ -88,8 +88,11 @@ the freeze. So you can freeze early, and freeze again when you fill the gaps.
 
    - `study.yaml` (or `project.yaml`), `README*`, `LICENSE*` and the files
      that freeze writes;
-   - the files under `analyses/`, `stats/`, `figures/`, `results/` and
-     `conditions/`. Data files that a function reads go in `analyses/data/`.
+   - the files under the folders that `study init` and `project init`
+     make: `conditions/`, `structures/`, `analyses/`, `stats/`, `figures/`,
+     `results/` and `environment/`. Reference structures go in
+     `structures/`, and data files that a function reads go in
+     `analyses/data/`.
 
    Freeze does not deposit other files, such as notes or a copied
    trajectory, and prints one `not deposited:` warning that names them.

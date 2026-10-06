@@ -1172,8 +1172,13 @@ def _git_preflight(
     return state, tag, warnings
 
 
-#: Folders of a study or project whose files freeze deposits.
-DEPOSITED_FOLDERS = ("analyses", "stats", "figures", "results", "conditions")
+def deposited_folders() -> tuple[str, ...]:
+    """Return the folders whose files freeze deposits: those ``study init`` and ``project init`` make."""
+    from polyzymd.analyses.project_scaffold import PROJECT_FOLDERS
+    from polyzymd.analyses.study_scaffold import FOLDERS
+
+    return tuple(dict.fromkeys([*FOLDERS, *PROJECT_FOLDERS]))
+
 #: Files at the top of a study or project that freeze deposits, besides those it writes.
 DEPOSITED_FILES = ("study.yaml", "project.yaml", ".gitignore")
 #: Prefixes of other top-level files that freeze deposits (README.md, LICENSE, ...).
@@ -1185,15 +1190,17 @@ def is_deposited_name(root: Path, path: str) -> bool:
 
     Freeze deposits only names that PolyzyMD chooses: ``study.yaml``,
     ``project.yaml``, ``README*``, ``LICENSE*``, ``.gitignore``, the files
-    freeze writes, and the files under ``analyses/``, ``stats/``,
-    ``figures/``, ``results/`` and ``conditions/``. In a project, the same
+    freeze writes, and the files under the folders ``study init`` and
+    ``project init`` make (:func:`deposited_folders`: ``conditions/``,
+    ``structures/``, ``analyses/``, ``figures/``, ``results/``,
+    ``environment/``, ``stats/`` ...). In a project, the same
     rule applies inside each study folder (a folder that holds ``study.yaml``).
     """
     parts = Path(path).parts
     if len(parts) > 1 and (root / parts[0] / "study.yaml").is_file():
         parts = parts[1:]
     if len(parts) > 1:
-        return parts[0] in DEPOSITED_FOLDERS
+        return parts[0] in deposited_folders()
     name = parts[0]
     return (
         name in DEPOSITED_FILES
@@ -1258,7 +1265,7 @@ def left_out_files(root: Path, state: dict[str, Any] | None) -> str | None:
         return None
     return (
         f"not deposited: {', '.join(entries)}. Freeze deposits only study.yaml, project.yaml, "
-        f"README*, LICENSE*, the files it writes, and {', '.join(f'{f}/' for f in DEPOSITED_FOLDERS)}"
+        f"README*, LICENSE*, the files it writes, and {', '.join(f'{f}/' for f in deposited_folders())}"
         "; move a file there to publish it"
     )
 

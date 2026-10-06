@@ -41,6 +41,7 @@ def test_freeze_deposits_only_names_polyzymd_chooses(tmp_path: Path) -> None:
         "analyses/data/t.csv",
         "conditions/A/config.yaml",
         "conditions/A/enzyme.pdb",
+        "structures/crystal.pdb",
         "results/rg/A/replicate_1/record.json",
         "notes.txt",
         "scratch/copy.xtc",
@@ -55,6 +56,7 @@ def test_freeze_deposits_only_names_polyzymd_chooses(tmp_path: Path) -> None:
         "conditions/A/config.yaml",
         "conditions/A/enzyme.pdb",
         "results/rg/A/replicate_1/record.json",
+        "structures/crystal.pdb",
         "study.yaml",
     ]
     message = left_out_files(root, None)
