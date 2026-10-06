@@ -213,8 +213,12 @@ def stale_runs(protocol: Any, conditions: dict[str, Any] | None = None) -> dict[
             if on_disk is not None:
                 # The first file is the topology, the others the trajectories.
                 now = sorted(item["sha256"] for item in on_disk["files"][1:])
-                then = sorted(item.get("sha256") for item in record.get("trajectories", []))
-                if now != then:
+                then = [item.get("sha256") for item in record.get("trajectories", [])]
+                if None in then:
+                    found.append(
+                        f"no trajectory hash recorded for {label} replicate {record['replicate']}"
+                    )
+                elif now != sorted(then):
                     found.append(
                         f"the trajectories of {label} replicate {record['replicate']} changed"
                     )

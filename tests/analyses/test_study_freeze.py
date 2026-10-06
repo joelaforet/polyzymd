@@ -176,6 +176,15 @@ class TestStale:
         (warning,) = [w for w in freeze(study).warnings if w.startswith("run rg may be stale")]
         assert "Polymer replicate 2" in warning
 
+    def test_record_without_trajectory_hashes_is_stale_not_an_error(self, study: Path) -> None:
+        record_path = next((study / "results").rglob("record.json"))
+        record = json.loads(record_path.read_text())
+        segment = {k: v for k, v in record["trajectories"][0].items() if k != "sha256"}
+        record["trajectories"] = [segment, dict(segment)]
+        record_path.write_text(json.dumps(record))
+        stale = [w for w in freeze(study).warnings if w.startswith("run rg may be stale")]
+        assert stale and "no trajectory hash recorded" in stale[0]
+
     def test_changed_window_and_missing_run(self, study: Path) -> None:
         text = (
             (study / "study.yaml")
