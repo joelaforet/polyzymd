@@ -70,3 +70,61 @@ class TestGromacsRunFiles:
         config = self._config(top="backup.top")
         assert gromacs_topology_file(run, topology_name(config)) == run / "backup.top"
         assert "backup.top" in [p.name for p in run_input_files(run, config)]
+
+
+def test_build_chain_ids_read_from_a_large_openmm_pdb(tmp_path: Path) -> None:
+    """An OpenMM PDB above 99,999 atoms (hex serials, CONECT records) still gives its chain IDs."""
+    import pytest
+
+    mda = pytest.importorskip("MDAnalysis")
+    app = pytest.importorskip("openmm.app")
+    import numpy as np
+    import openmm.unit as unit
+
+    from polyzymd.analyses.shared.gromacs import apply_build_chain_ids
+
+    n_waters = 33_340
+    topology = app.Topology()
+    water_chain = topology.addChain("D")
+    for _ in range(n_waters):
+        residue = topology.addResidue("HOH", water_chain)
+        oxygen = topology.addAtom("O", app.element.oxygen, residue)
+        for name in ("H1", "H2"):
+            topology.addBond(oxygen, topology.addAtom(name, app.element.hydrogen, residue))
+    monomer = topology.addResidue("SBM", topology.addChain("C"))
+    first = topology.addAtom("C1", app.element.carbon, monomer)
+    topology.addBond(first, topology.addAtom("C2", app.element.carbon, monomer))
+    n_atoms = topology.getNumAtoms()
+    assert n_atoms > 99_999
+    pdb = tmp_path / "solvated_system.pdb"
+    with pdb.open("w") as handle:
+        positions = np.zeros((n_atoms, 3)) * unit.nanometer
+        app.PDBFile.writeFile(topology, positions, handle, keepIds=True)
+    assert "CONECT" in pdb.read_text()
+
+    universe = mda.Universe.empty(
+        n_atoms,
+        n_residues=n_waters + 1,
+        atom_resindex=np.repeat(np.arange(n_waters + 1), [3] * n_waters + [2]),
+    )
+    universe.add_TopologyAttr("resnames", ["HOH"] * n_waters + ["SBM"])
+    metadata = apply_build_chain_ids(universe, pdb)
+    assert metadata["applied"], metadata
+    assert len(universe.select_atoms("chainID C")) == 2
+    assert len(universe.select_atoms("chainID D")) == 3 * n_waters
+
+    universe.residues[-1].resname = "PEG"
+    metadata = apply_build_chain_ids(universe, pdb)
+    assert not metadata["applied"] and "residue names" in metadata["reason"]
+
+
+def test_an_unreadable_build_pdb_gives_no_chain_ids(tmp_path: Path) -> None:
+    """A build PDB that cannot be read leaves the chains unchanged and says why."""
+    import pytest
+
+    mda = pytest.importorskip("MDAnalysis")
+    from polyzymd.analyses.shared.gromacs import apply_build_chain_ids
+
+    universe = mda.Universe.empty(1)
+    metadata = apply_build_chain_ids(universe, tmp_path / "missing.pdb")
+    assert not metadata["applied"] and metadata["reason"]

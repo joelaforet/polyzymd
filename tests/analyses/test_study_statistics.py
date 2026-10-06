@@ -81,3 +81,22 @@ def test_replicate_table_fills_missing_labels_as_the_report(tmp_path: Path) -> N
         sub = table[(table.condition == row["label"]) & (table.label.astype(str) == str(row["entry"]))]
         assert len(sub) == row["n_replicates"], row["entry"]
         assert sub.value.mean() == pytest.approx(row["mean"]), row["entry"]
+
+
+def test_equal_condition_means_read_as_no_trend() -> None:
+    """A flat trend says the means are the same, not that it cannot be tested."""
+    from types import SimpleNamespace
+
+    from polyzymd.analyses.protocols import ConditionReport, _trend_line
+    from polyzymd.analyses.study_statistics import trend_sentence, trend_tests
+
+    conditions = [
+        ConditionReport(label=f"c{i}", n_replicates=2, mean=1.0, replicate_values=[0.9, 1.1])
+        for i in range(3)
+    ]
+    factors = {"c0": {"x": 0.1}, "c1": {"x": 0.5}, "c2": {"x": 0.9}}
+    (flat,) = trend_tests(SimpleNamespace(conditions=conditions), factors)
+    assert trend_sentence("m", None, flat).startswith(
+        "no trend of m with x: every condition mean is the same"
+    )
+    assert _trend_line(flat).startswith("trend x  no trend: every condition mean is the same")

@@ -212,7 +212,9 @@ class TestAnalyzeStudy:
         protocol = load_study_file(study_dir)
         assert "rmsd" not in protocol.analyses
         result = _analyze("rmsd", "--study", str(study_dir), "--set", "selection=all")
-        assert "does not list rmsd" in result.output
+        assert "does not list rmsd; running it with the settings given." in result.output
+        result = _analyze("rmsd", "--study", str(study_dir))
+        assert "does not list rmsd; running it with its defaults." in result.output
 
     def test_submit_dry_run_reports_with_the_study(self, study_dir: Path) -> None:
         result = CliRunner().invoke(

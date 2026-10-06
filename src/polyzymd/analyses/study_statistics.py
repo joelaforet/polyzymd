@@ -143,7 +143,7 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
     """
     from scipy import stats
 
-    from polyzymd.analyses.protocols import TrendReport
+    from polyzymd.analyses.protocols import FLAT_TREND, TrendReport
     from polyzymd.analyses.shared.inferential_statistics import benjamini_hochberg
 
     if any(item.entry is not None for item in report.conditions):
@@ -178,7 +178,7 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
             n = len(set(levels))
             reason = f"{n} level{'s' if n != 1 else ''}; a trend needs at least three"
         elif len(set(means)) == 1:
-            reason = "the condition means do not vary"
+            reason = FLAT_TREND
         else:
             reason = None
         if reason is not None:
@@ -232,11 +232,12 @@ def trend_sentence(metric: str, unit: str | None, trend: Any) -> str:
     str
         The sentence, without a final period.
     """
-    from polyzymd.analyses.protocols import VERDICT_NOT_TESTABLE, _interval, _num
+    from polyzymd.analyses.protocols import FLAT_TREND, VERDICT_NOT_TESTABLE, _interval, _num
 
     if not trend.testable:
+        head = "no trend" if trend.reason == FLAT_TREND else f"{VERDICT_NOT_TESTABLE}: trend"
         return (
-            f"{VERDICT_NOT_TESTABLE}: trend of {metric} with {trend.factor}: {trend.reason} "
+            f"{head} of {metric} with {trend.factor}: {trend.reason} "
             f"({len(trend.conditions)} conditions, {trend.n_replicates} replicates)"
         )
     per = f" {unit} per unit {trend.factor}" if unit else f" per unit {trend.factor}"

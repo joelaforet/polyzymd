@@ -108,16 +108,45 @@ def _common_until(
     return next(iter(study)).until
 
 
-def _list_analyses(ctx: click.Context) -> None:
-    """Print every shipped analysis with what it measures and its settings, then exit."""
+def _analysis_lines(name: str) -> list[str]:
+    """Return what the shipped analysis ``name`` measures, then each setting with its default."""
     import json
 
     from polyzymd.analyses.protocols import ANALYSIS_SUMMARIES, FUNCTION_ANALYSES
 
-    for name, settings in FUNCTION_ANALYSES.items():
-        click.echo(f"{name}: {ANALYSIS_SUMMARIES.get(name, '')}")
-        for key, default in settings.items():
-            click.echo(f"  {key}: {json.dumps(default)}")
+    return [f"{name}: {ANALYSIS_SUMMARIES.get(name, '')}"] + [
+        f"  {key}: {json.dumps(default)}" for key, default in FUNCTION_ANALYSES[name].items()
+    ]
+
+
+class _AnalyzeCommand(click.Command):
+    """``polyzymd analyze``, whose ``NAME --help`` also prints the settings of analysis NAME."""
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+
+        # --help runs before NAME is parsed, so take the name from the raw arguments.
+        ctx.meta["analysis_name"] = next((arg for arg in args if arg in FUNCTION_ANALYSES), None)
+        return super().parse_args(ctx, args)
+
+    def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        super().format_help(ctx, formatter)
+        name = ctx.meta.get("analysis_name")
+        if name:
+            formatter.write_paragraph()
+            formatter.write_text(
+                "Settings of this analysis, with their defaults (--set key=value):"
+            )
+            for line in _analysis_lines(name):
+                formatter.write(f"{line}\n")
+
+
+def _list_analyses(ctx: click.Context) -> None:
+    """Print every shipped analysis with what it measures and its settings, then exit."""
+    from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+
+    for name in FUNCTION_ANALYSES:
+        click.echo("\n".join(_analysis_lines(name)))
     click.echo(
         "Use a name as a study.yaml entry ({name: {setting: value}}) or with "
         "polyzymd analyze NAME --set setting=value; definitions: "
@@ -206,7 +235,7 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-@click.command("analyze")
+@click.command("analyze", cls=_AnalyzeCommand)
 @click.argument("name", type=str, required=False, default=None)
 @click.option(
     "-c",
@@ -925,7 +954,8 @@ def _from_study(
                 f"or add '{run_name}:' under analyses: in the study file.",
             )
         click.echo(
-            f"note: {protocol.path} does not list {run_name}; running it with its defaults.",
+            f"note: {protocol.path} does not list {run_name}; running it with "
+            + ("the settings given." if setting_overrides else "its defaults."),
             err=True,
         )
         analysis, settings = run_name, {}

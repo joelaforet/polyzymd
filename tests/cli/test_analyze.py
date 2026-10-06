@@ -381,6 +381,16 @@ class TestRegistration:
         assert "--format" in result.output
         assert "agent" in result.output
 
+    def test_analysis_help_lists_its_settings(self) -> None:
+        """'polyzymd analyze rmsd --help' adds the settings of rmsd and their defaults."""
+        result = CliRunner().invoke(cli, ["analyze", "rmsd", "--help"])
+
+        assert result.exit_code == 0
+        assert "--format" in result.output
+        assert "rmsd: RMSD of a selection" in result.output
+        assert "reference_mode: null" in result.output
+        assert "polymer_selection" not in result.output
+
 
 def test_set_values_round_trip() -> None:
     """A float such as 1e-05 stays a float through --set."""
