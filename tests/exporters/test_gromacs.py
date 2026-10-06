@@ -129,11 +129,16 @@ def _protein_itp_content(mol_name: str) -> str:
     return PROTEIN_ITP_CONTENT.replace("MOL0", mol_name)
 
 
-def _posres_config(groups: list[str]) -> SimpleNamespace:
+def _posres_config(groups: list[str], freeze_solute: bool = False) -> SimpleNamespace:
     """Build a minimal config object with position restraint groups."""
     restraints = [SimpleNamespace(group=group, force_constant=1000.0) for group in groups]
     stage = SimpleNamespace(position_restraints=restraints)
-    return SimpleNamespace(simulation_phases=SimpleNamespace(equilibration_stages=[stage]))
+    return SimpleNamespace(
+        simulation_phases=SimpleNamespace(
+            equilibration_stages=[stage],
+            minimization=SimpleNamespace(freeze_solute=freeze_solute),
+        )
+    )
 
 
 def _component_info(
@@ -464,6 +469,24 @@ class TestTopologyLayoutPositionRestraints:
         assert _posres_indices(ligand_itp, "POSRES_LIGAND") == [1, 2, 4]
         _assert_posres_indices_within_atom_count(protein_itp, "POSRES_PROTEIN")
         _assert_posres_indices_within_atom_count(ligand_itp, "POSRES_LIGAND")
+
+    def test_minimization_restrains_solute_heavy_atoms_without_stage_restraints(self, tmp_path):
+        """POSRES_EM covers the protein and ligand heavy atoms even when no stage restrains them."""
+        prefix = "sys"
+        protein_itp = _write_itp(tmp_path, prefix, "MOL0", _protein_itp_content("MOL0"))
+        ligand_itp = _write_itp(
+            tmp_path, prefix, "MOL1", LIGAND_ITP_TEMPLATE.format(mol_name="MOL1")
+        )
+        _write_top(tmp_path, prefix, [("MOL0", 1), ("MOL1", 1)])
+
+        generator = _posres_generator(_component_info(n_protein_atoms=6, n_substrate_atoms=4))
+        defines = generator.add_posres_to_itp_files(
+            _posres_config([], freeze_solute=True), tmp_path, prefix
+        )
+
+        assert defines == {"minimization": "POSRES_EM"}
+        assert _posres_indices(protein_itp, "POSRES_EM") == [1, 2, 4, 5]
+        assert _posres_indices(ligand_itp, "POSRES_EM") == [1, 2, 4]
 
     def test_distinct_dimer_mol0_mol1_plus_ligand_mol2(self, tmp_path):
         """Distinct protein ITPs should both receive protein restraints."""
@@ -1298,14 +1321,9 @@ def _restrained_generator(tmp_path: Path, freeze_solute: bool = True):
     return MDPGenerator(SimulationConfig.from_yaml(path))
 
 
-def test_minimization_restrains_the_solute_of_the_first_stage(tmp_path: Path) -> None:
-    """em.mdp turns on the first stage's protein restraints; polymers relax, as in OpenMM."""
-    text = _restrained_generator(tmp_path).generate_energy_minimization().to_mdp_string()
-    assert "define          = -DPOSRES_PROTEIN\n" in text + "\n"
-    assert "POSRES_POLYMER" not in text
-
-
-def test_minimization_without_freeze_solute_has_no_restraints(tmp_path: Path) -> None:
-    """freeze_solute: false lets the solute move during GROMACS minimization too."""
-    text = _restrained_generator(tmp_path, False).generate_energy_minimization().to_mdp_string()
-    assert "define" not in text
+def test_minimization_restraints_do_not_follow_the_stages(tmp_path: Path) -> None:
+    """em.mdp borrows no stage restraint; it takes only the define it is given."""
+    generator = _restrained_generator(tmp_path)
+    assert "define" not in generator.generate_energy_minimization().to_mdp_string()
+    text = generator.generate_energy_minimization(define="-DPOSRES_EM").to_mdp_string()
+    assert "define          = -DPOSRES_EM\n" in text + "\n"

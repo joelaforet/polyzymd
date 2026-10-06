@@ -710,6 +710,7 @@ class TestOpenMMRunImplementation:
         )
         config = SimpleNamespace(
             simulation_phases=SimpleNamespace(production=production),
+            require_engine_barostats=lambda engine: None,
             get_working_directory=lambda replicate: tmp_path / f"run_{replicate}",
         )
 

@@ -150,7 +150,7 @@ Otherwise, freeze does these steps:
      substrate residue that is missing from the topology, or polymer residues
      in a condition whose config has no polymers, or the reverse.
    - An OpenMM replicate records no OpenMM version, or a GROMACS replicate
-     has no `gromacs/prod.log`, which gives the GROMACS version.
+     has no `GROMACS version:` line in `gromacs/prod.log`.
    - A file that `build_manifest.json` lists is missing from the replicate
      folder.
 3. It hashes every trajectory and topology file on this machine (SHA-256,
