@@ -159,9 +159,7 @@ verdict: core_rmsf falls with sbma_fraction (slope ...)
 It is a straight-line fit: look at the per-condition means before reading it
 as a dose response. Labelled results (one value per residue) get none.
 
-**Your own statistical plan.** A plan that goes further, such as Paper 1's
-gatekeeping (Welch against the control, then a trend, then bootstrap
-intervals), is a function in the project (or study) folder:
+**Your own statistical plan.** A plan that goes further is a function in the project (or study) folder:
 
 ```yaml
 stats:
