@@ -153,5 +153,5 @@ You have completed a guided SASA shielding analysis and can now answer:
   per-residue results and the settings.
 - Use {doc}`../explanation/analysis_sasa_verification` for how the values were
   checked.
-- Use {doc}`../explanation/analysis_api` to run your own functions on every
+- Use {doc}`../how_to/study_api` to run your own functions on every
   replicate.

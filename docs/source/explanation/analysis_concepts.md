@@ -23,7 +23,8 @@ load replicates  →  measure  →  reduce per replicate  →  summarise or comp
 `polyzymd analyze NAME -c A/config.yaml -c B/config.yaml` runs these steps for
 a shipped analysis and prints a report in which every number states its unit,
 its uncertainty and its sample size. The first `-c` config is the control. The
-same steps are open to your own functions in Python; see {doc}`analysis_api`.
+same steps are open to your own functions in Python; see
+{doc}`../how_to/study_api`.
 
 Figures are drawn from the stored values into `figures/<name>/`. They do not
 reload trajectories or rerun the measurement.
@@ -259,5 +260,6 @@ segments that were kept, and the lineage check would refuse the trajectory.
   first analysis
 - {doc}`../how_to/analysis_compare_conditions` — Practical guide to comparing
   several conditions
-- {doc}`analysis_api` — Running your own functions on a study
+- {doc}`../how_to/study_api` — Running your own functions on a study
+- {doc}`analysis_api` — How the study API works
 - {doc}`../reference/analysis_functions` — What each shipped function measures

@@ -134,7 +134,7 @@ Study.from_configs
   -> figures drawn from the stored values
 ```
 
-For concrete code examples, see {doc}`analysis_api`.
+For code examples, see {doc}`../how_to/study_api`.
 
 ## Comparison infrastructure
 

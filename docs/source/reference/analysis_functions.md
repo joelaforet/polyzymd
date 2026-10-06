@@ -4,7 +4,7 @@ These functions ship in `polyzymd.analyses.functions`. The per-frame functions
 measure one frame and run through `Study.timeseries`, and the per-replicate
 functions measure all production frames of one replicate and run through
 `Study.per_replicate`, like functions you write yourself; see
-{doc}`../explanation/analysis_api`.
+{doc}`study_api`.
 
 ## Per-frame functions
 

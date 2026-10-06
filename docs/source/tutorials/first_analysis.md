@@ -133,7 +133,7 @@ steps:
 - {doc}`../how_to/analysis_rmsf_quickstart` --- compare conditions, choose the
   reference, and define the core and regions
 - {doc}`../how_to/analysis_compare_conditions` --- compare several conditions
-- {doc}`../explanation/analysis_api` --- run your own function on every
+- {doc}`../how_to/study_api` --- run your own function on every
   replicate from Python
 - {doc}`../reference/data_requirements` --- directory layout reference and
   path resolution rules

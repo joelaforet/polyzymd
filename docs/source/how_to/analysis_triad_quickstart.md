@@ -139,4 +139,4 @@ carboxylate acceptor.
 - **Interpret triad results**: {doc}`../explanation/analysis_triad_best_practices`
 - **Count hydrogen bonds between groups**: {doc}`hydrogen_bonds`
 - **Measure other atom pairs**: {doc}`analysis_distances_quickstart`
-- **Write a measurement of your own**: {doc}`../explanation/analysis_api`
+- **Write a measurement of your own**: {doc}`study_api`
