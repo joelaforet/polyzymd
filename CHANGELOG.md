@@ -122,6 +122,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A control without polymer reports zero contact.**  In `contacts` and
+  `hydrogen_bonds`, a replicate whose polymer (a summary's second group)
+  matches no atoms has no contact and no hydrogen bond: its values are 0 (0
+  events, no lifetime), it stays in the statistics and is compared, and a
+  warning names it.  It was left out, so a no-polymer control was never
+  compared.  The measuring functions return 0 for an empty group instead of
+  `nan`; stored `contacts` and `hydrogen_bonds` results are recomputed once.
+- **`contacts` reports every monomer of the study, the same in every task.**
+  The per-monomer rows came from the polymer of one replicate, so `--submit`
+  tasks of conditions with different monomers stored different results from
+  the report job's.  `polymer_types` now names the monomers reported (default:
+  every residue name of the polymer in any condition, resolved once and passed
+  to every task), 0 in a replicate without one; it no longer narrows the
+  polymer selection, which `polymer_selection` does.
+
 - **Continuation segments record their software provenance.**  Only segment 0
   recorded `polyzymd_version`, `openmm_version` and `pixi_environment`;
   segments 1 and later now do too.

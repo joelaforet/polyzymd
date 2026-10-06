@@ -934,10 +934,11 @@ def _submit(
     until: str | None = None,
 ) -> None:
     """Write, and unless ``dry_run`` submit, the SLURM jobs of one ``polyzymd analyze`` command."""
+    import json
     import shlex
 
     from polyzymd.analyses.exceptions import ProtocolError
-    from polyzymd.analyses.protocols import _require_known, _study
+    from polyzymd.analyses.protocols import _require_known, _study, study_wide_settings
     from polyzymd.workflow.analysis_submit import (
         Resources,
         polyzymd_command,
@@ -984,6 +985,12 @@ def _submit(
     if no_eq_check:
         common.append("--no-eq-check")
     task_options = [*common, "--no-plots", "--task", *(["--recompute"] if recompute else [])]
+    # Each task sees one replicate, so settings that depend on every condition
+    # are resolved here; the report job runs the whole study and resolves the
+    # same ones itself, so its record keeps only the settings given.
+    if name is not None:
+        for key, value in study_wide_settings(name, study, _settings(setting_overrides)).items():
+            task_options += ["--set", f"{key}={json.dumps(value)}"]
     report_arguments = []
     if study_path is not None:
         # The report job reads the study file too, so it saves report.json for

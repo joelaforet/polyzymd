@@ -123,12 +123,13 @@ with unassigned residues. See {doc}`../how_to/analysis_secondary_structure_quick
 
 `polyzymd analyze contacts` runs, once per replicate between `--set
 protein_selection=...` (default `chainid A`) and `polymer_selection` (default
-`chainid C`, narrowed to the residue names of `polymer_types` when set),
+`chainid C`; a replicate where it matches no atoms, such as a control without
+polymer, has no contact: 0),
 `residue_occlusion` with `exposed_threshold`, `buried_threshold`, `max_asa`, `probe_radius_nm` and
 `n_sphere_points` for `method=occlusion` (default), or `residue_contacts` with
 `cutoff` for `method=distance`, on heavy atoms only when `heavy_atoms` is true
-(default). `use_pbc` sets `pbc`, and every polymer residue name of the
-control's first replicate gets a row. `coverage`, the default, is the fraction
+(default). `use_pbc` sets `pbc`, and every polymer residue name in any
+condition gets a row (`polymer_types`), 0 in a replicate without it. `coverage`, the default, is the fraction
 of measured residues with a contact fraction above zero;
 `mean_contact_fraction`, `<type>_contact_fraction`, `<class>_contact_fraction`
 for each amino-acid class of `ProteinAAClassification` and

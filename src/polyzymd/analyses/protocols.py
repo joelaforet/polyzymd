@@ -30,6 +30,7 @@ References
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -791,6 +792,53 @@ def _first_universe(study: Any, empty: dict[tuple[str, int], list[str]], analysi
     )
 
 
+def _zero_partner_warning(
+    empty: dict[tuple[str, int], list[str]], analysis: str, measured: str
+) -> list[str]:
+    """Return a warning naming the replicates whose partner selection matched no atoms.
+
+    Those replicates, such as a control without polymer, are measured with
+    no partner, so their ``measured`` is 0 rather than left out.
+    """
+    if not empty:
+        return []
+    by_condition: dict[str, list[str]] = {}
+    for (label, index), _ in sorted(empty.items()):
+        by_condition.setdefault(label, []).append(str(index))
+    where = "; ".join(f"{label} replicate {', '.join(i)}" for label, i in by_condition.items())
+    names = sorted({name for names in empty.values() for name in names})
+    return [
+        f"{analysis}: {', '.join(names)} matched no atoms in {where}, so {measured} there is 0 "
+        "(none of those atoms to touch). Check the selection if that condition has them."
+    ]
+
+
+def study_wide_settings(analysis: str, study: Any, settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the settings of ``analysis`` that depend on every condition of ``study``.
+
+    A ``--submit`` task sees one replicate, yet some settings must be the
+    same for every replicate of the study, as ``until: common`` is. They are
+    resolved here, once: by a full run, and by ``--submit`` for every task
+    and the report job. For ``contacts`` without ``polymer_types``, the
+    residue names of the polymer selection over every condition (its first
+    replicate) become ``polymer_types``, so every replicate reports contact
+    with every monomer of the study (0 for one it lacks) and every stored
+    record has the same settings. Other analyses have none.
+    """
+    if analysis != "contacts":
+        return {}
+    merged = {**FUNCTION_ANALYSES["contacts"], **settings}
+    if merged["polymer_types"]:
+        return {}
+    names: set[str] = set()
+    for condition in study:
+        if condition.replicates:
+            universe = condition.replicates[0].universe()
+            polymer = universe.select_atoms(str(merged["polymer_selection"]))
+            names |= {str(name) for name in polymer.resnames}
+    return {"polymer_types": sorted(names)} if names else {}
+
+
 def _report_skipping(
     values: Any, study: Any, empty: dict[tuple[str, int], list[str]], analysis: str
 ) -> ProtocolReport:
@@ -948,11 +996,10 @@ def _analyze_hydrogen_bonds(
         )
     first, second = summaries[summary]
     both = first if second is None else f"({first}) or ({second})"
-    group_selections = {
-        "first group": first,
-        **({} if second is None else {"second group": second}),
-    }
-    skipped = _empty_selections(study, group_selections)
+    # The first group is measured; a replicate without the second, such as
+    # a control without polymer, has no hydrogen bond with it: 0.
+    skipped = _empty_selections(study, {"first group": first})
+    no_partner = {} if second is None else _empty_selections(study, {"second group": second})
     universe = _first_universe(study, skipped, "hydrogen_bonds")
     explicit = {
         key: select(f"({both}) and ({settings[key]})", allow_empty=True)
@@ -1049,6 +1096,9 @@ def _analyze_hydrogen_bonds(
         )
     values.metric = run
     report = _report_skipping(values, study, skipped, "hydrogen_bonds")
+    report.warnings += _zero_partner_warning(
+        no_partner, "hydrogen_bonds", "the hydrogen-bond count"
+    )
     if part in life:
         empty = [
             f"{label} replicate {row[0]}"
@@ -1443,8 +1493,12 @@ def _analyze_contacts(
       counts a contact when any polymer atom is within ``cutoff`` Å of the
       residue, comparing heavy atoms only when ``heavy_atoms`` is true.
 
-    ``polymer_selection`` is narrowed to the residue names in
-    ``polymer_types`` when given, and ``use_pbc`` uses the frame's box: the
+    ``polymer_types`` names the polymer residue names (monomers) reported one
+    by one; by default every residue name of ``polymer_selection`` in any
+    condition (:func:`study_wide_settings`), so a replicate without one
+    reports 0 for it. A replicate whose ``polymer_selection`` matches no
+    atoms, such as a control without polymer, has no contact: 0, with a
+    warning. ``use_pbc`` uses the frame's box: the
     minimum image for ``distance``, and for ``occlusion`` each polymer
     molecule moved whole to its image nearest the protein. Results:
 
@@ -1507,21 +1561,21 @@ def _analyze_contacts(
             f"contacts: tolerance_ps must be at least 0, got {tolerance}.",
             hint="Pass --set tolerance_ps=0 for events that end at the first absent frame.",
         )
+    settings.update(study_wide_settings("contacts", study, settings))
     protein = str(settings["protein_selection"])
     polymer = str(settings["polymer_selection"])
-    types_filter = settings["polymer_types"]
-    if types_filter:
-        names = [types_filter] if isinstance(types_filter, str) else list(types_filter)
-        polymer = f"({polymer}) and (resname {' '.join(str(name) for name in names)})"
+    names = settings["polymer_types"] or []
+    types = sorted({str(name) for name in ([names] if isinstance(names, str) else names)})
     if method == "distance" and settings["heavy_atoms"]:
         protein = f"({protein}) and not element H"
         polymer = f"({polymer}) and not element H"
     regions = settings["regions"] or {}
-    skipped = _empty_selections(study, {"protein_selection": protein, "polymer_selection": polymer})
+    # A replicate without protein atoms cannot be measured; one without
+    # polymer atoms, such as a control, has no contact: 0.
+    skipped = _empty_selections(study, {"protein_selection": protein})
+    no_polymer = _empty_selections(study, {"polymer_selection": polymer})
     first = _first_universe(study, skipped, "contacts")
     protein_atoms = first.select_atoms(protein)
-    polymer_atoms = first.select_atoms(polymer)
-    types = sorted({str(name) for name in polymer_atoms.resnames})
 
     def measured(residues: Any) -> list:
         if method == "distance":
@@ -1626,6 +1680,7 @@ def _analyze_contacts(
             "censored_fraction": (None, (0.0, 1.0)),
         }[part]
         report = _report_skipping(values, study, skipped, "contacts")
+        report.warnings += _zero_partner_warning(no_polymer, "contacts", "the event count")
         no_events = [
             f"{label} replicate {row[0]}"
             for label, table_rows in values.rows.items()
@@ -1720,6 +1775,7 @@ def _analyze_contacts(
     runs = all_runs
     values = residue_runs[run] if run in residue_runs else totals[run]
     report = _report_skipping(values, study, skipped, "contacts")
+    report.warnings += _zero_partner_warning(no_polymer, "contacts", "contact")
     if unmeasured:
         report.warnings.append(
             f"contacts: {len(unmeasured)} residues of the protein selection have no maximum "

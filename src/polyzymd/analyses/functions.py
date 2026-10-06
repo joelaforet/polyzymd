@@ -738,7 +738,7 @@ def residue_contacts(
 
     The atoms compared are the atoms given; select heavy atoms, such as
     ``chainid A and not element H``, to leave hydrogens out. With no
-    ``polymer`` atoms every value is ``nan``.
+    ``polymer`` atoms, as in a control without polymer, every value is 0.
 
     Returns
     -------
@@ -748,7 +748,7 @@ def residue_contacts(
     import numpy as np
 
     if len(polymer) == 0:
-        return np.full((1 + len(types), len(protein.residues)), np.nan)
+        return np.zeros((1 + len(types), len(protein.residues)))
     counts = np.zeros((1 + len(types), len(protein.residues)))
     for _, touched in _distance_frames(protein, polymer, frames, cutoff, types, pbc):
         counts += touched
@@ -815,7 +815,7 @@ def _nearest_images(anchor: Any, atoms: Any, box: Any) -> Any:
     from polyzymd.analyses.exceptions import ProtocolError
 
     positions = atoms.positions
-    if box is None:
+    if box is None or len(atoms) == 0:
         return positions
     try:
         fragments = atoms.fragindices
@@ -875,7 +875,9 @@ def residue_occlusion(
     occluder atoms of that residue name are present. Columns follow the
     residues of ``protein`` that have a maximum ASA; residues without one,
     such as terminal caps, still cover their neighbours but are not measured.
-    With no ``occluder`` atoms every value is ``nan``.
+    With no ``occluder`` atoms, as in a control without polymer, nothing is
+    in contact or occluded: those rows are 0, and the exposed fraction and
+    area are measured as usual.
 
     Returns
     -------
@@ -885,8 +887,6 @@ def residue_occlusion(
     import numpy as np
 
     n_measured = len(_measured_residues(protein, max_asa))
-    if len(occluder) == 0:
-        return np.full((len(OCCLUSION_PARTS) + len(types), n_measured), np.nan)
     sums = np.zeros((len(OCCLUSION_PARTS) + len(types), n_measured))
     for _, contact, exposed, alone, covered in _occlusion_frames(
         protein,
@@ -999,6 +999,18 @@ def _occlusion_frames(
 LIFETIME_PARTS = ("mean_lifetime", "n_events", "censored_fraction")
 
 
+def _no_events(n_groups: int) -> Any:
+    """Return :data:`LIFETIME_PARTS` for ``n_groups`` groups without events.
+
+    The lifetime and censored fraction are ``nan`` and the event count is 0.
+    """
+    import numpy as np
+
+    rows = np.full((len(LIFETIME_PARTS), n_groups), np.nan)
+    rows[LIFETIME_PARTS.index("n_events")] = 0.0
+    return rows
+
+
 def contact_events(mask: Any, gap: int = 0) -> tuple[Any, Any]:
     """Return the lengths in frames of the runs of ``True`` in each column of ``mask``, and which are censored.
 
@@ -1086,7 +1098,8 @@ def contact_lifetimes(
     contact, found by :func:`contact_events`; absences of at most
     ``tolerance_ps`` ps are filled first. A run of ``k`` frames lasts ``k``
     times the frame spacing. Events of all residues are pooled. With no
-    ``polymer`` atoms every value is ``nan``.
+    ``polymer`` atoms there are no events: ``n_events`` is 0 and the
+    lifetime and censored fraction are ``nan``.
 
     The columns are the polymer, then each residue name in ``types``, whose
     contacts are those of its atoms alone. The rows, named in
@@ -1143,7 +1156,7 @@ def contact_lifetimes(
         )
     settings.update(options)
     if len(polymer) == 0:
-        return np.full((len(LIFETIME_PARTS), 1 + len(types)), np.nan)
+        return _no_events(1 + len(types))
     if method == "occlusion":
         stream = (
             (time, contact)
@@ -1396,8 +1409,9 @@ def hydrogen_bonds(
     from :func:`hbond_atoms` unless given. With ``group_b``, only bonds with
     one partner in each group count, in either direction; without it, bonds
     within ``group_a``. Bonds within one residue are left out. When a group
-    holds no atoms every value is ``nan``, as for the other hydrogen-bond
-    functions, and :func:`residue_pair_hbond_occupancy` returns no pairs.
+    holds no atoms, as the polymer of a control without polymer, there are
+    no hydrogen bonds: every value is 0, the other hydrogen-bond functions
+    count none, and :func:`residue_pair_hbond_occupancy` returns no pairs.
 
     The rows, named in :data:`HBOND_PARTS`, are the mean number of hydrogen
     bonds per frame, each donor-hydrogen-acceptor counted once; the mean
@@ -1412,7 +1426,7 @@ def hydrogen_bonds(
     import numpy as np
 
     if _empty(group_a, group_b):
-        return np.full(len(HBOND_PARTS), np.nan)
+        return np.zeros(len(HBOND_PARTS))
     events, frames = _hbond_events(
         group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
     )
@@ -1473,7 +1487,7 @@ def hbond_lifetimes(
             hint="Pass key='residue' for residue pairs or key='atom' for donor-acceptor atoms.",
         )
     if _empty(group_a, group_b):
-        return np.full(len(LIFETIME_PARTS), np.nan)
+        return _no_events(1)[:, 0]
     events, frames = _hbond_events(
         group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
     )
@@ -1521,7 +1535,7 @@ def residue_hbond_occupancy(
     import numpy as np
 
     if _empty(group_a, group_b):
-        return np.full(len(group_a.residues), np.nan)
+        return np.zeros(len(group_a.residues))
     events, frames = _hbond_events(
         group_a, group_b, frames, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors
     )
@@ -1639,7 +1653,7 @@ def hbond_count(
         Number of hydrogen bonds.
     """
     if _empty(group_a, group_b):
-        return float("nan")
+        return 0.0
     frame = int(group_a.universe.trajectory.ts.frame)
     events, _ = _hbond_events(
         group_a, group_b, [frame], d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors

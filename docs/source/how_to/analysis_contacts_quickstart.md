@@ -95,11 +95,11 @@ By default the report shows `coverage`: for each replicate, the fraction of
 measured residues in contact on at least one production frame. The replicate
 values are summarised per condition, and every other condition is compared with
 the control by Welch's t test with the Benjamini-Hochberg correction. A
-replicate where `protein_selection` or `polymer_selection` matches no atoms,
-such as every replicate of a no-polymer control, is left out of the statistics
-with a warning; when the control is left out, the other conditions are
-summarised and not compared. A selection that matches no atoms in any replicate
-is refused.
+replicate where `polymer_selection` matches no atoms, such as every replicate
+of a no-polymer control, has no contact: its values are 0 (0 events, no
+lifetime), it is compared like any other, and a warning names it. A replicate
+where `protein_selection` matches no atoms is left out with a warning, and a
+`protein_selection` that matches no atoms in any replicate is refused.
 
 Occlusion computes the SASA of the whole protein twice per frame, plus once
 more per monomer type, so it takes about 2 s per frame for a 180-residue
@@ -137,7 +137,7 @@ Settings, passed with `--set`:
 | `method` | `occlusion` | `occlusion` or `distance`, as above |
 | `protein_selection` | `chainid A` | Protein atoms whose residues are measured |
 | `polymer_selection` | `chainid C` | Polymer atoms |
-| `polymer_types` | none | Residue names to keep in the polymer selection, such as `[SBM]` |
+| `polymer_types` | every residue name of the polymer in any condition | Monomers reported one by one, such as `[SBM]`; a replicate without one reports 0 for it. Narrow the polymer itself with `polymer_selection` |
 | `use_pbc` | `true` | Use the frame's box: the minimum image for `distance`, and for `occlusion` each polymer molecule moved to its image nearest the protein |
 | `regions` | none | Mapping of region names to selections, each reported as `<region>_contact_fraction`; a region cannot be named `coverage`, `mean`, `contact`, `classes`, `occluded`, `occlusion`, a monomer type or an amino-acid class |
 | `exposed_threshold` | `0.2` | Occlusion only: relative SASA with the protein alone at or above which a residue is exposed; 0 counts every residue as exposed |

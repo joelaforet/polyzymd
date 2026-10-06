@@ -1,21 +1,20 @@
-"""Tests for replicates and conditions whose group selections match no atoms.
+"""Tests for replicates whose polymer (or other partner group) has no atoms.
 
-``polyzymd analyze contacts`` and ``polyzymd analyze hydrogen_bonds`` check
-each replicate's group selections. A replicate where one matches no atoms is
-left out of the statistics with a warning, a condition left without
-replicates is left out of the report, and when that condition is the control
-the other conditions are summarised instead of compared. Selections that match
-no atoms in any replicate are refused. The measuring functions return nan for
-an empty group.
+``polyzymd analyze contacts`` and ``polyzymd analyze hydrogen_bonds`` measure
+one group (the protein, or a summary's first group) against a partner. A
+replicate whose partner selection matches no atoms, such as a no-polymer
+control, has no contact and no hydrogen bond with it: its values are 0, it
+stays in the statistics, and a warning names it. Lifetimes there have no
+event: 0 events, no lifetime. A replicate whose measured group matches no
+atoms is left out with a warning, and a measured group with no atoms in any
+replicate is refused. The measuring functions return 0 for an empty group.
 
 The systems are those of tests/analyses/test_residue_contacts.py (distance
 contacts), tests/analyses/test_residue_occlusion.py (occlusion contacts) and
 tests/analyses/test_hydrogen_bonds_analyze.py (hydrogen bonds), written as
 OpenMM run directories. A replicate "without polymer" is the same system with
 the chain C atoms removed from its topology and trajectory, like a no-polymer
-control. Each expected report is the report of a run over only the
-replicates and conditions that keep their atoms, written from the same
-schedules.
+control.
 """
 
 from __future__ import annotations
@@ -27,6 +26,7 @@ import numpy as np
 import pytest
 from click.testing import CliRunner
 
+import polyzymd as pz
 from polyzymd.analyses import analyze, functions
 from polyzymd.analyses.exceptions import ProtocolError, StatisticsError
 from polyzymd.cli.analyze import analyze_command
@@ -210,22 +210,6 @@ def _assert_same_statistics(report, expected) -> None:
     assert _close(got, want), (got, want)
 
 
-def _left_out(analysis: str, label: str, entries: str, whole: bool) -> str:
-    what = "the condition is" if whole else "those replicates are"
-    return (
-        f"{analysis}: in condition {label}, replicate {entries} matched no atoms, so {what} "
-        "left out of the statistics."
-    )
-
-
-def _control_warning(analysis: str, control: str) -> str:
-    return f"{analysis}: the control {control} has no replicate where every selection matches atoms"
-
-
-def _no_polymer_entries(name: str, selection: str, replicates=(1, 2, 3)) -> str:
-    return ", ".join(f"{r} ({name} {selection!r})" for r in replicates)
-
-
 def _contact_options(tmp_path: Path, name: str, settings: dict | None = None, **extra) -> dict:
     return {
         "equilibration": EQUILIBRATION,
@@ -246,6 +230,16 @@ def _hb_options(tmp_path: Path, name: str, settings: dict | None = None, **extra
     }
 
 
+
+def _row(report, label, entry=None):
+    """The condition row of ``label`` (and ``entry``, for a labelled result)."""
+    return next(r for r in report.conditions if r.label == label and r.entry == entry)
+
+
+def _zero_warning(analysis: str, where: str) -> str:
+    return f"matched no atoms in {where}, so"
+
+
 # ---------------------------------------------------------------------------
 # contacts, method=distance
 # ---------------------------------------------------------------------------
@@ -258,15 +252,9 @@ def contact_schedules():
 
 @pytest.fixture(scope="module")
 def contact_configs(tmp_path_factory, contact_schedules) -> dict[str, Path]:
-    """A and B with polymer; N without; A2, A with replicate 2 without; A13, A's 1 and 3 only."""
+    """A and B with polymer; N without; A2, A with replicate 2 without."""
     root = tmp_path_factory.mktemp("contacts")
-    layout = {
-        "A": FULL,
-        "B": FULL,
-        "N": NONE,
-        "A2": {1: True, 2: False, 3: True},
-        "A13": {1: True, 3: True},
-    }
+    layout = {"A": FULL, "B": FULL, "N": NONE, "A2": {1: True, 2: False, 3: True}}
     return _conditions(root, "contacts", layout, contact_schedules)
 
 
@@ -274,178 +262,142 @@ def _contacts(configs, labels, tmp_path, name, run=None, settings=None, **extra)
     return analyze(
         "contacts",
         [configs[label] for label in labels],
-        labels=[label[0] if label in ("A2", "A13") else label for label in labels],
+        labels=[label[0] if label == "A2" else label for label in labels],
         run=run,
         **_contact_options(tmp_path, name, settings, **extra),
     )
 
 
-CONTACT_RUNS = [
-    "coverage",
-    "mean_contact_fraction",
-    "SBM_contact_fraction",
-    "nonpolar_contact_fraction",
-    "contact_fraction_residues",
-    "SBM_contact_fraction_residues",
-    "EGM_contact_fraction_residues",
-]
+CONTACT_RUNS = ["coverage", "mean_contact_fraction", "SBM_contact_fraction"]
+CONTACT_RUNS += ["nonpolar_contact_fraction", "contact_fraction_residues"]
+CONTACT_RUNS += ["SBM_contact_fraction_residues", "EGM_contact_fraction_residues"]
 
 
 @pytest.mark.parametrize("run", CONTACT_RUNS)
-def test_contacts_without_polymer_in_the_control_summarise_the_others(
+def test_contacts_of_a_control_without_polymer_are_zero_and_compared(
     contact_configs, tmp_path, run
 ) -> None:
-    report = _contacts(contact_configs, ["N", "A", "B"], tmp_path, "skip", run)
-    expected = _contacts(contact_configs, ["A", "B"], tmp_path, "ref", run)
+    report = _contacts(contact_configs, ["N", "A", "B"], tmp_path, "zero", run)
+    alone = _contacts(contact_configs, ["A", "B"], tmp_path, "ref", run)
 
-    assert report.run == run
-    assert report.all_runs == rc.ALL_RUNS
-    assert {row.label for row in report.conditions} == {"A", "B"}
-    assert report.pairwise == []
-    got = _rows(report.conditions, CONDITION_FIELDS)
-    assert _close(got, _rows(expected.conditions, CONDITION_FIELDS))
-    entries = _no_polymer_entries("polymer_selection", POLYMER)
-    assert _left_out("contacts", "N", entries, whole=True) in report.warnings
-    assert any(text.startswith(_control_warning("contacts", "N")) for text in report.warnings)
-    assert len([text for text in report.warnings if "matched no atoms" in text]) == 1
-
-
-@pytest.mark.parametrize("run", CONTACT_RUNS)
-def test_contacts_without_polymer_in_the_last_condition_compare_the_others(
-    contact_configs, tmp_path, run
-) -> None:
-    report = _contacts(contact_configs, ["A", "B", "N"], tmp_path, "skip", run)
-    expected = _contacts(contact_configs, ["A", "B"], tmp_path, "ref", run)
-
-    assert report.pairwise
-    assert {(row.a, row.b) for row in report.pairwise} == {("A", "B")}
-    _assert_same_statistics(report, expected)
-    entries = _no_polymer_entries("polymer_selection", POLYMER)
-    assert _left_out("contacts", "N", entries, whole=True) in report.warnings
-    assert not any("the control" in text for text in report.warnings)
-
-
-@pytest.mark.parametrize("run", CONTACT_RUNS)
-def test_contacts_leave_out_the_one_replicate_without_polymer(
-    contact_configs, tmp_path, run
-) -> None:
-    report = _contacts(contact_configs, ["A2", "B"], tmp_path, "skip", run)
-    expected = _contacts(contact_configs, ["A13", "B"], tmp_path, "ref", run)
-
+    assert {row.label for row in report.conditions} == {"N", "A", "B"}
     for row in report.conditions:
-        assert (row.n_replicates, row.replicates) == (
-            (2, [1, 3]) if row.label == "A" else (3, [1, 2, 3])
-        ), row
-    _assert_same_statistics(report, expected)
-    assert report.pairwise
-    entries = _no_polymer_entries("polymer_selection", POLYMER, (2,))
-    assert report.warnings.count(_left_out("contacts", "A", entries, whole=False)) == 1
+        if row.label == "N":
+            assert row.replicate_values == [0.0, 0.0, 0.0], row
+        else:
+            want = _row(alone, row.label, row.entry)
+            assert _close(_rows([row], CONDITION_FIELDS), _rows([want], CONDITION_FIELDS))
+    assert {row.a for row in report.pairwise} == {"N"}
+    assert any(_zero_warning("contacts", "N replicate 1, 2, 3") in t for t in report.warnings)
+    assert not any("left out" in text for text in report.warnings)
 
 
-def test_contacts_leaving_out_a_replicate_equals_excluding_it_with_replicates(
+def test_contacts_of_one_replicate_without_polymer_are_zero(contact_configs, tmp_path) -> None:
+    report = _contacts(contact_configs, ["A2", "B"], tmp_path, "zero")
+
+    row = _row(report, "A")
+    assert row.replicates == [1, 2, 3] and row.replicate_values[1] == 0.0
+    assert row.replicate_values[0] > 0 and row.replicate_values[2] > 0
+    assert any(_zero_warning("contacts", "A replicate 2") in t for t in report.warnings)
+
+
+def test_contact_lifetimes_of_a_control_without_polymer_have_no_event(
     contact_configs, tmp_path
 ) -> None:
-    report = _contacts(contact_configs, ["A2"], tmp_path, "skip")
-    expected = _contacts(contact_configs, ["A2"], tmp_path, "ref", replicates=[1, 3])
+    events = _contacts(contact_configs, ["N", "A"], tmp_path, "life", "lifetime_events")
+    lifetime = _contacts(contact_configs, ["N", "A"], tmp_path, "life", "mean_lifetime")
 
-    assert [row.n_replicates for row in report.conditions] == [2]
-    _assert_same_statistics(report, expected)
-    assert not any("matched no atoms" in text for text in expected.warnings)
+    assert _row(events, "N").replicate_values == [0.0, 0.0, 0.0]
+    assert all(math.isnan(v) for v in _row(lifetime, "N").replicate_values)
+    assert any("N replicate 1" in t and "no contact event" in t for t in lifetime.warnings)
 
 
-def test_cli_contacts_without_polymer_in_the_control_prints_both_warnings(
-    contact_configs, tmp_path
-) -> None:
+@pytest.mark.parametrize("settings", [{"method": "distance"}, {"method": "occlusion"}])
+def test_contacts_of_a_study_without_polymer_are_zero(contact_configs, tmp_path, settings) -> None:
+    report = _contacts(contact_configs, ["N"], tmp_path, "none", settings=settings)
+
+    assert _row(report, "N").replicate_values == [0.0, 0.0, 0.0]
+    assert any(_zero_warning("contacts", "N replicate 1, 2, 3") in t for t in report.warnings)
+
+
+def test_contacts_without_protein_atoms_anywhere_are_refused(contact_configs, tmp_path) -> None:
+    with pytest.raises(ProtocolError, match="match no atoms in any replicate") as info:
+        _contacts(contact_configs, ["A"], tmp_path, "x", settings={"protein_selection": "chainid Z"})
+    assert "protein_selection" in str(info.value) and info.value.hint
+
+
+def test_cli_contacts_of_a_control_without_polymer_warn_once(contact_configs, tmp_path) -> None:
     arguments = ["contacts", "-c", str(contact_configs["N"]), "-c", str(contact_configs["A"])]
-    arguments += ["-c", str(contact_configs["B"]), "--eq", EQUILIBRATION]
-    arguments += ["--output-dir", str(tmp_path), "--set", "method=distance", "--no-plots"]
+    arguments += ["--eq", EQUILIBRATION, "--output-dir", str(tmp_path), "--no-plots"]
+    arguments += ["--set", "method=distance"]
 
     result = CliRunner().invoke(analyze_command, arguments)
 
     assert result.exit_code == 0, result.output
-    assert "matched no atoms, so the condition is left out" in result.stdout
-    assert "the control N has no replicate" in result.stdout
+    assert result.stdout.count("matched no atoms in N replicate 1, 2, 3, so contact") == 1
 
 
-def test_contacts_with_a_resname_missing_from_one_replicate_leave_that_replicate_out(
-    tmp_path, contact_schedules
-) -> None:
-    """polymer_types EGM picks no atom in replicate 3 of A, whose topology has only SBM."""
+# ---------------------------------------------------------------------------
+# polymer_types: the monomers of every condition, the same in every task
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def monomer_configs(tmp_path_factory, contact_schedules) -> dict[str, Path]:
+    """S has only SBM monomers, E only EGM."""
+    root = tmp_path_factory.mktemp("monomers")
     configs = {}
-    for label, replicates in (("A", (1, 2, 3)), ("R", (1, 2))):
-        config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "scratch")
-        for replicate in replicates:
-            drop = ("EGM",) if (label, replicate) == ("A", 3) else ()
+    for label, drop in (("S", ("EGM",)), ("E", ("SBM",))):
+        config = write_simulation_config(root / label, scratch=root / label / "scratch")
+        for replicate in (1, 2, 3):
             _write_contacts(config, replicate, contact_schedules[("A", replicate)], drop=drop)
         configs[label] = config
-    settings = {"polymer_types": ["EGM"]}
-
-    report = analyze(
-        "contacts", [configs["A"]], labels=["A"], **_contact_options(tmp_path, "s", settings)
-    )
-    expected = analyze(
-        "contacts", [configs["R"]], labels=["A"], **_contact_options(tmp_path, "r", settings)
-    )
-
-    selection = "((chainid C) and (resname EGM)) and not element H"
-    entries = _no_polymer_entries("polymer_selection", selection, (3,))
-    assert _left_out("contacts", "A", entries, whole=False) in report.warnings
-    assert [row.replicates for row in report.conditions] == [[1, 2]]
-    _assert_same_statistics(report, expected)
+    return configs
 
 
-@pytest.mark.parametrize("run", ["contact_fraction_residues", "coverage", "mean_lifetime"])
-@pytest.mark.parametrize("labels", [["N", "A", "B"], ["A", "B", "N"]])
-def test_contacts_figures_are_drawn_with_a_condition_left_out(
-    contact_configs, tmp_path, run, labels
+def test_every_condition_reports_every_monomer_of_the_study(monomer_configs, tmp_path) -> None:
+    from polyzymd.analyses.protocols import study_wide_settings
+
+    study = pz.Study.from_configs(dict(monomer_configs), equilibration=EQUILIBRATION)
+    assert study_wide_settings("contacts", study, {}) == {"polymer_types": ["EGM", "SBM"]}
+    assert study_wide_settings("contacts", study, {"polymer_types": ["SBM"]}) == {}
+    assert study_wide_settings("rg", study, {}) == {}
+
+    report = _contacts(monomer_configs, ["S", "E"], tmp_path, "both", "EGM_contact_fraction")
+    assert _row(report, "S").replicate_values == [0.0, 0.0, 0.0]
+    assert all(v > 0 for v in _row(report, "E").replicate_values)
+
+
+def test_a_task_of_one_condition_reuses_what_the_whole_study_stored(
+    monomer_configs, tmp_path
 ) -> None:
-    report = _contacts(contact_configs, labels, tmp_path, "plots", run, plots=True)
+    """A --submit task, given the study's polymer_types, keys its values as the full run does."""
+    _contacts(monomer_configs, ["S", "E"], tmp_path, "out")
+    stored = sorted((tmp_path / "out").rglob("*.npz"))
+    before = {path: path.stat().st_mtime_ns for path in stored}
 
-    folder = Path(report.provenance.output_paths["figures"])
-    assert any(folder.iterdir())
-    assert {row.label for row in report.conditions} == {"A", "B"}
+    _contacts(monomer_configs, ["E"], tmp_path, "out", settings={"polymer_types": ["EGM", "SBM"]})
 
-
-@pytest.mark.parametrize("run", ["mean_lifetime", "SBM_mean_lifetime", "lifetime_events"])
-@pytest.mark.parametrize(
-    ("labels", "reference"),
-    [(["N", "A", "B"], ["A", "B"]), (["A", "B", "N"], ["A", "B"]), (["A2", "B"], ["A13", "B"])],
-)
-def test_contact_lifetimes_leave_out_what_has_no_polymer(
-    contact_configs, tmp_path, run, labels, reference
-) -> None:
-    report = _contacts(contact_configs, labels, tmp_path, "skip", run)
-    expected = _contacts(contact_configs, reference, tmp_path, "ref", run)
-
-    assert report.run == run
-    if labels[0] == "N":
-        assert report.pairwise == []
-        assert _close(
-            _rows(report.conditions, CONDITION_FIELDS), _rows(expected.conditions, CONDITION_FIELDS)
-        )
-        assert any(text.startswith(_control_warning("contacts", "N")) for text in report.warnings)
-    else:
-        _assert_same_statistics(report, expected)
-    assert any("matched no atoms" in text for text in report.warnings)
-    events = [text for text in report.warnings if "have no contact event" in text]
-    assert not any("N replicate" in text or "A replicate 2" in text for text in events)
+    after = sorted((tmp_path / "out").rglob("*.npz"))
+    assert after == stored
+    assert {path: path.stat().st_mtime_ns for path in after} == before
 
 
-@pytest.mark.parametrize("settings", [{"method": "distance"}, {"method": "occlusion"}])
-def test_contacts_with_no_polymer_in_any_replicate_are_refused(
-    contact_configs, tmp_path, settings
-) -> None:
-    with pytest.raises(ProtocolError, match="match no atoms in any replicate") as info:
-        analyze(
-            "contacts",
-            [contact_configs["N"]],
-            equilibration=EQUILIBRATION,
-            output_dir=tmp_path,
-            plots=False,
-            settings=settings,
-        )
-    assert "polymer_selection" in str(info.value)
-    assert info.value.hint
+def test_submit_passes_the_study_monomers_to_tasks_only(monomer_configs, tmp_path) -> None:
+    import shlex
+
+    arguments = ["contacts", "-c", str(monomer_configs["S"]), "-c", str(monomer_configs["E"])]
+    arguments += ["--label", "S", "--label", "E", "--eq", EQUILIBRATION, "--dry-run"]
+    arguments += ["--set", "method=distance", "--output-dir", str(tmp_path / "out")]
+
+    result = CliRunner().invoke(analyze_command, arguments)
+
+    assert result.exit_code == 0, result.output
+    (tasks,) = (tmp_path / "out").rglob("replicates.sbatch")
+    task = shlex.split(tasks.read_text().splitlines()[-1])
+    assert 'polymer_types=["EGM", "SBM"]' in task
+    report = (tasks.parent / "report.sbatch").read_text()
+    assert "polymer_types" not in report
 
 
 # ---------------------------------------------------------------------------
@@ -455,55 +407,25 @@ def test_contacts_with_no_polymer_in_any_replicate_are_refused(
 
 @pytest.fixture(scope="module")
 def occlusion_configs(tmp_path_factory) -> dict[str, Path]:
-    root = tmp_path_factory.mktemp("occlusion_skip")
-    schedules = _schedules(_occlusion_schedule)
-    layout = {"A": FULL, "B": FULL, "N": NONE, "A2": {1: True, 2: False, 3: True}}
-    layout["A13"] = {1: True, 3: True}
-    return _conditions(root, "occlusion", layout, schedules)
-
-
-def _occlusion(configs, labels, tmp_path, name, run=None):
-    return analyze(
-        "contacts",
-        [configs[label] for label in labels],
-        labels=[label[0] if label in ("A2", "A13") else label for label in labels],
-        run=run,
-        equilibration=EQUILIBRATION,
-        output_dir=tmp_path / name,
-        plots=False,
-    )
+    root = tmp_path_factory.mktemp("occlusion_zero")
+    layout = {"A": FULL, "N": NONE}
+    return _conditions(root, "occlusion", layout, _schedules(_occlusion_schedule))
 
 
 @pytest.mark.parametrize("run", ["coverage", "occluded_area", "occlusion_fraction"])
-@pytest.mark.parametrize(
-    ("labels", "reference"),
-    [(["N", "A", "B"], ["A", "B"]), (["A", "B", "N"], ["A", "B"]), (["A2", "B"], ["A13", "B"])],
-)
-def test_occlusion_leaves_out_what_has_no_polymer(
-    occlusion_configs, tmp_path, run, labels, reference
-) -> None:
-    report = _occlusion(occlusion_configs, labels, tmp_path, "skip", run)
-    expected = _occlusion(occlusion_configs, reference, tmp_path, "ref", run)
+def test_occlusion_of_a_control_without_polymer_is_zero(occlusion_configs, tmp_path, run) -> None:
+    report = analyze(
+        "contacts",
+        [occlusion_configs["N"], occlusion_configs["A"]],
+        labels=["N", "A"],
+        run=run,
+        equilibration=EQUILIBRATION,
+        output_dir=tmp_path,
+        plots=False,
+    )
 
-    if labels[0] == "N":
-        assert report.pairwise == []
-        assert _close(
-            _rows(report.conditions, CONDITION_FIELDS), _rows(expected.conditions, CONDITION_FIELDS)
-        )
-    else:
-        _assert_same_statistics(report, expected)
-    assert any("matched no atoms" in text for text in report.warnings)
-
-
-@pytest.mark.parametrize("run", ["contact_fraction_residues", "occluded_area_residues"])
-def test_occlusion_residue_runs_with_the_last_condition_left_out(
-    occlusion_configs, tmp_path, run
-) -> None:
-    report = _occlusion(occlusion_configs, ["A", "B", "N"], tmp_path, "skip", run)
-    expected = _occlusion(occlusion_configs, ["A", "B"], tmp_path, "ref", run)
-
-    assert sorted({row.entry for row in report.conditions}, key=int) == ["2", "3", "4", "5"]
-    _assert_same_statistics(report, expected)
+    assert _row(report, "N").replicate_values == [0.0, 0.0, 0.0]
+    assert report.pairwise and report.pairwise[0].a == "N"
 
 
 # ---------------------------------------------------------------------------
@@ -513,124 +435,53 @@ def test_occlusion_residue_runs_with_the_last_condition_left_out(
 
 @pytest.fixture(scope="module")
 def hb_configs(tmp_path_factory) -> dict[str, Path]:
-    root = tmp_path_factory.mktemp("hbonds_skip")
-    schedules = _schedules(hb._schedule)
-    layout = {"A": FULL, "B": FULL, "N": NONE, "A2": {1: True, 2: False, 3: True}}
-    layout["A13"] = {1: True, 3: True}
-    return _conditions(root, "hbonds", layout, schedules)
+    root = tmp_path_factory.mktemp("hbonds_zero")
+    layout = {"A": FULL, "N": NONE, "A2": {1: True, 2: False, 3: True}}
+    return _conditions(root, "hbonds", layout, _schedules(hb._schedule))
 
 
 def _hbonds(configs, labels, tmp_path, name, run=None, settings=None, **extra):
     return analyze(
         "hydrogen_bonds",
         [configs[label] for label in labels],
-        labels=[label[0] if label in ("A2", "A13") else label for label in labels],
+        labels=[label[0] if label == "A2" else label for label in labels],
         run=run,
         **_hb_options(tmp_path, name, settings, **extra),
     )
 
 
-HB_RUNS = [f"protein_polymer_{kind}" for kind in hb.KINDS]
-HB_ENTRIES = _no_polymer_entries("second group", "chainid C")
+HB_COUNTS = ["protein_polymer_mean_hbonds", "protein_polymer_any_fraction"]
 
 
-@pytest.mark.parametrize("run", HB_RUNS)
-def test_hbonds_without_polymer_in_the_control_summarise_the_others(
-    hb_configs, tmp_path, run
-) -> None:
-    report = _hbonds(hb_configs, ["N", "A", "B"], tmp_path, "skip", run)
-    expected = _hbonds(hb_configs, ["A", "B"], tmp_path, "ref", run)
+@pytest.mark.parametrize("run", HB_COUNTS)
+def test_hbonds_of_a_control_without_polymer_are_zero(hb_configs, tmp_path, run) -> None:
+    report = _hbonds(hb_configs, ["N", "A"], tmp_path, "zero", run)
 
-    assert (report.run, report.all_runs) == (run, hb.ALL_RUNS)
-    assert {row.label for row in report.conditions} == {"A", "B"}
-    assert report.pairwise == []
-    assert _close(
-        _rows(report.conditions, CONDITION_FIELDS), _rows(expected.conditions, CONDITION_FIELDS)
-    )
-    assert _left_out("hydrogen_bonds", "N", HB_ENTRIES, whole=True) in report.warnings
-    assert any(text.startswith(_control_warning("hydrogen_bonds", "N")) for text in report.warnings)
-    assert not any("N replicate" in text for text in report.warnings)
+    assert _row(report, "N").replicate_values == [0.0, 0.0, 0.0]
+    assert report.pairwise and report.pairwise[0].a == "N"
+    assert any(_zero_warning("hydrogen_bonds", "N replicate 1, 2, 3") in t for t in report.warnings)
 
 
-@pytest.mark.parametrize("run", HB_RUNS)
-def test_hbonds_without_polymer_in_the_last_condition_compare_the_others(
-    hb_configs, tmp_path, run
-) -> None:
-    report = _hbonds(hb_configs, ["A", "B", "N"], tmp_path, "skip", run)
-    expected = _hbonds(hb_configs, ["A", "B"], tmp_path, "ref", run)
+def test_hbonds_of_one_replicate_without_polymer_are_zero(hb_configs, tmp_path) -> None:
+    report = _hbonds(hb_configs, ["A2"], tmp_path, "one", HB_COUNTS[0])
 
-    assert report.pairwise
-    assert {(row.a, row.b) for row in report.pairwise} == {("A", "B")}
-    _assert_same_statistics(report, expected)
-    assert _left_out("hydrogen_bonds", "N", HB_ENTRIES, whole=True) in report.warnings
-    assert not any("the control" in text for text in report.warnings)
-
-
-@pytest.mark.parametrize("run", HB_RUNS)
-def test_hbonds_leave_out_the_one_replicate_without_polymer(hb_configs, tmp_path, run) -> None:
-    report = _hbonds(hb_configs, ["A2", "B"], tmp_path, "skip", run)
-    expected = _hbonds(hb_configs, ["A13", "B"], tmp_path, "ref", run)
-
-    for row in report.conditions:
-        assert row.n_replicates == (2 if row.label == "A" else 3), row
-    _assert_same_statistics(report, expected)
-    entries = _no_polymer_entries("second group", "chainid C", (2,))
-    assert _left_out("hydrogen_bonds", "A", entries, whole=False) in report.warnings
-
-
-def test_hbonds_leaving_out_a_replicate_equals_excluding_it_with_replicates(
-    hb_configs, tmp_path
-) -> None:
-    report = _hbonds(hb_configs, ["A2"], tmp_path, "skip")
-    expected = _hbonds(hb_configs, ["A2"], tmp_path, "ref", replicates=[1, 3])
-
-    assert [row.replicates for row in report.conditions] == [[1, 3]]
-    _assert_same_statistics(report, expected)
+    assert _row(report, "A").replicate_values[1] == 0.0
 
 
 def test_hbonds_a_within_summary_of_the_protein_keeps_every_replicate(hb_configs, tmp_path) -> None:
-    """Only the summary's own groups are checked, so a protein-only summary uses the N replicates."""
     settings = {"summaries": {"intra": {"within": "protein"}}}
 
     report = _hbonds(hb_configs, ["N", "A"], tmp_path, "intra", settings=settings)
 
     assert [row.n_replicates for row in report.conditions] == [3, 3]
-    assert len(report.pairwise) == 1
     assert not any("matched no atoms" in text for text in report.warnings)
 
 
-@pytest.mark.parametrize(
-    "run", ["protein_polymer_mean_hbonds", "protein_polymer_residues", "protein_polymer_pairs"]
-)
-@pytest.mark.parametrize("labels", [["N", "A", "B"], ["A", "B", "N"]])
-def test_hbonds_figures_are_drawn_with_a_condition_left_out(
-    hb_configs, tmp_path, run, labels
-) -> None:
-    report = _hbonds(hb_configs, labels, tmp_path, "plots", run, plots=True)
-
-    folder = Path(report.provenance.output_paths["figures"])
-    assert any(folder.iterdir())
-    assert {row.label for row in report.conditions} == {"A", "B"}
-
-
-def test_hbonds_explicit_acceptors_only_on_the_polymer_with_the_last_condition_left_out(
-    hb_configs, tmp_path
-) -> None:
-    """acceptors 'name O1' picks no atom in N either, which must not stop the run."""
-    settings = {"hydrogens": "name HG H2", "acceptors": "name O1"}
-
-    report = _hbonds(hb_configs, ["A", "B", "N"], tmp_path, "skip", settings=settings)
-    expected = _hbonds(hb_configs, ["A", "B"], tmp_path, "ref", settings=settings)
-
-    _assert_same_statistics(report, expected)
-    assert _left_out("hydrogen_bonds", "N", HB_ENTRIES, whole=True) in report.warnings
-
-
-def test_hbonds_with_no_polymer_in_any_replicate_are_refused(hb_configs, tmp_path) -> None:
+def test_hbonds_whose_first_group_matches_nothing_are_refused(hb_configs, tmp_path) -> None:
+    settings = {"summaries": {"intra": {"within": "polymer"}}}
     with pytest.raises(ProtocolError, match="match no atoms in any replicate") as info:
-        _hbonds(hb_configs, ["N"], tmp_path, "none")
-    assert "second group 'chainid C'" in str(info.value)
-    assert info.value.hint
+        _hbonds(hb_configs, ["N"], tmp_path, "none", settings=settings)
+    assert "first group" in str(info.value)
 
 
 # ---------------------------------------------------------------------------
@@ -643,21 +494,15 @@ def _contact_universe():
     return universe.select_atoms("chainid A"), universe.select_atoms("chainid Z")
 
 
-def _assert_all_nan(result, shape) -> None:
-    result = np.asarray(result)
-    assert result.shape == shape
-    assert np.isnan(result).all()
-
-
-def test_residue_contacts_of_an_empty_polymer_are_nan() -> None:
+def test_residue_contacts_of_an_empty_polymer_are_zero() -> None:
     protein, empty = _contact_universe()
 
     result = functions.residue_contacts(protein, empty, [0, 1], types=("EGM", "SBM"))
 
-    _assert_all_nan(result, (3, rc.N_PROTEIN))
+    assert result.shape == (3, rc.N_PROTEIN) and not result.any()
 
 
-def test_residue_occlusion_of_an_empty_occluder_is_nan() -> None:
+def test_residue_occlusion_of_an_empty_occluder_has_no_contact_but_measures_exposure() -> None:
     universe = occ._universe(
         [occ._study_frame(None, None)[:5]] * 2, [(name, "A", 1) for name in occ.PROTEIN]
     )
@@ -665,16 +510,24 @@ def test_residue_occlusion_of_an_empty_occluder_is_nan() -> None:
 
     result = functions.residue_occlusion(protein, empty, [0, 1], types=("EGM", "SBM"))
 
-    _assert_all_nan(result, (len(functions.OCCLUSION_PARTS) + 2, len(occ.MEASURED)))
+    parts = list(functions.OCCLUSION_PARTS)
+    assert result.shape == (len(parts) + 2, len(occ.MEASURED))
+    for zero in ("contact_fraction", "occluded_area"):
+        assert not result[parts.index(zero)].any()
+    assert not result[len(parts) :].any()
+    assert (result[parts.index("exposed_area")] > 0).all()
 
 
 @pytest.mark.parametrize("method", ["distance", "occlusion"])
-def test_contact_lifetimes_of_an_empty_polymer_are_nan(method) -> None:
+def test_contact_lifetimes_of_an_empty_polymer_have_no_event(method) -> None:
     protein, empty = _contact_universe()
 
     result = functions.contact_lifetimes(protein, empty, [0, 1], method=method, types=("SBM",))
 
-    _assert_all_nan(result, (len(functions.LIFETIME_PARTS), 2))
+    events = list(functions.LIFETIME_PARTS).index("n_events")
+    assert result.shape == (len(functions.LIFETIME_PARTS), 2)
+    assert (result[events] == 0).all()
+    assert np.isnan(np.delete(result, events, axis=0)).all()
 
 
 def _hbond_groups():
@@ -683,66 +536,56 @@ def _hbond_groups():
     return protein, polymer, universe.select_atoms("chainid Z")
 
 
-@pytest.mark.parametrize("which", ["second", "first", "within"])
-def test_hydrogen_bonds_of_an_empty_group_are_nan(which) -> None:
+WHICH = ["second", "first", "within"]
+
+
+def _pick(which):
     protein, polymer, empty = _hbond_groups()
-    groups = {"second": (protein, empty), "first": (empty, polymer), "within": (empty, None)}
-
-    result = functions.hydrogen_bonds(*groups[which], frames=[0, 1])
-
-    _assert_all_nan(result, (len(functions.HBOND_PARTS),))
+    return {"second": (protein, empty), "first": (empty, polymer), "within": (empty, None)}[which]
 
 
-@pytest.mark.parametrize("which", ["second", "first", "within"])
-def test_hbond_lifetimes_of_an_empty_group_are_nan(which) -> None:
+@pytest.mark.parametrize("which", WHICH)
+def test_hydrogen_bonds_of_an_empty_group_are_zero(which) -> None:
+    result = functions.hydrogen_bonds(*_pick(which), frames=[0, 1])
+
+    assert result.shape == (len(functions.HBOND_PARTS),) and not result.any()
+
+
+@pytest.mark.parametrize("which", WHICH)
+def test_hbond_lifetimes_of_an_empty_group_have_no_event(which) -> None:
+    result = functions.hbond_lifetimes(*_pick(which), frames=[0, 1])
+
+    events = list(functions.LIFETIME_PARTS).index("n_events")
+    assert result[events] == 0 and np.isnan(np.delete(result, events)).all()
+
+
+def test_residue_hbond_occupancy_of_an_empty_group_is_zero_per_residue_of_the_first() -> None:
     protein, polymer, empty = _hbond_groups()
-    groups = {"second": (protein, empty), "first": (empty, polymer), "within": (empty, None)}
 
-    result = functions.hbond_lifetimes(*groups[which], frames=[0, 1])
-
-    _assert_all_nan(result, (len(functions.LIFETIME_PARTS),))
+    assert functions.residue_hbond_occupancy(protein, empty, [0, 1]).tolist() == [0.0] * 3
+    assert functions.residue_hbond_occupancy(empty, polymer, [0, 1]).shape == (0,)
 
 
-def test_residue_hbond_occupancy_of_an_empty_group_is_nan_per_residue_of_the_first() -> None:
-    protein, polymer, empty = _hbond_groups()
-
-    _assert_all_nan(functions.residue_hbond_occupancy(protein, empty, [0, 1]), (3,))
-    _assert_all_nan(functions.residue_hbond_occupancy(empty, polymer, [0, 1]), (0,))
-    _assert_all_nan(functions.residue_hbond_occupancy(empty, None, [0, 1]), (0,))
-
-
-@pytest.mark.parametrize("which", ["second", "first", "within"])
+@pytest.mark.parametrize("which", WHICH)
 def test_residue_pair_hbond_occupancy_of_an_empty_group_has_no_pair(which) -> None:
-    protein, polymer, empty = _hbond_groups()
-    groups = {"second": (protein, empty), "first": (empty, polymer), "within": (empty, None)}
+    labels, values = functions.residue_pair_hbond_occupancy(*_pick(which), frames=[0, 1])
 
-    labels, values = functions.residue_pair_hbond_occupancy(*groups[which], frames=[0, 1])
-
-    assert labels == []
-    assert isinstance(values, np.ndarray) and values.shape == (0,)
+    assert labels == [] and values.shape == (0,)
 
 
-@pytest.mark.parametrize("which", ["second", "first", "within"])
-def test_hbond_count_of_an_empty_group_is_nan(which) -> None:
-    protein, polymer, empty = _hbond_groups()
-    groups = {"second": (protein, empty), "first": (empty, polymer), "within": (empty, None)}
-
-    result = functions.hbond_count(*groups[which])
-
-    assert isinstance(result, float) and math.isnan(result)
+@pytest.mark.parametrize("which", WHICH)
+def test_hbond_count_of_an_empty_group_is_zero(which) -> None:
+    assert functions.hbond_count(*_pick(which)) == 0.0
 
 
-def test_a_submit_task_on_a_control_without_polymer_succeeds(contact_configs, tmp_path) -> None:
-    """A --submit task runs one condition; with no polymer there is nothing to measure."""
-    from click.testing import CliRunner
-
+def test_a_submit_task_on_a_control_without_polymer_stores_zeros(contact_configs, tmp_path) -> None:
     from polyzymd.cli.main import cli
 
     arguments = ["analyze", "contacts", "-c", str(contact_configs["N"]), "--label", "N"]
     arguments += ["--replicates", "1", "--eq", EQUILIBRATION, "--set", "method=distance"]
-    arguments += ["--output-dir", str(tmp_path / "task"), "--no-plots"]
-    task = CliRunner().invoke(cli, [*arguments, "--task"])
+    arguments += ["--output-dir", str(tmp_path / "task"), "--no-plots", "--task"]
+
+    task = CliRunner().invoke(cli, arguments)
+
     assert task.exit_code == 0, task.output
-    assert "Nothing is stored for this task" in task.output
-    alone = CliRunner().invoke(cli, arguments)
-    assert alone.exit_code == 2 and "match no atoms in any replicate" in alone.output
+    assert sorted((tmp_path / "task").rglob("*.npz"))
