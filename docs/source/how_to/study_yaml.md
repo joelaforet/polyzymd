@@ -190,13 +190,16 @@ analyses:
 | `settings` | Keyword arguments passed as they are; `--set` overrides them |
 | `labels: returned` | For a `per_replicate` function that returns `(labels, values)`, such as one value per residue |
 | `parts: [area, contacts]` | For a function that measures several quantities in one pass: a `timeseries` function returns a dict with these keys each frame (or a sequence in this order), a `per_replicate` function one row per part. Each part is stored and plotted as its own result, has its own `part` in `Study.results().table`, and the report covers the part given with `--run`, the first by default |
-| `missing: .nan` | With `labels: returned`, the value a replicate gets for a label that other replicates returned and it did not, such as a frame index past the end of a shorter run. Without it such a replicate stops the report, with a message saying so |
+| `missing: .nan` | With `labels: returned`, the value a replicate gets for a label that other replicates returned and it did not, such as a frame index past the end of a shorter run; every replicate given it is named in the report's warnings, with its labels. Without it such a replicate stops the report, with a message saying so |
 | `allow_empty: true` | Pass a selection that matches no atoms, such as a polymer selection in a no-polymer control, to the function as an empty AtomGroup, so the function decides the value there (for example `0.0` when `len(polymer) == 0`). Without it such a replicate stops the run, with a message saying so |
 
-The stored results are keyed on every Python file in the function's folder,
-not only the function: edit any helper in it, or a helper module it imports
-from that folder, and the next run recomputes. The files are compiled from
-their current text every time, never from a cached `.pyc`.
+The stored results are keyed on every file under the function's folder, not
+only the function: edit a helper in the file, a helper module or package it
+imports from that folder, or a data file it reads there, and the next run
+recomputes. Only `results/`, `logs/`, `deposit/`, `conditions/` and `slurm/`
+folders, other studies' folders, `data.local.yaml` and the files freeze
+writes are left out. The files are compiled from their current text every
+time, never from a cached `.pyc`.
 
 `polyzymd study check` imports every listed function, so a broken file is
 reported before any trajectory is read.

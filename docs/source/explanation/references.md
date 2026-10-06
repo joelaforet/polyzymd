@@ -80,6 +80,13 @@ turn that count into an error bar.
   and Zuckerman, D. M. (2018). Best practices for quantifying sampling quality
   and uncertainty in molecular simulations. Living Journal of Computational
   Molecular Science 1:5067. doi:10.33011/livecoms.1.1.5067
+- Hurlbert, S. H. (1984). Pseudoreplication and the design of ecological field
+  experiments. Ecological Monographs 54:187-211. doi:10.2307/1942661 (the
+  experimental unit: trends over a condition factor are fitted on condition
+  means)
+- Lazic, S. E. (2010). The problem of pseudoreplication in neuroscientific
+  studies: is it affecting your analysis? BMC Neuroscience 11:5.
+  doi:10.1186/1471-2202-11-5
 - Grossfield, A. and Zuckerman, D. M. (2009). Quantifying uncertainty and
   sampling quality in biomolecular simulations. Annual Reports in Computational
   Chemistry 5:23-48. doi:10.1016/S1574-1400(09)00502-7

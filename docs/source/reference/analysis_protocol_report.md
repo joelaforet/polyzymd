@@ -80,15 +80,15 @@ rows the JSON form holds; every one of them is kept there.
 | Field | Type | Meaning |
 |---|---|---|
 | `factor` | `str` | The condition factor, for example `sbma_fraction`. |
-| `conditions` | `list[str]` | Conditions that declare the factor and were fitted; a control without it is left out. |
-| `n_replicates` | `int` | Replicate values fitted, one per replicate. |
-| `slope` | `float \| None` | Ordinary least-squares slope of the replicate values against the factor, in the metric's unit per unit of the factor. |
-| `slope_ci95` | `tuple[float, float] \| None` | 95 percent t interval on `slope`. |
+| `conditions` | `list[str]` | Conditions that declare the factor; each is one point of the fit, the mean of its replicate values. A control without the factor is left out. |
+| `n_replicates` | `int` | Replicate values behind those means. |
+| `slope` | `float \| None` | Ordinary least-squares slope of the condition means against the factor, in the metric's unit per unit of the factor. |
+| `slope_ci95` | `tuple[float, float] \| None` | 95 percent t interval on `slope`, on `k - 2` degrees of freedom for `k` conditions. |
 | `p`, `p_adjusted` | `float \| None` | Two-sided t test of zero slope, and the same corrected with Benjamini-Hochberg over the study's numeric factors. |
 | `family_size` | `int \| None` | Number of factors in that family. |
 | `r_squared` | `float \| None` | Coefficient of determination of the fit. |
 | `significant` | `bool` | Whether `p_adjusted` is at most 0.05. |
-| `testable` | `bool` | `False` when a replicate value is not finite, there are fewer than three factor levels or four replicate values, or the values all agree. |
+| `testable` | `bool` | `False` when a replicate value is not finite, there are fewer than three factor levels, or the condition means all agree. |
 | `reason` | `str \| None` | Why the trend is not testable. |
 
 ## ProtocolProvenance

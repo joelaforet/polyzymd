@@ -92,9 +92,13 @@ replicate, and the project and its studies give exactly that table.
 
 Conditions may declare factors, such as the SBMA fraction of a copolymer.
 Factors describe what varies between conditions; they do not group anything.
-A numeric factor lets a study's report test for a trend, the slope of the
-replicate values against the factor across the conditions that declare it,
-in addition to comparing each condition with the control. Factors need not
+A numeric factor lets a study's report test for a trend, in addition to
+comparing each condition with the control. The trend is fitted through the
+condition means, one point per condition, because the factor varies only
+between conditions: more replicates of a condition make its mean more
+precise, but they are not more points on the line. Treating them as
+independent points would claim a confidence the conditions cannot give
+(Hurlbert 1984; Lazic 2010). Factors need not
 match across studies: each study tests the factors its conditions declare.
 
 A paper's statistical plan often goes further, for example a hierarchy of

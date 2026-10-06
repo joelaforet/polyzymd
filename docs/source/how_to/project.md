@@ -170,21 +170,25 @@ Per-frame results are reduced over each replicate's frames as the analysis
 reduces them (the entry's `reduce`, otherwise the mean).
 
 **Trend over a factor.** When a study's conditions declare a numeric factor,
-such as `sbma_fraction`, every report of that study adds the slope of the
-replicate values against it, over the conditions that declare it (a control
-without the factor is left out), with a 95 percent interval and a t test of
-zero slope; several numeric factors are one Benjamini-Hochberg family:
+such as `sbma_fraction`, every report of that study adds a straight line
+fitted through the condition means against the factor, over the conditions
+that declare it (a control without the factor is left out), with a 95
+percent interval and a t test of zero slope; several numeric factors are one
+Benjamini-Hochberg family:
 
 ```
-trend sbma_fraction  slope 2  ci95 1.977 to 2.023  p 1.7e-15  p_adj 1.9e-14  r2 0.99  n 15  conditions 5
-verdict: core_rmsf falls with sbma_fraction (slope ...)
+trend sbma_fraction  slope -0.4  ci95 -0.61 to -0.19  p 0.009  p_adj 0.009  r2 0.92  condition_means 5  replicates 15
+verdict: core_rmsf falls with sbma_fraction (slope -0.4 A per unit sbma_fraction, ..., fitted on 5 condition means of 15 replicates)
 ```
 
-It is a straight-line fit: look at the per-condition means before reading it
-as a dose response. It needs at least three factor levels and four replicate
-values (with two levels it would only restate a pairwise comparison), and it
-is reported as not testable, with the reason, when a replicate value is not
-finite. Labelled results (one value per residue) get none.
+Each condition is one point, the mean of its replicates: the factor varies
+only between conditions, so with five conditions the test has three degrees
+of freedom, and only a clear, steady change across conditions is called a
+trend. It needs at least three factor levels (with two it would restate a
+pairwise comparison) and is reported as not testable, with the reason, when
+a replicate value is not finite. Labelled results (one value per residue) get
+none. A different model, such as a dose response that is not a straight
+line, belongs in your statistical plan.
 
 **Your own statistical plan.** A plan that goes further is a function in the project (or study) folder:
 
@@ -232,6 +236,7 @@ one DOI, for the paper.
 
 Before writing anything, freeze warns about every run whose stored results no
 longer match the project (a changed config, window, stride, function or
-helper module, setting, selection, file content, factor, or replicate set),
+anything in its folder, any key of the analysis entry, setting, selection,
+file content, factor, condition, or replicate set),
 every partial report, and a stats plan that is stale or was never run. Each
 warning names what to rerun; freezing anyway is your call.
