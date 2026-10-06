@@ -315,3 +315,27 @@ def test_repeated_pair_labels_are_refused() -> None:
             eq_check=False,
             plots=False,
         )
+
+
+@pytest.mark.parametrize(
+    ("limits", "text"),
+    [((1.9999995, 2.0000004), "1.999999 to 2"), ((0.7733, 1.227), "0.7733 to 1.227"), (None, "na")],
+)
+def test_a_narrow_interval_is_not_printed_as_one_number(limits, text) -> None:
+    """A real, narrow interval prints with enough digits to show both ends, not as 'ci95 2 to 2'."""
+    from polyzymd.analyses.protocols import _interval
+
+    assert _interval(limits) == text
+
+
+def test_the_untestable_reason_is_the_real_one() -> None:
+    """Two replicates with no variance are said to have no variance, not to lack replicates."""
+    from polyzymd.analyses.protocols import _verdict
+
+    conditions = [
+        ConditionReport(label=label, n_replicates=2, mean=0.0, replicate_values=[0.0, 0.0])
+        for label in ("A", "B")
+    ]
+    pair = PairwiseReport(a="A", b="B", delta=0.0, testable=False)
+    text = " ".join(_verdict("m", None, conditions, [pair]))
+    assert "same value in every replicate" in text and "at least two" not in text

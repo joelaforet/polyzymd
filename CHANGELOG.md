@@ -132,7 +132,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Console and messages (1.3 audit, wave D).**
+- **Console and messages.**
   - The uncommitted-inputs warning prints once per command, with a count and the first five files.
   - Freeze merges a warning that several conditions share into one line naming them.
   - The GROMACS TPR fallback warns once per command.

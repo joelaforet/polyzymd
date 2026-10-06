@@ -454,3 +454,20 @@ def test_freeze_names_cosolvents_and_missing_build_files(tmp_path: Path) -> None
     )
     (tmp_path / "system.xml").write_text("<x/>")
     assert _missing_build_files(tmp_path) == ["system.prmtop"]
+
+
+def test_identical_warnings_for_several_conditions_are_one_line() -> None:
+    """Conditions that share one warning give one line naming them all."""
+    from polyzymd.analyses.study_freeze import group_warnings
+
+    warnings = [
+        "A: no hashes; run x",
+        "B: no hashes; run x",
+        "metadata.doi is not set",
+        "A replicate 1: odd",
+    ]
+    assert group_warnings(warnings, ["A", "B"]) == [
+        "A, B: no hashes; run x",
+        "metadata.doi is not set",
+        "A replicate 1: odd",
+    ]
