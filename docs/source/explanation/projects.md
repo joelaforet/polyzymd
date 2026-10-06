@@ -52,10 +52,17 @@ conditions:                    # control first
   SBMA 360 K: {config: conditions/sbma_360, factors: {temperature_K: 360, polymer: SBMA}}
 ```
 
+PolyzyMD compares each condition with the first condition, the control. In
+this study, `SBMA 360 K` is compared with `No polymer 300 K`, so that
+difference holds the effect of the polymer and the effect of the temperature.
+To compare each polymer condition with the no-polymer condition at the same
+temperature, make one study for each temperature, or fit a model with both
+factors in a `stats/` script.
+
 A point mutant keeps the residue numbering of its wild type. It can share the
 frame of the wild type when one reference structure fits both. A different
-protein usually cannot: its numbering, structures and regions differ. So it goes in its own
-study. By default, PolyzyMD never compares a condition of one study with the
+protein usually cannot: its numbering, structures and regions differ. So it
+goes in its own study. By default, PolyzyMD never compares a condition of one study with the
 control of a different study.
 
 The examples on these pages come from a paper with one enzyme at one
