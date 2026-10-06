@@ -545,6 +545,18 @@ class CoSolventSpec(_ConfigModel):
     # Specification method 2: Molar concentration
     concentration: float | None = Field(None, gt=0.0, description="Molar concentration (mol/L)")
 
+    # Specification method 3: number of molecules
+    count: int | None = Field(None, ge=1, description="Number of molecules in the box")
+
+    charge_method: ChargeMethod = Field(
+        ChargeMethod.NAGL,
+        description=(
+            "How partial charges are assigned to a co-solvent that is not in the bundled "
+            "library: 'nagl' (default, the OpenFF graph network trained on AM1-BCC), "
+            "'am1bcc' (needs AmberTools) or 'espaloma'"
+        ),
+    )
+
     # Optional physical property for library metadata
     density: float | None = Field(
         None,
@@ -572,17 +584,13 @@ class CoSolventSpec(_ConfigModel):
         from polyzymd.data.cosolvent_library import get_cosolvent
 
         # Check that exactly one composition method is specified
-        has_mole_fraction = self.mole_fraction is not None
-        has_conc = self.concentration is not None
-
-        if not has_mole_fraction and not has_conc:
+        given = [
+            key for key in ("mole_fraction", "concentration", "count") if getattr(self, key) is not None
+        ]
+        if len(given) != 1:
             raise ValueError(
-                f"Co-solvent '{self.name}': Must specify either 'mole_fraction' or 'concentration'"
-            )
-        if has_mole_fraction and has_conc:
-            raise ValueError(
-                f"Co-solvent '{self.name}': Cannot specify both 'mole_fraction' "
-                f"and 'concentration' - choose one"
+                f"Co-solvent '{self.name}': give exactly one of mole_fraction, concentration "
+                f"and count, not {given or 'none'}"
             )
 
         # Look up from library
@@ -1721,6 +1729,8 @@ class SimulationConfig(_ConfigModel):
             elif cosolvent.concentration is not None:
                 concentration = _format_decimal_token(cosolvent.concentration)
                 token = f"{name}_{concentration}M"
+            elif cosolvent.count is not None:
+                token = f"{name}_{cosolvent.count}mol"
             else:
                 # Validation guarantees one composition mode, but keep errors explicit
                 raise ValueError(f"Co-solvent '{cosolvent.name}' has no composition value")

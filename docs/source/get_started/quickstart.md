@@ -1,5 +1,16 @@
 # Run Your First PolyzyMD Simulation
 
+```{tip}
+**The fastest start.** The repository ships a protein ready to simulate:
+`examples/quickstart/` holds Trp-cage (PDB 1L2Y) in water with NaCl, with one
+config for OpenMM and one for GROMACS. From that folder, run:
+
+    polyzymd run -c config.yaml -r 1
+
+It builds the system and runs a few picoseconds on the CPU. Then go to Step 7.
+To use your own protein, copy the folder and replace `trpcage.pdb`.
+```
+
 This tutorial walks through one complete first run: create a project scaffold,
 add an enzyme structure, write a minimal configuration, validate it, and make
 sure PolyzyMD can build the system.

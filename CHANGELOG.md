@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Systems without polymers (1.3 audit, wave C).**
+  - Co-solvents take `charge_method` (default `nagl`; `am1bcc` needs AmberTools), and the build asks you to check the default.
+  - Co-solvents take `count:` for a number of molecules.
+  - A SMILES with several parts (`...[O-].[Na+]`) is charged part by part, so NAGL handles the sodium.
+  - The config hash includes the co-solvents, so a water and an SDS condition never share one.
+  - `polyzymd build` follows the config's `engine`, and `polyzymd run` takes it from the config when `--engine` is left out.
+  - The build dry run lists co-solvents and ions, and says what the replicate number seeds.
+  - `examples/quickstart/` ships Trp-cage with one config per engine. `tests/test_quickstart_example.py` runs it from config to `analyze rg`.
+  - A `polyzymd-simulate` agent skill covers setup, build, run and submit.
+
 - **Trajectory hashes, and `polyzymd hash-trajectories`.**  Each completed
   OpenMM production segment records its trajectory's SHA-256 and size in
   `progress.json` (`trajectory_sha256`, `trajectory_bytes`) after flushing the

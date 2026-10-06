@@ -79,6 +79,12 @@ class CoSolvent:
     density: float | None = None  # g/mL
     residue_name: str = "COS"
     molecule: Molecule | None = field(default=None, repr=False)
+    count: int | None = None
+    #: How charges are assigned when the molecule is not in the bundled library.
+    charge_method: str = "nagl"
+    #: Whether the config set charge_method; when it did not, the build asks
+    #: the user to check the default.
+    charge_method_given: bool = False
 
     def __post_init__(self) -> None:
         """Validate co-solvent specification.
@@ -92,14 +98,16 @@ class CoSolvent:
             self.residue_name = self.residue_name[:3].upper()
 
         # Validate that exactly one composition method is used
-        if self.mole_fraction is None and self.concentration is None:
+        given = [
+            v for v in (self.mole_fraction, self.concentration, self.count) if v is not None
+        ]
+        if len(given) != 1:
             raise ValueError(
-                f"CoSolvent '{self.name}': Must specify either mole_fraction or concentration"
+                f"CoSolvent '{self.name}': give exactly one of mole_fraction, concentration "
+                "and count"
             )
-        if self.mole_fraction is not None and self.concentration is not None:
-            raise ValueError(
-                f"CoSolvent '{self.name}': Cannot specify both mole_fraction and concentration"
-            )
+        if self.count is not None and self.count < 1:
+            raise ValueError(f"CoSolvent '{self.name}': count must be at least 1")
         if self.mole_fraction is not None and not 0.0 < self.mole_fraction < 1.0:
             raise ValueError(f"CoSolvent '{self.name}': mole_fraction must be between 0 and 1")
         if self.concentration is not None and self.concentration <= 0.0:
@@ -368,7 +376,7 @@ class SolventBuilder:
         from openff.toolkit import Molecule
         from openff.units import Quantity
 
-        from polyzymd.data.solvent_molecules import get_solvent_molecule
+        from polyzymd.data.solvent_molecules import get_solvent_molecule, is_bundled_solvent
         from polyzymd.utils import boxvectors
         from polyzymd.utils.packmol import solvate_with_packmol
 
@@ -442,17 +450,26 @@ class SolventBuilder:
                     name=cosolvent.name,
                     smiles=cosolvent.smiles,
                     residue_name=cosolvent.residue_name,
+                    charge_method=cosolvent.charge_method,
                 )
+                if not cosolvent.charge_method_given and not is_bundled_solvent(cosolvent.name):
+                    LOGGER.warning(
+                        f"Co-solvent {cosolvent.name}: partial charges are from "
+                        f"{cosolvent.charge_method.upper()} (the default). Check that they suit "
+                        "this molecule; set charge_method: am1bcc in its co_solvents entry to "
+                        "use AM1-BCC, which needs AmberTools."
+                    )
 
             cosolvent_molar_mass = sum(atom.mass for atom in cosolvent.molecule.atoms)
             if cosolvent.mole_fraction is not None:
                 cosolvent_masses.append(
                     (cosolvent.name, cosolvent.mole_fraction, cosolvent_molar_mass)
                 )
-            elif cosolvent.concentration is None:
+            elif cosolvent.concentration is None and cosolvent.count is None:
                 # Should not reach here due to validation in CoSolvent.__post_init__
                 raise ValueError(
-                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction nor concentration"
+                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction, concentration "
+                    "nor count"
                 )
 
         neutral_solvent_mass = self._calculate_neutral_solvent_mass(
@@ -515,10 +532,15 @@ class SolventBuilder:
                     f"Adding {n_cosolvent} {cosolvent.name} molecules ({cosolvent.concentration} M)"
                 )
 
+            elif cosolvent.count is not None:
+                n_cosolvent = int(cosolvent.count)
+                LOGGER.info(f"Adding {n_cosolvent} {cosolvent.name} molecules (count)")
+
             else:
                 # Should not reach here due to validation in CoSolvent.__post_init__
                 raise ValueError(
-                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction nor concentration"
+                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction, concentration "
+                    "nor count"
                 )
 
             solvent_molecules.append(cosolvent.molecule)
@@ -636,6 +658,9 @@ class SolventBuilder:
                 concentration=cs.concentration,
                 density=cs.density,
                 residue_name=cs.residue_name or cs.name[:3].upper(),
+                count=cs.count,
+                charge_method=cs.charge_method.value,
+                charge_method_given="charge_method" in cs.model_fields_set,
             )
             for cs in config.co_solvents
         ]

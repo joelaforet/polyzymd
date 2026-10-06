@@ -455,6 +455,10 @@ def build(
         if projects_dir:
             sim_config.output.projects_directory = Path(projects_dir)
 
+        # A config for GROMACS builds GROMACS inputs unless --format says otherwise.
+        if export_format is None and sim_config.engine == "gromacs":
+            export_format = "gromacs"
+
         if dry_run:
             colored_echo("=" * 60, phase="build")
             colored_echo("DRY RUN — Validation Report", phase="build")
@@ -471,7 +475,12 @@ def build(
             colored_echo("Replicates:", phase="build")
             colored_echo(f"  Count: {len(replicate_list)}", phase="build")
             colored_echo(f"  IDs: {replicate_list}", phase="build")
-            colored_echo(f"  Polymer seeds: {replicate_list} (one per replicate)", phase="build")
+            polymer = bool(sim_config.polymers and sim_config.polymers.enabled)
+            what = "Packmol and polymer draws" if polymer else "Packmol"
+            colored_echo(
+                f"  Seeds: the replicate number seeds {what} (the starting structure)",
+                phase="build",
+            )
             colored_echo(phase="build")
 
             colored_echo("System Components:", phase="build")
@@ -498,9 +507,22 @@ def build(
             colored_echo(f"  Chain D+ (Solvent): {sim_config.solvent.primary.model}", phase="build")
             colored_echo(f"    Box padding: {sim_config.solvent.box.padding} nm", phase="build")
             colored_echo(
-                f"    NaCl concentration: {sim_config.solvent.ions.nacl_concentration} M",
+                f"    NaCl concentration: {sim_config.solvent.ions.nacl_concentration} M, "
+                f"neutralize: {sim_config.solvent.ions.neutralize}",
                 phase="build",
             )
+            for cs in sim_config.solvent.co_solvents:
+                if cs.count is not None:
+                    amount = f"{cs.count} molecules"
+                elif cs.concentration is not None:
+                    amount = f"{cs.concentration} M"
+                else:
+                    amount = f"{cs.mole_fraction * 100:g} mol%"
+                colored_echo(
+                    f"    Co-solvent {cs.name} ({cs.residue_name}): {amount}, "
+                    f"SMILES {cs.smiles}, charges {cs.charge_method.value}",
+                    phase="build",
+                )
             colored_echo(phase="build")
 
             colored_echo("Parameterization Plan:", phase="build")
@@ -925,9 +947,9 @@ def _print_run_dry_run_report(
 )
 @click.option(
     "--engine",
-    required=True,
+    default=None,
     type=click.Choice(["gromacs", "openmm"], case_sensitive=False),
-    help="Simulation engine to run locally",
+    help="Simulation engine to run locally. Default: the config's engine.",
 )
 @click.option(
     "--dry-run",
@@ -940,7 +962,7 @@ def run(
     scratch_dir: str | None,
     projects_dir: str | None,
     gmx_path: str | None,
-    engine: str,
+    engine: str | None,
     dry_run: bool,
 ) -> None:
     """Build and run a simulation locally.
@@ -957,6 +979,13 @@ def run(
         - ``--gmx-path`` is valid only with ``--engine gromacs``
         - ``--dry-run`` validates and previews without writing files
     """
+    if engine is None:
+        from polyzymd.config.schema import SimulationConfig
+
+        try:
+            engine = SimulationConfig.from_yaml(config).engine
+        except Exception:  # noqa: BLE001 - the full load below reports the problem
+            engine = "openmm"
     engine = engine.lower()
     if engine == "openmm":
         warn_if_wrong_pixi_env(

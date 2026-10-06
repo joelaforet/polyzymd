@@ -258,10 +258,10 @@ class TestCoSolventCompositionValidation:
         """Each co-solvent should have exactly one composition method."""
         from polyzymd.config.schema import CoSolventSpec
 
-        with pytest.raises(ValidationError, match="Must specify either 'mole_fraction'"):
+        with pytest.raises(ValidationError, match="give exactly one of mole_fraction, concentration"):
             CoSolventSpec(name="dmso")
 
-        with pytest.raises(ValidationError, match="Cannot specify both 'mole_fraction'"):
+        with pytest.raises(ValidationError, match="give exactly one of mole_fraction, concentration"):
             CoSolventSpec(name="dmso", mole_fraction=0.1, concentration=1.0)
 
 

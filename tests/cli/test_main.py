@@ -44,7 +44,8 @@ def _make_dry_run_config() -> SimpleNamespace:
         solvent=SimpleNamespace(
             primary=SimpleNamespace(model="tip3p"),
             box=SimpleNamespace(padding=1.2),
-            ions=SimpleNamespace(nacl_concentration=0.15),
+            ions=SimpleNamespace(nacl_concentration=0.15, neutralize=True),
+            co_solvents=[],
         ),
         force_field=SimpleNamespace(protein="amber14", small_molecule="openff-2.2.0"),
         thermodynamics=SimpleNamespace(temperature=300.0, pressure=1.0),

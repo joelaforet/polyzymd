@@ -1,0 +1,47 @@
+# A protein in water: the PolyzyMD quickstart. Trp-cage (20 residues) in
+# TIP3P water with 0.15 M NaCl, run for a few picoseconds on the CPU. Change
+# the durations (ns) for a real study; see the configuration reference.
+name: "trpcage_water"
+engine: "openmm"
+description: "Trp-cage in water with NaCl"
+
+enzyme:
+  name: "trpcage"
+  pdb_path: "trpcage.pdb"
+
+solvent:
+  primary:
+    type: "water"
+    model: "tip3p"
+  ions:
+    neutralize: true
+    nacl_concentration: 0.15
+  box:
+    padding: 1.0
+    shape: "rhombic_dodecahedron"
+
+thermodynamics:
+  temperature: 300.0
+  pressure: 1.0
+
+simulation_phases:
+  equilibration_stages:
+    - name: "equil"
+      duration: 0.002
+      samples: 2
+      ensemble: "NVT"
+      temperature: 300.0
+  production:
+    ensemble: "NPT"
+    duration: 0.004
+    samples: 4
+    time_step: 2.0
+    thermostat: "LangevinMiddle"
+    barostat: "MC"
+
+openmm:
+  platform: "CPU"
+
+output:
+  projects_directory: "."
+  naming_template: "{enzyme}_{temperature}K_run{replicate}"

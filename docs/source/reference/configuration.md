@@ -304,7 +304,7 @@ solvent counts.
 
 ### Co-solvents
 
-PolyzyMD supports adding co-solvents to a water primary solvent. You can specify co-solvents using either **mole fraction** or **molar concentration**.
+PolyzyMD supports adding co-solvents to a water primary solvent. Give the amount of each as a **mole fraction**, a **molar concentration** or a **count** of molecules.
 
 #### Specification Methods
 
@@ -312,8 +312,9 @@ PolyzyMD supports adding co-solvents to a water primary solvent. You can specify
 |--------|-------|-------------|-----------------|
 | Mole Fraction | `mole_fraction` | Fraction of neutral solvent molecules (0-1) | Replaces water in the neutral solvent mixture |
 | Concentration | `concentration` | Molar concentration (mol/L) | Additive (water unchanged) |
+| Count | `count` | Number of molecules in the box | Additive (water unchanged) |
 
-**Important:** Use exactly ONE method per co-solvent. Do not specify both `mole_fraction` and `concentration` for the same co-solvent. The previous `volume_fraction` key has been removed and is rejected instead of converted automatically. Existing configs that used `volume_fraction` must be updated explicitly to either `mole_fraction` or `concentration`; PolyzyMD does not infer mole fractions from volume fractions.
+**Important:** Use exactly ONE method per co-solvent. The previous `volume_fraction` key has been removed and is rejected instead of converted automatically. Existing configs that used `volume_fraction` must be updated explicitly to either `mole_fraction` or `concentration`; PolyzyMD does not infer mole fractions from volume fractions.
 
 #### Mole Fraction Method
 
@@ -508,18 +509,30 @@ All 12 library co-solvents plus water models have pre-computed charges:
 
 #### Custom Solvents
 
-When you use a custom co-solvent (not in the library), PolyzyMD will:
+When you use a custom co-solvent (not in the library), PolyzyMD:
 
-1. Generate the molecule from your SMILES string
-2. Compute AM1BCC partial charges (this may take a few seconds)
-3. Cache the parameterized molecule to `~/.polyzymd/solvent_cache/`
-4. Reuse the cached version for all future simulations
+1. Generates the molecule from your SMILES string.
+2. Assigns partial charges with `charge_method`: `nagl` by default, the
+   OpenFF graph network trained on AM1-BCC. Set `charge_method: am1bcc` for
+   AM1-BCC itself, which needs AmberTools. When you leave the default, the
+   build writes a warning that asks you to check that NAGL charges suit the
+   molecule.
+3. Charges each part of a SMILES with several parts on its own: a single-atom
+   ion takes its formal charge.
+4. Caches the charged molecule in `~/.polyzymd/solvent_cache/`, one file per
+   charge method, and reuses it.
+
+A charged molecule can carry its counter-ion in the SMILES, which keeps it
+neutral. Without the counter-ion, `solvent.ions.neutralize: true` adds the
+counter-ions. Either way the system is neutral.
 
 ```yaml
 co_solvents:
-  - name: "my_custom_solvent"
-    smiles: "CC(=O)OCC"        # First use: computes and caches charges
-    concentration: 0.5         # Future uses: loads from cache instantly
+  - name: "sds"
+    smiles: "CCCCCCCCCCCCOS(=O)(=O)[O-].[Na+]"   # sodium dodecyl sulfate with Na+
+    residue_name: "SDS"
+    count: 8
+    charge_method: nagl                          # the default; am1bcc needs AmberTools
 ```
 
 #### Managing the Cache

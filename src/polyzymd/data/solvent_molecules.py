@@ -84,11 +84,20 @@ TIP4PEW_CHARGES = {
 }
 
 
+def is_bundled_solvent(name: str) -> bool:
+    """Return whether ``name`` has charges shipped with PolyzyMD (a water model or a bundled SDF)."""
+    key = name.lower().strip()
+    return key in ("tip3p", "water_tip3p", "water", "spce", "spc_e", "spc/e") or (
+        _SOLVENTS_DIR / f"{key}.sdf"
+    ).exists()
+
+
 def get_solvent_molecule(
     name: str,
     smiles: Optional[str] = None,
     residue_name: Optional[str] = None,
     cache: bool = True,
+    charge_method: str = "nagl",
 ) -> Molecule:
     """Get a solvent molecule with pre-computed partial charges.
 
@@ -98,7 +107,7 @@ def get_solvent_molecule(
     1. In-memory cache (already loaded this session)
     2. Bundled library SDFs (src/polyzymd/data/solvents/)
     3. User cache (~/.polyzymd/solvent_cache/)
-    4. Generate from SMILES, compute AM1BCC charges, cache for future use
+    4. Generate from SMILES, assign charges with ``charge_method``, cache for future use
 
     Args:
         name: Solvent identifier (e.g., "dmso", "ethanol", "tip3p").
@@ -107,6 +116,9 @@ def get_solvent_molecule(
         residue_name: 3-letter residue name for topology. If not provided,
                      uses first 3 characters of name (uppercase).
         cache: If True, cache newly generated molecules to disk.
+        charge_method: How a molecule generated from SMILES is charged:
+            ``nagl`` (default), ``am1bcc`` or ``espaloma``. Library and water
+            molecules keep their shipped charges.
 
     Returns:
         OpenFF Molecule with partial charges assigned.
@@ -128,10 +140,14 @@ def get_solvent_molecule(
     # Normalize name
     name_key = name.lower().strip()
 
+    # Generated charges depend on the method, so it is part of every cache key.
+    method = str(charge_method).lower().strip()
+    memory_key = name_key if is_bundled_solvent(name_key) else f"{name_key}.{method}"
+
     # Check in-memory cache first
-    if name_key in _loaded_molecules:
-        LOGGER.debug(f"Returning {name_key} from in-memory cache")
-        return _loaded_molecules[name_key]
+    if memory_key in _loaded_molecules:
+        LOGGER.debug(f"Returning {memory_key} from in-memory cache")
+        return _loaded_molecules[memory_key]
 
     # Handle water models specially (hardcoded literature charges)
     if name_key in ("tip3p", "water_tip3p", "water"):
@@ -158,11 +174,11 @@ def get_solvent_molecule(
 
     # Try user cache
     _USER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache_path = _USER_CACHE_DIR / f"{name_key}.sdf"
+    cache_path = _USER_CACHE_DIR / f"{name_key}.{method}.sdf"
     if cache_path.exists():
         LOGGER.info(f"Loading {name_key} from user cache: {cache_path}")
         mol = _load_molecule_from_sdf(cache_path)
-        _loaded_molecules[name_key] = mol
+        _loaded_molecules[memory_key] = mol
         return mol
 
     # Need to generate - requires SMILES
@@ -181,15 +197,15 @@ def get_solvent_molecule(
             )
 
     # Generate molecule with charges
-    LOGGER.info(f"Generating {name_key} from SMILES and computing AM1BCC charges...")
-    mol = _generate_charged_molecule(smiles, residue_name)
+    LOGGER.info(f"Generating {name_key} from SMILES and assigning {method} charges...")
+    mol = _generate_charged_molecule(smiles, residue_name, method)
 
     # Cache to disk if requested
     if cache:
         LOGGER.info(f"Caching {name_key} to: {cache_path}")
         _save_molecule_to_sdf(mol, cache_path)
 
-    _loaded_molecules[name_key] = mol
+    _loaded_molecules[memory_key] = mol
     return mol
 
 
@@ -251,30 +267,30 @@ def _create_spce_water() -> Molecule:
     return water
 
 
-def _generate_charged_molecule(smiles: str, residue_name: str) -> Molecule:
-    """Generate a molecule from SMILES and compute AM1BCC charges.
+def _generate_charged_molecule(smiles: str, residue_name: str, method: str = "nagl") -> Molecule:
+    """Generate a molecule from SMILES and assign partial charges with ``method``.
 
     This is used for custom solvents not in the library. The charges are
-    computed once and can be cached for future use.
+    computed once and cached for future use. The methods are those of the
+    substrate (:func:`polyzymd.utils.get_charger`): ``nagl``, ``am1bcc``
+    (needs AmberTools) and ``espaloma``.
 
     Args:
         smiles: SMILES string for the molecule.
         residue_name: 3-letter residue name.
+        method: Charge assignment method.
 
     Returns:
-        OpenFF Molecule with AM1BCC partial charges.
+        OpenFF Molecule with partial charges.
     """
     from openff.toolkit import Molecule
 
-    # Create molecule from SMILES
+    from polyzymd.utils import get_charger
+
     mol = Molecule.from_smiles(smiles)
-
-    # Generate a 3D conformer (required for AM1BCC)
+    # A conformer places the molecule; AM1-BCC also needs one to compute charges.
     mol.generate_conformers(n_conformers=1)
-
-    # Compute AM1BCC charges
-    # This uses the OpenFF toolkit's charge assignment
-    mol.assign_partial_charges(partial_charge_method="am1bcc")
+    mol = _charge_components(mol, method)
 
     # Set residue metadata
     for atom in mol.atoms:
@@ -285,6 +301,38 @@ def _generate_charged_molecule(smiles: str, residue_name: str) -> Molecule:
         f"total charge: {sum(mol.partial_charges.magnitude):.4f}"
     )
 
+    return mol
+
+
+def _charge_components(mol: Molecule, method: str) -> Molecule:
+    """Assign partial charges to each connected part of ``mol`` and return it.
+
+    A SMILES may hold a molecule with its counter-ion (``...[O-].[Na+]``).
+    Each part is charged on its own: a single atom (an ion) takes its formal
+    charge, any other part ``method``. NAGL, for one, cannot charge sodium.
+    """
+    import numpy as np
+    from openff.toolkit import Molecule as OFFMolecule
+    from openff.units import unit
+    from rdkit import Chem
+
+    from polyzymd.utils import get_charger
+
+    rdmol = mol.to_rdkit()
+    mapping: list = []
+    parts = Chem.GetMolFrags(rdmol, asMols=True, fragsMolAtomMapping=mapping, sanitizeFrags=True)
+    if len(parts) == 1:
+        return get_charger(method).charge_molecule(mol)
+    charges = np.zeros(mol.n_atoms)
+    for part, atoms in zip(parts, mapping):
+        if part.GetNumAtoms() == 1:
+            charges[atoms[0]] = part.GetAtomWithIdx(0).GetFormalCharge()
+            continue
+        piece = get_charger(method).charge_molecule(
+            OFFMolecule.from_rdkit(part, allow_undefined_stereo=True)
+        )
+        charges[list(atoms)] = piece.partial_charges.m_as(unit.elementary_charge)
+    mol.partial_charges = charges * unit.elementary_charge
     return mol
 
 
