@@ -1763,7 +1763,7 @@ class TestGlobalTermHandling:
 
 
 def test_a_stop_file_stops_the_chain(tmp_path, monkeypatch) -> None:
-    """E-3: a GROMACS job does no work and submits no successor once `polyzymd cancel` wrote STOP."""
+    """A GROMACS job does no work and submits no successor once `polyzymd cancel` wrote STOP."""
     import os
     import subprocess
 
