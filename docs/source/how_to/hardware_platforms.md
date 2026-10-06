@@ -29,8 +29,8 @@ driver probe and the explicit CUDA Context preflight.
 | NVIDIA GPU with `polyzymd submit` | Supported when the driver is compatible with a checked-in CUDA environment |
 | NVIDIA GPU on a non-Blanca SLURM cluster | Supported with a suitable preset or CLI resource overrides |
 | Bridges-2 NVIDIA GPU | The scheduler preset is included; test the selected GPU type and current driver before a campaign |
-| CPU with the Python API | Supported when `openmm.platform` is `CPU` |
-| AMD GPU with the Python API | Possible through OpenMM `OpenCL` when the site supplies a working OpenCL runtime; not tested by PolyzyMD CI |
+| CPU with `polyzymd run` | Supported when `openmm.platform` is `CPU` |
+| AMD GPU with `polyzymd run` | Possible through OpenMM `OpenCL` when the site supplies a working OpenCL runtime; not tested by PolyzyMD CI |
 | CPU or AMD GPU with generated OpenMM SLURM scripts | Not supported in version 1.3; the generated script requires `nvidia-smi` and performs a CUDA preflight |
 | GROMACS CPU or GPU with generated SLURM scripts | Supported through a site module or container; GROMACS does not use OpenMM platform routing |
 
@@ -71,7 +71,7 @@ lines before submission. Run a short test job before you start a campaign.
 
 For presets without a site policy, `auto` selects the newest compatible
 checked-in environment. Use an explicit environment after site validation so
-all replicas use the same OpenMM version. The node probe does not use a static
+all replicates use the same OpenMM version. The node probe does not use a static
 node list.
 
 If a node fails the probe or the Context preflight, the job submits one
@@ -98,7 +98,7 @@ pixi run -e build polyzymd submit \
 The allocated node must pass the driver probe and CUDA execution test. A newer
 driver does not cause PolyzyMD to select another environment.
 
-## Run with CPU through the API
+## Run on a CPU
 
 Set the platform in the simulation configuration:
 
@@ -108,26 +108,22 @@ openmm:
   precision: mixed
 ```
 
-Run the OpenMM engine from a site-managed environment that contains PolyzyMD
-and OpenMM:
+Build and run one replicate on this machine with `polyzymd run`. The `build`
+environment holds PolyzyMD and OpenMM:
 
-```python
-from pathlib import Path
-
-from polyzymd.config.schema import SimulationConfig
-from polyzymd.engines import create_engine
-
-config = SimulationConfig.from_yaml("config.yaml")
-engine = create_engine(config)
-replicate = 1
-working_dir = Path(config.get_working_directory(replicate))
-engine.run_local(replicate, working_dir, skip_build=True)
+```bash
+pixi run -e build polyzymd run -c config.yaml -r 1
 ```
 
-The CPU platform uses `SLURM_CPUS_PER_TASK` as the OpenMM thread count when the
-variable exists. The Python API does not generate or submit a CPU batch script.
-Write a site wrapper that requests CPU resources, activates the site
-environment, and runs this Python entry point.
+`polyzymd run` builds the system, minimizes it, runs the equilibration stages
+and runs production, in one process. The shipped example
+`examples/quickstart/config.yaml` uses the CPU platform. See
+{doc}`../get_started/quickstart`.
+
+The CPU platform uses `SLURM_CPUS_PER_TASK` as the OpenMM thread count when
+the variable exists. `polyzymd submit` does not write CPU batch scripts for
+OpenMM. To run on CPU nodes of a cluster, write a batch script that requests
+CPU resources, activates the environment and runs `polyzymd run`.
 
 ## Evaluate an AMD GPU
 
@@ -159,7 +155,7 @@ context = openmm.Context(system, integrator, platform)
 print(context.getPlatform().getName())
 ```
 
-After this preflight succeeds, use the Python API example above. Run a short,
+After this preflight succeeds, run `polyzymd run` as in the CPU section above. Run a short,
 deterministic simulation and compare its energies with a known result before a
 full campaign.
 
@@ -193,7 +189,7 @@ constraint, or node selection.
 
 ## Respond to a driver update
 
-Do not replace an environment while active replicas use it. Progress metadata
+Do not replace an environment while active replicates use it. Progress metadata
 records the Pixi environment, OpenMM version, CUDA runtime, platform, precision,
 driver, and device. PolyzyMD rejects a changed simulation environment during a
 resubmission.
@@ -205,7 +201,7 @@ Use this sequence after a driver update:
 3. Keep an old environment when it still works and active campaigns use it.
 4. Add a new rich platform and environment when the new driver needs one.
 5. Update the routing threshold only after the Context and benchmark tests pass.
-6. Start new campaigns with the new environment. Finish each existing replica
+6. Start new campaigns with the new environment. Finish each existing replicate
    with its recorded environment and OpenMM version.
 
 This process makes hardware support explicit and testable. It also keeps the
