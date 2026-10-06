@@ -263,7 +263,7 @@ BUILD_PDB = "solvated_system.pdb"
 
 
 def build_pdb_file(topology_file: str | Path) -> Path | None:
-    """Return the ``solvated_system.pdb`` of the run whose GROMACS files hold ``topology_file``.
+    """Return the ``solvated_system.pdb`` of the run whose topology is ``topology_file``.
 
     PolyzyMD writes it in the replicate directory, the parent of the
     ``gromacs`` folder; the ``gromacs`` folder itself is searched first.
@@ -276,11 +276,11 @@ def build_pdb_file(topology_file: str | Path) -> Path | None:
 
 
 def apply_build_chain_ids(universe: Any, pdb_file: str | Path | None) -> dict[str, Any]:
-    """Give a GROMACS universe the chain IDs PolyzyMD assigned when it built the system.
+    """Give a universe the chain IDs PolyzyMD assigned when it built the system.
 
-    A TPR or ``.top`` names chains after molecule types (``MOL0``, ...),
-    while PolyzyMD's build puts the protein on chain A, the substrate on B
-    and the polymers on C, as the OpenMM topology does. The ``chainIDs`` of
+    A TPR or ``.top`` names chains after molecule types (``MOL0``, ...), and
+    an OpenMM ``system.prmtop`` has no chain IDs, while PolyzyMD's build puts
+    the protein on chain A, the substrate on B and the polymers on C. The ``chainIDs`` of
     ``pdb_file`` replace those of ``universe`` when it has the same number of
     atoms with the same residue names in order (water and ion atom names
     differ between the two files). Otherwise the universe is left unchanged.

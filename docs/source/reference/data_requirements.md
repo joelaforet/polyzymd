@@ -201,7 +201,9 @@ and production trajectories as indexed daisy-chain segments:
 - `system.prmtop` is the analysis topology. It is built from the OpenMM
   topology and System together, so it carries every atom, residue, element,
   mass, charge and bond, including constrained bonds, with no column widths
-  and no atom limit. Analyses load it when it is present.
+  and no atom limit. Analyses load it when it is present. It has no chain
+  IDs, so the loader takes them from `solvated_system.pdb` beside it, and
+  `chainid A` selects the protein.
 - `solvated_system.pdb` is the viewer topology, for PyMOL or VMD with the DCD
   segments. Above 99,999 atoms OpenMM writes its serials in hex and MDAnalysis
   cannot read its CONECT records, and OpenMM writes CONECT records only for

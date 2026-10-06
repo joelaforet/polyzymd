@@ -679,3 +679,39 @@ def test_legacy_settings_reproduce_the_all_atom_function_at_4_5(legacy_config, t
         ]
         assert row.replicate_values == pytest.approx(expected, abs=1e-12)
     assert [row.replicate_values for row in report.conditions] == [[1.0] * 3, [0.0] * 3]
+
+
+def test_the_co_solvent_command_of_the_contacts_how_to_runs(tmp_path) -> None:
+    """The how-to's co-solvent command measures contacts with residues named SDS, off chain C."""
+    import re
+    import shlex
+
+    how_to = Path(__file__).parents[2] / "docs/source/how_to/analysis_contacts_quickstart.md"
+    blocks = re.findall(r"```bash\n(.*?)```", how_to.read_text(), re.S)
+    (command,) = [block for block in blocks if "resname SDS" in block]
+    arguments = shlex.split(command.replace("\\\n", " "))
+    assert arguments[:3] == ["polyzymd", "analyze", "contacts"]
+    for label in ("Water", "SDS"):
+        config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "scratch")
+        for replicate in (1, 2):
+            schedule = _random_schedule(replicate, 0.0 if label == "Water" else 0.8)
+            write_openmm_frames(
+                config,
+                replicate,
+                _frames(schedule),
+                RESINDEX,
+                names=NAMES,
+                resnames=PROTEIN + ["SDS", "SDS"],
+                elements=ELEMENTS,
+                chain_ids=["A"] * 8 + ["D"] * 2,
+            )
+        arguments[arguments.index(f"{label}/config.yaml")] = str(config)
+    arguments[arguments.index("--eq") + 1] = EQUILIBRATION
+    arguments += ["--output-dir", str(tmp_path), "--no-plots"]
+
+    result = CliRunner().invoke(analyze_command, arguments[2:])
+
+    assert result.exit_code == 0, result.output
+    rows = dict(line.split("  ", 1) for line in result.stdout.splitlines() if "  n 2  " in line)
+    assert rows["Water"].startswith("n 2  mean 0 ")
+    assert rows["SDS"].startswith("n 2  mean 0.75 ")  # residues 1 to 3 of 4 are reached
