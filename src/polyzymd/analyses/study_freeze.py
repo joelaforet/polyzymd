@@ -407,7 +407,7 @@ def _named_files(value: Any) -> dict[str, str]:
     elif isinstance(value, list):
         for item in value:
             files.update(_named_files(item))
-    elif isinstance(value, str) and len(value) < 4096 and Path(value).is_file():
+    elif isinstance(value, str) and len(value) < 4096 and _is_file(Path(value)):
         files[Path(value).name] = hashlib.sha256(Path(value).read_bytes()).hexdigest()
     return files
 
@@ -1730,3 +1730,11 @@ def freeze(
     result = _finish_deposit(root, deposit, tag, commit, manifest, readme, warnings)
     result.git_failed = bool(state and tag and commit is None)
     return result
+
+
+def _is_file(path: Path) -> bool:
+    """Whether ``path`` is a file; False for a string too long to be a file name (TRIAL patch)."""
+    try:
+        return path.is_file()
+    except OSError:
+        return False

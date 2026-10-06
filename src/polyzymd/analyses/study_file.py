@@ -485,7 +485,7 @@ def missing_files(value: Any) -> list[str]:
     if (
         isinstance(value, str)
         and value.lower().endswith(FILE_SUFFIXES)
-        and not Path(value).exists()
+        and not _exists(Path(value))
     ):
         return [value]
     return []
