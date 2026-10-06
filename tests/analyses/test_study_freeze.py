@@ -670,3 +670,38 @@ def test_an_unknown_package_version_is_not_recorded_and_the_lock_file_is_hashed(
     versions = freeze(study).manifest["versions"]
     assert versions["numpy"] is None
     assert versions["pixi.lock"] == hashlib.sha256(b"version: 6\n").hexdigest()
+
+
+def test_a_non_ascii_file_name_is_deposited(study: Path) -> None:
+    """git quotes non-ASCII names in its listings; freeze still lists and deposits the file."""
+    (study / "results" / "résumé.csv").write_text("x\n")
+    result = freeze(study)
+    assert "results/résumé.csv" in result.manifest["files"]
+    assert "results/résumé.csv" in _zip_names(result.deposit, "study")
+
+
+def test_a_file_name_with_brackets_deposits_only_that_file(tmp_path: Path) -> None:
+    """A listed name such as a[1].csv is a file name, not a pattern that also matches a1.csv."""
+    from polyzymd.analyses.study_freeze import _copy_frozen_folder
+
+    root = tmp_path / "study"
+    (root / "results").mkdir(parents=True)
+    for name in ("a[1].csv", "a1.csv"):
+        (root / "results" / name).write_text("x\n")
+    _git(root, "init", "-q")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "Results")
+    _git(root, "tag", "v1")
+    commit = _git(root, "rev-parse", "HEAD").strip()
+    _copy_frozen_folder(root, tmp_path / "deposit", "v1", commit, ["results/a[1].csv"], [])
+    copied = tmp_path / "deposit" / "study" / "results"
+    assert sorted(p.name for p in copied.iterdir()) == ["a[1].csv"]
+
+
+def test_the_gitignore_written_by_a_first_freeze_is_deposited(study: Path) -> None:
+    """A study without .gitignore gets one from freeze, committed and deposited."""
+    _git(study, "rm", "-q", ".gitignore")
+    _git(study, "commit", "-qm", "No .gitignore")
+    result = freeze(study)
+    assert ".gitignore" in _git(study, "ls-tree", "--name-only", "study-v1")
+    assert ".gitignore" in _zip_names(result.deposit, "study")
