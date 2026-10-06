@@ -410,7 +410,7 @@ class TestUserFunctions:
             ).read_text()
         )
         assert record["function"]["hash_of"] == "module_folder"
-        assert record["function"]["module"] == "polyzymd_study.metrics"
+        assert record["function"]["module"] == f"polyzymd_study.{user_study.name}.metrics"
 
     def test_check_imports_the_function(self, user_study: Path) -> None:
         result = CliRunner().invoke(cli, ["study", "check", str(user_study)])

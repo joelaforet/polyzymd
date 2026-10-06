@@ -701,7 +701,7 @@ class TestFigureLayerFriction:
         study = pz.Study(project / "lipa")
         assert study.path("structures/ref.pdb") == (project / "lipa" / "structures" / "ref.pdb")
         assert study.path("analyses/lid.py") == project / "analyses" / "lid.py"
-        assert study.module("lid").lid_size.__module__ == "polyzymd_study.lid"
+        assert study.module("lid").lid_size.__module__ == f"polyzymd_study.{project.name}.lid"
         assert study.module("analyses/lid.py").__file__ == str(project / "analyses" / "lid.py")
         with pytest.raises(ProtocolError, match="No Python file"):
             study.module("nothing")

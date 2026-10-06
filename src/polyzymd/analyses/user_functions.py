@@ -52,6 +52,23 @@ def load_function(file: Path, qualname: str) -> Callable:
     return function
 
 
+def _owner_name(file: Path) -> str:
+    """Return the name of the study or project folder that holds ``file``, as an identifier.
+
+    The nearest folder above ``file`` with a ``study.yaml`` or ``project.yaml``,
+    or the file's own folder when there is none.
+    """
+    import re
+
+    owner = file.parent
+    for folder in file.parents:
+        if (folder / "study.yaml").is_file() or (folder / "project.yaml").is_file():
+            owner = folder
+            break
+    name = re.sub(r"\W", "_", owner.name) or "study"
+    return f"_{name}" if name[0].isdigit() else name
+
+
 def load_module(file: Path) -> types.ModuleType:
     """Import the Python file ``file`` from its current text and return the module.
 
@@ -67,13 +84,16 @@ def load_module(file: Path) -> types.ModuleType:
     """
     file = Path(file).resolve()
     # The record keeps the module name, so it must not depend on where the
-    # study folder sits. The module and its parent package are put in
-    # sys.modules, where dataclasses and pickle look up the classes the file
-    # defines.
-    module_name = f"polyzymd_study.{file.stem}"
+    # study folder sits; it names the study or project folder the file
+    # belongs to, so two studies' f.py are two modules. The module and its
+    # parent packages are put in sys.modules, where dataclasses and pickle
+    # look up the classes the file defines.
+    package = f"polyzymd_study.{_owner_name(file)}"
+    module_name = f"{package}.{file.stem}"
     module = types.ModuleType(module_name)
     module.__file__ = str(file)
     sys.modules.setdefault("polyzymd_study", types.ModuleType("polyzymd_study"))
+    sys.modules.setdefault(package, types.ModuleType(package))
     sys.modules[module_name] = module
     # A helper module imported earlier in this process from this folder may
     # have been edited since, and one from another study's folder may have
