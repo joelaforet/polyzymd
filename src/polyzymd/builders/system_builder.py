@@ -1230,6 +1230,8 @@ class SystemBuilder:
                 interchange=self._interchange,
                 config=config,
                 component_info=component_info,
+                # The replicate number, as the build recorded it.
+                replicate=(getattr(self, "_build_provenance", None) or {}).get("polymer_seed"),
             )
 
             result = exporter.export(

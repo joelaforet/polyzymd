@@ -16,7 +16,7 @@ TRUE principles for molecular simulation (Thompson et al. 2020).
 |---|---|---|
 | 1. Figures | The study folder only | Run the scripts in `figures/`, which read stored results with `pz.Study("study.yaml").results(name)` and need no trajectories |
 | 2. Analyses | The folder plus the trajectories | `polyzymd study locate DIR`, then `polyzymd analyze --study study.yaml` |
-| 3. Simulations | The folder plus compute | Each `conditions/<label>/config.yaml`; the replicate number seeds the starting structure |
+| 3. Simulations | The folder plus compute | Each `conditions/<label>/config.yaml`; the replicate number seeds the starting structure and the dynamics |
 
 Level 3 reproduces results within the statistical noise of MD, not bit for
 bit: floating-point arithmetic, parallel reduction order and hardware differ

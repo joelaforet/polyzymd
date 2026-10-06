@@ -214,8 +214,8 @@ class MDPParameters:
     gen_vel: bool = False
     gen_temp: float = 300.0
     gen_seed: int = -1
-    #: Random seed of the stochastic-dynamics noise (integrator sd); -1 is a
-    #: fresh seed for each stage, so no stage repeats another's noise.
+    #: Random seed of the stochastic-dynamics noise (integrator sd); each
+    #: stage gets its own, so no stage repeats another's noise. -1 is random.
     ld_seed: int = -1
 
     # Energy minimization specific
@@ -436,19 +436,20 @@ class MDPGenerator:
         >>> prod_mdp = generator.generate_production()
     """
 
-    def __init__(self, config: "SimulationConfig"):
+    def __init__(self, config: "SimulationConfig", replicate: int | None = None):
         """Initialize the MDP generator.
 
         Args:
             config: PolyzyMD SimulationConfig object containing all simulation
                 parameters including thermodynamics, simulation phases, etc.
-
-        Velocities and the stochastic-dynamics noise take GROMACS's random
-        seeds (``gen_seed = ld_seed = -1``), as the OpenMM engine's do: the
-        replicate number seeds the starting structure (Packmol and polymer
-        draws), not the dynamics, so each stage draws fresh noise.
+            replicate: The replicate number. It seeds the initial velocities
+                (``gen_seed``) and each stage's stochastic-dynamics noise
+                (``ld_seed``), one seed per stage from
+                :func:`polyzymd.simulation.seeds.dynamics_seed`, as the
+                OpenMM engine does. ``None`` leaves GROMACS's random seeds (-1).
         """
         self._config = config
+        self._replicate = replicate
         self._temperature = config.thermodynamics.temperature
         self._pressure = config.thermodynamics.pressure
         self._warned: set[str] = set()
@@ -569,6 +570,7 @@ class MDPGenerator:
                     posres_defines=posres_defines,
                 )
 
+            self._seed(params, f"equilibration:{i}")
             filename = f"eq_{stage_num:02d}_{stage.name}.mdp"
             result.append((filename, params))
 
@@ -781,6 +783,15 @@ class MDPGenerator:
 
         return " ".join(unique_defines)
 
+    def _seed(self, params: MDPParameters, phase: str) -> None:
+        """Set the velocity and noise seeds of one stage from the replicate number."""
+        if self._replicate is None:
+            return
+        from polyzymd.simulation.seeds import dynamics_seed
+
+        params.ld_seed = dynamics_seed(self._replicate, phase)
+        params.gen_seed = dynamics_seed(self._replicate, f"velocities:{phase}")
+
     def generate_production(self) -> MDPParameters:
         """Generate MDP parameters for production MD.
 
@@ -807,7 +818,7 @@ class MDPGenerator:
 
         ref_p = self._pressure * 1.01325  # GROMACS uses bar internally, convert from atm
 
-        return MDPParameters(
+        params = MDPParameters(
             title=f"Production MD ({prod.duration} ns)",
             stage_type="prod",
             integrator=integrator,
@@ -828,6 +839,8 @@ class MDPGenerator:
             ref_p=ref_p,
             gen_vel=False,
         )
+        self._seed(params, "production:0")
+        return params
 
 
 # =============================================================================
@@ -1898,6 +1911,7 @@ class GromacsExporter:
         interchange: "Interchange",
         config: "SimulationConfig",
         component_info: Optional["SystemComponentInfo"] = None,
+        replicate: int | None = None,
     ):
         """Initialize the GROMACS exporter.
 
@@ -1906,10 +1920,12 @@ class GromacsExporter:
             config: PolyzyMD SimulationConfig with simulation parameters.
             component_info: Optional SystemComponentInfo for position restraints.
                 If not provided, position restraints will be skipped.
+            replicate: The replicate number, which seeds the dynamics in the MDP files.
         """
         self._interchange = interchange
         self._config = config
         self._component_info = component_info
+        self._replicate = replicate
 
     def export(
         self,
@@ -1950,7 +1966,7 @@ class GromacsExporter:
 
         # Step 2: Generate MDP files
         logger.info("Generating MDP files...")
-        mdp_generator = MDPGenerator(self._config)
+        mdp_generator = MDPGenerator(self._config, replicate=self._replicate)
 
         # Energy minimization
         em_params = mdp_generator.generate_energy_minimization()

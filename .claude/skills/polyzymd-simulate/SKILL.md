@@ -20,8 +20,9 @@ polyzymd status -c config.yaml --no-slurm
 
 Paths in a config (`pdb_path`, `projects_directory`, ...) are relative to the
 config's folder. `-r 1-3` runs replicates 1 to 3. The replicate number seeds
-the starting structure (Packmol and polymer draws); dynamics noise is drawn
-afresh in each run.
+the starting structure (Packmol and polymer draws), the initial velocities
+and the thermostat noise, so a replicate is reproducible on the same
+hardware and software.
 
 ## 2. Change the system
 

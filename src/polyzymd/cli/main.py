@@ -423,8 +423,8 @@ def build(
     workflows.
 
     The ``--replicates`` option accepts range syntax (for example ``1-3`` or
-    ``1,3,5``). Each replicate is built independently with a different polymer
-    random seed.
+    ``1,3,5``). The replicate number seeds the build (Packmol and polymer
+    draws) and the dynamics of each replicate.
 
     \b
     Export Notes:
@@ -478,7 +478,8 @@ def build(
             polymer = bool(sim_config.polymers and sim_config.polymers.enabled)
             what = "Packmol and polymer draws" if polymer else "Packmol"
             colored_echo(
-                f"  Seeds: the replicate number seeds {what} (the starting structure)",
+                f"  Seeds: the replicate number seeds {what}, the velocities"
+                " and the thermostat noise",
                 phase="build",
             )
             colored_echo(phase="build")
@@ -682,6 +683,7 @@ def build(
                     output_dir=export_dir,
                     fmt=export_format,
                     component_info=builder.get_component_info(),
+                    replicate=rep,
                 )
 
                 colored_echo(f"{export_format.upper()} export successful!", phase="export")
@@ -1129,6 +1131,7 @@ def _run_gromacs_impl(
         interchange=interchange,
         config=sim_config,
         component_info=component_info,
+        replicate=replicate,
     )
     export_result = exporter.export(
         output_dir=gromacs_dir,
@@ -2122,6 +2125,7 @@ def _run_segment_locked(
                 sim_config=sim_config,
                 working_dir=working_dir,
                 segment_index=seg_idx,
+                replicate=replicate,
                 duration_ns=duration_ns,
                 num_samples=samples_to_write,
                 timestep_fs=timestep_fs,
@@ -2296,6 +2300,7 @@ def _run_initial_segment(
         platform=sim_config.openmm.platform,
         precision=sim_config.openmm.precision,
         device_index=sim_config.openmm.device_index,
+        replicate=replicate,
     )
 
     # ------------------------------------------------------------------
@@ -2419,6 +2424,7 @@ def _run_continuation_segment(
     timestep_fs: float,
     report_interval: int,
     checkpoint_interval_s: float,
+    replicate: int | None = None,
 ) -> None:
     """Continue from the last completed segment.
 
@@ -2453,6 +2459,7 @@ def _run_continuation_segment(
         platform=sim_config.openmm.platform,
         precision=sim_config.openmm.precision,
         device_index=sim_config.openmm.device_index,
+        replicate=replicate,
     )
     manager.load_previous_state()
 

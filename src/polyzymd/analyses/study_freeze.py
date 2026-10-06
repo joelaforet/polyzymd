@@ -1007,8 +1007,8 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
         ),
         "1d_independent_starting_configurations": item(
             "each replicate's starting structure is built with its replicate number as the "
-            "seed of Packmol and of polymer draws; velocities and thermostat noise are drawn "
-            "afresh in every run",
+            "seed of Packmol and of polymer draws; the replicate number also seeds the initial "
+            "velocities and the thermostat noise of each stage",
             None,
         ),
         "2a_connection_to_experiment": item(

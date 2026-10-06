@@ -149,6 +149,7 @@ class ContinuationManager:
         platform: str = "CUDA",
         precision: str = "mixed",
         device_index: str | None = None,
+        replicate: int | None = None,
     ) -> None:
         """Initialize the ContinuationManager.
 
@@ -159,6 +160,11 @@ class ContinuationManager:
         segment_index : int
             Current segment index (0-based for first continuation after
             initial production, incrementing from there).
+        replicate : int, optional
+            The replicate number, which seeds this segment's thermostat
+            noise (:func:`polyzymd.simulation.seeds.dynamics_seed`). A
+            segment restored from a checkpoint keeps the checkpoint's
+            random state instead.
         """
         self._working_dir = Path(working_dir)
         self._segment_index = segment_index
@@ -166,6 +172,7 @@ class ContinuationManager:
         self._platform_name = platform
         self._platform_precision = precision
         self._platform_device_index = device_index
+        self._replicate = replicate
 
         # State
         self._system: Optional[openmm.System] = None
@@ -523,7 +530,14 @@ class ContinuationManager:
         temperature = quantity_from_dict(thermostat_raw["temperature"])
         friction_coeff = quantity_from_dict(thermostat_raw["timescale"])
 
-        return openmm.LangevinMiddleIntegrator(temperature, friction_coeff, time_step)
+        integrator = openmm.LangevinMiddleIntegrator(temperature, friction_coeff, time_step)
+        if self._replicate is not None:
+            from polyzymd.simulation.seeds import dynamics_seed
+
+            integrator.setRandomNumberSeed(
+                dynamics_seed(self._replicate, f"production:{self._segment_index}")
+            )
+        return integrator
 
     def _add_barostat_if_needed(self) -> None:
         """Add barostat to the system if parameters specify NPT."""

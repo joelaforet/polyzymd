@@ -26,13 +26,22 @@ the same way on both engines, and PolyzyMD writes a warning.
 | What | OpenMM | GROMACS | Match |
 |---|---|---|---|
 | Starting structure | Packmol and polymer draws seeded with the replicate number | the same, built by PolyzyMD before export | 1:1 |
-| Initial velocities | drawn afresh in each run | `gen_seed = -1` (drawn afresh) | 1:1 |
-| Thermostat noise | drawn afresh in each run | `ld_seed = -1` (drawn afresh in each stage) | 1:1 |
+| Initial velocities | `setVelocitiesToTemperature(T, seed)`, seed from the replicate number | `gen_seed`, seed from the replicate number | 1:1 |
+| Thermostat noise | `integrator.setRandomNumberSeed(seed)`, one seed for each stage and segment | `ld_seed`, one seed for each stage | 1:1 |
 
-The replicate number fixes the starting structure, not the trajectory. Two
-runs of one replicate agree within MD noise, not frame by frame. A fixed
-`ld_seed` would repeat the same noise in every stage, because GROMACS
-starts the step count again at each stage.
+The replicate number seeds the starting structure, the initial velocities
+and the thermostat noise. Each equilibration stage and production segment
+gets its own seed, derived from the replicate number and the stage name
+(`polyzymd.simulation.seeds.dynamics_seed`). A single `ld_seed` for all
+stages would repeat the same noise in every stage, because GROMACS starts
+the step count again at each stage.
+
+The two engines use different random number generators, so one seed does
+not give the same trajectory on OpenMM and on GROMACS. On one engine, a
+replicate run again gives the same trajectory only on the same platform,
+precision and software versions. On a GPU, the order of floating-point
+sums can change between runs, so trajectories can diverge after some
+picoseconds. Results then agree within MD noise, not frame by frame.
 
 ## Nonbonded interactions and constraints
 

@@ -7,7 +7,7 @@ PolyzyMD organizes experiments in four levels:
 | Project | One paper | The analyses every study runs, statistics and figures code, publishing metadata | `project.yaml` |
 | **Study** | **One protein (or other system) under its conditions**, such as protein X | Its equilibration window, its structures, its named residue regions, its conditions | `study.yaml` |
 | Condition | One simulated variant of that protein, such as a polymer composition or a different temperature | A simulation `config.yaml`, optionally its `factors:` | `conditions/<name>/config.yaml` |
-| Replicate | One run of a condition | Trajectories; its number seeds its starting structure | the run directory |
+| Replicate | One run of a condition | Trajectories; its number seeds its starting structure and dynamics | the run directory |
 
 ## A study is tied to its protein
 

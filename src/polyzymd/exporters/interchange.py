@@ -73,6 +73,7 @@ def export_system(
     component_info: "SystemComponentInfo | None" = None,
     prefix: str | None = None,
     gmx_command: str = "gmx",
+    replicate: int | None = None,
 ) -> dict[str, Any]:
     """Export a parameterized system to a requested MD engine format.
 
@@ -90,6 +91,8 @@ def export_system(
         Component metadata used for position restraints (GROMACS-only for now)
     prefix : str or None, optional
         Filename prefix for exported files. If None, exporter derives a default
+    replicate : int, optional
+        The replicate number, which seeds the dynamics in the GROMACS MDP files.
     gmx_command : str, optional
         GROMACS executable command used by generated run scripts, by default ``"gmx"``
 
@@ -115,7 +118,9 @@ def export_system(
         )
 
     if fmt_str == "gromacs":
-        return _export_gromacs(interchange, config, output_dir, component_info, prefix, gmx_command)
+        return _export_gromacs(
+            interchange, config, output_dir, component_info, prefix, gmx_command, replicate
+        )
     if fmt_str == "lammps":
         return _export_lammps(interchange, config, output_dir, prefix)
     if fmt_str == "amber":
@@ -132,6 +137,7 @@ def _export_gromacs(
     component_info: "SystemComponentInfo | None",
     prefix: str | None,
     gmx_command: str,
+    replicate: int | None = None,
 ) -> dict[str, Any]:
     """Export to GROMACS format via :class:`GromacsExporter`.
 
@@ -162,6 +168,7 @@ def _export_gromacs(
         interchange=interchange,
         config=config,
         component_info=component_info,
+        replicate=replicate,
     )
     return exporter.export(
         output_dir=output_dir,

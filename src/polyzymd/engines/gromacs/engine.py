@@ -184,7 +184,12 @@ class GromacsEngine(SimulationEngine):
                 polymer_seed=request.replicate,
             )
             component_info = builder.get_component_info()
-            exporter = GromacsExporter(interchange, self._config, component_info=component_info)
+            exporter = GromacsExporter(
+                interchange,
+                self._config,
+                component_info=component_info,
+                replicate=request.replicate,
+            )
             exporter.export(
                 output_dir=request.working_dir,
                 prefix=prefix,

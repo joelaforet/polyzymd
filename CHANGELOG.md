@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Seeded dynamics (1.3 audit, wave G).**  The replicate number now seeds the initial velocities and the thermostat noise, on both engines. Each equilibration stage and production segment gets its own seed from `polyzymd.simulation.seeds.dynamics_seed(replicate, phase)`, so no stage repeats another's noise. OpenMM sets `integrator.setRandomNumberSeed` and `setVelocitiesToTemperature(T, seed)`; GROMACS MDP files get `gen_seed` and `ld_seed`. A replicate run again gives the same trajectory only on the same platform, precision and software versions.
+
 - **Systems without polymers (1.3 audit, wave C).**
   - Co-solvents take `charge_method` (default `nagl`; `am1bcc` needs AmberTools), and the build asks you to check the default.
   - Co-solvents take `count:` for a number of molecules.
@@ -153,7 +155,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `neutralize` counts the charge of co-solvents. A charged SMILES (`...OS(=O)(=O)[O-]`) gets counter-ions; one that carries its counter-ion (`...[O-].[Na+]`) needs none. A system left charged is an error with `neutralize: true` and a warning without it.
   - `gmx grompp` gets no blanket `-maxwarn 1`, which hid the net-charge warning. Set `grompp_flags: "-maxwarn 1"` to accept a warning you have read.
   - GROMACS runs the Langevin thermostats as Langevin dynamics (`integrator = sd`, `tau-t` = the thermostat timescale), as OpenMM does, not as `v-rescale`. Approximate mappings (the Monte Carlo barostat as `c-rescale`) and thermostats OpenMM does not implement are warned about. The new reference page "GROMACS and OpenMM" records how each setting runs on each engine.
-  - The deposit and checklist no longer say the replicate number seeds the dynamics: it seeds the starting structure. Velocities and thermostat noise are drawn afresh in every run, on both engines.
   - Solvent chain IDs never repeat those of the solute. A system that would need more chain IDs is refused, instead of solvent being labelled as protein or polymer.
   - `pdbindex N` selects the N-th atom of the system in analyses (`bynum`), as it does in restraints.
   - `projects_directory` and `scratch_directory` are relative to the config's folder, so commands find the runs from any folder.
