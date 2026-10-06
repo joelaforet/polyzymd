@@ -36,6 +36,7 @@ enzyme:
 |-------|------|----------|-------------|
 | `name` | string | Yes | Short identifier for the enzyme |
 | `pdb_path` | path | Yes | Path to prepared PDB file |
+| `custom_substructures_path` | path | No | JSON file of residue templates for residues that OpenFF does not know, such as an N-terminal cystine. See {doc}`openff_pdb_ingestion` |
 | `description` | string | No | Human-readable description |
 
 ---

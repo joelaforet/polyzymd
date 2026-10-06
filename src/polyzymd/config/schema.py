@@ -143,6 +143,51 @@ class _ConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def load_custom_substructures(path: Path) -> dict[str, dict[str, list[str]]]:
+    """Read a custom substructures JSON file and check its shape.
+
+    Parameters
+    ----------
+    path : Path
+        JSON file that maps each residue name to SMARTS patterns, and each
+        SMARTS pattern to the PDB atom names it matches, in order.
+
+    Returns
+    -------
+    dict
+        The file's content, ``{residue name: {SMARTS: [atom names]}}``.
+
+    Raises
+    ------
+    ValueError
+        When the file is missing, is not JSON or has another shape.
+    """
+    import json
+
+    try:
+        data = json.loads(Path(path).read_text())
+    except OSError as error:
+        raise ValueError(f"Cannot read custom_substructures_path {path}: {error}") from error
+    except json.JSONDecodeError as error:
+        raise ValueError(f"custom_substructures_path {path} is not JSON: {error}") from error
+    if not isinstance(data, dict) or not all(
+        isinstance(name, str)
+        and isinstance(patterns, dict)
+        and all(
+            isinstance(smarts, str)
+            and isinstance(atoms, list)
+            and all(isinstance(atom, str) for atom in atoms)
+            for smarts, atoms in patterns.items()
+        )
+        for name, patterns in data.items()
+    ):
+        raise ValueError(
+            f"custom_substructures_path {path} must map each residue name to SMARTS "
+            'patterns, and each pattern to a list of atom names: {"NCYX": {"[#7:1]...": ["N", ...]}}'
+        )
+    return data
+
+
 class EnzymeConfig(_ConfigModel):
     """Configuration for the enzyme/protein component.
 
@@ -150,11 +195,30 @@ class EnzymeConfig(_ConfigModel):
         name: Identifier for the enzyme (e.g., "LipA")
         pdb_path: Path to the PDB file containing the enzyme structure
         description: Optional description of the enzyme
+        custom_substructures_path: Optional JSON file of residue templates for
+            residues that OpenFF's template matcher does not know
     """
 
     name: str = Field(..., description="Enzyme identifier")
     pdb_path: Path = Field(..., description="Path to enzyme PDB file")
     description: str | None = Field(None, description="Optional description")
+    custom_substructures_path: Path | None = Field(
+        None,
+        description=(
+            "JSON file of extra residue templates, passed to OpenFF's "
+            "Topology.from_pdb(_custom_substructures=...): "
+            '{"RESNAME": {"SMARTS": ["ATOM", ...]}}. Relative to the config.'
+        ),
+    )
+
+    @field_validator("custom_substructures_path")
+    @classmethod
+    def validate_custom_substructures(cls, v: Path | None) -> Path | None:
+        """Check that the file exists and has the shape OpenFF reads."""
+        if v is None:
+            return v
+        load_custom_substructures(v)
+        return v
 
     @field_validator("pdb_path")
     @classmethod

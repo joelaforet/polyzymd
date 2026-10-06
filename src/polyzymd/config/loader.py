@@ -23,6 +23,7 @@ from polyzymd.core.branding import prepend_file_header
 PATH_KEYS = frozenset(
     {
         "pdb_path",
+        "custom_substructures_path",
         "sdf_path",
         "sdf_directory",
         "cache_directory",

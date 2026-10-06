@@ -70,6 +70,11 @@ def compute_config_hash(config: "SimulationConfig") -> str:
         "enzyme": {
             "name": config.enzyme.name,
             "pdb": _content(config.enzyme.pdb_path),
+            **(
+                {"custom_substructures": _content(config.enzyme.custom_substructures_path)}
+                if getattr(config.enzyme, "custom_substructures_path", None)
+                else {}
+            ),
         },
         "thermodynamics": {
             "temperature": config.thermodynamics.temperature,
