@@ -107,13 +107,6 @@ Cleaning PDB: structures/1UBQ_protein.pdb
 Cleaned PDB written to: structures/ubq_clean.pdb
 ```
 
-```{note}
-PDBFixer uses OpenMM to place the hydrogens, and OpenMM selects the fastest
-platform. If the command stops with a CUDA error, such as
-`CUDA_ERROR_UNSUPPORTED_PTX_VERSION`, run it on the CPU:
-`OPENMM_DEFAULT_PLATFORM=CPU polyzymd clean-pdb ...`
-```
-
 Check the result. Every protein atom must be on chain `A`, the PolyzyMD
 chain of the protein:
 

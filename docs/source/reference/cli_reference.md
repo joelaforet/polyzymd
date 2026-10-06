@@ -830,8 +830,8 @@ polyzymd clean-pdb -i <input.pdb> [-o <output.pdb>] [--ph 7.4]
 - The command does not remove waters or other molecules, does not select one
   copy of a protein, does not set chain IDs, and does not add missing residues
   or heavy atoms. See {doc}`../tutorials/prepare_pdb_for_openff`.
-- PDBFixer places the hydrogens with OpenMM, on the fastest platform. If the
-  command stops with a CUDA error, run it with `OPENMM_DEFAULT_PLATFORM=CPU`.
+- PDBFixer places the hydrogens with OpenMM on the CPU platform. To use
+  another platform, set `OPENMM_DEFAULT_PLATFORM`, for example to `CUDA`.
 - Run it in the `build` environment, which holds PDBFixer.
 
 ---

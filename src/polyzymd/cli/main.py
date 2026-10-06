@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -3330,6 +3331,11 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
         polyzymd clean-pdb -i raw.pdb -o cleaned.pdb --ph 7.0
     """
     warn_if_wrong_pixi_env("clean-pdb", "build")
+
+    # PDBFixer places hydrogens with an OpenMM context on the fastest platform.
+    # A GPU whose driver is older than the CUDA toolkit then fails
+    # (CUDA_ERROR_UNSUPPORTED_PTX_VERSION); the CPU is fast enough for this.
+    os.environ.setdefault("OPENMM_DEFAULT_PLATFORM", "CPU")
 
     from openmm.app import PDBFile
     from pdbfixer import PDBFixer

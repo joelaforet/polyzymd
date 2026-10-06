@@ -7,6 +7,7 @@ Each test names its finding in
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -68,3 +69,20 @@ class TestCustomSubstructures:
         one = _config_with_templates(tmp_path / "a", json.dumps({"X": {"[#6:1]": ["C1"]}}))
         two = _config_with_templates(tmp_path / "b", json.dumps({"X": {"[#6:1]": ["C2"]}}))
         assert compute_config_hash(one) != compute_config_hash(two)
+
+
+def test_clean_pdb_runs_on_the_cpu(tmp_path: Path, monkeypatch) -> None:
+    """E-1: PDBFixer took the GPU and failed on a CUDA driver mismatch."""
+    pytest.importorskip("pdbfixer")
+    from click.testing import CliRunner
+
+    from polyzymd.cli.main import cli
+
+    monkeypatch.delenv("OPENMM_DEFAULT_PLATFORM", raising=False)
+    source = Path(__file__).resolve().parents[1] / "examples" / "quickstart" / "trpcage.pdb"
+    result = CliRunner().invoke(
+        cli, ["clean-pdb", "-i", str(source), "-o", str(tmp_path / "clean.pdb")]
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "clean.pdb").is_file()
+    assert os.environ["OPENMM_DEFAULT_PLATFORM"] == "CPU"
