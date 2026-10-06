@@ -8,18 +8,28 @@ that only apply to Claude Code.
 
 ## Skills
 
-Repository skills live in `.claude/skills/`. Invoke `livecoms-check` before you
-commit any change to `src/polyzymd/analyses/`. It holds the statistical rules
-this project is held to, the fields every result must carry, and the known
-answers the scientific tests check against.
+Repository skills live in `.claude/skills/`:
 
-## The analyses refactor
+- `polyzymd-simulate`: write a config, validate, build, run, submit and check
+  status.
+- `polyzymd-analyze`: run analyses on a study and read the reports.
+- `livecoms-check`: the statistical rules, the fields every result must carry
+  and the known answers the scientific tests check. Invoke it before you
+  commit any change to `src/polyzymd/analyses/`.
 
-Work on `src/polyzymd/analyses/` is split into items, each one branch, one
-session and one pull request. The maintainer keeps the checklist outside the
-repository and names the item when starting a session.
+## The 1.3 release work
 
-- Branch from `analyses_refactor` and name the branch `analyses/<item>`.
-- Open the pull request against `analyses_refactor`, never against
-  `feature/v1.3.0-rc5` or `main`.
-- Never commit on `analyses_refactor` itself.
+`analyses_refactor` is the trunk of the 1.3 work. Pull requests on it form a
+stack: `analyses/project-studies` (#163) targets `analyses_refactor`, and each
+later branch (`analyses/contacts-zero-control`, then
+`analyses/audit-wave-a` and the other `analyses/audit-wave-*` branches) targets
+the branch before it. `feature/v1.3.0-rc5` and `main` have commits that
+`analyses_refactor` lacks; Joe syncs the trunks before the 1.3.0 tag.
+
+- Branch from the top of the stack, or from the branch the maintainer names,
+  as `analyses/<item>`. Open the pull request as a draft against that branch,
+  never against `feature/v1.3.0-rc5` or `main`.
+- Never commit on `analyses_refactor` itself. Joe merges.
+- The maintainer keeps the audit log and friction log outside the repository
+  and names the finding IDs (for example NOV-6) to fix. Name those IDs in the
+  tests and the CHANGELOG entry.

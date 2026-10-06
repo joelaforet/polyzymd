@@ -298,11 +298,6 @@ two ways, and mixing them up picks the wrong structure:
   frame, so the same N points at a different structure when the window
   changes. Each record stores the trajectory frame actually used under
   `chosen`.
-- The removed plugins counted differently: rmsd took trajectory frames from 0
-  (default 0, inside the equilibration window), and rmsf took trajectory
-  frames from 1. With the first production frame's 0-based trajectory index,
-  convert an old rmsd value with new = old - (first production frame) + 1 and
-  an old rmsf value with new = old - (first production frame).
 - A frame inside the equilibration window, such as the starting structure,
   cannot be named as a `frame` reference. Use `external` mode with that
   structure's file, which is also hashed into the record.
