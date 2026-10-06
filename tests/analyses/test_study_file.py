@@ -556,3 +556,15 @@ def test_relative_files_of_shipped_analyses_follow_the_study(tmp_path: Path) -> 
     (root / "structures" / "ref.pdb").write_text("END\n")
     entry = load_study_file(root).analyses["rmsd"]
     assert Path(entry.settings["reference_file"]) == (root / "structures" / "ref.pdb").resolve()
+
+
+def test_labels_that_share_a_folder_name_are_refused(tmp_path: Path) -> None:
+    """Two labels that give one results folder name raise an error naming both."""
+    for name in ("a", "b"):
+        write_simulation_config(tmp_path / name, scratch=tmp_path / "scratch" / name)
+    _write(
+        tmp_path / "study.yaml",
+        "equilibration: 0ns\nconditions:\n  SBMA 50: a\n  'SBMA 50%': b\n",
+    )
+    with pytest.raises(ProtocolError, match="SBMA 50.*SBMA 50%"):
+        load_study_file(tmp_path)
