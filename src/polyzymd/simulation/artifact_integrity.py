@@ -134,7 +134,10 @@ def validate_build_bundle(working_dir: Path, config: Any) -> None:
             "Pre-built bundle is incomplete; missing: " + ", ".join(missing)
         )
     if not manifest_path.is_file():
-        raise ArtifactIntegrityError(f"Build manifest is missing: {manifest_path}")
+        raise ArtifactIntegrityError(
+            f"Build manifest is missing: {manifest_path}. Rebuild with "
+            "'polyzymd build -c <config> -r <replicate>', then run the same command again."
+        )
     try:
         manifest = json.loads(manifest_path.read_text())
         artifacts = manifest["artifacts"]
