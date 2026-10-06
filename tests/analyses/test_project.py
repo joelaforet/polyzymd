@@ -301,7 +301,7 @@ def test_names_may_start_with_a_digit_and_unknown_ones_are_errors(project: Path)
 
     structures = {"4TGL_open": Path("/x/4tgl.pdb")}
     assert resolve_names("structure 4TGL_open", {}, structures, "here") == "/x/4tgl.pdb"
-    assert resolve_names("region 1st", {"1st": "resid 1"}, {}, "here") == "(resid 1)"
+    assert resolve_names("region 1st", {"1st": "resid 1"}, {}, "here", True) == "(resid 1)"
     with pytest.raises(ProtocolError, match="uses structure 3TGL"):
         resolve_names("structure 3TGL", {}, structures, "here")
     with pytest.raises(ProtocolError, match="one name"):

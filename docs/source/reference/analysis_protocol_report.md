@@ -12,7 +12,7 @@ reads back exactly what `model_dump_json()` wrote.
 | `analysis` | `str` | Canonical analysis name, for example `rg`. |
 | `status` | `str` | `complete`, or `partial` when a condition could not be measured or compared and the report covers the others. |
 | `problems` | `list[str]` | For a partial report, each condition left out, or the comparison that failed, with its error. Empty for a complete report. `polyzymd study check`, `study freeze` and `project freeze` name them. |
-| `trends` | `list[TrendReport]` | For a run from a study whose conditions declare numeric factors: one slope test per factor. Empty otherwise. |
+| `trends` | `list[TrendReport]` | For a run from a study whose conditions declare factors: one slope test per factor, untestable for a factor that is not numeric. Empty otherwise. |
 | `protocol_version` | `str` | Version of the report protocol, `"2"` for every report of the study API. With `analysis` it identifies the code that defined the metric; it changes when the meaning, unit or estimator of a reported metric changes. |
 | `metric` | `str` | Name of the reported values, for example `mean_rg`. |
 | `unit` | `str \| None` | Unit of `metric`, for example `A` or `%`. `None` marks a dimensionless metric, such as a fraction. |
@@ -88,7 +88,7 @@ rows the JSON form holds; every one of them is kept there.
 | `family_size` | `int \| None` | Number of factors in that family. |
 | `r_squared` | `float \| None` | Coefficient of determination of the fit. |
 | `significant` | `bool` | Whether `p_adjusted` is at most 0.05. |
-| `testable` | `bool` | `False` when a replicate value is not finite, there are fewer than three factor levels, or the condition means all agree. |
+| `testable` | `bool` | `False` when the factor is not a number in every condition, a replicate value is not finite, there are fewer than three factor levels, or the condition means all agree. |
 | `reason` | `str \| None` | Why the trend is not testable. |
 
 ## ProtocolProvenance
@@ -100,7 +100,7 @@ rows the JSON form holds; every one of them is kept there.
 | `config_hashes` | `dict[str, str]` | `polyzymd.analyses.identity.compute_config_hash` of each simulation config, keyed by condition label: the first 16 hex characters of the SHA-256 of the config fields that locate and describe its trajectories. |
 | `settings_fingerprint` | `str \| None` | `None`: no shipped analysis sets it. |
 | `settings` | `dict` | Settings a study-API analysis ran with. For rmsf and rmsd_per_residue: every setting, the resolved `reference_mode`, and under `residues` the residue IDs of the core and of each region. Empty for other analyses. |
-| `study` | `dict \| None` | Set for a run from a study file: `path` and `sha256` of `study.yaml`; the `run`; the `settings` it was given (from the file and `--set`), with paths inside the study or project written relative to the study and any other path as its file name; the `selections` of a study's own function; the condition `factors` its trend tests used; for a study of a project, `project` with the `path`, study `label` and `sha256` of `project.yaml`; and `git`, with the `commit` of the study folder (of the project folder for a study of a project), its `uncommitted` files and `inputs_uncommitted`, those outside `results/`, `logs/`, `deposit/` and `data.local.yaml`; `git` is `None` outside a repository. |
+| `study` | `dict \| None` | Set for a run from a study file: `path` and `sha256` of `study.yaml`; the `run`; the `settings` it was given (from the file and `--set`), with paths inside the study or project written relative to the study and any other path as its file name; the `selections` of a study's own function; the condition `factors` its trend tests used; for a study of a project, `project` with the `path`, study `label` and `sha256` of `project.yaml`; and `git`, with the `commit` of the study folder (of the project folder for a study of a project), its `uncommitted` files and `inputs_uncommitted`, those outside `results/`, `logs/`, `deposit/` and `data.local.yaml`; `git` is `None` outside a repository. A rerun whose report differs from the saved `report.json` only in that `commit` keeps the saved file. |
 | `output_paths` | `dict[str, str]` | `results` is the `polyzymd_results/<name>/` folder holding every replicate's stored values and record; `figures` is the directory holding the generated plots, absent with `--no-plots`. |
 
 ## Verdict vocabulary

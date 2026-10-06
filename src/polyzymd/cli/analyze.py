@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Iterator, Sequence
 
 import click
 
@@ -106,6 +106,42 @@ def _common_until(
         until="common",
     )
     return next(iter(study)).until
+
+
+def _whole_study(
+    study_path: Path,
+    equilibration: str | None,
+    replicate_spec: str | None,
+    stride: int,
+    data: dict | None,
+) -> Iterator[Any]:
+    """Yield each condition of the study file whose runs are on this machine.
+
+    A ``--label`` run, a ``--submit`` task and a partial report each see some
+    conditions; :func:`~polyzymd.analyses.protocols.study_wide_settings`
+    reads these instead, so their stored records match a full run.
+    """
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.protocols import _study
+    from polyzymd.analyses.study_file import load_study_file
+
+    for label, config in load_study_file(study_path).conditions.items():
+        try:
+            yield from _study(
+                [config], [label], equilibration, _replicates(replicate_spec), stride, data
+            )
+        except ProtocolError:
+            continue
+
+
+def _without_commit(report_text: str) -> dict:
+    """Return a saved report without the git commit its study record names."""
+    import json
+
+    report = json.loads(report_text)
+    git = ((report.get("provenance") or {}).get("study") or {}).get("git") or {}
+    git.pop("commit", None)
+    return report
 
 
 def _list_analyses(ctx: click.Context) -> None:
@@ -524,6 +560,15 @@ def analyze_command(
     )
     if data_dir is not None:
         data = {"*": Path(data_dir).expanduser().resolve()}
+    wide: dict[str, Any] | None = None
+    if study_path is not None and name is not None and not is_task:
+        from polyzymd.analyses.protocols import study_wide_settings
+
+        wide = study_wide_settings(
+            name,
+            _whole_study(study_path, equilibration, replicate_spec, stride, data),
+            _settings(setting_overrides),
+        )
 
     if submit or dry_run:
         try:
@@ -544,6 +589,7 @@ def analyze_command(
                 no_eq_check=no_eq_check,
                 no_plots=no_plots,
                 study_path=study_path,
+                study_wide=wide,
                 run_name=run_name,
                 data=data,
                 data_dir=data_dir,
@@ -575,7 +621,10 @@ def analyze_command(
         "equilibration": equilibration,
         "labels": labels,
         "run": run,
-        "setting_overrides": setting_overrides,
+        "setting_overrides": (
+            *setting_overrides,
+            *(f"{key}={_set_value(value)}" for key, value in (wide or {}).items()),
+        ),
         "output_dir": output_dir,
         "recompute": recompute,
         "eq_check": not no_eq_check,
@@ -661,7 +710,19 @@ def analyze_command(
         if not is_task and not subset:
             saved = Path(output_dir) / REPORT_FILE
             saved.parent.mkdir(parents=True, exist_ok=True)
-            saved.write_text(report.model_dump_json(indent=2) + "\n")
+            text = report.model_dump_json(indent=2) + "\n"
+            # A rerun on unchanged inputs keeps the report it made before, so
+            # committing between the runs leaves nothing new to commit.
+            if not saved.is_file() or _without_commit(saved.read_text()) != _without_commit(text):
+                saved.write_text(text)
+            # Records of replicates the study no longer lists would be read and deposited.
+            listed = load_study_file(study_root).replicates
+            if listed is not None:
+                import shutil
+
+                for folder in Path(output_dir).glob("polyzymd_results/*/*/replicate_*"):
+                    if int(folder.name.removeprefix("replicate_")) not in listed:
+                        shutil.rmtree(folder)
     rendered = _render(report, output_format)
     click.echo(rendered)
     if output_path is not None:
@@ -717,6 +778,13 @@ def _analyze_project(
     if study_path is not None or configs:
         click.echo("error: --project runs every study; give it without --study or -c.", err=True)
         click.echo("fix: Use --study to run one study of the project.", err=True)
+        sys.exit(EXIT_ANALYSIS_ERROR)
+    if ctx.params.get("output_dir") is not None:
+        # Studies with the same condition labels would overwrite each other's results.
+        click.echo("error: --output-dir cannot be given with --project.", err=True)
+        click.echo(
+            "fix: Leave out --output-dir; each study keeps its results in its own folder.", err=True
+        )
         sys.exit(EXIT_ANALYSIS_ERROR)
     try:
         project = Project(project_path)
@@ -973,12 +1041,17 @@ def _submit(
     preset: str | None,
     overrides: dict,
     study_path: Path | None = None,
+    study_wide: dict | None = None,
     run_name: str | None = None,
     data: dict | None = None,
     data_dir: Path | None = None,
     until: str | None = None,
 ) -> None:
-    """Write, and unless ``dry_run`` submit, the SLURM jobs of one ``polyzymd analyze`` command."""
+    """Write, and unless ``dry_run`` submit, the SLURM jobs of one ``polyzymd analyze`` command.
+
+    ``study_wide`` holds the settings worked out over the whole study file;
+    without it they are worked out over ``configs``.
+    """
     import json
     import shlex
 
@@ -1034,7 +1107,9 @@ def _submit(
     # are resolved here; the report job runs the whole study and resolves the
     # same ones itself, so its record keeps only the settings given.
     if name is not None:
-        for key, value in study_wide_settings(name, study, _settings(setting_overrides)).items():
+        if study_wide is None:
+            study_wide = study_wide_settings(name, study, _settings(setting_overrides))
+        for key, value in study_wide.items():
             task_options += ["--set", f"{key}={_set_value(value)}"]
     report_arguments = []
     if study_path is not None:

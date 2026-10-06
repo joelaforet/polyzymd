@@ -170,6 +170,12 @@ class TestStale:
     def test_fresh_results_are_not_stale(self, study: Path) -> None:
         assert stale_runs(load_study_file(study)) == {}
 
+    def test_an_extended_trajectory_makes_its_run_stale(self, study: Path) -> None:
+        config = study.parent / "runs" / condition_folder("Polymer") / "config.yaml"
+        write_openmm_replicate(config, 2, [2.2 + 0.01 * k for k in range(12)])
+        (warning,) = [w for w in freeze(study).warnings if w.startswith("run rg may be stale")]
+        assert "Polymer replicate 2" in warning
+
     def test_changed_window_and_missing_run(self, study: Path) -> None:
         text = (
             (study / "study.yaml")

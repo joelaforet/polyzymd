@@ -27,7 +27,8 @@ def replicate_table(study: Any, run: str) -> Any:
     has one (``mean``; ``fraction`` as the mean; ``std`` with ``ddof=1``),
     otherwise with the mean. Values stored once per replicate are kept as
     they are. Labelled and multi-part results keep one row per label and
-    part. Rows are sorted by the study's condition order, then by replicate.
+    part. Only the replicates the run's report lists are kept, when it lists
+    them. Rows are sorted by the study's condition order, then by replicate.
 
     Parameters
     ----------
@@ -51,6 +52,15 @@ def replicate_table(study: Any, run: str) -> Any:
     """
     stored = study.results(run)
     table = stored.table
+    # Only the replicates the report used, so the table and the report agree.
+    used = {
+        (c.label, int(r))
+        for c in (stored.report.conditions if stored.report is not None else [])
+        for r in c.replicates
+    }
+    if used:
+        pairs = zip(table["condition"], table["replicate"])
+        table = table[[(c, int(r)) in used for c, r in pairs]]
     entry = study.protocol.analyses.get(run) if study.protocol is not None else None
     reduce = entry.function.reduce if entry is not None and entry.function is not None else "mean"
     # A run can store several quantities (two hydrogen-bond summaries), so the
@@ -117,11 +127,11 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
     Returns
     -------
     list of TrendReport
-        One :class:`~polyzymd.analyses.protocols.TrendReport` per numeric
-        factor. A factor with a replicate value that is not finite, fewer
-        than three levels (two make it a pairwise comparison), or condition
-        means that are all equal has ``testable=False``, its ``reason``, and
-        no slope. The list is empty when the report holds labelled results
+        One :class:`~polyzymd.analyses.protocols.TrendReport` per factor. A
+        factor that is not numeric, or has a replicate value that is not
+        finite, fewer than three levels (two make it a pairwise comparison),
+        or condition means that are all equal, has ``testable=False``, its
+        ``reason``, and no slope. The list is empty when the report holds labelled results
         (any condition with an ``entry``, such as one value per residue).
 
     Notes
@@ -148,17 +158,13 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
 
     if any(item.entry is not None for item in report.conditions):
         return []
-    names = [
-        name
-        for name in dict.fromkeys(n for values in factors.values() for n in values)
-        if all(
+    trends = []
+    for name in dict.fromkeys(n for values in factors.values() for n in values):
+        numeric = all(
             isinstance(values.get(name), (int, float)) and not isinstance(values.get(name), bool)
             for values in factors.values()
             if name in values
         )
-    ]
-    trends = []
-    for name in names:
         levels, means, used, n_values, bad = [], [], [], 0, 0
         for item in report.conditions:
             level = factors.get(item.label, {}).get(name)
@@ -168,11 +174,13 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
             used.append(item.label)
             n_values += len(values)
             bad += sum(1 for v in values if not math.isfinite(v))
-            if values:
+            if values and numeric:
                 levels.append(float(level))
                 means.append(sum(values) / len(values))
         trend = TrendReport(factor=name, conditions=used, n_replicates=n_values)
-        if bad:
+        if not numeric:
+            reason = "its levels are not all numbers (YAML reads 1e-3 as text; write 1.0e-3)"
+        elif bad:
             reason = f"{bad} replicate value{'s are' if bad != 1 else ' is'} not finite"
         elif len(set(levels)) < 3:
             n = len(set(levels))

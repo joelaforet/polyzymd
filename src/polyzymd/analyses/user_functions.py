@@ -64,10 +64,14 @@ def load_module(file: Path) -> types.ModuleType:
     """
     file = Path(file).resolve()
     # The record keeps the module name, so it must not depend on where the
-    # study folder sits; the module is not added to sys.modules.
+    # study folder sits. The module and its parent package are put in
+    # sys.modules, where dataclasses and pickle look up the classes the file
+    # defines.
     module_name = f"polyzymd_study.{file.stem}"
     module = types.ModuleType(module_name)
     module.__file__ = str(file)
+    sys.modules.setdefault("polyzymd_study", types.ModuleType("polyzymd_study"))
+    sys.modules[module_name] = module
     # A helper module imported from the file's folder earlier in this process
     # may have been edited since; drop it so the import reads it again, as
     # its current content is what the stored results' hash covers. Only

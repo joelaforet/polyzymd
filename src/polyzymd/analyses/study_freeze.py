@@ -161,7 +161,7 @@ def _function_hash(record: dict[str, Any], entry: Any) -> str | None:
         return None
 
 
-def stale_runs(protocol: Any) -> dict[str, list[str]]:
+def stale_runs(protocol: Any, conditions: dict[str, Any] | None = None) -> dict[str, list[str]]:
     """Return, for each analysis run, why its stored results may not match the study now.
 
     A run has one reason per difference between what produced its stored
@@ -171,7 +171,9 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
     folder's helper modules), or the content of a file it was given; the
     replicates found on disk; or the report's settings, selections, condition
     factors (which its trend tests used) or PolyzyMD version. Trajectories are
-    read only to work out ``until: common``.
+    read only to work out ``until: common``. ``conditions`` are the manifest's
+    conditions (from :func:`_replicates`); with them, a replicate whose
+    trajectory hashes differ from those its record names is a reason too.
     """
     import polyzymd
     from polyzymd.analyses.identity import compute_config_hash
@@ -206,6 +208,16 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
             record = json.loads(path.read_text())
             label = record.get("condition")
             recorded_replicates.setdefault(label, set()).add(int(record.get("replicate", 0)))
+            here = (conditions or {}).get(label, {}).get("replicates", {})
+            on_disk = here.get(str(record.get("replicate")))
+            if on_disk is not None:
+                # The first file is the topology, the others the trajectories.
+                now = sorted(item["sha256"] for item in on_disk["files"][1:])
+                then = sorted(item.get("sha256") for item in record.get("trajectories", []))
+                if now != then:
+                    found.append(
+                        f"the trajectories of {label} replicate {record['replicate']} changed"
+                    )
             for name, sha in _recorded_files(record.get("arguments")).items():
                 if name in current_files and current_files[name] != sha:
                     found.append(f"the content of {name} changed")
@@ -1541,11 +1553,6 @@ def freeze(
         from polyzymd.analyses.study_git import git_state
 
         state = git_state(root)
-    for run, why in stale_runs(protocol).items():
-        warnings.append(f"run {run} may be stale: {'; '.join(why)}")
-    warnings.extend(report_problems(protocol))
-    warnings.extend(_outside_inputs(protocol))
-
     deposit = root / DEPOSIT
     for part in ("engine_inputs", "final_frames"):
         # A replicate no longer in the study must not stay in the deposit.
@@ -1553,6 +1560,10 @@ def freeze(
     deposit.mkdir(exist_ok=True)
     hashes = _Hashes()
     conditions, rows = _replicates(protocol, deposit, hashes, warnings)
+    for run, why in stale_runs(protocol, conditions).items():
+        warnings.append(f"run {run} may be stale: {'; '.join(why)}")
+    warnings.extend(report_problems(protocol))
+    warnings.extend(_outside_inputs(protocol))
     for label, items in condition_restraints(protocol).items():
         conditions[label]["restraints"] = items
     warnings.extend(_production_length_warnings(conditions))

@@ -81,3 +81,20 @@ def test_replicate_table_fills_missing_labels_as_the_report(tmp_path: Path) -> N
         sub = table[(table.condition == row["label"]) & (table.label.astype(str) == str(row["entry"]))]
         assert len(sub) == row["n_replicates"], row["entry"]
         assert sub.value.mean() == pytest.approx(row["mean"]), row["entry"]
+
+
+def test_a_factor_written_as_text_is_reported_untestable() -> None:
+    """YAML reads 1e-3 as text, so such a factor gets an untestable trend with the reason."""
+    from polyzymd.analyses.protocols import ConditionReport
+    from polyzymd.analyses.study_statistics import trend_tests
+
+    class Report:
+        conditions = [
+            ConditionReport(label=label, n_replicates=2, mean=0.0, replicate_values=[1.0, 2.0])
+            for label in ("a", "b", "c")
+        ]
+
+    factors = {"a": {"conc": "1e-3"}, "b": {"conc": "1e-2"}, "c": {"conc": "1e-1"}}
+    (trend,) = trend_tests(Report(), factors)
+    assert trend.factor == "conc" and not trend.testable
+    assert "not all numbers" in trend.reason

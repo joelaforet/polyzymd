@@ -323,6 +323,8 @@ verdict: core_rmsf falls with sbma_fraction (slope -0.4 A per unit sbma_fraction
   family.
 - If a replicate value is not finite, the trend is "not testable", with the
   reason.
+- A factor that is not a number in every condition is also "not testable".
+  YAML reads `1e-3` as text; write `1.0e-3`.
 - Labeled results, such as one value per residue, get no trend test.
 
 ## Your own statistics
