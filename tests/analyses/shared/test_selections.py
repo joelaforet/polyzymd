@@ -33,3 +33,10 @@ def test_get_position_single_mode_rejects_multi_atom_selection() -> None:
 
     with pytest.raises(ValueError, match=r"SelectionMode\.MIDPOINT or SelectionMode\.COM"):
         get_position(atoms, SelectionMode.SINGLE)
+
+
+def test_pdbindex_means_the_same_in_analyses_and_restraints() -> None:
+    """pdbindex N is the N-th atom (bynum), as restraints read it."""
+    from polyzymd.analyses.shared.selections import translate_selection
+
+    assert translate_selection("pdbindex 100 and name CA") == "bynum 100 and name CA"
