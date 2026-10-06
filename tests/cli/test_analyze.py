@@ -486,6 +486,28 @@ def test_records_of_replicates_the_study_drops_are_removed(tmp_path: Path) -> No
     assert "rg" not in stale_runs(load_study_file(root))
 
 
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_records_of_replicates_the_run_used_are_kept(tmp_path: Path) -> None:
+    """--replicates 1-3 with replicates: [1, 2] keeps the record of replicate 3 it just made."""
+    import subprocess
+
+    pytest.importorskip("MDAnalysis")
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    study_yaml = root / "study.yaml"
+    study_yaml.write_text(study_yaml.read_text() + "replicates: [1, 2]\n")
+    subprocess.run(["git", "-C", str(root), "commit", "-qam", "two"], check=True)
+    options = ["rg", "--study", str(root), "--no-plots", "--no-eq-check"]
+    result = _analyze_cli(*options, "--replicates", "1-3")
+    assert result.exit_code == 0, result.output
+    assert list((root / "results").rglob("replicate_3"))
+    record = next((root / "results").rglob("replicate_3"))
+    (record.parent / "replicate_1.bak").mkdir()
+    assert _analyze_cli(*options).exit_code == 0
+    assert not list((root / "results").rglob("replicate_3"))
+    assert (record.parent / "replicate_1.bak").is_dir()
+
+
 def test_project_refuses_one_output_dir_for_every_study(tmp_path: Path) -> None:
     """Studies with the same labels would overwrite each other's records in one folder."""
     result = CliRunner().invoke(

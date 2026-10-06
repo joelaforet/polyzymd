@@ -743,13 +743,16 @@ def analyze_command(
             # committing between the runs leaves nothing new to commit.
             if not saved.is_file() or _without_commit(saved.read_text()) != _without_commit(text):
                 saved.write_text(text)
-            # Records of replicates the study no longer lists would be read and deposited.
+            # Records of replicates the study no longer lists would be read and
+            # deposited; the replicates this report used stay.
             listed = load_study_file(study_root).replicates
             if listed is not None:
                 import shutil
 
+                keep = set(listed) | {r for c in report.conditions for r in c.replicates}
                 for folder in Path(output_dir).glob("polyzymd_results/*/*/replicate_*"):
-                    if int(folder.name.removeprefix("replicate_")) not in listed:
+                    number = folder.name.removeprefix("replicate_")
+                    if number.isdigit() and int(number) not in keep:
                         shutil.rmtree(folder)
     rendered = _render(report, output_format)
     click.echo(rendered)
