@@ -174,10 +174,9 @@ Use this checklist when a site has a new NVIDIA driver or GPU cohort:
    `pixi.toml`. Keep the OpenMM version fixed for an active campaign.
 4. Regenerate `pixi.lock` with Pixi 0.72.2 or newer. Install the environment on
    an allocated node.
-5. Add the validated driver threshold and environment name in
-   `src/polyzymd/workflow/cuda_routing.py` and in the OpenMM Slurm template.
-6. Add routing tests in `tests/workflow/test_cuda_routing.py` and script tests
-   in `tests/workflow/test_slurm.py`.
+5. Add the validated driver threshold and environment name in the OpenMM
+   Slurm template, `src/polyzymd/workflow/templates/openmm_self_resubmitting.sh.jinja`.
+6. Add script tests in `tests/workflow/test_slurm.py`.
 7. Create an explicit CUDA Context on each hardware cohort. Then run a short,
    deterministic benchmark without CPU fallback.
 8. Compare particle identity and energy behavior with an existing supported

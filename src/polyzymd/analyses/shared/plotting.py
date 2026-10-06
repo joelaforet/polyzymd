@@ -496,10 +496,9 @@ def save_figure(
     output_path: Path,
     plot_settings: "PlotSettings",
     *,
-    experimental_features: Sequence[str] | None = None,
     close: bool = True,
 ) -> Path:
-    """Save figure with DPI, watermark, and optional experimental stamp.
+    """Save figure with DPI and watermark.
 
     Parameters
     ----------
@@ -509,8 +508,6 @@ def save_figure(
         Output file path.
     plot_settings : PlotSettings
         Global plot settings (carries ``dpi`` and ``theme``).
-    experimental_features : sequence of str or None, optional
-        Experimental feature ids to stamp onto the figure.
     close : bool, optional
         If True, close the figure after saving. Set False when the caller
         needs to keep using the figure object.
@@ -522,14 +519,9 @@ def save_figure(
     """
     import matplotlib.pyplot as plt
 
-    from polyzymd.core.experimental import annotate_experimental_figure
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        if experimental_features:
-            annotate_experimental_figure(fig, experimental_features)
-
         # Add watermark if enabled
         if plot_settings.theme.show_watermark:
             fig.text(

@@ -6,7 +6,6 @@ This module provides internal utilities for:
 - OpenFF topology utilities (SDF loading, molecule extraction)
 - Molecular charging with ML models (NAGL, Espaloma)
 - Box vector calculations (bounding boxes, padding, volumes)
-- Unit conversion between OpenFF and OpenMM unit systems
 """
 
 from polyzymd.utils.boxvectors import (
@@ -26,7 +25,6 @@ from polyzymd.utils.forcegroups import impose_unique_force_groups
 from polyzymd.utils.packmol import PeriodicImageClashError, SolvationClashError
 from polyzymd.utils.replicates import parse_replicate_range, validate_replicate_range
 from polyzymd.utils.topology import get_largest_offmol, topology_from_sdf
-from polyzymd.utils.units import openff_to_openmm, openmm_to_openff
 
 __all__ = [
     # Force groups
@@ -48,9 +46,6 @@ __all__ = [
     # Packing / solvation safeguards
     "SolvationClashError",
     "PeriodicImageClashError",
-    # Units
-    "openff_to_openmm",
-    "openmm_to_openff",
     # Replicates
     "parse_replicate_range",
     "validate_replicate_range",
