@@ -1276,3 +1276,36 @@ def test_gromacs_equilibration_stages_do_not_share_noise(tmp_path: Path) -> None
     stages = [params for _, params in generator.generate_equilibration_stages()]
     assert len(stages) == 2
     assert stages[0].ld_seed != stages[1].ld_seed
+
+
+def _restrained_generator(tmp_path: Path, freeze_solute: bool = True):
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    (stage,) = data["simulation_phases"]["equilibration_stages"]
+    stage["position_restraints"] = [
+        {"group": "protein_heavy", "force_constant": 4184.0},
+        {"group": "polymer_heavy", "force_constant": 4184.0},
+    ]
+    data["simulation_phases"]["minimization"] = {"freeze_solute": freeze_solute}
+    path.write_text(yaml.safe_dump(data))
+    return MDPGenerator(SimulationConfig.from_yaml(path))
+
+
+def test_minimization_restrains_the_solute_of_the_first_stage(tmp_path: Path) -> None:
+    """em.mdp turns on the first stage's protein restraints; polymers relax, as in OpenMM."""
+    text = _restrained_generator(tmp_path).generate_energy_minimization().to_mdp_string()
+    assert "define          = -DPOSRES_PROTEIN\n" in text + "\n"
+    assert "POSRES_POLYMER" not in text
+
+
+def test_minimization_without_freeze_solute_has_no_restraints(tmp_path: Path) -> None:
+    """freeze_solute: false lets the solute move during GROMACS minimization too."""
+    text = _restrained_generator(tmp_path, False).generate_energy_minimization().to_mdp_string()
+    assert "define" not in text

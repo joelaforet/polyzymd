@@ -262,6 +262,8 @@ class MDPParameters:
         lines.append(f"emtol           = {self.emtol}")
         lines.append(f"emstep          = {self.emstep}")
         lines.append(f"nsteps          = {self.nsteps}")
+        if self.define:
+            lines.append(f"define          = {self.define}")
         lines.append("")
 
         # Output
@@ -491,6 +493,11 @@ class MDPGenerator:
     ) -> MDPParameters:
         """Generate MDP parameters for energy minimization.
 
+        With ``minimization.freeze_solute`` (the default), the protein and
+        ligand position restraints of the first equilibration stage are on,
+        so the solute holds its place while solvent and polymers relax.
+        OpenMM freezes these atoms instead.
+
         Args:
             nsteps: Maximum number of minimization steps.
             emtol: Energy tolerance (kJ/mol/nm) for convergence.
@@ -498,6 +505,11 @@ class MDPGenerator:
         Returns:
             MDPParameters configured for steepest descent minimization.
         """
+        define = ""
+        phases = self._config.simulation_phases
+        if phases.minimization.freeze_solute and phases.equilibration_stages:
+            first = self._build_posres_defines(phases.equilibration_stages[0])
+            define = " ".join(d for d in first.split() if d != "-DPOSRES_POLYMER")
         return MDPParameters(
             title="Energy Minimization - Run FIRST before dynamics",
             stage_type="em",
@@ -507,6 +519,7 @@ class MDPGenerator:
             emstep=0.01,
             nstlog=500,
             nstenergy=500,
+            define=define,
         )
 
     def generate_equilibration_stages(self) -> List[Tuple[str, MDPParameters]]:
