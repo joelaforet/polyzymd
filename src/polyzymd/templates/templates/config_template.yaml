@@ -273,7 +273,7 @@ description: "Description of your simulation system"
 # ensemble options: NVT, NPT, NVE
 # thermostat options: LangevinMiddle (recommended), Langevin. NoseHoover and
 #   Andersen run only on GROMACS; see "GROMACS and OpenMM" in the reference.
-# barostat options: MC (Monte Carlo), MCA (anisotropic)
+# barostat options: MC (Monte Carlo), MCA (anisotropic, GROMACS only)
 #
 # Equilibration is a list of stages. Each stage sets its ensemble, its
 # temperature (or a temperature ramp) and its position restraints.
