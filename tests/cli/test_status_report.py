@@ -408,3 +408,19 @@ class TestStatusAgentCli:
         result = CliRunner().invoke(cli, ["status"])
         assert result.exit_code != 0
         assert "at least one" in result.output
+
+
+def test_short_runs_show_progress_in_ps() -> None:
+    """A run shorter than 1 ns shows its progress in ps, not as 0.0/0 ns."""
+    from polyzymd.cli.status_report import _progress_text
+
+    assert _progress_text(0.004, 0.004) == "   4.0/4ps"
+    assert _progress_text(12.5, 100.0) == "  12.5/100ns"
+
+
+def test_status_without_slurm_says_so_instead_of_warning() -> None:
+    """With --no-slurm the report says SLURM was not queried, not 'squeue unavailable'."""
+    from polyzymd.cli.status_report import render_agent
+
+    text = render_agent([], slurm_available=False, slurm_queried=False)
+    assert "SLURM not queried" in text and "squeue unavailable" not in text
