@@ -408,11 +408,11 @@ def open_universe(
     beside it (``gromacs_topology`` when given, else the only ``.top``), laid
     out as MDAnalysis lays out a TPR
     (:func:`~polyzymd.analyses.shared.gromacs.universe_from_gromacs_top`),
-    with a warning. A universe read from a TPR or ``.top`` takes PolyzyMD's
-    chain IDs (A protein, B substrate, C polymer) from the build's
-    ``solvated_system.pdb``
-    (:func:`~polyzymd.analyses.shared.gromacs.apply_build_chain_ids`), so
-    chain selections mean what they mean for an OpenMM run. The universe's
+    with a warning. A universe read from a TPR, ``.top`` or OpenMM
+    ``system.prmtop`` takes PolyzyMD's chain IDs (A protein, B substrate,
+    C polymer) from the build's ``solvated_system.pdb``
+    (:func:`~polyzymd.analyses.shared.gromacs.apply_build_chain_ids`), since
+    none of these files stores them. The universe's
     ``_polyzymd_bond_source`` names where its bonds came from: ``"tpr"``,
     ``"top"`` or ``None`` for the file format's own bonds.
     """
@@ -458,16 +458,20 @@ def open_universe(
     else:
         universe._polyzymd_bond_source = "tpr" if is_tpr else None
         universe._polyzymd_topology_source = str(topology)
-    if is_tpr:
+    if is_tpr or topology.suffix.lower() == ".prmtop":
         metadata = apply_build_chain_ids(universe, build_pdb_file(topology))
         if not metadata["applied"] and topology not in _WARNED_CHAIN_ID_PATHS:
             _WARNED_CHAIN_ID_PATHS.add(topology)
             LOGGER.warning(
-                "Chain IDs of %s are named after molecule types, not PolyzyMD's chains "
-                "(A protein, B substrate, C polymer): %s. Select by chainID MOL0 and so on, "
-                "or by residue name.",
+                "%s does not hold PolyzyMD's chain IDs (A protein, B substrate, C polymer) "
+                "and they could not be read from the build: %s. %s",
                 topology,
                 metadata["reason"],
+                (
+                    "Select by chainID MOL0 and so on, or by residue name."
+                    if is_tpr
+                    else "Select by residue name."
+                ),
             )
     return universe
 

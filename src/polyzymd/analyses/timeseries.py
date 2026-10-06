@@ -1441,6 +1441,7 @@ class ReplicateValues:
             _condition,
             _verdict,
         )
+        from polyzymd.analyses.study_freeze import group_warnings
 
         conditions, notes = [], list(self.filled)
         for position, entry in self._entries():
@@ -1535,6 +1536,8 @@ class ReplicateValues:
             from polyzymd.analyses.study import production_length_warnings
 
             notes.extend(production_length_warnings(study, chosen))
+        # One line for a warning that several conditions share, as freeze writes it.
+        notes = group_warnings(notes, [f"condition {label}" for label in chosen])
         if self.labels is None:
             verdict = _verdict(self.metric, self.unit, conditions, pairwise)
         else:
