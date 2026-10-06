@@ -1760,3 +1760,44 @@ class TestGlobalTermHandling:
         assert pre_idx != -1
         assert post_idx != -1
         assert pre_idx < first_idx < post_idx
+
+
+def test_a_stop_file_stops_the_chain(tmp_path, monkeypatch) -> None:
+    """E-3: a GROMACS job does no work and submits no successor once `polyzymd cancel` wrote STOP."""
+    import os
+    import subprocess
+
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "STOP").write_text("PolyzyMD STOP marker\n")
+    script = tmp_path / "job.sh"
+    script.write_text(
+        _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir=str(run),
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool in ("sbatch", "module", "gmx", "pixi", "nvidia-smi"):
+        stub = bin_dir / tool
+        stub.write_text(f'#!/bin/sh\necho {tool} >> "{tmp_path}/calls"\n')
+        stub.chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(script)],
+        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "STOP: not starting replicate 1" in result.stdout
+    calls = (tmp_path / "calls").read_text().split() if (tmp_path / "calls").exists() else []
+    assert "gmx" not in calls and "sbatch" not in calls, calls

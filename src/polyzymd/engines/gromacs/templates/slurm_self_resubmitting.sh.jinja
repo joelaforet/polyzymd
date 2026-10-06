@@ -49,6 +49,33 @@ if [ -z "$MDRUN_FLAGS_PROD" ]; then MDRUN_FLAGS_PROD="$MDRUN_FLAGS"; fi
 # EM-safe flags: strip GPU offload flags incompatible with non-dynamical integrators
 MDRUN_FLAGS_EM=$(echo "$MDRUN_FLAGS" | sed 's/-pme  *gpu//g; s/-update  *gpu//g; s/-bonded  *gpu//g' | xargs)
 MDRUN="{{ mdrun_command }}"
+STOP_FILE="${POLYZYMD_STOP_FILE:-$WORKING_DIR/STOP}"
+
+# A chain stops when the run directory holds a STOP file (written by
+# `polyzymd cancel`) or when POLYZYMD_STOP_CHAIN=1 is exported into the job.
+# Checked at the start and before every successor submission, so a
+# cancelled chain stays cancelled.
+stop_requested() {
+    if [ "${POLYZYMD_STOP_CHAIN:-0}" = "1" ]; then
+        echo "STOP: POLYZYMD_STOP_CHAIN=1 — not submitting a successor"
+        return 0
+    fi
+    if [ -n "${STOP_FILE:-}" ] && [ -f "$STOP_FILE" ]; then
+        echo "STOP: $STOP_FILE exists — not submitting a successor"
+        echo "STOP: ---- $STOP_FILE ----"
+        sed -n '1,20p' "$STOP_FILE" || true
+        echo "STOP: -------------------------------"
+        echo "STOP: remove the file (or run 'polyzymd cancel --resume') to restart the chain"
+        return 0
+    fi
+    return 1
+}
+
+# A successor that was already queued when the chain was cancelled does no work.
+if stop_requested; then
+    echo "STOP: not starting replicate $REPLICATE"
+    exit 0
+fi
 
 # =========================================================================
 # Signal infrastructure: script-global SIGTERM handling with state machine
@@ -89,6 +116,9 @@ handle_term() {
 resubmit_once() {
     if [ "$RESUBMITTED" -eq 1 ]; then
         echo "Resubmission already attempted — skipping duplicate sbatch."
+        return 0
+    fi
+    if stop_requested; then
         return 0
     fi
     echo "Resubmitting job..."
