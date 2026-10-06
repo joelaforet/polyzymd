@@ -27,8 +27,9 @@ Usage
 For library solvents (dmso, ethanol, etc.), pre-computed charges are loaded
 instantly from bundled SDF files.
 
-For custom solvents, AM1BCC charges are computed once and cached in
-~/.polyzymd/solvent_cache/ for future use.
+For custom solvents, charges are computed once and cached in
+~/.polyzymd/solvent_cache/ for future use, one file per SMILES and charge
+method.
 
 Adding New Solvents
 -------------------
@@ -38,6 +39,7 @@ solvents to the library.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -106,7 +108,8 @@ def get_solvent_molecule(
 
     1. In-memory cache (already loaded this session)
     2. Bundled library SDFs (src/polyzymd/data/solvents/)
-    3. User cache (~/.polyzymd/solvent_cache/)
+    3. User cache (~/.polyzymd/solvent_cache/), keyed by the name, the
+       canonical SMILES and the charge method
     4. Generate from SMILES, assign charges with ``charge_method``, cache for future use
 
     Args:
@@ -140,14 +143,10 @@ def get_solvent_molecule(
     # Normalize name
     name_key = name.lower().strip()
 
-    # Generated charges depend on the method, so it is part of every cache key.
-    method = str(charge_method).lower().strip()
-    memory_key = name_key if is_bundled_solvent(name_key) else f"{name_key}.{method}"
-
-    # Check in-memory cache first
-    if memory_key in _loaded_molecules:
-        LOGGER.debug(f"Returning {memory_key} from in-memory cache")
-        return _loaded_molecules[memory_key]
+    # Check in-memory cache first (water models and library molecules)
+    if name_key in _loaded_molecules:
+        LOGGER.debug(f"Returning {name_key} from in-memory cache")
+        return _loaded_molecules[name_key]
 
     # Handle water models specially (hardcoded literature charges)
     if name_key in ("tip3p", "water_tip3p", "water"):
@@ -172,16 +171,6 @@ def get_solvent_molecule(
         _loaded_molecules[name_key] = mol
         return mol
 
-    # Try user cache
-    _USER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache_path = _USER_CACHE_DIR / f"{name_key}.{method}.sdf"
-    if cache_path.exists():
-        LOGGER.info(f"Loading {name_key} from user cache: {cache_path}")
-        mol = _load_molecule_from_sdf(cache_path)
-        _loaded_molecules[memory_key] = mol
-        return mol
-
-    # Need to generate - requires SMILES
     if smiles is None:
         # Try to get from cosolvent library
         from polyzymd.data.cosolvent_library import get_cosolvent
@@ -196,6 +185,26 @@ def get_solvent_molecule(
                 f"Please provide a SMILES string to generate the molecule."
             )
 
+    # A generated molecule depends on its SMILES and charge method, so both
+    # are part of every cache key.
+    from rdkit import Chem
+
+    method = str(charge_method).lower().strip()
+    digest = hashlib.sha256(f"{Chem.CanonSmiles(smiles)} {method}".encode()).hexdigest()[:12]
+    cache_key = f"{name_key}.{method}.{digest}"
+    if cache_key in _loaded_molecules:
+        LOGGER.debug(f"Returning {cache_key} from in-memory cache")
+        return _loaded_molecules[cache_key]
+
+    # Try user cache
+    _USER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path = _USER_CACHE_DIR / f"{cache_key}.sdf"
+    if cache_path.exists():
+        LOGGER.info(f"Loading {name_key} from user cache: {cache_path}")
+        mol = _load_molecule_from_sdf(cache_path)
+        _loaded_molecules[cache_key] = mol
+        return mol
+
     # Generate molecule with charges
     LOGGER.info(f"Generating {name_key} from SMILES and assigning {method} charges...")
     mol = _generate_charged_molecule(smiles, residue_name, method)
@@ -205,7 +214,7 @@ def get_solvent_molecule(
         LOGGER.info(f"Caching {name_key} to: {cache_path}")
         _save_molecule_to_sdf(mol, cache_path)
 
-    _loaded_molecules[memory_key] = mol
+    _loaded_molecules[cache_key] = mol
     return mol
 
 
@@ -290,7 +299,7 @@ def _generate_charged_molecule(smiles: str, residue_name: str, method: str = "na
     mol = Molecule.from_smiles(smiles)
     # A conformer places the molecule; AM1-BCC also needs one to compute charges.
     mol.generate_conformers(n_conformers=1)
-    mol = _charge_components(mol, method)
+    mol = get_charger(method).charge_molecule(mol)
 
     # Set residue metadata
     for atom in mol.atoms:
@@ -304,36 +313,31 @@ def _generate_charged_molecule(smiles: str, residue_name: str, method: str = "na
     return mol
 
 
-def _charge_components(mol: Molecule, method: str) -> Molecule:
-    """Assign partial charges to each connected part of ``mol`` and return it.
+def split_counter_ions(smiles: str) -> tuple[str, int, int]:
+    """Split Na+ and Cl- counter-ions off a co-solvent SMILES.
 
-    A SMILES may hold a molecule with its counter-ion (``...[O-].[Na+]``).
-    Each part is charged on its own: a single atom (an ion) takes its formal
-    charge, any other part ``method``. NAGL, for one, cannot charge sodium.
+    Returns the SMILES of the molecule and the numbers of Na+ and Cl- written
+    with it: ``CCCCCCCCCCCCOS(=O)(=O)[O-].[Na+]`` gives the dodecyl sulfate
+    SMILES, 1 and 0. A SMILES with one part is returned unchanged.
+
+    Raises:
+        ValueError: If the SMILES holds a part that is neither Na+ nor Cl-
+            besides the molecule.
     """
-    import numpy as np
-    from openff.toolkit import Molecule as OFFMolecule
-    from openff.units import unit
     from rdkit import Chem
 
-    from polyzymd.utils import get_charger
-
-    rdmol = mol.to_rdkit()
-    mapping: list = []
-    parts = Chem.GetMolFrags(rdmol, asMols=True, fragsMolAtomMapping=mapping, sanitizeFrags=True)
-    if len(parts) == 1:
-        return get_charger(method).charge_molecule(mol)
-    charges = np.zeros(mol.n_atoms)
-    for part, atoms in zip(parts, mapping):
-        if part.GetNumAtoms() == 1:
-            charges[atoms[0]] = part.GetAtomWithIdx(0).GetFormalCharge()
-            continue
-        piece = get_charger(method).charge_molecule(
-            OFFMolecule.from_rdkit(part, allow_undefined_stereo=True)
+    if "." not in smiles:
+        return smiles, 0, 0
+    fragments = Chem.GetMolFrags(Chem.MolFromSmiles(smiles), asMols=True)
+    parts = [Chem.MolToSmiles(part) for part in fragments]
+    molecules = [part for part in parts if part not in ("[Na+]", "[Cl-]")]
+    if len(molecules) != 1:
+        raise ValueError(
+            f"Co-solvent SMILES {smiles!r} has the parts {', '.join(parts)}. Only Na+ and Cl- "
+            "may be written beside the molecule. Give each other molecule its own co_solvents "
+            "entry, and leave other counter-ions out: solvent.ions.neutralize adds Na+ or Cl-."
         )
-        charges[list(atoms)] = piece.partial_charges.m_as(unit.elementary_charge)
-    mol.partial_charges = charges * unit.elementary_charge
-    return mol
+    return molecules[0], parts.count("[Na+]"), parts.count("[Cl-]")
 
 
 def _load_molecule_from_sdf(path: Path) -> Molecule:
@@ -430,13 +434,11 @@ def clear_cache(name: Optional[str] = None) -> None:
     if name is not None:
         # Clear specific solvent
         name_key = name.lower().strip()
-        if name_key in _loaded_molecules:
-            del _loaded_molecules[name_key]
-
-        cache_path = _USER_CACHE_DIR / f"{name_key}.sdf"
-        if cache_path.exists():
+        for key in [key for key in _loaded_molecules if key.split(".")[0] == name_key]:
+            del _loaded_molecules[key]
+        for cache_path in _USER_CACHE_DIR.glob(f"{name_key}.*.sdf"):
             cache_path.unlink()
-            LOGGER.info(f"Removed {name_key} from cache")
+            LOGGER.info(f"Removed {cache_path.name} from cache")
     else:
         # Clear all
         _loaded_molecules.clear()

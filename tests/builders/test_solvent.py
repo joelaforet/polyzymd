@@ -73,31 +73,19 @@ def test_config_translation_uses_mole_fraction(monkeypatch) -> None:
     assert co_solvents[1].concentration == 2.0
 
 
-def test_neutralizing_ion_counts_use_target_and_tie_toward_more_ions() -> None:
-    """Neutralization should target a concentration and prefer more ions on ties."""
-    na_count, cl_count = SolventBuilder._calculate_ion_counts(
-        nacl_to_add=43,
-        solute_charge=-15,
-        neutralize=True,
-    )
-
-    assert (na_count, cl_count) == (51, 36)
-    assert -15 + na_count - cl_count == 0
-
-
 @pytest.mark.parametrize(
     ("solute_charge", "expected_counts"),
     [
-        (-4, (12, 8)),
-        (5, (8, 13)),
+        (-4, (14, 10)),
+        (5, (10, 15)),
         (0, (10, 10)),
     ],
 )
-def test_neutralizing_ion_counts_produce_zero_net_charge(
+def test_neutralizing_ions_are_added_on_top_of_the_salt(
     solute_charge: int,
     expected_counts: tuple[int, int],
 ) -> None:
-    """Neutralizing final ion counts should exactly cancel integer solute charge."""
+    """Neutralizing ions are added to the requested salt pairs, which stay complete."""
     na_count, cl_count = SolventBuilder._calculate_ion_counts(
         nacl_to_add=10,
         solute_charge=solute_charge,
@@ -338,35 +326,15 @@ def test_solvate_without_box_centres_and_derives_the_box(monkeypatch) -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("smiles", "total", "sodium"),
-    [
-        ("CCCCCCCCCCCCOS(=O)(=O)[O-]", -1.0, None),
-        ("CCCCCCCCCCCCOS(=O)(=O)[O-].[Na+]", 0.0, 1.0),
-        ("CCO", 0.0, None),
-    ],
-)
-def test_each_part_of_a_smiles_is_charged(smiles, total, sodium) -> None:
-    """A charged SMILES keeps its charge; one that carries its counter-ion is neutral, with Na+ at +1."""
-    from openff.toolkit import Molecule
-
-    from polyzymd.data.solvent_molecules import _charge_components
-
-    molecule = Molecule.from_smiles(smiles)
-    molecule.generate_conformers(n_conformers=1)
-    charges = _charge_components(molecule, "nagl").partial_charges.m
-    assert sum(charges) == pytest.approx(total, abs=1e-6)
-    if sodium is not None:
-        (na,) = [a.molecule_atom_index for a in molecule.atoms if a.atomic_number == 11]
-        assert charges[na] == pytest.approx(sodium)
-
-
-def _solvate_counts(monkeypatch, co_solvent_smiles: str, neutralize: bool = True) -> dict:
+def _solvate_counts(
+    monkeypatch, tmp_path, co_solvent_smiles: str, neutralize: bool = True, nacl: float = 0.0
+) -> dict:
     """Solvate methane with one co-solvent at 0.5 M, Packmol replaced, and return what it was asked."""
     from openff.toolkit import Molecule, Topology
 
     import polyzymd.utils.packmol as packmol_utils
     from polyzymd.builders.solvent import CoSolvent, SolventComposition
+    from polyzymd.data import solvent_molecules
 
     captured: dict = {}
 
@@ -375,32 +343,54 @@ def _solvate_counts(monkeypatch, co_solvent_smiles: str, neutralize: bool = True
         return kwargs["solute"]
 
     monkeypatch.setattr(packmol_utils, "solvate_with_packmol", fake_solvate_with_packmol)
+    monkeypatch.setattr(solvent_molecules, "_USER_CACHE_DIR", tmp_path)
+    monkeypatch.setattr(solvent_molecules, "_loaded_molecules", {})
     solute = Molecule.from_smiles("C")
     solute.generate_conformers(n_conformers=1)
     cosolvent = CoSolvent(name="surf", smiles=co_solvent_smiles, concentration=0.5)
-    cosolvent.molecule = Molecule.from_smiles(co_solvent_smiles)
-    composition = SolventComposition(co_solvents=[cosolvent], neutralize=neutralize)
+    composition = SolventComposition(
+        co_solvents=[cosolvent], neutralize=neutralize, nacl_concentration=nacl
+    )
     SolventBuilder().solvate(Topology.from_molecules([solute]), composition, padding=1.5)
     names = ["water", "na", "cl", "cosolvent"]
-    return dict(zip(names, captured["number_of_copies"]))
+    counts = dict(zip(names, captured["number_of_copies"]))
+    counts["molecule"] = captured["molecules"][3]
+    return counts
 
 
 class TestCoSolventCharge:
-    def test_a_charged_cosolvent_is_neutralized(self, monkeypatch) -> None:
+    def test_a_charged_cosolvent_is_neutralized(self, monkeypatch, tmp_path) -> None:
         """An acetate SMILES carries -1 each, which the Na+ count must balance."""
-        counts = _solvate_counts(monkeypatch, "CC(=O)[O-]")
+        counts = _solvate_counts(monkeypatch, tmp_path, "CC(=O)[O-]")
         assert counts["cosolvent"] > 0
         assert counts["na"] - counts["cl"] - counts["cosolvent"] == 0
 
-    def test_a_cosolvent_with_its_counterion_needs_no_ions(self, monkeypatch) -> None:
-        """An ion-pair SMILES ('...[O-].[Na+]') is neutral, so neutralize adds nothing."""
-        counts = _solvate_counts(monkeypatch, "CC(=O)[O-].[Na+]")
-        assert counts["cosolvent"] > 0 and counts["na"] == counts["cl"] == 0
+    @pytest.mark.parametrize("neutralize", [True, False])
+    def test_a_counter_ion_in_the_smiles_becomes_its_own_ion(
+        self, monkeypatch, tmp_path, neutralize
+    ) -> None:
+        """'...[O-].[Na+]' packs acetate without Na and one Na+ ion per acetate."""
+        counts = _solvate_counts(monkeypatch, tmp_path, "CC(=O)[O-].[Na+]", neutralize)
+        assert counts["cosolvent"] > 0
+        assert counts["na"] == counts["cosolvent"] and counts["cl"] == 0
+        assert 11 not in [atom.atomic_number for atom in counts["molecule"].atoms]
 
-    def test_a_net_charge_without_neutralize_is_a_warning(self, monkeypatch, caplog) -> None:
+    @pytest.mark.parametrize("smiles", ["CC(=O)[O-]", "CC(=O)[O-].[Na+]"])
+    def test_requested_salt_is_kept_beside_a_charged_cosolvent(
+        self, monkeypatch, tmp_path, smiles
+    ) -> None:
+        """Both spellings keep every requested Cl-, and the Na+ count adds one per acetate."""
+        salt = _solvate_counts(monkeypatch, tmp_path, "CCO", nacl=0.5)["cl"]
+        counts = _solvate_counts(monkeypatch, tmp_path, smiles, nacl=0.5)
+        assert salt > 0 and counts["cl"] == salt
+        assert counts["na"] == salt + counts["cosolvent"]
+
+    def test_a_net_charge_without_neutralize_is_a_warning(
+        self, monkeypatch, tmp_path, caplog
+    ) -> None:
         """With neutralize off the build goes on, but says the system is charged."""
         import logging
 
         with caplog.at_level(logging.WARNING):
-            _solvate_counts(monkeypatch, "CC(=O)[O-]", neutralize=False)
+            _solvate_counts(monkeypatch, tmp_path, "CC(=O)[O-]", neutralize=False)
         assert any("net charge" in r.getMessage() for r in caplog.records)

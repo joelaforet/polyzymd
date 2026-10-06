@@ -264,7 +264,7 @@ solvent:
   
   ions:
     neutralize: true                     # Add counter-ions
-    nacl_concentration: 0.15             # NaCl-equivalent final ion concentration (M)
+    nacl_concentration: 0.15             # NaCl salt concentration (M)
   
   box:
     padding: 1.2                         # nm from solute to box edge
@@ -273,8 +273,9 @@ solvent:
     tolerance: 2.0                       # PACKMOL tolerance (Angstrom)
 ```
 
-With `neutralize: true`, `nacl_concentration` targets the final neutralized
-Na+/Cl- ion concentration, not extra salt added after counter-ions.
+`nacl_concentration` sets the number of NaCl pairs. With `neutralize: true`,
+the Na+ or Cl- ions that cancel the charge of the solute and co-solvents are
+added on top of the salt, as OpenMM `Modeller` and `gmx genion -neutral` do.
 
 `box.padding` is the clearance between the **solute** and the box edge. When
 polymers are configured, `polymers.packing.padding` is added to it and the
@@ -483,7 +484,7 @@ PolyzyMD solves this by computing charges **once** and reusing them:
 # Lookup order for get_solvent_molecule("dmso")
 1. Check in-memory cache (fastest)
 2. Check bundled library: src/polyzymd/data/solvents/dmso.sdf
-3. Check user cache: ~/.polyzymd/solvent_cache/dmso.sdf
+3. Check user cache: ~/.polyzymd/solvent_cache/<name>.<charge method>.<SMILES hash>.sdf
 4. Generate from SMILES + AM1BCC, save to user cache
 ```
 
@@ -517,14 +518,17 @@ When you use a custom co-solvent (not in the library), PolyzyMD:
    AM1-BCC itself, which needs AmberTools. When you leave the default, the
    build writes a warning that asks you to check that NAGL charges suit the
    molecule.
-3. Charges each part of a SMILES with several parts on its own: a single-atom
-   ion takes its formal charge.
-4. Caches the charged molecule in `~/.polyzymd/solvent_cache/`, one file per
-   charge method, and reuses it.
+3. Caches the charged molecule in `~/.polyzymd/solvent_cache/`, one file per
+   SMILES and charge method, and reuses it. A changed SMILES gives a new
+   molecule, even under the same `name`.
 
-A charged molecule can carry its counter-ion in the SMILES, which keeps it
-neutral. Without the counter-ion, `solvent.ions.neutralize: true` adds the
-counter-ions. Either way the system is neutral.
+A charged molecule can carry Na+ or Cl- counter-ions in its SMILES
+(`...[O-].[Na+]`). PolyzyMD splits them off: the co-solvent molecule has no
+ion atoms, and each counter-ion is added as a Na+ or Cl- ion like the salt
+ions. Without the counter-ion, `solvent.ions.neutralize: true` adds the ions
+that cancel the net charge of the solute and co-solvents together. Both
+spellings give a neutral system with the requested salt. Other counter-ions
+are refused; leave them out of the SMILES.
 
 ```yaml
 co_solvents:
