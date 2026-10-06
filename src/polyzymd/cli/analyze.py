@@ -130,8 +130,10 @@ def _partial_report(options: dict[str, Any], error: Exception) -> "ProtocolRepor
     """Build a report from the conditions that can be reported, after the whole run failed.
 
     Each condition is run alone, which reuses its stored results, and the
-    conditions that fail are named in ``problems`` with the type and hint of
-    their error, not its message, which can name this machine's paths. The
+    conditions that fail are named in ``problems`` with their error on one
+    line; each absolute path in it is written relative to the study folder,
+    or as its file name when outside it (:func:`_portable_text`). The log
+    file gets each error with its traceback. The
     comparison is then run over the conditions that worked, control first;
     without the control, or when that comparison fails too, the report holds
     each condition's summary. Returns ``None`` when there is no second
@@ -152,10 +154,19 @@ def _partial_report(options: dict[str, Any], error: Exception) -> "ProtocolRepor
             }
         )
 
+    import logging
+
+    study = options.get("study_path")
+    root = Path(study).resolve() if study is not None else Path.cwd()
+    root = root.parent if root.is_file() else root
+
     def reason(exc: Exception) -> str:
-        # The message can name this machine's paths, and the report is published.
+        logging.getLogger(__name__).info("analysis failed", exc_info=exc)
         hint = getattr(exc, "hint", None)
-        return type(exc).__name__ + (f" (fix: {_one_line(hint)})" if hint else "")
+        text = f"{type(exc).__name__}: {_one_line(str(exc))}" + (
+            f" (fix: {_one_line(hint)})" if hint else ""
+        )
+        return _portable_text(text, root)
 
     alone: dict[int, "ProtocolReport"] = {}
     problems = []
@@ -199,6 +210,23 @@ def _render(report: "ProtocolReport", output_format: str) -> str:
     if output_format == "json":
         return report.model_dump_json(indent=2)
     return report.to_agent_text()
+
+
+def _portable_text(text: str, root: Path) -> str:
+    """Return ``text`` with each absolute path rewritten by :func:`~polyzymd.analyses.study_file.portable`.
+
+    A path inside ``root`` becomes relative to it, any other its file name,
+    so a published report names no place on this machine.
+    """
+    import re
+
+    from polyzymd.analyses.study_file import portable
+
+    return re.sub(
+        r"(?<![\w.~:/])/[^\s'\"`,;:()\[\]]*[^\s'\"`,;:()\[\].]",
+        lambda match: portable(match.group(), root),
+        text,
+    )
 
 
 def _one_line(text: str) -> str:

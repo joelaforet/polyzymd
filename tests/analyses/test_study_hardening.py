@@ -368,7 +368,9 @@ class TestPartialReport:
         report = json.loads((root / "results" / "first" / "report.json").read_text())
         assert report["status"] == "partial"
         assert [c["label"] for c in report["conditions"]] == ["A", "B"]
-        assert "condition C is left out: RuntimeError" in report["problems"]
+        assert any(
+            "condition C is left out: RuntimeError: boom in C" in p for p in report["problems"]
+        )
         assert any(p["a"] == "A" and p["b"] == "B" for p in report["pairwise"])
         check = CliRunner().invoke(cli, ["study", "check", str(root)])
         assert "with a partial report" in check.output
