@@ -1,7 +1,7 @@
 """Inferential statistical tests shared across analysis comparisons.
 
 This module provides statistical functions for comparing analysis results
-across multiple conditions, including t-tests, ANOVA, and effect sizes.
+across multiple conditions, including t tests, Tukey HSD and effect sizes.
 
 :meth:`~polyzymd.analyses.timeseries.ReplicateValues.compare` takes its t
 tests, effect sizes and Benjamini-Hochberg correction from here.
@@ -163,41 +163,6 @@ def hedges_correction(n1: int, n2: int) -> float:
     if denominator <= 0:
         return float("nan")
     return 1.0 - 3.0 / denominator
-
-
-@dataclass
-class ANOVAResult:
-    """Result of one-way ANOVA.
-
-    Attributes
-    ----------
-    f_statistic : float
-        The F-statistic
-    p_value : float
-        P-value for the test
-    """
-
-    f_statistic: float
-    p_value: float
-
-    @property
-    def significant(self) -> bool:
-        """Whether the result is significant at p < 0.05.
-
-        .. note::
-           This uses a hardcoded alpha=0.05 threshold.  The comparison
-           pipeline overrides significance with configurable thresholds.
-           Use this property only as a convenience default.
-        """
-        return self.p_value < 0.05
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary."""
-        return {
-            "f_statistic": self.f_statistic,
-            "p_value": self.p_value,
-            "significant": self.significant,
-        }
 
 
 @dataclass
@@ -483,50 +448,6 @@ def cohens_d(
     )
 
 
-def one_way_anova(*groups: ArrayLike) -> ANOVAResult:
-    """Perform classical one-way ANOVA across multiple groups.
-
-    Tests the null hypothesis that all groups have the same mean
-    using ``scipy.stats.f_oneway`` (equal variance assumption).
-
-    Parameters
-    ----------
-    *groups : array_like
-        Variable number of groups to compare.  Each group must have
-        at least 2 observations; groups with fewer observations cause
-        the function to return NaN statistics.
-
-    Returns
-    -------
-    ANOVAResult
-        Result containing F-statistic and p-value.  Both are NaN if
-        any group has fewer than 2 observations.
-
-    Examples
-    --------
-    >>> no_poly = [0.715, 0.693, 0.696]
-    >>> sbma = [0.517, 0.586]
-    >>> egma = [0.558, 0.738, 0.496]
-    >>> result = one_way_anova(no_poly, sbma, egma)
-    >>> print(f"F = {result.f_statistic:.3f}, p = {result.p_value:.4f}")
-    """
-    from scipy import stats
-
-    arrays = [np.asarray(g, dtype=np.float64) for g in groups]
-
-    # Guard: need at least 2 groups for ANOVA
-    if len(arrays) < 2:
-        return ANOVAResult(f_statistic=float("nan"), p_value=float("nan"))
-
-    # Guard: need at least 2 observations per group for ANOVA
-    if any(len(a) < 2 for a in arrays):
-        return ANOVAResult(f_statistic=float("nan"), p_value=float("nan"))
-
-    stat, p = stats.f_oneway(*arrays)
-
-    return ANOVAResult(f_statistic=float(stat), p_value=float(p))
-
-
 @dataclass
 class TukeyHSDResult:
     """Result of Tukey's HSD test for one pair of groups.
@@ -602,41 +523,6 @@ def tukey_hsd(*groups: ArrayLike) -> list[TukeyHSDResult]:
                 )
             )
     return pairs
-
-
-def percent_change(control_mean: float, treatment_mean: float) -> float:
-    """Calculate percent change from control.
-
-    Parameters
-    ----------
-    control_mean : float
-        Mean value of control condition
-    treatment_mean : float
-        Mean value of treatment condition
-
-    Returns
-    -------
-    float
-        Percent change: (treatment - control) / control * 100
-        Negative = reduction, Positive = increase.
-
-        Special handling for zero control values:
-
-        - 0 -> 0 returns ``0.0``
-        - 0 -> positive returns ``math.inf``
-        - 0 -> negative returns ``-math.inf``
-
-        If either input is non-finite (NaN or +/-inf), returns ``math.nan``.
-    """
-    if not (math.isfinite(control_mean) and math.isfinite(treatment_mean)):
-        return math.nan
-
-    if control_mean == 0:
-        if treatment_mean == 0:
-            return 0.0
-        return math.inf if treatment_mean > 0 else -math.inf
-
-    return (treatment_mean - control_mean) / control_mean * 100
 
 
 class OmnibusTest(Protocol):
@@ -765,29 +651,3 @@ def apply_family_correction(
         anova.significant = bool(
             testable and raw_p is not None and not math.isnan(raw_p) and raw_p <= fdr_alpha
         )
-
-
-def enforce_direction_significance(
-    results: Sequence[object],
-    fields: Sequence[tuple[str, str]] = (("direction", "significant"),),
-) -> None:
-    """Replace direction labels on results that are not significant.
-
-    A label such as "stabilizing" or "increased" is a claim about the
-    system. Without a significant test there is nothing to claim, so the
-    label becomes :data:`NO_SIGNIFICANT_CHANGE`.
-
-    Parameters
-    ----------
-    results : Sequence[object]
-        Result objects to relabel in place.
-    fields : Sequence[tuple[str, str]], optional
-        ``(direction_attribute, significance_attribute)`` pairs to check,
-        by default the single pair ``("direction", "significant")``.
-    """
-    for result in results:
-        for direction_attr, significant_attr in fields:
-            if getattr(result, direction_attr, None) is None:
-                continue
-            if not getattr(result, significant_attr, False):
-                setattr(result, direction_attr, NO_SIGNIFICANT_CHANGE)

@@ -1,8 +1,7 @@
-"""A control value of zero gives an infinite percent change and a finite difference.
+"""A control value of zero gives a finite difference and a direction.
 
-``percent_change`` returns plus or minus infinity when the control is 0.0 and
-the treatment is not, and ``ReplicateValues.compare`` reports the plain
-difference and its direction, never "similar".
+``ReplicateValues.compare`` reports the plain difference and its direction,
+never "similar", when the control is 0.0.
 """
 
 from __future__ import annotations
@@ -10,36 +9,6 @@ from __future__ import annotations
 import math
 
 import pytest
-
-from polyzymd.analyses.shared.inferential_statistics import percent_change
-
-
-def test_percent_change_zero_to_zero_is_zero() -> None:
-    """Percent change should be zero when both values are zero."""
-    assert percent_change(0.0, 0.0) == 0.0
-
-
-def test_percent_change_zero_to_positive_is_inf() -> None:
-    """Percent change should be +inf when control is zero and treatment is positive."""
-    assert math.isinf(percent_change(0.0, 162.6))
-    assert percent_change(0.0, 162.6) > 0
-
-
-def test_percent_change_zero_to_negative_is_minus_inf() -> None:
-    """Percent change should be -inf when control is zero and treatment is negative."""
-    assert percent_change(0.0, -5.0) == -math.inf
-
-
-def test_percent_change_near_zero_stays_finite() -> None:
-    """Non-zero controls should use the standard finite formula."""
-    pct = percent_change(1e-12, 2e-12)
-    assert math.isfinite(pct)
-    assert pct == 100.0
-
-
-def test_percent_change_nan_input_returns_nan() -> None:
-    """NaN inputs should propagate as NaN."""
-    assert math.isnan(percent_change(math.nan, 5.0))
 
 
 def test_function_path_zero_control_reports_a_finite_difference_and_direction() -> None:
