@@ -1005,3 +1005,14 @@ class TestSolvateCenterSolute:
     def test_centring_is_the_default(self, monkeypatch, tmp_path):
         _, mocks, _ = self._run(monkeypatch, tmp_path)
         mocks["center"].assert_called_once()
+
+
+def test_a_missing_packmol_is_named(monkeypatch) -> None:
+    """A missing Packmol is named as such, not reported as an unexpected TypeError."""
+    import shutil
+
+    from polyzymd.utils import packmol
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(OSError, match="Packmol is not on PATH"):
+        packmol._require_packmol()
