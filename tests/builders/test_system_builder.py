@@ -494,6 +494,7 @@ class TestBuildFromConfigSharesOneBox:
 
         builder = SystemBuilder()
         builder.build_from_config(config, polymer_seed=7)
+        calls["provenance"] = builder.build_provenance
         return calls, sentinel_box
 
     def test_polymer_build_packs_and_solvates_in_one_cell(self, monkeypatch):
@@ -511,3 +512,11 @@ class TestBuildFromConfigSharesOneBox:
         assert "pack" not in calls
         assert "extra_padding_nm" not in calls
         assert calls["solvate_box"] is None
+
+    def test_polymer_seed_is_recorded_only_with_polymers(self, monkeypatch):
+        with_polymers, _ = self._run(monkeypatch, self._config(with_polymers=True))
+        without, _ = self._run(monkeypatch, self._config(with_polymers=False))
+
+        assert with_polymers["provenance"]["polymer_seed"] == 7
+        assert "polymer_seed" not in without["provenance"]
+        assert without["provenance"]["packmol_seed"] == 7

@@ -590,8 +590,8 @@ class SlurmScriptGenerator:
             Falls back to ``pzmd_r{replicate}`` if not provided.
         output_file : str or None, optional
             SLURM log file pattern.  Falls back to
-            ``slurm_logs/{job_name}.%j.out`` relative to the directory
-            where ``sbatch`` is invoked.
+            ``slurm_logs/{job_name}.%j.out``. A relative path is made
+            absolute against the current directory.
 
         Returns
         -------
@@ -604,6 +604,11 @@ class SlurmScriptGenerator:
             job_name = f"pzmd_r{replicate}"
         if output_file is None:
             output_file = f"slurm_logs/{job_name}.%j.out"
+        # The job runs in its run directory (``--chdir``), which is how
+        # ``squeue`` tells the jobs of two runs apart. Absolute paths keep the
+        # log where ``sbatch`` was invoked and the run directory where it is.
+        output_file = str(Path(output_file).absolute())
+        working_dir = str(Path(working_dir).absolute())
 
         openff_logs_flag = " --openff-logs" if self._openff_logs else ""
         skip_build_flag = " \\\n    --skip-build" if self._skip_build else ""

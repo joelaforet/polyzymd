@@ -132,7 +132,7 @@ how per-replicate directories are named.
 | `{polymer_type}` | Derived from polymer config, or `none` if disabled | `SBMA-EGPMA_A70_B30` |
 | `{temperature}` | `thermodynamics.temperature` (integer) | `300` |
 | `{replicate}` | Replicate number (1-indexed) | `1` |
-| `{duration}` | `simulation_phases.production.duration` (integer ns) | `100` |
+| `{duration}` | `simulation_phases.production.duration` in ns: whole ns from 1 ns up, in full below 1 ns | `100`, `0.005` |
 | `{primary_solvent}` | Primary solvent token | `water_tip3p` |
 | `{cosolvent_composition}` | Co-solvents sorted by normalized name, or `none` | `dmso_30molpct_urea_2p5M` |
 | `{solvent_composition}` | Primary solvent plus co-solvents when present | `water_tip3p_dmso_30molpct` |

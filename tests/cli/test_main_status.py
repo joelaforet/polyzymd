@@ -53,6 +53,7 @@ def _make_mock_config(scratch_dir: Path, template: str | None = None):
         cosolvent_composition="none",
         solvent_composition="water_tip3p",
     )
+    mock._zero_duration_run_directory.return_value = None
 
     return mock
 
@@ -498,6 +499,22 @@ class TestStatusCli:
         assert "100.0%" in result.output
         assert "completed" in result.output
         assert "run1" in result.output
+
+    def test_status_shows_short_runs_in_ps(self, tmp_path):
+        scratch = tmp_path / "scratch"
+        rep_dir = scratch / "fnIII_apo_none_100ns_310K_run1"
+        _write_progress_json(rep_dir, total_steps=2500, completed_steps=2500, duration_ns=0.005)
+
+        mock_cfg = _mock_sim_config(scratch)
+        mock_cfg.simulation_phases.production.duration = 0.005
+        mock_cfg.discover_replicate_dirs.return_value = [(1, rep_dir)]
+
+        config_path = self._make_dummy_config(tmp_path)
+        with patch("polyzymd.config.schema.SimulationConfig.from_yaml", return_value=mock_cfg):
+            result = CliRunner().invoke(cli, ["status", "-c", str(config_path)])
+
+        assert result.exit_code == 0, f"Output: {result.output}"
+        assert "5.0/5.0 ps" in result.output
 
     def test_status_shows_interrupted_replicate(self, tmp_path):
         scratch = tmp_path / "scratch"
