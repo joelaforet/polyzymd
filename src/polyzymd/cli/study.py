@@ -173,7 +173,10 @@ def check_command(path: Path, production: bool = False) -> None:
         )
     from polyzymd.analyses.study_git import describe, git_state
 
-    click.echo(describe(git_state(protocol.root)))
+    # A study of a project is committed with it, so project.yaml and the shared
+    # analyses/ count among its inputs.
+    project = protocol.project
+    click.echo(describe(git_state(project.root if project is not None else protocol.root)))
     from polyzymd.analyses.study_metadata import check_metadata
 
     try:
@@ -203,7 +206,8 @@ def check_command(path: Path, production: bool = False) -> None:
             "--study, or redraw figures from results/ without trajectories"
         )
     elif protocol.analyses:
-        click.echo("publish: when the analyses are final, run polyzymd study freeze")
+        command = "project freeze" if protocol.project is not None else "study freeze"
+        click.echo(f"publish: when the analyses are final, run polyzymd {command}")
     click.echo(f"cite: {citation_line()}")
     if failed:
         sys.exit(EXIT_STUDY_ERROR)

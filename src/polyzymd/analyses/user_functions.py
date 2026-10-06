@@ -26,14 +26,41 @@ MODULE_FILE_ATTRIBUTE = "__polyzymd_module_file__"
 def load_function(file: Path, qualname: str) -> Callable:
     """Import ``qualname`` from the Python file ``file`` and return it.
 
-    The file's folder is put first on ``sys.path`` while it imports, so it
-    can import helper modules beside it. The function is marked so its
-    stored results are keyed on the hash of the whole file.
+    The file is imported by :func:`load_module`. The function is marked so
+    its stored results are keyed on the hash of the whole file.
 
     Raises
     ------
     ProtocolError
         If the file cannot be imported or has no such callable.
+    """
+    file = Path(file).resolve()
+    function: Any = load_module(file)
+    for part in qualname.split("."):
+        function = getattr(function, part, None)
+    if not callable(function):
+        raise ProtocolError(
+            f"{file} has no function {qualname!r}.",
+            hint="Name a function defined in the file, as 'file.py:function_name'.",
+        )
+    try:
+        setattr(function, MODULE_FILE_ATTRIBUTE, str(file))
+    except (AttributeError, TypeError):
+        pass
+    return function
+
+
+def load_module(file: Path) -> types.ModuleType:
+    """Import the Python file ``file`` from its current text and return the module.
+
+    The file's folder is put first on ``sys.path`` while it imports, so it
+    can import helper modules beside it; helpers imported earlier from that
+    folder are imported again, so edits since then take effect.
+
+    Raises
+    ------
+    ProtocolError
+        If the file cannot be imported.
     """
     file = Path(file).resolve()
     # The record keeps the module name, so it must not depend on where the
@@ -69,19 +96,7 @@ def load_function(file: Path, qualname: str) -> Callable:
         sys.path.remove(str(file.parent))
         shutil.rmtree(sys.pycache_prefix, ignore_errors=True)
         sys.pycache_prefix = saved_prefix
-    function: Any = module
-    for part in qualname.split("."):
-        function = getattr(function, part, None)
-    if not callable(function):
-        raise ProtocolError(
-            f"{file} has no function {qualname!r}.",
-            hint="Name a function defined in the file, as 'file.py:function_name'.",
-        )
-    try:
-        setattr(function, MODULE_FILE_ATTRIBUTE, str(file))
-    except (AttributeError, TypeError):
-        pass
-    return function
+    return module
 
 
 def _imported_from(module: Any, name: str, folder: Path) -> bool:

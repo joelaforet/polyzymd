@@ -266,4 +266,6 @@ present.
 | Stored results of a run | `study.results("rg")` (`.table`, `.report`, `.warnings`) |
 | One row per replicate | `study.replicate_table("rg")` |
 | A run's settings | `study.settings("rg")` |
+| A file of the study, from a relative path in its settings | `study.path(study.settings("rmsf")["reference_file"])`; `study.root` is the folder |
+| The study's own Python code, as the analyses import it | `study.module("interface")` for `analyses/interface.py` (also looked up in the project folder) |
 | Several proteins | `pz.Project("Paper_1")`, with the same `results` and `replicate_table` and a `study` column |

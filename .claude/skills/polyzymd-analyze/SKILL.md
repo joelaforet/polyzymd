@@ -21,9 +21,10 @@ built from the file, which is the command to run. `polyzymd compare` and
 `polyzymd new-analysis` are retired: with any arguments they exit 2 and print
 the replacement. An unknown analysis name exits 2 with the list of names.
 
-Environment: only the `analysis` and `sim-cuda-12-4` pixi envs have the CLI. The
-bare `polyzymd` on PATH points at a system Python without click. Always go
-through `pixi run -e analysis`.
+Environment: in the PolyzyMD checkout, only the `analysis` and `sim-cuda-12-4`
+pixi envs have the CLI, so go through `pixi run -e analysis` there; a bare
+`polyzymd` that fails to import click is a system Python. Where `polyzymd`
+already runs (`polyzymd --version`), call it directly.
 
 `pixi run -e analysis polyzymd analyze --help` lists the analysis names: rg,
 rmsd, rmsf, rmsd_per_residue, sasa, secondary_structure, contacts, native_contacts,
@@ -116,7 +117,7 @@ verdict: B larger mean_rg than A (delta +0.31 A, 95% CI 0.02 to 0.6, p_adj 0.041
 - `significant` means `p_adj` is at most 0.05 (Benjamini-Hochberg over the
   comparisons of the report).
 - `run` in the header names the selection when an analysis measures several
-  (rg does protein and polymer); `--run LABEL` picks another.
+  (one label per pair of `distances`); `--run LABEL` picks another.
 
 Verdict vocabulary, fixed so you can branch on it:
 

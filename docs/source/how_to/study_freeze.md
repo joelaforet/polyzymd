@@ -19,6 +19,7 @@ pixi shell -e analysis
 Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
+(study-metadata)=
 ## 1. Fill in the metadata
 
 Add a `metadata:` block to `study.yaml`. These fields make the deposit

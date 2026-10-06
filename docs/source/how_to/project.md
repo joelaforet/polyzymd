@@ -90,6 +90,13 @@ A condition is the folder holding its `config.yaml` (or the file itself), or
 `{config: ..., factors: {...}}` when you want to record what varies between
 conditions; factors become columns of the results table.
 
+Give the control a factor value only when it is a point on the same axis.
+For polymer loading (grams of polymer, or polymer chains per protein), the
+control is loading 0: write `factors: {polymer_loading: 0}` and the trend
+includes it. For the polymer's composition, such as `sbma_fraction`, a
+control without polymer has no composition: leave its factor out, and the
+trend is fitted over the polymer conditions only.
+
 ## Write `project.yaml`
 
 ```yaml
@@ -107,7 +114,7 @@ analyses:
     kind: timeseries
     studies: [calb343, rml333]
     selections: {lid: region lid, core: region core}
-metadata:
+metadata:                      # title, authors, license, keywords, related paper and data
   title: ...
 ```
 
@@ -229,7 +236,8 @@ each study's manifest by SHA-256, every condition as `<study> /
 <condition>`, and the size and SHA-256 of every project file outside the
 studies (`project.yaml`, the shared `analyses/` and `stats/` code, figures,
 the stats plan's output), and one `CITATION.cff` and `.zenodo.json` from
-`project.yaml`'s `metadata:`. It commits and tags the project
+`project.yaml`'s `metadata:` (the keys are those of a study's metadata,
+listed in {ref}`study-metadata`). It commits and tags the project
 (`project-v1`, ...) and lays out one `deposit/` with `deposit/UPLOAD.md`, as
 `polyzymd study freeze` does for a study ({doc}`study_freeze`): one dataset,
 one DOI, for the paper.

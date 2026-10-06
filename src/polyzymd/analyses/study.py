@@ -443,6 +443,63 @@ class Study:
         """The study folder, when the study was read from a ``study.yaml``."""
         return None if self.protocol is None else self.protocol.root
 
+    def _folders(self) -> list[Path]:
+        if self.protocol is None:
+            raise ProtocolError(
+                "This study was not read from a study.yaml, so it has no folder.",
+                hint="Load it with pz.Study('path/to/study.yaml').",
+            )
+        project = self.protocol.project
+        return [self.protocol.root] + ([project.root] if project is not None else [])
+
+    def path(self, relative: str | Path) -> Path:
+        """Return ``relative`` resolved against the study folder.
+
+        For example, ``study.path(study.settings("rmsf")["reference_file"])``
+        for a structure that ``study.yaml`` names as ``structures/ref.pdb``.
+        In a project, a path that is not in the study folder is looked up in
+        the project folder. An absolute path is returned unchanged.
+
+        Raises
+        ------
+        ProtocolError
+            If the study was not read from a ``study.yaml``.
+        """
+        relative = Path(relative).expanduser()
+        if relative.is_absolute():
+            return relative
+        folders = self._folders()
+        for folder in folders:
+            if (folder / relative).exists():
+                return (folder / relative).resolve()
+        return (folders[0] / relative).resolve()
+
+    def module(self, name: str | Path) -> Any:
+        """Import a Python file of the study, as ``polyzymd analyze`` imports analysis functions.
+
+        ``name`` is a file such as ``analyses/interface.py``, or a bare name
+        such as ``interface`` for ``analyses/interface.py``. It is found by
+        :meth:`path`: in the study folder, then in its project. Figures that
+        use the module run the same definitions as the analyses.
+
+        Raises
+        ------
+        ProtocolError
+            If no such file exists, or importing it fails.
+        """
+        from polyzymd.analyses.user_functions import load_module
+
+        name = Path(name)
+        if name.suffix != ".py" and len(name.parts) == 1:
+            name = Path("analyses") / f"{name}.py"
+        file = self.path(name)
+        if not file.is_file():
+            raise ProtocolError(
+                f"No Python file {name} in {' or '.join(str(f) for f in self._folders())}.",
+                hint="Name a file relative to the study or project folder, such as analyses/lid.py.",
+            )
+        return load_module(file)
+
     def settings(self, run: str) -> dict[str, Any]:
         """Return the settings ``study.yaml`` gives the analysis run ``run``.
 

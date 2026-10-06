@@ -231,8 +231,8 @@ def citation_cff(
     cff: dict[str, Any] = {
         "cff-version": "1.2.0",
         "type": "dataset",
-        "message": "If you use this study, please cite the article in preferred-citation, "
-        "this dataset, and PolyzyMD, which produced its analyses.",
+        "message": "If you use this study, please cite this dataset and PolyzyMD, "
+        "which produced its analyses.",
         "title": meta["title"],
         "abstract": meta["description"],
         "authors": [_cff_person(p) for p in meta["authors"]],
@@ -256,6 +256,10 @@ def citation_cff(
             if paper.get(key) and not (key == "doi" and is_placeholder(paper[key])):
                 preferred[key] = paper[key]
         cff["preferred-citation"] = preferred
+        cff["message"] = (
+            "If you use this study, please cite the article in preferred-citation, "
+            "this dataset, and PolyzyMD, which produced its analyses."
+        )
     references = [software_reference()]
     if paper_reference():
         references.append(paper_reference())

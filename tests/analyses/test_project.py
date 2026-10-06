@@ -724,3 +724,35 @@ class TestFrictionLog:
         assert result.exit_code == 0, result.output
         labels = set(pz.Study(root).results("byf").table["label"])
         assert labels == {"0.0", "0.1", "0.2", "0.3"}
+
+
+class TestFigureLayerFriction:
+    """Friction log F17 and the fourth fresh-agent walkthrough."""
+
+    def test_study_path_and_module_find_study_then_project_files(self, project: Path) -> None:
+        study = pz.Study(project / "lipa")
+        assert study.path("structures/ref.pdb") == (project / "lipa" / "structures" / "ref.pdb")
+        assert study.path("analyses/lid.py") == project / "analyses" / "lid.py"
+        assert study.module("lid").lid_size.__module__ == "polyzymd_study.lid"
+        assert study.module("analyses/lid.py").__file__ == str(project / "analyses" / "lid.py")
+        with pytest.raises(ProtocolError, match="No Python file"):
+            study.module("nothing")
+
+    def test_a_study_of_a_project_points_at_project_freeze(self, project: Path) -> None:
+        result = CliRunner().invoke(cli, ["study", "check", str(project / "lipa")])
+        assert "run polyzymd project freeze" in result.output
+
+    def test_citation_names_preferred_citation_only_with_a_paper(self) -> None:
+        from polyzymd.analyses.study_metadata import check_metadata, citation_cff
+
+        raw = {
+            "title": "T",
+            "authors": [{"family-names": "Doe", "given-names": "Jane"}],
+        }
+        meta, _ = check_metadata(raw)
+        cff = citation_cff(meta, version="1", released="2026-10-06", commit=None)
+        assert "preferred-citation" not in cff and "preferred-citation" not in cff["message"]
+        raw["related"] = {"paper": {"title": "The paper"}}
+        meta, _ = check_metadata(raw)
+        cff = citation_cff(meta, version="1", released="2026-10-06", commit=None)
+        assert "preferred-citation" in cff and "preferred-citation" in cff["message"]
