@@ -6,9 +6,9 @@ esterase active site tends to preserve the geometric arrangement associated
 with catalysis.
 
 It is not direct evidence of catalytic activity. The hydrogen-bond fractions,
-distances and contact fractions are **geometric proxies**. They should be interpreted with
-replicate uncertainty, substrate pose, hydrogen-bond geometry, protonation
-state, and experimental activity data whenever those are available.
+distances and contact fractions are **geometric proxies**. Interpret them
+together with the replicate uncertainty, the substrate pose, the hydrogen-bond
+geometry, the protonation state and any experimental activity data.
 
 ```{note}
 PolyzyMD has no separate triad analysis: the triad is a routine on the analysis
@@ -87,21 +87,20 @@ Useful ways to think about threshold choices:
 - **Around 4.0 Å** is more permissive and may include weak or transient
   interactions.
 
-Choose thresholds before comparing conditions whenever possible. Avoid tuning a
+Choose the thresholds before you compare conditions. Avoid tuning a
 threshold after seeing the results just to make a preferred condition look
 active or inactive. That kind of post-hoc threshold selection makes the metric
 circular and can overstate the evidence.
 
-When a threshold is uncertain, report sensitivity analyses honestly. For
-example, note whether the same qualitative ordering appears at 3.0, 3.5, and
+When a threshold is uncertain, report how the result changes with it. For
+example, state whether the same qualitative ordering appears at 3.0, 3.5, and
 4.0 Å, rather than selecting only the cutoff that gives the clearest story.
 
 ## Heavy-atom distances are only hydrogen-bond proxies
 
 Triad distances are usually measured between heavy atoms or user-defined
-points such as `midpoint(...)`. This is robust and convenient, and needs no
-hydrogens, but it is only a proxy for hydrogen bonding; `hbond_count` also
-checks the angle at the hydrogen.
+points such as `midpoint(...)`. This needs no hydrogens. It is only a proxy
+for hydrogen bonding. `hbond_count` also checks the angle at the hydrogen.
 
 Important cautions:
 
@@ -110,8 +109,8 @@ Important cautions:
 - A distance slightly above the threshold does not prove the active site is
   catalytically inactive; transient geometry, force-field behavior, and sampling
   limitations can all matter.
-- Histidine tautomer and protonation state affect which nitrogen should be used
-  and how the Ser-His and Asp/Glu-His contacts should be interpreted.
+- The histidine tautomer and protonation state decide which nitrogen to
+  measure, and how to read the Ser-His and Asp/Glu-His contacts.
 - Asp/Glu atom choices matter. A midpoint of the carboxylate atoms can be useful
   for symmetric monitoring, but it is not the same as tracking a specific
   oxygen involved in a particular hydrogen bond.

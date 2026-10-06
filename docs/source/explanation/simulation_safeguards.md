@@ -1,259 +1,256 @@
-# Why PolyzyMD Guards the Prepared Structure
+# Why PolyzyMD guards the prepared structure
 
-This page explains four safeguards that sit between system building and
-production: the build-time solute/solvent clash assertion, periodic-image
-safety with a deterministic box, frozen-solute energy minimization, and the
-trajectory lineage check. They exist because of specific failures that went
-undetected for a full simulation campaign, and understanding those failures
-explains why the defaults are what they are.
+PolyzyMD checks the built system before production and checks the
+trajectory before analysis. Each check prevents a failure that a real
+simulation campaign suffered without any error message. The checks are:
 
-## The failure that motivated them
+- the solute clash check at build time;
+- the periodic-image check, with a box that is fixed before packing;
+- energy minimization with the solute heavy atoms frozen;
+- the trajectory lineage check;
+- the rules that keep a restart chain recoverable and stoppable.
 
-Before PolyzyMD 1.2.1, `solvate_with_packmol()` packed solvent around a copy of
-the solute centered in the rectangular PACKMOL brick but assembled the final
-topology with the solute at the center of the triclinic cell. For a rhombic
-dodecahedron the two centers differ by tens of ångströms, so several hundred
-water molecules ended up inside the protein while PACKMOL reported success.
+## The failure that the build checks prevent
 
-Nothing downstream complained. Energy minimization followed the gradient,
-which meant pushing protein atoms away from the trapped waters: the protein
-inflated (a lipase's Cα radius of gyration grew from 18.0 to 20.4 Å) before
-heating even started, and the heavy-atom position restraints of the heating
-stage then held the inflated structure in place. Density, volume, and potential
-energy all looked normal. The defect was found only by measuring water-protein
-distances in the built PDB months later.
+PACKMOL packs solvent around the solute in a rectangular box. If the final
+topology puts the solute at a different position than the one PACKMOL
+packed around, the solvent overlaps the protein. For a rhombic dodecahedron,
+the two centers can differ by tens of ångströms. In one PolyzyMD build,
+several hundred water molecules ended up inside the protein, and PACKMOL
+reported success.
 
-## Safeguard 1: the clash assertion at build time
+Nothing after the build detected the error. Energy minimization pushed
+protein atoms away from the trapped waters. The protein inflated before
+heating started: a lipase's Cα radius of gyration grew from 18.0 to 20.4 Å.
+The heavy-atom restraints of the heating stage then held the inflated
+structure in place. Density, volume and potential energy all looked normal.
+Only a measurement of water-protein distances in the built PDB found the
+defect, months later.
 
-`solvate_with_packmol()` and `pack_polymers()` now measure the distance from
-every packed atom to the nearest solute atom immediately after assembly. If
-more than a small number of packed atoms (20, `SOLVATION_CLASH_ATOM_LIMIT`)
-lie within half the PACKMOL tolerance of the solute, the build aborts with
-`SolvationClashError` before any file is written.
+## The clash check at build time
 
-Why a count limit rather than zero tolerance? PACKMOL frequently exits with
-code 173 ("imperfect packing") for dense polymer shells and leaves a handful
-of atoms slightly inside the tolerance. That is a packing-quality residual that
-minimization resolves and PolyzyMD has always accepted. A frame mismatch, by
-contrast, produces hundreds to thousands of overlapping atoms. The limit sits
-two orders of magnitude from both cases, so it separates them without false
-alarms.
+`solvate_with_packmol()` and `pack_polymers()` measure the distance from
+each packed atom to the nearest solute atom, directly after assembly. The
+build stops with `SolvationClashError` before it writes any file if more than
+20 packed atoms (`SOLVATION_CLASH_ATOM_LIMIT`) are closer to the solute than
+half the {term}`PACKMOL` tolerance.
 
-## Safeguard 2: periodic-image safety and a deterministic box
+The limit is a count, not zero. PACKMOL often exits with code 173
+("imperfect packing") for dense polymer shells. It then leaves a few atoms
+slightly inside the tolerance, and minimization removes these small overlaps.
+A frame mismatch gives hundreds to thousands of overlapping atoms. A limit of
+20 is far from both cases, so it separates them.
 
-### The second failure: chains packed outside their own cell
+## The periodic-image check and a fixed box
 
-Polymer packing and solvation used to size two different boxes. Chains were
-packed into a rectangular box of `solute bbox + 2 * packing.padding`, and only
-afterwards was the periodic cell derived from the bounding box of whatever
-PACKMOL had produced, plus `solvent.box.padding`. Two things went wrong.
+### The failure: chains packed outside their own cell
 
-First, **periodic-image overlap**. A rhombic-dodecahedron cell is represented
-as a rectangular brick whose `z` height is `sqrt(2)/2` (0.707) times the padded
-extent. The rectangular region the chains had been packed into was taller than
-that, so chains protruded through the `z` faces of the brick and landed on top
-of themselves across the `c` lattice vector. PACKMOL never sees this: it is run
-without periodicity and only enforces the tolerance inside its own box. In the
-audited production builds this left 11 to 169 atom pairs closer than 1.5 Å to a
-periodic image, down to 0.10 Å (one CALB replicate: 17 pairs below 2 Å, 11
-below 1.5 Å, 2.1 % of polymer atoms outside the brick). A singular overlap like
-that is not something minimization can fix; the runs died with NaN.
+A rhombic-dodecahedron cell is stored as a rectangular brick. The `z` height
+of the brick is `sqrt(2)/2` (0.707) times the padded extent. If polymer
+chains are packed into a rectangular box taller than the brick, they extend
+through the `z` faces. Across the `c` lattice vector they then overlap their
+own periodic images. PACKMOL cannot see this, because it runs without
+periodic boundaries.
 
-Second, **a non-deterministic box**. Deriving the cell from the packed
-coordinates makes the cell a function of the PACKMOL seed. One RML replicate
-came out with a box 23 % smaller than its siblings and was solvated with 18,865
-waters instead of ~25,000, and 56/47 ions instead of 72/63. Replicates of one
-condition were therefore not replicates of the same system: "38 pentamers"
-meant a different polymer concentration in each one.
+In audited production builds, this left 11 to 169 atom pairs closer than
+1.5 Å to a periodic image, down to 0.10 Å. One CALB replicate had 17 pairs
+below 2 Å, and 2.1 % of its polymer atoms were outside the brick.
+Minimization cannot fix an overlap this close. The simulations failed with
+NaN coordinates.
 
-### The fix: one box, computed first
+A box computed from the packed coordinates has a second fault: its size
+depends on the PACKMOL seed. One RML replicate got a box 23 % smaller than
+the other replicates. It held 18,865 waters instead of about 25,000, and
+56/47 ions instead of 72/63. "38 pentamers" therefore meant a different
+polymer concentration in each replicate.
 
-The periodic cell is now computed **before** anything is packed, from the
-protein and substrate alone:
+### What PolyzyMD does
+
+PolyzyMD computes the periodic cell before it packs anything. It uses the
+protein and the substrate only:
 
 ```
 box vectors = shape_matrix @ diag(solute bbox + 2 * (packing.padding
                                                      + solvent.box.padding))
 ```
 
-Chains are packed inside the rectangular brick of *that* cell, shrunk by the
-PACKMOL tolerance, plus an `inside sphere` constraint centred on the solute so
-they stay in a shell around the protein rather than in the brick's corners.
-Solvation then reuses the same cell and, crucially, does **not** re-centre the
-packed topology: a centre-of-geometry shift of an already-framed system is a
-rigid translation that pushes atoms back out through the brick faces (measured:
-0.02 % to 0.38 % of polymer atoms).
+Then it does these steps:
 
-The guarantee is a one-line argument. If two atoms both lie inside the brick
-shrunk by `tolerance`, then along the axis of any lattice vector their
-separation after a translation of `±L` is at least `L - (L - tolerance)
-= tolerance`. Every lattice vector of a reduced-form cell has a non-zero
-component along `x`, `y` or `z` that equals a full brick edge, so no image pair
-can be closer than the tolerance. Packing in the cell the system will actually
-be simulated in is therefore not merely better — it is sufficient.
+1. It packs the polymer chains inside the rectangular brick of that cell,
+   shrunk by the PACKMOL tolerance.
+2. It adds an `inside sphere` constraint centered on the solute. The chains
+   then stay in a shell around the protein, not in the corners of the brick.
+3. It solvates in the same cell, and it does not center the packed system
+   again. A second centering moves all atoms rigidly and pushes some back out
+   through the brick faces. Measured, this moved 0.02 % to 0.38 % of polymer
+   atoms outside.
 
-Because a deterministic cell is a function of the enzyme and substrate only,
-replicates of a condition now share their box volume, water count and ion
-count. Controls (no polymers) are unaffected: their box is still computed from
-the solute at solvation time, so pre-built control bundles remain valid.
+Packing inside the shrunk brick is enough to prevent image overlaps. Take two
+atoms inside the brick shrunk by `tolerance`. Along the axis of a lattice
+vector, a translation by `±L` leaves them at least
+`L - (L - tolerance) = tolerance` apart. Each lattice vector of a
+reduced-form cell has one component along `x`, `y` or `z` equal to a full
+brick edge. Therefore no image pair is closer than the tolerance.
+
+The cell depends only on the enzyme and the substrate. The replicates of a
+condition therefore have the same box volume, water count and ion count. A
+system without polymer gets its box from the solute at solvation time.
 
 ### The check: `PeriodicImageClashError`
 
-Arguments are not evidence, so the build measures it. After polymer packing and
-again after solvation, every atom is translated by each of the 26 non-zero
-lattice vectors and queried against a KD-tree of the untranslated coordinates.
-An atom within half the tolerance of an image aborts the build with
-`PeriodicImageClashError`, naming the count, the minimum image distance, the
-worst pair and the lattice vector; contacts between half the tolerance and the
-tolerance only warn. The zero translation is skipped, so an atom is never
-compared with itself — only with its images.
+The build also measures the result. After polymer packing, and again after
+solvation, it translates every atom by each of the 26 non-zero lattice
+vectors. It compares the translated atoms with a KD-tree of the original
+coordinates. An atom closer than half the tolerance to an image stops the
+build with `PeriodicImageClashError`. The message gives the count, the
+smallest image distance, the worst pair and the lattice vector. A contact
+between half the tolerance and the full tolerance gives a warning only.
 
-## Safeguard 3: frozen-solute minimization
+## Minimization with frozen solute heavy atoms
 
-Even a single overlapping water deforms the protein locally during
-minimization, because the minimizer moves whatever the gradient points at
-regardless of mass. The protocol PolyzyMD implements is therefore: the prepared
-structure enters equilibration exactly as built, restraints are applied, and
-the configured heating and free-equilibration stages take it from there.
+The minimizer moves any atom that the energy gradient points at. One
+overlapping water can therefore deform the protein. PolyzyMD keeps the
+prepared protein structure unchanged through minimization. The heating and
+equilibration stages then start from the structure as built.
 
-Mechanically, `SimulationRunner.minimize()` runs the minimizer on a temporary
-copy of the OpenMM System in which every protein and substrate **heavy** atom
-(the `solute_heavy` atom group) has zero mass. OpenMM never moves a massless
-particle, so those coordinates come back bit-identical. Solvent and polymers
-relax against the fixed solute; the relaxed coordinates are copied back into
-the real System, whose masses and constraints are untouched. The runner checks
-that the heavy-atom displacement is zero and records it in
-`minimization/phase.json`.
+`SimulationRunner.minimize()` does these steps:
 
-### Why the hydrogens stay mobile
+1. It makes a temporary copy of the OpenMM System.
+2. In the copy, it sets the mass of every protein and substrate heavy atom
+   (the `solute_heavy` atom group) to zero. OpenMM never moves a massless
+   particle.
+3. It minimizes. Solvent, polymer and solute hydrogens relax against the
+   fixed heavy atoms.
+4. It copies the coordinates back into the real System. The masses and
+   constraints of the real System do not change.
+5. It checks that the heavy atoms did not move, and records the result in
+   `minimization/phase.json`.
 
-Freezing the *whole* solute, hydrogens included, looks like the stricter choice
-and is in fact a bug — one this section previously described as the design.
-With `constraints=HBonds` the force field emits no harmonic bond term for an
-X–H bond; it emits a constraint, and the bond length is whatever that constraint
-says. A massless hydrogen keeps the length it had in the input PDB, and those
-lengths come from whatever built the structure (a crystallographic hydrogen
-placement, PDBFixer, a previous force field) rather than from the force field
-about to be simulated. Nothing in a frozen minimization corrects them, because
-OpenMM refuses to build a Context for a constraint that involves a massless
-particle, so every X–H constraint was simply dropped from the copy.
+To minimize without frozen atoms, set
+`simulation_phases.minimization.freeze_solute: false`. The setting applies at
+run time and does not change the build manifest hash.
 
-The result was measurable. In the 2026-09 rebuild, all 1994 protein X–H
-constraints of the RML systems were violated in the minimized state — mean
-0.113 Å, maximum 0.234 Å, 950 of them by more than 0.1 Å — while the polymer
-and water constraints, whose atoms were mobile, were exact to 0.000 Å.
-Equilibration then sets those positions on a constrained integrator, assigns
-velocities at 60 K, and steps: CCMA has to remove ~2000 violations at once and
-occasionally diverges on the very first step, which OpenMM reports as
-`Particle coordinate is NaN`. Whether a replicate survived was a matter of the
-velocity seed — protein-identical replicates of the same condition failed and
-succeeded at random (RML 0:100 replicate 1 ran, replicates 2 and 5 died; the
-RML control lost replicate 1 and kept the other four).
+### Why the hydrogens can move
 
-Freezing only the heavy atoms fixes this at the source. The hydrogens are the
-only solute atoms whose geometry the force field, not the crystal structure,
-determines; letting the minimizer place them costs nothing scientifically and
-is what the pre-`freeze_solute` behaviour did. Since OpenMM will not accept a
-constraint on a massless particle in *any* position — verified empirically:
-constructing such a Context raises `A constraint cannot involve a massless
-particle` — the copy replaces each frozen-heavy-atom/mobile-hydrogen constraint
-with a stiff harmonic bond at the constraint distance
-(5 × 10⁵ kJ mol⁻¹ nm⁻²). Dropping the constraint outright is not an option: it
-would leave the hydrogen with no bonded term at all and the minimizer would
-scatter it. Constraints whose two particles are both frozen are removed, since
-neither atom moves; in a real system there are none, because every X–H
-constraint has a hydrogen on one end.
+With `constraints=HBonds`, the force field has no harmonic bond term for an
+X–H bond. It has a constraint. OpenMM refuses to build a Context in which a
+constraint involves a massless particle. If the hydrogens were frozen too,
+every X–H constraint would have to be removed from the copy. Each hydrogen
+would then keep its bond length from the input PDB, which came from the
+crystal structure or from another tool, not from this force field.
 
-### The final check: the constraints of the real System
+This was measured. With frozen hydrogens, all 1994 protein X–H constraints
+of the RML systems were violated after minimization: mean 0.113 Å, maximum
+0.234 Å, 950 of them by more than 0.1 Å. The polymer and water constraints,
+whose atoms could move, were exact. The equilibration integrator then had to
+correct about 2000 violations in its first step. The constraint solver
+(CCMA) sometimes failed, and OpenMM reported `Particle coordinate is NaN`.
+Some replicates survived and others died, at random.
 
-Because the surrogate bond is an approximation to the constraint, the runner
-does not assume the result. After minimization — frozen or not — it measures
-the largest `|distance − constraint length|` over every constraint of the real
-System and logs it. If that exceeds 0.01 Å it calls
-`Context.applyConstraints(1e-6)` to project the coordinates back onto the
-constraint manifold and logs the residual. `applyConstraints` distributes a
-correction by inverse mass, so a heavy partner can move by roughly 1/12 of it;
-the heavy-atom displacement is therefore re-checked afterwards against a 0.02 Å
-ceiling instead of the 1e-4 Å ceiling that applies to the minimization itself.
-In practice the surrogate leaves a residual well below 0.01 Å, the projection
-never runs, and the heavy atoms are bit-identical.
+The force field, not the crystal structure, decides the hydrogen positions.
+Therefore PolyzyMD lets the minimizer place them. In the copy, it replaces
+each constraint between a frozen heavy atom and a mobile hydrogen with a
+stiff harmonic bond at the constraint distance (5 × 10⁵ kJ mol⁻¹ nm⁻²).
+Without that bond, the hydrogen would have no bonded term, and the minimizer
+would move it away. A constraint between two frozen atoms is removed, because
+neither atom moves. A real protein has none, because each X–H constraint has
+a hydrogen at one end.
 
-The maximum distance a solute hydrogen travelled is logged and recorded in
-`minimization/phase.json` as `hydrogen_max_displacement_angstrom`. A large value
-there is not an error — it is the measure of how far the input hydrogens were
-from the force field's own bond lengths.
+### The constraint check after minimization
 
-Set `simulation_phases.minimization.freeze_solute: false` to recover the old
-behaviour. The setting is runtime-only and does not change the build manifest
-hash.
+The harmonic bond only approximates the constraint. Therefore the runner
+measures the result. After minimization, frozen or not, it does these steps:
 
-## Safeguard 4: trajectory lineage
+1. It computes the largest `|distance − constraint length|` over all
+   constraints of the real System, and logs it.
+2. If this value is more than 0.01 Å, it calls
+   `Context.applyConstraints(1e-6)` and logs the remaining violation.
+3. It checks the heavy-atom displacement again. `applyConstraints` moves
+   both atoms of a constraint, in inverse proportion to their mass, so the
+   limit at this step is 0.02 Å. During minimization itself the limit is
+   1e-4 Å.
 
-A self-resubmitting SLURM chain that is duplicated (two jobs continuing the
-same replicate) writes two sets of production segments into one directory.
-Concatenating them yields a trajectory that jumps backwards in time. The
-analysis loader now reads each segment's raw timestamps and refuses to build a
-`ChainReader` unless segment *k* starts exactly one frame interval after
-segment *k−1* ends and all segments share the interval. Every segment record
-also carries the PolyzyMD version, OpenMM version, and pixi environment that
-produced it, so a chain that silently switched software can be identified.
+In practice the violation stays well below 0.01 Å, step 2 does not run, and
+the heavy atoms do not move at all.
 
-## Safeguard 5: a restart chain must be recoverable and stoppable
+The runner records the largest hydrogen displacement as
+`hydrogen_max_displacement_angstrom` in `minimization/phase.json`. A large
+value is not an error. It shows how far the input hydrogens were from the
+force field's bond lengths.
 
-A production run on a preemptable QoS is not one job. It is a chain of jobs,
-each of which runs one segment and submits its own successor, and the chain
-only produces science if every link can be re-established after an
-interruption — and can be broken deliberately when a human decides the run is
-wrong. Four properties are guarded.
+## The trajectory lineage check
 
-**A chain must not run out of nodes.** Site-pinned CUDA routing sends a job to
-a node, and a node whose driver is too old for the pinned environment cannot
-run it. The job then resubmits itself excluding that node. The exclusion is
-only useful if it survives: the accumulated node list travels with the chain
-and is unioned into the successor's `--exclude`, so consecutive bad draws
-narrow the search instead of repeating it. The retry budget is per unhealthy
-stretch, not per run: reaching `run-segment` proves the node works, so the
-next job starts with a fresh budget and no exclusions. When the budget really
-is exhausted the job names every node it tried, which is exactly the argument
-a human needs to resubmit by hand.
+A self-resubmitting SLURM chain can be duplicated: two jobs continue the same
+replicate. They then write two sets of production segments into one folder.
+Joined in order, these segments give a trajectory that jumps back in time.
 
-**A runtime that cannot be reproduced is a routing problem, not a fatal
-error.** A replica is pinned to one pixi environment, OpenMM build, platform
-and precision, because mixing them within a trajectory is not defensible.
-Detecting a mismatch used to end the chain: the guard raised before any
-successor had been queued. The mismatch is a property of the *node*, so it is
-now treated the way an incompatible driver is — the job reroutes.
+The analysis loader reads the raw time stamps of each segment. Each segment
+must start one frame interval after the previous segment ends, and all
+segments must have the same frame interval. The loader repairs two boundary
+faults of a restart:
 
-**Recovery must prefer portable state.** OpenMM `.chk` checkpoints are binary
-and are only guaranteed to reload under the build that wrote them, while a
-serialized `State` XML reloads anywhere. Continuation therefore takes the
-best available state XML first and reaches a checkpoint only when nothing
-portable survived. In that case the previous segment's recorded
-`openmm_version` and `pixi_environment` are compared with the running process
-and the decision is logged, so a checkpoint reloaded across a rebuilt
-environment is either caught or, at minimum, on the record.
+- A segment that starts at the time of the previous segment's last frame. The
+  loader leaves out the repeated frame.
+- A segment that starts two frame intervals after the previous one ends. The
+  loader records the missing frame.
 
-**Nothing partial is deleted, and nothing is deleted on a heuristic.** A
-segment that was hard-killed is recognised only by a stale checkpoint and a
-missing marker — a guess, not a fact. Acting on that guess by deleting the
-directory destroyed GPU-hours of frames. The directory is now renamed to
-`production_N.hardkilled-<timestamp>`, which removes it from progress
-accounting while keeping every byte, and the guess is not made at all when a
-`restart_state.xml` shows the segment is recoverable.
+The loader names each repair in the analysis warnings. Any other overlap or
+gap, or a change of frame interval, stops the analysis with
+`TrajectoryLineageError`.
 
-**Stopping must be possible without a trick.** `scancel` sends `SIGTERM`,
-which is exactly the signal that means "wall-time is up, save and continue"
-to a chain designed to survive preemption — so cancelling a job resubmitted
-it. Distinguishing "the scheduler interrupted you" from "a human wants you to
-stop" cannot be done from the signal alone, so the intent is recorded out of
-band: `polyzymd cancel` writes a `STOP` marker into the run directory, and the
-wrapper checks for it before submitting any successor. The marker is a plain
-text file that says who wrote it and when, because a control file that stops
-a month-long run should be readable by the next person who finds it.
+Each segment record also stores the PolyzyMD version, the OpenMM version and
+the pixi environment of the job that wrote it. A chain that changed software
+partway is therefore visible.
+
+## A restart chain must be recoverable and stoppable
+
+A production simulation on a preemptable SLURM queue is a chain of jobs.
+Each job runs one {term}`segment` and submits the next job. The chain
+gives a usable trajectory only if each link can continue after an
+interruption. A person must also be able to stop the chain on purpose.
+
+**A chain must not run out of nodes.** A job pinned to a CUDA environment can
+land on a node whose driver is too old. The job then submits itself again and
+excludes that node. The list of excluded nodes passes to every following
+job and grows with each bad node. The retry budget counts one unhealthy
+stretch, not the whole simulation. When a job reaches `run-segment`, the node
+works, so the next job starts with a full budget and no exclusions. When the
+budget runs out, the job names every node it tried. You need this list to
+submit again by hand.
+
+**A runtime that does not match is a routing problem.** PolyzyMD pins a
+replicate to one pixi environment, OpenMM build, platform and precision,
+because a trajectory that mixes them is not defensible. A mismatch is a
+property of the node. The job therefore moves to another node, as it does for
+an old driver. The chain does not stop.
+
+**Recovery uses portable state first.** An OpenMM `.chk` checkpoint is binary
+and reloads reliably only under the build that wrote it. A serialized
+`State` XML file reloads under any build. Continuation therefore loads the
+newest state XML file first. It uses a checkpoint only when no state XML file
+survives. In that case it compares the `openmm_version` and
+`pixi_environment` of the previous segment with the running job, and logs the
+decision.
+
+**PolyzyMD deletes no partial data.** A hard-killed segment is recognized
+only by a stale checkpoint and a missing marker. This is a guess. PolyzyMD
+renames such a folder to `production_N.hardkilled-<timestamp>`. The renamed
+folder no longer counts as progress, and all its files stay. PolyzyMD does
+not make the guess when a `restart_state.xml` shows that the segment can be
+recovered.
+
+**A person can stop a chain.** `scancel` sends `SIGTERM`. To a chain built to
+survive preemption, `SIGTERM` means "the time limit is near; save and
+continue". So `scancel` alone makes the chain submit its next job. The signal
+cannot show whether the scheduler or a person sent it. Therefore
+`polyzymd cancel` writes a `STOP` marker into the replicate folder, and the
+job script checks for the marker before it submits the next job. The marker
+is a plain text file that says who wrote it and when. See
+{doc}`../how_to/hpc_slurm`.
 
 ## Related pages
 
-- Configuration keys: {doc}`../reference/configuration`
-- Output files and provenance: {doc}`../reference/data_requirements`
-- Polymer placement: {doc}`../how_to/polymers`
-- Equilibration setup: {doc}`../how_to/equilibration`
+- {doc}`../reference/configuration` — configuration keys
+- {doc}`../reference/data_requirements` — output files and provenance
+- {doc}`../how_to/polymers` — polymer placement
+- {doc}`../how_to/equilibration` — equilibration stages
