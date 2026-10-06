@@ -1158,13 +1158,12 @@ class SimulationRunner:
             LOGGER.warning(f"Could not parse EQ_INTERRUPTED marker {marker_path}: {exc}")
             return None
 
-        # Verify a synchronized portable state or binary checkpoint exists.
-        chk = stage_dir / f"{stage_name}_checkpoint.chk"
+        # Resuming loads the stage's portable state; without it the stage restarts.
         state_xml = stage_dir / f"{stage_name}_state.xml"
-        if not state_xml.exists() and not chk.exists():
+        if not state_xml.exists():
             LOGGER.warning(
-                f"EQ_INTERRUPTED marker found for stage {next_idx} but no state or "
-                "checkpoint — will restart stage from beginning"
+                f"EQ_INTERRUPTED marker found for stage {next_idx} but no "
+                f"{state_xml.name} — will restart stage from beginning"
             )
             return None
 
