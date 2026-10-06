@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Systems without polymers (1.3 audit, wave C).**
+- **Systems without polymers.**
   - Co-solvents take `charge_method` (default `nagl`; `am1bcc` needs AmberTools), and the build asks you to check the default.
   - Co-solvents take `count:` for a number of molecules.
   - A SMILES with several parts (`...[O-].[Na+]`) is charged part by part, so NAGL handles the sodium.

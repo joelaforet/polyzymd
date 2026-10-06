@@ -3,9 +3,11 @@
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from polyzymd.config.schema import SimulationConfig
+from tests._support.analysis_testkit import write_simulation_config
 
 
 @pytest.fixture
@@ -1033,3 +1035,38 @@ class TestPolymerPackingSphereConfinement:
         with_block = copy.deepcopy(base)
         with_block["simulation_phases"]["minimization"] = {"freeze_solute": False}
         assert config_hash(without) == config_hash(SimulationConfig(**with_block))
+
+
+SDS = "CCCCCCCCCCCCOS(=O)(=O)[O-]"
+
+
+def _config_with_solvent(tmp_path: Path, **solvent) -> SimulationConfig:
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    if solvent:
+        data["solvent"] = solvent
+    path.write_text(yaml.safe_dump(data))
+    return SimulationConfig.from_yaml(path)
+
+
+class TestCoSolventAmount:
+    def test_a_count_is_a_third_way_to_give_the_amount(self, tmp_path: Path) -> None:
+        """A co-solvent takes a number of molecules, or a concentration, but not both."""
+        config = _config_with_solvent(
+            tmp_path, co_solvents=[{"name": "sds", "smiles": SDS, "count": 8}]
+        )
+        assert config.solvent.co_solvents[0].count == 8
+        with pytest.raises(ValidationError, match="exactly one"):
+            _config_with_solvent(
+                tmp_path,
+                co_solvents=[{"name": "sds", "smiles": SDS, "count": 8, "concentration": 0.1}],
+            )
+
+    def test_custom_cosolvents_default_to_nagl(self, tmp_path: Path) -> None:
+        """AM1-BCC needs AmberTools, which the default environment lacks, so NAGL is the default."""
+        config = _config_with_solvent(
+            tmp_path, co_solvents=[{"name": "sds", "smiles": SDS, "count": 8}]
+        )
+        assert config.solvent.co_solvents[0].charge_method.value == "nagl"
+        assert "charge_method" not in config.solvent.co_solvents[0].model_fields_set

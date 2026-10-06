@@ -336,3 +336,26 @@ def test_solvate_without_box_centres_and_derives_the_box(monkeypatch) -> None:
     np.testing.assert_allclose(
         captured["box_vectors"].m_as("nanometer"), expected.m_as("nanometer")
     )
+
+
+@pytest.mark.parametrize(
+    ("smiles", "total", "sodium"),
+    [
+        ("CCCCCCCCCCCCOS(=O)(=O)[O-]", -1.0, None),
+        ("CCCCCCCCCCCCOS(=O)(=O)[O-].[Na+]", 0.0, 1.0),
+        ("CCO", 0.0, None),
+    ],
+)
+def test_each_part_of_a_smiles_is_charged(smiles, total, sodium) -> None:
+    """A charged SMILES keeps its charge; one that carries its counter-ion is neutral, with Na+ at +1."""
+    from openff.toolkit import Molecule
+
+    from polyzymd.data.solvent_molecules import _charge_components
+
+    molecule = Molecule.from_smiles(smiles)
+    molecule.generate_conformers(n_conformers=1)
+    charges = _charge_components(molecule, "nagl").partial_charges.m
+    assert sum(charges) == pytest.approx(total, abs=1e-6)
+    if sodium is not None:
+        (na,) = [a.molecule_atom_index for a in molecule.atoms if a.atomic_number == 11]
+        assert charges[na] == pytest.approx(sodium)
