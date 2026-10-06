@@ -245,6 +245,9 @@ class TestData:
 
     def test_data_example_is_not_read(self, tmp_path: Path, sources: dict[str, Path]) -> None:
         root = _study(tmp_path, sources, git=False)
+        # study init records where the copied conditions' runs are; without
+        # that file, data.example.yaml is still never read.
+        (root / "data.local.yaml").unlink()
         assert load_study_file(root).data == {}
 
 

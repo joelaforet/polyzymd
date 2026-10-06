@@ -37,14 +37,22 @@ def study_group() -> None:
 
 @study_group.command("check")
 @click.argument("path", type=click.Path(path_type=Path), default=Path("."))
-def check_command(path: Path) -> None:
+@click.option(
+    "--production",
+    is_flag=True,
+    help="Also give each condition's production length, read from every run's trajectory "
+    "headers and segments: seconds for a few runs, minutes for long restarted chains.",
+)
+def check_command(path: Path, production: bool = False) -> None:
     """Check a study.yaml without loading any trajectory.
 
     PATH is the study.yaml or the folder holding it (default: here). Prints
     one line per condition, saying where its runs were found, and one per
-    analysis run, saying whether it has stored results. Exits 2 when the file
-    or a condition's config cannot be read; missing runs are reported but are
-    not errors, so a study folder without its trajectories still checks.
+    analysis run, saying whether it has stored results. With --production,
+    each condition line also gives how long its replicates were simulated.
+    Exits 2 when the file or a condition's config cannot be read; missing
+    runs are reported but are not errors, so a study folder without its
+    trajectories still checks.
     """
     _study_logging(path, "study-check")
     from polyzymd.analyses.exceptions import ProtocolError
@@ -108,7 +116,7 @@ def check_command(path: Path) -> None:
             f"{role} {label}: runs {found} under {where}"
             + (f"; factors {', '.join(f'{k}={v}' for k, v in factors.items())}" if factors else "")
             + (f"; missing replicates {missing}" if missing else "")
-            + _production_summary(label, config_path, protocol)
+            + (_production_summary(label, config_path, protocol) if production else "")
         )
     from polyzymd.analyses.user_functions import load_function
 
@@ -129,6 +137,13 @@ def check_command(path: Path) -> None:
                 else user.file
             )
             what = f"{run} ({relative}:{user.qualname}, {user.kind})"
+            from polyzymd.analyses.study_file import missing_files
+
+            for value in missing_files(user.settings):
+                click.echo(
+                    f"warning: analysis {run}: setting {value} names no file; give a path "
+                    "relative to the file that lists the analysis, or a structure <name>"
+                )
             settings = (
                 ", ".join(
                     [f"{k}={v!r}" for k, v in user.selections.items()]

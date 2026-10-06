@@ -77,6 +77,8 @@ the analyses each runs): use `polyzymd project check PROJECT`,
 `polyzymd analyze RUN --project PROJECT`, and
 `pz.Project("PROJECT").results(RUN).table` (one table, a `study` column),
 never a loop over study folders by hand (`docs/source/how_to/project.md`).
+Before writing your own function, run `polyzymd analyze --list`: it names each
+shipped analysis, what it measures and its settings keys with defaults.
 For statistics beyond the report, use `replicate_table(RUN)` (one row per
 replicate) and put the plan in the project's `stats:` function, run with
 `polyzymd stats PROJECT`, rather than a standalone script.

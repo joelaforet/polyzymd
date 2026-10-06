@@ -527,7 +527,7 @@ def _engine_inputs(provenance: Any) -> list[Path]:
 
 
 #: What a deposited config says in place of a machine's directories.
-_PLACEHOLDER = "machine path removed by polyzymd study freeze: say where the runs are with data.local.yaml (polyzymd study locate)"
+_PLACEHOLDER = "machine path removed by polyzymd: say where the runs are with data.local.yaml (polyzymd study locate)"
 
 
 def _condition_configs(protocol: Any) -> list[str]:
@@ -556,9 +556,9 @@ def without_machine_paths(text: str) -> str:
         if match:
             value = "." if match.group(2) == "projects_directory" else "data"
             line = f"{match.group(1)}{match.group(2)}: {value}  # {_PLACEHOLDER}"
-        header = re.match(r"^# Copied by polyzymd study init from (.+)$", line)
+        header = re.match(r"^# Copied by polyzymd(?: study init)? from (.+)$", line)
         if header:
-            line = f"# Copied by polyzymd study init from {Path(header.group(1).strip()).name}"
+            line = f"# Copied by polyzymd from {Path(header.group(1).strip()).name}"
         lines.append(line)
     return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
 

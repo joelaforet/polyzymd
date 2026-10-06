@@ -730,3 +730,19 @@ def test_hbond_count_of_an_empty_group_is_nan(which) -> None:
     result = functions.hbond_count(*groups[which])
 
     assert isinstance(result, float) and math.isnan(result)
+
+
+def test_a_submit_task_on_a_control_without_polymer_succeeds(contact_configs, tmp_path) -> None:
+    """A --submit task runs one condition; with no polymer there is nothing to measure."""
+    from click.testing import CliRunner
+
+    from polyzymd.cli.main import cli
+
+    arguments = ["analyze", "contacts", "-c", str(contact_configs["N"]), "--label", "N"]
+    arguments += ["--replicates", "1", "--eq", EQUILIBRATION, "--set", "method=distance"]
+    arguments += ["--output-dir", str(tmp_path / "task"), "--no-plots"]
+    task = CliRunner().invoke(cli, [*arguments, "--task"])
+    assert task.exit_code == 0, task.output
+    assert "Nothing is stored for this task" in task.output
+    alone = CliRunner().invoke(cli, arguments)
+    assert alone.exit_code == 2 and "match no atoms in any replicate" in alone.output

@@ -35,7 +35,7 @@ from typing import Any, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from polyzymd.analyses.exceptions import ProtocolError
+from polyzymd.analyses.exceptions import NoMatchingAtomsError, ProtocolError
 
 #: Published page of the polyzymd analyze protocol.
 ANALYZE_PROTOCOL_URL = (
@@ -78,6 +78,20 @@ VERDICT_VOCABULARY = (
 
 #: The analyses polyzymd analyze runs, each through Study.timeseries or
 #: Study.per_replicate, with the settings each one takes and their defaults.
+#: One line on what each shipped analysis measures, for ``polyzymd analyze --list``.
+ANALYSIS_SUMMARIES = {
+    "rg": "radius of gyration of a selection per frame (A)",
+    "rmsd": "RMSD of a selection superposed on a reference, per frame (A)",
+    "rmsf": "per-residue RMS fluctuation about the mean structure, with core and region means (A)",
+    "rmsd_per_residue": "per-residue RMS deviation from a reference structure (A)",
+    "sasa": "solvent-accessible surface area of a target in each context, total and per residue (A^2)",
+    "secondary_structure": "DSSP secondary structure, fractions overall and per residue",
+    "hydrogen_bonds": "hydrogen bonds between groups: counts, lifetimes, per-residue and per-pair occupancy",
+    "native_contacts": "fraction of native contacts Q against a reference structure",
+    "contacts": "protein-polymer contacts per residue: method occlusion (buried surface) or distance",
+    "distances": "distances between atom pairs, and the fraction of frames below a threshold (A)",
+}
+
 FUNCTION_ANALYSES = {
     "rg": {"selection": "protein"},
     "rmsd": {
@@ -770,7 +784,7 @@ def _first_universe(study: Any, empty: dict[tuple[str, int], list[str]], analysi
             if (condition.label, replicate.index) not in empty:
                 return replicate.universe()
     missing = sorted({name for names in empty.values() for name in names})
-    raise ProtocolError(
+    raise NoMatchingAtomsError(
         f"{analysis}: the selections {', '.join(missing)} match no atoms in any replicate.",
         hint="Choose selections that pick atoms, such as 'chainid A' for the protein and "
         "'chainid C' for the polymer.",

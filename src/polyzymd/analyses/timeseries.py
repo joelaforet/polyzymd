@@ -692,9 +692,11 @@ def run_per_replicate(
                     values = None
             if values is None:
                 built, chosen = _build_arguments({**dict(enumerate(args)), **kwargs}, replicate)
+                extra = {"times": replicate.times} if _takes(function, "times") else {}
                 output = function(
                     *(built[index] for index in range(len(args))),
                     frames=replicate.frames,
+                    **extra,
                     **{key: built[key] for key in kwargs},
                 )
                 if returned:
@@ -755,6 +757,14 @@ def run_per_replicate(
         )
         for i, part in enumerate(parts)
     }
+
+
+def _takes(function: Callable, name: str) -> bool:
+    """Return whether ``function`` has a parameter called ``name``."""
+    try:
+        return name in inspect.signature(function).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def _label_order(

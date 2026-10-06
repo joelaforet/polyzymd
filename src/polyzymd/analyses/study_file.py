@@ -350,7 +350,7 @@ def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
         unit=None if unit is None else str(unit),
         selections={str(k): str(v) for k, v in (raw.get("selections") or {}).items()},
         universe=None if raw.get("universe") is None else str(raw["universe"]),
-        settings=dict(raw.get("settings") or {}),
+        settings=_resolve_files(dict(raw.get("settings") or {}), path.parent),
         labels=labels,
         reduce=reduce,
         allow_empty=bool(raw.get("allow_empty", False)),
@@ -392,6 +392,73 @@ def read_data_file(path: Path, labels: Any) -> dict[str, Path]:
         str(label): (path.parent / Path(str(folder)).expanduser()).resolve()
         for label, folder in raw.items()
     }
+
+
+#: Suffixes that mark a setting as naming a file, for ``study check``.
+FILE_SUFFIXES = (
+    ".pdb",
+    ".gro",
+    ".tpr",
+    ".top",
+    ".itp",
+    ".xtc",
+    ".dcd",
+    ".sdf",
+    ".mol2",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".csv",
+    ".tsv",
+    ".txt",
+    ".npy",
+    ".npz",
+    ".dat",
+)
+
+
+def _resolve_files(value: Any, folder: Path) -> Any:
+    """Make a relative path that names an existing file or folder under ``folder`` absolute.
+
+    A study's own function receives its ``settings`` as written, and runs
+    with the shell's working directory, so ``structures/ref.pdb`` is resolved
+    here against the folder of the file that lists it, as the shipped
+    analyses resolve theirs; other values are returned as they are.
+    """
+    if isinstance(value, Mapping):
+        return {key: _resolve_files(item, folder) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_files(item, folder) for item in value]
+    if (
+        isinstance(value, str)
+        and value
+        and "\n" not in value
+        and len(value) < 1024
+        and not Path(value).is_absolute()
+        and (folder / value).exists()
+    ):
+        return str((folder / value).resolve())
+    return value
+
+
+def missing_files(value: Any) -> list[str]:
+    """Return the settings values that look like file names but name no existing file.
+
+    A string ending in one of :data:`FILE_SUFFIXES` that is not an existing
+    path after :func:`_resolve_files`; ``study check`` reports them before
+    any analysis runs.
+    """
+    if isinstance(value, Mapping):
+        return [m for item in value.values() for m in missing_files(item)]
+    if isinstance(value, list):
+        return [m for item in value for m in missing_files(item)]
+    if (
+        isinstance(value, str)
+        and value.lower().endswith(FILE_SUFFIXES)
+        and not Path(value).exists()
+    ):
+        return [value]
+    return []
 
 
 def entry_record(protocol: StudyFile, run: str) -> dict[str, Any]:

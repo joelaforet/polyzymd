@@ -67,7 +67,7 @@ fix: Did you mean 'method'? The keys it takes are analysis, method, ...
 ## Check it
 
 ```bash
-polyzymd study check my_study
+polyzymd study check my_study --production
 ```
 
 ```
@@ -82,9 +82,11 @@ publish: when the analyses are final, run polyzymd study freeze
 cite: Laforet, Joseph R., Jr. PolyzyMD: ... (version 1.3.0). https://github.com/joelaforet/polyzymd
 ```
 
-It reads trajectory headers, not frames, so it takes seconds. Each
-condition's production length tells you how long an equilibration window can
-be, and whether the conditions were simulated for the same time. Missing runs
+Without `--production` it reads no trajectory at all. With it, it reads
+each run's trajectory headers and segments, not frames: seconds for a few
+runs, minutes for long restarted chains. Each condition's production length
+tells you how long an equilibration window can be, and whether the
+conditions were simulated for the same time. Missing runs
 are reported but are not errors, so a study folder without its trajectories
 still checks. An unreadable file or config exits 2.
 
@@ -156,6 +158,13 @@ segments, is named in the report too.
 
 ## Run your own function
 
+First check whether a shipped analysis already measures it:
+`polyzymd analyze --list` prints each one, what it measures, and its
+settings with their defaults (for example, `contacts` with `method:
+occlusion` is the buried-surface contact definition). A shipped analysis is
+verified and documented, and its settings go straight into a `study.yaml`
+entry.
+
 List a function from a Python file of the study, and it runs like a shipped
 analysis, with stored records, statistics, a report and figures:
 
@@ -183,7 +192,7 @@ analyses:
 | Key | Meaning |
 |---|---|
 | `function` | `file.py:function_name`, relative to `study.yaml` |
-| `kind` | `timeseries`: called on every production frame, returning one number; each replicate's series is then averaged (`reduce: mean`). `per_replicate`: called once per replicate with `frames=` the production frame indices, returning one value |
+| `kind` | `timeseries`: called on every production frame, returning one number; each replicate's series is then averaged (`reduce: mean`). `per_replicate`: called once per replicate with `frames=` the production frame indices (and `times=` their times in ns, when the function has a `times` parameter), returning one value |
 | `unit` | Unit of the values |
 | `selections` | Keyword argument to selection; each is passed as the replicate's `AtomGroup` |
 | `universe` | Keyword argument that receives the replicate's `Universe` |
@@ -192,6 +201,13 @@ analyses:
 | `parts: [area, contacts]` | For a function that measures several quantities in one pass: a `timeseries` function returns a dict with these keys each frame (or a sequence in this order), a `per_replicate` function one row per part. Each part is stored and plotted as its own result, has its own `part` in `Study.results().table`, and the report covers the part given with `--run`, the first by default |
 | `missing: .nan` | With `labels: returned`, the value a replicate gets for a label that other replicates returned and it did not, such as a frame index past the end of a shorter run; every replicate given it is named in the report's warnings, with its labels. Without it such a replicate stops the report, with a message saying so |
 | `allow_empty: true` | Pass a selection that matches no atoms, such as a polymer selection in a no-polymer control, to the function as an empty AtomGroup, so the function decides the value there (for example `0.0` when `len(polymer) == 0`). Without it such a replicate stops the run, with a message saying so |
+
+A per-frame label, such as one value per residue and frame, should name the
+frame by its time, not its index: after restart stitching drops duplicated
+frames, frame index *k* is not the same time in every run. Give the function
+a `times` parameter and label by `f"{resid}|{t:.3f}"`, and add `until:
+common` so every replicate covers the same times. For a few quantities per
+frame, `kind: timeseries` with `parts:` keeps the time axis for you.
 
 The stored results are keyed on every file under the function's folder, not
 only the function: edit a helper in the file, a helper module or package it
@@ -238,3 +254,16 @@ several parts, such as the contact fraction and its components, fills `part`.
 `study.settings("contacts_4A")` returns a run's settings, and the conditions
 load as usual (`study["SBMA 50%"].replicates`) when the trajectories are
 present.
+
+### The Study object at a glance
+
+| You want | Write |
+|---|---|
+| A study from its file | `study = pz.Study("my_study/study.yaml")` (`polyzymd.Study`) |
+| Condition labels, control first | `study.labels`, `study.control` |
+| The conditions | `study.conditions`, `for condition in study`, `study["SBMA 50%"]` |
+| A condition's replicates | `study["SBMA 50%"].replicates`; each has `.index`, `.frames`, `.times`, `.universe()` |
+| Stored results of a run | `study.results("rg")` (`.table`, `.report`, `.warnings`) |
+| One row per replicate | `study.replicate_table("rg")` |
+| A run's settings | `study.settings("rg")` |
+| Several proteins | `pz.Project("Paper_1")`, with the same `results` and `replicate_table` and a `study` column |

@@ -886,6 +886,7 @@ distances --set pairs=...` for the triad distances.
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
 | `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default `10ns`. |
 | `--label TEXT` | No | Condition label, one per `-c` in the same order. Default: the name of the directory holding the config. |
+| `--list` | No | Print every shipped analysis, what it measures, and its settings with their defaults, then exit. |
 | `--run LABEL` | No | Run or pair label to report when the analysis measures one metric on several selections, for example one atom pair for distances. Default: the first one the analysis lists; the rest appear in `all_runs`. |
 | `--set KEY=VALUE` | No | Top-level analysis setting. Repeatable. The value is read as YAML, so `--set threshold=3.0` gives a number and `--set groups='{protein: chainid A, polymer: chainid C}'` a mapping. A dotted key such as `groups.protein` is refused; give the whole top-level setting as a mapping instead. |
 | `--format agent\|json` | No | `agent` (default) prints one line per condition and comparison; `json` prints the full `ProtocolReport`. |
@@ -1098,8 +1099,12 @@ Commands on a study folder; see {doc}`../how_to/study_yaml` and
 ### polyzymd study check
 
 ```bash
-polyzymd study check [PATH]
+polyzymd study check [PATH] [--production]
 ```
+
+`--production` adds each condition's production length, read from every run's
+trajectory headers and segments (minutes for long restarted chains); without
+it no trajectory is read.
 
 Reads `study.yaml` (`PATH` is the file or its folder, by default the current
 directory) without loading any trajectory, and prints:
@@ -1110,7 +1115,7 @@ directory) without loading any trajectory, and prints:
 | system | `system: <description>`, when the study has one |
 | project | `project <project.yaml> as study <label>`, when a project lists the study |
 | names | `structure <name>: <path>` and `region <name>: <selection>`, one line each |
-| condition | `control\|condition <label>: runs <numbers> under <directory> (from data.local.yaml\|config); production <ns>` (a range when the replicates differ), or `no runs found under <directory> ...` |
+| condition | `control\|condition <label>: runs <numbers> under <directory> (from data.local.yaml\|config)`, with `; production <ns>` (a range when the replicates differ) under `--production`, or `no runs found under <directory> ...` |
 | analysis | `analysis <run>: <settings>; stored results in <folder>[ with its report]`, or `no stored results`; for the study's own function, `analysis <run> (<file>:<function>, <kind>)`, after importing it |
 | git | `git: commit <sha>; inputs committed`, `git: commit <sha>; uncommitted inputs: <paths>`, or `git: not a repository` |
 | metadata | `metadata: complete`, or `metadata: <n> gaps for publishing; ...` |

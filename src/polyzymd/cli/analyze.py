@@ -97,6 +97,24 @@ def _common_until(
     return next(iter(study)).until
 
 
+def _list_analyses(ctx: click.Context) -> None:
+    """Print every shipped analysis with what it measures and its settings, then exit."""
+    import json
+
+    from polyzymd.analyses.protocols import ANALYSIS_SUMMARIES, FUNCTION_ANALYSES
+
+    for name, settings in FUNCTION_ANALYSES.items():
+        click.echo(f"{name}: {ANALYSIS_SUMMARIES.get(name, '')}")
+        for key, default in settings.items():
+            click.echo(f"  {key}: {json.dumps(default)}")
+    click.echo(
+        "Use a name as a study.yaml entry ({name: {setting: value}}) or with "
+        "polyzymd analyze NAME --set setting=value; definitions: "
+        "https://polyzymd.readthedocs.io/en/latest/reference/analysis_functions.html"
+    )
+    ctx.exit(0)
+
+
 def _partial_report(options: dict[str, Any], error: Exception) -> "ProtocolReport | None":
     """Build a report from the conditions that can be reported, after the whole run failed.
 
@@ -242,6 +260,16 @@ def _one_line(text: str) -> str:
     "--run",
     default=None,
     help="Run or pair label to report when the analysis measures several. Default: the first.",
+)
+@click.option(
+    "--list",
+    "list_analyses",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=lambda ctx, _param, value: _list_analyses(ctx) if value else None,
+    help="List the shipped analyses, what each measures, and its settings with their "
+    "defaults, then exit. Check here before writing your own function.",
 )
 @click.option(
     "--set",
@@ -546,6 +574,16 @@ def analyze_command(
             if report is None:
                 raise
     except AnalysisError as exc:
+        from polyzymd.analyses.exceptions import NoMatchingAtomsError
+
+        if is_task and isinstance(exc, NoMatchingAtomsError):
+            # Nothing to measure in this condition (a control without polymer):
+            # the task succeeds, and the report job leaves the condition out.
+            click.echo(
+                f"note: {_one_line(str(exc))} Nothing is stored for this task; the "
+                "report leaves the condition out of the statistics."
+            )
+            return
         hint = getattr(exc, "hint", None)
         click.echo(f"error: {_one_line(str(exc))}", err=True)
         if hint:

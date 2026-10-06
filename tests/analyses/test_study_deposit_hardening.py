@@ -66,6 +66,8 @@ class TestAddCondition:
 class TestCheck:
     def test_production_lengths(self, study: Path) -> None:
         result = CliRunner().invoke(cli, ["study", "check", str(study)])
+        assert "; production " not in result.output
+        result = CliRunner().invoke(cli, ["study", "check", str(study), "--production"])
         assert "production 0.9 ns" in result.output
 
     def test_frozen_copy_says_how_to_reproduce(self, study: Path, tmp_path: Path) -> None:
@@ -102,7 +104,7 @@ class TestDeposit:
         text = "# Copied by polyzymd study init from /home/x/run/config.yaml\noutput:\n  projects_directory: /home/x\n  scratch_directory: /scratch/x\n  naming_template: r{replicate}\n"
         clean = without_machine_paths(text)
         assert "/home" not in clean and "/scratch" not in clean and "r{replicate}" in clean
-        assert clean.startswith("# Copied by polyzymd study init from config.yaml\n")
+        assert clean.startswith("# Copied by polyzymd from config.yaml\n")
 
     def test_readme_from_metadata(self, study: Path) -> None:
         readme = (freeze(study).deposit / "README.md").read_text()

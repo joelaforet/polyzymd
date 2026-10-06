@@ -625,6 +625,15 @@ class Study:
         """Label of the first condition, the default control of a comparison."""
         return self.labels[0]
 
+    @property
+    def conditions(self) -> list[Condition]:
+        """The conditions in order, control first, as ``for condition in study`` gives them.
+
+        Building them reads each condition's config; reading stored results
+        (:meth:`results`) does not need them.
+        """
+        return list(self._conditions.values())
+
     def timeseries(self, function: Any, *args: Any, **kwargs: Any) -> Any:
         """Measure ``function`` on every production frame of every replicate.
 

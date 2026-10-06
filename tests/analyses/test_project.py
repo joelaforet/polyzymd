@@ -630,3 +630,97 @@ class TestThirdAuditFindings:
             cli, ["project", "init", str(tmp_path / "P"), "--study", "a", "--no-git"]
         )
         assert result.exit_code == 2 and "is not empty" in result.output
+
+
+class TestFrictionLog:
+    """Regressions for the Paper 1 case-study friction log."""
+
+    def test_copied_configs_hold_no_machine_paths(self, tmp_path: Path) -> None:
+        import yaml
+
+        config = write_simulation_config(tmp_path / "runs" / "a", scratch=tmp_path / "scratch_a")
+        (config.parent / "test.pdb").write_text("END\n")
+        write_openmm_replicate(config, 1, [1.0, 1.1, 1.2])
+        assert (
+            CliRunner()
+            .invoke(cli, ["project", "init", str(tmp_path / "P"), "--study", "lipa", "--no-git"])
+            .exit_code
+            == 0
+        )
+        study = tmp_path / "P" / "lipa"
+        result = CliRunner().invoke(
+            cli,
+            [
+                "study",
+                "add-condition",
+                "No polymer",
+                "--config",
+                str(config),
+                "--study",
+                str(study),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        copied = (study / "conditions" / "no_polymer" / "config.yaml").read_text()
+        assert str(tmp_path) not in copied
+        data = yaml.safe_load((study / "data.local.yaml").read_text())
+        assert data == {"No polymer": str((tmp_path / "scratch_a").resolve())}
+        assert load_study_file(study).conditions["No polymer"].is_file()
+        assert pz.Study(study)["No polymer"].replicates[0].index == 1
+
+    def test_results_warn_when_the_report_does_not_match(self, project: Path) -> None:
+        lipa = str(project / "lipa")
+        assert _analyze("rg", "--study", lipa, "--replicates", "1").exit_code == 0
+        assert _analyze("rg", "--study", lipa, "--replicates", "2", "--task").exit_code == 0
+        with pytest.warns(UserWarning, match="stored but not in the report"):
+            stored = pz.Study(project / "lipa").results("rg")
+        assert any("replicates 2" in note for note in stored.warnings)
+        assert _analyze("rg", "--study", lipa).exit_code == 0
+        assert pz.Study(project / "lipa").results("rg").warnings == []
+
+    def test_study_lists_its_conditions(self, project: Path) -> None:
+        study = pz.Study(project / "lipa")
+        assert [c.label for c in study.conditions] == study.labels == ["No polymer", "Half"]
+
+    def test_relative_file_settings_resolve_against_the_study(
+        self, project: Path, monkeypatch
+    ) -> None:
+        text = (
+            (project / "lipa" / "study.yaml")
+            .read_text()
+            .replace(
+                "analyses: {}",
+                "analyses:\n"
+                "  own:\n"
+                "    function: analyses/own.py:own\n"
+                "    kind: per_replicate\n"
+                "    selections: {atoms: all}\n"
+                "    settings: {ref: structures/ref.pdb, other: structures/nothing.pdb}\n",
+            )
+        )
+        (project / "lipa" / "study.yaml").write_text(text)
+        (project / "lipa" / "analyses").mkdir()
+        (project / "lipa" / "analyses" / "own.py").write_text(
+            "def own(atoms, ref, other, frames):\n    open(ref).read()\n    return 1.0\n"
+        )
+        entry = load_study_file(project / "lipa").analyses["own"].function
+        assert entry.settings["ref"] == str((project / "lipa/structures/ref.pdb").resolve())
+        check = CliRunner().invoke(cli, ["study", "check", str(project / "lipa")])
+        assert "setting structures/nothing.pdb names no file" in check.output
+        monkeypatch.chdir(project.parent)  # not the study folder
+        assert _analyze("own", "--study", str(project / "lipa")).exit_code == 0
+
+    def test_per_replicate_functions_can_ask_for_times(self, tmp_path: Path) -> None:
+        from tests.analyses.test_study_hardening import TestMissingLabels
+
+        root = TestMissingLabels()._study(tmp_path, None)
+        (root / "analyses" / "m.py").write_text(
+            "def per_frame(atoms, frames, times):\n"
+            "    return [f'{t:.1f}' for t in times], [1.0 for _ in times]\n"
+        )
+        text = (root / "study.yaml").read_text() + "until: common\n"
+        (root / "study.yaml").write_text(text)
+        result = _analyze("byf", "--study", str(root))
+        assert result.exit_code == 0, result.output
+        labels = set(pz.Study(root).results("byf").table["label"])
+        assert labels == {"0.0", "0.1", "0.2", "0.3"}

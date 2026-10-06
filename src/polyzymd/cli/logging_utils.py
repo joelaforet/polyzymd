@@ -111,12 +111,25 @@ FILE_ONLY_LOGGERS = ("py.warnings", "pymbar")
 
 
 class _ConsoleFilter(logging.Filter):
-    """Keep library chatter out of the console: it goes to the log file."""
+    """Keep library chatter out of the console, and print each warning once.
+
+    Library records below ERROR go to the log file only. A message already
+    printed in this command is not printed again (loaders reached twice for
+    one replicate would otherwise repeat theirs); the log file keeps every one.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._seen: set[tuple[str, int, str]] = set()
 
     def filter(self, record: logging.LogRecord) -> bool:
         name = record.name
         if any(name == prefix or name.startswith(prefix + ".") for prefix in FILE_ONLY_LOGGERS):
             return record.levelno >= logging.ERROR
+        key = (name, record.levelno, record.getMessage())
+        if key in self._seen:
+            return False
+        self._seen.add(key)
         return True
 
 

@@ -12,7 +12,8 @@ trajectories are not on the machine.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import warnings
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -41,11 +42,18 @@ class StoredResults:
         ``label``; a per-replicate value has neither, and a labelled one (for
         example one value per residue) has its ``label`` and, when the
         function returned several parts, its ``part``.
+    warnings : list of str
+        Where the report and the stored values disagree: no report, a
+        partial report, or replicates stored but not in the report (or the
+        reverse), as when a later run stored values and its report job
+        failed. Empty when the report covers exactly the stored values.
+        Each is also issued as a Python warning when the results are read.
     """
 
     folder: Path
     report: Any
     table: Any
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def names(self) -> list[str]:
@@ -126,4 +134,37 @@ def read_results(folder: str | Path) -> StoredResults:
         if report_path.is_file()
         else None
     )
-    return StoredResults(folder, report, pd.DataFrame(rows, columns=list(COLUMNS)))
+    table = pd.DataFrame(rows, columns=list(COLUMNS))
+    notes = _report_mismatch(report, table)
+    for note in notes:
+        warnings.warn(f"{folder}: {note}", UserWarning, stacklevel=2)
+    return StoredResults(folder, report, table, notes)
+
+
+def _report_mismatch(report: Any, table: Any) -> list[str]:
+    """Return how a run's report and its stored values disagree, one note per difference."""
+    if report is None:
+        return ["no report.json: the values are stored but no report was written for them"]
+    notes = []
+    if report.status != "complete":
+        notes.append(f"the report is {report.status}: " + "; ".join(report.problems))
+    stored = {(str(c), int(r)) for c, r in zip(table["condition"], table["replicate"])}
+    covered = {(c.label, int(r)) for c in report.conditions for r in c.replicates}
+    if not covered:
+        # A report without replicate numbers is compared by condition only.
+        stored = {(c, 0) for c, _ in stored}
+        covered = {(c.label, 0) for c in report.conditions}
+    for what, pairs in (
+        ("stored but not in the report", stored - covered),
+        ("in the report but not stored", covered - stored),
+    ):
+        by_condition: dict[str, list[int]] = {}
+        for label, index in sorted(pairs):
+            by_condition.setdefault(label, []).append(index)
+        for label, indices in by_condition.items():
+            which = "" if indices == [0] else f" replicates {', '.join(map(str, indices))}"
+            notes.append(
+                f"condition {label}{which}: {what}; the report may be stale or partial "
+                "(rerun polyzymd analyze to rewrite it)"
+            )
+    return notes
