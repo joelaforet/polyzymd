@@ -517,3 +517,61 @@ def test_a_project_applies_the_deposit_rule_inside_each_study(tmp_path: Path) ->
         (root / name).write_text("x")
     assert _listed_files(root, None) == ["lipa/study.yaml", "project.yaml", "stats/plan.py"]
     assert left_out_files(root, None).startswith("not deposited: lipa/notes.docx, todo.md.")
+
+
+@pytest.fixture()
+def gromacs_study(tmp_path: Path) -> Path:
+    """A committed study of one GROMACS condition of two replicates, without polymers."""
+    import MDAnalysis as mda
+    import numpy as np
+
+    from polyzymd.config.schema import SimulationConfig
+
+    folder = tmp_path / "runs" / "water"
+    config = write_simulation_config(folder, scratch=tmp_path / "scratch")
+    data = yaml.safe_load(config.read_text())
+    data["engine"] = "gromacs"
+    config.write_text(yaml.safe_dump(data, sort_keys=False))
+    (folder / "test.pdb").write_text("REMARK input\nEND\n")
+    for replicate in (1, 2):
+        working = SimulationConfig.from_yaml(config).get_working_directory(replicate) / "gromacs"
+        working.mkdir(parents=True)
+        universe = mda.Universe.empty(4, n_residues=1, atom_resindex=[0] * 4, trajectory=True)
+        universe.add_TopologyAttr("names", ["C1", "C2", "C3", "C4"])
+        universe.add_TopologyAttr("resnames", ["MOL"])
+        universe.add_TopologyAttr("masses", [1.0] * 4)
+        universe.dimensions = [30.0, 30.0, 30.0, 90.0, 90.0, 90.0]
+        cross = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]], dtype=np.float32)
+        universe.atoms.positions = cross + 10.0
+        universe.atoms.write(str(working / "system.gro"))
+        with mda.Writer(str(working / "prod.xtc"), n_atoms=4, dt=100.0) as writer:
+            for k in range(10):
+                universe.atoms.positions = cross * (1.0 + 0.01 * k) + 10.0
+                writer.write(universe.atoms)
+        (working / "prod.log").write_text(
+            "                      :-) GROMACS - gmx mdrun, 2025.2 (-:\n"
+            "GROMACS version:     2025.2\nPrecision:           mixed\n"
+        )
+    root = tmp_path / "my_study"
+    create_study(root, conditions={"Water": config}, equilibration="0.25ns")
+    text = (root / "study.yaml").read_text() + METADATA.replace("[No polymer, Polymer]", "[Water]")
+    (root / "study.yaml").write_text(text)
+    _git(root, "commit", "-qam", "Add metadata")
+    return root
+
+
+class TestGromacsFreeze:
+    def test_manifest_records_the_gromacs_version(self, gromacs_study: Path) -> None:
+        """The version comes from each replicate's production log."""
+        result = freeze(gromacs_study)
+        replicates = result.manifest["conditions"]["Water"]["replicates"]
+        assert {r["simulated_with"]["gromacs_version"] for r in replicates.values()} == {"2025.2"}
+        assert not any("gromacs version" in w.lower() for w in result.warnings)
+
+    def test_checklist_gives_what_gromacs_ran(self, gromacs_study: Path) -> None:
+        """4b lists the GROMACS integrator and barostat; 1d has no polymers for a study without them."""
+        freeze(gromacs_study)
+        checklist = yaml.safe_load((gromacs_study / "md_checklist.yaml").read_text())
+        ran = checklist["4b_simulation_parameters"]["evidence"]["Water"]["gromacs_production"]
+        assert ran["integrator"] == "sd" and ran["pcoupl"] == "c-rescale"
+        assert "polymer" not in checklist["1d_independent_starting_configurations"]["answer"]
