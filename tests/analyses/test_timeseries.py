@@ -43,26 +43,20 @@ def test_reordered_parts_recompute(tmp_path: Path) -> None:
     assert means["a"] == 1.0 and means["b"] == 100.0
 
 
-def test_shipped_analyses_hash_their_modules(monkeypatch) -> None:
-    """A fix in a module a shipped analysis imports changes its record."""
+def test_shipped_analyses_hash_every_analysis_file(tmp_path: Path) -> None:
+    """A fix in any analysis module, even one imported two levels down, changes the hash."""
+    import shutil
+
     from polyzymd.analyses import functions, timeseries
 
-    record = timeseries._function_record(functions.rms_decomposition)
-    assert record["hash_of"] == "polyzymd_modules"
-    timeseries._shipped_code_hash.cache_clear()
-    reference = Path(__import__("polyzymd.analyses.reference").analyses.reference.__file__)
-    real = Path.read_bytes
-
-    def edited(self):
-        data = real(self)
-        return data + b"# fixed\n" if self == reference else data
-
-    monkeypatch.setattr(Path, "read_bytes", edited)
-    try:
-        assert timeseries._function_record(functions.rms_decomposition)["hash"] != record["hash"]
-    finally:
-        monkeypatch.undo()
-        timeseries._shipped_code_hash.cache_clear()
+    assert timeseries._function_record(functions.rms_decomposition)["hash_of"] == "polyzymd_modules"
+    package = Path(timeseries.__file__).parent
+    before, after = tmp_path / "before", tmp_path / "after"
+    for copy in (before, after):
+        shutil.copytree(package, copy, ignore=shutil.ignore_patterns("__pycache__"))
+    with open(after / "shared" / "centroid.py", "a") as handle:
+        handle.write("# fixed\n")
+    assert timeseries._shipped_code_hash(before) != timeseries._shipped_code_hash(after)
 
 
 def test_stray_files_do_not_change_the_code_hash(tmp_path: Path, caplog) -> None:

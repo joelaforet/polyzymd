@@ -32,6 +32,17 @@ STUDIES_KEY = "studies"
 # Names are letters, digits, _ and -, and may start with a digit (4TGL_open).
 _REGION = re.compile(r"\bregion\s+([\w][\w-]*)")
 _STRUCTURE = re.compile(r"^\s*structure\s+(\S+)\s*$")
+#: Setting keys whose values are atom selections, besides keys that contain "selection".
+_SELECTION_KEYS = {
+    "groups",
+    "regions",
+    "core",
+    "target",
+    "contexts",
+    "donors",
+    "hydrogens",
+    "acceptors",
+}
 
 
 @dataclass(frozen=True)
@@ -257,12 +268,19 @@ def find_project(study_dir: Path) -> tuple[ProjectFile, str] | None:
 
 
 def resolve_names(
-    value: Any, regions: Mapping[str, str], structures: Mapping[str, Path], where: str
+    value: Any,
+    regions: Mapping[str, str],
+    structures: Mapping[str, Path],
+    where: str,
+    selection: bool = False,
 ) -> Any:
     """Replace ``region <name>`` and ``structure <name>`` with a study's selection and file.
 
-    ``region <name>`` anywhere in a string becomes the region's selection in
-    parentheses; a string that is only ``structure <name>`` becomes the path
+    ``region <name>`` in a selection becomes the region's selection in
+    parentheses. A selection is a value under a key that contains
+    ``selection`` (``selection_a``, ``selections``) or under one of
+    :data:`_SELECTION_KEYS`; other strings, such as labels, keep the words
+    as written. A string that is only ``structure <name>`` becomes the path
     of that structure, as a string. Mappings and lists are resolved item by
     item; other values are returned as they are.
 
@@ -276,6 +294,8 @@ def resolve_names(
         The study's structure names mapped to their files.
     where : str
         Location used in error messages.
+    selection : bool, optional
+        Whether ``value`` is a selection itself.
 
     Returns
     -------
@@ -290,9 +310,18 @@ def resolve_names(
         exactly one name.
     """
     if isinstance(value, Mapping):
-        return {key: resolve_names(item, regions, structures, where) for key, item in value.items()}
+        return {
+            key: resolve_names(
+                item,
+                regions,
+                structures,
+                where,
+                selection or "selection" in str(key) or key in _SELECTION_KEYS,
+            )
+            for key, item in value.items()
+        }
     if isinstance(value, list):
-        return [resolve_names(item, regions, structures, where) for item in value]
+        return [resolve_names(item, regions, structures, where, selection) for item in value]
     if not isinstance(value, str):
         return value
     if value.strip().startswith("structure ") and not _STRUCTURE.match(value):
@@ -324,4 +353,4 @@ def resolve_names(
             )
         return f"({regions[name]})"
 
-    return _REGION.sub(region, value)
+    return _REGION.sub(region, value) if selection else value

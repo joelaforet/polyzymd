@@ -161,7 +161,7 @@ def _function_hash(record: dict[str, Any], entry: Any) -> str | None:
         return None
 
 
-def stale_runs(protocol: Any) -> dict[str, list[str]]:
+def stale_runs(protocol: Any, conditions: dict[str, Any] | None = None) -> dict[str, list[str]]:
     """Return, for each analysis run, why its stored results may not match the study now.
 
     A run has one reason per difference between what produced its stored
@@ -171,7 +171,9 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
     folder's helper modules), or the content of a file it was given; the
     replicates found on disk; or the report's settings, selections, condition
     factors (which its trend tests used) or PolyzyMD version. Trajectories are
-    read only to work out ``until: common``.
+    read only to work out ``until: common``. ``conditions`` are the manifest's
+    conditions (from :func:`_replicates`); with them, a replicate whose
+    trajectory hashes differ from those its record names is a reason too.
     """
     import polyzymd
     from polyzymd.analyses.identity import compute_config_hash
@@ -206,6 +208,20 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
             record = json.loads(path.read_text())
             label = record.get("condition")
             recorded_replicates.setdefault(label, set()).add(int(record.get("replicate", 0)))
+            here = (conditions or {}).get(label, {}).get("replicates", {})
+            on_disk = here.get(str(record.get("replicate")))
+            if on_disk is not None:
+                # The first file is the topology, the others the trajectories.
+                now = sorted(item["sha256"] for item in on_disk["files"][1:])
+                then = [item.get("sha256") for item in record.get("trajectories", [])]
+                if None in then:
+                    found.append(
+                        f"no trajectory hash recorded for {label} replicate {record['replicate']}"
+                    )
+                elif now != sorted(then):
+                    found.append(
+                        f"the trajectories of {label} replicate {record['replicate']} changed"
+                    )
             for name, sha in _recorded_files(record.get("arguments")).items():
                 if name in current_files and current_files[name] != sha:
                     found.append(f"the content of {name} changed")
@@ -1311,18 +1327,24 @@ def is_deposited_name(root: Path, path: str) -> bool:
     )
 
 
+#: Untracked paths that freeze lists in a git repository; it commits them.
+_UNTRACKED = ("results", ".gitignore")
+
+
 def _candidate_files(root: Path, state: dict[str, Any] | None) -> list[str]:
     """Return the files under ``root`` that freeze may publish, before the name rule.
 
-    In a git repository (``state`` given), the tracked files and the untracked
-    files under ``results/``; otherwise every file. Job, log and hidden files
+    In a git repository (``state`` given), the tracked files, the untracked
+    files under ``results/`` and an untracked ``.gitignore`` (freeze writes
+    one and commits it); otherwise every file. Job, log and hidden files
     (:func:`is_machine_file`), anything under a ``deposit/`` folder and
     ``data.local.yaml`` are left out.
     """
     if state is not None:
         # -z: names separated by NUL and not quoted, as git quotes non-ASCII names.
         listed = (_git(root, "ls-files", "-z") or "").split("\0") + (
-            _git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", "results") or ""
+            _git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", *_UNTRACKED)
+            or ""
         ).split("\0")
     else:
         listed = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
@@ -1391,7 +1413,7 @@ def _write_citation(
     commit: str | None,
     method: str,
 ) -> None:
-    """Write ``CITATION.cff`` and ``.zenodo.json`` from ``meta``, and ignore freeze's outputs in git."""
+    """Write ``CITATION.cff`` and ``.zenodo.json`` from ``meta``."""
     from polyzymd.analyses.study_metadata import citation_cff, dump_cff, zenodo_json
 
     (root / CITATION).write_text(
@@ -1401,6 +1423,10 @@ def _write_citation(
         json.dumps(zenodo_json(meta, version=version, released=released, method=method), indent=2)
         + "\n"
     )
+
+
+def _write_gitignore(root: Path) -> None:
+    """Add the entries of :data:`_IGNORED` that ``root/.gitignore`` lacks, creating it if needed."""
     gitignore = root / ".gitignore"
     lines = gitignore.read_text().splitlines() if gitignore.exists() else []
     missing = [(entry, why) for entry, why in _IGNORED if entry not in lines]
@@ -1592,11 +1618,6 @@ def freeze(
         from polyzymd.analyses.study_git import git_state
 
         state = git_state(root)
-    for run, why in stale_runs(protocol).items():
-        warnings.append(f"run {run} may be stale: {'; '.join(why)}")
-    warnings.extend(report_problems(protocol))
-    warnings.extend(_outside_inputs(protocol))
-
     deposit = root / DEPOSIT
     for part in ("engine_inputs", "final_frames"):
         # A replicate no longer in the study must not stay in the deposit.
@@ -1604,6 +1625,10 @@ def freeze(
     deposit.mkdir(exist_ok=True)
     hashes = _Hashes()
     conditions, rows = _replicates(protocol, deposit, hashes, warnings)
+    for run, why in stale_runs(protocol, conditions).items():
+        warnings.append(f"run {run} may be stale: {'; '.join(why)}")
+    warnings.extend(report_problems(protocol))
+    warnings.extend(_outside_inputs(protocol))
     for label, items in condition_restraints(protocol).items():
         conditions[label]["restraints"] = items
     warnings.extend(_production_length_warnings(conditions))
@@ -1624,6 +1649,8 @@ def freeze(
 
     from polyzymd.analyses.study_file import STUDY_FILE
 
+    if publish:
+        _write_gitignore(root)
     study_files = [p for p in _listed_files(root, state) if p not in GENERATED]
     # A project names the files it leaves out once, for all its studies.
     left_out = left_out_files(root, state) if publish else None
@@ -1701,9 +1728,8 @@ def freeze(
         commit = _commit_and_tag(root, paths, tag, "study", warnings)
         if commit is None:
             _drop_tag(root, manifest, meta, released, _method(protocol))
-    # Listed again now that the files freeze writes exist (a first .gitignore).
     generated = [p for p in GENERATED if (root / p).exists()]
-    files = sorted({*_listed_files(root, state), *generated})
+    files = sorted({*study_files, *generated})
     _copy_frozen_folder(root, deposit, tag, commit, files, _condition_configs(protocol))
     from polyzymd.analyses.study_upload_guide import deposit_readme
 

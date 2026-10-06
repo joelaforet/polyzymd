@@ -100,3 +100,35 @@ def test_equal_condition_means_read_as_no_trend() -> None:
         "no trend of m with x: every condition mean is the same"
     )
     assert _trend_line(flat).startswith("trend x  no trend: every condition mean is the same")
+
+
+class _ThreeConditions:
+    """A report of three conditions a, b and c with two replicates each."""
+
+    def __init__(self) -> None:
+        from polyzymd.analyses.protocols import ConditionReport
+
+        self.conditions = [
+            ConditionReport(label=label, n_replicates=2, mean=0.0, replicate_values=[1.0, 2.0])
+            for label in ("a", "b", "c")
+        ]
+
+
+def test_a_factor_written_as_text_is_reported_untestable() -> None:
+    """YAML reads 1e-3 as text, so such a factor gets an untestable trend with the reason."""
+    from polyzymd.analyses.study_statistics import trend_tests
+
+    factors = {"a": {"conc": "1e-3"}, "b": {"conc": 1.0e-2}, "c": {"conc": "1e-1"}}
+    (trend,) = trend_tests(_ThreeConditions(), factors)
+    assert trend.factor == "conc" and not trend.testable
+    assert "write 1.0e-3" in trend.reason
+
+
+@pytest.mark.parametrize("levels", [("PEG", "PEG", "SBMA"), (True, False, True), ("PEG", 1.0, 2.0)])
+def test_a_factor_that_is_not_numeric_gets_no_trend(levels: tuple) -> None:
+    """A factor such as polymer: PEG or a boolean names a condition; it has no slope to test."""
+    from polyzymd.analyses.study_statistics import trend_tests
+
+    factors = {label: {"polymer": level} for label, level in zip("abc", levels, strict=True)}
+    factors["a"]["temperature"] = 300
+    assert [t.factor for t in trend_tests(_ThreeConditions(), factors)] == ["temperature"]

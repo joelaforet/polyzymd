@@ -55,7 +55,7 @@ analyses:
 |---|---|
 | `equilibration` | Required. The time that each analysis removes from the start of the production trajectory of each replicate |
 | `conditions` | Required. Condition label to `config.yaml`. The first condition is the control. Each label is also a folder name, so two labels that differ only in case or punctuation (`SBMA 50`, `SBMA 50%`) are an error. Analysis reads a config anywhere, but `polyzymd study freeze` refuses one outside the study folder (or its project folder); `polyzymd study add-condition --config` copies one in |
-| `stride`, `replicates` | Optional. The same as `--stride` and `--replicates` |
+| `stride`, `replicates` | Optional. The same as `--stride` and `--replicates`. `analyze` deletes the stored results of a replicate that `replicates` does not list and the run did not use |
 | `until` | Optional. The end of a common analysis window, such as `38ns`, the same as `--until`. See {ref}`study-until` |
 | `analyses` | Run name to settings. Each entry is one {term}`run`. The settings are the keys that `--set` takes. `analysis:` names the shipped analysis when the run name is not its name |
 | `metadata` | Publishing metadata for `polyzymd study freeze`; see {doc}`study_freeze` |

@@ -170,6 +170,21 @@ class TestStale:
     def test_fresh_results_are_not_stale(self, study: Path) -> None:
         assert stale_runs(load_study_file(study)) == {}
 
+    def test_an_extended_trajectory_makes_its_run_stale(self, study: Path) -> None:
+        config = study.parent / "runs" / condition_folder("Polymer") / "config.yaml"
+        write_openmm_replicate(config, 2, [2.2 + 0.01 * k for k in range(12)])
+        (warning,) = [w for w in freeze(study).warnings if w.startswith("run rg may be stale")]
+        assert "Polymer replicate 2" in warning
+
+    def test_record_without_trajectory_hashes_is_stale_not_an_error(self, study: Path) -> None:
+        record_path = next((study / "results").rglob("record.json"))
+        record = json.loads(record_path.read_text())
+        segment = {k: v for k, v in record["trajectories"][0].items() if k != "sha256"}
+        record["trajectories"] = [segment, dict(segment)]
+        record_path.write_text(json.dumps(record))
+        stale = [w for w in freeze(study).warnings if w.startswith("run rg may be stale")]
+        assert stale and "no trajectory hash recorded" in stale[0]
+
     def test_changed_window_and_missing_run(self, study: Path) -> None:
         text = (
             (study / "study.yaml")
@@ -764,6 +779,17 @@ def test_the_gitignore_written_by_a_first_freeze_is_deposited(study: Path) -> No
     result = freeze(study)
     assert ".gitignore" in _git(study, "ls-tree", "--name-only", "study-v1")
     assert ".gitignore" in _zip_names(result.deposit, "study")
+
+
+def test_the_manifest_lists_the_gitignore_written_by_a_first_freeze(study: Path) -> None:
+    """The study zip holds the files manifest.json lists and the files freeze writes."""
+    from polyzymd.analyses.study_freeze import GENERATED
+
+    _git(study, "rm", "-q", ".gitignore")
+    _git(study, "commit", "-qm", "No .gitignore")
+    result = freeze(study)
+    assert ".gitignore" in result.manifest["files"]
+    assert _zip_names(result.deposit, "study") - set(GENERATED) == set(result.manifest["files"])
 
 
 def test_freeze_refuses_a_condition_config_outside_the_study(tmp_path: Path) -> None:
