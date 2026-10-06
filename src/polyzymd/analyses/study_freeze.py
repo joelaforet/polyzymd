@@ -316,23 +316,25 @@ def stale_runs(protocol: Any, conditions: dict[str, Any] | None = None) -> dict[
 
 
 #: Pathspecs ``git add`` and ``git commit`` leave out when freezing: job files of
-#: ``polyzymd analyze --submit`` and logs, which name one machine's paths.
+#: ``polyzymd analyze --submit``, logs, which name one machine's paths, and runs.
 EXCLUDE_MACHINE_FILES = [
     ":(exclude)**/slurm/**",
     ":(exclude)**/slurm_logs/**",
     ":(exclude)**/logs/**",
+    ":(exclude)**/runs/**",
 ]
 
 
-#: Folders that hold one machine's job files, logs or environments, never published.
-MACHINE_FOLDERS = ("slurm", "slurm_logs", "logs")
+#: Folders that hold one machine's job files, logs, runs or environments, never published.
+MACHINE_FOLDERS = ("slurm", "slurm_logs", "logs", "runs")
 
 
 def is_machine_file(path: str) -> bool:
-    """Return whether ``path`` is never published: in a job, log or hidden folder, or hidden.
+    """Return whether ``path`` is never published: in a job, log, run or hidden folder, or hidden.
 
     Job and log folders (``slurm/``, ``slurm_logs/``, ``logs/``) name one
-    machine's paths; hidden ones (``.git``, ``.pixi``, ``.venv``) hold
+    machine's paths; ``runs/`` holds the simulations, which are deposited
+    apart from the study; hidden ones (``.git``, ``.pixi``, ``.venv``) hold
     repositories and environments.
     """
     parts = Path(path).parts
@@ -342,7 +344,7 @@ def is_machine_file(path: str) -> bool:
 
 
 def drop_machine_files(folder: Path) -> None:
-    """Delete every job, log and hidden folder under ``folder``, a copy being deposited."""
+    """Delete every job, log, run and hidden folder under ``folder``, a copy being deposited."""
     for path in sorted(folder.rglob("*"), reverse=True):
         if path.is_dir() and (path.name in MACHINE_FOLDERS or path.name.startswith(".")):
             shutil.rmtree(path, ignore_errors=True)

@@ -111,28 +111,39 @@ Use the environment whose CUDA version does not exceed your driver.
 
 ## Quick Start
 
-### 1. Initialize a Project
+### 1. Make a Project and a Condition
 
 ```bash
-polyzymd init --name my_simulation
-cd my_simulation
+polyzymd project init my_paper --study my_protein
+cd my_paper
+polyzymd study add-condition "No polymer" --new --study my_protein
 ```
 
-This creates a project directory with a template `config.yaml` and placeholder files.
+This makes a project folder with one study, and a template `config.yaml` in
+`my_protein/conditions/no_polymer/`.
+
+**Disk space:** the runs go into the git-ignored `runs/` folder of the
+project unless you set `scratch_directory` in the config. Trajectories can
+use a lot of disk space. On a cluster, set `scratch_directory` to scratch
+storage.
 
 ### 2. Add Your Structure Files
 
 ```bash
-cp /path/to/enzyme.pdb structures/
-cp /path/to/substrate.sdf structures/  # optional
+cp /path/to/enzyme.pdb my_protein/conditions/no_polymer/structures/
+cp /path/to/substrate.sdf my_protein/conditions/no_polymer/structures/  # optional
 ```
 
 ### 3. Edit Configuration & Run
 
 ```bash
+cd my_protein/conditions/no_polymer
 # Edit config.yaml with your settings, then:
 polyzymd validate -c config.yaml
+polyzymd build -c config.yaml -r 1 --dry-run
 ```
+
+Add more conditions with `polyzymd study add-condition LABEL --from "No polymer"`.
 
 Switch to the CUDA simulation environment that matches your cluster before
 running OpenMM simulation commands such as `polyzymd submit`:
@@ -161,7 +172,8 @@ See the [Quick Start Guide](https://polyzymd.readthedocs.io/en/latest/get_starte
 
 | Command | Description |
 |---------|-------------|
-| `polyzymd init -n my_project` | Initialize a new project directory |
+| `polyzymd project init my_paper --study my_protein` | Make a project folder with one study |
+| `polyzymd study add-condition LABEL --new` | Add a condition with a template config |
 | `polyzymd validate -c config.yaml` | Validate configuration file |
 | `polyzymd build -c config.yaml` | Build simulation system |
 | `polyzymd run -c config.yaml --engine gromacs` | Build and run GROMACS simulation |

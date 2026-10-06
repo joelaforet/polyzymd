@@ -534,6 +534,19 @@ def test_a_project_applies_the_deposit_rule_inside_each_study(tmp_path: Path) ->
     assert left_out_files(root, None).startswith("not deposited: lipa/notes.docx, todo.md.")
 
 
+def test_the_runs_folder_is_neither_listed_nor_named_as_left_out(tmp_path: Path) -> None:
+    """runs/ holds the simulations: freeze neither deposits it nor warns that it does not."""
+    from polyzymd.analyses.study_freeze import EXCLUDE_MACHINE_FILES, _listed_files, left_out_files
+
+    root = tmp_path / "paper"
+    for name in ("project.yaml", "lipa/study.yaml", "runs/lipa/water/w_run1/traj.dcd"):
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text("x")
+    assert _listed_files(root, None) == ["lipa/study.yaml", "project.yaml"]
+    assert left_out_files(root, None) is None
+    assert ":(exclude)**/runs/**" in EXCLUDE_MACHINE_FILES
+
+
 @pytest.fixture()
 def gromacs_study(tmp_path: Path) -> Path:
     """A committed study of one GROMACS condition of two replicates, without polymers."""

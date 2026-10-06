@@ -9,12 +9,12 @@ errors.
 
 ## Simulation Projects and Analysis Output
 
-PolyzyMD keeps one simulation project per condition. Analysis reads those
-projects and writes into a separate output directory:
+PolyzyMD keeps one simulation folder per condition, inside a {term}`study`.
+Analysis reads those conditions and writes into a separate output directory:
 
 | Directory | Created By | Holds |
 |---|---|---|
-| Simulation project | `polyzymd init -n <name>` | `config.yaml` and the inputs of one simulation condition; its replicates' trajectories live under the scratch or projects directory the config names |
+| Simulation folder | `polyzymd study add-condition LABEL --new` | `config.yaml` and the inputs of one simulation condition; its replicates' trajectories live under the scratch or projects directory the config names, by default `runs/` of the project |
 | Analysis output | `polyzymd analyze NAME -c A/config.yaml ...` or the study API | `polyzymd_results/` (every replicate's stored values and record), `figures/<analysis>/` and, with `--submit`, `slurm/`; the current directory unless `--output-dir` is given |
 
 `polyzymd analyze` takes each condition's `config.yaml` with `-c`, control
@@ -24,15 +24,28 @@ first; no other file lists the conditions.
 
 ## Simulation Project Layout
 
-Running `polyzymd init -n my_simulation` creates:
+`polyzymd project init my_paper --study lipa` followed by
+`polyzymd study add-condition "No polymer" --new --study lipa` in `my_paper/`
+creates:
 
 ```
-my_simulation/
-├── config.yaml              # Simulation configuration (edit this)
-├── structures/              # Input PDB/SDF files
-├── job_scripts/             # Generated SLURM submission scripts
-└── slurm_logs/              # SLURM stdout/stderr logs
+my_paper/
+├── project.yaml
+├── lipa/
+│   ├── study.yaml
+│   └── conditions/no_polymer/
+│       ├── config.yaml      # Simulation configuration (edit this)
+│       └── structures/      # Input PDB/SDF files
+└── runs/                    # Git-ignored; made by the first build or submit
+    └── lipa/no_polymer/     # projects_directory of the config
+        ├── job_scripts/     # Generated SLURM submission scripts
+        ├── slurm_logs/      # SLURM stdout/stderr logs
+        └── ...              # One directory per replicate
 ```
+
+The runs go into `runs/` unless you set `scratch_directory` in the config.
+Trajectories can use a lot of disk space. On a cluster, set
+`scratch_directory` to scratch storage.
 
 After building and running a simulation, the **output directory** (on
 scratch or in the projects directory) grows to:
@@ -322,7 +335,7 @@ of its `record.json` matches the new call; see
 ## Connecting It All Together
 
 ```
-polyzymd init       -->  config.yaml  -->  polyzymd build  -->  polyzymd run  -->  trajectories/
+study add-condition -->  config.yaml  -->  polyzymd build  -->  polyzymd run  -->  trajectories/
                                                                                        |
 polyzymd analyze NAME -c A/config.yaml -c B/config.yaml  -->  report + polyzymd_results/ + figures/
 ```

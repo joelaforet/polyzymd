@@ -24,13 +24,18 @@ Alternatively, prefix each command with `pixi run -e analysis`.
 
 ## Create the folder
 
+For a new paper, start with a project instead: `polyzymd project init`
+makes the project and its study folders. See {doc}`project` and the tutorial
+{doc}`../tutorials/own_system`. Use `polyzymd study init` for one study on
+its own, or for a study of simulations that you already ran.
+
 Give `polyzymd study init` the config of each condition that you set up or
 ran. Give the control first.
 
 ```bash
 polyzymd study init lipase_363K \
-  --condition "No polymer=runs/noPoly/config.yaml" \
-  --condition "SBMA 50%=runs/SBMA50/config.yaml" \
+  --condition "No polymer=sims/noPoly/config.yaml" \
+  --condition "SBMA 50%=sims/SBMA50/config.yaml" \
   --equilibration 100ns
 ```
 
@@ -49,28 +54,38 @@ For each `--condition`, `study init` does these steps:
    substrate SDF, polymer building blocks) to `conditions/<name>/structures/`.
    The paths in the copied config are relative.
 3. It removes the machine paths from the copied config. `projects_directory`
-   becomes `.`, and a `scratch_directory` becomes `data`. These paths are not
-   part of the {term}`config hash`, so stored results still match.
-4. It writes the folder that holds the simulations of the condition to
-   `data.local.yaml`.
+   becomes `runs/<name>/` of the study, given relative to the config, and
+   `scratch_directory` becomes `null`. So new runs of the copy go into
+   `runs/`, which git ignores. These paths are not part of the
+   {term}`config hash`, so stored results still match.
+4. If the original `scratch_directory` holds runs of the config, it writes
+   that folder to `data.local.yaml`. The analyses then read those runs.
 
 The original configs do not change.
 
 For a condition that you have not simulated yet, use
-`--new-condition "No polymer"`. It creates `conditions/no_polymer/` with
-`polyzymd init`, for you to fill in and simulate.
+`--new-condition "No polymer"`. It creates `conditions/no_polymer/` with a
+template `config.yaml`, for you to fill in and simulate.
+
+:::{warning}
+New runs go into the study folder, in `runs/`, unless you set
+`scratch_directory` in the config. Trajectories can use a lot of disk space.
+On a cluster, set `scratch_directory` to scratch storage.
+:::
 
 ### Add a condition later
 
 ```bash
-polyzymd study add-condition "SBMA 100%" --config runs/SBMA100/config.yaml --study lipase_363K
-polyzymd study add-condition "SBMA 100%" --new --study lipase_363K   # an empty simulation folder
+polyzymd study add-condition "SBMA 100%" --new --study lipase_363K                    # a template config
+polyzymd study add-condition "SBMA 100%" --from "SBMA 50%" --study lipase_363K        # a copy of another condition
+polyzymd study add-condition "SBMA 100%" --config sims/SBMA100/config.yaml --study lipase_363K
 ```
 
-`add-condition --config` copies the config and its inputs as `study init`
-does, and writes the location of the simulations to `data.local.yaml`. Both
-forms add one line under `conditions:` in `study.yaml`. The rest of the
-file, with its comments, does not change.
+`add-condition --from` copies the config of another condition of the study,
+with the input files it names. Then change what differs. `--config` copies
+the config and its inputs as `study init` does. All three forms add one line
+under `conditions:` in `study.yaml`. The rest of the file, with its comments,
+does not change. Each prints where the new runs go.
 
 ### What the folder holds
 
@@ -87,7 +102,8 @@ file, with its comments, does not change.
 | `LICENSE-data`, `LICENSE-code` | CC-BY-4.0 and MIT by default |
 | `data.example.yaml` | How to write `data.local.yaml` |
 | `data.local.yaml` | Where this machine keeps the simulations. Git ignores it |
-| `.gitignore` | Leaves out `data.local.yaml`, caches and SLURM logs |
+| `runs/` | The runs of the condition configs that set no `scratch_directory`. Git ignores it |
+| `.gitignore` | Leaves out `data.local.yaml`, `runs/`, caches and SLURM logs |
 
 `study init` also makes the folder a git repository with one commit. Use
 `--no-git` to skip git. To use a different license, replace a LICENSE file.
@@ -102,7 +118,7 @@ never publishes.
 
 | Situation | What to do |
 |---|---|
-| You made the study with `study init --condition` or `add-condition --config` | Nothing. The command wrote `data.local.yaml` |
+| You made the study with `study init --condition` or `add-condition --config` | Nothing. The command wrote `data.local.yaml` when it found the runs |
 | A condition has no entry in `data.local.yaml` | Nothing. PolyzyMD uses the `scratch_directory` of the config |
 | You moved the data, for example to PetaLibrary | Edit `data.local.yaml`, or run `polyzymd study locate NEW_DIR` |
 | You downloaded the trajectories, for example from Zenodo | Run `polyzymd study locate DOWNLOAD_DIR` |

@@ -7,9 +7,9 @@
 #    below are filled in with working defaults.
 # 2. Uncomment the optional sections you need by removing the leading "# "
 # 3. Validate your configuration: polyzymd validate -c config.yaml
-# 4. Build your system: polyzymd build -c config.yaml -r 1
+# 4. Check the build without running it: polyzymd build -c config.yaml -r 1 --dry-run
 #
-# Documentation: https://polyzymd.readthedocs.io/en/latest/get_started/quickstart.html
+# Documentation: https://polyzymd.readthedocs.io/en/latest/tutorials/own_system.html
 #
 # REQUIRED SECTIONS:
 #   - name (simulation identifier)
@@ -280,17 +280,17 @@ simulation_phases:
 # ============================================================================
 # Output Configuration (REQUIRED)
 # ============================================================================
-# Directory structure and file naming.
+# Where the runs go, and how their folders are named. A relative path is
+# relative to this file.
 #
-# For HPC systems, you may want separate directories:
-#   - projects_directory: long-term storage (scripts, logs)
-#   - scratch_directory: high-performance storage (trajectories)
-#
-# For local development, set both to "." or just projects_directory.
+# WARNING: the runs go into the runs/ folder of the project (of the study,
+# for a study in no project) unless you set scratch_directory. Trajectories
+# can use a lot of disk space. On a cluster, set scratch_directory to your
+# scratch storage. git ignores runs/.
 #
 output:
-  projects_directory: "."               # Where to put scripts and logs
-  scratch_directory: null               # Where to put trajectories (null = same as projects)
+  projects_directory: {{ runs_directory | yaml_quote }}   # job scripts and logs
+  scratch_directory: null               # the runs (null = projects_directory)
   
   # Subdirectories within projects_directory
   job_scripts_subdir: "job_scripts"

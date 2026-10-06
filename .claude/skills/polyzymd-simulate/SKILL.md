@@ -1,22 +1,40 @@
 ---
 name: polyzymd-simulate
-description: Set up, build and run a molecular dynamics simulation with PolyzyMD, on OpenMM or GROMACS, locally or on SLURM. Use when a user wants to simulate a protein in water, with or without a ligand, co-solvents (a SMILES is enough) or polymers. Start from examples/quickstart/; do not write a config from nothing.
+description: Set up, build and run a molecular dynamics simulation with PolyzyMD, on OpenMM or GROMACS, locally or on SLURM. Use when a user wants to simulate a protein in water, with or without a ligand, co-solvents (a SMILES is enough) or polymers. Start from a project (polyzymd project init) and add conditions with polyzymd study add-condition; do not write a config from nothing.
 ---
 
 # polyzymd-simulate: from a structure to trajectories
 
-## 1. Start from the quickstart example
+## 1. Make a project, then add conditions
 
-`examples/quickstart/` is a protein in water with 0.15 M NaCl: Trp-cage,
-`config.yaml` for OpenMM and `config_gromacs.yaml` for GROMACS. Copy the
-folder, put your structure in place of `trpcage.pdb`, and edit the config.
+Work top down: a project (one paper) holds studies (one protein each), and a
+study holds conditions (one `config.yaml` each).
 
 ```bash
-polyzymd validate -c config.yaml          # check the config; names every wrong key
-polyzymd build -c config.yaml --dry-run   # what will be built: components, counts, seeds
-polyzymd run -c config.yaml -r 1          # build and run replicate 1 here (engine from the config)
-polyzymd status -c config.yaml --no-slurm
+polyzymd project init my_paper --study trpcage    # project.yaml and the study folder trpcage/
+cd my_paper
+polyzymd study add-condition Water --new --study trpcage                 # template config to fill in
+polyzymd study add-condition Water --config ~/polyzymd/examples/quickstart/config.yaml --study trpcage  # or copy a config
+polyzymd study add-condition "Urea 2 M" --from Water --study trpcage     # copy a condition, then edit what differs
+polyzymd project add-study calb --project .       # another protein
 ```
+
+`examples/quickstart/config.yaml` is a protein in water with 0.15 M NaCl
+(Trp-cage, OpenMM on the CPU; `config_gromacs.yaml` for GROMACS). Put the
+user's PDB in `<study>/conditions/<name>/structures/` and set
+`enzyme.pdb_path`. Then, with `C=trpcage/conditions/water/config.yaml`:
+
+```bash
+polyzymd validate -c $C          # check the config; names every wrong key and missing file
+polyzymd build -c $C --dry-run   # what will be built: components, counts, seeds, folders
+polyzymd run -c $C -r 1          # build and run replicate 1 here (engine from the config)
+polyzymd status -c $C --no-slurm
+```
+
+Runs go into the git-ignored `runs/<study>/<name>/` of the project unless the
+config sets `scratch_directory`. Tell the user plainly: trajectories can use
+a lot of disk space, so on a cluster set `scratch_directory` to scratch
+storage. `polyzymd init` is retired.
 
 Paths in a config (`pdb_path`, `projects_directory`, ...) are relative to the
 config's folder. `-r 1-3` runs replicates 1 to 3. The replicate number seeds
@@ -46,20 +64,21 @@ hardware and software.
 ## 3. Run on a cluster
 
 ```bash
-polyzymd submit -c config.yaml -r 1-5 --dry-run   # show what would be submitted first
-polyzymd submit -c config.yaml -r 1-5             # submit; jobs resubmit themselves
-polyzymd status -c config.yaml
+polyzymd submit -c $C -r 1-5 --dry-run   # show what would be submitted first
+polyzymd submit -c $C -r 1-5             # submit; jobs resubmit themselves
+polyzymd status -c $C
 ```
 
 Check `--preset` and its SLURM account before submitting.
 
 ## 4. Analyse
 
-Make a study of the conditions and use the `polyzymd-analyze` skill:
+List the analyses under `analyses:` in `project.yaml` (such as `rg: {}`),
+commit, and use the `polyzymd-analyze` skill:
 
 ```bash
-polyzymd study init my_study --condition "Water=water/config.yaml" --condition "SDS=sds/config.yaml"
-polyzymd analyze rg --study my_study
+git add -A && git commit -m "Conditions and analyses"
+polyzymd analyze --project .
 ```
 
 ## 5. When something fails

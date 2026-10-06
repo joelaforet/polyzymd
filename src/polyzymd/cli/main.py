@@ -25,7 +25,6 @@ from pydantic import ValidationError
 
 from polyzymd.cli.colors import colored_echo, echo_logo, setup_colored_logging
 from polyzymd.cli.env_warnings import warn_if_wrong_pixi_env
-from polyzymd.core.branding import prepend_file_header
 
 # Bootstrap a minimal root handler so suppress_openff_logs() works at import
 # time.  setup_colored_logging() replaces this handler when the CLI runs.
@@ -3274,117 +3273,6 @@ def validate(config: str) -> None:
 
 
 # =============================================================================
-# Init Command
-# =============================================================================
-
-
-@cli.command()
-@click.option(
-    "-n",
-    "--name",
-    required=True,
-    help="Name of the project directory to create",
-)
-def init(name: str) -> None:
-    """Initialize a new PolyzyMD project directory.
-
-    Creates a scaffold with a template configuration file and placeholder
-    structure files to help new users get started.
-
-    \b
-    Example:
-        polyzymd init --name my_simulation
-
-    This creates:
-        my_simulation/
-        ├── config.yaml              <- Edit this file
-        ├── structures/              <- Add your PDB/SDF files
-        ├── job_scripts/
-        └── slurm_logs/
-    """
-    import shutil
-
-    from polyzymd.utils.templates import render_package_template
-
-    warn_if_wrong_pixi_env("init", "build")
-
-    project_dir = Path(name)
-
-    # Check if directory already exists
-    if project_dir.exists():
-        click.echo(
-            click.style(f"Error: Directory '{name}' already exists.", fg="red"),
-            err=True,
-        )
-        colored_echo("Choose a different name or remove the existing directory.")
-        sys.exit(1)
-
-    try:
-        # Create directory structure
-        _echo_branding()
-        colored_echo(f"Creating project directory: {name}/")
-        project_dir.mkdir(parents=True)
-        (project_dir / "structures").mkdir()
-        (project_dir / "job_scripts").mkdir()
-        (project_dir / "slurm_logs").mkdir()
-
-        # Render template configuration
-        config_content = render_package_template(
-            "polyzymd.templates",
-            "config_template.yaml",
-            {"project_name": name},
-        )
-        config_dest = project_dir / "config.yaml"
-        config_dest.write_text(prepend_file_header(config_content, comment_prefix="#"))
-
-        # Create placeholder files
-        protein_placeholder = project_dir / "structures" / "place_protein_here.placeholder.txt"
-        protein_content = render_package_template(
-            "polyzymd.templates",
-            "protein_placeholder.txt.jinja",
-        )
-        protein_placeholder.write_text(prepend_file_header(protein_content, comment_prefix="#"))
-
-        ligand_placeholder = project_dir / "structures" / "place_ligand_here.placeholder.txt"
-        ligand_content = render_package_template(
-            "polyzymd.templates",
-            "ligand_placeholder.txt.jinja",
-        )
-        ligand_placeholder.write_text(prepend_file_header(ligand_content, comment_prefix="#"))
-
-        # Success message
-        colored_echo()
-        click.echo(click.style("Project created successfully!", fg="green"))
-        colored_echo()
-        colored_echo("Directory structure:")
-        colored_echo(f"  {name}/")
-        colored_echo("  ├── config.yaml              <- Edit this file")
-        colored_echo("  ├── structures/              <- Add your PDB/SDF files")
-        colored_echo("  ├── job_scripts/")
-        colored_echo("  └── slurm_logs/")
-        colored_echo()
-        colored_echo("Next steps:")
-        colored_echo(f"  1. Add structure files to {name}/structures/")
-        colored_echo(
-            f"  2. Edit {name}/config.yaml: set enzyme.pdb_path, uncomment optional sections"
-        )
-        colored_echo(f"  3. Validate: polyzymd validate -c {name}/config.yaml")
-        colored_echo(f"  4. Build:    polyzymd build -c {name}/config.yaml -r 1")
-        colored_echo()
-        colored_echo(
-            "Documentation: https://polyzymd.readthedocs.io/en/latest/get_started/quickstart.html"
-        )
-
-    except Exception as e:
-        # Broad catch is intentional — must clean up partially-created
-        # directory regardless of what went wrong
-        if project_dir.exists():
-            shutil.rmtree(project_dir)
-        click.echo(click.style(f"Error creating project: {e}", fg="red"), err=True)
-        sys.exit(1)
-
-
-# =============================================================================
 # Clean-PDB Command
 # =============================================================================
 
@@ -3935,10 +3823,11 @@ def _register_optional_command_groups() -> None:
     """Register optional command groups when deps are importable."""
     from polyzymd.cli.analysis_topology import analysis_topology_command
     from polyzymd.cli.analyze import analyze_command
-    from polyzymd.cli.retired import compare, new_analysis
+    from polyzymd.cli.retired import compare, init, new_analysis
     from polyzymd.cli.study import study_group
 
     cli.add_command(compare)
+    cli.add_command(init)
     cli.add_command(new_analysis)
     cli.add_command(analyze_command)
     cli.add_command(study_group)

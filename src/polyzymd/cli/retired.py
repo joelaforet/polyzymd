@@ -1,6 +1,6 @@
-"""Hidden ``polyzymd compare`` and ``polyzymd new-analysis`` commands that name their replacements.
+"""Hidden ``polyzymd compare``, ``new-analysis`` and ``init`` commands that name their replacements.
 
-Both commands accept any arguments, print where the workflow went to stderr
+Each command accepts any arguments, print where the workflow went to stderr
 and exit with status 2, the status ``polyzymd analyze`` uses for a refused
 analysis.
 """
@@ -63,4 +63,17 @@ def new_analysis(arguments: tuple[str, ...]) -> None:
     """Retired: point to the study API that replaces analysis plugins, and exit 2."""
     del arguments
     click.echo(new_analysis_message(), err=True)
+    sys.exit(EXIT_RETIRED)
+
+
+@click.command("init", hidden=True, context_settings=_ANY_ARGUMENTS)
+@click.argument("arguments", nargs=-1, type=click.UNPROCESSED)
+def init(arguments: tuple[str, ...]) -> None:
+    """Retired: point to project init and study add-condition --new, and exit 2."""
+    del arguments
+    click.echo(
+        "error: polyzymd init is retired: make a project with polyzymd project init PATH "
+        "--study LABEL, then a condition with polyzymd study add-condition LABEL --new",
+        err=True,
+    )
     sys.exit(EXIT_RETIRED)

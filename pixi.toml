@@ -235,7 +235,6 @@ sim-cuda-12-6 = { features = ["core", "sim-cuda-12-6"], no-default-feature = tru
 [feature.openmm-any.tasks]
 build     = { cmd = "polyzymd build" }
 validate  = { cmd = "polyzymd validate" }
-init      = { cmd = "polyzymd init" }
 info      = { cmd = "polyzymd info" }
 clean-pdb = { cmd = "polyzymd clean-pdb" }
 
