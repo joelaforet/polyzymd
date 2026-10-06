@@ -1,56 +1,58 @@
 # Projects and studies: one paper, one study per protein
 
-PolyzyMD organizes experiments in four levels:
+PolyzyMD organizes simulations in four levels:
 
-| Level | Is | Holds | File |
+| Level | What it is | What it holds | File |
 |---|---|---|---|
-| Project | One paper | The analyses every study runs, statistics and figures code, publishing metadata | `project.yaml` |
-| **Study** | **One protein (or other system) under its conditions**, such as protein X | Its equilibration window, its structures, its named residue regions, its conditions | `study.yaml` |
-| Condition | One simulated variant of that protein, such as a polymer composition or a different temperature | A simulation `config.yaml`, optionally its `factors:` | `conditions/<name>/config.yaml` |
-| Replicate | One run of a condition | Trajectories; its number seeds its starting structure | the run directory |
+| {term}`Project <project>` | One paper | The analyses that every study runs, the statistics and figure code, the publishing metadata | `project.yaml` |
+| **{term}`Study <study>`** | **One protein (or other system) under its conditions** | Its equilibration window, its structures, its named residue regions, its conditions | `study.yaml` |
+| {term}`Condition <condition>` | One simulated variant of that protein, such as a polymer composition, a co-solvent or a temperature | A simulation `config.yaml`, and optionally its `factors:` | `conditions/<name>/config.yaml` |
+| {term}`Replicate <replicate>` | One independent simulation of a condition | Its trajectories. Its number seeds its starting structure | The {term}`replicate folder` |
 
 ## A study is tied to its protein
 
-Everything an analysis needs to know about a protein differs from one protein
-to the next:
+Each protein differs in everything that an analysis must know about it:
 
 - **Residue numbering.** The catalytic serine of lipase A is residue 76 in the
-  trajectory; RML's numbering is offset from its crystal structure. A
+  trajectory. The numbering of RML is offset from its crystal structure. A
   selection written for one protein selects the wrong atoms in another.
-- **Reference structures.** Native contacts and RMSF are measured against a
-  protein's own crystal structure, and some proteins need two (an open and a
-  closed lid).
-- **Regions.** Which residues form the core, the active site or a lid is a
-  property of the fold.
-- **Equilibration.** Each protein relaxes at its own pace, at its own
+- **Reference structures.** Native contacts and RMSF use the crystal
+  structure of the protein. Some proteins need two, such as an open lid and a
+  closed lid.
+- **Regions.** The fold of the protein sets which residues form the core, the
+  active site or a lid.
+- **Equilibration.** Each protein relaxes at its own rate, at its own
   temperature.
-- **The control.** A polymer condition is meaningful only against the same
+- **The control.** A polymer condition has meaning only against the same
   protein without polymer.
 
-So a study holds exactly one protein, and every comparison is made within a
-study, against that study's control. Comparing one protein's polymer
-condition with another protein's control is never something PolyzyMD does by
-default.
+So a study holds exactly one protein. PolyzyMD makes every comparison within
+a study, against the control of that study. By default, PolyzyMD never
+compares a polymer condition of one protein with the control of a different
+protein.
 
 ## What the project adds
 
-What stays the same across proteins is the question. A project writes each
-analysis once, in `project.yaml`, and runs it in every study, so the paper's
-three enzymes are measured the same way by construction rather than by
-keeping three copies of a file in step. The project also holds what belongs
-to the paper as a whole: the statistical plan, the figures, and the
-publishing metadata, which is written once and published as one dataset with
-one DOI.
+The question stays the same across the proteins of a paper. A project writes
+each analysis once, in `project.yaml`, and runs it in every study. So the
+three enzymes of a paper get the same measurement by design. You do not keep
+three copies of one file in step.
 
-A study can still stand on its own. A project is only needed to analyse
-several proteins the same way, and every study command works on a study
-inside a project as it does on a study alone.
+The project also holds what belongs to the paper as a whole:
+
+- the statistical plan;
+- the figures;
+- the publishing metadata, published as one dataset with one DOI.
+
+A study can still stand on its own. You need a project only to analyze
+several proteins the same way. Every study command works the same on a study
+inside a project and on a study alone.
 
 ## How one analysis fits every protein
 
-An analysis written once has to select different residues and read different
-reference files in each protein. Studies therefore name their protein-specific
-parts, and the analysis refers to the names:
+One analysis must select different residues and read different reference
+files in each protein. So each study names its protein-specific parts, and
+the analysis uses the names:
 
 ```yaml
 # project.yaml
@@ -66,62 +68,85 @@ structures: {reference: structures/1ISP_clean.pdb}
 regions: {core: resid 5-8 15-27 32-37}
 ```
 
-In each study, `region core` becomes that protein's core selection and
-`structure reference` its crystal structure. The resolved selection, not the
-name, is what the analysis runs with and what its stored record holds, so a
-result always says which residues it measured.
+In each study, `region core` becomes the core selection of that protein.
+`structure reference` becomes its crystal structure. The analysis runs with
+the resolved selection, not with the name. The stored record holds the
+resolved selection too, so each result says which residues it measured.
 
-A name a study does not define stops the analysis with an error naming the
-study. PolyzyMD never skips a protein silently, because a figure missing one
-enzyme looks complete. When an analysis applies only to some proteins (a lid
-opening, where one enzyme has no lid), the project says so explicitly with
-`studies: [...]`, and `polyzymd project check` lists which studies run each
-analysis, so a protein left out is visibly left out. An analysis that only one protein has belongs in that study's
-own `study.yaml`.
+If a study does not define a name, the analysis stops with an error that
+names the study. PolyzyMD never skips a protein without a message, because a
+figure that is missing one enzyme looks complete.
 
-Results stay with the protein: each study stores its results in its own
-`results/` folder. Reading them through the project puts every study's rows
-in one table with a `study` column, which is what cross-protein figures need,
-while each study's report keeps its own comparisons.
+Some analyses apply only to some proteins, such as a lid opening when one
+enzyme has no lid. The project then lists the proteins with
+`studies: [...]`. `polyzymd project check` lists which studies run each
+analysis, so you can see each protein that is left out. Put an analysis that
+only one protein has in the `study.yaml` of that protein.
 
+Results stay with the protein. Each study stores its results in its own
+`results/` folder. When you read them through the project, the rows of every
+study go into one table with a `study` column. Cross-protein figures need
+this table. The report of each study keeps its own comparisons.
+
+(project-statistics)=
 ## Statistics follow the same rule
 
-The sampling unit is the replicate, the independent simulation, not the
-frame (Grossfield et al. 2018). Every test in PolyzyMD works on one value per
-replicate, and the project and its studies give exactly that table.
+The sampling unit is the replicate, the independent simulation. It is not the
+frame (Grossfield et al. 2018). Every test in PolyzyMD uses one value per
+replicate. `replicate_table` gives that table, for a project or for a study.
+It reduces the per-frame values of each replicate the way the analysis does:
+with the `reduce` of the analysis entry, or else with the mean.
 
-Conditions may declare factors, such as the SBMA fraction of a copolymer.
-Factors describe what varies between conditions; they do not group anything.
-A numeric factor lets a study's report test for a trend, in addition to
-comparing each condition with the control. The trend is fitted through the
-condition means, one point per condition, because the factor varies only
-between conditions: more replicates of a condition make its mean more
-precise, but they are not more points on the line. Treating them as
-independent points would claim a confidence the conditions cannot give
-(Hurlbert 1984; Lazic 2010). Factors need not
-match across studies: each study tests the factors its conditions declare.
+Conditions can declare factors, such as the SBMA fraction of a copolymer.
+Factors describe what varies between conditions. They do not group anything.
+Factors need not match across studies: each study tests the factors that its
+conditions declare.
 
-A paper's statistical plan often goes further, for example a hierarchy of
-tests with multiplicity control across them, or comparisons across proteins
-made deliberately. That plan is a script in the project's `stats/` folder,
-reading the stored results with `replicate_table`, so it is committed and
-published with the paper instead of living beside it.
+### Why a trend uses one point per condition
+
+A numeric factor lets the report of a study test for a trend, in addition to
+the comparison of each condition with the control. PolyzyMD fits the line
+through the condition means, with one point per condition.
+
+The factor varies only between conditions. More replicates make the mean of
+a condition more precise, but they do not add points to the line. If the
+replicates were independent points, the test would claim a confidence that
+the conditions cannot give (Hurlbert 1984; Lazic 2010).
+
+With one point per condition, the test has few degrees of freedom: n - 2 for
+n condition means. So the test finds only a clear, steady change across the
+conditions. The test needs at least three factor levels. With two levels it
+would repeat a pairwise comparison.
+
+### The statistical plan of the paper
+
+The plan of a paper often goes further than the report. Examples are a
+hierarchy of tests with multiplicity control across them, or comparisons
+across proteins that you choose on purpose. Write that plan as a script in
+the `stats/` folder of the project. The script reads the stored results with
+`replicate_table`. So the plan is committed and published with the paper.
 
 ## Reproducing and publishing
 
-A project is the unit of publication. Freezing it freezes every study,
-records each study's manifest by its hash in one project manifest, and
-writes one citation and one deposit, so a reader reproduces the paper from
-one dataset.
+A project is the unit of publication. When you freeze a project, PolyzyMD
+does these steps:
 
-Stored results identify their inputs by content: trajectories, topologies
-and argument files by name, size and SHA-256, and configs by a hash that
-leaves out where data lives. A study moved into a project, or a project
-moved to another machine, therefore reuses every stored result whose inputs
-are unchanged.
+1. It freezes every study.
+2. It records the hash of the manifest of each study in one project manifest.
+3. It writes one citation and one deposit.
+
+A reader then reproduces the paper from one dataset.
+
+Stored results identify their inputs by content:
+
+- trajectories, topologies and argument files by name, size and SHA-256;
+- configs by the {term}`config hash`, which leaves out where the data is.
+
+So when you move a study into a project, or move a project to a different
+machine, every stored result with unchanged inputs is reused.
 
 ## See also
 
-- {doc}`../how_to/project`: analyse, test and publish a project.
+- {doc}`../how_to/project`: analyze, test and publish a project.
 - {doc}`../how_to/move_studies_into_project`: bring existing studies into a project.
 - {doc}`study_folders`: what a study folder holds and how it is published.
