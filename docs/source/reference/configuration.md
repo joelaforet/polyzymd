@@ -685,7 +685,7 @@ stages continue to require an explicit `duration`.
 | Barostat | Description |
 |----------|-------------|
 | `MC` | Monte Carlo barostat (recommended) |
-| `MCA` | Monte Carlo anisotropic |
+| `MCA` | anisotropic pressure coupling. Only with `engine: gromacs`; `validate` refuses it with `engine: openmm`. |
 
 ---
 

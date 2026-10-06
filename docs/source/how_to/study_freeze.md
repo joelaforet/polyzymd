@@ -149,8 +149,8 @@ Otherwise, freeze does these steps:
    - The config of a condition does not agree with its topology. Examples: a
      substrate residue that is missing from the topology, or polymer residues
      in a condition whose config has no polymers, or the reverse.
-   - An OpenMM replicate records no OpenMM version. For a GROMACS study,
-     freeze always asks you to state the GROMACS version in the methods.
+   - An OpenMM replicate records no OpenMM version, or a GROMACS replicate
+     has no `GROMACS version:` line in `gromacs/prod.log`.
    - A file that `build_manifest.json` lists is missing from the replicate
      folder.
 3. It hashes every trajectory and topology file on this machine (SHA-256,

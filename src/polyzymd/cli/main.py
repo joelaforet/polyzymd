@@ -1214,6 +1214,8 @@ def _run_openmm_impl(
         save_progress,
     )
 
+    sim_config.require_engine_barostats("openmm")
+
     production = sim_config.simulation_phases.production
     working_dir = sim_config.get_working_directory(replicate)
     total_steps = int(production.duration * 1e6 / production.time_step)
@@ -1960,6 +1962,8 @@ def _run_segment_locked(
         save_progress,
     )
     from polyzymd.simulation.signals import raise_if_interrupted
+
+    sim_config.require_engine_barostats("openmm")
 
     # Calculate total steps and samples from config
     prod = sim_config.simulation_phases.production

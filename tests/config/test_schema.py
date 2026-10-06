@@ -1131,3 +1131,18 @@ class TestCustomSubstructures:
         """A templates file that does not map residue names to SMARTS and atom names is refused."""
         with pytest.raises(ValidationError, match="must map each residue name"):
             _config_with_templates(tmp_path, json.dumps({"NCYX": ["N", "CA"]}))
+
+
+def test_openmm_runs_refuse_the_anisotropic_barostat_whatever_the_engine_key(tmp_path: Path) -> None:
+    """A GROMACS config with barostat MCA loads, but running it on OpenMM is refused."""
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    data["engine"] = "gromacs"
+    data["simulation_phases"]["production"].update(ensemble="NPT", barostat="MCA")
+    path.write_text(yaml.safe_dump(data))
+    config = SimulationConfig.from_yaml(path)
+    config.require_engine_barostats("gromacs")
+    with pytest.raises(ValueError, match="set engine: gromacs"):
+        config.require_engine_barostats("openmm")
+
