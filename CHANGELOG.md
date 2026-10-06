@@ -136,7 +136,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Every config section refuses keys it does not define, so a misspelled key is an error instead of a silent default. Older configs with `simulation_phases.segments` must drop it.
   - `freeze` recognises co-solvents, names a build file `build_manifest.json` lists that is missing, asks GROMACS studies to state the GROMACS version instead of reporting a missing OpenMM version, and mentions polymer parameters in the checklist only for systems with polymers.
 
-- **Stored results and replicate tables (1.3 audit, wave A).**
+- **Stored results and replicate tables.**
   - Reordering `parts:` recomputes instead of giving one part the values of another; `parts` is now part of the stored record.
   - `replicate_table` keeps a `name` column, so two quantities stored in one run (two hydrogen-bond summaries) are no longer counted as two replicates.
   - It also fills each label a replicate lacks with the run's `missing` value, as the report does, so its n and mean match the report's.
@@ -145,7 +145,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Relative file settings of shipped analyses are relative to `study.yaml`, not to the shell's folder.
   - `--set` values from `study.yaml` keep their type (`1e-05` stays a number).
   - Repeated `distances` pair labels are refused.
-- **Freeze (1.3 audit, wave A).**
+- **Freeze.**
   - `freeze` refuses while inputs are uncommitted, and names them. The manifest therefore describes exactly the tagged and deposited files.
   - It also refuses when git has no user name and email, before writing anything that names a tag.
   - `study freeze` on a study of a project refuses and points to `project freeze`.
@@ -154,12 +154,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Configs written in flow style lose their machine paths too.
   - The manifest no longer reports frames analysed: each analysis has its own window, and its report has `frames_per_replicate`.
   - `CITATION.cff` carries no commit; the tag is the version.
-- **Projects and `--label` (1.3 audit, wave A).**
+- **Projects and `--label`.**
   - A project's studies must be folders directly inside it.
   - An analysis entry that is not a mapping gets a message instead of a traceback.
   - `analyze --study S --label L` prints its report but never saves it as the run's `report.json`. The `--submit` report job gets the same labels as its tasks, and `until: common` is resolved over the whole study.
   - `analyze --project` writes one log, in the project's `logs/`. Log names carry the array task or process ID.
-- **`study init` and `study locate` (1.3 audit, wave A).**
+- **`study init` and `study locate`.**
   - `study init` records a relative scratch directory relative to its config.
   - `study locate` no longer maps two conditions whose runs are named alike to one folder. It tells them apart by folder name or by `manifest.json`, and otherwise refuses with a fix.
 
