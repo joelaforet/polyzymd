@@ -41,7 +41,7 @@ import math
 import re
 import sys
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
@@ -194,7 +194,8 @@ def _build(value: Any, universe_: Any) -> Any:
                 f"Selection {value.selection!r} matched no atoms.",
                 hint="Check the selection string against the topology. If some conditions have "
                 "no such atoms (a polymer selection in a no-polymer control), write "
-                "'allow_empty: true' in the study.yaml entry to leave those replicates out.",
+                "'allow_empty: true' in the study.yaml entry to pass the function an empty "
+                "AtomGroup there.",
             )
         return atoms
     return universe_ if isinstance(value, UniverseArgument) else value
@@ -256,8 +257,9 @@ def run_timeseries(
     recompute: bool = False,
     output_dir: str | Path | None = None,
     bounds: tuple[float | None, float | None] = (None, None),
+    parts: Sequence[str] | None = None,
     **kwargs: Any,
-) -> Timeseries:
+) -> Timeseries | dict[str, Timeseries]:
     """Measure ``function`` on every production frame of every replicate.
 
     Each replicate runs ``AnalysisFromFunction(function, *args, **kwargs)``
@@ -299,13 +301,20 @@ def run_timeseries(
         Lowest and highest value the quantity can take, ``None`` for no
         limit, such as ``(0.0, None)`` for a distance. Recorded with the
         result and used to correct distribution figures at the limits.
+    parts : sequence of str, optional
+        Names of several quantities ``function`` measures per frame, for
+        example ``["area", "contacts"]``. ``function`` then returns, per
+        frame, a dict with exactly these keys or a sequence in this order.
+        They are stored as one ``(frames, parts)`` array; each part becomes
+        its own series, named by its part.
     **kwargs
         Keyword arguments of ``function``, recorded like ``args``.
 
     Returns
     -------
-    Timeseries
-        Every replicate's series, by condition.
+    Timeseries or dict of str to Timeseries
+        Every replicate's series, by condition, or with ``parts`` one such
+        result per part.
 
     Raises
     ------
@@ -340,19 +349,32 @@ def run_timeseries(
                 u = replicate.universe()
                 built, chosen = _build_arguments({**dict(enumerate(args)), **kwargs}, replicate)
                 analysis = AnalysisFromFunction(
-                    function,
+                    function if parts is None else _per_part(function, list(parts), name),
                     # MDAnalysis passes anything that is not its own reader to
                     # the function as an argument, so hand it the unwrapped one.
                     underlying_reader(u.trajectory),
                     *(built[index] for index in range(len(args))),
                     **{key: built[key] for key in kwargs},
                 ).run(frames=replicate.frames)
-                values = np.asarray(analysis.results.timeseries, dtype=np.float64)
-                if values.shape != (len(record["frames"]),):
+                n_frames = len(record["frames"])
+                expected = (n_frames,) if parts is None else (n_frames, len(parts))
+                several = (
+                    "Return one float per frame, or name the quantities with parts: [...] in "
+                    "the study.yaml entry (parts= in Python) and return a dict of them."
+                )
+                try:
+                    values = np.asarray(analysis.results.timeseries, dtype=np.float64)
+                except (TypeError, ValueError) as exc:
+                    raise ProtocolError(
+                        f"{name}: {function!r} returned something other than numbers per "
+                        f"frame: {exc}",
+                        hint=several,
+                    ) from exc
+                if values.shape != expected:
                     raise ProtocolError(
                         f"{name}: {function!r} returned values of shape {values.shape[1:]} per "
-                        "frame; this version takes one number per frame.",
-                        hint="Return a single float from the function.",
+                        f"frame, not {expected[1:] or 'one number'}.",
+                        hint=several,
                     )
                 folder.mkdir(parents=True, exist_ok=True)
                 np.savez(
@@ -365,6 +387,10 @@ def run_timeseries(
                 (folder / "record.json").write_text(
                     json.dumps({**stored, "versions": _versions()}, indent=1)
                 )
+                if parts is not None:
+                    # The part names, for polyzymd.analyses.results; the function's
+                    # source, in the record, already decides reuse.
+                    (folder / "parts.json").write_text(json.dumps(list(parts)))
             else:
                 stored = json.loads((folder / "record.json").read_text())
                 if stored.get("bounds") != list(bounds):
@@ -381,7 +407,37 @@ def run_timeseries(
                     folder,
                 )
             )
-    return Timeseries(name, unit, study, series, root, tuple(bounds))
+    if parts is None:
+        return Timeseries(name, unit, study, series, root, tuple(bounds))
+    return {
+        part: Timeseries(
+            part,
+            unit,
+            study,
+            {c: [replace(s, values=s.values[:, i]) for s in items] for c, items in series.items()},
+            root,
+            tuple(bounds),
+        )
+        for i, part in enumerate(parts)
+    }
+
+
+def _per_part(function: Callable, parts: list[str], name: str) -> Callable:
+    """Wrap ``function`` so a dict it returns per frame becomes its values in ``parts`` order."""
+    from collections.abc import Mapping
+
+    def per_frame(*args: Any, **kwargs: Any) -> Any:
+        out = function(*args, **kwargs)
+        if not isinstance(out, Mapping):
+            return out
+        if set(out) != set(parts):
+            raise ProtocolError(
+                f"{name}: {function!r} returned the parts {sorted(out)}, not {parts}.",
+                hint="Return a dict with exactly the names listed under parts.",
+            )
+        return [out[part] for part in parts]
+
+    return per_frame
 
 
 def _replicate_record(base: dict[str, Any], replicate: Replicate) -> dict[str, Any]:
@@ -617,7 +673,9 @@ def _label_order(rows: dict[str, list[tuple]], missing: float | None, name: str)
                 raise ProtocolError(
                     f"{name}: condition {condition} replicate {row[0]} has no value for "
                     f"labels {absent}, which other replicates have.",
-                    hint="Measure the same labels in every replicate, or pass missing=<value>.",
+                    hint="Measure the same labels in every replicate, or give the value a "
+                    "replicate gets for a label it lacks: missing: .nan in the study.yaml entry "
+                    "(missing=<value> in Python).",
                 )
             values = np.array([row[1].get(key, missing) for key in order], dtype=np.float64)
             items[position] = (row[0], values, *row[2:])
@@ -1209,8 +1267,21 @@ class ReplicateValues:
                         "where a t interval is not reliable"
                     )
                 conditions.append(item)
+        untestable: dict[tuple[str, str], list] = {}
         for row in pairwise:
+            untestable.setdefault((row.a, row.b), [])
             if not row.testable:
+                untestable[(row.a, row.b)].append(row)
+        for (a, b), rows in untestable.items():
+            total = sum(1 for row in pairwise if (row.a, row.b) == (a, b))
+            if rows and len(rows) == total and total > 1:
+                # One note for the pair; its rows stay in the report's pairwise table.
+                notes.append(
+                    f"{a} vs {b} is not testable at any of its {total} labels: a condition has "
+                    "fewer than two replicates, or both have one value in every replicate"
+                )
+                continue
+            for row in rows:
                 at = "" if row.entry is None else f" at {row.entry}"
                 notes.append(
                     f"{row.a} vs {row.b}{at} is not testable: a condition has fewer than two "
@@ -1262,22 +1333,39 @@ def _labelled_verdict(
     metric: str, unit: str | None, chosen: list[str], conditions: list, pairwise: list
 ) -> list[str]:
     """Write one sentence per condition, or per comparison, naming every significant label."""
-    from polyzymd.analyses.protocols import _num
+    from polyzymd.analyses.protocols import VERDICT_NOT_TESTABLE, _num
 
     unit_text = f" {unit}" if unit else ""
     if not pairwise:
         sentences = []
         for label in chosen:
             means = [item.mean for item in conditions if item.label == label]
+            finite = [mean for mean in means if math.isfinite(mean)]
+            if not finite:
+                sentences.append(f"{label} {metric} over {len(means)} labels, no finite label mean")
+                continue
             sentences.append(
                 f"{label} {metric} over {len(means)} labels, label means from "
-                f"{_num(min(means))} to {_num(max(means))}{unit_text}"
+                f"{_num(min(finite))} to {_num(max(finite))}{unit_text}"
+                + (
+                    f" ({len(means) - len(finite)} labels without a mean)"
+                    if len(finite) < len(means)
+                    else ""
+                )
             )
         return sentences
+    replicates = {item.label: item.n_replicates for item in conditions}
     sentences = []
     for label in dict.fromkeys(row.b for row in pairwise):
         rows = [row for row in pairwise if row.b == label]
         tested = [row for row in rows if row.p_adjusted is not None]
+        if not tested:
+            n_text = f"n {replicates.get(rows[0].a, 0)} vs {replicates.get(label, 0)}"
+            sentences.append(
+                f"{VERDICT_NOT_TESTABLE}: {metric} for {rows[0].a} vs {label} needs at least two "
+                f"replicates per condition and values that vary ({n_text})"
+            )
+            continue
         larger = [row.entry for row in tested if row.significant and row.delta > 0]
         smaller = [row.entry for row in tested if row.significant and row.delta < 0]
         family = tested[0].family_size if tested else 0

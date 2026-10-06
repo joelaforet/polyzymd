@@ -27,7 +27,7 @@ the folder can be moved as a whole.
 
 ```yaml
 polyzymd: 1.3.0                 # the version that produced the results
-equilibration: 100ns            # one window for every condition and replicate
+equilibration: 100ns            # the window for every analysis that sets none
 stride: 1                       # optional
 replicates: 1-5                 # optional; default: every run found
 conditions:                     # control first
@@ -41,6 +41,9 @@ analyses:
     analysis: contacts
     method: distance
     cutoff: 4.0
+  rg_full:                      # the same analysis over its own window
+    analysis: rg
+    equilibration: 0ns          # from the start of production
 ```
 
 | Key | Meaning |
@@ -48,7 +51,7 @@ analyses:
 | `equilibration` | Required. Window removed from the start of every replicate's production trajectory |
 | `conditions` | Required. Condition label to `config.yaml`, control first |
 | `stride`, `replicates` | Optional, as `--stride` and `--replicates` |
-| `until` | Optional end of a common analysis window, such as `38ns`, as `--until`: production after it is left out for every condition |
+| `until` | Optional end of a common analysis window, such as `38ns`, as `--until`: production after it is left out for every condition. `common` ends every replicate at the shortest one's last time |
 | `analyses` | Run name to settings. The settings are those `--set` takes; `analysis:` names the shipped analysis when the run name is not one |
 | `polyzymd` | The PolyzyMD version the study was run with; a different version gives a warning |
 | `metadata` | Publishing metadata, read by `polyzymd study freeze`; see {doc}`study_freeze` |
@@ -130,7 +133,21 @@ warning: the conditions were analysed up to different times (No polymer 456.4 ns
 ```
 
 `until: 38ns` in `study.yaml`, or `--until 38ns`, leaves out production after
-that time for every condition. A replicate whose `progress.json` records
+that time for every condition. `until: common` (or `--until common`) ends
+every replicate at the earliest last production time of any replicate, so
+runs that restart stitching left a frame or two apart share the same time
+points; the time it stands for is worked out once over every condition and
+recorded in each result.
+
+### Give one analysis its own window
+
+An analysis entry may set its own `equilibration:` and `until:`. A
+time-resolved analysis of a system still changing at the end of production
+can start at 0 ns, while a steady-state analysis keeps the study's window.
+Two entries of the same analysis with different windows store their results
+side by side, each record names its window, and `polyzymd study check`
+prints each analysis's window. A window on the command line (`--eq`,
+`--until`) overrides the entry's, which overrides the study's. A replicate whose `progress.json` records
 production segments missing from disk, as in a copy that kept only some
 segments, is named in the report too.
 
@@ -169,7 +186,9 @@ analyses:
 | `universe` | Keyword argument that receives the replicate's `Universe` |
 | `settings` | Keyword arguments passed as they are; `--set` overrides them |
 | `labels: returned` | For a `per_replicate` function that returns `(labels, values)`, such as one value per residue |
-| `allow_empty: true` | Leave out, with a warning in the report, every replicate where a selection matches no atoms, such as a polymer selection in a no-polymer control. Without it such a replicate stops the run, with a message saying so |
+| `parts: [area, contacts]` | For a function that measures several quantities in one pass: a `timeseries` function returns a dict with these keys each frame (or a sequence in this order), a `per_replicate` function one row per part. Each part is stored and plotted as its own result, has its own `part` in `Study.results().table`, and the report covers the part given with `--run`, the first by default |
+| `missing: .nan` | With `labels: returned`, the value a replicate gets for a label that other replicates returned and it did not, such as a frame index past the end of a shorter run. Without it such a replicate stops the report, with a message saying so |
+| `allow_empty: true` | Pass a selection that matches no atoms, such as a polymer selection in a no-polymer control, to the function as an empty AtomGroup, so the function decides the value there (for example `0.0` when `len(polymer) == 0`). Without it such a replicate stops the run, with a message saying so |
 
 The stored results are keyed on the whole file, not only the function: edit
 any helper in it and the next run recomputes. The file is compiled from its
@@ -194,6 +213,12 @@ results.report                 # the ProtocolReport, as polyzymd analyze printed
 results.table                  # one row per stored value
 results.table.groupby(["condition", "replicate"])["value"].mean()
 ```
+
+`study.results` reads `results/<run>` in the study folder. Results that
+`polyzymd analyze` wrote elsewhere with `--output-dir` are read with
+`study.results("lid_opening", folder="that/folder")`; `analyze` warns when
+`--output-dir` takes them out of the study folder, because `study check` and
+`study freeze` see only `results/`.
 
 `results.table` has the columns `name`, `condition`, `replicate`, `part`,
 `label`, `frame`, `time_ns`, `value` and `unit`. A per-frame series fills

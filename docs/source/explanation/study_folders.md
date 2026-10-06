@@ -96,7 +96,7 @@ metadata: {}                    # see "Publishing metadata"
 
 | Rule | Why |
 |---|---|
-| One equilibration window for the whole study | Replicates and conditions are compared on equal footing |
+| One equilibration window per analysis, the study's unless the analysis sets its own | Replicates and conditions are compared on equal footing, while a time-resolved analysis can start where a steady-state one cannot |
 | Command-line options override `study.yaml`, which overrides defaults | A one-off change needs no edit |
 | Unknown keys are errors with a "did you mean" hint | A misspelt setting must not fall back to its default silently |
 | Results go to `results/` beside `study.yaml` unless `--output-dir` says otherwise | The protocol and its results travel together |

@@ -55,6 +55,23 @@ class TestProductionLength:
         assert "Short 0.9 ns" in notes[0] and "Long 2.9 ns" in notes[0]
         assert "until 0.9ns" in notes[0]
 
+    def test_replicates_differing_the_same_way_are_not_blamed_on_conditions(
+        self, tmp_path: Path
+    ) -> None:
+        configs = {}
+        for label in ("A", "B"):
+            config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "s")
+            for replicate, n_frames in ((1, 10), (2, 30)):
+                write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(n_frames)])
+            configs[label] = config
+        study = pz.Study.from_configs(configs, equilibration="0ns")
+        report = (
+            study.timeseries(rg, pz.select("all"), unit="A", output_dir=tmp_path).reduce().compare()
+        )
+        notes = [w for w in report.warnings if "different times" in w]
+        assert len(notes) == 1
+        assert notes[0].startswith("the replicates within each condition")
+
     def test_until_gives_a_common_window(self, unequal, tmp_path: Path) -> None:
         study = pz.Study.from_configs(unequal, equilibration="0ns", until="0.9ns")
         assert [len(r.frames) for r in study["Long"].replicates] == [10, 10]
@@ -191,16 +208,55 @@ class TestAllowEmpty:
         assert result.exit_code == 2
         assert "allow_empty: true" in result.output
 
-    def test_allow_empty_leaves_replicates_out(self, tmp_path: Path) -> None:
-        from polyzymd.analyses.study_file import load_study_file
-        from polyzymd.analyses.user_functions import _without_empty_replicates
+    def test_allow_empty_passes_empty_groups(self, tmp_path: Path) -> None:
+        """A no-polymer control is measured with an empty group, also in one submit task."""
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
 
         root = self._study(tmp_path, True)
-        assert load_study_file(root).analyses["count"].function.allow_empty is True
-        with pytest.raises(ProtocolError, match="Every replicate"):
-            _without_empty_replicates(pz.Study(root), {"atoms": "index 99"})
-        kept, notes = _without_empty_replicates(pz.Study(root), {"atoms": "index 0"})
-        assert kept.labels == ["A", "B"] and notes == []
+        task = CliRunner().invoke(
+            cli,
+            ["analyze", "count", "--study", str(root), "--label", "A", "--replicates", "1"]
+            + ["--no-plots"],
+        )
+        assert task.exit_code == 0, task.output
+        result = CliRunner().invoke(cli, ["analyze", "count", "--study", str(root), "--no-plots"])
+        assert result.exit_code == 0, result.output
+        table = pz.Study(root).results("count").table
+        assert sorted(set(table["condition"])) == ["A", "B"]
+        assert (table["value"] == 0.0).all()
+
+
+class TestLabelledVerdict:
+    def _rows(self, testable: bool):
+        from polyzymd.analyses.protocols import ConditionReport, PairwiseReport
+
+        conditions = [
+            ConditionReport(label=c, entry=e, n_replicates=n, mean=m)
+            for c, n in (("A", 1), ("B", 1))
+            for e, m in (("1", 1.0), ("2", float("nan")))
+        ]
+        pairwise = [
+            PairwiseReport(a="A", b="B", entry=e, delta=0.0, testable=testable) for e in ("1", "2")
+        ]
+        return conditions, pairwise
+
+    def test_one_replicate_is_not_testable(self) -> None:
+        from polyzymd.analyses.timeseries import _labelled_verdict
+
+        conditions, pairwise = self._rows(False)
+        (sentence,) = _labelled_verdict("q", None, ["A", "B"], conditions, pairwise)
+        assert sentence.startswith("not testable: q for A vs B") and "(n 1 vs 1)" in sentence
+        assert "0 of 0" not in sentence
+
+    def test_label_means_ignore_nan(self) -> None:
+        from polyzymd.analyses.timeseries import _labelled_verdict
+
+        conditions, _ = self._rows(True)
+        sentence = _labelled_verdict("q", None, ["A"], conditions, [])[0]
+        assert "nan" not in sentence and "from 1 to 1" in sentence
+        assert "1 labels without a mean" in sentence
 
 
 class TestAnalysisLogging:
@@ -245,3 +301,233 @@ def test_logs_and_deposit_are_outputs() -> None:
     from polyzymd.analyses.study_git import OUTPUTS
 
     assert "logs/" in OUTPUTS and "deposit/" in OUTPUTS and "results/" in OUTPUTS
+
+
+class TestOutputDirResults:
+    def test_results_written_elsewhere_are_found_with_folder(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = TestAllowEmpty()._study(tmp_path, True)
+        elsewhere = tmp_path / "elsewhere"
+        result = CliRunner().invoke(
+            cli,
+            ["analyze", "count", "--study", str(root), "--output-dir", str(elsewhere)]
+            + ["--no-plots"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Study.results('count', folder=...)" in result.output
+        study = pz.Study(root)
+        with pytest.raises(ProtocolError) as error:
+            study.results("count")
+        assert "folder=" in error.value.hint
+        assert len(study.results("count", folder=elsewhere).table) > 0
+
+
+class TestPartialReport:
+    def _study(self, tmp_path: Path) -> Path:
+        configs = {}
+        for label in ("A", "B", "C"):
+            config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "s")
+            write_openmm_replicate(config, 1, [1.0 + 0.01 * k for k in range(10)])
+            write_openmm_replicate(config, 2, [1.1 + 0.01 * k for k in range(10)])
+            configs[label] = config
+        root = tmp_path / "study"
+        (root / "analyses").mkdir(parents=True)
+        (root / "analyses" / "m.py").write_text(
+            "def n(atoms):\n"
+            "    if '/C/' in atoms.universe.filename:\n"
+            "        raise RuntimeError('boom in C')\n"
+            "    return float(atoms.positions[0, 0])\n"
+        )
+        (root / "study.yaml").write_text(
+            "equilibration: 0ns\n"
+            "conditions: {"
+            + ", ".join(f"{label}: {config}" for label, config in configs.items())
+            + "}\n"
+            "analyses:\n"
+            "  first:\n"
+            "    function: analyses/m.py:n\n"
+            "    kind: timeseries\n"
+            "    selections: {atoms: all}\n"
+        )
+        return root
+
+    def test_failing_condition_leaves_a_partial_report(self, tmp_path: Path) -> None:
+        import json
+
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path)
+        result = CliRunner().invoke(cli, ["analyze", "first", "--study", str(root), "--no-plots"])
+        assert result.exit_code == 0, result.output
+        assert "status partial" in result.output
+        report = json.loads((root / "results" / "first" / "report.json").read_text())
+        assert report["status"] == "partial"
+        assert [c["label"] for c in report["conditions"]] == ["A", "B"]
+        assert any(
+            "condition C is left out: RuntimeError: boom in C" in p for p in report["problems"]
+        )
+        assert any(p["a"] == "A" and p["b"] == "B" for p in report["pairwise"])
+        check = CliRunner().invoke(cli, ["study", "check", str(root)])
+        assert "with a partial report" in check.output
+
+    def test_a_task_does_not_replace_the_study_report(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path)
+        task = CliRunner().invoke(
+            cli,
+            ["analyze", "first", "--study", str(root), "--label", "A", "--replicates", "1"]
+            + ["--no-plots", "--task"],
+        )
+        assert task.exit_code == 0, task.output
+        assert not (root / "results" / "first" / "report.json").exists()
+
+
+class TestMissingLabels:
+    def _study(self, tmp_path: Path, missing: str | None) -> Path:
+        configs = {}
+        for label in ("A", "B"):
+            config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "s")
+            for replicate, n_frames in ((1, 6), (2, 4)):
+                write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(n_frames)])
+            configs[label] = config
+        root = tmp_path / "study"
+        (root / "analyses").mkdir(parents=True)
+        (root / "analyses" / "m.py").write_text(
+            "def per_frame(atoms, frames):\n"
+            "    n = len(frames)\n"
+            "    return [f'f{i}' for i in range(n)], [float(i) for i in range(n)]\n"
+        )
+        (root / "study.yaml").write_text(
+            "equilibration: 0ns\n"
+            f"conditions: {{A: {configs['A']}, B: {configs['B']}}}\n"
+            "analyses:\n"
+            "  byf:\n"
+            "    function: analyses/m.py:per_frame\n"
+            "    kind: per_replicate\n"
+            "    labels: returned\n"
+            "    selections: {atoms: all}\n" + (f"    missing: {missing}\n" if missing else "")
+        )
+        return root
+
+    def test_missing_labels_name_the_study_yaml_key(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path, None)
+        result = CliRunner().invoke(cli, ["analyze", "byf", "--study", str(root), "--no-plots"])
+        assert result.exit_code == 2
+        assert "missing: .nan in the study.yaml entry" in result.output
+
+    def test_missing_fills_labels_a_replicate_lacks(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path, ".nan")
+        result = CliRunner().invoke(cli, ["analyze", "byf", "--study", str(root), "--no-plots"])
+        assert result.exit_code == 0, result.output
+        table = pz.Study(root).results("byf").table
+        assert set(table["label"]) == {f"f{i}" for i in range(6)}
+
+    def test_missing_needs_returned_labels(self, tmp_path: Path) -> None:
+        from polyzymd.analyses.study_file import load_study_file
+
+        root = self._study(tmp_path, ".nan")
+        text = (root / "study.yaml").read_text().replace("    labels: returned\n", "")
+        (root / "study.yaml").write_text(text)
+        with pytest.raises(ProtocolError, match="missing applies only"):
+            load_study_file(root)
+
+
+class TestTimeseriesParts:
+    """Issue 2: a timeseries function returns several named values per frame."""
+
+    def _study(self, tmp_path: Path, parts: str | None) -> Path:
+        configs = {}
+        for label in ("A", "B"):
+            config = write_simulation_config(tmp_path / label, scratch=tmp_path / label / "s")
+            for replicate in (1, 2):
+                write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(6)])
+            configs[label] = config
+        root = tmp_path / "study"
+        (root / "analyses").mkdir(parents=True)
+        (root / "analyses" / "m.py").write_text(
+            "def shape(atoms):\n"
+            "    x = float(atoms.positions[0, 0])\n"
+            "    return {'x': x, 'double': 2 * x, 'one': 1.0}\n"
+        )
+        (root / "study.yaml").write_text(
+            "equilibration: 0ns\n"
+            f"conditions: {{A: {configs['A']}, B: {configs['B']}}}\n"
+            "analyses:\n"
+            "  shape:\n"
+            "    function: analyses/m.py:shape\n"
+            "    kind: timeseries\n"
+            "    selections: {atoms: all}\n" + (f"    parts: {parts}\n" if parts else "")
+        )
+        return root
+
+    def test_each_part_is_its_own_series(self, tmp_path: Path) -> None:
+        import json
+
+        import numpy as np
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path, "[x, double, one]")
+        result = CliRunner().invoke(cli, ["analyze", "shape", "--study", str(root)])
+        assert result.exit_code == 0, result.output
+        stored = root / "results" / "shape" / "polyzymd_results" / "shape" / "A" / "replicate_1"
+        with np.load(stored / "series.npz") as data:
+            assert data["values"].shape == (6, 3) and len(data["times"]) == 6
+        assert json.loads((stored / "parts.json").read_text()) == ["x", "double", "one"]
+        results = pz.Study(root).results("shape")
+        table = results.table
+        assert sorted(set(table["part"])) == ["double", "one", "x"]
+        x = table.query("part == 'x'")["value"].to_numpy()
+        double = table.query("part == 'double'")["value"].to_numpy()
+        assert np.allclose(double, 2 * x)
+        assert results.report.run == "x" and results.report.all_runs == ["x", "double", "one"]
+        figures = root / "results" / "shape" / "figures"
+        assert {"x_timeseries", "double_timeseries", "one_timeseries"} <= {
+            p.stem for p in figures.rglob("*")
+        }
+        chosen = CliRunner().invoke(
+            cli, ["analyze", "shape", "--study", str(root), "--run", "double", "--no-plots"]
+        )
+        assert chosen.exit_code == 0, chosen.output
+        assert pz.Study(root).results("shape").report.run == "double"
+        wrong = CliRunner().invoke(
+            cli, ["analyze", "shape", "--study", str(root), "--run", "nope", "--no-plots"]
+        )
+        assert wrong.exit_code == 2 and "Use --run with one of x, double, one" in wrong.output
+
+    def test_a_dict_without_parts_says_how(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path, None)
+        result = CliRunner().invoke(cli, ["analyze", "shape", "--study", str(root), "--no-plots"])
+        assert result.exit_code == 2
+        assert "parts: [...]" in result.output
+
+    def test_parts_must_match(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from polyzymd.cli.main import cli
+
+        root = self._study(tmp_path, "[x, other]")
+        result = CliRunner().invoke(cli, ["analyze", "shape", "--study", str(root), "--no-plots"])
+        assert result.exit_code == 2
+        assert "returned the parts" in result.output

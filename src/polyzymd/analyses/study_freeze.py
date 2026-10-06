@@ -178,9 +178,14 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
             label = record.get("condition")
             if label in hashes and hashes[label] and record.get("config_hash") != hashes[label]:
                 found.append(f"the config of {label} changed")
-            if record.get("equilibration") != protocol.equilibration:
+            equilibration, until = protocol.window(run)
+            if record.get("equilibration") != equilibration:
+                found.append(f"equilibration {record.get('equilibration')} is not {equilibration}")
+            if not _same_until(record.get("until_ns"), until):
+                recorded = record.get("until_ns")
                 found.append(
-                    f"equilibration {record.get('equilibration')} is not {protocol.equilibration}"
+                    f"until {'none' if recorded is None else f'{recorded}ns'} is not "
+                    f"{until or 'none'}"
                 )
             if int(record.get("stride", 1)) != protocol.stride:
                 found.append(f"stride {record.get('stride')} is not {protocol.stride}")
@@ -206,6 +211,30 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
         if found:
             reasons[run] = sorted(set(found))
     return reasons
+
+
+def _own_windows(protocol: Any) -> str:
+    """Name the analyses that set their own window, for the checklist and methods text."""
+    own = []
+    for run, entry in protocol.analyses.items():
+        if entry.equilibration is None and entry.until is None:
+            continue
+        equilibration, until = protocol.window(run)
+        own.append(f"{run} {equilibration}" + (f" until {until}" if until else ""))
+    return f" (analyses with their own window: {', '.join(own)})" if own else ""
+
+
+def _same_until(recorded_ns: Any, until: str | None) -> bool:
+    """Return whether a record's ``until_ns`` is the window end ``until`` (None: no end)."""
+    if until is None or recorded_ns is None:
+        return until is None and recorded_ns is None
+    if until == "common":
+        # Resolved to the shortest replicate's end when the results were made.
+        return True
+    from polyzymd.analyses.shared.loader import convert_time, parse_time_string
+
+    value, unit = parse_time_string(until)
+    return abs(convert_time(value, unit, "ns") - float(recorded_ns)) < 1e-9
 
 
 def _gzip_copy(source: Path, target: Path) -> Path:
@@ -656,7 +685,9 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
             [f"results/{run}/report.json" for run in protocol.analyses],
         ),
         "1b_equilibration_and_production": item(
-            f"equilibration window {protocol.equilibration} removed from every replicate; stride {protocol.stride}",
+            f"equilibration window {protocol.equilibration} removed from every replicate"
+            + _own_windows(protocol)
+            + f"; stride {protocol.stride}",
             {
                 label: {r: v["frames_analysed"] for r, v in c["replicates"].items()}
                 for label, c in manifest["conditions"].items()
@@ -718,8 +749,9 @@ def _method(protocol: Any) -> str:
     )
     return (
         f"Analysed with PolyzyMD {polyzymd.__version__}: {len(protocol.conditions)} conditions "
-        f"({', '.join(protocol.conditions)}), equilibration window {protocol.equilibration}, "
-        f"stride {protocol.stride}; analyses {runs or 'none'}. The replicate is the sampling unit."
+        f"({', '.join(protocol.conditions)}), equilibration window {protocol.equilibration}"
+        f"{_own_windows(protocol)}, stride {protocol.stride}; analyses {runs or 'none'}. The "
+        "replicate is the sampling unit."
     )
 
 
@@ -827,6 +859,8 @@ def freeze(root: str | Path, *, tag: str | None = None) -> FreezeResult:
                 if entry.function
                 else None,
                 "settings": entry.settings or (entry.function.settings if entry.function else {}),
+                "equilibration": protocol.window(run)[0],
+                "until": protocol.window(run)[1],
                 "report": f"results/{run}/report.json",
             }
             for run, entry in protocol.analyses.items()

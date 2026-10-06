@@ -199,9 +199,13 @@ class Replicate:
         return identity
 
 
+#: ``until`` value that ends every replicate at the shortest replicate's last time.
+COMMON_UNTIL = "common"
+
+
 def _parse_until(label: str, until: str | None) -> float | None:
-    """Return the common window end ``until`` in ns, or ``None``."""
-    if until is None:
+    """Return the common window end ``until`` in ns, or ``None`` (also for ``common``, set later)."""
+    if until is None or until == COMMON_UNTIL:
         return None
     from polyzymd.analyses.shared.loader import convert_time, parse_time_string
 
@@ -213,6 +217,27 @@ def _parse_until(label: str, until: str | None) -> float | None:
             f"Condition {label!r}: cannot read until {until!r}: {exc}",
             hint="Write it as a time such as '38ns'.",
         ) from exc
+
+
+def resolve_common_until(conditions: Sequence[Condition]) -> None:
+    """Replace ``until: common`` with the earliest last production time of any replicate.
+
+    Every replicate of every condition then ends at the same time, so the
+    replicates share their time points. The time is written back as each
+    condition's ``until`` and ``until_ns``, so records name it.
+    """
+    if not any(condition.until == COMMON_UNTIL for condition in conditions):
+        return
+    ends = [r.production_ns for condition in conditions for r in condition.replicates]
+    if not ends:
+        raise ProtocolError(
+            "until: common found no replicate to take the common end from.",
+            hint="Check that the conditions' runs are where the configs or data.local.yaml say.",
+        )
+    end = f"{min(ends):.6g}ns"
+    for condition in conditions:
+        condition.until = end
+        condition.until_ns = _parse_until(condition.label, end)
 
 
 #: Relative difference in production length above which conditions are flagged.
@@ -246,14 +271,29 @@ def production_length_warnings(study: Any, labels: Sequence[str] | None = None) 
     shortest = min(min(v) for v in ends.values())
     if longest <= 0 or (longest - shortest) / longest <= PRODUCTION_LENGTH_TOLERANCE:
         return []
+
+    def differ(values: list[float]) -> bool:
+        return (max(values) - min(values)) / longest > PRODUCTION_LENGTH_TOLERANCE
+
     described = "; ".join(
         f"{label} {min(v):.4g}" + (f"-{max(v):.4g}" if max(v) != min(v) else "") + " ns"
         for label, v in ends.items()
     )
+    remedy = (
+        f"Compare over a common window with until {shortest:.4g}ns (--until, or until: in "
+        "study.yaml)"
+    )
+    # Conditions differ when their shortest or their longest replicates do;
+    # otherwise only replicates within each condition differ, the same way.
+    if differ([min(v) for v in ends.values()]) or differ([max(v) for v in ends.values()]):
+        return [
+            f"the conditions were analysed up to different times ({described}); a difference "
+            f"may come from simulated time rather than the condition. {remedy}"
+        ]
     return [
-        f"the conditions were analysed up to different times ({described}); a difference may "
-        f"come from simulated time rather than the condition. Compare over a common window with "
-        f"until {shortest:.4g}ns (--until, or until: in study.yaml)"
+        f"the replicates within each condition were analysed up to different times "
+        f"({described}), the same range in every condition; a replicate's value may depend on "
+        f"how long it ran. {remedy}"
     ]
 
 
@@ -395,6 +435,7 @@ class Study:
                 )
                 for label, path in protocol.conditions.items()
             }
+            resolve_common_until(list(self._built.values()))
         return self._built
 
     @property
@@ -417,16 +458,26 @@ class Study:
         self._entry(run)
         return self.protocol.results_dir(run)
 
-    def results(self, run: str) -> Any:
+    def results(self, run: str, *, folder: str | Path | None = None) -> Any:
         """Return the stored per-replicate values of ``run``, without loading any trajectory.
 
-        See :func:`polyzymd.analyses.results.read_results`; this reads
+        See :func:`polyzymd.analyses.results.read_results`. This reads
         ``<study>/results/<run>``, where ``polyzymd analyze RUN --study``
-        stores them.
+        stores them, or ``folder`` when the run was given ``--output-dir``.
         """
         from polyzymd.analyses.results import read_results
 
-        return read_results(self.results_dir(run))
+        if folder is not None:
+            return read_results(Path(folder).expanduser())
+        default = self.results_dir(run)
+        try:
+            return read_results(default)
+        except ProtocolError as exc:
+            raise ProtocolError(
+                str(exc),
+                hint=f"Run polyzymd analyze {run} --study {self.protocol.path} first. Results "
+                "written with --output-dir are read with Study.results(run, folder=<that folder>).",
+            ) from exc
 
     def _entry(self, run: str) -> Any:
         if self.protocol is None:
@@ -511,20 +562,20 @@ class Study:
                 f"Cannot read the equilibration window {equilibration!r}: {exc}",
                 hint="Write it as a time such as '100ns', '500ps' or '0ns'.",
             ) from exc
-        return cls(
-            [
-                Condition(
-                    label,
-                    path,
-                    str(equilibration),
-                    replicates,
-                    stride,
-                    (data or {}).get(label, (data or {}).get("*")),
-                    until,
-                )
-                for label, path in zip(labels, paths, strict=True)
-            ]
-        )
+        conditions = [
+            Condition(
+                label,
+                path,
+                str(equilibration),
+                replicates,
+                stride,
+                (data or {}).get(label, (data or {}).get("*")),
+                until,
+            )
+            for label, path in zip(labels, paths, strict=True)
+        ]
+        resolve_common_until(conditions)
+        return cls(conditions)
 
     def __getitem__(self, label: str) -> Condition:
         if label not in self._conditions:

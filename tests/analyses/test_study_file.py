@@ -244,8 +244,11 @@ class TestCheck:
         result = CliRunner().invoke(cli, ["study", "check", str(study_dir)])
         assert result.exit_code == 0, result.output
         assert "control No polymer: runs [1, 2]" in result.output
-        assert "analysis rg: selection=all; stored results" in result.output
-        assert "analysis rg as rg_first: selection=index 0; no stored results" in result.output
+        assert "analysis rg: selection=all; window eq 0.25ns; stored results" in result.output
+        assert (
+            "analysis rg as rg_first: selection=index 0; window eq 0.25ns; no stored results"
+            in result.output
+        )
         assert "cite: " in result.output and "PolyzyMD" in result.output
 
     def test_missing_trajectories_are_not_errors(self, study_dir: Path, tmp_path: Path) -> None:
@@ -423,3 +426,97 @@ def test_no_name_needs_a_study() -> None:
     result = CliRunner().invoke(cli, ["analyze"])
     assert result.exit_code == 2
     assert "needs NAME" in result.output
+
+
+class TestAnalysisWindow:
+    """Issue 1: an analysis entry sets its own equilibration and until."""
+
+    def _with_full(self, study_dir: Path) -> Path:
+        text = (study_dir / "study.yaml").read_text()
+        _write(
+            study_dir / "study.yaml",
+            text + "  rg_full:\n    analysis: rg\n    selection: all\n    equilibration: 0ns\n"
+            "  rg_early:\n    analysis: rg\n    selection: all\n    until: 0.5ns\n",
+        )
+        return study_dir
+
+    def test_entries_keep_their_own_window(self, study_dir: Path) -> None:
+        import json
+
+        from polyzymd.analyses.study_freeze import stale_runs
+
+        root = self._with_full(study_dir)
+        protocol = load_study_file(root)
+        assert protocol.window("rg") == ("0.25ns", None)
+        assert protocol.window("rg_full") == ("0ns", None)
+        assert protocol.window("rg_early") == ("0.25ns", "0.5ns")
+        for run in ("rg", "rg_full", "rg_early"):
+            assert _analyze(run, "--study", str(root)).exit_code == 0
+        study = pz.Study(root)
+        frames = {
+            run: len(study.results(run).table.query("condition == 'Polymer' and replicate == 1"))
+            for run in ("rg", "rg_full", "rg_early")
+        }
+        assert frames == {"rg": 7, "rg_full": 10, "rg_early": 3}
+        record = next((root / "results" / "rg_full").rglob("record.json"))
+        assert json.loads(record.read_text())["equilibration"] == "0ns"
+        stale = stale_runs(protocol)
+        assert not {"rg", "rg_full", "rg_early"} & set(stale), stale
+        check = CliRunner().invoke(cli, ["study", "check", str(root)])
+        assert "window eq 0ns (its own)" in check.output
+        assert "window eq 0.25ns until 0.5ns (its own)" in check.output
+
+    def test_command_line_window_wins(self, study_dir: Path) -> None:
+        root = self._with_full(study_dir)
+        assert _analyze("rg_full", "--study", str(root), "--eq", "0.5ns").exit_code == 0
+        table = pz.Study(root).results("rg_full").table
+        assert len(table.query("condition == 'Polymer' and replicate == 1")) == 5
+
+    def test_bad_window_is_refused(self, study_dir: Path) -> None:
+        text = (study_dir / "study.yaml").read_text()
+        _write(study_dir / "study.yaml", text + "  rg_bad: {analysis: rg, equilibration: soon}\n")
+        with pytest.raises(ProtocolError, match="analyses.rg_bad: cannot read equilibration"):
+            load_study_file(study_dir)
+
+
+class TestCommonUntil:
+    """Issue 3: until: common ends every replicate at the shortest one's last time."""
+
+    def _unequal(self, tmp_path: Path, entry_until: str) -> Path:
+        root = tmp_path / "s"
+        for folder in ("a", "b"):
+            config = write_simulation_config(
+                root / "conditions" / folder, scratch=tmp_path / "data" / folder
+            )
+            for replicate, n_frames in ((1, 10), (2, 6 if folder == "b" else 8)):
+                write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(n_frames)])
+        _write(
+            root / "study.yaml",
+            "equilibration: 0ns\n"
+            "conditions: {A: conditions/a/config.yaml, B: conditions/b/config.yaml}\n"
+            f"analyses:\n  rg: {{selection: all, until: {entry_until}}}\n",
+        )
+        return root
+
+    def test_python_api_aligns_replicates(self, tmp_path: Path) -> None:
+        root = self._unequal(tmp_path, "common")
+        protocol = load_study_file(root)
+        study = pz.Study.from_configs(
+            dict(protocol.conditions), equilibration="0ns", until="common"
+        )
+        times = [r.times.tolist() for c in study for r in c.replicates]
+        assert all(t == times[0] for t in times) and len(times[0]) == 6
+        assert study["A"].until == "0.5ns"
+
+    def test_command_line_records_the_common_end(self, tmp_path: Path) -> None:
+        import json
+
+        from polyzymd.analyses.study_freeze import stale_runs
+
+        root = self._unequal(tmp_path, "common")
+        assert _analyze("rg", "--study", str(root)).exit_code == 0
+        table = pz.Study(root).results("rg").table
+        assert set(table.groupby(["condition", "replicate"]).size()) == {6}
+        record = next((root / "results" / "rg").rglob("record.json"))
+        assert json.loads(record.read_text())["until_ns"] == pytest.approx(0.5)
+        assert "rg" not in stale_runs(load_study_file(root))

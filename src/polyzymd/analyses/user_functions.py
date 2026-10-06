@@ -76,84 +76,72 @@ def run_user_analysis(
     output_dir: Path,
     recompute: bool = False,
     plots: bool = True,
+    part: str | None = None,
 ) -> Any:
     """Run a study's user function over every replicate and return its ProtocolReport.
 
     ``user`` is the :class:`~polyzymd.analyses.study_file.UserFunction` of
     the entry ``run``; ``settings`` (from ``--set``) override its
     ``settings``. With one condition the report summarises it, and with
-    several it compares each with the first.
+    several it compares each with the first. With ``parts``, every part is
+    stored and plotted, and the report covers ``part`` (``--run``), the first
+    part by default, naming the others in ``all_runs``.
     """
     from polyzymd.analyses.timeseries import select, universe
 
     function = load_function(user.file, user.qualname)
-    skipped: list[str] = []
-    if user.allow_empty and user.selections:
-        study, skipped = _without_empty_replicates(study, user.selections)
-    kwargs: dict[str, Any] = {key: select(value) for key, value in user.selections.items()}
+    # With allow_empty, a selection matching no atoms reaches the function as
+    # an empty AtomGroup, so a no-polymer control is measured, not dropped.
+    kwargs: dict[str, Any] = {
+        key: select(value, allow_empty=user.allow_empty) for key, value in user.selections.items()
+    }
     if user.universe:
         kwargs[user.universe] = universe()
     kwargs.update(user.settings)
     kwargs.update(settings or {})
+    parts = user.parts
+    if part is not None and part not in (parts or []):
+        raise ProtocolError(
+            f"{run} has no part {part!r}.",
+            hint=f"Use --run with one of {', '.join(parts)}."
+            if parts
+            else "Leave --run out; this function measures one quantity.",
+        )
+    extra = {} if parts is None else {"parts": parts}
     if user.kind == "timeseries":
-        series = study.timeseries(
+        measured = study.timeseries(
             function,
             unit=user.unit,
             name=run,
             recompute=recompute,
             output_dir=output_dir,
+            **extra,
             **kwargs,
         )
+        every = measured if parts is not None else {None: measured}
         if plots:
-            series.plot()
-        values = series.reduce(user.reduce)
+            for series in every.values():
+                series.plot()
+        results = {key: series.reduce(user.reduce) for key, series in every.items()}
     else:
-        values = study.per_replicate(
+        measured = study.per_replicate(
             function,
             unit=user.unit,
             labels=user.labels,
+            missing=user.missing,
             name=run,
             recompute=recompute,
             output_dir=output_dir,
+            **extra,
             **kwargs,
         )
+        results = measured if parts is not None else {None: measured}
     if plots:
-        values.plot()
+        for values in results.values():
+            values.plot()
+    chosen = part or (parts[0] if parts else None)
+    values = results[chosen]
     report = values.compare() if len(study) > 1 else values.summary()
-    report.warnings = [*skipped, *report.warnings]
-    return report
-
-
-def _without_empty_replicates(study: Any, selections: dict[str, str]) -> tuple[Any, list[str]]:
-    """Return ``study`` without the replicates where a selection matches no atoms, and why.
-
-    A condition left with no replicate is left out of the study; when none is
-    left, ``ProtocolError`` says which selections matched nothing.
-    """
-    from polyzymd.analyses.study import Study
-
-    kept, notes = [], []
-    for condition in study:
-        replicates = []
-        for replicate in condition.replicates:
-            universe = replicate.universe()
-            empty = [k for k, sel in selections.items() if len(universe.select_atoms(sel)) == 0]
-            if empty:
-                notes.append(
-                    f"condition {condition.label} replicate {replicate.index}: "
-                    f"{', '.join(f'{k} {selections[k]!r}' for k in empty)} matched no atoms, so "
-                    "the replicate is left out (allow_empty)"
-                )
-            else:
-                replicates.append(replicate)
-        if replicates:
-            condition.replicates = replicates
-            kept.append(condition)
-        else:
-            notes.append(f"condition {condition.label} has no replicate left and is left out")
-    if not kept:
-        raise ProtocolError(
-            "Every replicate has a selection that matches no atoms.",
-            hint="Check the selections in the study.yaml entry against the topology.",
-        )
-    return Study(kept), notes
+    if parts is None:
+        return report
+    return report.model_copy(update={"analysis": run, "run": chosen, "all_runs": list(parts)})

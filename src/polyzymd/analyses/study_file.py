@@ -2,8 +2,8 @@
 
 A study folder holds one MD study; see the "Study folders" explanation page.
 ``study.yaml`` names the conditions (each a simulation ``config.yaml``,
-control first), the one equilibration window applied to every replicate,
-and the settings of every analysis. :func:`load_study_file` reads and
+control first), the equilibration window applied to every replicate (an
+analysis may set its own), and the settings of every analysis. :func:`load_study_file` reads and
 checks it: every key must be one this module knows, and a misspelt key is
 refused with the nearest known spelling, so a typo never falls back to a
 default silently.
@@ -37,6 +37,8 @@ _TOP_KEYS = (
     "metadata",
 )
 _ENTRY_KEYS = ("analysis",)
+#: Keys of any ``analyses:`` entry that set its own analysis window.
+WINDOW_KEYS = ("equilibration", "until")
 #: Keys of an ``analyses:`` entry that runs your own function.
 USER_KEYS = (
     "function",
@@ -48,6 +50,8 @@ USER_KEYS = (
     "labels",
     "reduce",
     "allow_empty",
+    "missing",
+    "parts",
 )
 #: How a user function is run: once per replicate, or once per frame.
 USER_KINDS = ("per_replicate", "timeseries")
@@ -83,9 +87,18 @@ class UserFunction:
     reduce : str
         How a timeseries becomes one value per replicate, ``"mean"`` by default.
     allow_empty : bool
-        Leave out, with a warning, every replicate where a selection matches
-        no atoms, such as a polymer selection in a no-polymer control, as the
-        shipped analyses do; ``False`` refuses such a replicate.
+        Pass a selection that matches no atoms, such as a polymer selection
+        in a no-polymer control, to the function as an empty AtomGroup, as
+        the shipped analyses do; ``False`` refuses such a replicate.
+    parts : list of str or None
+        Names of several quantities the function measures in one pass: a
+        timeseries function returns, per frame, a dict with these keys (or
+        a sequence in this order), a per_replicate function one row per
+        part. Each part is stored and reported as its own result.
+    missing : float or None
+        For ``labels: returned``, the value a replicate gets for a label that
+        other replicates returned and it did not, such as ``nan``; ``None``
+        refuses such a replicate.
     """
 
     file: Path
@@ -98,6 +111,8 @@ class UserFunction:
     labels: str | None = None
     reduce: str = "mean"
     allow_empty: bool = False
+    missing: float | None = None
+    parts: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -107,12 +122,16 @@ class AnalysisEntry:
     ``run`` is the entry's key, which names its results folder. ``analysis``
     is the shipped analysis it runs, the key itself unless given, or
     ``None`` when ``function`` names your own function instead.
+    ``equilibration`` and ``until`` are the entry's own analysis window, or
+    ``None`` to use the study's.
     """
 
     run: str
     analysis: str | None
     settings: dict[str, Any] = field(default_factory=dict)
     function: UserFunction | None = None
+    equilibration: str | None = None
+    until: str | None = None
 
 
 @dataclass(frozen=True)
@@ -138,6 +157,19 @@ class StudyFile:
     def results_dir(self, run: str) -> Path:
         """The folder of one analysis run's stored results, report and figures."""
         return self.root / RESULTS_FOLDER / run
+
+    def window(self, run: str) -> tuple[str, str | None]:
+        """Return the equilibration and ``until`` of ``run``: its entry's, else the study's.
+
+        A run the file does not list runs with the study's window.
+        """
+        entry = self.analyses.get(run)
+        if entry is None:
+            return self.equilibration, self.until
+        return (
+            entry.equilibration or self.equilibration,
+            entry.until if entry.until is not None else self.until,
+        )
 
 
 def find_study_file(path: str | Path) -> Path:
@@ -177,8 +209,18 @@ def _analysis_entry(run: str, raw: Any, path: Path) -> AnalysisEntry:
             f"{path}: analyses.{run} must be a mapping of settings, got {raw!r}.",
             hint=f"Write it as '{run}: {{setting: value}}', or '{run}: {{}}' for the defaults.",
         )
+    raw = dict(raw)
+    window = {key: raw.pop(key) for key in WINDOW_KEYS if key in raw}
+    equilibration = (
+        None
+        if window.get("equilibration") is None
+        else _equilibration(window["equilibration"], f"{path}: analyses.{run}")
+    )
+    until = _until(window.get("until"), f"{path}: analyses.{run}")
     if "function" in raw:
-        return AnalysisEntry(run, None, {}, _user_function(run, raw, path))
+        return AnalysisEntry(
+            run, None, {}, _user_function(run, raw, path), equilibration=equilibration, until=until
+        )
     settings = dict(raw)
     analysis = str(settings.pop("analysis", run))
     if analysis not in FUNCTION_ANALYSES:
@@ -190,8 +232,12 @@ def _analysis_entry(run: str, raw: Any, path: Path) -> AnalysisEntry:
             + ("" if "analysis" in raw else f", or add 'analysis: NAME' to the {run!r} entry")
             + ".",
         )
-    _unknown(settings, (*_ENTRY_KEYS, *FUNCTION_ANALYSES[analysis]), f"{path}: analyses.{run}")
-    return AnalysisEntry(run, analysis, settings)
+    _unknown(
+        settings,
+        (*_ENTRY_KEYS, *WINDOW_KEYS, *FUNCTION_ANALYSES[analysis]),
+        f"{path}: analyses.{run}",
+    )
+    return AnalysisEntry(run, analysis, settings, equilibration=equilibration, until=until)
 
 
 def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
@@ -244,6 +290,26 @@ def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
             f"{where}: a keyword argument is given twice: {sorted(clash) or raw['universe']}.",
             hint="Give each keyword argument in only one of selections, settings and universe.",
         )
+    missing = raw.get("missing")
+    if missing is not None:
+        if labels != "returned":
+            raise ProtocolError(
+                f"{where}: missing applies only to a per_replicate function with labels: returned.",
+                hint="Leave missing out, or return (labels, values) and write labels: returned.",
+            )
+        if isinstance(missing, bool) or not isinstance(missing, (int, float)):
+            raise ProtocolError(
+                f"{where}: missing must be a number, not {missing!r}.",
+                hint="Write a number, or .nan for a label without a value.",
+            )
+    parts = raw.get("parts")
+    if parts is not None:
+        if not isinstance(parts, list) or not parts or len(set(map(str, parts))) != len(parts):
+            raise ProtocolError(
+                f"{where}: parts must be a list of distinct names, not {parts!r}.",
+                hint="For example 'parts: [area, contacts, gyration]'.",
+            )
+        parts = [str(part) for part in parts]
     unit = raw.get("unit")
     return UserFunction(
         file=location,
@@ -256,6 +322,8 @@ def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
         labels=labels,
         reduce=reduce,
         allow_empty=bool(raw.get("allow_empty", False)),
+        missing=None if missing is None else float(missing),
+        parts=parts,
     )
 
 
@@ -294,10 +362,27 @@ def read_data_file(path: Path, labels: Any) -> dict[str, Path]:
     }
 
 
-def _until(value: Any, file: Path) -> str | None:
-    """Check ``until:``, the end of a common analysis window."""
+def _equilibration(value: Any, where: Any) -> str:
+    """Check an equilibration window, such as ``100ns``."""
+    from polyzymd.analyses.shared.loader import parse_time_string
+
+    text = str(value)
+    try:
+        parse_time_string(text)
+    except ValueError as exc:
+        raise ProtocolError(
+            f"{where}: cannot read equilibration {text!r}: {exc}",
+            hint="Write it as a time such as '100ns', '500ps' or '0ns'.",
+        ) from exc
+    return text
+
+
+def _until(value: Any, file: Any) -> str | None:
+    """Check ``until:``, the end of a common analysis window, or ``common``."""
     if value is None:
         return None
+    if str(value) == "common":
+        return "common"
     from polyzymd.analyses.shared.loader import parse_time_string
 
     try:
@@ -305,7 +390,8 @@ def _until(value: Any, file: Path) -> str | None:
     except ValueError as exc:
         raise ProtocolError(
             f"{file}: cannot read until {value!r}: {exc}",
-            hint="Write it as a time such as '38ns', or leave it out to use every production frame.",
+            hint="Write it as a time such as '38ns', 'common' to end every replicate at the "
+            "shortest one's last time, or leave it out to use every production frame.",
         ) from exc
     return str(value)
 
@@ -347,16 +433,7 @@ def load_study_file(path: str | Path) -> StudyFile:
                 "window, for example 'equilibration: 100ns'.",
             )
 
-    from polyzymd.analyses.shared.loader import parse_time_string
-
-    equilibration = str(raw["equilibration"])
-    try:
-        parse_time_string(equilibration)
-    except ValueError as exc:
-        raise ProtocolError(
-            f"{file}: cannot read equilibration {equilibration!r}: {exc}",
-            hint="Write it as a time such as '100ns', '500ps' or '0ns'.",
-        ) from exc
+    equilibration = _equilibration(raw["equilibration"], file)
 
     conditions_raw = raw["conditions"]
     if not isinstance(conditions_raw, Mapping) or not conditions_raw:

@@ -122,6 +122,15 @@ ended, whether or not each one succeeded, and prints both job IDs. A task that
 fails leaves its replicate unmeasured, and the report job measures it itself;
 check `logs/` for the failure.
 
+When a condition still cannot be measured, the report job does not fail with
+it: it reports the conditions that work, compared with the control when the
+control is among them, and marks the report `status partial`, with one
+`problem:` line naming each condition left out and its error. `report.json`
+records the same as `status` and `problems`, and `polyzymd study check` shows
+a partial report with its problems. An array task, which measures one
+condition and replicate, stores its result but never writes the run's
+`report.json`.
+
 - **`--dry-run`** writes the folder and prints the two `sbatch` commands
   without submitting, so you can read the scripts first.
 - **Environment.** Both jobs run the Python interpreter and `PYTHONPATH` of

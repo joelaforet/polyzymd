@@ -285,7 +285,7 @@ def test_constant_labels_are_not_testable_and_leave_the_family(tmp_path) -> None
     )
     report = values.compare()
     assert all(not row.testable and row.family_size is None for row in report.pairwise)
-    assert sum("is not testable" in text for text in report.warnings) == 3
+    assert sum("is not testable at any of its 3 labels" in text for text in report.warnings) == 1
 
 
 @pytest.fixture()

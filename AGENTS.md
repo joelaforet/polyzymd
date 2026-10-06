@@ -94,7 +94,8 @@ replicate and a report job (`workflow/analysis_submit.py`). The hidden
 exit 2 and name their replacements.
 
 A study folder's `study.yaml` (`analyses/study_file.py`) holds the analysis
-protocol: conditions, one equilibration window and each analysis run's
+protocol: conditions, the equilibration window (an entry may set its own
+`equilibration:`/`until:`, `StudyFile.window`) and each analysis run's
 settings, including the study's own functions (`function: file.py:name`,
 `analyses/user_functions.py`, keyed on the whole file's hash).
 `polyzymd study check` reads it without trajectories (`cli/study.py`);
@@ -110,7 +111,8 @@ warn when conditions were analysed up to different times (`until`/`--until`
 gives a common window) and name segments `progress.json` records but the disk
 lacks; `analyze` and the `study` commands print only reports and warnings and
 write the full log to `logs/` (`polyzymd -v` for more). A study's own function
-with `allow_empty: true` skips replicates where a selection matches nothing.
+with `allow_empty: true` gets an empty AtomGroup where a selection matches
+nothing (a polymer selection in a no-polymer control), so it must handle one.
 Config hashes identify input structures by content and leave out the
 projects and scratch directories (`analyses/identity.py`); stored records
 identify trajectory and topology files by SHA-256 and size
