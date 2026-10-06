@@ -36,6 +36,12 @@ restraints:
     enabled: true
 ```
 
+The units differ between the two keys:
+
+- `distance` is in Å.
+- `force_constant` is in kJ mol⁻¹ nm⁻². 4184 kJ mol⁻¹ nm⁻² is
+  10 kcal mol⁻¹ Å⁻².
+
 ## Step 3: make selections specific
 
 PolyzyMD uses MDAnalysis-style selections. The most useful selectors are:
@@ -141,7 +147,7 @@ restraints:
 
 ## Force constant starting points
 
-| Use case | Suggested `force_constant` |
+| Use case | Suggested `force_constant` (kJ mol⁻¹ nm⁻²) |
 |----------|----------------------------|
 | strong restraint | `10000-50000` |
 | moderate restraint | `1000-5000` |

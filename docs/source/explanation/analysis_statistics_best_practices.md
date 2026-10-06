@@ -34,9 +34,9 @@ non-stationary trajectories as provisional unless independent replicates and
 convergence diagnostics support the conclusion.
 ```
 
-PolyzyMD analyses may account for correlation directly where an analysis
-supports it. A generalized metric-type system for automatic correlation handling is a
-planned design direction, not a universal implemented contract.
+PolyzyMD reports the statistical inefficiency g and N_eff of the time series
+of each replicate. These values change no interval, because intervals use one
+value per replicate.
 
 ## Key concepts
 
@@ -232,7 +232,8 @@ error in every table rather than the standard error alone.
 
 With one replicate there is nothing to take a spread over. PolyzyMD writes
 `null` for the SEM, the standard deviation and both confidence limits, and
-prints `n/a (single replicate)` in tables, rather than writing `0.0`. A zero
+prints `na` in the text report (for example `sem na  ci95 na`), rather than
+writing `0.0`. A zero
 would claim a measurement with no uncertainty, which is the opposite of what a
 single run supports.
 
@@ -418,6 +419,9 @@ Useful background includes:
 
 > **Flyvbjerg, H., & Petersen, H. G.** (1989). "Error estimates on averages
 > of correlated data." *Journal of Chemical Physics*, 91(1), 461-466.
+> [DOI: 10.1063/1.457480](https://doi.org/10.1063/1.457480). Block averaging is
+> an alternative route to the statistical inefficiency. PolyzyMD does not
+> implement it.
 
 > **Joint Committee for Guides in Metrology** (2008). "JCGM 100: Evaluation of
 > measurement data - Guide to the expression of uncertainty in measurement
@@ -444,7 +448,3 @@ follows the GUM.
 > **Benjamini, Y.** (2010). "Discovering the false discovery rate." *Journal of
 > the Royal Statistical Society B*, 72(4), 405-416.
 > [DOI: 10.1111/j.1467-9868.2010.00746.x](https://doi.org/10.1111/j.1467-9868.2010.00746.x)
-
-> [DOI: 10.1063/1.457480](https://doi.org/10.1063/1.457480). Block averaging is
-> an alternative route to the statistical inefficiency. PolyzyMD does not
-> implement it.

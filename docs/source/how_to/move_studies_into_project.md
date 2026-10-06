@@ -48,7 +48,7 @@ created project Paper_1 with studies lipa363, calb343, rml333
 ```
 
 `Paper_1/` now holds `project.yaml`, `analyses/`, `stats/`, `figures/`, the
-licences, and one folder per study, each with a `study.yaml` full of `TODO`s.
+licenses, and one folder per study, each with a `study.yaml` full of `TODO`s.
 
 ## 2. Add each protein's conditions
 
@@ -58,9 +58,9 @@ files it names, into the new study:
 
 ```bash
 polyzymd study add-condition "No Polymer" --study Paper_1/lipa363 \
-    --config /projects/.../LipA_noPoly_363K_REDO.yaml
+    --config old_runs/lipa_no_polymer/config.yaml
 polyzymd study add-condition "SBMA-EGMA 0:100" --study Paper_1/lipa363 \
-    --config /projects/.../LipA_SBMA-EGMA_0_100_363K_REDO.yaml
+    --config old_runs/lipa_sbma_egma_0_100/config.yaml
 # ... and so on for every condition of every study
 ```
 
@@ -111,12 +111,12 @@ Copy each reference structure the old analyses name into the study's
 `structures/` folder, and name it:
 
 ```bash
-cp /projects/.../1ISP_clean_processed_moved_simulation_resids.pdb Paper_1/lipa363/structures/
+cp old_runs/structures/1ISP_clean.pdb Paper_1/lipa363/structures/
 ```
 
 ```yaml
 structures:
-  reference: structures/1ISP_clean_processed_moved_simulation_resids.pdb
+  reference: structures/1ISP_clean.pdb
 ```
 
 Use the same name for the equivalent structure of every protein (here
@@ -142,7 +142,7 @@ Give the same region the same name in every study: `core` is LipA's core in
 
 ## 6. Move the analyses
 
-Each old analysis entry goes to one of two places:
+Each old analysis entry goes to one of three places:
 
 - **every protein runs it:** `analyses:` in `Paper_1/project.yaml`, written
   once, with `structure <name>` and `region <name>` where the old entry had a
@@ -158,7 +158,7 @@ An old entry
     selection: protein and name CA
     alignment_selection: protein and name CA and resid 5 6 7 8 15 16 ...
     reference_mode: external
-    reference_file: /projects/.../1ISP_clean_processed_moved_simulation_resids.pdb
+    reference_file: old_runs/structures/1ISP_clean.pdb
 ```
 
 becomes, in `project.yaml`,
@@ -230,7 +230,7 @@ are measured once more.
 ## 10. Finish
 
 - Fill `metadata:` in `project.yaml` (title, authors with `family-names`,
-  `given-names` and ORCID, licences).
+  `given-names` and ORCID, licenses).
 - Move any standalone statistics script into `stats/`, reading results with
   `pz.Project(".").replicate_table(run)` ({doc}`../how_to/project`).
 - Commit: `git -C Paper_1 add -A && git -C Paper_1 commit -m "Move the studies into a project"`.

@@ -112,11 +112,14 @@ After the run, the directory holds:
         └── rmsf_comparison.png
 ```
 
-- **`record.json`** holds the function and a hash of its source, its
-  arguments, the config hash, the path, size and modification time of the
-  topology and every trajectory file, the frames and times used, the residue
-  labels and the software versions, so the value can be traced back to what
-  produced it.
+- **`record.json`** records what produced the values:
+  - the function and the hash of its code;
+  - the arguments;
+  - the config hash;
+  - the relative path, size and SHA-256 of the topology and of each
+    trajectory file;
+  - the frames and times used, and the residue labels;
+  - the software versions.
 - **`values.npz`** holds the replicate's per-residue values.
 - The **figures** show each residue's RMSF, its offset from the reference and
   its RMS deviation from the reference (`rmsd_per_residue`), and the three core values.

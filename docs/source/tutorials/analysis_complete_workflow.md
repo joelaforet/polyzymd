@@ -1,14 +1,15 @@
 # Tutorial: Analyze a Study from Finished Simulations
 
-This tutorial walks through one complete PolyzyMD analysis story:
+In this tutorial you analyze a study of three conditions with finished
+simulations: one without polymer and two with a polymer. You do these steps:
 
-- three simulation conditions already exist
-- you compare the protein-polymer hydrogen bonds with one `polyzymd analyze` command
-- you read the result and find the stored values and figures
-- you add RMSF and polymer-protein contacts for the same conditions
+1. Compare the protein-polymer hydrogen bonds of the two polymer conditions.
+2. Read the result, and report another result of the same analysis.
+3. Find the stored values and the figures.
+4. Add RMSF and contacts for all three conditions.
 
-By the end, you will have validated comparisons, stored per-replicate results
-and figures for a small three-condition study.
+At the end, you have comparisons with intervals, stored per-replicate results
+and figures for the study.
 
 ## What You Will Learn
 
@@ -64,9 +65,9 @@ conditions plus the results folder. -->
 ## Step 1: Compare the Hydrogen Bonds
 
 From the study root, make a folder for the results and run the comparison
-there. Protein-polymer hydrogen bonds exist only in the two conditions with a
-polymer, so compare those two; the first `-c` is the control, and `--label`
-names the conditions in the same order:
+there. The question of this step is which polymer forms more hydrogen bonds
+with the protein, so compare the two polymer conditions. The first `-c` is the
+control, and `--label` names the conditions in the same order:
 
 ```bash
 cd my_enzyme_study
@@ -76,13 +77,13 @@ pixi run -e analysis polyzymd analyze hydrogen_bonds \
   -c ../SBMA_100_enzyme_DMSO/config.yaml \
   -c ../EGMA_100_enzyme_DMSO/config.yaml \
   --label "100% SBMA" --label "100% EGMA" \
-  --replicates 1-3 --eq 10ns --set d_a_cutoff=3.0
+  --replicates 1-3 --eq 10ns
 ```
 
 The command discards the first 10 ns of every replicate and, on every
 production frame, counts the hydrogen bonds between the protein (`chainid A`)
 and the polymer (`chainid C`) with MDAnalysis `HydrogenBondAnalysis`, a donor
-within 3.0 Å of the acceptor and a donor-hydrogen-acceptor angle of at least
+within 3.5 Å of the acceptor and a donor-hydrogen-acceptor angle of at least
 150°. It prints one line per condition with the mean number of hydrogen bonds
 per frame over the replicates, its 95% interval and every replicate value,
 one line comparing 100% EGMA with 100% SBMA by Welch's t test, and a
@@ -99,7 +100,7 @@ pixi run -e analysis polyzymd analyze hydrogen_bonds \
   -c ../SBMA_100_enzyme_DMSO/config.yaml \
   -c ../EGMA_100_enzyme_DMSO/config.yaml \
   --label "100% SBMA" --label "100% EGMA" \
-  --replicates 1-3 --eq 10ns --set d_a_cutoff=3.0 \
+  --replicates 1-3 --eq 10ns \
   --run protein_polymer_residues
 ```
 

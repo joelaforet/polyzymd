@@ -15,7 +15,7 @@ Multi-stage equilibration is useful when:
 
 ## Basic rule
 
-PolyzyMD now requires `simulation_phases.equilibration_stages`.
+PolyzyMD requires `simulation_phases.equilibration_stages`.
 
 Even if your protocol is minimal, represent it as one or more named stages.
 

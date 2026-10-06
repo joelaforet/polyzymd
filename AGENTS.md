@@ -187,7 +187,7 @@ shipped analysis, as a `FUNCTION_ANALYSES` entry and an `_analyze_<name>` in
 | Resource | Location | What It Documents |
 |----------|----------|-------------------|
 | Shipped functions | `analyses/functions.py`, `docs/source/reference/analysis_functions.md` | What each function measures, its arguments and units |
-| Study API | `analyses/study.py`, `analyses/timeseries.py` | `Study.from_configs`, `timeseries`, `per_replicate`, `transform`, `reduce`, `compare`, records under `polyzymd_results/` |
+| Study API | `analyses/study.py`, `analyses/timeseries.py`, `docs/source/how_to/study_api.md`, `docs/source/reference/study_api.md` | `Study.from_configs`, `timeseries`, `per_replicate`, `transform`, `reduce`, `compare`, records under `polyzymd_results/` |
 | API explanation | `docs/source/explanation/analysis_api.md` | How the study API supplies universes, records and statistics |
 | `polyzymd analyze` | `analyses/protocols.py`, `docs/source/how_to/analysis_agent_protocol.md` | `FUNCTION_ANALYSES`, the `_analyze_<name>` functions, `ProtocolReport` |
 | Study folders | `analyses/study_file.py`, `analyses/results.py`, `analyses/study_scaffold.py`, `analyses/study_git.py`, `docs/source/how_to/study_yaml.md`, `docs/source/how_to/study_folder.md` | `study.yaml`, `--study`, `polyzymd study check/init/locate/freeze`, `data.local.yaml`, `--data`, `Study.results`, `docs/source/how_to/study_freeze.md` |
@@ -234,7 +234,7 @@ print(series.reduce("mean").compare().to_agent_text())
 
 ### When Adding New Features
 
-1. **Read** `docs/source/explanation/analysis_api.md` and `docs/source/reference/analysis_functions.md`
+1. **Read** `docs/source/reference/study_api.md`, `docs/source/explanation/analysis_api.md` and `docs/source/reference/analysis_functions.md`
 2. **Write the function** in `analyses/functions.py`, with a docstring that says concretely what it measures and in which unit
 3. **Test it on placed geometry** with a known answer, then on the synthetic OpenMM run directories of `tests/_support/analysis_testkit.py` (`write_simulation_config`, `write_openmm_replicate`)
 4. **For a shipped analysis**, add the `FUNCTION_ANALYSES` entry and `_analyze_<name>` in `protocols.py`, and document it in `analysis_functions.md` and a how-to page
