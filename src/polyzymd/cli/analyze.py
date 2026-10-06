@@ -732,7 +732,12 @@ def _study_record(study_path: Path, run: str, settings: dict) -> dict:
     """
     import hashlib
 
-    from polyzymd.analyses.study_file import find_study_file, load_study_file, portable
+    from polyzymd.analyses.study_file import (
+        entry_record,
+        find_study_file,
+        load_study_file,
+        portable,
+    )
     from polyzymd.analyses.study_git import git_state
 
     file = find_study_file(study_path)
@@ -762,6 +767,8 @@ def _study_record(study_path: Path, run: str, settings: dict) -> dict:
         "settings": portable(settings, root, project_root),
         "selections": selections,
         "factors": protocol.factors,
+        "conditions": list(protocol.conditions),
+        "entry": entry_record(protocol, run) if entry is not None else None,
         "git": state,
     }
     if project is not None:

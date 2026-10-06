@@ -12,6 +12,7 @@ default silently.
 from __future__ import annotations
 
 import difflib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -391,6 +392,43 @@ def read_data_file(path: Path, labels: Any) -> dict[str, Path]:
         str(label): (path.parent / Path(str(folder)).expanduser()).resolve()
         for label, folder in raw.items()
     }
+
+
+def entry_record(protocol: StudyFile, run: str) -> dict[str, Any]:
+    """Return everything an ``analyses:`` entry says, resolved for the study, fit to publish.
+
+    The shipped analysis or the function (file relative to the study, name,
+    kind, unit, selections, settings, labels, reduce, allow_empty, missing,
+    parts), the window and the stride. A report records it, so ``freeze``
+    can tell when any of it changed since.
+    """
+    entry = protocol.analyses[run]
+    project_root = protocol.project.root if protocol.project is not None else None
+    equilibration, until = protocol.window(run)
+    record: dict[str, Any] = {
+        "analysis": entry.analysis,
+        "settings": portable(entry.settings, protocol.root, project_root),
+        "equilibration": equilibration,
+        "until": until,
+        "stride": protocol.stride_of(run),
+    }
+    function = entry.function
+    if function is not None:
+        record["function"] = {
+            "file": portable(str(function.file), protocol.root, project_root),
+            "qualname": function.qualname,
+            "kind": function.kind,
+            "unit": function.unit,
+            "selections": dict(function.selections),
+            "universe": function.universe,
+            "settings": portable(function.settings, protocol.root, project_root),
+            "labels": function.labels,
+            "reduce": function.reduce,
+            "allow_empty": function.allow_empty,
+            "missing": function.missing,
+            "parts": function.parts,
+        }
+    return json.loads(json.dumps(record, default=str))
 
 
 def portable(value: Any, root: Path, project_root: Path | None = None) -> Any:

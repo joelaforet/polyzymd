@@ -41,8 +41,9 @@ __pycache__/
 deposit/
 # Full logs of polyzymd commands; the console shows only warnings.
 logs/
-# SLURM logs of polyzymd analyze --submit and of the simulations.
-results/*/slurm/*/logs/
+# Job scripts and logs of polyzymd analyze --submit, which name this
+# machine's paths, and SLURM logs of the simulations.
+results/*/slurm/
 conditions/*/slurm_logs/
 """
 

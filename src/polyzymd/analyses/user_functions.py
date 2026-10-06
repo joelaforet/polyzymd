@@ -46,7 +46,7 @@ def load_function(file: Path, qualname: str) -> Callable:
     # its current content is what the stored results' hash covers.
     for name, loaded in list(sys.modules.items()):
         origin = getattr(loaded, "__file__", None)
-        if origin and Path(origin).resolve().parent == file.parent:
+        if origin and Path(origin).resolve().is_relative_to(file.parent):
             del sys.modules[name]
     sys.path.insert(0, str(file.parent))
     # Helpers it imports are compiled into a fresh cache: a .pyc beside them is
@@ -144,6 +144,7 @@ def run_user_analysis(
             unit=user.unit,
             labels=user.labels,
             missing=user.missing,
+            note_filled=True,
             name=run,
             recompute=recompute,
             output_dir=output_dir,

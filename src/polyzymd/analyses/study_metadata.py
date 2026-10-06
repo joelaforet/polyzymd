@@ -103,7 +103,7 @@ def check_metadata(raw: Any, what: str = "study") -> tuple[dict[str, Any], list[
         value = raw.get(key)
         if not value or not str(value).strip():
             warnings.append(f"metadata.{key} is missing")
-            meta[key] = f"{TODO}: add metadata.{key} to study.yaml"
+            meta[key] = f"{TODO}: add metadata.{key} to {what}.yaml"
         else:
             meta[key] = str(value).strip()
     for key in ("keywords", "system_type"):
@@ -125,7 +125,7 @@ def check_metadata(raw: Any, what: str = "study") -> tuple[dict[str, Any], list[
         authors.append({k: str(v) for k, v in person.items() if v})
     if not authors:
         warnings.append("metadata.authors is empty")
-        authors = [{"name": f"{TODO}: add metadata.authors to study.yaml"}]
+        authors = [{"name": f"{TODO}: add metadata.authors to {what}.yaml"}]
     meta["authors"] = authors
     meta["contact"] = dict(_mapping(raw.get("contact"), "metadata.contact"))
     doi = raw.get("doi")

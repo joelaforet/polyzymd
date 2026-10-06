@@ -22,6 +22,7 @@ from polyzymd.analyses.study_freeze import (
     CHECKLIST,
     CITATION,
     DEPOSIT,
+    EXCLUDE_MACHINE_FILES,
     MANIFEST,
     MANIFEST_SCHEMA_FILE,
     SUMMARY,
@@ -29,7 +30,9 @@ from polyzymd.analyses.study_freeze import (
     FreezeResult,
     _git,
     _versions,
+    drop_machine_files,
     freeze,
+    is_machine_file,
     stats_warnings,
     without_machine_paths,
 )
@@ -208,6 +211,7 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         results = root / "results"
         if results.exists():
             paths.append("results")
+        paths += EXCLUDE_MACHINE_FILES
         _git(root, "add", "--", *paths)
         if _git(root, "commit", "--quiet", "-m", f"Freeze project as {tag}", "--", *paths) is None:
             warnings.append("git could not commit the frozen files (is user.name set?)")
@@ -237,11 +241,12 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
                 and relative.parts[0] not in (DEPOSIT, ".git")
                 and DEPOSIT not in relative.parts
                 and path.name != "data.local.yaml"
-                and "logs" not in relative.parts
+                and not is_machine_file(str(relative))
             ):
                 target = copy / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(path, target)
+    drop_machine_files(copy)
     for label in project.labels:
         study = project[label]
         for config in study.protocol.conditions.values():
@@ -258,7 +263,12 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         Path(__file__).parent / "schemas" / MANIFEST_SCHEMA_FILE, deposit / MANIFEST_SCHEMA_FILE
     )
     readme = deposit_readme(
-        study_name=root.name, tag=tag if commit else None, meta=meta, analyses={}, root=root
+        study_name=root.name,
+        tag=tag if commit else None,
+        meta=meta,
+        analyses={},
+        root=root,
+        project=True,
     )
     (deposit / "README.md").write_text(readme + _studies_section(project))
     prepared = prepare_upload(
@@ -303,6 +313,7 @@ def _project_files(project: Any, state: dict | None) -> dict[str, dict[str, Any]
             not parts
             or parts[0] in studies
             or parts[0] in (DEPOSIT, ".git", "logs")
+            or is_machine_file(name)
             or name in (*PROJECT_GENERATED, "data.local.yaml")
             or not (root / name).is_file()
         ):

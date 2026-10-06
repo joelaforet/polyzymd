@@ -168,7 +168,7 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
             hashes[label] = compute_config_hash(SimulationConfig.from_yaml(path))
         except (OSError, ValueError):
             hashes[label] = None
-    from polyzymd.analyses.study_file import portable
+    from polyzymd.analyses.study_file import entry_record, portable
 
     project_root = protocol.project.root if protocol.project is not None else None
     found_replicates = _replicates_on_disk(protocol)
@@ -243,6 +243,33 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
         if entry.function is not None and "selections" in study:
             if study["selections"] != dict(entry.function.selections):
                 found.append("the selections differ from the ones the results were made with")
+        if study.get("entry") is not None:
+            now_entry = entry_record(protocol, run)
+            changed = sorted(
+                key
+                for key in set(now_entry) | set(study["entry"])
+                if now_entry.get(key) != study["entry"].get(key)
+            )
+            inner = []
+            if "function" in changed and isinstance(now_entry.get("function"), dict):
+                then = study["entry"].get("function") or {}
+                inner = sorted(
+                    key
+                    for key in set(now_entry["function"]) | set(then)
+                    if now_entry["function"].get(key) != then.get(key)
+                )
+            for key in [k for k in changed if k != "function"] + inner:
+                found.append(f"the entry's {key} changed since the report")
+        reported = [c.get("label") for c in report.get("conditions", [])]
+        listed = list(protocol.conditions)
+        if reported and set(dict.fromkeys(reported)) != set(listed):
+            missing_now = sorted(set(listed) - set(reported))
+            extra = sorted(set(reported) - set(listed))
+            found.append(
+                "the report's conditions differ from study.yaml"
+                + (f": not in the report {missing_now}" if missing_now else "")
+                + (f"; no longer in study.yaml {extra}" if extra else "")
+            )
         if "factors" in study:
             labels = [c.get("label") for c in report.get("conditions", [])]
             now = {k: v for k, v in protocol.factors.items() if k in labels}
@@ -252,6 +279,23 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
         if found:
             reasons[run] = sorted(set(found))
     return reasons
+
+
+#: Pathspecs ``git add`` and ``git commit`` leave out when freezing: job files of
+#: ``polyzymd analyze --submit`` and logs, which name one machine's paths.
+EXCLUDE_MACHINE_FILES = [":(exclude)**/slurm/**", ":(exclude)**/logs/**"]
+
+
+def is_machine_file(path: str) -> bool:
+    """Return whether ``path`` lies in a ``slurm/`` or ``logs/`` folder, never published."""
+    return any(part in ("slurm", "logs") for part in Path(path).parts[:-1])
+
+
+def drop_machine_files(folder: Path) -> None:
+    """Delete every ``slurm/`` and ``logs/`` folder under ``folder``, a copy being deposited."""
+    for path in sorted(folder.rglob("*"), reverse=True):
+        if path.is_dir() and path.name in ("slurm", "logs"):
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def report_problems(protocol: Any) -> list[str]:
@@ -1019,7 +1063,11 @@ def freeze(
             if p.is_file()
             and p.relative_to(root).parts[0] not in (DEPOSIT, ".git", "data.local.yaml")
         }
-    study_files = sorted(p for p in candidates if p not in GENERATED and (root / p).is_file())
+    study_files = sorted(
+        p
+        for p in candidates
+        if p not in GENERATED and (root / p).is_file() and not is_machine_file(p)
+    )
     manifest: dict[str, Any] = {
         "$schema": MANIFEST_SCHEMA_FILE,
         "schema": MANIFEST_SCHEMA,
@@ -1101,6 +1149,7 @@ def freeze(
     commit = None
     if state and tag:
         paths = [p for p in (*GENERATED, ".gitignore", "results") if (root / p).exists()]
+        paths += EXCLUDE_MACHINE_FILES
         _git(root, "add", "--", *paths)
         if (
             _git(
@@ -1137,6 +1186,7 @@ def freeze(
             target = study_copy / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(root / name, target)
+    drop_machine_files(study_copy)
     for config in _condition_configs(protocol):
         copied = study_copy / config
         if copied.is_file():

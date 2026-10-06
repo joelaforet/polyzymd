@@ -172,16 +172,20 @@ def replicate_table(study: Any, run: str) -> Any:
 
 
 def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[Any]:
-    """Fit the slope of the replicate values against each numeric factor of the conditions.
+    """Fit the slope of the condition means against each numeric factor of the conditions.
 
     A factor is numeric when every condition that declares it gives an
-    ``int`` or ``float`` (not a ``bool``). For each numeric factor, the
-    per-replicate values of the report's conditions (the values its
-    comparisons used) are regressed on the factor's level, with the
-    replicate as the unit and only the conditions that declare the factor
-    included. The fit is ordinary least squares (:func:`scipy.stats.linregress`)
-    with a two-sided t test of zero slope and a 95 percent t interval on the
-    slope. The p-values of all factors form one Benjamini-Hochberg family.
+    ``int`` or ``float`` (not a ``bool``). For each numeric factor, each
+    condition that declares it contributes one point: the mean of its
+    replicate values (the values its comparisons used), at the factor's
+    level. The condition, not the replicate, is the unit, because the
+    factor varies only between conditions; replicates of one condition
+    measure that condition's run-to-run scatter and say nothing more about
+    the line between conditions (Hurlbert, 1984; Lazic, 2010). The fit is
+    ordinary least squares (:func:`scipy.stats.linregress`) on the means,
+    with a two-sided t test of zero slope and a 95 percent t interval, both
+    on ``k - 2`` degrees of freedom for ``k`` conditions. The p-values of all
+    factors form one Benjamini-Hochberg family.
 
     Parameters
     ----------
@@ -196,18 +200,27 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
     list of TrendReport
         One :class:`~polyzymd.analyses.protocols.TrendReport` per numeric
         factor. A factor with a replicate value that is not finite, fewer
-        than three levels (two make it a pairwise comparison), fewer than
-        four replicate values, or values that are all equal has
-        ``testable=False``, its ``reason``, and no slope. The list is empty when the report
-        holds labelled results (any condition with an ``entry``, such as one
-        value per residue).
+        than three levels (two make it a pairwise comparison), or condition
+        means that are all equal has ``testable=False``, its ``reason``, and
+        no slope. The list is empty when the report holds labelled results
+        (any condition with an ``entry``, such as one value per residue).
 
     Notes
     -----
-    The Benjamini-Hochberg step-up procedure (Benjamini and Hochberg, 1995)
-    is applied with
+    With three to five conditions the test has one to three degrees of
+    freedom, so only a clear, steady change across conditions reaches
+    significance. The Benjamini-Hochberg step-up procedure (Benjamini and
+    Hochberg, 1995) is applied with
     :func:`~polyzymd.analyses.shared.inferential_statistics.benjamini_hochberg`
     at its default ``alpha`` of 0.05.
+
+    References
+    ----------
+    Hurlbert, S. H. (1984). Pseudoreplication and the design of ecological
+    field experiments. Ecological Monographs 54, 187-211.
+    Lazic, S. E. (2010). The problem of pseudoreplication in neuroscientific
+    studies: is it affecting your analysis? BMC Neuroscience 11, 5.
+    doi:10.1186/1471-2202-11-5
     """
     from scipy import stats
 
@@ -227,32 +240,34 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
     ]
     trends = []
     for name in names:
-        x, y, used = [], [], []
+        levels, means, used, n_values, bad = [], [], [], 0, 0
         for item in report.conditions:
             level = factors.get(item.label, {}).get(name)
             if level is None:
                 continue
+            values = [float(v) for v in item.replicate_values]
             used.append(item.label)
-            for value in item.replicate_values:
-                x.append(float(level))
-                y.append(float(value))
-        trend = TrendReport(factor=name, conditions=used, n_replicates=len(y))
-        bad = sum(1 for value in y if not math.isfinite(value))
+            n_values += len(values)
+            bad += sum(1 for v in values if not math.isfinite(v))
+            if values:
+                levels.append(float(level))
+                means.append(sum(values) / len(values))
+        trend = TrendReport(factor=name, conditions=used, n_replicates=n_values)
         if bad:
-            reason = f"{bad} replicate values are not finite"
-        elif len(set(x)) < 3:
-            reason = f"{len(set(x))} levels; a trend needs at least three"
-        elif len(y) < 4:
-            reason = f"{len(y)} replicate values; a trend needs at least four"
-        elif len(set(y)) == 1:
-            reason = "the values do not vary"
+            reason = f"{bad} replicate value{'s are' if bad != 1 else ' is'} not finite"
+        elif len(set(levels)) < 3:
+            n = len(set(levels))
+            reason = f"{n} level{'s' if n != 1 else ''}; a trend needs at least three"
+        elif len(set(means)) == 1:
+            reason = "the condition means do not vary"
         else:
             reason = None
         if reason is not None:
             trend = trend.model_copy(update={"reason": reason})
         else:
-            fit = stats.linregress(x, y)
-            half = stats.t.ppf(0.975, len(y) - 2) * fit.stderr
+            fit = stats.linregress(levels, means)
+            dof = len(means) - 2
+            half = stats.t.ppf(0.975, dof) * fit.stderr
             trend = trend.model_copy(
                 update={
                     "slope": float(fit.slope),
@@ -303,13 +318,13 @@ def trend_sentence(metric: str, unit: str | None, trend: Any) -> str:
     if not trend.testable:
         return (
             f"{VERDICT_NOT_TESTABLE}: trend of {metric} with {trend.factor}: {trend.reason} "
-            f"(n {trend.n_replicates} replicates over {len(trend.conditions)} conditions)"
+            f"({len(trend.conditions)} conditions, {trend.n_replicates} replicates)"
         )
     per = f" {unit} per unit {trend.factor}" if unit else f" per unit {trend.factor}"
     evidence = (
         f"slope {_num(trend.slope)}{per}, 95% CI {_interval(trend.slope_ci95)}, "
-        f"p_adj {_num(trend.p_adjusted)}, n {trend.n_replicates} replicates over "
-        f"{len(trend.conditions)} conditions"
+        f"p_adj {_num(trend.p_adjusted)}, fitted on {len(trend.conditions)} condition means "
+        f"of {trend.n_replicates} replicates"
     )
     if trend.significant:
         direction = "rises" if trend.slope > 0 else "falls"
@@ -345,18 +360,29 @@ def _report_hashes(target: Any) -> dict[str, str]:
 
 
 def _protocol_hashes(target: Any) -> dict[str, str]:
-    """Return the SHA-256 of the files that define the target's factors and analyses.
+    """Return a hash of each file that defines the target's factors and analyses.
 
     Every study's ``study.yaml`` (keyed ``<study label>/study.yaml`` for a
-    Project) and, for a Project, ``project.yaml``: editing a factor, a region
-    or an analysis changes what :func:`replicate_table` gives a plan.
+    Project) and, for a Project, ``project.yaml``, each hashed without its
+    ``metadata:`` block: editing a factor, a region or an analysis changes
+    what :func:`replicate_table` gives a plan, while filling in authors or a
+    DOI does not.
     """
     if hasattr(target, "runs_in"):
-        hashes = {"project.yaml": _file_hash(target.protocol.path)}
+        hashes = {"project.yaml": _science_hash(target.protocol.path)}
         for label in target.labels:
-            hashes[f"{label}/study.yaml"] = _file_hash(target[label].protocol.path)
+            hashes[f"{label}/study.yaml"] = _science_hash(target[label].protocol.path)
         return hashes
-    return {"study.yaml": _file_hash(target.protocol.path)}
+    return {"study.yaml": _science_hash(target.protocol.path)}
+
+
+def _science_hash(path: Path) -> str:
+    """Return the SHA-256 of a study.yaml or project.yaml without its ``metadata:`` block."""
+    import yaml
+
+    data = yaml.safe_load(Path(path).read_text()) or {}
+    data.pop("metadata", None)
+    return hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()
 
 
 def _plan_hash(plan: StatsPlan) -> str:

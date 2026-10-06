@@ -237,16 +237,18 @@ class PairwiseReport(BaseModel):
 
 
 class TrendReport(BaseModel):
-    """The slope of the replicate values against one numeric factor of the conditions.
+    """The slope of the condition means against one numeric factor of the conditions.
 
-    ``conditions`` are those that declare the factor; ``n_replicates`` the
-    points fitted, one per replicate. ``slope`` is in the metric's unit per
-    unit of the factor, with a 95 percent t interval; ``p`` tests zero slope
-    and ``p_adjusted`` corrects it over the study's numeric factors
-    (Benjamini-Hochberg). ``testable`` is ``False``, with the ``reason``,
-    when a replicate value is not finite, there are fewer than three factor
-    levels (two levels make the trend a pairwise comparison), fewer than four
-    replicate values, or the values all agree.
+    ``conditions`` are those that declare the factor, each one point of the
+    fit: the mean of its replicate values at its factor level.
+    ``n_replicates`` counts the replicate values behind those means.
+    ``slope`` is in the metric's unit per unit of the factor, with a 95
+    percent t interval on ``k - 2`` degrees of freedom for ``k`` conditions;
+    ``p`` tests zero slope and ``p_adjusted`` corrects it over the study's
+    numeric factors (Benjamini-Hochberg). ``testable`` is ``False``, with the
+    ``reason``, when a replicate value is not finite, there are fewer than
+    three factor levels (two levels make the trend a pairwise comparison),
+    or the condition means all agree.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -2001,11 +2003,14 @@ def _difference_ci(
 def _trend_line(trend: TrendReport) -> str:
     """One report line per trend test."""
     if not trend.testable:
-        return f"trend {trend.factor}  not testable: {trend.reason}  n {trend.n_replicates}"
+        return (
+            f"trend {trend.factor}  not testable: {trend.reason}"
+            f"  condition_means {len(trend.conditions)}  replicates {trend.n_replicates}"
+        )
     return (
         f"trend {trend.factor}  slope {_num(trend.slope)}  ci95 {_interval(trend.slope_ci95)}"
         f"  p {_num(trend.p)}  p_adj {_num(trend.p_adjusted)}  r2 {_num(trend.r_squared)}"
-        f"  n {trend.n_replicates}  conditions {len(trend.conditions)}"
+        f"  condition_means {len(trend.conditions)}  replicates {trend.n_replicates}"
     )
 
 

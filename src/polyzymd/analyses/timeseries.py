@@ -127,10 +127,11 @@ def _function_record(function: Callable) -> dict[str, Any]:
 
     A function loaded from a study's or project's own file
     (:func:`~polyzymd.analyses.user_functions.load_function`) is hashed with
-    every Python file in that file's folder, by name and content: the folder
-    is on ``sys.path`` while the function runs, so a helper module it imports
-    from there is part of what produced the result. Editing any of those files
-    changes the record.
+    every file under that file's folder (:func:`code_files`), by path and
+    content: the folder is on ``sys.path`` while the function runs, so a
+    helper module or package it imports from there, or a data file it reads,
+    is part of what produced the result. Editing any of those files changes
+    the record.
     """
     module_file = getattr(function, "__polyzymd_module_file__", None)
     try:
@@ -155,11 +156,55 @@ def _function_record(function: Callable) -> dict[str, Any]:
     }
 
 
+#: Folders whose files are outputs or inputs of their own, never code a function uses.
+_NOT_CODE = {"__pycache__", ".git", "results", "logs", "deposit", "conditions", "slurm"}
+#: Files beside code that say where data is on one machine, or that freeze writes.
+_NOT_CODE_FILES = {
+    "data.local.yaml",
+    "manifest.json",
+    "md_checklist.yaml",
+    "system_summary.csv",
+    "CITATION.cff",
+    ".zenodo.json",
+}
+
+
+def code_files(folder: Path) -> list[Path]:
+    """Return every file a function or plan in ``folder`` may use, in path order.
+
+    Every file under ``folder``, in subfolders too (helper packages, data
+    files the code reads), except compiled bytecode and the files of
+    ``results/``, ``logs/``, ``deposit/``, ``conditions/``, ``slurm/`` and
+    ``.git/`` folders and of any folder holding a ``study.yaml``, which are
+    a study's data rather than its code, and ``data.local.yaml`` and the
+    files ``freeze`` writes, which change with the machine or the freeze.
+    """
+    files = []
+    for path in sorted(folder.rglob("*")):
+        relative = path.relative_to(folder)
+        if (
+            not path.is_file()
+            or path.suffix == ".pyc"
+            or path.name in _NOT_CODE_FILES
+            or any(part in _NOT_CODE for part in relative.parts[:-1])
+        ):
+            continue
+        if any(
+            (folder / Path(*relative.parts[:i])).joinpath("study.yaml").is_file()
+            for i in range(1, len(relative.parts))
+        ):
+            continue
+        files.append(path)
+    return files
+
+
 def _folder_code(module_file: Path) -> bytes:
-    """Return the name and content of every Python file beside ``module_file``, in name order."""
+    """Return the path and content of every file :func:`code_files` gives for the file's folder."""
+    folder = module_file.parent
     parts = []
-    for path in sorted(module_file.parent.glob("*.py")):
-        parts.append(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
+    for path in code_files(folder):
+        name = path.relative_to(folder).as_posix().encode()
+        parts.append(name + b"\0" + path.read_bytes() + b"\0")
     return b"".join(parts)
 
 
@@ -505,6 +550,7 @@ def run_per_replicate(
     unit: str | None,
     labels: Sequence | Callable | None = None,
     missing: float | None = None,
+    note_filled: bool = False,
     name: str | None = None,
     recompute: bool = False,
     output_dir: str | Path | None = None,
@@ -543,6 +589,11 @@ def run_per_replicate(
     missing : float, optional
         Value given to a label that one replicate lacks and another has.
         By default a missing label is an error.
+    note_filled : bool, optional
+        Name, in the report's warnings, every replicate given ``missing`` and
+        its labels. For a value chosen to stand in for one that was not
+        measured, as a study's ``missing:``; not for a shipped analysis whose
+        ``missing`` is a definition (an unformed hydrogen bond is zero).
     name : str, optional
         Result name. Defaults to the function's ``__name__``.
     recompute : bool, optional
@@ -662,9 +713,11 @@ def run_per_replicate(
     source = Source(name, unit, study, found, root)
 
     def result(table: dict[str, list[tuple]], metric: str) -> ReplicateValues:
-        order = None if labels is None else _label_order(table, missing, metric)
+        filled: list[str] = []
+        order = None if labels is None else _label_order(table, missing, metric, filled)
         values = ReplicateValues(source, metric, unit, False, table, order)
         values.bounds = tuple(bounds)
+        values.filled = filled if note_filled else []
         return values
 
     if parts is None:
@@ -677,8 +730,17 @@ def run_per_replicate(
     }
 
 
-def _label_order(rows: dict[str, list[tuple]], missing: float | None, name: str) -> list:
-    """Replace each replicate's label mapping with an array in the order labels first appear."""
+def _label_order(
+    rows: dict[str, list[tuple]],
+    missing: float | None,
+    name: str,
+    filled: list[str] | None = None,
+) -> list:
+    """Replace each replicate's label mapping with an array in the order labels first appear.
+
+    A label a replicate lacks gets ``missing``; each replicate that got one is
+    named in ``filled``, with its labels, for the report's warnings.
+    """
     import numpy as np
 
     order = list(dict.fromkeys(key for items in rows.values() for row in items for key in row[1]))
@@ -692,6 +754,12 @@ def _label_order(rows: dict[str, list[tuple]], missing: float | None, name: str)
                     hint="Measure the same labels in every replicate, or give the value a "
                     "replicate gets for a label it lacks: missing: .nan in the study.yaml entry "
                     "(missing=<value> in Python).",
+                )
+            if absent and filled is not None:
+                filled.append(
+                    f"condition {condition} replicate {row[0]}: {len(absent)} of {len(order)} "
+                    f"labels had no value and were given missing={missing}: "
+                    + ", ".join(str(key) for key in absent)
                 )
             values = np.array([row[1].get(key, missing) for key in order], dtype=np.float64)
             items[position] = (row[0], values, *row[2:])
@@ -978,6 +1046,8 @@ class ReplicateValues:
         self.source, self.metric, self.unit = source, metric, unit
         self.is_fraction, self.rows, self.labels = is_fraction, rows, labels
         self.bounds: tuple[float | None, float | None] = (0.0, 1.0) if is_fraction else (None, None)
+        #: One note per replicate whose missing labels were filled with ``missing``.
+        self.filled: list[str] = []
 
     @property
     def values(self) -> dict[str, list]:
@@ -1227,7 +1297,7 @@ class ReplicateValues:
             _verdict,
         )
 
-        conditions, notes = [], []
+        conditions, notes = [], list(self.filled)
         for position, entry in self._entries():
             at = "" if entry is None else f" at {entry}"
             values = self._column(position)

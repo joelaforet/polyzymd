@@ -234,6 +234,10 @@ class TestStatistics:
         assert '"n_replicates": 12' in (folder / "values.json").read_text()
         check = CliRunner().invoke(cli, ["project", "check", str(graded)])
         assert "stats plan: up to date" in check.output
+        text = (graded / "project.yaml").read_text()
+        (graded / "project.yaml").write_text(text + "metadata: {title: Filled in later}\n")
+        check = CliRunner().invoke(cli, ["project", "check", str(graded)])
+        assert "stats plan: up to date" in check.output
         with (graded / "stats" / "plan.py").open("a") as handle:
             handle.write("# edited\n")
         check = CliRunner().invoke(cli, ["project", "check", str(graded)])
@@ -438,6 +442,11 @@ class TestAuditFindings:
         (nan,) = trend_tests(report([[1.0, 2.0], [1.5, float("nan")], [2.0, 3.0]]), factors)
         assert not nan.testable and "not finite" in nan.reason
         assert "not finite" in trend_sentence("m", None, nan)
+        # Tight replicates around means 1.0, 1.0, 1.5: three points that are not a line.
+        steps = report([[0.99, 1.0, 1.01], [0.99, 1.0, 1.01], [1.49, 1.5, 1.51]])
+        (step,) = trend_tests(steps, {"c0": {"x": 0.0}, "c1": {"x": 0.5}, "c2": {"x": 1.0}})
+        assert step.testable and not step.significant and step.p > 0.2
+        assert step.slope == pytest.approx(0.5)
         two = {"c0": {"x": 0.1}, "c1": {"x": 0.5}}
         (pair,) = trend_tests(report([[1.0, 1.1], [2.0, 2.1]]), two)
         assert not pair.testable and "at least three" in pair.reason
@@ -460,3 +469,75 @@ class TestAuditFindings:
         ]["study"]
         assert "analyses/lid.py" in study["git"]["inputs_uncommitted"]
         assert study["project"]["label"] == "lipa" and len(study["project"]["sha256"]) == 64
+
+
+class TestSecondAuditFindings:
+    """Regressions for the second pre-release reproducibility audit."""
+
+    def test_helper_packages_and_data_files_are_part_of_the_code(self, project: Path) -> None:
+        (project / "analyses" / "util").mkdir()
+        (project / "analyses" / "util" / "__init__.py").write_text("")
+        (project / "analyses" / "util" / "k.py").write_text("K = 1.0\n")
+        (project / "analyses" / "scale.json").write_text('{"s": 1.0}')
+        (project / "analyses" / "lid.py").write_text(
+            "import json, pathlib\nfrom util.k import K\n\n"
+            "def lid_size(lid, reference):\n"
+            "    s = json.loads((pathlib.Path(__file__).parent / 'scale.json').read_text())['s']\n"
+            "    return K * s * float(len(lid))\n"
+        )
+        assert _analyze("lid", "--project", str(project)).exit_code == 0
+        (project / "analyses" / "util" / "k.py").write_text("K = 2.0\n")
+        assert _analyze("lid", "--project", str(project)).exit_code == 0
+        assert set(pz.Project(project).results("lid").table["value"]) == {2.0}
+        (project / "analyses" / "scale.json").write_text('{"s": 3.0}')
+        assert _analyze("lid", "--project", str(project)).exit_code == 0
+        assert set(pz.Project(project).results("lid").table["value"]) == {6.0}
+
+    def test_freeze_sees_added_conditions_and_entry_edits(self, project: Path) -> None:
+        from polyzymd.analyses.study_freeze import stale_runs
+
+        assert _analyze("--project", str(project)).exit_code == 0
+        rml = project / "rml"
+        config = write_simulation_config(rml / "conditions" / "full", scratch=project.parent / "x")
+        text = (
+            (rml / "study.yaml")
+            .read_text()
+            .replace(
+                "  Half: {config: conditions/half, factors: {sbma_fraction: 0.5}}\n",
+                "  Half: {config: conditions/half, factors: {sbma_fraction: 0.5}}\n"
+                f"  Full: {config.parent.relative_to(rml)}\n",
+            )
+        )
+        (rml / "study.yaml").write_text(text)
+        project_text = (project / "project.yaml").read_text()
+        (project / "project.yaml").write_text(
+            project_text.replace(
+                "    kind: timeseries\n", "    kind: timeseries\n    reduce: std\n"
+            )
+        )
+        stale = stale_runs(load_study_file(rml))
+        assert any("not in the report ['Full']" in w for w in stale["rg"])
+        lipa = stale_runs(load_study_file(project / "lipa"))
+        assert any("the entry's reduce changed" in w for w in lipa["lid"])
+
+    def test_submit_job_files_stay_out_of_the_deposit(self, project: Path, monkeypatch) -> None:
+        from polyzymd.analyses.project_freeze import freeze_project
+        from polyzymd.analyses.study_git import init_repository
+
+        for key in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+            monkeypatch.setenv(key, "Test")
+        for key in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+            monkeypatch.setenv(key, "test@example.com")
+        assert _analyze("--project", str(project)).exit_code == 0
+        jobs = project / "lipa" / "results" / "rg" / "slurm" / "rg_1"
+        jobs.mkdir(parents=True)
+        (jobs / "tasks.tsv").write_text(f"{project}/lipa/conditions/none/config.yaml\tA\t1\n")
+        init_repository(project, "start")
+        result = freeze_project(project)
+        deposited = "\n".join(
+            p.read_text(errors="ignore")
+            for p in result.deposit.rglob("*")
+            if p.is_file() and p.suffix in (".json", ".tsv", ".md", ".yaml", ".cff")
+        )
+        assert str(project) not in deposited
+        assert not list((result.deposit / "study").rglob("slurm"))
