@@ -1185,3 +1185,47 @@ class TestEnergyMinimizationHelpers:
 
         with pytest.raises(RuntimeError, match="infinite forces"):
             runner._check_energy_minimization_health()
+
+
+class TestMDPThermostatAndBarostat:
+    def _generator(self, tmp_path: Path, **production):
+        import yaml
+
+        from polyzymd.config.schema import SimulationConfig
+        from polyzymd.exporters.gromacs import MDPGenerator
+        from tests._support.analysis_testkit import write_simulation_config
+
+        path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+        (tmp_path / "c" / "test.pdb").write_text("END\n")
+        data = yaml.safe_load(path.read_text())
+        data["simulation_phases"]["production"].update(production)
+        path.write_text(yaml.safe_dump(data))
+        return MDPGenerator(SimulationConfig.from_yaml(path))
+
+    def test_langevin_runs_as_stochastic_dynamics(self, tmp_path: Path) -> None:
+        """LangevinMiddle is Langevin dynamics on GROMACS too, with fresh noise per stage."""
+        text = self._generator(tmp_path).generate_production().to_mdp_string()
+        assert "integrator      = sd" in text and "tcoupl          = no" in text
+        assert "ld_seed         = -1" in text
+
+    def test_approximate_mappings_are_warned_once(self, tmp_path: Path, monkeypatch) -> None:
+        """The Monte Carlo barostat maps to c-rescale, with a warning."""
+        from polyzymd.exporters import gromacs
+
+        messages = []
+        monkeypatch.setattr(gromacs.logger, "warning", lambda text, *a: messages.append(text % a))
+        generator = self._generator(tmp_path, barostat="MC")
+        generator.generate_production()
+        generator.generate_production()
+        assert sum("no Monte Carlo barostat" in text for text in messages) == 1
+
+
+def test_grompp_gets_no_blanket_maxwarn() -> None:
+    """-maxwarn would hide a net-charge warning, so every grompp warning stops the run."""
+    import inspect
+
+    from polyzymd.config.schema import GromacsEngineConfig
+    from polyzymd.exporters import gromacs
+
+    assert GromacsEngineConfig().grompp_flags == ""
+    assert "-maxwarn" not in inspect.getsource(gromacs)

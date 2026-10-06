@@ -4,12 +4,14 @@
 :func:`write_openmm_frames` write a minimal OpenMM simulation that
 :class:`~polyzymd.analyses.study.Study` can load; :func:`replicate_values`
 builds a :class:`~polyzymd.analyses.timeseries.ReplicateValues` from given
-numbers.
+numbers. :func:`write_committed_study` writes a committed study folder of two
+such conditions.
 """
 
 from __future__ import annotations
 
 import importlib
+import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -111,6 +113,36 @@ def write_openmm_replicate(
             universe.atoms.positions = cross * float(scale)
             writer.write(universe.atoms)
     return run_dir
+
+
+def write_committed_study(tmp_path: Path, analyses: str, name: str = "my_study") -> Path:
+    """Write and commit a study of two conditions with three replicates of ten frames each.
+
+    The conditions are ``No polymer`` (offset 1.0) and ``Polymer`` (offset
+    2.0); frame ``k`` of replicate ``r`` has a radius of gyration of
+    ``offset + 0.1 r + 0.01 k``. Their runs go in ``tmp_path/scratch``, the
+    study in ``tmp_path/name`` with a 0.25 ns equilibration, and ``analyses``
+    (indented YAML lines) becomes its ``analyses:`` block. The caller sets a
+    git identity, since the study is committed.
+    """
+    from polyzymd.analyses.study_scaffold import condition_folder, create_study
+
+    configs = {}
+    for label, offset in (("No polymer", 1.0), ("Polymer", 2.0)):
+        folder = tmp_path / "runs" / condition_folder(label)
+        config = write_simulation_config(folder, scratch=tmp_path / "scratch" / folder.name)
+        (folder / "test.pdb").write_text("REMARK input\nEND\n")
+        for replicate in (1, 2, 3):
+            write_openmm_replicate(
+                config, replicate, [offset + 0.1 * replicate + 0.01 * k for k in range(10)]
+            )
+        configs[label] = config
+    root = tmp_path / name
+    create_study(root, conditions=configs, equilibration="0.25ns")
+    text = (root / "study.yaml").read_text().replace("analyses: {}", "analyses:\n" + analyses)
+    (root / "study.yaml").write_text(text)
+    subprocess.run(["git", "-C", str(root), "commit", "-qam", "analyses"], capture_output=True)
+    return root
 
 
 def write_openmm_frames(
