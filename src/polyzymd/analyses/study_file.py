@@ -519,6 +519,21 @@ def portable(value: Any, root: Path, project_root: Path | None = None) -> Any:
     return value
 
 
+def outside_configs(protocol: StudyFile) -> dict[str, Path]:
+    """Return the condition configs outside the study folder and its project folder, by label.
+
+    Freeze deposits only those folders, so it refuses these configs.
+    """
+    inside = [protocol.root.resolve()]
+    if protocol.project is not None:
+        inside.append(protocol.project.root.resolve())
+    return {
+        label: config
+        for label, config in protocol.conditions.items()
+        if not any(config.is_relative_to(folder) for folder in inside)
+    }
+
+
 def _condition(label: str, value: Any, file: Path) -> tuple[Path, dict[str, Any]]:
     """Read one condition: a config path (or its folder), or ``{config: ..., factors: {...}}``."""
     factors: dict[str, Any] = {}
@@ -608,9 +623,8 @@ def load_study_file(path: str | Path) -> StudyFile:
     ------
     ProtocolError
         If the file is missing or not YAML, a key is unknown, a required key
-        (``equilibration``, ``conditions``) is missing, a value has the
-        wrong type, or a condition config is outside the study folder and
-        its project folder.
+        (``equilibration``, ``conditions``) is missing, or a value has the
+        wrong type.
     """
     import yaml
 
@@ -695,16 +709,6 @@ def load_study_file(path: str | Path) -> StudyFile:
 
     found = find_project(file.parent)
     project, project_label = found if found is not None else (None, None)
-    # Freeze deposits only the study folder (and its project), so a config
-    # outside it would be missing from the deposit.
-    inside = [file.parent.resolve()] + ([project.path.parent.resolve()] if project else [])
-    for label, config in conditions.items():
-        if not any(config.is_relative_to(folder) for folder in inside):
-            raise ProtocolError(
-                f"{file}: the config of condition {label} is {config}, outside the study folder.",
-                hint=f'Copy it into the study with: polyzymd study add-condition "{label}" '
-                f"--config {config}",
-            )
     analyses: dict[str, AnalysisEntry] = {}
     if project is not None:
         # The project's analyses, for this study: its regions and structures resolved.

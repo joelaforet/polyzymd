@@ -1297,9 +1297,10 @@ def _candidate_files(root: Path, state: dict[str, Any] | None) -> list[str]:
     ``data.local.yaml`` are left out.
     """
     if state is not None:
-        listed = (_git(root, "ls-files") or "").splitlines() + (
-            _git(root, "ls-files", "--others", "--exclude-standard", "--", "results") or ""
-        ).splitlines()
+        # -z: names separated by NUL and not quoted, as git quotes non-ASCII names.
+        listed = (_git(root, "ls-files", "-z") or "").split("\0") + (
+            _git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", "results") or ""
+        ).split("\0")
     else:
         listed = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
     return sorted(
@@ -1441,11 +1442,17 @@ def _copy_frozen_folder(
         shutil.rmtree(copy)
     copy.mkdir(parents=True)
     if commit:
-        tracked = set((_git(root, "ls-tree", "-r", "--name-only", tag) or "").splitlines())
+        tracked = set((_git(root, "ls-tree", "-r", "-z", "--name-only", tag) or "").split("\0"))
         names = [name for name in files if name in tracked]
-        if names:  # without paths, git archive would write every tracked file
+        # Literal pathspecs, so a[1].csv is a name and not a pattern; in chunks,
+        # to keep each command line short. Without paths, git archive would
+        # write every tracked file.
+        for start in range(0, len(names), 500):
             archive = subprocess.run(
-                ["git", "-C", str(root), "archive", "--format=tar", tag, "--", *names],
+                [
+                    *("git", "-C", str(root), "--literal-pathspecs", "archive", "--format=tar"),
+                    *(tag, "--", *names[start : start + 500]),
+                ],
                 capture_output=True,
             )
             subprocess.run(["tar", "-x", "-C", str(copy)], input=archive.stdout, check=False)
@@ -1524,13 +1531,14 @@ def freeze(
     Raises
     ------
     ProtocolError
-        Only when the study file or its metadata cannot be read, or the tag
+        Only when the study file or its metadata cannot be read, a condition
+        config is outside the study folder and its project folder, or the tag
         already exists. Everything else is a warning in the result.
     """
     import yaml
 
     import polyzymd
-    from polyzymd.analyses.study_file import load_study_file, portable
+    from polyzymd.analyses.study_file import load_study_file, outside_configs, portable
     from polyzymd.analyses.study_metadata import check_metadata
 
     protocol = load_study_file(root)
@@ -1540,6 +1548,14 @@ def freeze(
             f"{root.name} is a study of the project {protocol.project.root}, whose "
             "project.yaml and shared analyses/ its results depend on.",
             hint=f"Freeze the whole project: polyzymd project freeze {protocol.project.root}",
+        )
+    for label, config in outside_configs(protocol).items():
+        raise ProtocolError(
+            f"The config of condition {label} is {config}, outside the study folder, "
+            "so the deposit would not hold it.",
+            hint=f"Remove {label} from conditions: in study.yaml, then copy it in with: "
+            f'polyzymd study add-condition "{label}" --config {config}. Or move its folder '
+            "under conditions/ and give the new path in study.yaml.",
         )
     meta, warnings = check_metadata(protocol.metadata)
     if publish:
@@ -1661,10 +1677,10 @@ def freeze(
         commit = _commit_and_tag(root, paths, tag, "study", warnings)
         if commit is None:
             _drop_tag(root, manifest, meta, released, _method(protocol))
+    # Listed again now that the files freeze writes exist (a first .gitignore).
     generated = [p for p in GENERATED if (root / p).exists()]
-    _copy_frozen_folder(
-        root, deposit, tag, commit, [*study_files, *generated], _condition_configs(protocol)
-    )
+    files = sorted({*_listed_files(root, state), *generated})
+    _copy_frozen_folder(root, deposit, tag, commit, files, _condition_configs(protocol))
     from polyzymd.analyses.study_upload_guide import deposit_readme
 
     # The deposit's README describes the study from its metadata; the study's
