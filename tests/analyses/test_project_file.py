@@ -48,3 +48,12 @@ def test_region_is_resolved_only_in_selections() -> None:
         "selection": "(resid 1-5)",
         "pairs": [{"label": "lid region gap", "selection_a": "(resid 1-5) and name CA"}],
     }
+
+
+@pytest.mark.parametrize("key", ["donors", "hydrogens", "acceptors"])
+def test_region_is_resolved_in_hydrogen_bond_selections(key: str) -> None:
+    """donors, hydrogens and acceptors of hydrogen_bonds are atom selections."""
+    from polyzymd.analyses.project_file import resolve_names
+
+    resolved = resolve_names({key: "region core and name N"}, {"core": "resid 1-5"}, {}, "test")
+    assert resolved == {key: "(resid 1-5) and name N"}

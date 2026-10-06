@@ -33,7 +33,16 @@ STUDIES_KEY = "studies"
 _REGION = re.compile(r"\bregion\s+([\w][\w-]*)")
 _STRUCTURE = re.compile(r"^\s*structure\s+(\S+)\s*$")
 #: Setting keys whose values are atom selections, besides keys that contain "selection".
-_SELECTION_KEYS = {"groups", "regions", "core", "target", "contexts"}
+_SELECTION_KEYS = {
+    "groups",
+    "regions",
+    "core",
+    "target",
+    "contexts",
+    "donors",
+    "hydrogens",
+    "acceptors",
+}
 
 
 @dataclass(frozen=True)
