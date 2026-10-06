@@ -122,6 +122,24 @@ and `--run <class>_residues` compares every residue. The default is the
 scheme's first class, `helix` or `alpha_helix`. A warning names the replicates
 with unassigned residues. See {doc}`../how_to/analysis_secondary_structure_quickstart`.
 
+(dssp-classes)=
+The two schemes use these classes. `simplified` calls
+`mdtraj.compute_dssp(simplified=True)`, and `full` calls
+`mdtraj.compute_dssp(simplified=False)`. `DSSP_GROUPS` gives the same mapping
+in Python.
+
+| `scheme=full` class | DSSP code | `scheme=simplified` class |
+|---|---|---|
+| `alpha_helix` | H | `helix` |
+| `3_10_helix` | G | `helix` |
+| `pi_helix` | I | `helix` |
+| `extended_strand` | E | `strand` |
+| `isolated_bridge` | B | `strand` |
+| `turn` | T | `coil` |
+| `bend` | S | `coil` |
+| `loop` | blank | `coil` |
+| `unassigned` | NA | `unassigned` |
+
 `polyzymd analyze contacts` runs, once per replicate between `--set
 protein_selection=...` (default `chainid A`) and `polymer_selection` (default
 `chainid C`; a replicate where it matches no atoms, such as a control without

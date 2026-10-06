@@ -1,26 +1,17 @@
-# How to Compare Simulation Conditions
+# Compare simulation conditions
 
-Use this guide when you already have completed PolyzyMD simulations and want to
-know whether conditions differ, for example an enzyme with and without a
-polymer.
+Find out whether the conditions of a study differ, for example an enzyme with
+and without a polymer. You need finished simulations of each condition.
 
-You will:
+The steps are:
 
-- pick the simulation `config.yaml` of every condition, control first
-- run `polyzymd analyze NAME -c ... -c ...` for each analysis
-- read the per-condition values and the comparisons against the control
-- find the stored results and the figures
+1. Give the `config.yaml` of each condition, the control first.
+2. Run `polyzymd analyze NAME -c ... -c ...` for each analysis.
+3. Read the value of each condition and its comparison with the control.
+4. Find the stored results and the figures.
 
-```{note}
-If you have not yet run a full analysis workflow, start with
-[Tutorial: Analyze a Study from Finished Simulations](../tutorials/analysis_complete_workflow.md).
-Each analysis has its own quick start: {doc}`analysis_rmsd_quickstart`,
-{doc}`analysis_rg_quickstart`, {doc}`analysis_rmsf_quickstart`,
-{doc}`analysis_distances_quickstart`, {doc}`analysis_secondary_structure_quickstart`,
-{doc}`analysis_sasa_quickstart`, {doc}`analysis_contacts_quickstart`,
-{doc}`analysis_native_contacts_quickstart` and {doc}`hydrogen_bonds`. The
-catalytic triad is a routine on the analysis API: {doc}`analysis_triad_quickstart`.
-```
+For a guided lesson, see {doc}`../tutorials/analysis_complete_workflow`. For
+the settings of each analysis, see its how-to under {doc}`index`.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -38,55 +29,53 @@ Alternatively, prefix each command with `pixi run -e analysis`.
 :::{admonition} Resource requirements
 :class: important
 
-`polyzymd analyze` loads trajectories and can require substantial RAM, CPU
-time, and scratch I/O. On shared HPC systems, run it inside an allocated job or
-interactive compute session, not on a login node; {doc}`hpc_execution` shows a
-batch script.
+`polyzymd analyze` loads trajectories. It can use much memory, CPU time and
+disk I/O. On a shared cluster, run it in a batch job or an interactive job,
+not on a login node. For a batch script, see {doc}`hpc_execution`.
 :::
 
-## Before You Start
+## Before you start
 
-Make sure each condition already has:
+Make sure that each condition has:
 
-- a simulation `config.yaml`
-- finished trajectories for the replicates you want to compare
+- a simulation `config.yaml`;
+- finished trajectories for the replicates that you want to compare.
 
-`polyzymd analyze` stores each replicate's result under `polyzymd_results/`
-and reads it back on a later run when the function, settings, config, input
-files, equilibration window and frames are unchanged. A replicate whose
-trajectory grew since its result was stored is measured again. Add
-`--recompute` to measure every replicate again.
+`polyzymd analyze` stores the result of each replicate under
+`polyzymd_results/`. A later command reuses it if the function, the settings,
+the config, the input files, the equilibration window and the frames are
+unchanged. If the trajectory of a replicate grew, PolyzyMD measures the
+replicate again. To measure every replicate again, add `--recompute`.
 
-## Analyze a campaign that is still running
+## Analyze simulations that are still running
 
-Analyses leave out any OpenMM production segment that `progress.json` records
-as running or failed, because its trajectory file ends wherever the last flush
-landed. A warning names the segments that were dropped.
+An analysis leaves out each OpenMM production segment that `progress.json`
+records as running or failed. The trajectory file of such a segment ends at
+the last flush. A warning names the segments that PolyzyMD left out.
 
-- If the warning says the window ends before the excluded segments, the results
-  describe the completed part of the run. Wait for the run to finish and rerun
-  with `--recompute` when you want the full window.
-- If it says the exclusion left a gap, an excluded segment sits between two
-  that were kept and the lineage check will refuse the replicate. Wait for the
-  run to finish, or load it deliberately with `require_complete=False`:
+- **The window ends before the left-out segments.** The results describe the
+  completed part of the simulation. When the simulation finishes, run the
+  command again with `--recompute` to use the full window.
+- **The left-out segment makes a gap.** A left-out segment lies between two
+  kept segments, so the lineage check refuses the replicate. Wait for the
+  simulation to finish. Or load the replicate with `require_complete=False`:
 
   ```python
   from polyzymd.analyses.shared.loader import TrajectoryLoader
   u = TrajectoryLoader(config).load_universe(replicate=1, require_complete=False)
   ```
 
-  The incomplete segments are then read as they stand and listed in
+  PolyzyMD then reads the incomplete segments as they are. It lists them in
   `incomplete_segments` on the layout.
 
-On GROMACS there is no per-segment status to consult, so a production XTC that
-is still being written is read as-is. Check that the job has finished before
-analyzing a live GROMACS run.
+GROMACS records no status for each segment. PolyzyMD reads a production XTC
+that GROMACS is still writing as it is. Make sure that the job has finished
+before you analyze a GROMACS simulation.
 
-## Step 1: Run One Comparison
+## Step 1: Run one comparison
 
-Give one `-c` per condition, the control first, and name the conditions with
-`--label` in the same order. Protein-polymer hydrogen bonds exist only where
-there is a polymer, so this example compares three polymer conditions:
+Give one `-c` for each condition, the control first. Name the conditions with
+`--label`, in the same order:
 
 ```bash
 polyzymd analyze hydrogen_bonds \
@@ -94,41 +83,44 @@ polyzymd analyze hydrogen_bonds \
   -c ../EGMA_100_enzyme_DMSO/config.yaml \
   -c ../SBMA_50_enzyme_DMSO/config.yaml \
   --label "100% SBMA" --label "100% EGMA" --label "50% SBMA" \
-  --replicates 1-3 --eq 10ns --set d_a_cutoff=3.0
+  --replicates 1-3 --eq 10ns
 ```
 
-This command:
+The command does these steps:
 
-- builds every condition from its `config.yaml` and the replicates given with
-  `--replicates`, or every replicate found on disk without it
-- discards the first 10 ns of every replicate
-- measures, on every production frame, the hydrogen bonds between the
-  protein (`chainid A`) and the polymer (`chainid C`), the default groups
-- prints each condition's replicate mean with its 95% interval, and a Welch's
-  t test of every condition against the control with the Benjamini-Hochberg
-  correction
+1. It reads each condition from its `config.yaml`. It uses the replicates of
+   `--replicates`, or without it, every replicate it finds.
+2. It discards the first 10 ns of each replicate.
+3. On each production frame, it counts the hydrogen bonds between the protein
+   (`chainid A`) and the polymer (`chainid C`). These are the default groups.
+4. It prints the mean of each condition with its 95 % confidence interval.
+5. It compares each condition with the control by Welch's t test. It corrects
+   the p values with the {term}`Benjamini-Hochberg` method.
 
-Without `--label`, each condition is named after the directory holding its
-config. {doc}`analysis_agent_protocol` explains every line of the output, and
-{doc}`hydrogen_bonds` lists the other settings, such as named groups and
-summaries.
+A condition without polymer can be the control. Its replicates report 0
+hydrogen bonds and stay in the statistics.
 
-## Step 2: Pick Another Result
+Without `--label`, each condition takes the name of the folder that holds its
+config. For the meaning of each output line, see {doc}`analysis_agent_protocol`.
+For the other settings, such as named groups and summaries, see
+{doc}`hydrogen_bonds`.
 
-An analysis that reports several results reports one at a time and lists the
-others in `all_runs` of the JSON report. Pick one with `--run`:
+## Step 2: Report another result
+
+An analysis with several results reports one at a time. The JSON report lists
+the others in `all_runs`. To report a different result, use `--run`:
 
 ```bash
 polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --eq 10ns \
   --run protein_polymer_residues
 ```
 
-The replicate results stored by the first command are read back, so only
-results that were not measured yet load the trajectories.
+PolyzyMD reads back the replicate results that the first command stored. Only
+a result that is not measured yet loads the trajectories.
 
-## Step 3: Save the Full Report
+## Step 3: Save the full report
 
-`--format json` prints the whole `ProtocolReport`, and `-o` also writes it to a
+`--format json` prints the whole `ProtocolReport`. `-o` also writes it to a
 file:
 
 ```bash
@@ -136,10 +128,10 @@ polyzymd analyze hydrogen_bonds -c A/config.yaml -c B/config.yaml --eq 10ns \
   --format json -o reports/hydrogen_bonds.json
 ```
 
-## Step 4: Run the Other Analyses
+## Step 4: Run the other analyses
 
 Every analysis takes the same `-c`, `--label`, `--replicates` and `--eq`
-options, so run each one on the same conditions:
+options. Run each analysis on the same conditions:
 
 ```bash
 polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml --eq 10ns
@@ -149,12 +141,13 @@ polyzymd analyze distances -c A/config.yaml -c B/config.yaml --eq 10ns \
   --set pairs=pairs.yaml
 ```
 
-For the pair distances of a catalytic triad, write the pairs to `pairs.yaml`;
-for its hydrogen bonds, follow {doc}`analysis_triad_quickstart`.
+For the distances of a catalytic triad, write the pairs to `pairs.yaml`. For
+its hydrogen bonds, see {doc}`analysis_triad_quickstart`.
 
-## Step 5: Check the Outputs
+## Step 5: Check the outputs
 
-After a successful run in `polymer_stability_study/`, expect files like these:
+After you run the commands in `polymer_stability_study/`, the folder holds
+files such as these:
 
 ```text
 polymer_stability_study/
@@ -172,13 +165,16 @@ polymer_stability_study/
         └── hbonds_protein_polymer_mean_hbonds_comparison.png
 ```
 
-Each folder name is the result or condition label with every run of
-characters other than letters, digits, `.`, `+` and `-` replaced by `_`.
-`record.json` holds what was measured and on which inputs, and `values.npz`
-the replicate's values. `--output-dir` puts `polyzymd_results/` and
-`figures/` in another directory, and `--no-plots` draws no figures.
+Each folder name is the result or condition label. PolyzyMD replaces each
+series of characters other than letters, digits, `.`, `+` and `-` with `_`.
 
-## Programmatic Use
+- `record.json` records what was measured and from which inputs.
+- `values.npz` holds the values of the replicate.
+
+`--output-dir` puts `polyzymd_results/` and `figures/` in another folder.
+`--no-plots` draws no figures.
+
+## From Python
 
 In Python, `analyze` returns the same report:
 
@@ -194,41 +190,35 @@ report = analyze(
 print(report.to_agent_text())
 ```
 
-To measure a function of your own on the same conditions, build a
-`pz.Study` and call `study.timeseries` or `study.per_replicate`; see
-{doc}`../reference/analysis_functions` and {doc}`custom_artifact_plotting`.
-
-## If you have a `comparison.yaml`
-
-`polyzymd analyze` does not read `comparison.yaml`. `polyzymd analyze NAME -f
-comparison.yaml` exits with an error that prints the equivalent
-`polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq ...`
-command built from the file's conditions, labels, replicates and
-equilibration window. `polyzymd compare`, with any arguments, exits 2 and
-prints the `polyzymd analyze` and `polyzymd analyze ... --submit` commands
-that replace it.
+To measure your own function on the same conditions, see {doc}`study_api`.
 
 ## Troubleshooting
 
 ### `config` path not found
 
-Relative `-c` paths are resolved from your current shell directory.
+PolyzyMD resolves a relative `-c` path from the current folder of the shell.
 
-### `no run directory under the scratch directory`
+### `replicates ... have no run directory`
 
-The replicates given with `--replicates` have no run directory for that
-config. Leave out `--replicates` to use every replicate found on disk.
+The replicates of `--replicates` have no replicate folder under the scratch
+directory of the config. Do one of these:
+
+- Leave out `--replicates` to use every replicate that PolyzyMD finds.
+- Run the simulations first.
+- If the replicate folders are in another place, name the place in
+  `data.local.yaml`, with `polyzymd study locate DIR`, or with `--data`.
 
 ### `the control ... has no replicate where every selection matches atoms`
 
-A condition without a polymer has no `chainid C`, so `hydrogen_bonds` and
-`contacts` leave its replicates out, and when it is the control the other
-conditions are only summarised. Put a condition with a polymer first to compare
-against it, or compare a group that every condition has, such as
-`--set "summaries={protein: {within: protein}}"`.
+A selection of the analysis matched no atoms in any replicate of the control,
+so PolyzyMD gives a summary of the other conditions and does not compare them.
+An empty polymer selection does not cause this warning: a replicate without
+polymer reports 0. Check the other selections of the control, such as
+`protein_selection` or the groups of a hydrogen-bond summary. Or give a
+condition in which every selection matches atoms first.
 
-## See Also
+## See also
 
-- [Tutorial: Analyze a Study from Finished Simulations](../tutorials/analysis_complete_workflow.md)
-- [Get a validated number with one command](analysis_agent_protocol.md)
-- [Statistical Best Practices for Analysis](../explanation/analysis_statistics_best_practices.md)
+- {doc}`../tutorials/analysis_complete_workflow`
+- {doc}`analysis_agent_protocol`
+- {doc}`../explanation/analysis_statistics_best_practices`
