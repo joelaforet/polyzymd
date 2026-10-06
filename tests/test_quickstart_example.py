@@ -10,6 +10,7 @@ analysis topology MDAnalysis cannot read) fails here.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -57,6 +58,11 @@ def test_the_quickstart_runs_and_analyzes(tmp_path: Path, config: str) -> None:
     ):
         result = _polyzymd(folder, *step)
         assert result.returncode == 0, f"{' '.join(step)}\n{result.stdout}\n{result.stderr}"
+    if config == "config.yaml":
+        # E-2: a local OpenMM run records the hash of its trajectory, as a SLURM run does.
+        (progress,) = folder.rglob("progress.json")
+        segment = json.loads(progress.read_text())["segments"][0]
+        assert segment["status"] == "completed" and segment["trajectory_sha256"]
     result = _polyzymd(folder, "analyze", "rg", "--study", "study", "--no-plots")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "verdict: Water mean_rg" in result.stdout
