@@ -143,7 +143,9 @@ class TestSystemBuilderHomodimerRetention:
         """build_enzyme should retain the OpenFF enzyme molecule count."""
         builder = SystemBuilder()
         enzyme_topology = FakeTopology([FakeMolecule("enzyme_1"), FakeMolecule("enzyme_2")])
-        monkeypatch.setattr(builder._enzyme_builder, "build", lambda _path: enzyme_topology)
+        monkeypatch.setattr(
+            builder._enzyme_builder, "build", lambda _path, _templates=None: enzyme_topology
+        )
 
         with caplog.at_level(logging.INFO, logger="polyzymd.builders.system_builder"):
             topology = builder.build_enzyme(Path("enzyme.pdb"))
@@ -155,7 +157,9 @@ class TestSystemBuilderHomodimerRetention:
     def test_build_enzyme_rejects_empty_topology(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """build_enzyme should reject an OpenFF topology with no molecules."""
         builder = SystemBuilder()
-        monkeypatch.setattr(builder._enzyme_builder, "build", lambda _path: FakeTopology([]))
+        monkeypatch.setattr(
+            builder._enzyme_builder, "build", lambda _path, _templates=None: FakeTopology([])
+        )
 
         with pytest.raises(RuntimeError, match="contains no molecules"):
             builder.build_enzyme(Path("empty.pdb"))
@@ -466,7 +470,7 @@ class TestBuildFromConfigSharesOneBox:
         calls: dict = {}
         sentinel_box = Quantity(__import__("numpy").diag([9.0, 9.0, 9.0]), "nanometer")
 
-        monkeypatch.setattr(SystemBuilder, "build_enzyme", lambda self, path: None)
+        monkeypatch.setattr(SystemBuilder, "build_enzyme", lambda self, path, templates=None: None)
         monkeypatch.setattr(SystemBuilder, "combine_solutes", lambda self: None)
         monkeypatch.setattr(SystemBuilder, "build_polymers", lambda self, **kwargs: None)
         monkeypatch.setattr(SystemBuilder, "_assign_pdb_identifiers", lambda self: None)
