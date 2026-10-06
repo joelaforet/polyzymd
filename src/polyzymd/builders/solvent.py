@@ -151,7 +151,7 @@ class SolventComposition:
     Attributes:
         water_model: Water model to use.
         co_solvents: List of co-solvent specifications.
-        nacl_concentration: NaCl-equivalent target for the final ion concentration in mol/L.
+        nacl_concentration: NaCl salt concentration in mol/L, before neutralizing ions.
         kcl_concentration: KCl concentration in mol/L.
         mgcl2_concentration: MgCl2 concentration in mol/L.
         neutralize: Whether to neutralize system charge.
@@ -159,7 +159,7 @@ class SolventComposition:
 
     water_model: WaterModelType = "tip3p"
     co_solvents: List[CoSolvent] = field(default_factory=list)
-    nacl_concentration: float = 0.0  # NaCl-equivalent target concentration, mol/L
+    nacl_concentration: float = 0.0  # NaCl salt concentration, mol/L
     kcl_concentration: float = 0.0
     mgcl2_concentration: float = 0.0
     neutralize: bool = True
@@ -376,7 +376,11 @@ class SolventBuilder:
         from openff.toolkit import Molecule
         from openff.units import Quantity
 
-        from polyzymd.data.solvent_molecules import get_solvent_molecule, is_bundled_solvent
+        from polyzymd.data.solvent_molecules import (
+            get_solvent_molecule,
+            is_bundled_solvent,
+            split_counter_ions,
+        )
         from polyzymd.utils import boxvectors
         from polyzymd.utils.packmol import solvate_with_packmol
 
@@ -420,7 +424,7 @@ class SolventBuilder:
         water_mass = sum(atom.mass for atom in water.atoms)
         molarity_pure_water = Quantity(55.5, "mole / liter")
 
-        # Calculate NaCl-equivalent target concentration
+        # Calculate the number of NaCl pairs
         na = Molecule.from_smiles("[Na+]")
         cl = Molecule.from_smiles("[Cl-]")
         na_mass = sum(atom.mass for atom in na.atoms)
@@ -432,23 +436,21 @@ class SolventBuilder:
         nacl_mass_to_add = solvent_mass * nacl_mass_fraction
         nacl_to_add = self._round_dimensionless_to_int(nacl_mass_to_add / nacl_mass)
 
-        # Resolve ion counts, including any neutralizing imbalance
-        solute_charge = sum(mol.total_charge for mol in topology.molecules)
-        na_to_add, cl_to_add = self._calculate_ion_counts(
-            nacl_to_add=nacl_to_add,
-            solute_charge=solute_charge,
-            neutralize=composition.neutralize,
-        )
-
-        # Load co-solvents before count calculations so molar masses are known
+        # Load co-solvents so molar masses and charges are known. Na+ and Cl-
+        # written in a co-solvent SMILES become ions of their own.
         cosolvent_masses: list[tuple[str, float, Any]] = []
+        counter_ions: list[tuple[int, int]] = []
+        copies: list[int] = []
         for cosolvent in composition.co_solvents:
+            smiles, na_per_copy, cl_per_copy = (cosolvent.smiles, 0, 0)
+            if smiles:
+                smiles, na_per_copy, cl_per_copy = split_counter_ions(smiles, cosolvent.name)
             if cosolvent.molecule is None:
                 # Load molecule with pre-computed charges to ensure all copies
                 # of the same co-solvent have identical parameters
                 cosolvent.molecule = get_solvent_molecule(
                     name=cosolvent.name,
-                    smiles=cosolvent.smiles,
+                    smiles=smiles,
                     residue_name=cosolvent.residue_name,
                     charge_method=cosolvent.charge_method,
                 )
@@ -459,108 +461,57 @@ class SolventBuilder:
                         "this molecule; set charge_method: am1bcc in its co_solvents entry to "
                         "use AM1-BCC, which needs AmberTools."
                     )
+            counter_ions.append((na_per_copy, cl_per_copy))
 
-            cosolvent_molar_mass = sum(atom.mass for atom in cosolvent.molecule.atoms)
             if cosolvent.mole_fraction is not None:
+                cosolvent_molar_mass = sum(atom.mass for atom in cosolvent.molecule.atoms)
                 cosolvent_masses.append(
                     (cosolvent.name, cosolvent.mole_fraction, cosolvent_molar_mass)
                 )
-            elif cosolvent.concentration is None and cosolvent.count is None:
-                # Should not reach here due to validation in CoSolvent.__post_init__
-                raise ValueError(
-                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction, concentration "
-                    "nor count"
-                )
-
-        neutral_solvent_mass = self._calculate_neutral_solvent_mass(
-            solvent_mass=solvent_mass,
-            na_count=na_to_add,
-            cl_count=cl_to_add,
-            na_mass=na_mass,
-            cl_mass=cl_mass,
-        )
-        if cosolvent_masses:
-            water_to_add, mole_fraction_counts = self._calculate_mole_fraction_counts(
-                neutral_solvent_mass=neutral_solvent_mass,
-                water_mass=water_mass,
-                cosolvent_mole_fractions=cosolvent_masses,
-            )
-        else:
-            water_to_add = self._round_dimensionless_to_int(neutral_solvent_mass / water_mass)
-            mole_fraction_counts = []
-
-        LOGGER.info(f"Adding {int(water_to_add)} water, {na_to_add} Na+, {cl_to_add} Cl-")
-
-        # Build molecule and count lists
-        solvent_molecules = [water, na, cl]
-        solvent_counts = [int(water_to_add), na_to_add, cl_to_add]
-
-        # Track co-solvent counts for SolvationCounts
-        cosolvent_counts_list: List[Tuple[str, int]] = []
-
-        # Add co-solvents (using cached charges for consistency)
-        mole_fraction_count_index = 0
-        for cosolvent in composition.co_solvents:
-            if cosolvent.mole_fraction is not None:
-                _, n_cosolvent = mole_fraction_counts[mole_fraction_count_index]
-                mole_fraction_count_index += 1
-
-                LOGGER.info(
-                    f"Adding {n_cosolvent} {cosolvent.name} molecules "
-                    f"({cosolvent.mole_fraction * 100:.1f} mol%)"
-                )
-
+                copies.append(0)  # set from the mass budget below
             elif cosolvent.concentration is not None:
-                # =============================================================
-                # CONCENTRATION METHOD
-                # =============================================================
-                # Formula: n = C × V × N_A
-                # Where:
-                #   C   = concentration (mol/L)
-                #   V   = box volume (L)
-                #   N_A = Avogadro's number
-                #
-                # Convert volume to liters explicitly before applying N_A
-                # =============================================================
-                box_volume_liters = self._box_volume_liters(box_vol)
-                n_cosolvent = self._count_concentration_molecules(
-                    concentration_molar=cosolvent.concentration,
-                    box_volume_liters=box_volume_liters,
+                # n = C x V x N_A, with the box volume in liters
+                copies.append(
+                    self._count_concentration_molecules(
+                        concentration_molar=cosolvent.concentration,
+                        box_volume_liters=self._box_volume_liters(box_vol),
+                    )
                 )
-
-                LOGGER.info(
-                    f"Adding {n_cosolvent} {cosolvent.name} molecules ({cosolvent.concentration} M)"
-                )
-
-            elif cosolvent.count is not None:
-                n_cosolvent = int(cosolvent.count)
-                LOGGER.info(f"Adding {n_cosolvent} {cosolvent.name} molecules (count)")
-
             else:
-                # Should not reach here due to validation in CoSolvent.__post_init__
-                raise ValueError(
-                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction, concentration "
-                    "nor count"
-                )
+                copies.append(int(cosolvent.count))
 
-            solvent_molecules.append(cosolvent.molecule)
-            solvent_counts.append(n_cosolvent)
-            cosolvent_counts_list.append((cosolvent.name, n_cosolvent))
+        # A charged co-solvent (a SMILES such as dodecyl sulfate) carries
+        # charge too. Counter-ions written in its SMILES ("...[O-].[Na+]") are
+        # added as Na+ and Cl- ions; neutralizing then adds only what they
+        # leave unbalanced, on top of the salt pairs.
+        solute_int = self._charge_to_integer(sum(mol.total_charge for mol in topology.molecules))
 
-        # A charged co-solvent (a SMILES such as dodecyl sulfate without its
-        # counter-ion) carries charge the first ion count did not know. A
-        # SMILES that holds its counter-ion ("...[O-].[Na+]") is neutral.
-        solute_int = self._charge_to_integer(solute_charge)
-        cosolvent_int = sum(
-            self._charge_to_integer(cosolvent.molecule.total_charge) * count
-            for cosolvent, (_, count) in zip(composition.co_solvents, cosolvent_counts_list)
-        )
-        if composition.neutralize and cosolvent_int:
-            na_to_add, cl_to_add = self._calculate_ion_counts(
-                nacl_to_add=nacl_to_add,
-                solute_charge=solute_int + cosolvent_int,
-                neutralize=True,
+        def ion_counts(copies: list[int]) -> tuple[int, int, int, int, int]:
+            cosolvent_int = sum(
+                self._charge_to_integer(cosolvent.molecule.total_charge) * n
+                for cosolvent, n in zip(composition.co_solvents, copies)
             )
+            counter_na = sum(na * n for (na, _), n in zip(counter_ions, copies))
+            counter_cl = sum(cl * n for (_, cl), n in zip(counter_ions, copies))
+            na_count, cl_count = self._calculate_ion_counts(
+                nacl_to_add=nacl_to_add,
+                solute_charge=solute_int + cosolvent_int + counter_na - counter_cl,
+                neutralize=composition.neutralize,
+            )
+            return (
+                na_count + counter_na,
+                cl_count + counter_cl,
+                cosolvent_int,
+                counter_na,
+                counter_cl,
+            )
+
+        # Mole-fraction counts come from the mass left after the ions, and
+        # the ions depend on those counts: count once without the
+        # mole-fraction co-solvents, then take water and co-solvent counts
+        # from a second pass that reserves their ions.
+        for _ in range(2 if cosolvent_masses else 1):
+            na_to_add, cl_to_add, *_ = ion_counts(copies)
             neutral_solvent_mass = self._calculate_neutral_solvent_mass(
                 solvent_mass=solvent_mass,
                 na_count=na_to_add,
@@ -569,18 +520,40 @@ class SolventBuilder:
                 cl_mass=cl_mass,
             )
             if cosolvent_masses:
-                water_to_add, _ = self._calculate_mole_fraction_counts(
+                water_to_add, mole_fraction_counts = self._calculate_mole_fraction_counts(
                     neutral_solvent_mass=neutral_solvent_mass,
                     water_mass=water_mass,
                     cosolvent_mole_fractions=cosolvent_masses,
                 )
+                fraction_counts = iter(n for _, n in mole_fraction_counts)
+                copies = [
+                    next(fraction_counts) if cosolvent.mole_fraction is not None else n
+                    for cosolvent, n in zip(composition.co_solvents, copies)
+                ]
             else:
                 water_to_add = self._round_dimensionless_to_int(neutral_solvent_mass / water_mass)
-            solvent_counts[:3] = [int(water_to_add), na_to_add, cl_to_add]
+        na_to_add, cl_to_add, cosolvent_int, counter_na, counter_cl = ion_counts(copies)
+
+        LOGGER.info(f"Adding {int(water_to_add)} water, {na_to_add} Na+, {cl_to_add} Cl-")
+        if cosolvent_int or counter_na or counter_cl:
             LOGGER.info(
-                f"Co-solvents carry charge {cosolvent_int:+d}: now {int(water_to_add)} water, "
-                f"{na_to_add} Na+, {cl_to_add} Cl-"
+                f"Co-solvents carry charge {cosolvent_int:+d} and {counter_na} Na+, "
+                f"{counter_cl} Cl- counter-ions"
             )
+        for cosolvent, n_cosolvent in zip(composition.co_solvents, copies):
+            if cosolvent.mole_fraction is not None:
+                amount = f"{cosolvent.mole_fraction * 100:.1f} mol%"
+            elif cosolvent.concentration is not None:
+                amount = f"{cosolvent.concentration} M"
+            else:
+                amount = "count"
+            LOGGER.info(f"Adding {n_cosolvent} {cosolvent.name} molecules ({amount})")
+
+        solvent_molecules = [water, na, cl] + [c.molecule for c in composition.co_solvents]
+        solvent_counts = [int(water_to_add), na_to_add, cl_to_add] + copies
+        cosolvent_counts_list: List[Tuple[str, int]] = [
+            (cosolvent.name, n) for cosolvent, n in zip(composition.co_solvents, copies)
+        ]
         net_charge = solute_int + cosolvent_int + na_to_add - cl_to_add
         if net_charge and composition.neutralize:
             raise ValueError(
@@ -778,21 +751,17 @@ class SolventBuilder:
         solute_charge: Any,
         neutralize: bool,
     ) -> tuple[int, int]:
-        """Calculate final Na+ and Cl- counts from a NaCl-equivalent target.
+        """Calculate final Na+ and Cl- counts from the NaCl pair count.
 
-        When neutralization is enabled, counts are chosen so that the final
-        solute plus ion charge is exactly zero while keeping the final ion
-        concentration as close as possible to the requested NaCl-equivalent
-        target. Exact counts may differ by one ion from the concentration
-        target to satisfy integer charge neutrality; neutrality is prioritized
-        because this difference is negligible for realistic systems. If parity
-        makes the target total impossible, the tie is resolved by adding the
-        larger feasible ion count.
+        Every requested NaCl pair is added. When neutralization is enabled,
+        Na+ or Cl- ions that cancel the solute charge are added on top of the
+        pairs, as OpenMM ``Modeller.addSolvent(neutralize=True)`` and
+        ``gmx genion -neutral`` do.
 
         Parameters
         ----------
         nacl_to_add : Any
-            NaCl-equivalent target count as a scalar or dimensionless quantity.
+            NaCl pair count as a scalar or dimensionless quantity.
         solute_charge : Any
             Solute net charge in elementary-charge units.
         neutralize : bool
@@ -808,28 +777,7 @@ class SolventBuilder:
             return nacl_count, nacl_count
 
         solute_charge_int = cls._charge_to_integer(solute_charge)
-        charge_difference = -solute_charge_int
-        minimum_total_ions = abs(charge_difference)
-        target_total_ions = 2 * nacl_count
-
-        lower_total = target_total_ions
-        while lower_total >= minimum_total_ions and (lower_total - charge_difference) % 2 != 0:
-            lower_total -= 1
-
-        upper_total = max(target_total_ions, minimum_total_ions)
-        while (upper_total - charge_difference) % 2 != 0:
-            upper_total += 1
-
-        if lower_total < minimum_total_ions:
-            total_ions = upper_total
-        elif abs(upper_total - target_total_ions) <= abs(target_total_ions - lower_total):
-            total_ions = upper_total
-        else:
-            total_ions = lower_total
-
-        na_count = (total_ions + charge_difference) // 2
-        cl_count = (total_ions - charge_difference) // 2
-        return na_count, cl_count
+        return nacl_count + max(0, -solute_charge_int), nacl_count + max(0, solute_charge_int)
 
     @staticmethod
     def _charge_to_integer(charge: Any, tolerance: float = ION_CHARGE_TOLERANCE) -> int:

@@ -90,7 +90,7 @@ solvent:
   
   ions:
     neutralize: true
-    nacl_concentration: 0.1  # 100 mM NaCl-equivalent final ion concentration
+    nacl_concentration: 0.1  # 100 mM of NaCl pairs; neutralizing ions are added on top
   
   box:
     padding: 1.0  # Smaller padding for faster solvation
