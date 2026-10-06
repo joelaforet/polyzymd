@@ -117,10 +117,13 @@ identify trajectory and topology files by SHA-256 and size
 (`analyses/shared/file_hashes.py`, from `progress.json`'s `trajectory_sha256`
 when the runner recorded it), so moved or downloaded data reuses results.
 `polyzymd hash-trajectories` (`cli/hashes.py`) records missing trajectory
-hashes for older runs of any engine, idempotently and without ever overwriting
-a recorded hash. The logic is `SimulationEngine.record_trajectory_hashes` in
-`engines/base.py`; each engine implements `trajectory_files` (and may extend
-`recorded_trajectory_hashes`/`store_trajectory_hash`), and records and freeze
+hashes for older runs of any engine in `trajectory_hashes.json`,
+idempotently, without ever overwriting a recorded hash, and never writing
+`progress.json` (only the runner writes it). The logic is
+`SimulationEngine.record_trajectory_hashes` in `engines/base.py`; each engine
+overrides `trajectory_files` with the finished files analyses read (and may
+extend `recorded_trajectory_hashes`, as OpenMM does so the runner's segment
+hash wins), and records and freeze
 read hashes through `UniverseProvider.recorded_trajectory_hashes`. Anything
 new about a run's outputs belongs on the engine in the same way.
 `polyzymd study freeze` (`analyses/study_freeze.py`, `analyses/study_metadata.py`)

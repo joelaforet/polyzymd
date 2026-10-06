@@ -16,11 +16,13 @@ import pytest
 import polyzymd as pz
 from polyzymd.analyses.shared.file_hashes import file_sha256
 from polyzymd.simulation.progress import (
+    TRAJECTORY_HASHES_FILE,
     SegmentRecord,
     SegmentStatus,
     SimulationProgress,
     flush_reporters,
     load_progress,
+    load_trajectory_hashes,
     save_progress,
     trajectory_digest,
 )
@@ -233,7 +235,7 @@ DCD = "production_{0}/production_{0}_trajectory.dcd"
 
 
 class TestHashExistingRuns:
-    """SimulationEngine.record_trajectory_hashes: idempotent, never overwrites, for every engine."""
+    """SimulationEngine.record_trajectory_hashes: idempotent, never overwrites, never edits progress.json."""
 
     def _run(
         self, tmp_path: Path, status=SegmentStatus.COMPLETED, overall=None, **recorded
@@ -241,15 +243,15 @@ class TestHashExistingRuns:
         from polyzymd.simulation.progress import SimulationStatus
 
         working = tmp_path / "run"
-        for index in (0, 1):
+        for index in (0, 1, 3):
             (working / f"production_{index}").mkdir(parents=True, exist_ok=True)
             (working / DCD.format(index)).write_bytes(f"segment {index}".encode())
         save_progress(
             working,
             SimulationProgress(
                 config_path="config.yaml",
-                total_steps_requested=2000,
-                total_samples_requested=20,
+                total_steps_requested=4000,
+                total_samples_requested=40,
                 timestep_fs=2.0,
                 status=overall or SimulationStatus.COMPLETED,
                 segments=[
@@ -259,6 +261,8 @@ class TestHashExistingRuns:
                                   samples_written=10, status=SegmentStatus.INTERRUPTED),
                     SegmentRecord(index=2, steps_completed=1000, steps_requested=1000,
                                   samples_written=10, status=SegmentStatus.COMPLETED),
+                    SegmentRecord(index=3, steps_completed=0, steps_requested=1000,
+                                  samples_written=0, status=SegmentStatus.FAILED),
                 ],
             ),
         )  # fmt: skip
@@ -267,64 +271,118 @@ class TestHashExistingRuns:
     def test_records_then_changes_nothing(self, tmp_path: Path) -> None:
         engine = _engine(tmp_path, "openmm")
         working = self._run(tmp_path)
-        first = engine.record_trajectory_hashes(working, 1)
+        progress_before = (working / "progress.json").read_bytes()
+        first = engine.record_trajectory_hashes(working)
+        # The segments analyses read: completed and interrupted, not failed.
         assert first["hashed"] == [DCD.format(0), DCD.format(1)]
-        progress = load_progress(working)
-        assert progress.segments[0].trajectory_sha256 == hashlib.sha256(b"segment 0").hexdigest()
-        assert progress.segments[1].trajectory_bytes == len(b"segment 1")
-        assert progress.trajectory_hashes[DCD.format(1)].bytes == len(b"segment 1")
-        # Only hashes are added: segment 2 has no file and no state.xml, and stays completed.
-        assert [x.status for x in progress.segments] == [
-            SegmentStatus.COMPLETED,
-            SegmentStatus.INTERRUPTED,
-            SegmentStatus.COMPLETED,
-        ]
-        before = (
-            (working / "progress.json").read_bytes(),
-            (working / "progress.json").stat().st_mtime_ns,
-        )
-        second = engine.record_trajectory_hashes(working, 1)
+        assert (working / "progress.json").read_bytes() == progress_before
+        stored = load_trajectory_hashes(working)
+        assert stored[DCD.format(0)].sha256 == hashlib.sha256(b"segment 0").hexdigest()
+        assert stored[DCD.format(1)].bytes == len(b"segment 1")
+        sidecar = working / TRAJECTORY_HASHES_FILE
+        before = (sidecar.read_bytes(), sidecar.stat().st_mtime_ns)
+        second = engine.record_trajectory_hashes(working)
         assert second["hashed"] == [] and second["recorded"] == [DCD.format(0), DCD.format(1)]
-        after = (
-            (working / "progress.json").read_bytes(),
-            (working / "progress.json").stat().st_mtime_ns,
-        )
-        assert after == before
-        verified = engine.record_trajectory_hashes(working, 1, verify=True)["verified"]
+        assert (sidecar.read_bytes(), sidecar.stat().st_mtime_ns) == before
+        verified = engine.record_trajectory_hashes(working, verify=True)["verified"]
         assert verified == [DCD.format(0), DCD.format(1)]
 
     def test_never_overwrites_a_recorded_hash(self, tmp_path: Path) -> None:
         engine = _engine(tmp_path, "openmm")
         working = self._run(tmp_path, trajectory_sha256="0" * 64, trajectory_bytes=99)
-        report = engine.record_trajectory_hashes(working, 1)
-        assert any("records 99 bytes" in c for c in report["conflicts"])
+        report = engine.record_trajectory_hashes(working, rehash_changed=True)
+        # The runner's hash is never replaced, even with --rehash-changed.
+        assert any("progress.json records 99 bytes" in c for c in report["conflicts"])
+        assert DCD.format(0) not in load_trajectory_hashes(working)
         assert load_progress(working).segments[0].trajectory_sha256 == "0" * 64
         working = self._run(
             tmp_path / "b", trajectory_sha256="0" * 64, trajectory_bytes=len(b"segment 0")
         )
-        report = engine.record_trajectory_hashes(working, 1, verify=True)
+        report = engine.record_trajectory_hashes(working, verify=True)
         assert any("differs from the one recorded" in c for c in report["conflicts"])
-        assert load_progress(working).segments[0].trajectory_sha256 == "0" * 64
 
-    def test_running_runs_are_left_alone(self, tmp_path: Path) -> None:
-        from polyzymd.simulation.progress import SimulationStatus
-
+    def test_segments_still_running_are_left_out(self, tmp_path: Path) -> None:
         engine = _engine(tmp_path, "openmm")
-        working = self._run(tmp_path, overall=SimulationStatus.RUNNING)
-        assert "running" in engine.record_trajectory_hashes(working, 1)["skipped"]
-        assert load_progress(working).segments[0].trajectory_sha256 is None
-        forced = engine.record_trajectory_hashes(working, 1, force=True)
-        assert forced["hashed"] == [DCD.format(0), DCD.format(1)]
+        working = self._run(tmp_path, status=SegmentStatus.RUNNING)
+        assert engine.record_trajectory_hashes(working)["hashed"] == [DCD.format(1)]
 
     def test_dry_run_writes_nothing(self, tmp_path: Path) -> None:
         engine = _engine(tmp_path, "openmm")
         working = self._run(tmp_path)
-        before = (working / "progress.json").read_bytes()
-        assert engine.record_trajectory_hashes(working, 1, dry_run=True)["hashed"] == [
+        assert engine.record_trajectory_hashes(working, dry_run=True)["hashed"] == [
             DCD.format(0),
             DCD.format(1),
         ]
-        assert (working / "progress.json").read_bytes() == before
+        assert not (working / TRAJECTORY_HASHES_FILE).exists()
+
+    def test_runner_hash_takes_precedence(self, tmp_path: Path) -> None:
+        """A segment resumed after hash-trajectories: its completion hash wins over the stale entry."""
+        engine = _engine(tmp_path, "openmm")
+        working = self._run(tmp_path)
+        engine.record_trajectory_hashes(working)
+        (working / DCD.format(1)).write_bytes(b"segment 1, resumed and completed")
+        progress = load_progress(working)
+        progress.segments[1].status = SegmentStatus.COMPLETED
+        progress.segments[1].trajectory_sha256 = "c" * 64
+        progress.segments[1].trajectory_bytes = len(b"segment 1, resumed and completed")
+        save_progress(working, progress)
+        dcd = (working / DCD.format(1)).resolve()
+        assert engine.recorded_trajectory_hashes(working)[dcd][0] == "c" * 64
+        assert engine.record_trajectory_hashes(working)["conflicts"] == []
+
+    def test_reconciliation_keeps_segment_hashes(self, tmp_path: Path) -> None:
+        """status, check-progress, recover and the next run-segment re-check progress.json."""
+        from polyzymd.simulation.progress import load_or_scan_progress
+
+        working = tmp_path / "run"
+        for index in (0, 1):
+            (working / f"production_{index}").mkdir(parents=True)
+            (working / DCD.format(index)).write_bytes(b"x" * 10)
+            (working / f"production_{index}" / f"production_{index}_state.xml").write_text("<S/>")
+        save_progress(
+            working,
+            SimulationProgress(
+                config_path="c",
+                total_steps_requested=2000,
+                total_samples_requested=20,
+                timestep_fs=2.0,
+                segments=[
+                    SegmentRecord(index=i, steps_completed=1000, steps_requested=1000,
+                                  samples_written=10, status=SegmentStatus.COMPLETED,
+                                  trajectory_sha256=str(i) * 64, trajectory_bytes=10)
+                    for i in (0, 1)
+                ],
+            ),
+        )  # fmt: skip
+        reconciled = load_or_scan_progress(
+            working, config_path="c", total_steps=2000, total_samples=20, timestep_fs=2.0
+        )
+        save_progress(working, reconciled)
+        assert [s.trajectory_sha256 for s in load_progress(working).segments] == [
+            "0" * 64,
+            "1" * 64,
+        ]
+
+    def test_downsampled_copy_stays_analysable(self, tmp_path: Path) -> None:
+        """A copy with no progress.json, state or checkpoint, like the LipA 400 ps copy."""
+        from polyzymd.config.schema import SimulationConfig
+        from polyzymd.engines import create_engine
+
+        config = write_simulation_config(tmp_path / "A", scratch=tmp_path / "data")
+        write_openmm_replicate(config, 1, [1.0 + 0.01 * k for k in range(5)])
+        cfg = SimulationConfig.from_yaml(config)
+        working = cfg.get_working_directory(1)
+        for path in list(working.rglob("*")):
+            if path.name == "progress.json" or path.name.endswith(("state.xml", ".chk")):
+                path.unlink()
+        engine = create_engine(cfg, defer_binary=True)
+        before = engine.resolve_trajectory_layout(working, 1).trajectory_paths
+        assert before
+        report = engine.record_trajectory_hashes(engine.resolve_engine_working_directory(working))
+        assert report["hashed"] == [DCD.format(0)]
+        assert not (working / "progress.json").exists()
+        assert engine.resolve_trajectory_layout(working, 1).trajectory_paths == before
+        assert (before[0]).resolve() in engine.recorded_trajectory_hashes(working)
 
     def test_gromacs_hashes_its_trajectories(self, tmp_path: Path) -> None:
         engine = _engine(tmp_path, "gromacs")
@@ -333,25 +391,38 @@ class TestHashExistingRuns:
         for name in ("prod.xtc", "prod_nojump.xtc"):
             (working / name).write_bytes(name.encode())
         (working / "prod.edr").write_bytes(b"not a trajectory")
-        first = engine.record_trajectory_hashes(working, 1)
-        assert first["hashed"] == ["prod.xtc", "prod_nojump.xtc"] and first["created"]
-        recorded = load_progress(working).trajectory_hashes
-        assert recorded["prod.xtc"].sha256 == hashlib.sha256(b"prod.xtc").hexdigest()
+        first = engine.record_trajectory_hashes(working)
+        assert first["hashed"] == ["prod.xtc", "prod_nojump.xtc"]
+        assert not (working / "progress.json").exists()
         assert engine.recorded_trajectory_hashes(working)[(working / "prod.xtc").resolve()] == (
             hashlib.sha256(b"prod.xtc").hexdigest(),
             len(b"prod.xtc"),
         )
-        before = (working / "progress.json").read_bytes()
-        second = engine.record_trajectory_hashes(working, 1)
-        assert second["hashed"] == [] and not second["created"]
-        assert (working / "progress.json").read_bytes() == before
+        before = (working / TRAJECTORY_HASHES_FILE).read_bytes()
+        assert engine.record_trajectory_hashes(working)["hashed"] == []
+        assert (working / TRAJECTORY_HASHES_FILE).read_bytes() == before
         (working / "prod.xtc").write_bytes(b"appended by a later mdrun")
-        conflict = engine.record_trajectory_hashes(working, 1)["conflicts"]
-        assert any(c.startswith("prod.xtc:") for c in conflict)
+        conflict = engine.record_trajectory_hashes(working)["conflicts"]
+        assert any(c.startswith("prod.xtc:") and "--rehash-changed" in c for c in conflict)
+        again = engine.record_trajectory_hashes(working, rehash_changed=True)
+        assert again["rehashed"] == ["prod.xtc"] and again["conflicts"] == []
+        assert load_trajectory_hashes(working)["prod.xtc"].bytes == len(
+            b"appended by a later mdrun"
+        )
+
+    def test_gromacs_run_not_completed_gives_no_files(self, tmp_path: Path) -> None:
+        from polyzymd.simulation.progress import SimulationStatus
+
+        engine = _engine(tmp_path, "gromacs")
+        working = tmp_path / "run"
+        working.mkdir()
+        (working / "prod.xtc").write_bytes(b"x")
+        progress = SimulationProgress(status=SimulationStatus.INTERRUPTED)
+        assert engine.trajectory_files(working, progress) == []
 
     def test_missing_working_directory_is_skipped(self, tmp_path: Path) -> None:
         for name in ("openmm", "gromacs"):
-            report = _engine(tmp_path, name).record_trajectory_hashes(tmp_path / "absent", 1)
+            report = _engine(tmp_path, name).record_trajectory_hashes(tmp_path / "absent")
             assert report["skipped"] and report["hashed"] == []
 
     def test_cli_reports_and_exits_2_on_conflict(self, tmp_path: Path) -> None:
@@ -372,8 +443,8 @@ class TestHashExistingRuns:
         dcd = (working / DCD.format(0)).resolve()
         assert dcd in condition._provider.recorded_trajectory_hashes(1)
         progress = load_progress(working)
+        progress.segments[0].trajectory_sha256 = "0" * 64
         progress.segments[0].trajectory_bytes = 1
-        progress.trajectory_hashes.clear()
         save_progress(working, progress)
         conflict = CliRunner().invoke(cli, ["hash-trajectories", "-c", str(config)])
         assert conflict.exit_code == 2 and "conflict:" in conflict.output
@@ -381,6 +452,8 @@ class TestHashExistingRuns:
             cli, ["hash-trajectories", "-c", str(config), "--replicates", "7"]
         )
         assert none.exit_code == 0 and "A: no runs found in" in none.output
+        usage = CliRunner().invoke(cli, ["hash-trajectories"])
+        assert usage.exit_code == 2 and "give -c config.yaml or --study" in usage.output
 
 
 class TestFreezeNudge:
@@ -402,13 +475,10 @@ class TestFreezeNudge:
         root = tmp_path / "study"
         create_study(root, conditions={"A": config}, equilibration="0ns")
         working = pz.Study(root)["A"].config.get_working_directory(1)
-        assert (
-            any("hash-trajectories" in w for w in freeze(root).warnings) is False
-        )  # no progress.json
         _progress(working)
         subprocess.run(["git", "-C", str(root), "add", "-A"], check=False)
         nudged = freeze(root)
         assert any("polyzymd hash-trajectories --study ." in w for w in nudged.warnings)
         assert str(tmp_path) not in (root / "manifest.json").read_text()
-        _engine(tmp_path, "openmm").record_trajectory_hashes(working, 1)
+        _engine(tmp_path, "openmm").record_trajectory_hashes(working)
         assert not any("hash-trajectories" in w for w in freeze(root).warnings)

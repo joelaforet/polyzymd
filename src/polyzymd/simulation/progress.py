@@ -189,11 +189,43 @@ def trajectory_digest(path: str | Path) -> dict[str, Any]:
     return {"trajectory_sha256": digest.hexdigest(), "trajectory_bytes": file.stat().st_size}
 
 
+#: File in an engine working directory where ``polyzymd hash-trajectories``
+#: records trajectory hashes. Only the runner writes ``progress.json``.
+TRAJECTORY_HASHES_FILE = "trajectory_hashes.json"
+
+
 class TrajectoryHash(BaseModel):
-    """SHA-256 and size of one trajectory file, recorded in ``progress.json``."""
+    """SHA-256 and size of one trajectory file."""
 
     sha256: str
     bytes: int
+
+
+class TrajectoryHashes(BaseModel):
+    """Contents of ``trajectory_hashes.json``: hashes by path relative to the engine working directory."""
+
+    files: Dict[str, TrajectoryHash] = Field(default_factory=dict)
+
+
+def load_trajectory_hashes(working_dir: Path) -> Dict[str, TrajectoryHash]:
+    """Return the hashes recorded in ``working_dir/trajectory_hashes.json``; empty when it is absent."""
+    path = Path(working_dir) / TRAJECTORY_HASHES_FILE
+    if not path.is_file():
+        return {}
+    return TrajectoryHashes.model_validate_json(path.read_text()).files
+
+
+def save_trajectory_hashes(working_dir: Path, files: Dict[str, TrajectoryHash]) -> None:
+    """Write ``working_dir/trajectory_hashes.json`` atomically, sorted by path."""
+    import tempfile
+
+    working_dir = Path(working_dir)
+    text = TrajectoryHashes(files=dict(sorted(files.items()))).model_dump_json(indent=2) + "\n"
+    with tempfile.NamedTemporaryFile(
+        "w", dir=working_dir, prefix=f".{TRAJECTORY_HASHES_FILE}.", suffix=".tmp", delete=False
+    ) as handle:
+        handle.write(text)
+    os.replace(handle.name, working_dir / TRAJECTORY_HASHES_FILE)
 
 
 class SimulationProgress(BaseModel):
@@ -230,9 +262,6 @@ class SimulationProgress(BaseModel):
     timestep_fs: float = 2.0
     equilibration_stages: List[EquilibrationStageRecord] = Field(default_factory=list)
     segments: List[SegmentRecord] = Field(default_factory=list)
-    #: Engine-neutral trajectory hashes: path relative to the engine working
-    #: directory to SHA-256 and size (see SimulationEngine.record_trajectory_hashes).
-    trajectory_hashes: Dict[str, TrajectoryHash] = Field(default_factory=dict)
     status: SimulationStatus = SimulationStatus.NOT_STARTED
     last_updated: str = Field(default_factory=lambda: _now_iso())
     replicate: int = 1
@@ -1069,6 +1098,9 @@ def validate_progress(
                 polyzymd_version=file_rec.polyzymd_version or fs_rec.polyzymd_version,
                 openmm_version=file_rec.openmm_version or fs_rec.openmm_version,
                 pixi_environment=file_rec.pixi_environment or fs_rec.pixi_environment,
+                # Only the runner records a segment's hash, so a scan never has one.
+                trajectory_sha256=file_rec.trajectory_sha256,
+                trajectory_bytes=file_rec.trajectory_bytes,
             )
             reconciled.append(merged)
         elif fs_rec is not None:

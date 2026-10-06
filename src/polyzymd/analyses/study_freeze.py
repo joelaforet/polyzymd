@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import csv
 import gzip
-import hashlib
 import json
 import shutil
 import subprocess
@@ -58,7 +57,6 @@ MANIFEST_SCHEMA = "polyzymd-study-manifest/1"
 #: JSON Schema of the manifest, shipped with PolyzyMD and written into every deposit.
 MANIFEST_SCHEMA_FILE = "manifest-1.schema.json"
 _IONS = {"NA", "CL", "K", "MG", "ZN", "CA", "SOD", "CLA", "POT", "NA+", "CL-", "K+", "MG2+"}
-_HASH_CACHE = ".hashes.json"
 
 
 @dataclass
@@ -76,24 +74,16 @@ class FreezeResult:
 
 
 class _Hashes:
-    """SHA-256 of files and their sizes, from the shared hash cache (:mod:`~polyzymd.analyses.shared.file_hashes`)."""
+    """SHA-256 of files and their sizes, from the shared hash cache.
 
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        try:
-            self.cache = json.loads(path.read_text())
-        except (OSError, ValueError):
-            self.cache = {}
+    The cache is :mod:`~polyzymd.analyses.shared.file_hashes`, so files that
+    analyses already hashed are not read again.
+    """
 
     def __call__(self, file: Path) -> dict[str, Any]:
         from polyzymd.analyses.shared.file_hashes import file_sha256
 
-        # The shared cache, so files hashed by analyses are not hashed again.
         return {"size": file.stat().st_size, "sha256": file_sha256(file)}
-
-    def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.cache))
 
 
 def _git(root: Path, *arguments: str) -> str | None:
@@ -362,18 +352,13 @@ def composition_warnings(label: str, config: Any, universe: Any) -> list[str]:
 def _hashes_recorded(condition: Any, replicate: int, provenance: Any) -> bool:
     """Return whether the run recorded the hash of every trajectory file the replicate reads.
 
-    Read through the condition's simulation engine. A run with no
-    ``progress.json`` has nowhere to record them, so it counts as recorded
-    and freeze does not ask for ``polyzymd hash-trajectories``.
+    Read through the condition's simulation engine, from the hashes the runner
+    recorded and those ``polyzymd hash-trajectories`` recorded. Trajectories
+    loaded without a simulation engine count as recorded.
     """
-    get_engine = getattr(condition._provider._get_loader(), "_get_engine", None)
-    if not callable(get_engine):
-        return True
-    engine = get_engine()
-    working_dir = engine.resolve_engine_working_directory(Path(provenance.working_directory))
-    if not (working_dir / "progress.json").is_file():
-        return True
     recorded = condition._provider.recorded_trajectory_hashes(replicate)
+    if recorded is None:
+        return True
     paths = [Path(item.path).resolve() for item in provenance.trajectories]
     return bool(paths) and all(path in recorded for path in paths)
 
@@ -585,8 +570,8 @@ def _replicates(
         unhashed = [index for index, r in replicates.items() if not r["hashes_recorded"]]
         if unhashed:
             warnings.append(
-                f"{label}: replicates {', '.join(unhashed)} have no trajectory hashes in "
-                "progress.json (the runs predate them); record them, once, by running polyzymd "
+                f"{label}: replicates {', '.join(unhashed)} have no recorded trajectory "
+                "hashes; record them, once, by running polyzymd "
                 "hash-trajectories --study . in the study folder, so anyone can check the "
                 "trajectories without hashing them again"
             )
@@ -784,9 +769,8 @@ def freeze(root: str | Path, *, tag: str | None = None) -> FreezeResult:
 
     deposit = root / DEPOSIT
     deposit.mkdir(exist_ok=True)
-    hashes = _Hashes(deposit / _HASH_CACHE)
+    hashes = _Hashes()
     conditions, rows = _replicates(protocol, deposit, hashes, warnings)
-    hashes.save()
     for label, items in condition_restraints(protocol).items():
         conditions[label]["restraints"] = items
     warnings.extend(_production_length_warnings(conditions))
@@ -859,7 +843,6 @@ def freeze(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         ],
         "warnings": warnings,
     }
-    hashes.save()
     (root / MANIFEST).write_text(json.dumps(manifest, indent=1) + "\n")
     (root / CHECKLIST).write_text(
         "# The Communications Biology MD checklist, filled by polyzymd study freeze. Informational.\n"

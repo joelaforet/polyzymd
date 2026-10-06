@@ -36,9 +36,11 @@ EXIT_CONFLICT = 2
     "--dry-run", "dry_run", is_flag=True, help="Report what would be hashed; write nothing."
 )
 @click.option(
-    "--force",
+    "--rehash-changed",
+    "rehash_changed",
     is_flag=True,
-    help="Also hash runs recorded as running, once their jobs have stopped.",
+    help="Hash again, and replace, entries this command recorded for files whose size has "
+    "changed since, such as a GROMACS run that was extended.",
 )
 def hash_trajectories_command(
     configs: tuple[Path, ...],
@@ -46,17 +48,19 @@ def hash_trajectories_command(
     replicate_spec: str | None,
     verify: bool,
     dry_run: bool,
-    force: bool,
+    rehash_changed: bool,
 ) -> None:
-    """Record the SHA-256 of each run's finished trajectory files in its progress.json.
+    """Record the SHA-256 of each run's finished trajectory files in trajectory_hashes.json.
 
-    For runs that finished before PolyzyMD recorded trajectory hashes, with
-    any simulation engine: each config's engine (OpenMM, GROMACS) says which
-    files are its trajectories and where their hashes are recorded. Running
-    it again changes nothing: files with a recorded hash are skipped without
-    being read, and a recorded hash is never overwritten; a disagreement is
-    printed as a conflict and exits 2. Reading the trajectories takes about a
-    second per gigabyte, so on a cluster run it in a batch job.
+    For runs whose runner did not record trajectory hashes (older OpenMM
+    runs, downsampled copies, GROMACS runs), with any simulation engine: each
+    config's engine (OpenMM, GROMACS) says which files are its finished
+    trajectories. It writes only trajectory_hashes.json in each run's engine
+    working directory, never progress.json. Running it again changes
+    nothing: files with a recorded hash are skipped without being read, and
+    a recorded hash is never overwritten; a disagreement is printed as a
+    conflict and exits 2. Reading the trajectories takes about a second per
+    gigabyte, so on a cluster run it in a batch job.
 
     \b
     Examples:
@@ -80,8 +84,7 @@ def hash_trajectories_command(
     for path in configs:
         targets.append((path.resolve().parent.name, SimulationConfig.from_yaml(path)))
     if not targets:
-        click.echo("error: give -c config.yaml or --study.", err=True)
-        sys.exit(EXIT_CONFLICT)
+        raise click.UsageError("give -c config.yaml or --study.")
     wanted = set(parse_replicate_range(replicate_spec)) if replicate_spec else None
     conflicts = 0
     for label, config in targets:
@@ -98,10 +101,9 @@ def hash_trajectories_command(
         for index, root in runs:
             report = engine.record_trajectory_hashes(
                 engine.resolve_engine_working_directory(root),
-                int(index),
                 verify=verify,
                 dry_run=dry_run,
-                force=force,
+                rehash_changed=rehash_changed,
             )
             name = f"{label} replicate {index}"
             if report["skipped"]:
@@ -113,8 +115,10 @@ def hash_trajectories_command(
             ]
             if verify:
                 parts.append(f"verified {len(report['verified'])}")
-            if report["created"]:
-                parts.append("progress.json written from a scan of the run")
+            if report["rehashed"]:
+                parts.append(
+                    f"{'would rehash' if dry_run else 'rehashed'} {len(report['rehashed'])}"
+                )
             click.echo(f"{name} ({engine.name}): " + ", ".join(parts))
             for message in report["conflicts"]:
                 click.echo(f"conflict: {name} {message}")
