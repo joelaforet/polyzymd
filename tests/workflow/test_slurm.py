@@ -12,6 +12,7 @@ Covers:
 
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -492,7 +493,8 @@ class TestGeneratedOpenMMScript:
 
         assert "#SBATCH --partition=aa100" in script
         assert "#SBATCH --job-name=r3_test" in script
-        assert "#SBATCH --output=slurm_logs/r3_test.%j.out" in script
+        assert f"#SBATCH --output={Path.cwd()}/slurm_logs/r3_test.%j.out" in script
+        assert '#SBATCH --chdir="/scratch/user/run_3"' in script
         assert "REQUESTED_PIXI_ENV=sim-cuda-12-4" in script
         assert (
             'eval "$(pixi shell-hook -e "$PIXI_ENV" '

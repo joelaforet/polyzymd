@@ -194,7 +194,9 @@ def test_recover_submit_openmm_accepts_build_environment(monkeypatch, tmp_path) 
     monkeypatch.setattr("polyzymd.engines.create_engine", lambda *args, **kwargs: fake_engine)
     monkeypatch.setattr("polyzymd.simulation.progress.save_progress", lambda *args, **kwargs: None)
     monkeypatch.setattr("polyzymd.workflow.daisy_chain.create_job_name", lambda *args: "demo-r1")
-    monkeypatch.setattr("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", lambda name: [])
+    monkeypatch.setattr(
+        "polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", lambda run_dir, job_name: []
+    )
     runner = CliRunner()
 
     result = runner.invoke(

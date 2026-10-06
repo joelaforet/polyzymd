@@ -7,7 +7,7 @@ writes a STOP marker that the wrapper honours, then cancels the jobs.
 
 Covers:
 - STOP marker contents and location
-- job lookup and cancellation by job name
+- job lookup and cancellation by run directory or job name
 - --resume, --stop-only and --dry-run
 - cancel_slurm_jobs best-effort behaviour outside SLURM
 """
@@ -97,9 +97,29 @@ class TestCancelCommand:
 
         assert result.exit_code == 0, result.output
         assert stop_file_path(working_dir).exists()
-        lookup.assert_called_once_with("pzmd_r1")
+        lookup.assert_called_once_with(working_dir, "pzmd_r1")
         cancel_jobs.assert_called_once_with(["4242"])
         assert "4242" in result.output
+
+    def test_cancels_a_chain_that_works_in_the_folder_it_was_submitted_from(self, tmp_path):
+        """Chains from older versions work where they were submitted; their name matches."""
+        working_dir = tmp_path / "run_1"
+        config_path, sim_config = _config_and_mock(tmp_path, lambda r: working_dir)
+        squeue = MagicMock(returncode=0, stdout=f"4242|pzmd_r1|{tmp_path / 'projects'}\n")
+
+        with (
+            patch("polyzymd.config.schema.SimulationConfig.from_yaml", return_value=sim_config),
+            patch("polyzymd.workflow.daisy_chain.create_job_name", return_value="pzmd_r1"),
+            patch("polyzymd.workflow.daisy_chain.subprocess.run", return_value=squeue),
+            patch(
+                "polyzymd.workflow.daisy_chain.cancel_slurm_jobs",
+                side_effect=lambda ids: list(ids),
+            ) as cancel_jobs,
+        ):
+            result = CliRunner().invoke(cli, ["cancel", "-c", str(config_path), "-r", "1"])
+
+        assert result.exit_code == 0, result.output
+        cancel_jobs.assert_called_once_with(["4242"])
 
     def test_handles_several_replicates(self, tmp_path):
         config_path, sim_config = _config_and_mock(tmp_path, lambda r: tmp_path / f"run_{r}")

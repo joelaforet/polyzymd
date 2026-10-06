@@ -611,18 +611,21 @@ class SystemBuilder:
                 charge_from.append(mol)
                 seen_smiles.add(smi)
 
+        parts = ["water"]
+        if seen_smiles:
+            parts.append(f"{len(seen_smiles)} polymer type(s)")
+
         if self._substrate_molecule:
             charge_from.append(self._substrate_molecule)
+            parts.append("substrate")
 
         if self._solvent_builder._composition:
             for cosolvent in self._solvent_builder._composition.co_solvents:
                 if cosolvent.molecule is not None:
                     charge_from.append(cosolvent.molecule)
+                    parts.append(cosolvent.name)
 
-        LOGGER.info(
-            f"Charge templates: {len(charge_from)} "
-            f"(water + {len(seen_smiles)} polymer type(s) + substrate + co-solvents)"
-        )
+        LOGGER.info(f"Charge templates: {len(charge_from)} ({' + '.join(parts)})")
         LOGGER.info(f"  Template prep took {time.perf_counter() - t0:.1f}s")
 
         # Single parameterization call
@@ -948,10 +951,9 @@ class SystemBuilder:
             OpenFF Interchange ready for simulation.
         """
         self._working_dir = Path(working_dir) if working_dir else None
-        self._build_provenance = {
-            "polymer_seed": polymer_seed,
-            "packmol_seed": polymer_seed,
-        }
+        self._build_provenance = {"packmol_seed": polymer_seed}
+        if config.polymers and config.polymers.enabled:
+            self._build_provenance["polymer_seed"] = polymer_seed
         if polymer_seed is None:
             LOGGER.warning(
                 "No replicate seed supplied: Packmol will use its fixed default seed and "
@@ -1237,7 +1239,7 @@ class SystemBuilder:
                 config=config,
                 component_info=component_info,
                 # The replicate number, as the build recorded it.
-                replicate=(getattr(self, "_build_provenance", None) or {}).get("polymer_seed"),
+                replicate=(getattr(self, "_build_provenance", None) or {}).get("packmol_seed"),
             )
 
             result = exporter.export(

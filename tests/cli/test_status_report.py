@@ -20,7 +20,6 @@ from polyzymd.cli.status_report import (
     estimate_eta_days,
     estimate_rate_ns_per_day,
     find_latest_log,
-    jobs_by_name,
     last_error_line,
     parse_squeue_output,
     render_agent,
@@ -42,16 +41,15 @@ NOW = datetime(2026, 9, 11, 16, 0, tzinfo=timezone.utc)
 
 def test_parse_squeue_output_fields_and_grouping():
     text = (
-        "28248388|CALB_none_run5|R|3:27|bgpu-shirts2|None\n"
-        "28248422|CALB_none_run3|PD|0:00||(Priority)\n"
+        "28248388|CALB_none_run5|R|3:27|bgpu-shirts2|None|/scratch/CALB_none_run5\n"
+        "28248422|CALB_none_run3|PD|0:00||(Priority)|/scratch/CALB_none_run3\n"
         "\n"
     )
     jobs = parse_squeue_output(text)
     assert [j.job_id for j in jobs] == ["28248388", "28248422"]
     assert jobs[0].node == "bgpu-shirts2"
     assert jobs[1].reason == "(Priority)"
-    grouped = jobs_by_name(jobs)
-    assert set(grouped) == {"CALB_none_run5", "CALB_none_run3"}
+    assert jobs[1].work_dir == "/scratch/CALB_none_run3"
 
 
 # ---------------------------------------------------------------------------
@@ -142,10 +140,12 @@ def test_eta():
 def test_find_latest_log_and_error_line(tmp_path: Path):
     logs = tmp_path / "slurm_logs"
     logs.mkdir()
+    run_dir = tmp_path / "scratch" / "sys_run1"
     old = logs / "sys_run1.100.out"
-    old.write_text("run-segment exited with code 0\n")
+    old.write_text(f"Work dir:  {run_dir}\nrun-segment exited with code 0\n")
     new = logs / "sys_run1.200.out"
     new.write_text(
+        f"Work dir:  {run_dir}\n"
         "ROUTING: sim-cuda-12-4 is incompatible with driver 525.147\n"
         "FATAL: CUDA routing failed after 3 retries\n"
     )
@@ -156,11 +156,13 @@ def test_find_latest_log_and_error_line(tmp_path: Path):
     os.utime(old, (t - 100, t - 100))
     os.utime(new, (t, t))
 
-    assert find_latest_log(logs, "sys_run1") == new
+    assert find_latest_log(logs, "sys_run1", run_dir) == new
     assert last_error_line(new) == "FATAL: CUDA routing failed after 3 retries"
     assert last_error_line(old) is None
-    assert find_latest_log(logs, "other") is None
-    assert find_latest_log(None, "sys_run1") is None
+    assert find_latest_log(logs, "other", run_dir) is None
+    assert find_latest_log(None, "sys_run1", run_dir) is None
+    # A log written for a run with the same name in another scratch folder.
+    assert find_latest_log(logs, "sys_run1", tmp_path / "other" / "sys_run1") is None
 
 
 def test_error_line_concurrent_and_segment_failed(tmp_path: Path):
@@ -318,7 +320,9 @@ class TestStatusAgentCli:
         p2 = _write_progress(
             rep2, 60_000_000, SimulationStatus.INTERRUPTED, SegmentStatus.INTERRUPTED
         )
-        (logs / "SYS_run2.77.out").write_text("FATAL: CUDA routing failed after 3 retries\n")
+        (logs / "SYS_run2.77.out").write_text(
+            f"Work dir:  {rep2}\nFATAL: CUDA routing failed after 3 retries\n"
+        )
 
         cfg = _mock_cfg(scratch, logs)
         cfg.discover_replicate_dirs.return_value = [(1, rep1), (2, rep2)]
@@ -329,7 +333,7 @@ class TestStatusAgentCli:
         engine.resolve_engine_working_directory.side_effect = lambda p: p
         engine.load_or_scan_progress.side_effect = lambda d, r: {rep1: p1, rep2: p2}[d]
 
-        squeue_text = "555|SYS_run1|R|2:00:00|nodeA|None\n"
+        squeue_text = f"555|SYS_run1|R|2:00:00|nodeA|None|{rep1}\n"
         runner = CliRunner()
         with (
             patch("polyzymd.config.schema.SimulationConfig.from_yaml", return_value=cfg),
@@ -362,6 +366,89 @@ class TestStatusAgentCli:
         assert f"polyzymd submit -c {config_path} -r 2 --preset p" in out
         # exactly one squeue call regardless of replicate count
         assert run.call_count == 1
+
+    def test_job_and_log_of_a_run_with_the_same_name_are_not_shown(self, tmp_path: Path):
+        """Condition B shares A's run-folder name and logs folder, not A's job or log."""
+        logs = tmp_path / "slurm_logs"
+        logs.mkdir()
+        rep_a = tmp_path / "scratch_a" / "SYS_run1"
+        rep_b = tmp_path / "scratch_b" / "SYS_run1"
+        progress = _write_progress(
+            rep_b, 60_000_000, SimulationStatus.INTERRUPTED, SegmentStatus.INTERRUPTED
+        )
+        (logs / "SYS_run1.77.out").write_text(f"Work dir:  {rep_a}\nFATAL: from run A\n")
+
+        cfg = _mock_cfg(rep_b.parent, logs)
+        cfg.discover_replicate_dirs.return_value = [(1, rep_b)]
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("name: x\n")
+        engine = MagicMock()
+        engine.resolve_engine_working_directory.side_effect = lambda p: p
+        engine.load_or_scan_progress.return_value = progress
+
+        with (
+            patch("polyzymd.config.schema.SimulationConfig.from_yaml", return_value=cfg),
+            patch("polyzymd.engines.create_engine", return_value=engine),
+            patch("polyzymd.cli.main._resolve_engine_name", return_value="openmm"),
+            patch("polyzymd.cli.main.warn_if_wrong_pixi_env"),
+            patch("polyzymd.simulation.progress.save_progress"),
+            patch(
+                "polyzymd.workflow.daisy_chain.create_job_name",
+                side_effect=lambda c, r: f"SYS_run{r}",
+            ),
+            patch("polyzymd.cli.status_report.subprocess.run") as run,
+        ):
+            run.return_value = MagicMock(
+                returncode=0, stdout=f"555|SYS_run1|R|2:00:00|nodeA|None|{rep_a}\n", stderr=""
+            )
+            result = CliRunner().invoke(cli, ["status", "--format", "json", "-c", str(config_path)])
+
+        assert result.exit_code == 0, result.output
+        replicate = json.loads(result.output)["systems"][0]["replicates"][0]
+        assert replicate["jobs"] == []
+        assert replicate["verdict"] == "dead"
+        assert replicate["last_log"] is None
+
+    def test_chain_working_in_the_folder_it_was_submitted_from_is_running(self, tmp_path: Path):
+        """A chain from an older version works where it was submitted; its name matches."""
+        logs = tmp_path / "slurm_logs"
+        logs.mkdir()
+        rep = tmp_path / "scratch" / "SYS_run1"
+        progress = _write_progress(
+            rep, 60_000_000, SimulationStatus.INTERRUPTED, SegmentStatus.INTERRUPTED
+        )
+
+        cfg = _mock_cfg(rep.parent, logs)
+        cfg.discover_replicate_dirs.return_value = [(1, rep)]
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("name: x\n")
+        engine = MagicMock()
+        engine.resolve_engine_working_directory.side_effect = lambda p: p
+        engine.load_or_scan_progress.return_value = progress
+
+        with (
+            patch("polyzymd.config.schema.SimulationConfig.from_yaml", return_value=cfg),
+            patch("polyzymd.engines.create_engine", return_value=engine),
+            patch("polyzymd.cli.main._resolve_engine_name", return_value="openmm"),
+            patch("polyzymd.cli.main.warn_if_wrong_pixi_env"),
+            patch("polyzymd.simulation.progress.save_progress"),
+            patch(
+                "polyzymd.workflow.daisy_chain.create_job_name",
+                side_effect=lambda c, r: f"SYS_run{r}",
+            ),
+            patch("polyzymd.cli.status_report.subprocess.run") as run,
+        ):
+            run.return_value = MagicMock(
+                returncode=0,
+                stdout=f"555|SYS_run1|R|2:00:00|nodeA|None|{tmp_path / 'projects'}\n",
+                stderr="",
+            )
+            result = CliRunner().invoke(cli, ["status", "--format", "json", "-c", str(config_path)])
+
+        assert result.exit_code == 0, result.output
+        replicate = json.loads(result.output)["systems"][0]["replicates"][0]
+        assert [job["job_id"] for job in replicate["jobs"]] == ["555"]
+        assert replicate["verdict"] == "running"
 
     def test_json_format(self, tmp_path: Path):
         scratch = tmp_path / "scratch"

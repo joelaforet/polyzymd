@@ -384,7 +384,8 @@ class GromacsSlurmScriptGenerator:
         job_name : str | None, optional
             Custom scheduler job name.
         output_file : str | None, optional
-            Custom SLURM log path pattern.
+            Custom SLURM log path pattern. A relative path is made absolute
+            against the current directory.
 
         Returns
         -------
@@ -395,6 +396,9 @@ class GromacsSlurmScriptGenerator:
             job_name = f"pzmd_gmx_r{replicate}"
         if output_file is None:
             output_file = f"slurm_logs/{job_name}.%j.out"
+        # The job runs in its run directory (``--chdir``); see the OpenMM generator.
+        output_file = str(Path(output_file).absolute())
+        working_dir = str(Path(working_dir).absolute())
 
         wall_hours = self._parse_wall_time_hours(self._config.time_limit)
         maxh_hours = wall_hours * self.MAXH_SAFETY_FACTOR

@@ -15,13 +15,14 @@ until the simulation is complete.
 
 from __future__ import annotations
 
+import getpass
 import logging
 import os
 import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from polyzymd.config.schema import SimulationConfig
 from polyzymd.utils.replicates import parse_replicate_range, validate_replicate_range
@@ -42,8 +43,14 @@ _SLURM_JOB_NAME_UNDERSCORES = re.compile(r"_+")
 # ---------------------------------------------------------------------------
 
 
-def check_existing_slurm_jobs(job_name: str) -> List[str]:
-    """Query SLURM for RUNNING or PENDING jobs that match *job_name*.
+def check_existing_slurm_jobs(
+    run_dir: Union[str, Path], job_name: Optional[str] = None
+) -> List[str]:
+    """Query SLURM for RUNNING or PENDING jobs of the run in *run_dir*.
+
+    A job matches as described in :func:`job_belongs_to_run`: by its working
+    directory (``squeue`` field ``%Z``), or, for a chain submitted by an
+    older PolyzyMD, by its name *job_name*.
 
     This is a best-effort check: if ``squeue`` is unavailable (e.g. in a
     non-SLURM environment or CI), a warning is logged and an empty list is
@@ -51,26 +58,29 @@ def check_existing_slurm_jobs(job_name: str) -> List[str]:
 
     Parameters
     ----------
-    job_name : str
-        The SLURM ``--job-name`` to search for (exact match).
+    run_dir : str or Path
+        The replicate's run directory.
+    job_name : str, optional
+        The replicate's job name, from :func:`create_job_name`.
 
     Returns
     -------
     list of str
-        SLURM job IDs that are RUNNING or PENDING with the given name.
+        IDs of the user's RUNNING or PENDING jobs of the run.
         Empty if ``squeue`` is unavailable or returns no matches.
     """
+    user = os.environ.get("USER") or getpass.getuser()
     try:
         result = subprocess.run(
             [
                 "squeue",
                 "--noheader",
-                "--name",
-                job_name,
+                "--user",
+                user,
                 "--states",
                 "RUNNING,PENDING",
                 "--format",
-                "%i",
+                "%i|%j|%Z",
             ],
             capture_output=True,
             text=True,
@@ -95,8 +105,46 @@ def check_existing_slurm_jobs(job_name: str) -> List[str]:
         )
         return []
 
-    job_ids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    job_ids = []
+    for line in result.stdout.splitlines():
+        job_id, _, rest = line.strip().partition("|")
+        name, _, work_dir = rest.partition("|")
+        if job_id and job_belongs_to_run(name, work_dir, run_dir, job_name):
+            job_ids.append(job_id)
     return job_ids
+
+
+def job_belongs_to_run(
+    name: str,
+    work_dir: Union[str, Path, None],
+    run_dir: Union[str, Path],
+    job_name: Optional[str],
+) -> bool:
+    """Return True when the job *name* working in *work_dir* runs *run_dir*.
+
+    New jobs work in the run directory (GROMACS jobs in ``<run_dir>/gromacs``).
+    Chains submitted by older PolyzyMD versions work in the folder they were
+    submitted from, so a job named *job_name* also matches, unless it works in
+    a folder with the run directory's name: that is the same-named run of
+    another condition.
+    """
+    if is_within_run_dir(work_dir, run_dir):
+        return True
+    if not job_name or name != job_name or not work_dir:
+        return False
+    folder = Path(work_dir)
+    if folder.name == "gromacs":
+        folder = folder.parent
+    return folder.name != Path(run_dir).name
+
+
+def is_within_run_dir(path: Union[str, Path, None], run_dir: Union[str, Path]) -> bool:
+    """Return True when *path* is *run_dir* or a folder inside it."""
+    if not path:
+        return False
+    target = Path(run_dir).resolve()
+    candidate = Path(path).resolve()
+    return candidate == target or target in candidate.parents
 
 
 def cancel_slurm_jobs(job_ids: List[str]) -> List[str]:
@@ -568,6 +616,9 @@ class DaisyChainSubmitter:
                 is_generated_only=False,
             )
 
+        # The job starts in its run directory (``#SBATCH --chdir``).
+        Path(self._get_scratch_dir(replicate)).mkdir(parents=True, exist_ok=True)
+
         # Use --export=NONE to start with clean environment, letting the
         # script's pixi shell-hook initialization work properly regardless
         # of submission context
@@ -605,8 +656,8 @@ class DaisyChainSubmitter:
         """Generate and submit the job for a single replicate.
 
         Before submitting, checks ``squeue`` for existing RUNNING/PENDING
-        jobs with the same job name.  If duplicates are found and
-        ``force`` is not set, raises ``RuntimeError``.
+        jobs of this replicate (see :func:`job_belongs_to_run`).  If duplicates are
+        found and ``force`` is not set, raises ``RuntimeError``.
 
         Parameters
         ----------
@@ -632,12 +683,13 @@ class DaisyChainSubmitter:
             and not self._dc_config.generate_only
             and not self._dc_config.force
         ):
-            existing = check_existing_slurm_jobs(job_name)
+            run_dir = self._get_scratch_dir(replicate)
+            existing = check_existing_slurm_jobs(run_dir, job_name)
             if existing:
                 ids = ", ".join(existing)
                 raise RuntimeError(
                     f"Replicate {replicate} already has RUNNING/PENDING SLURM "
-                    f"job(s): {ids} (job name '{job_name}'). "
+                    f"job(s): {ids} (run directory {run_dir}). "
                     "Use --force to submit anyway."
                 )
 

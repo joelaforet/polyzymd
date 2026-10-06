@@ -385,7 +385,8 @@ def _assert_solute_solvent_separation(
     elif stats["n_below_tolerance"] > 0:
         logger.warning(
             "%d %s atom(s) lie between %.2f and %.2f A of the solute "
-            "(minimum %.3f A); Packmol tolerance was not fully honoured.",
+            "(minimum %.3f A); Packmol tolerance was not fully honoured. Energy "
+            "minimisation resolves contacts this close; no action is needed.",
             stats["n_below_tolerance"],
             label,
             0.5 * tolerance_angstrom,

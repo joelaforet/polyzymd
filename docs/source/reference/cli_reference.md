@@ -317,7 +317,9 @@ polyzymd run -c config.yaml -r 1-3 --engine gromacs --dry-run
 ### Workflow
 
 1. Load and validate configuration
-2. Build system (enzyme + substrate + polymers + solvent)
+2. Build system (enzyme + substrate + polymers + solvent). If an earlier
+   `polyzymd build` wrote a build for this config, reuse it. The log says which
+   build is used.
 3. Run selected engine workflow:
    - GROMACS: export `.gro/.top/.mdp` then run EM/equilibration/production/post-processing
    - OpenMM: run minimization/equilibration/production locally
@@ -482,7 +484,7 @@ remains" and queues a successor within seconds. `polyzymd cancel` writes a
 `STOP` marker into each replicate working directory first — the wrapper
 refuses to submit a successor while it exists, and a successor that is
 already queued exits before starting a segment — and then cancels the
-matching queued and running jobs by job name.
+queued and running jobs that work in that directory.
 
 ### Options
 
@@ -675,9 +677,9 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | Verdict | Meaning |
 |---------|---------|
 | `COMPLETED` | `progress.json` reports all production steps done |
-| `RUNNING` | A SLURM job with this replicate's job name is in state `R` (or completing/configuring) |
+| `RUNNING` | A SLURM job that works in this replicate's run directory is in state `R` (or completing/configuring) |
 | `QUEUED` | A matching job exists but is pending; the reason is shown in parentheses |
-| `DEAD` | Work remains and no matching job is queued or running. Nothing will restart it. The `last:` field is the most informative error line near the end of the newest SLURM log, with the log filename in brackets. |
+| `DEAD` | Work remains and no matching job is queued or running. Nothing will restart it. The `last:` field is the most informative error line near the end of the newest SLURM log whose `Work dir:` line names this run directory, with the log filename in brackets. |
 | `NOT_STARTED` | Directory exists but production never began (typically a failed build; the build log is consulted). |
 | `NOT_FOUND` | Expected replicate directory is missing from scratch |
 
