@@ -24,3 +24,17 @@ def test_a_topology_that_cannot_load_is_named_as_such(tmp_path: Path) -> None:
         Replicate.universe(replicate)
     assert "analysis-topology" in info.value.hint
     assert Condition  # the class used above is the study's own
+
+
+def test_labels_that_share_a_folder_name_are_refused(tmp_path: Path) -> None:
+    """Study.from_configs refuses two labels that give one results folder name."""
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.study import Study
+    from tests._support.analysis_testkit import write_simulation_config
+
+    configs = {
+        label: write_simulation_config(tmp_path / name, scratch=tmp_path / "scratch" / name)
+        for label, name in (("SBMA 50", "a"), ("sbma 50%", "b"))
+    }
+    with pytest.raises(ProtocolError, match="SBMA 50.*sbma 50%"):
+        Study.from_configs(configs, equilibration="0ns")

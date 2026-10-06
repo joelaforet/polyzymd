@@ -627,11 +627,13 @@ class Study:
         Raises
         ------
         ProtocolError
-            If no config is given, a config is missing or unreadable, or a
-            requested replicate has no run directory.
+            If no config is given, two labels give one folder name, a config
+            is missing or unreadable, or a requested replicate has no run
+            directory.
         """
         from polyzymd.analyses.protocols import _labels
         from polyzymd.analyses.shared.loader import parse_time_string
+        from polyzymd.analyses.study_file import check_folder_names
 
         if isinstance(configs, Mapping):
             labels = [str(label) for label in configs]
@@ -639,6 +641,7 @@ class Study:
         else:
             paths = [Path(path).expanduser().resolve() for path in configs]
             labels = _labels(paths, None)
+        check_folder_names(labels, "Study.from_configs")
         missing = [str(path) for path in paths if not path.is_file()]
         if not paths or missing:
             raise ProtocolError(

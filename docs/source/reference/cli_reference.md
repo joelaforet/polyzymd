@@ -1066,7 +1066,9 @@ Reads `project.yaml` (`PATH` is the file or its folder, by default the
 current directory) and each study's `study.yaml` without loading any
 trajectory. Prints `analysis <run>: studies <labels>` for each project
 analysis, `stats <function>: up to date|stale: ...|not run` when it names a
-plan, then `== study <label>` and the `polyzymd study check` of each study.
+plan, then `== study <label>` and the `polyzymd study check` of each study,
+then `== project` with the git line and the project's metadata line, once.
+A study's metadata line is printed only when the study has its own metadata.
 Exits 2 when the project file or a study cannot be read.
 
 ### polyzymd project init
@@ -1123,7 +1125,7 @@ directory) without loading any trajectory, and prints:
 | names | `structure <name>: <path>` and `region <name>: <selection>`, one line each |
 | condition | `control\|condition <label>: runs <numbers> under <directory> (from data.local.yaml\|config)`, with `; production <ns>` (a range when the replicates differ) under `--production`, or `no runs found under <directory> ...` |
 | analysis | `analysis <run>: <settings>; stored results in <folder>[ with its report]`, or `no stored results`; for the study's own function, `analysis <run> (<file>:<function>, <kind>)`, after importing it |
-| git | `git: commit <sha>; inputs committed`, `git: commit <sha>; uncommitted inputs: <paths>`, or `git: not a repository` |
+| git | `git: commit <sha>; inputs committed`, `git: commit <sha>; <n> uncommitted inputs: <first five paths> and <m> more`, or `git: not a repository` |
 | metadata | `metadata: complete`, or `metadata: <n> gaps for publishing; ...` |
 | publish | `publish: follow <study>/deposit/UPLOAD.md` after a freeze, or `publish: when the analyses are final, run polyzymd study freeze` |
 | reproduce | In a downloaded frozen study (a `manifest.json` but no `deposit/`): how to point it at the trajectories and rerun or redraw |
@@ -1171,7 +1173,10 @@ Adds a condition to an existing study: `--config` copies `CONFIG` and the
 input files it names into `conditions/<label>/`, as `study init --condition`
 does; `--new` creates `conditions/<label>/` with `polyzymd init`. The condition
 is added as one line under `conditions:` in `study.yaml`, keeping the rest of
-the file. Exits 2 when neither or both options are given, or the label or its
+the file. With `--config`, the config's `scratch_directory` is written to
+`data.local.yaml` and printed as `data <label>: <path> (from the config's
+scratch_directory)`, with a warning when that folder holds no run directories.
+Exits 2 when neither or both options are given, or the label or its
 folder is taken.
 
 ### polyzymd study locate
@@ -1185,9 +1190,13 @@ named by its config's `naming_template`, and writes the folder holding the
 most of them to `data.local.yaml` beside `study.yaml`, keeping entries of
 conditions it does not find. With a `manifest.json` from `study freeze`, it
 prefers a folder whose files have the recorded sizes (and with `--verify`,
-SHA-256), and prints `<label>: <n> files match manifest.json`. Prints
-`<label>: runs <numbers> under <folder>` per condition found. Exits 2 when a
-condition is not found or a file is missing or different. See
+SHA-256), and prints `<label>: <n> files match manifest.json`. When two
+conditions name their runs alike, a folder named for the condition
+(`no_polymer/`) is chosen before file sizes, and one folder is never written
+for two conditions. Prints `<label>: runs <numbers> under <folder>` per
+condition found. Writes nothing when no condition is found. Exits 2 when a
+condition is not found, two conditions are found in one folder, or a file is
+missing or different. See
 {doc}`../how_to/study_folder` and {doc}`../how_to/study_freeze`.
 
 ### polyzymd study freeze

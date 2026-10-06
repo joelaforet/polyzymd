@@ -9,6 +9,8 @@ from typing import Any
 import click
 
 EXIT_STUDY_ERROR = 2
+#: Context ``meta`` key set by project check, which prints the git and metadata lines once.
+PROJECT_CHECK = "polyzymd.project_check"
 
 
 def _report_status(path: Path) -> str:
@@ -167,27 +169,16 @@ def check_command(path: Path, production: bool = False) -> None:
     from polyzymd.analyses.study_git import describe, git_state
 
     # A study of a project is committed with it, so project.yaml and the shared
-    # analyses/ count among its inputs.
+    # analyses/ count among its inputs. project check prints the git line and the
+    # project's metadata line once, for all its studies.
     project = protocol.project
-    click.echo(describe(git_state(project.root if project is not None else protocol.root)))
-    from polyzymd.analyses.study_metadata import check_metadata
-
-    try:
-        _, gaps = check_metadata(protocol.metadata)
-        # A study of a project publishes with the project's metadata.
-        owner, command = (
-            ("project.yaml", "project freeze")
-            if protocol.project is not None
-            else ("study.yaml", "study freeze")
-        )
-        click.echo(
-            f"metadata ({owner}): {len(gaps)} gaps for publishing: {'; '.join(gaps)}"
-            if gaps
-            else f"metadata ({owner}): complete"
-        )
-    except ProtocolError as exc:
-        click.echo(f"error: {' '.join(str(exc).split())}")
-        failed = True
+    in_project = click.get_current_context().meta.get(PROJECT_CHECK, False)
+    if not in_project:
+        click.echo(describe(git_state(project.root if project is not None else protocol.root)))
+    if not (in_project and protocol.metadata == project.metadata):
+        owner = "project.yaml" if project is not None else "study.yaml"
+        if not _echo_metadata(protocol.metadata, owner):
+            failed = True
     guide = protocol.root / "deposit" / "UPLOAD.md"
     frozen = protocol.root / "manifest.json"
     if guide.is_file():
@@ -258,8 +249,10 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
     (named by its config's naming_template), preferring one whose files have the sizes
     manifest.json records, is written to data.local.yaml
     beside study.yaml, which is never committed or published; entries for
-    conditions not found are kept as they were. Moving data never changes
-    the study or its stored results' config hashes.
+    conditions not found are kept as they were. Runs named alike go to the
+    folder named for the condition (no_polymer/), and one folder is never
+    written for two conditions. Moving data never changes the study or its
+    stored results' config hashes.
     """
     _study_logging(study_path, "study-locate")
     import yaml
@@ -275,7 +268,9 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
         if exc.hint:
             click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
         sys.exit(EXIT_STUDY_ERROR)
-    located = {label: str(folder) for label, folder in protocol.data.items()}
+    from polyzymd.analyses.study_scaffold import condition_folder
+
+    located: dict[str, Path] = {}
     missing = []
     configs = {}
     for label, config_path in protocol.conditions.items():
@@ -298,16 +293,15 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
             )
             missing.append(label)
             continue
-        matching = [p for p in parents if _matches_manifest(protocol.root, label, p, verify)]
+        candidates = list(parents)
         alike = [other for other in named[config.format_run_directory_name("*")] if other != label]
-        if alike and not matching:
+        by_name = [p for p in parents if condition_folder(label) in p.parts]
+        if alike and len(by_name) == 1:
             # One folder per condition, named as in the study (no_polymer/,
-            # sds/), as a deposit lays them out, tells them apart.
-            from polyzymd.analyses.study_scaffold import condition_folder
-
-            matching = [p for p in parents if condition_folder(label) in p.parts]
-            matching = matching if len(matching) == 1 else []
-        if alike and not matching:
+            # sds/), as a deposit lays them out, tells them apart before sizes do.
+            candidates = by_name
+        matching = [p for p in candidates if _matches_manifest(protocol.root, label, p, verify)]
+        if alike and len(by_name) != 1 and not matching:
             click.echo(
                 f"error: {label}: its runs are named like those of {', '.join(alike)} "
                 f"({config.format_run_directory_name('*')}), so their folders cannot be told "
@@ -320,24 +314,40 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
             )
             missing.append(label)
             continue
-        candidates = matching or list(parents)
-        best = max(candidates, key=lambda parent: (len(parents[parent]), -len(parent.parts)))
-        located[label] = str(best)
+        best = max(
+            matching or candidates, key=lambda parent: (len(parents[parent]), -len(parent.parts))
+        )
+        located[label] = best
         others = f" ({len(parents) - 1} other folders also hold some)" if len(parents) > 1 else ""
         click.echo(f"{label}: runs {parents[best]} under {best}{others}")
         for line in _check_against_manifest(protocol.root, label, best, verify):
             click.echo(line)
             if line.startswith("error"):
                 missing.append(label)
-    target = protocol.root / DATA_FILE
-    target.write_text(
-        "# Where this machine keeps each condition's runs. Written by polyzymd study locate;\n"
-        "# never commit or publish it.\n"
-        + yaml.safe_dump(
-            {k: located[k] for k in protocol.conditions if k in located}, sort_keys=False
+    for folder in set(located.values()):
+        shared = [label for label, where in located.items() if where == folder]
+        if len(shared) > 1:
+            click.echo(
+                f"error: {' and '.join(shared)} were both located in {folder}; neither is written"
+            )
+            click.echo(
+                f"fix: Write each condition's folder into {protocol.root / DATA_FILE} by hand "
+                "('<label>: /path/to/folder'), or run study locate on a directory that holds "
+                "each condition's runs in a folder named for it."
+            )
+            missing.extend(shared)
+            for label in shared:
+                del located[label]
+    if located:
+        # Entries this run did not locate are kept as written, hand-written ones included.
+        target = protocol.root / DATA_FILE
+        written = (yaml.safe_load(target.read_text()) if target.is_file() else None) or {}
+        written.update({label: str(folder) for label, folder in located.items()})
+        target.write_text(
+            "# Where this machine keeps each condition's runs. Written by polyzymd study locate;\n"
+            "# never commit or publish it.\n" + yaml.safe_dump(written, sort_keys=False)
         )
-    )
-    click.echo(f"wrote {target}")
+        click.echo(f"wrote {target}")
     if missing:
         sys.exit(EXIT_STUDY_ERROR)
 
@@ -475,6 +485,24 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1 << 22), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _echo_metadata(metadata: dict, owner: str) -> bool:
+    """Print the metadata line of ``owner``; return False when the metadata cannot be read."""
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.study_metadata import check_metadata
+
+    try:
+        _, gaps = check_metadata(metadata)
+    except ProtocolError as exc:
+        click.echo(f"error: {' '.join(str(exc).split())}")
+        return False
+    click.echo(
+        f"metadata ({owner}): {len(gaps)} gaps for publishing: {'; '.join(gaps)}"
+        if gaps
+        else f"metadata ({owner}): complete"
+    )
+    return True
 
 
 def _production_summary(label: str, config_path: Path, protocol: Any) -> str:
@@ -627,6 +655,9 @@ def freeze_command(path: Path, tag: str | None) -> None:
 def add_condition_command(label: str, config: Path | None, new: bool, study_path: Path) -> None:
     """Add the condition LABEL to an existing study and list it in study.yaml.
 
+    With --config, the config's scratch_directory, where its runs are, is
+    written to data.local.yaml.
+
     \b
     Examples:
         polyzymd study add-condition "SBMA 100%" --config runs/SBMA100/config.yaml
@@ -643,6 +674,22 @@ def add_condition_command(label: str, config: Path | None, new: bool, study_path
             click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
         sys.exit(EXIT_STUDY_ERROR)
     click.echo(f"condition {label}: {path}, listed in study.yaml")
+    if config is not None:
+        import yaml
+
+        from polyzymd.analyses.study_file import DATA_FILE, find_study_file
+        from polyzymd.config.schema import SimulationConfig
+
+        data = find_study_file(study_path).parent / DATA_FILE
+        where = (yaml.safe_load(data.read_text()) or {}).get(label) if data.is_file() else None
+        if where is not None:
+            click.echo(f"data {label}: {where} (from the config's scratch_directory)")
+            runs = find_run_parents(SimulationConfig.from_yaml(config), Path(where), max_depth=1)
+            if Path(where).resolve() not in runs:
+                click.echo(
+                    f"warning: {where} holds no run directories of {label}; if its runs are "
+                    "elsewhere, run polyzymd study locate DIR"
+                )
     click.echo(
         "next: "
         + ("fill in the config, then build and run it with polyzymd; " if new else "")

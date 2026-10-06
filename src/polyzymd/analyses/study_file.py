@@ -206,6 +206,27 @@ def find_study_file(path: str | Path) -> Path:
     return candidate
 
 
+def check_folder_names(labels: Any, where: str) -> None:
+    """Raise ProtocolError when two condition labels give one folder name.
+
+    Results are stored in one folder per label, and a study folder or deposit
+    has one folder per condition, so ``SBMA 50`` and ``SBMA 50%`` would share one.
+    """
+    from polyzymd.analyses.study_scaffold import condition_folder
+    from polyzymd.analyses.timeseries import _safe
+
+    for name in (_safe, condition_folder):
+        seen: dict[str, str] = {}
+        for label in map(str, labels):
+            other = seen.setdefault(name(label), label)
+            if other != label:
+                raise ProtocolError(
+                    f"{where}: the conditions {other!r} and {label!r} give one folder name, "
+                    f"{name(label)!r}, so their results would overwrite each other.",
+                    hint="Rename one of them.",
+                )
+
+
 def _unknown(keys: Any, known: tuple[str, ...], where: str) -> None:
     """Refuse every key of ``keys`` not in ``known``, naming the closest known key."""
     for key in keys:
@@ -608,8 +629,8 @@ def load_study_file(path: str | Path) -> StudyFile:
     ------
     ProtocolError
         If the file is missing or not YAML, a key is unknown, a required key
-        (``equilibration``, ``conditions``) is missing, or a value has the
-        wrong type.
+        (``equilibration``, ``conditions``) is missing, a value has the
+        wrong type, or two condition labels give one folder name.
     """
     import yaml
 
@@ -645,6 +666,7 @@ def load_study_file(path: str | Path) -> StudyFile:
     factors: dict[str, dict[str, Any]] = {}
     for label, value in conditions_raw.items():
         conditions[str(label)], factors[str(label)] = _condition(str(label), value, file)
+    check_folder_names(conditions, str(file))
 
     structures = _named(raw.get("structures"), "structures", file)
     structures = {
