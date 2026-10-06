@@ -254,8 +254,14 @@ if [ -f prod.log ]; then
         # Run post-processing (trajectory centering)
         echo "=== Post-processing ==="
         CURRENT_PHASE="foreground"
-        echo "System" | $GMX trjconv -s prod.tpr -f prod.xtc -o prod_nojump.xtc -pbc nojump 2>/dev/null || true
-        echo -e "Protein\nSystem" | $GMX trjconv -s prod.tpr -f prod_nojump.xtc -o prod_centered.xtc -center -pbc mol -ur compact 2>/dev/null || true
+        # On failure, remove the partial output so that analysis reads the previous trajectory.
+        if ! echo "System" | $GMX trjconv -s prod.tpr -f prod.xtc -o prod_nojump.xtc -pbc nojump 2>/dev/null; then
+            rm -f prod_nojump.xtc
+            echo "WARNING: trjconv could not remove PBC jumps from prod.xtc; analysis reads prod.xtc"
+        elif ! echo -e "Protein\nSystem" | $GMX trjconv -s prod.tpr -f prod_nojump.xtc -o prod_centered.xtc -center -pbc mol -ur compact 2>/dev/null; then
+            rm -f prod_centered.xtc
+            echo "WARNING: trjconv could not center prod.xtc; analysis reads the uncentred prod_nojump.xtc"
+        fi
         CURRENT_PHASE="idle"
 
         # Final progress update marking completion
