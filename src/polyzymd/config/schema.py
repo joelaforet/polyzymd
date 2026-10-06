@@ -1739,6 +1739,19 @@ class SimulationConfig(_ConfigModel):
         default_factory=GromacsEngineConfig, description="GROMACS engine settings"
     )
 
+    @model_validator(mode="after")
+    def validate_barostat_for_engine(self) -> "SimulationConfig":
+        """Refuse barostat MCA with engine openmm, which runs only the isotropic barostat."""
+        phases = self.simulation_phases
+        barostats = [stage.barostat for stage in phases.equilibration_stages or []]
+        barostats.append(phases.production.barostat)
+        if self.engine == "openmm" and BarostatType.MONTE_CARLO_ANISOTROPIC in barostats:
+            raise ValueError(
+                "barostat MCA (anisotropic) runs only with engine gromacs. The OpenMM engine "
+                "runs only the isotropic Monte Carlo barostat; use barostat MC."
+            )
+        return self
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> "SimulationConfig":
         """Load configuration from a YAML file.

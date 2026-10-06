@@ -330,6 +330,21 @@ class TestValidateCommandReferenceWarnings:
         assert "60 -> 300 K, +1 K every 600 steps" in result.output
         assert "derived duration 0.288000 ns" in result.output
 
+    @pytest.mark.parametrize("where", ["production", "equilibration"])
+    def test_validate_refuses_anisotropic_barostat_on_openmm(self, tmp_path: Path, where) -> None:
+        """OpenMM runs no anisotropic barostat, so MCA with engine openmm is an error."""
+        data = _minimal_cli_config_data("missing.pdb")
+        phases = data["simulation_phases"]
+        phase = phases["production"] if where == "production" else phases["equilibration_stages"][0]
+        phase.update(ensemble="NPT", barostat="MCA")
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+
+        assert result.exit_code != 0
+        assert "MCA" in result.output and "anisotropic" in result.output
+
 
 class TestBuildCommandReplicateFlags:
     """Test that the build command accepts the new flags via Click invocation."""
