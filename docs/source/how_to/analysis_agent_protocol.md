@@ -146,8 +146,7 @@ and the frames. To measure it again, add `--recompute`.
 | `error: No analysis named 'rgyr'.` | Use one of the names that the `fix:` line lists. |
 | `error: Condition ...: replicates [...] have no run directory under ...` | Give replicates that exist with `--replicates`, or run the simulations first. If the replicate folders are in another place, name it with `data.local.yaml`, `polyzymd study locate DIR` or `--data`. |
 | `error: Config file(s) not found` | Point `-c` at a simulation `config.yaml`, not a `comparison.yaml`. |
-| `error: comparison.yaml is no longer read by polyzymd analyze` | Run the command on the `fix:` line. It gives each condition with `-c`. |
-| `error: catalytic_triad is no longer a polyzymd analyze analysis` | Follow {doc}`analysis_triad_quickstart`, or run `polyzymd analyze distances --set pairs=<pairs.yaml>` for the distances. |
+| `error: No analysis named 'catalytic_triad'.` | The catalytic triad is a routine on the study API: follow {doc}`analysis_triad_quickstart`, or run `polyzymd analyze distances --set pairs=<pairs.yaml>` for the distances. |
 | `polyzymd: command not found` | Run through `pixi run -e analysis`. |
 
 The command exits with 0 on success. On each error above, it exits with 2 and

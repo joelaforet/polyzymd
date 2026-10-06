@@ -67,66 +67,6 @@ class TestSbatchOutputParsing:
 class TestJobNameGeneration:
     """Tests for DaisyChainSubmitter._create_job_name()."""
 
-    def _make_submitter(self, enzyme_name, temperature, monomers_by_label):
-        from unittest.mock import MagicMock
-
-        from polyzymd.workflow.daisy_chain import DaisyChainSubmitter
-
-        sim_config = MagicMock()
-        sim_config.enzyme.name = enzyme_name
-        sim_config.thermodynamics.temperature = temperature
-
-        if monomers_by_label is None:
-            sim_config.polymers = None
-        else:
-            sim_config.polymers.enabled = True
-            sim_config.polymers.type_prefix = "SBMA-OEGMA"
-            monomers = []
-            for label, prob in monomers_by_label.items():
-                monomer = MagicMock()
-                monomer.label = label
-                monomer.probability = prob
-                monomers.append(monomer)
-            sim_config.polymers.monomers = monomers
-
-        dc_config = MagicMock()
-        return DaisyChainSubmitter(sim_config=sim_config, dc_config=dc_config)
-
-    def test_copolymer_uses_label_composition_format(self):
-        submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, {"A": 0.75, "B": 0.25})
-        name = submitter._create_job_name(1)
-        assert "SBMA-OEGMA_A75_B25" in name
-        assert "25%" not in name
-        assert "-25" not in name
-
-    def test_copolymer_label_order_is_alphabetical(self):
-        submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, {"B": 0.25, "A": 0.75})
-        name = submitter._create_job_name(1)
-        assert name.index("_A75") < name.index("_B25")
-
-    def test_full_name_format_two_monomers(self):
-        submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, {"A": 0.75, "B": 0.25})
-        assert submitter._create_job_name(1) == "r1_310K_Fibronectin_8_to_10_SBMA-OEGMA_A75_B25"
-
-    def test_replicate_encoded(self):
-        submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, {"A": 0.75, "B": 0.25})
-        assert submitter._create_job_name(2) == "r2_310K_Fibronectin_8_to_10_SBMA-OEGMA_A75_B25"
-
-    def test_no_polymer_omits_composition_suffix(self):
-        submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, None)
-        assert submitter._create_job_name(1) == "r1_310K_Fibronectin_8_to_10"
-
-    def test_three_monomer_composition(self):
-        submitter = self._make_submitter("LipA", 300.0, {"A": 0.50, "B": 0.30, "C": 0.20})
-        name = submitter._create_job_name(1)
-        assert "SBMA-OEGMA_A50_B30_C20" in name
-
-    def test_integer_rounding_of_probabilities(self):
-        submitter = self._make_submitter("LipA", 300.0, {"A": 0.333, "B": 0.667})
-        name = submitter._create_job_name(1)
-        assert "A33" in name
-        assert "B67" in name
-
     def test_template_derived_job_name_matches_run_directory(self, tmp_path):
         """Real configs should derive job names from naming_template."""
         from polyzymd.config.schema import SimulationConfig
@@ -173,10 +113,14 @@ class TestJobNameGeneration:
 
         assert create_job_name(sim_config, 1) == "LipA_variant_run_1"
 
-    def test_magicmock_fallback_uses_legacy_name(self):
-        """Legacy config-like mocks should still use the historical fallback."""
-        submitter = self._make_submitter("Fibronectin_8_to_10", 310.0, None)
-        assert submitter._create_job_name(1) == "r1_310K_Fibronectin_8_to_10"
+    def test_job_name_needs_a_simulation_config(self):
+        """An object without format_run_directory_name gets no made-up job name."""
+        from types import SimpleNamespace
+
+        from polyzymd.workflow.daisy_chain import create_job_name
+
+        with pytest.raises(AttributeError, match="format_run_directory_name"):
+            create_job_name(SimpleNamespace(enzyme=SimpleNamespace(name="LipA")), 1)
 
     def test_duplicate_guard_header_and_log_use_same_sanitized_name(self, tmp_path, monkeypatch):
         """SBATCH headers and logs share one job name; the guard checks the run directory."""

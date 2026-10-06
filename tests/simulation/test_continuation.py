@@ -160,7 +160,6 @@ class TestFindSolvatedPdb:
     @pytest.mark.parametrize(
         "relative_path",
         [
-            Path("solvated_system.pdb"),
             Path("production_0") / "production_0_topology.pdb",
             Path("production") / "production_topology.pdb",
         ],
@@ -179,6 +178,14 @@ class TestFindSolvatedPdb:
         nested_dir = tmp_path / "nested"
         nested_dir.mkdir()
         (nested_dir / "decoy.pdb").write_text("ATOM ...")
+        mgr = self._make_manager(tmp_path)
+
+        with pytest.raises(FileNotFoundError, match="Could not find solvated PDB file"):
+            mgr._find_solvated_pdb()
+
+    def test_refuses_the_root_build_topology(self, tmp_path):
+        """A segment is continued only from a segment-owned topology, never the root build PDB."""
+        (tmp_path / "solvated_system.pdb").write_text("ATOM ...")
         mgr = self._make_manager(tmp_path)
 
         with pytest.raises(FileNotFoundError, match="Could not find solvated PDB file"):

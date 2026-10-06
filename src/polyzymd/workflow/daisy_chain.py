@@ -215,43 +215,11 @@ def _sanitize_slurm_job_name(job_name: object, replicate: int) -> str:
     return sanitized
 
 
-def _legacy_job_name(sim_config: SimulationConfig, replicate: int) -> str:
-    """Create a legacy synthesized job name for config-like test objects.
-
-    Parameters
-    ----------
-    sim_config : SimulationConfig
-        Simulation configuration or legacy config-like object.
-    replicate : int
-        Replicate number.
-
-    Returns
-    -------
-    str
-        Legacy formatted job name.
-    """
-
-    enzyme = sim_config.enzyme.name
-    temp = int(sim_config.thermodynamics.temperature)
-
-    polymer_info = ""
-    polymers = getattr(sim_config, "polymers", None)
-    if polymers is not None and getattr(polymers, "enabled", False) is True:
-        prefix = polymers.type_prefix
-        probs = {m.label: m.probability for m in polymers.monomers}
-        composition = "_".join(f"{lbl}{int(round(probs[lbl] * 100))}" for lbl in sorted(probs))
-        polymer_info = f"_{prefix}_{composition}"
-
-    return f"r{replicate}_{temp}K_{enzyme}{polymer_info}"
-
-
 def create_job_name(sim_config: SimulationConfig, replicate: int) -> str:
     """Create a sanitized SLURM job name for a replicate.
 
-    Real ``SimulationConfig`` objects use ``output.naming_template`` via
-    :meth:`SimulationConfig.format_run_directory_name`, so SLURM job names match
-    run directory names. Legacy config-like objects fall back to the historical
-    synthesized format.
+    The name is :meth:`SimulationConfig.format_run_directory_name`, so SLURM
+    job names match run directory names.
 
     Parameters
     ----------
@@ -265,13 +233,7 @@ def create_job_name(sim_config: SimulationConfig, replicate: int) -> str:
     str
         Formatted job name.
     """
-    formatter = getattr(sim_config, "format_run_directory_name", None)
-    if callable(formatter):
-        formatted = formatter(replicate)
-        if isinstance(formatted, str):
-            return _sanitize_slurm_job_name(formatted, replicate)
-
-    return _sanitize_slurm_job_name(_legacy_job_name(sim_config, replicate), replicate)
+    return _sanitize_slurm_job_name(sim_config.format_run_directory_name(replicate), replicate)
 
 
 @dataclass

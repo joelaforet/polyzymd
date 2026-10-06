@@ -44,7 +44,6 @@ Package Structure
     │   ├── shared/       # Reusable utilities (TrajectoryLoader, statistics, plotting)
     └── cli/              # Command-line interface
         ├── analyze.py    # `polyzymd analyze`
-        ├── retired.py    # hidden `compare` and `new-analysis`, which name their replacements
         └── main.py       # Click CLI
 
 Every analysis that ``polyzymd analyze`` offers is a function in

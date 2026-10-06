@@ -1248,7 +1248,7 @@ def _run_openmm_impl(
 
     # Reuse the build of an earlier `polyzymd build` when it matches this config.
     try:
-        validate_build_bundle(working_dir, sim_config, allow_legacy=False)
+        validate_build_bundle(working_dir, sim_config)
         reuse_build = True
     except ArtifactIntegrityError:
         reuse_build = False
@@ -3935,11 +3935,8 @@ def _register_optional_command_groups() -> None:
     """Register optional command groups when deps are importable."""
     from polyzymd.cli.analysis_topology import analysis_topology_command
     from polyzymd.cli.analyze import analyze_command
-    from polyzymd.cli.retired import compare, new_analysis
     from polyzymd.cli.study import study_group
 
-    cli.add_command(compare)
-    cli.add_command(new_analysis)
     cli.add_command(analyze_command)
     cli.add_command(study_group)
     from polyzymd.cli.project import project_group

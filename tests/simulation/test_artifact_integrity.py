@@ -87,21 +87,11 @@ def test_failed_publication_restores_previous_bundle(tmp_path, monkeypatch):
     validate_build_bundle(tmp_path, _Config())
 
 
-def test_legacy_bundle_requires_consistent_counts(tmp_path):
+def test_bundle_without_manifest_is_refused(tmp_path):
     topology, system, positions = _tiny_openmm_bundle()
     publish_build_bundle(tmp_path, topology, system, positions, _Config())
     (tmp_path / "build_manifest.json").unlink()
-    with pytest.warns(RuntimeWarning, match="Legacy build"):
-        validate_build_bundle(tmp_path, _Config())
-
-    _, wrong_system, _ = _tiny_openmm_bundle(3)
-    from openmm import XmlSerializer
-
-    (tmp_path / "system.xml").write_text(XmlSerializer.serialize(wrong_system))
-    with (
-        pytest.warns(RuntimeWarning),
-        pytest.raises(ArtifactIntegrityError, match="particle-count"),
-    ):
+    with pytest.raises(ArtifactIntegrityError, match="Build manifest is missing"):
         validate_build_bundle(tmp_path, _Config())
 
 

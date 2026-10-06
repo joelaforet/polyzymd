@@ -268,8 +268,8 @@ class SubstrateConfig(_ConfigModel):
 class PolymerPackingConfig(_ConfigModel):
     """Settings for packing polymers around the solute.
 
-    Controls the box size and PACKMOL behavior when packing polymers
-    around the protein-ligand complex.
+    Controls the PACKMOL behavior when packing polymers around the
+    protein-ligand complex.
 
     Attributes:
         padding: Room reserved for the polymer chains around the solute, in
@@ -284,16 +284,6 @@ class PolymerPackingConfig(_ConfigModel):
             unique chain types).  Has no effect when only a single chain
             type is present.  Default is ``False`` (PACKMOL default
             behaviour is preserved).
-        box_vectors: Optional explicit box dimensions ``[Lx, Ly, Lz]`` in
-            nanometers.  When set, overrides the auto-computed bounding box
-            plus *padding*.  The protein is centered at the midpoint of
-            the box.  Default is ``None`` (auto-compute from solute
-            bounding box + padding).
-        exclude_solute_bbox: When ``True``, add a PACKMOL ``outside box``
-            constraint equal to the solute bounding box inflated by the
-            tolerance, confining chains to a rectangular shell (legacy
-            behaviour).  Default ``False``: chains may pack anywhere in the
-            box and the tolerance against the fixed solute prevents overlap.
         confine_to_sphere: When ``True`` (default), chains are packed inside a
             sphere centred on the solute with radius
             ``0.5 * |solute bbox diagonal| + padding``, in addition to the
@@ -303,21 +293,12 @@ class PolymerPackingConfig(_ConfigModel):
 
     Example:
         >>> PolymerPackingConfig(padding=2.5, movebadrandom=True)
-        >>> PolymerPackingConfig(box_vectors=[8.0, 10.0, 12.0])
     """
 
     padding: float = Field(
         2.0, gt=0.0, description="Room reserved for polymer chains around the solute (nm)"
     )
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
-    exclude_solute_bbox: bool = Field(
-        False,
-        description=(
-            "Confine polymers to a rectangular shell outside the solute bounding box "
-            "(legacy behaviour). Off by default: the PACKMOL tolerance against the fixed "
-            "solute already prevents overlap, and the shell over-constrains long chains."
-        ),
-    )
     confine_to_sphere: bool = Field(
         True,
         description=(
@@ -335,16 +316,25 @@ class PolymerPackingConfig(_ConfigModel):
             "by placing badly-packed molecules at random box positions."
         ),
     )
-    box_vectors: list[float] | None = Field(
-        None,
-        min_length=3,
-        max_length=3,
-        description=(
-            "Optional explicit box dimensions [Lx, Ly, Lz] in nanometers. "
-            "Overrides auto-computed bounding box + padding. "
-            "Protein is centered at the midpoint of this box."
-        ),
-    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_packing_keys(cls, data: Any) -> Any:
+        """Refuse the removed packing keys and name the keys that replace them."""
+        if not isinstance(data, dict):
+            return data
+        if "exclude_solute_bbox" in data:
+            raise ValueError(
+                "'exclude_solute_bbox' was removed: chains are kept off the solute by the "
+                "Packmol tolerance and near it by 'confine_to_sphere'. Delete the key."
+            )
+        if "box_vectors" in data:
+            raise ValueError(
+                "'box_vectors' was removed: the periodic cell is the protein + substrate "
+                "bounding box plus 2 x ('polymers.packing.padding' + 'solvent.box.padding'). "
+                "Delete the key and set those paddings."
+            )
+        return data
 
 
 # =============================================================================
@@ -797,7 +787,6 @@ class ThermodynamicsConfig(_ConfigModel):
     Attributes:
         temperature: System temperature in Kelvin
         pressure: System pressure in atmospheres (for NPT)
-        salt_concentration: Ionic strength in mol/L (deprecated, use solvent.ions)
     """
 
     temperature: float = Field(..., gt=0.0, description="Temperature (K)")
@@ -849,14 +838,13 @@ class SimulationPhaseConfig(_ConfigModel):
 
     @model_validator(mode="before")
     @classmethod
-    def discard_report_interval(cls, data: Any) -> Any:
-        """Ignore the obsolete reporter interval in existing configurations."""
+    def reject_report_interval(cls, data: Any) -> Any:
+        """Refuse the removed reporter interval and name the key that replaces it."""
         if isinstance(data, dict) and "report_interval" in data:
-            LOGGER.warning(
-                "Ignoring deprecated production 'report_interval'; trajectory "
-                "cadence is derived from 'samples'"
+            raise ValueError(
+                "'report_interval' was removed: the trajectory interval is the phase's steps "
+                "divided by 'samples'. Delete 'report_interval' and set 'samples'."
             )
-            return {key: value for key, value in data.items() if key != "report_interval"}
         return data
 
     @model_validator(mode="after")
@@ -991,93 +979,28 @@ class EquilibrationStageConfig(_ConfigModel):
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_temperature_ramp_config(cls, data: Any) -> Any:
-        """Migrate legacy ramp fields before validating the derived duration."""
+    def reject_removed_ramp_keys(cls, data: Any) -> Any:
+        """Refuse the removed ramp keys and name ``temperature_interval_steps``."""
         if not isinstance(data, dict):
             return data
-
-        values = dict(data)
-        start = values.get("temperature_start")
-        end = values.get("temperature_end")
-        if start is None and end is None:
-            return values
-
-        rate = values.pop("temperature_ramp_rate", None)
-        duration = values.get("duration")
-        increment = values.get("temperature_increment")
-        interval_steps = values.get("temperature_interval_steps")
-        interval_fs = values.pop("temperature_interval", None)
-
-        if rate is not None:
+        if "temperature_ramp_rate" in data:
             raise ValueError(
                 "'temperature_ramp_rate' is not supported; specify "
                 "'temperature_increment' and 'temperature_interval_steps'"
             )
-
-        if interval_fs is not None and interval_steps is not None:
+        if "temperature_interval" in data:
             raise ValueError(
-                "Cannot specify both legacy 'temperature_interval' and 'temperature_interval_steps'"
+                "'temperature_interval' was removed; give the MD steps between temperature "
+                "updates as 'temperature_interval_steps' (1200 fs at a 2 fs time step is 600)"
             )
-
-        if duration is not None and interval_steps is not None:
+        ramping = any(data.get(key) is not None for key in ("temperature_start", "temperature_end"))
+        if ramping and data.get("duration") is not None:
             raise ValueError(
                 "Do not specify 'duration' for a temperature ramp; it is derived from "
                 "'temperature_start', 'temperature_end', 'temperature_increment', "
                 "and 'temperature_interval_steps'"
             )
-
-        used_legacy_interval_default = (
-            duration is not None and interval_fs is None and interval_steps is None
-        )
-        if used_legacy_interval_default:
-            # The former schema required duration and defaulted the interval to
-            # 1200 fs. Preserve that behavior long enough to migrate existing
-            # configuration files to the step-based schedule.
-            interval_fs = 1200.0
-
-        timestep_fs = float(values.get("time_step") or 2.0)
-        if interval_fs is not None:
-            try:
-                increment_value = float(increment if increment is not None else 1.0)
-                interval_value = float(interval_fs)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    "Legacy 'temperature_increment' and 'temperature_interval' must be numeric"
-                ) from exc
-            if increment_value > 0 and interval_value > 0:
-                exact_interval_steps = interval_value / timestep_fs
-                rounded_interval_steps = round(exact_interval_steps)
-                if not math.isclose(
-                    exact_interval_steps,
-                    rounded_interval_steps,
-                    rel_tol=1e-12,
-                    abs_tol=1e-9,
-                ):
-                    raise ValueError(
-                        "Legacy 'temperature_interval' must be an exact multiple "
-                        "of the stage timestep"
-                    )
-                values["temperature_increment"] = increment_value
-                values["temperature_interval_steps"] = max(1, rounded_interval_steps)
-                legacy_source = (
-                    "the legacy 1200 fs default"
-                    if used_legacy_interval_default
-                    else f"temperature_interval={interval_value:g} fs"
-                )
-                warnings.warn(
-                    f"Deprecated temperature-ramp configuration using {legacy_source} "
-                    "was converted to 'temperature_interval_steps'; update the "
-                    "configuration file and remove the ramp 'duration' field",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                LOGGER.warning(
-                    f"Deprecated temperature-ramp configuration using {legacy_source} was "
-                    f"converted to temperature_interval_steps="
-                    f"{values['temperature_interval_steps']}; any supplied ramp "
-                    "duration is ignored"
-                )
-        return values
+        return data
 
     @model_validator(mode="after")
     def validate_temperature_mode(self) -> "EquilibrationStageConfig":

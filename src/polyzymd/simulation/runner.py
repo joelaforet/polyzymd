@@ -1180,12 +1180,10 @@ class SimulationRunner:
         stage_index: int,
         stage_name: str,
     ) -> None:
-        """Load positions, velocities, and box vectors from a completed equilibration checkpoint.
+        """Load positions, velocities, and box vectors from a completed equilibration stage.
 
-        Creates a temporary ``Simulation`` to deserialise the binary
-        checkpoint, then stores the extracted state on ``self`` so
-        subsequent stages or production can pick up seamlessly.
-        The temporary simulation is discarded after extraction.
+        Reads the stage's ``*_state.xml`` and stores the state on ``self`` so
+        the next stage or production starts from it.
 
         Parameters
         ----------
@@ -1197,45 +1195,17 @@ class SimulationRunner:
         dir_name = f"equilibration_{stage_index}_{stage_name}"
         stage_dir = self._working_dir / dir_name
         state_path = stage_dir / f"{dir_name}_state.xml"
-        chk_path = stage_dir / f"{dir_name}_checkpoint.chk"
+        if not state_path.exists():
+            raise FileNotFoundError(f"Equilibration state not found: {state_path}")
 
-        if state_path.exists():
-            state = XmlSerializer.deserialize(state_path.read_text())
-            self._current_positions = state.getPositions()
-            self._current_velocities = state.getVelocities()
-            self._current_box_vectors = state.getPeriodicBoxVectors()
-            self._current_step_count = int(state.getStepCount())
-            self._current_time = state.getTime()
-            LOGGER.info(
-                f"Loaded portable state from equilibration stage {stage_index} "
-                f"({stage_name}) at step {self._current_step_count}"
-            )
-            return
-
-        if not chk_path.exists():
-            raise FileNotFoundError(
-                f"Equilibration state and checkpoint not found: {state_path}, {chk_path}"
-            )
-
-        # Temporary simulation context to deserialise the binary checkpoint.
-        # We use a dummy VerletIntegrator because we only need to extract
-        # geometric state (positions, velocities, box vectors) — the next
-        # run_equilibration_stage() call creates a proper LangevinMiddleIntegrator.
-        integrator = openmm.VerletIntegrator(1.0 * omm_unit.femtosecond)
-        temp_sim = self._create_simulation(integrator)
-        temp_sim.loadCheckpoint(str(chk_path))
-
-        state = temp_sim.context.getState(getPositions=True, getVelocities=True)
+        state = XmlSerializer.deserialize(state_path.read_text())
         self._current_positions = state.getPositions()
         self._current_velocities = state.getVelocities()
         self._current_box_vectors = state.getPeriodicBoxVectors()
         self._current_step_count = int(state.getStepCount())
         self._current_time = state.getTime()
-        # Discard the temporary simulation — it has a dummy integrator
-        del temp_sim
-
         LOGGER.info(
-            f"Loaded legacy checkpoint from equilibration stage {stage_index} "
+            f"Loaded portable state from equilibration stage {stage_index} "
             f"({stage_name}) at step {self._current_step_count}"
         )
 

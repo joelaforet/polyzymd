@@ -418,7 +418,6 @@ def build_packmol_input(
     use_pbc: bool = False,
     movebadrandom: bool = False,
     ignore_conect: bool = False,
-    inner_exclusion_box_angstrom: "NDArray | None" = None,
     inside_sphere_angstrom: "NDArray | None" = None,
     nloop: int | None = None,
     seed: int | None = None,
@@ -454,14 +453,6 @@ def build_packmol_input(
         CONECT records in PDB input files are not parsed.  This prevents
         failures when atom indices exceed the 5-digit PDB fixed-width
         field limit (>99,999 atoms).  Default is ``False``.
-    inner_exclusion_box_angstrom : NDArray or None, optional
-        When provided, a 1-D array of 6 floats
-        ``[xmin, ymin, zmin, xmax, ymax, zmax]`` in Angstrom defining a
-        rectangular region that packed molecules must avoid.  An
-        ``outside box`` constraint is added to every non-fixed structure
-        block, creating a rectangular *shell* between the inner exclusion
-        zone and the outer packing box.  Ignored when *use_pbc* is
-        ``True``.  Default is ``None`` (no exclusion zone).
     inside_sphere_angstrom : NDArray or None, optional
         When provided, a 1-D array of 4 floats ``[cx, cy, cz, radius]`` in
         Angstrom.  An ``inside sphere`` constraint is added to every
@@ -493,18 +484,6 @@ def build_packmol_input(
         effective_box = np.asarray(box_size_angstrom, dtype=float)
     else:
         effective_box = np.asarray(box_size_angstrom, dtype=float) - tolerance_angstrom
-
-    # Pre-format the exclusion constraint line (if requested and not PBC)
-    _exclusion_line: str | None = None
-    if inner_exclusion_box_angstrom is not None and not use_pbc:
-        ebox = np.asarray(inner_exclusion_box_angstrom, dtype=float)
-        if ebox.shape != (6,):
-            raise ValueError(f"inner_exclusion_box_angstrom must have shape (6,), got {ebox.shape}")
-        _exclusion_line = (
-            f"  outside box"
-            f" {ebox[0]:.6f} {ebox[1]:.6f} {ebox[2]:.6f}"
-            f" {ebox[3]:.6f} {ebox[4]:.6f} {ebox[5]:.6f}"
-        )
 
     _sphere_line: str | None = None
     if inside_sphere_angstrom is not None and not use_pbc:
@@ -571,8 +550,6 @@ def build_packmol_input(
             )
         if _sphere_line is not None:
             block.append(_sphere_line)
-        if _exclusion_line is not None:
-            block.append(_exclusion_line)
         block.append("end structure")
         block.append("")
         lines.extend(block)
@@ -702,7 +679,6 @@ def pack_polymers(
     movebadrandom: bool = False,
     nloop: int | None = 200,
     seed: int | None = None,
-    exclude_solute_bbox: bool = False,
     confine_to_sphere: bool = True,
     sphere_padding_angstrom: float = 20.0,
     working_directory: str | Path | None = None,
@@ -720,10 +696,7 @@ def pack_polymers(
     confined to a sphere centred on the solute (``confine_to_sphere``) so that
     they stay in a shell around the protein instead of spreading into the
     corners of the brick; the fixed solute and the Packmol tolerance keep them
-    off the protein itself.  Setting ``exclude_solute_bbox`` additionally
-    restores the older behaviour of an ``outside box`` annulus around the
-    solute's bounding box, which over-constrains long chains into a thin
-    annulus and makes Packmol converge slowly or not at all.
+    off the protein itself.
 
     Parameters
     ----------
@@ -747,11 +720,6 @@ def pack_polymers(
         values (200-500) improve convergence.  Default is ``200``.
     seed : int or None, optional
         Packmol random seed (see :func:`build_packmol_input`).
-    exclude_solute_bbox : bool, optional
-        Add an ``outside box`` constraint equal to the solute's bounding box
-        inflated by the tolerance, forcing the chains into a rectangular shell.
-        Default ``False`` (chains pack anywhere; the tolerance against the
-        fixed solute prevents overlap).
     confine_to_sphere : bool, optional
         Add an ``inside sphere`` constraint centred on the solute with radius
         ``0.5 * |solute bounding-box diagonal| + sphere_padding_angstrom``,
@@ -822,25 +790,11 @@ def pack_polymers(
     # --- center solute in the brick ---
     centered_solute = _center_topology_at("BRICK", solute, box_vectors, brick_size)
 
-    # --- optional inner exclusion box (polymer shell constraint) ---
-    # By default the chains may occupy the whole packing box; Packmol keeps
-    # every polymer atom at least ``tolerance`` from the fixed solute, which
-    # is all the geometry we need.  The legacy ``outside box`` shell equal to
-    # the solute's bounding box (inflated by the tolerance) over-constrains
-    # long chains into an annulus that is often thinner than the chains
-    # themselves, and Packmol then grinds to its loop limit without
-    # converging.
-    inner_exclusion_box = None
-    if exclude_solute_bbox:
-        inner_exclusion_box = _solute_bbox_exclusion(
-            centered_solute, box_size_angstrom, tolerance_angstrom, molecules
-        )
-    else:
-        logger.info(
-            "Polymers pack throughout the box (no solute bounding-box exclusion); "
-            "the %.1f A Packmol tolerance against the fixed solute prevents overlap.",
-            tolerance_angstrom,
-        )
+    logger.info(
+        "Polymers pack throughout the box; the %.1f A Packmol tolerance against the "
+        "fixed solute prevents overlap.",
+        tolerance_angstrom,
+    )
 
     # --- optional spherical confinement around the solute ---
     # The packing box is the *final* periodic brick, which is much larger than
@@ -860,8 +814,8 @@ def pack_polymers(
             *box_size_angstrom,
         )
 
-    # Force PBC off for polymer packing so per-structure ``inside box`` (and
-    # the optional ``outside box``) constraints apply.  PBC mode removes
+    # Force PBC off for polymer packing so per-structure ``inside box``
+    # constraints apply.  PBC mode removes
     # per-structure spatial constraints.  (Solvation can still use PBC
     # since it doesn't need shell constraints.)
     _use_pbc = False
@@ -883,7 +837,6 @@ def pack_polymers(
             solute_pdb_path=solute_pdb,
             use_pbc=_use_pbc,
             movebadrandom=movebadrandom,
-            inner_exclusion_box_angstrom=inner_exclusion_box,
             inside_sphere_angstrom=inside_sphere,
             nloop=nloop,
             seed=seed,
@@ -1177,94 +1130,6 @@ def solute_sphere_constraint(
     extent = positions.max(axis=0) - positions.min(axis=0)
     radius = 0.5 * float(np.linalg.norm(extent)) + float(padding_angstrom)
     return np.array([center[0], center[1], center[2], radius], dtype=float)
-
-
-def _solute_bbox_exclusion(
-    centered_solute,
-    box_size_angstrom: "NDArray",
-    tolerance_angstrom: float,
-    molecules: list,
-) -> "NDArray":
-    """Legacy rectangular shell: solute bounding box inflated by the tolerance.
-
-    Logs the resulting shell thickness and warns when it is thinner than the
-    largest polymer diameter, in which case Packmol is unlikely to converge.
-    """
-    import numpy as np
-
-    from polyzymd.utils.boxvectors import get_topology_bbox_bounds
-
-    min_coords, max_coords = get_topology_bbox_bounds(centered_solute)
-    inner_exclusion_box = np.array(
-        [
-            min_coords[0] - tolerance_angstrom,
-            min_coords[1] - tolerance_angstrom,
-            min_coords[2] - tolerance_angstrom,
-            max_coords[0] + tolerance_angstrom,
-            max_coords[1] + tolerance_angstrom,
-            max_coords[2] + tolerance_angstrom,
-        ]
-    )
-
-    # Effective packing box (non-PBC) runs from 0 to ``box_size - tolerance``.
-    effective_box = np.asarray(box_size_angstrom, dtype=float) - tolerance_angstrom
-    shell_lo = inner_exclusion_box[:3]
-    shell_hi = effective_box - inner_exclusion_box[3:]
-    min_shell = float(min(np.min(shell_lo), np.min(shell_hi)))
-
-    logger.info(
-        "Protein bbox (A): [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]", *min_coords, *max_coords
-    )
-    logger.info("Exclusion box (A): [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]", *inner_exclusion_box)
-    logger.info(
-        "Shell thickness lo (A): [%.1f, %.1f, %.1f]  hi: [%.1f, %.1f, %.1f]  min: %.1f",
-        *shell_lo,
-        *shell_hi,
-        min_shell,
-    )
-
-    max_diameter = max(_max_molecule_diameter_angstrom(mol) for mol in molecules)
-    if min_shell < max_diameter:
-        deficit_nm = (max_diameter - min_shell) / 10.0
-        logger.warning(
-            "Polymer shell thickness (%.1f A) is less than the largest "
-            "polymer diameter (%.1f A). Packing may fail or produce poor "
-            "results. Consider increasing packing.padding by at least "
-            "%.1f nm, or disable exclude_solute_bbox.",
-            min_shell,
-            max_diameter,
-            deficit_nm,
-        )
-    return inner_exclusion_box
-
-
-def _max_molecule_diameter_angstrom(mol) -> float:
-    """Return the maximum internal distance of a molecule in Angstrom.
-
-    This is the largest pairwise distance between any two atoms in the
-    molecule's first conformer — effectively the molecule's "diameter".
-    Used to check whether the polymer shell is thick enough to contain
-    the molecule.
-
-    Parameters
-    ----------
-    mol : openff.toolkit.Molecule
-        Molecule with at least one conformer.
-
-    Returns
-    -------
-    float
-        Maximum pairwise distance in Angstrom, or 0.0 if the molecule
-        has fewer than 2 atoms.
-    """
-    import numpy as np
-
-    coords = mol.conformers[0].m_as("angstrom")
-    if len(coords) <= 1:
-        return 0.0
-    diffs = coords[:, np.newaxis, :] - coords[np.newaxis, :, :]
-    dists_sq = np.sum(diffs**2, axis=-1)
-    return float(np.sqrt(np.max(dists_sq)))
 
 
 def _strip_conect_records(pdb_path: str | Path) -> int:

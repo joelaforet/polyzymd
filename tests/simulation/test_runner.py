@@ -385,6 +385,19 @@ class TestEquilibrationPortableState:
         assert runner._current_step_count == 1234
         assert runner._current_time == "time"
 
+    def test_load_refuses_a_stage_without_portable_state(self, tmp_path):
+        """A completed stage is resumed only from its state XML, not from a binary checkpoint."""
+        from polyzymd.simulation.runner import SimulationRunner
+
+        stage_dir = tmp_path / "equilibration_0_heating"
+        stage_dir.mkdir()
+        (stage_dir / "equilibration_0_heating_checkpoint.chk").write_bytes(b"checkpoint")
+        runner = SimulationRunner.__new__(SimulationRunner)
+        runner._working_dir = tmp_path
+
+        with pytest.raises(FileNotFoundError, match="equilibration_0_heating_state.xml"):
+            runner._load_eq_stage_state(0, "heating")
+
 
 class TestEquilibrationResumeMetadata:
     """Resume markers must match the current derived stage schedule."""
