@@ -1903,3 +1903,39 @@ class TestSubmitGromacsDuplicateGuard:
         )
         assert result.exit_code == 0
         mock_submit.assert_called_once()
+
+
+def test_build_follows_the_config_engine(tmp_path: Path) -> None:
+    """A GROMACS config builds GROMACS inputs, and run takes its engine from the config."""
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    data["engine"] = "gromacs"
+    data["solvent"] = {
+        "co_solvents": [{"name": "sds", "smiles": "CCCCCCCCCCCCOS(=O)(=O)[O-]", "count": 8}]
+    }
+    path.write_text(yaml.safe_dump(data))
+    result = CliRunner().invoke(cli, ["build", "-c", str(path), "--dry-run"])
+    assert "Files to Generate (GROMACS)" in result.output, result.output
+    assert "Co-solvent sds (SDS): 8 molecules" in result.output
+    assert "Polymer seeds" not in result.output
+    dry = CliRunner().invoke(cli, ["run", "-c", str(path), "--dry-run"])
+    assert "Missing option '--engine'" not in dry.output
+
+
+def test_clean_pdb_runs_on_the_cpu(tmp_path: Path, monkeypatch) -> None:
+    """clean-pdb places hydrogens on the CPU platform, so a GPU driver mismatch cannot stop it."""
+    import os
+
+    pytest.importorskip("pdbfixer")
+
+    monkeypatch.delenv("OPENMM_DEFAULT_PLATFORM", raising=False)
+    source = Path(__file__).resolve().parents[2] / "examples" / "quickstart" / "trpcage.pdb"
+    result = CliRunner().invoke(
+        cli, ["clean-pdb", "-i", str(source), "-o", str(tmp_path / "clean.pdb")]
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "clean.pdb").is_file()
+    assert os.environ["OPENMM_DEFAULT_PLATFORM"] == "CPU"

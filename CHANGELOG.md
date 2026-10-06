@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`enzyme.custom_substructures_path` (1.3 audit, wave H).**  A JSON file of residue templates for residues OpenFF's template matcher does not know, such as the N-terminal cystine of 4CHA. The path is relative to the config, checked for shape on load, passed to `Topology.from_pdb(_custom_substructures=...)`, and part of the config hash. The docs described this key before any code read it.
+- **`enzyme.custom_substructures_path`.**  A JSON file of residue templates for residues OpenFF's template matcher does not know, such as the N-terminal cystine of 4CHA. The path is relative to the config, checked for shape on load, passed to `Topology.from_pdb(_custom_substructures=...)`, and part of the config hash. The docs described this key before any code read it.
 
-- **Seeded dynamics (1.3 audit, wave G).**  The replicate number now seeds the initial velocities and the thermostat noise, on both engines. Each equilibration stage and production segment gets its own seed from `polyzymd.simulation.seeds.dynamics_seed(replicate, phase)`, so no stage repeats another's noise. OpenMM sets `integrator.setRandomNumberSeed` and `setVelocitiesToTemperature(T, seed)`; GROMACS MDP files get `gen_seed` and `ld_seed`. A replicate run again gives the same trajectory only on the same platform, precision and software versions.
+- **Seeded dynamics.**  The replicate number now seeds the initial velocities and the thermostat noise, on both engines. Each equilibration stage and production segment gets its own seed from `polyzymd.simulation.seeds.dynamics_seed(replicate, phase)`, so no stage repeats another's noise. OpenMM sets `integrator.setRandomNumberSeed` and `setVelocitiesToTemperature(T, seed)`; GROMACS MDP files get `gen_seed` and `ld_seed`. A replicate run again gives the same trajectory only on the same platform, precision and software versions.
 
-- **Systems without polymers (1.3 audit, wave C).**
+- **Systems without polymers.**
   - Co-solvents take `charge_method` (default `nagl`; `am1bcc` needs AmberTools), and the build asks you to check the default.
   - Co-solvents take `count:` for a number of molecules.
   - A SMILES with several parts (`...[O-].[Na+]`) is charged part by part, so NAGL handles the sodium.
@@ -141,13 +141,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `freeze` deposits only `study.yaml`, `project.yaml`, `README*`, `LICENSE*`, the files it writes, and the folders `study init` and `project init` make (`conditions/`, `structures/`, `analyses/`, `stats/`, `figures/`, `results/`, `environment/`), with or without git, and prints one `not deposited:` warning for the rest.
   - GROMACS runs use `<prefix>.top`, the files it includes, `prod.tpr` and PolyzyMD's `.mdp` names, so a `backup.top` neither stops an analysis nor is deposited. `gromacs.analysis_topology` names another `.top`.
 
-- **Wave H of the 1.3 audit.**
+- **Hydrogen placement, local runs, GROMACS cancellation and help text.**
   - `polyzymd clean-pdb` places hydrogens on the CPU platform, so a GPU with an older driver no longer stops it with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`. Set `OPENMM_DEFAULT_PLATFORM` to choose another platform.
   - A local `polyzymd run` with OpenMM writes `progress.json`, so it records each segment and its trajectory hash, as a SLURM run does.
   - `polyzymd cancel` stops GROMACS chains: the GROMACS job script checks the `STOP` file at start and before each resubmission.
   - The `study freeze` help says that freeze refuses uncommitted inputs. The build message names `polyzymd run`, and the "write a function" hint links to the study API how-to.
 
-- **Console and messages (1.3 audit, wave D).**
+- **Console and messages.**
   - The uncommitted-inputs warning prints once per command, with a count and the first five files.
   - Freeze merges a warning that several conditions share into one line naming them.
   - The GROMACS TPR fallback warns once per command.
@@ -162,7 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The scaffold YAML puts comments above `{}` stubs, so filling a stub leaves no stray comment.
   - The `init` template names its relaxation stage without "polymer", lists only thermostats both engines run, and links the quickstart page where it is.
 
-- **Simulation correctness (1.3 audit, wave B).**
+- **Simulation correctness.**
   - Ions get atom names (`NA`, `CL`) in the built system and in `system.prmtop`. Their blank names made MDAnalysis refuse the Amber topology, so analysis of any system with ions failed. `analysis-topology --overwrite` repairs older runs.
   - A topology that cannot be loaded is reported as such, not as an equilibration-window problem.
   - `neutralize` counts the charge of co-solvents. A charged SMILES (`...OS(=O)(=O)[O-]`) gets counter-ions; one that carries its counter-ion (`...[O-].[Na+]`) needs none. A system left charged is an error with `neutralize: true` and a warning without it.
@@ -175,7 +175,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Every config section refuses keys it does not define, so a misspelled key is an error instead of a silent default. Older configs with `simulation_phases.segments` must drop it.
   - `freeze` recognises co-solvents, names a build file `build_manifest.json` lists that is missing, asks GROMACS studies to state the GROMACS version instead of reporting a missing OpenMM version, and mentions polymer parameters in the checklist only for systems with polymers.
 
-- **Stored results and replicate tables (1.3 audit, wave A).**
+- **Stored results and replicate tables.**
   - Reordering `parts:` recomputes instead of giving one part the values of another; `parts` is now part of the stored record.
   - `replicate_table` keeps a `name` column, so two quantities stored in one run (two hydrogen-bond summaries) are no longer counted as two replicates.
   - It also fills each label a replicate lacks with the run's `missing` value, as the report does, so its n and mean match the report's.
@@ -184,7 +184,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Relative file settings of shipped analyses are relative to `study.yaml`, not to the shell's folder.
   - `--set` values from `study.yaml` keep their type (`1e-05` stays a number).
   - Repeated `distances` pair labels are refused.
-- **Freeze (1.3 audit, wave A).**
+- **Freeze.**
   - `freeze` refuses while inputs are uncommitted, and names them. The manifest therefore describes exactly the tagged and deposited files.
   - It also refuses when git has no user name and email, before writing anything that names a tag.
   - `study freeze` on a study of a project refuses and points to `project freeze`.
@@ -193,12 +193,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Configs written in flow style lose their machine paths too.
   - The manifest no longer reports frames analysed: each analysis has its own window, and its report has `frames_per_replicate`.
   - `CITATION.cff` carries no commit; the tag is the version.
-- **Projects and `--label` (1.3 audit, wave A).**
+- **Projects and `--label`.**
   - A project's studies must be folders directly inside it.
   - An analysis entry that is not a mapping gets a message instead of a traceback.
   - `analyze --study S --label L` prints its report but never saves it as the run's `report.json`. The `--submit` report job gets the same labels as its tasks, and `until: common` is resolved over the whole study.
   - `analyze --project` writes one log, in the project's `logs/`. Log names carry the array task or process ID.
-- **`study init` and `study locate` (1.3 audit, wave A).**
+- **`study init` and `study locate`.**
   - `study init` records a relative scratch directory relative to its config.
   - `study locate` no longer maps two conditions whose runs are named alike to one folder. It tells them apart by folder name or by `manifest.json`, and otherwise refuses with a fix.
 

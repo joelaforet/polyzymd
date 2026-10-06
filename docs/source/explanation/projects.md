@@ -11,7 +11,7 @@ PolyzyMD organizes simulations in four levels:
 
 ## A study shares one analysis frame
 
-A study is a set of conditions that you compare with each other: a slice of
+A study is a set of conditions that you compare with each other: a part of
 the space of independent variables. The study holds fixed each variable that
 it does not vary. All its conditions share one analysis frame: the same atom
 and residue numbering, so one selection means the same atoms in every
