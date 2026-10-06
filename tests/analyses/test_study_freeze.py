@@ -108,7 +108,7 @@ class TestMetadata:
         meta, warnings = check_metadata(yaml.safe_load(METADATA)["metadata"])
         assert warnings == [
             "metadata.doi is not set: reserve a DOI for the study in Zenodo, add it here and "
-            "refreeze (deposit/UPLOAD.md says how)",
+            "refreeze",
             "the paper DOI is missing or a placeholder; refreeze once it is known",
         ]
         assert meta["license"] == {"data": "CC-BY-4.0", "code": "MIT"}
@@ -547,6 +547,7 @@ def gromacs_study(tmp_path: Path) -> Path:
         with mda.Writer(str(working / "prod.xtc"), n_atoms=4, dt=100.0) as writer:
             for k in range(10):
                 universe.atoms.positions = cross * (1.0 + 0.01 * k) + 10.0
+                universe.trajectory.ts.frame = k  # the writer stamps time dt * frame
                 writer.write(universe.atoms)
         (working / "prod.log").write_text(
             "                      :-) GROMACS - gmx mdrun, 2025.2 (-:\n"
@@ -575,3 +576,210 @@ class TestGromacsFreeze:
         ran = checklist["4b_simulation_parameters"]["evidence"]["Water"]["gromacs_production"]
         assert ran["integrator"] == "sd" and ran["pcoupl"] == "c-rescale"
         assert "polymer" not in checklist["1d_independent_starting_configurations"]["answer"]
+
+
+def _zip_names(deposit: Path, part: str) -> set[str]:
+    """Return the file names in the upload zip of ``part`` (study, engine_inputs or final_frames)."""
+    import zipfile
+
+    pattern = "*-study-v*.zip" if part == "study" else f"{part}.zip"
+    (archive,) = (deposit / "upload").glob(pattern)
+    with zipfile.ZipFile(archive) as opened:
+        return {
+            name.removeprefix(f"{part}/") for name in opened.namelist() if not name.endswith("/")
+        }
+
+
+def test_tracked_stray_files_stay_out_of_the_deposit(study: Path) -> None:
+    """The deposited study holds the files the manifest lists and the files freeze writes."""
+    from polyzymd.analyses.study_freeze import GENERATED
+
+    (study / "notes.txt").write_text("private\n")
+    (study / "copied.dcd").write_bytes(b"\0" * 16)
+    _git(study, "add", "notes.txt", "copied.dcd")
+    _git(study, "commit", "-qm", "Notes")
+    result = freeze(study)
+    copied = result.deposit / "study"
+    assert not (copied / "notes.txt").exists() and not (copied / "copied.dcd").exists()
+    written = {name for name in GENERATED if (study / name).is_file()}
+    assert _zip_names(result.deposit, "study") == set(result.manifest["files"]) | written
+
+
+def test_a_dropped_replicate_leaves_the_deposit(tmp_path: Path) -> None:
+    """Engine inputs and final frames of a replicate no longer in the study are not deposited."""
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    freeze(root)
+    (root / "study.yaml").write_text((root / "study.yaml").read_text() + "replicates: [1, 2]\n")
+    _git(root, "commit", "-qam", "Two replicates")
+    result = freeze(root)
+    for part in ("engine_inputs", "final_frames"):
+        assert not list((result.deposit / part).rglob("*replicate_3*")), part
+        assert not any("replicate_3" in name for name in _zip_names(result.deposit, part)), part
+
+
+def test_an_absolute_input_path_inside_the_study_is_deposited_relative(
+    study: Path, tmp_path: Path
+) -> None:
+    """A reproducer's copy of the deposit finds the input and its results are not stale."""
+    config = study / "conditions" / "polymer" / "config.yaml"
+    data = yaml.safe_load(config.read_text())
+    data["enzyme"]["pdb_path"] = str((config.parent / data["enzyme"]["pdb_path"]).resolve())
+    config.write_text(yaml.safe_dump(data, sort_keys=False))
+    _git(study, "commit", "-qam", "Absolute path")
+    deposit = freeze(study).deposit
+    elsewhere = tmp_path / "downloaded"
+    shutil.copytree(deposit / "study", elsewhere)
+    shutil.rmtree(study)
+    deposited = yaml.safe_load((elsewhere / "conditions" / "polymer" / "config.yaml").read_text())
+    assert not Path(deposited["enzyme"]["pdb_path"]).is_absolute()
+    assert stale_runs(load_study_file(elsewhere)) == {}
+
+
+def test_an_input_outside_the_study_is_named_in_a_warning(study: Path, tmp_path: Path) -> None:
+    """Freeze warns that an input outside the study is not deposited, naming no machine path."""
+    config = study / "conditions" / "polymer" / "config.yaml"
+    data = yaml.safe_load(config.read_text())
+    data["enzyme"]["pdb_path"] = str(tmp_path / "runs" / "polymer" / "test.pdb")
+    config.write_text(yaml.safe_dump(data, sort_keys=False))
+    _git(study, "commit", "-qam", "Outside path")
+    warnings = freeze(study).warnings
+    assert any("test.pdb" in w and "outside the study" in w for w in warnings), warnings
+    assert not any(str(tmp_path) in w for w in warnings)
+
+
+def test_the_manifest_names_the_parent_of_the_tagged_commit(study: Path) -> None:
+    """The manifest is inside the tagged commit, so it records that commit's parent."""
+    freeze(study)
+    manifest = json.loads((study / "manifest.json").read_text())
+    assert manifest["git"]["parent_commit"] == _git(study, "rev-parse", "study-v1^").strip()
+    assert "commit" not in manifest["git"]
+
+
+def test_a_failed_commit_leaves_no_tag_in_the_deposit(study: Path) -> None:
+    """When git cannot commit, freeze exits with an error and no file names the tag."""
+    hook = study / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    result = CliRunner().invoke(cli, ["study", "freeze", str(study)])
+    assert result.exit_code != 0, result.output
+    assert not _git(study, "tag").strip()
+    for path in (study / "deposit").rglob("*"):
+        if path.is_file() and path.suffix not in (".zip", ".gz"):
+            assert "study-v1" not in path.read_text(errors="ignore"), path
+
+
+def _write_segment(run_dir: Path, index: int, istart: int, n_frames: int = 5) -> None:
+    """Write production_<index>: ``n_frames`` frames 100 ps apart, the first at step ``istart``."""
+    import MDAnalysis as mda
+    import numpy as np
+
+    from tests._support.analysis_testkit import CROSS
+
+    segment = run_dir / f"production_{index}"
+    segment.mkdir(parents=True, exist_ok=True)
+    universe = mda.Universe.empty(4, n_residues=1, atom_resindex=[0] * 4, trajectory=True)
+    universe.add_TopologyAttr("names", ["C1", "C2", "C3", "C4"])
+    universe.add_TopologyAttr("resnames", ["MOL"])
+    universe.add_TopologyAttr("masses", [1.0] * 4)
+    universe.atoms.positions = np.asarray(CROSS, dtype=np.float32)
+    universe.atoms.write(str(run_dir / "solvated_system.pdb"))
+    path = segment / f"production_{index}_trajectory.dcd"
+    with mda.Writer(str(path), n_atoms=4, dt=100.0, istart=istart, nsavc=1) as writer:
+        for k in range(n_frames):
+            universe.atoms.positions = np.asarray(CROSS, dtype=np.float32) * (1.0 + 0.01 * k)
+            writer.write(universe.atoms)
+
+
+def test_production_length_skips_a_repeated_boundary_frame(tmp_path: Path) -> None:
+    """The manifest's production length is the replicate's, with a repeated frame left out."""
+    from polyzymd.analyses.study import Study
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_simulation_config
+
+    config = write_simulation_config(tmp_path / "runs" / "toy", scratch=tmp_path / "scratch")
+    (config.parent / "test.pdb").write_text("REMARK input\nEND\n")
+    run_dir = SimulationConfig.from_yaml(config).get_working_directory(1)
+    _write_segment(run_dir, 0, 0)
+    _write_segment(run_dir, 1, 4)
+    root = tmp_path / "study"
+    create_study(root, conditions={"Toy": config}, equilibration="0ns")
+    expected = Study.from_configs({"Toy": config}, equilibration="0ns")["Toy"].replicates[0]
+    manifest = freeze(root).manifest
+    recorded = manifest["conditions"]["Toy"]["replicates"]["1"]["production_ns"]
+    assert recorded == pytest.approx(expected.production_ns)
+
+
+def test_a_new_study_has_no_left_out_warning(study: Path) -> None:
+    """The files study init writes are all deposited."""
+    assert not any(w.startswith("not deposited") for w in freeze(study).warnings)
+
+
+def test_an_unknown_package_version_is_not_recorded_and_the_lock_file_is_hashed(
+    study: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A package reporting version 0.0.0 is recorded as unknown; the deposited pixi.lock pins it."""
+    import hashlib
+
+    import numpy
+
+    (study / "environment" / "pixi.lock").write_text("version: 6\n")
+    _git(study, "add", "environment/pixi.lock")
+    _git(study, "commit", "-qm", "Lock file")
+    monkeypatch.setattr(numpy, "__version__", "0.0.0")
+    versions = freeze(study).manifest["versions"]
+    assert versions["numpy"] is None
+    assert versions["pixi.lock"] == hashlib.sha256(b"version: 6\n").hexdigest()
+
+
+def test_a_non_ascii_file_name_is_deposited(study: Path) -> None:
+    """git quotes non-ASCII names in its listings; freeze still lists and deposits the file."""
+    (study / "results" / "résumé.csv").write_text("x\n")
+    result = freeze(study)
+    assert "results/résumé.csv" in result.manifest["files"]
+    assert "results/résumé.csv" in _zip_names(result.deposit, "study")
+
+
+def test_a_file_name_with_brackets_deposits_only_that_file(tmp_path: Path) -> None:
+    """A listed name such as a[1].csv is a file name, not a pattern that also matches a1.csv."""
+    from polyzymd.analyses.study_freeze import _copy_frozen_folder
+
+    root = tmp_path / "study"
+    (root / "results").mkdir(parents=True)
+    for name in ("a[1].csv", "a1.csv"):
+        (root / "results" / name).write_text("x\n")
+    _git(root, "init", "-q")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "Results")
+    _git(root, "tag", "v1")
+    commit = _git(root, "rev-parse", "HEAD").strip()
+    _copy_frozen_folder(root, tmp_path / "deposit", "v1", commit, ["results/a[1].csv"], [])
+    copied = tmp_path / "deposit" / "study" / "results"
+    assert sorted(p.name for p in copied.iterdir()) == ["a[1].csv"]
+
+
+def test_the_gitignore_written_by_a_first_freeze_is_deposited(study: Path) -> None:
+    """A study without .gitignore gets one from freeze, committed and deposited."""
+    _git(study, "rm", "-q", ".gitignore")
+    _git(study, "commit", "-qm", "No .gitignore")
+    result = freeze(study)
+    assert ".gitignore" in _git(study, "ls-tree", "--name-only", "study-v1")
+    assert ".gitignore" in _zip_names(result.deposit, "study")
+
+
+def test_freeze_refuses_a_condition_config_outside_the_study(tmp_path: Path) -> None:
+    """Analysis reads a config outside the study, but freeze could not deposit it."""
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    outside = tmp_path / "runs" / "polymer" / "config.yaml"
+    text = (root / "study.yaml").read_text().replace("conditions/polymer/config.yaml", str(outside))
+    (root / "study.yaml").write_text(text)
+    _git(root, "commit", "-qam", "Polymer config outside")
+    result = CliRunner().invoke(
+        cli, ["analyze", "rg", "--study", str(root), "--no-eq-check", "--no-plots"]
+    )
+    assert result.exit_code == 0, result.output
+    check = CliRunner().invoke(cli, ["study", "check", str(root)])
+    assert "freeze will refuse" in check.output
+    with pytest.raises(ProtocolError, match="outside the study") as caught:
+        freeze(root)
+    assert "conditions:" in caught.value.hint
+    assert 'polyzymd study add-condition "Polymer" --config' in caught.value.hint

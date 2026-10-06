@@ -134,3 +134,11 @@ def test_the_custom_substructures_are_part_of_the_config_hash(tmp_path: Path) ->
     one = _config_with_templates(tmp_path / "a", json.dumps({"X": {"[#6:1]": ["C1"]}}))
     two = _config_with_templates(tmp_path / "b", json.dumps({"X": {"[#6:1]": ["C2"]}}))
     assert compute_config_hash(one) != compute_config_hash(two)
+
+
+def test_a_missing_input_file_hashes_the_same_wherever_it_was(tmp_path: Path) -> None:
+    """A file that is not here is hashed as missing, not by its name."""
+    one, two = _config(tmp_path, folder="a"), _config(tmp_path, folder="b")
+    one.enzyme.pdb_path = tmp_path / "gone" / "LipA.pdb"
+    two.enzyme.pdb_path = tmp_path / "elsewhere" / "lipa_copy.pdb"
+    assert compute_config_hash(one) == compute_config_hash(two)

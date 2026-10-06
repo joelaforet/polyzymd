@@ -543,6 +543,21 @@ def portable(value: Any, root: Path, project_root: Path | None = None) -> Any:
     return value
 
 
+def outside_configs(protocol: StudyFile) -> dict[str, Path]:
+    """Return the condition configs outside the study folder and its project folder, by label.
+
+    Freeze deposits only those folders, so it refuses these configs.
+    """
+    inside = [protocol.root.resolve()]
+    if protocol.project is not None:
+        inside.append(protocol.project.root.resolve())
+    return {
+        label: config
+        for label, config in protocol.conditions.items()
+        if not any(config.is_relative_to(folder) for folder in inside)
+    }
+
+
 def _condition(label: str, value: Any, file: Path) -> tuple[Path, dict[str, Any]]:
     """Read one condition: a config path (or its folder), or ``{config: ..., factors: {...}}``."""
     factors: dict[str, Any] = {}

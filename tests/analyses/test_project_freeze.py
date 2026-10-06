@@ -25,4 +25,16 @@ def test_project_study_manifests_list_what_git_tracks(project: Path) -> None:  #
     freeze_project(project)
     manifest = json.loads((project / "lipa" / "manifest.json").read_text())
     assert not any("__pycache__" in name for name in manifest["files"])
-    assert manifest["git"]["commit"]
+    assert manifest["git"]["parent_commit"]
+
+
+def test_a_stray_file_is_named_once(project: Path) -> None:  # noqa: F811
+    """Project freeze names a file it does not deposit in one warning line."""
+    from polyzymd.analyses.project_freeze import freeze_project
+    from polyzymd.analyses.study_git import init_repository
+
+    (project / ".gitignore").write_text("data.local.yaml\n")
+    (project / "lipa" / "notes.txt").write_text("private\n")
+    init_repository(project, "start")
+    warnings = freeze_project(project).warnings
+    assert len([w for w in warnings if "not deposited" in w]) == 1, warnings

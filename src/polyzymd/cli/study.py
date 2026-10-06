@@ -85,8 +85,16 @@ def check_command(path: Path, production: bool = False) -> None:
     for name, selection in protocol.regions.items():
         click.echo(f"region {name}: {selection}")
     failed = False
+    from polyzymd.analyses.study_file import outside_configs
+
+    outside = outside_configs(protocol)
     for index, (label, config_path) in enumerate(protocol.conditions.items()):
         role = "control" if index == 0 else "condition"
+        if label in outside:
+            click.echo(
+                f"warning: {role} {label}: the config is outside the study folder, so "
+                "polyzymd study freeze will refuse it; copy it in with polyzymd study add-condition"
+            )
         try:
             config = SimulationConfig.from_yaml(config_path)
         except (OSError, ValueError) as exc:
@@ -641,6 +649,11 @@ def freeze_command(path: Path, tag: str | None) -> None:
         f"next: follow {result.guide}, which says how to reserve the DOI, upload and publish "
         "on Zenodo; PolyzyMD uploads nothing"
     )
+    if result.git_failed:
+        click.echo(
+            "error: git could not commit and tag the study; fix that and freeze again", err=True
+        )
+        sys.exit(EXIT_STUDY_ERROR)
 
 
 @study_group.command("add-condition")

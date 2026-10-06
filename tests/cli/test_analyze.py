@@ -440,3 +440,30 @@ def test_a_project_logs_once_in_its_own_folder(tmp_path: Path) -> None:
     assert result.output.count("log: ") == 1
     assert list((paper / "logs").glob("polyzymd-analyze-*.log"))
     assert not (paper / "lipa" / "logs").exists() or not list((paper / "lipa" / "logs").iterdir())
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_a_partial_report_names_no_machine_path(tmp_path: Path) -> None:
+    """A partial report keeps each error's message, with no absolute path; the log has the traceback."""
+    import json
+    import shutil
+
+    pytest.importorskip("MDAnalysis")
+    from polyzymd.analyses.study_freeze import freeze
+
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    shutil.rmtree(tmp_path / "scratch" / "polymer")
+    result = _analyze_cli("rg", "--study", str(root), "--no-plots", "--no-eq-check")
+    report = json.loads((root / "results" / "rg" / "report.json").read_text())
+    assert report["status"] == "partial", result.output
+    assert any("no run directory under polymer" in p for p in report["problems"])
+    (log,) = (root / "logs").glob("polyzymd-analyze-*.log")
+    assert "Traceback" in log.read_text() and str(tmp_path / "scratch") in log.read_text()
+    deposit = freeze(root).deposit
+    for path in (
+        root / "results" / "rg" / "report.json",
+        root / "manifest.json",
+        deposit / "README.md",
+    ):
+        assert str(tmp_path) not in path.read_text(), path

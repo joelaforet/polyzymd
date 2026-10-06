@@ -154,3 +154,8 @@ def freeze_command(path: Path, tag: str | None) -> None:
     for warning in result.warnings:
         click.echo(f"warning: {warning}")
     click.echo(f"next: follow {result.guide}; PolyzyMD uploads nothing")
+    if result.git_failed:
+        click.echo(
+            "error: git could not commit and tag the project; fix that and freeze again", err=True
+        )
+        sys.exit(EXIT_PROJECT_ERROR)
