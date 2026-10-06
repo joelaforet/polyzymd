@@ -9,10 +9,6 @@
   ],
   "additionalProperties": false,
   "properties": {
-    "polyzymd": {
-      "type": "string",
-      "description": "PolyzyMD version that produced the results."
-    },
     "studies": {
       "type": "object",
       "minProperties": 1,

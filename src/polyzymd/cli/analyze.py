@@ -787,7 +787,6 @@ def _from_study(
     """
     import json
 
-    import polyzymd
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.protocols import FUNCTION_ANALYSES
     from polyzymd.analyses.study_file import load_study_file
@@ -826,12 +825,6 @@ def _from_study(
         analysis, settings = None, {}
     else:
         analysis, settings = entry.analysis, entry.settings
-    if protocol.polyzymd and protocol.polyzymd != polyzymd.__version__:
-        click.echo(
-            f"warning: {protocol.path} was written for PolyzyMD {protocol.polyzymd}; "
-            f"this is {polyzymd.__version__}.",
-            err=True,
-        )
     from_file = tuple(f"{key}={json.dumps(value)}" for key, value in settings.items())
     if replicate_spec is None and protocol.replicates is not None:
         replicate_spec = ",".join(str(index) for index in protocol.replicates)

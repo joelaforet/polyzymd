@@ -1,17 +1,22 @@
-"""Statistics on stored results: replicate tables, trend tests and a study's own plan.
+"""Statistics on stored results: replicate tables, trend tests and user statistics plans.
 
-Slice P2 of the "Projects and studies" design:
+This module reads stored analysis results only; it loads no trajectory. Its
+main functions are:
 
-- :func:`replicate_table` gives one row per replicate of an analysis run
-  (and per label or part), the sampling unit of every test, from stored
-  results only.
-- :func:`trend_tests` fits, for each numeric factor the conditions declare,
-  the slope of the replicate values against it, with the replicate as the
-  unit, and corrects the family of factors with Benjamini-Hochberg.
-- :func:`run_stats_plan` runs the function a ``stats:`` entry names on a
-  :class:`~polyzymd.analyses.study.Study` or
-  :class:`~polyzymd.analyses.project.Project` and stores what it returns with
-  a record of its code and of the reports it read.
+- :func:`replicate_table`, which returns one row per replicate of an
+  analysis run (and per label or part), the sampling unit of every test.
+- :func:`trend_tests`, which fits, for each numeric factor the conditions
+  declare, the slope of the replicate values against the factor, with the
+  replicate as the unit, and corrects the family of factors with
+  Benjamini-Hochberg.
+- :func:`read_stats_plan`, which reads the ``stats:`` entry of a
+  ``study.yaml`` or ``project.yaml``.
+- :func:`run_stats_plan`, which runs the function a ``stats:`` entry names on
+  a :class:`~polyzymd.analyses.study.Study` or
+  :class:`~polyzymd.analyses.project.Project` and writes what it returns,
+  with a record of the function's code and of the reports it read.
+- :func:`stats_status`, which compares that record with the current code and
+  reports.
 """
 
 from __future__ import annotations
@@ -35,14 +40,55 @@ _REDUCE = {"mean": "mean", "fraction": "mean", "std": "std"}
 
 @dataclass(frozen=True)
 class StatsPlan:
-    """A ``stats:`` entry: the function ``qualname`` in the Python file ``file``."""
+    """A ``stats:`` entry: the function ``qualname`` in the Python file ``file``.
+
+    :func:`read_stats_plan` builds it from ``stats: {plan: file.py:function}``
+    and :func:`run_stats_plan` runs it.
+
+    Attributes
+    ----------
+    file : Path
+        Absolute path of the Python file that defines the function.
+    qualname : str
+        Name of the function in that file. It also names the output folder
+        ``results/stats/<qualname>``.
+    """
 
     file: Path
     qualname: str
 
 
 def read_stats_plan(raw: Any, where: str, folder: Path) -> StatsPlan | None:
-    """Read ``stats: {plan: path/to/file.py:function}``; ``None`` when absent."""
+    """Read a ``stats: {plan: path/to/file.py:function}`` entry.
+
+    The value of ``plan`` is split at its last colon into a file path and a
+    function name. The path is resolved against ``folder`` and must name an
+    existing file; whether the file defines the function is checked only when
+    the plan runs.
+
+    Parameters
+    ----------
+    raw : Any
+        The value of the ``stats`` key as parsed from YAML, or ``None`` when
+        the key is absent.
+    where : str
+        Location used in error messages, such as ``"<file>: stats"``.
+    folder : Path
+        Folder that relative plan paths are resolved against: the folder
+        of the ``study.yaml`` or ``project.yaml``.
+
+    Returns
+    -------
+    StatsPlan or None
+        The plan, or ``None`` when ``raw`` is ``None``.
+
+    Raises
+    ------
+    ProtocolError
+        If ``raw`` is not a mapping with the single key ``plan`` holding a
+        string, if the string is not of the form ``file:function``, or if
+        the file does not exist.
+    """
     if raw is None:
         return None
     spec = raw.get("plan") if isinstance(raw, Mapping) else None
@@ -64,17 +110,33 @@ def read_stats_plan(raw: Any, where: str, folder: Path) -> StatsPlan | None:
 def replicate_table(study: Any, run: str) -> Any:
     """Return one row per replicate of ``run`` in ``study``, from its stored results.
 
-    Per-frame values are reduced over each replicate's frames the way the
-    analysis reduces them: the entry's ``reduce`` for the study's own
-    function (``mean``, ``fraction`` as the mean, or ``std`` with ``ddof=1``),
-    otherwise the mean. Labelled and multi-part results keep one row per
-    label and part.
+    Reads ``study.results(run)``; no trajectory is loaded. Per-frame values
+    are reduced over each replicate's frames the way the analysis reduces
+    them: with the ``reduce`` of the analysis entry's function when the entry
+    has one (``mean``; ``fraction`` as the mean; ``std`` with ``ddof=1``),
+    otherwise with the mean. Values stored once per replicate are kept as
+    they are. Labelled and multi-part results keep one row per label and
+    part. Rows are sorted by the study's condition order, then by replicate.
+
+    Parameters
+    ----------
+    study : Study
+        The :class:`~polyzymd.analyses.study.Study` whose results are read.
+    run : str
+        Name of the analysis run.
 
     Returns
     -------
     pandas.DataFrame
         Columns ``study``, ``condition``, ``replicate``, ``part``, ``label``,
-        ``value``, ``unit``, then one per factor the conditions declare.
+        ``value``, ``unit``, then one per factor the conditions declare
+        (``None`` where a condition does not declare it). ``study`` holds the
+        study's label in its project, or else the name of its folder.
+
+    Raises
+    ------
+    ProtocolError
+        If ``run`` has no stored results (raised by ``study.results``).
     """
     stored = study.results(run)
     table = stored.table
@@ -112,12 +174,39 @@ def replicate_table(study: Any, run: str) -> Any:
 def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[Any]:
     """Fit the slope of the replicate values against each numeric factor of the conditions.
 
-    Uses the per-replicate values of the report's conditions (the values its
-    comparisons used), with the replicate as the unit, over the conditions
-    that declare the factor. One slope per factor, by ordinary least squares,
-    with a two-sided t test of zero slope and a 95 percent interval; the
-    factors form one Benjamini-Hochberg family. Labelled results (one value
-    per residue, say) get none.
+    A factor is numeric when every condition that declares it gives an
+    ``int`` or ``float`` (not a ``bool``). For each numeric factor, the
+    per-replicate values of the report's conditions (the values its
+    comparisons used) are regressed on the factor's level, with the
+    replicate as the unit and only the conditions that declare the factor
+    included. The fit is ordinary least squares (:func:`scipy.stats.linregress`)
+    with a two-sided t test of zero slope and a 95 percent t interval on the
+    slope. The p-values of all factors form one Benjamini-Hochberg family.
+
+    Parameters
+    ----------
+    report : ProtocolReport
+        A study's report of one analysis; its ``conditions`` give each
+        condition's label, ``entry`` and ``replicate_values``.
+    factors : Mapping of str to Mapping of str to Any
+        Factor levels by condition label, then by factor name.
+
+    Returns
+    -------
+    list of TrendReport
+        One :class:`~polyzymd.analyses.protocols.TrendReport` per numeric
+        factor. A factor with fewer than two levels, fewer than three
+        replicate values, or values that are all equal has
+        ``testable=False`` and no slope. The list is empty when the report
+        holds labelled results (any condition with an ``entry``, such as one
+        value per residue).
+
+    Notes
+    -----
+    The Benjamini-Hochberg step-up procedure (Benjamini and Hochberg, 1995)
+    is applied with
+    :func:`~polyzymd.analyses.shared.inferential_statistics.benjamini_hochberg`
+    at its default ``alpha`` of 0.05.
     """
     from scipy import stats
 
@@ -174,7 +263,27 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
 
 
 def trend_sentence(metric: str, unit: str | None, trend: Any) -> str:
-    """Write the verdict sentence of one trend test."""
+    """Write the verdict sentence of one trend test.
+
+    A testable trend gives the slope, its 95 percent interval, the adjusted
+    p-value and the number of replicates and conditions, and says whether
+    ``metric`` rises or falls with the factor (when significant) or that no
+    linear trend was detected. An untestable trend gives the reason.
+
+    Parameters
+    ----------
+    metric : str
+        Name of the measured quantity, used in the sentence.
+    unit : str or None
+        Unit of the metric; the slope is given in ``<unit> per unit <factor>``.
+    trend : TrendReport
+        One result of :func:`trend_tests`.
+
+    Returns
+    -------
+    str
+        The sentence, without a final period.
+    """
     from polyzymd.analyses.protocols import VERDICT_NOT_TESTABLE, _interval, _num
 
     if not trend.testable:
@@ -195,11 +304,16 @@ def trend_sentence(metric: str, unit: str | None, trend: Any) -> str:
 
 
 def _file_hash(path: Path) -> str:
+    """Return the SHA-256 hex digest of the bytes of ``path``."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def _report_hashes(target: Any) -> dict[str, str]:
-    """Return the SHA-256 of every stored report the target's studies hold, by study/run."""
+    """Return the SHA-256 of every stored report of the target, keyed ``<study>/<run>``.
+
+    For a Project the key is ``<study label>/<run>``; for a Study it is the
+    run name alone. Runs without a stored ``report.json`` are left out.
+    """
     from polyzymd.analyses.results import REPORT_FILE
 
     studies = (
@@ -217,24 +331,57 @@ def _report_hashes(target: Any) -> dict[str, str]:
 
 
 def stats_folder(target: Any, plan: StatsPlan) -> Path:
-    """Return the folder of a stats plan's output: ``<root>/results/stats/<function>``."""
-    return Path(target.root) / "results" / STATS_FOLDER / plan.qualname
+    """Return the folder of a stats plan's output: ``<root>/results/stats/<function>``.
 
+    The folder is not created.
 
-def run_stats_plan(target: Any, plan: StatsPlan) -> Path:
-    """Run a ``stats:`` plan on a Study or Project and store what it returns.
-
-    The function receives the target and returns a mapping of names to
-    tables (``pandas.DataFrame``, written as ``<name>.csv``) or JSON values
-    (written together to ``values.json``). ``record.json`` holds the SHA-256
-    of the plan's file, the function name, the SHA-256 of every stored report
-    the target held when it ran, and the PolyzyMD version, so
-    :func:`stats_status` can tell when it is out of date.
+    Parameters
+    ----------
+    target : Study or Project
+        The study or project the plan runs on; its ``root`` is used.
+    plan : StatsPlan
+        The plan; its ``qualname`` names the folder.
 
     Returns
     -------
     Path
-        The folder holding the output.
+        The output folder.
+    """
+    return Path(target.root) / "results" / STATS_FOLDER / plan.qualname
+
+
+def run_stats_plan(target: Any, plan: StatsPlan) -> Path:
+    """Run a ``stats:`` plan on a Study or Project and write what it returns.
+
+    The plan's function is loaded with
+    :func:`~polyzymd.analyses.user_functions.load_function`, called with the
+    target, and must return a mapping of names to values. Each
+    ``pandas.DataFrame`` value is written to ``<name>.csv`` without its
+    index; all other values are written together to ``values.json``
+    (NumPy and pandas scalars become plain JSON values). CSV files left from
+    an earlier run are deleted first. ``record.json`` holds the plan's file
+    (relative to the target's root when inside it), the function name, the
+    SHA-256 of the file, the SHA-256 of every stored report the target held
+    before the function ran, and the PolyzyMD version; :func:`stats_status`
+    compares it with the current state.
+
+    Parameters
+    ----------
+    target : Study or Project
+        The :class:`~polyzymd.analyses.study.Study` or
+        :class:`~polyzymd.analyses.project.Project` passed to the function.
+    plan : StatsPlan
+        The plan to run.
+
+    Returns
+    -------
+    Path
+        The output folder, ``<root>/results/stats/<function>``.
+
+    Raises
+    ------
+    ProtocolError
+        If the function cannot be loaded or does not return a mapping.
     """
     import pandas as pd
 
@@ -282,7 +429,25 @@ def run_stats_plan(target: Any, plan: StatsPlan) -> Path:
 
 
 def stats_status(target: Any, plan: StatsPlan) -> str:
-    """Say whether a stats plan's stored output matches its code and the current reports."""
+    """Return whether a stats plan's stored output matches its code and the current reports.
+
+    Compares the SHA-256 of the plan's file and of the target's stored
+    reports with those in the plan's ``record.json``.
+
+    Parameters
+    ----------
+    target : Study or Project
+        The study or project the plan runs on.
+    plan : StatsPlan
+        The plan to check.
+
+    Returns
+    -------
+    str
+        ``"not run"`` when there is no record, ``"up to date"`` when both
+        match, otherwise ``"stale: "`` followed by what changed (its code,
+        the analysis reports, or both).
+    """
     record_path = stats_folder(target, plan) / STATS_RECORD
     if not record_path.is_file():
         return "not run"
@@ -296,11 +461,18 @@ def stats_status(target: Any, plan: StatsPlan) -> str:
 
 
 def _json(value: Any) -> Any:
-    """Turn NumPy and pandas scalars into plain JSON values."""
+    """Convert a value :func:`json.dumps` cannot serialise, as its ``default`` hook.
+
+    A NumPy or pandas scalar is unwrapped to its Python number, with a
+    non-finite float as ``None``; an array becomes a list; anything else
+    becomes its string.
+    """
+    if hasattr(value, "tolist") and getattr(value, "ndim", 0) > 0:
+        return value.tolist()
     if hasattr(value, "item"):
         value = value.item()
     if isinstance(value, float) and not math.isfinite(value):
         return None
-    if hasattr(value, "tolist"):
-        return value.tolist()
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
     return str(value)

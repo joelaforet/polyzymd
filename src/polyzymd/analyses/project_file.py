@@ -2,10 +2,15 @@
 
 A project folder holds one paper: its ``project.yaml`` lists the study
 folders, one per protein, and the analyses every study runs; see the
-"Projects and studies" explanation page. A study finds its project in the
-folder above it (:func:`find_project`), and :func:`project_analyses` gives
-the project's analyses for that study, with the study's ``region`` and
-``structure`` names resolved (:func:`resolve_names`).
+"Projects and studies" explanation page. This module contains:
+
+- :func:`load_project_file`, which reads and checks ``project.yaml`` into a
+  :class:`ProjectFile`.
+- :func:`find_project`, which looks for the project of a study in the
+  folder above the study.
+- :func:`resolve_names`, which replaces ``region <name>`` and
+  ``structure <name>`` in a project analysis's settings with one study's
+  selection and file.
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ from polyzymd.analyses.statistics_plan import read_stats_plan
 #: File name that marks a project folder.
 PROJECT_FILE = "project.yaml"
 
-_TOP_KEYS = ("polyzymd", "studies", "analyses", "stats", "metadata")
+_TOP_KEYS = ("studies", "analyses", "stats", "metadata")
 #: Key of a project analysis that limits it to some studies.
 STUDIES_KEY = "studies"
 # Names are letters, digits, _ and -, and may start with a digit (4TGL_open).
@@ -32,18 +37,31 @@ _STRUCTURE = re.compile(r"^\s*structure\s+(\S+)\s*$")
 
 @dataclass(frozen=True)
 class ProjectFile:
-    """The contents of one ``project.yaml``.
+    """The contents of one ``project.yaml``, as read by :func:`load_project_file`.
 
-    ``studies`` maps each study's label to its folder. ``analyses`` holds
-    each analysis entry as written, with its ``studies:`` list (``None`` for
-    every study) under :data:`STUDIES_KEY` removed into ``runs_in``.
+    Attributes
+    ----------
+    path : Path
+        Absolute path of the ``project.yaml``.
+    studies : dict of str to Path
+        Each study's label mapped to its absolute folder, in file order.
+    analyses : dict of str to dict
+        Each analysis entry as written, by run name, with its ``studies:``
+        key (:data:`STUDIES_KEY`) removed.
+    runs_in : dict of str to list of str or None
+        For each run name, the labels its ``studies:`` key listed, or
+        ``None`` when the analysis runs in every study.
+    metadata : dict
+        The ``metadata:`` mapping, used for citation and deposit files.
+    stats : StatsPlan or None
+        The paper's statistical plan (``stats: {plan: file.py:function}``),
+        or ``None`` when the file has none.
     """
 
     path: Path
     studies: dict[str, Path]
     analyses: dict[str, dict[str, Any]]
     runs_in: dict[str, list[str] | None]
-    polyzymd: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     #: The paper's statistical plan (``stats: {plan: file.py:function}``).
     stats: Any = None
@@ -54,7 +72,19 @@ class ProjectFile:
         return self.path.parent
 
     def label_of(self, study_dir: Path) -> str | None:
-        """Return the label of the study in ``study_dir``, or ``None`` when it is not listed."""
+        """Return the label of the study in ``study_dir``, or ``None`` when it is not listed.
+
+        Parameters
+        ----------
+        study_dir : Path
+            A study folder; it is resolved before comparison with the
+            project's study folders.
+
+        Returns
+        -------
+        str or None
+            The study's label, or ``None`` when no listed study has that folder.
+        """
         study_dir = Path(study_dir).resolve()
         for label, folder in self.studies.items():
             if folder == study_dir:
@@ -63,7 +93,23 @@ class ProjectFile:
 
 
 def find_project_file(path: str | Path) -> Path:
-    """Return the ``project.yaml`` that ``path`` names: the file itself, or the one in that folder."""
+    """Return the ``project.yaml`` that ``path`` names: the file itself, or the one in that folder.
+
+    Parameters
+    ----------
+    path : str or Path
+        A project folder or a ``project.yaml``; ``~`` is expanded.
+
+    Returns
+    -------
+    Path
+        The absolute path of the file.
+
+    Raises
+    ------
+    ProtocolError
+        If no such file exists.
+    """
     path = Path(path).expanduser().resolve()
     file = path / PROJECT_FILE if path.is_dir() else path
     if not file.is_file():
@@ -77,15 +123,31 @@ def find_project_file(path: str | Path) -> Path:
 def load_project_file(path: str | Path) -> ProjectFile:
     """Read and check ``project.yaml``.
 
-    Study folders are resolved against the project folder and must each hold
-    a ``study.yaml``. Every ``studies:`` list of an analysis must name listed
-    studies.
+    The top-level keys may be ``studies``, ``analyses``, ``stats`` and
+    ``metadata``; ``studies`` is required and must not be empty. Study
+    folders are resolved against the project folder and must each hold a
+    ``study.yaml``. Every ``studies:`` list of an analysis must be a
+    non-empty list of listed study labels. The ``stats:`` entry is read
+    with :func:`~polyzymd.analyses.statistics_plan.read_stats_plan`.
+
+    Parameters
+    ----------
+    path : str or Path
+        The project folder or its ``project.yaml``.
+
+    Returns
+    -------
+    ProjectFile
+        The checked contents of the file.
 
     Raises
     ------
     ProtocolError
-        If the file is missing or not YAML, a key is unknown, a study folder
-        has no ``study.yaml``, or an analysis lists an unknown study.
+        If the file is missing or not a YAML mapping, a top-level key is
+        unknown, ``studies`` is missing or empty, a study folder has no
+        ``study.yaml``, ``analyses`` or ``metadata`` is not a mapping, an
+        analysis's ``studies:`` is not a non-empty list or names an unknown
+        study, or the ``stats:`` entry is invalid.
     """
     import yaml
 
@@ -146,20 +208,40 @@ def load_project_file(path: str | Path) -> ProjectFile:
     metadata = raw.get("metadata") or {}
     if not isinstance(metadata, Mapping):
         raise ProtocolError(f"{file}: metadata must be a mapping.", hint="Leave it out for now.")
-    version = raw.get("polyzymd")
     return ProjectFile(
         path=file,
         studies=studies,
         analyses=analyses,
         runs_in=runs_in,
-        polyzymd=None if version is None else str(version),
         metadata=dict(metadata),
         stats=read_stats_plan(raw.get("stats"), f"{file}: stats", file.parent),
     )
 
 
 def find_project(study_dir: Path) -> tuple[ProjectFile, str] | None:
-    """Return the project whose ``project.yaml`` in the folder above lists ``study_dir``, with its label."""
+    """Return the project that lists ``study_dir``, with the study's label.
+
+    Only the folder directly above ``study_dir`` is searched for a
+    ``project.yaml``.
+
+    Parameters
+    ----------
+    study_dir : Path
+        A study folder.
+
+    Returns
+    -------
+    tuple of (ProjectFile, str) or None
+        The project file and the study's label in it, or ``None`` when the
+        folder above holds no ``project.yaml`` or that file does not list
+        ``study_dir``.
+
+    Raises
+    ------
+    ProtocolError
+        If the ``project.yaml`` found cannot be read or fails its checks
+        (see :func:`load_project_file`).
+    """
     candidate = Path(study_dir).resolve().parent / PROJECT_FILE
     if not candidate.is_file():
         return None
@@ -175,13 +257,31 @@ def resolve_names(
 
     ``region <name>`` anywhere in a string becomes the region's selection in
     parentheses; a string that is only ``structure <name>`` becomes the path
-    of that structure. Mappings and lists are resolved item by item; other
-    values are returned as they are.
+    of that structure, as a string. Mappings and lists are resolved item by
+    item; other values are returned as they are.
+
+    Parameters
+    ----------
+    value : Any
+        A project analysis setting, or a mapping or list of them.
+    regions : Mapping of str to str
+        The study's region names mapped to their selections.
+    structures : Mapping of str to Path
+        The study's structure names mapped to their files.
+    where : str
+        Location used in error messages.
+
+    Returns
+    -------
+    Any
+        ``value`` with every name replaced.
 
     Raises
     ------
     ProtocolError
-        If a name is not one of the study's regions or structures.
+        If a name is not one of the study's regions or structures, or a
+        string starting with ``structure`` is not ``structure <name>`` with
+        exactly one name.
     """
     if isinstance(value, Mapping):
         return {key: resolve_names(item, regions, structures, where) for key, item in value.items()}
@@ -207,6 +307,7 @@ def resolve_names(
         return str(structures[name])
 
     def region(match: re.Match) -> str:
+        """Return the selection of the matched region name, in parentheses."""
         name = match.group(1)
         if name not in regions:
             raise ProtocolError(

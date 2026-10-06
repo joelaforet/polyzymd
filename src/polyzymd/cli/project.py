@@ -60,6 +60,7 @@ def check_command(ctx: click.Context, path: Path) -> None:
 
 
 def _fail(exc: Exception) -> None:
+    """Print the error and its hint to stderr and exit with status 2."""
     click.echo(f"error: {' '.join(str(exc).split())}", err=True)
     if getattr(exc, "hint", None):
         click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
@@ -73,50 +74,34 @@ def _fail(exc: Exception) -> None:
     "studies",
     multiple=True,
     required=True,
-    help="A study of the project, one per protein: LABEL for a new study, or "
-    "LABEL=path/to/study.yaml to move an existing study in. Repeatable.",
+    help="Label of a study of the project, one per protein; also its folder name. Repeatable.",
 )
 @click.option("--holder", default=None, help="Copyright holder for the licence files.")
 @click.option("--no-git", is_flag=True, help="Do not make the project a git repository.")
 def init_command(path: Path, studies: tuple[str, ...], holder: str | None, no_git: bool) -> None:
-    """Create a project folder at PATH: project.yaml and one study per protein.
+    """Create a project folder at PATH: project.yaml and one empty study per protein.
 
-    An existing study (--study LABEL=OLD/study.yaml) is copied in, not moved:
-    its conditions' configs and structures, where its runs are (into
-    data.local.yaml), its analyses/ code and its results/; settings naming
-    files become structure <name>. Analyses every moved study defines alike
-    go into project.yaml. The old study is only read.
+    Writes project.yaml listing the studies, analyses/, stats/, figures/,
+    licences and a README, and one study folder per --study with a
+    study.yaml to fill in. To bring existing studies in, follow the tutorial
+    "Move existing studies into a project".
 
     \b
     Examples:
-        polyzymd project init Paper_1 --study lipa363 --study calb343
-        polyzymd project init Paper_1 --study lipa363=old/lipa363 --study rml333=old/rml333
+        polyzymd project init Paper_1 --study lipa363 --study calb343 --study rml333
     """
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.project_scaffold import create_project
 
-    parsed: dict[str, Path | None] = {}
-    for item in studies:
-        label, equals, source = item.partition("=")
-        parsed[label.strip()] = Path(source).expanduser() if equals else None
     try:
-        created = create_project(path, parsed, holder=holder, git=not no_git)
+        created = create_project(path, list(studies), holder=holder, git=not no_git)
     except ProtocolError as exc:
         _fail(exc)
     click.echo(f"created project {created.root} with studies {', '.join(created.studies)}")
-    for label, migrated in created.migrated.items():
-        click.echo(
-            f"study {label}: moved in"
-            + (f"; structures {', '.join(migrated.structures)}" if migrated.structures else "")
-            + ("; results copied" if migrated.copied_results else "")
-        )
-        for value in migrated.left_absolute:
-            click.echo(f"warning: study {label} keeps the absolute path {value}; make it relative")
-    if created.shared:
-        click.echo(f"project.yaml: analyses shared by every study: {', '.join(created.shared)}")
     click.echo(
-        "next: fill description: in each study.yaml and metadata: in project.yaml, name "
-        "regions for analyses that differ only in residues, then polyzymd project check"
+        "next: fill description:, structures:, regions: and conditions: in each study.yaml "
+        "(polyzymd study add-condition adds a condition), the analyses and metadata: in "
+        "project.yaml, then polyzymd project check"
     )
 
 

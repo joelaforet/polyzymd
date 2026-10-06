@@ -28,7 +28,6 @@ RESULTS_FOLDER = "results"
 DATA_FILE = "data.local.yaml"
 
 _TOP_KEYS = (
-    "polyzymd",
     "description",
     "equilibration",
     "stride",
@@ -150,7 +149,6 @@ class StudyFile:
     equilibration: str
     conditions: dict[str, Path]
     analyses: dict[str, AnalysisEntry]
-    polyzymd: str | None = None
     stride: int = 1
     replicates: list[int] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -593,14 +591,12 @@ def load_study_file(path: str | Path) -> StudyFile:
     if not isinstance(metadata, Mapping):
         raise ProtocolError(f"{file}: metadata must be a mapping.", hint="Leave it out for now.")
 
-    version = raw.get("polyzymd")
     data = read_data_file(file.parent / DATA_FILE, conditions)
     return StudyFile(
         path=file,
         equilibration=equilibration,
         conditions=conditions,
         analyses=analyses,
-        polyzymd=str(version) if version is not None else (project.polyzymd if project else None),
         stride=stride,
         replicates=replicates,
         # A study of a project publishes with the project's metadata unless it has its own.

@@ -197,8 +197,6 @@ def copy_condition(config: Path, folder: Path) -> tuple[list[str], list[str]]:
 def _study_yaml(conditions: dict[str, str], equilibration: str | None) -> str:
     import yaml
 
-    import polyzymd
-
     listed = (
         yaml.safe_dump({"conditions": conditions}, sort_keys=False)
         if conditions
@@ -209,7 +207,6 @@ def _study_yaml(conditions: dict[str, str], equilibration: str | None) -> str:
     return f"""\
 # The analysis protocol of this study: see
 # https://polyzymd.readthedocs.io/en/latest/how_to/study_yaml.html
-polyzymd: {polyzymd.__version__}
 equilibration: {window}{note}
 {listed}analyses: {{}}
 # analyses:
@@ -387,7 +384,7 @@ def add_condition(
         If neither or both of ``config`` and ``new`` are given, the label or
         its folder is taken, or the config cannot be copied.
     """
-    from polyzymd.analyses.study_file import find_study_file, load_study_file
+    from polyzymd.analyses.study_file import find_study_file
 
     if (config is None) == (not new):
         raise ProtocolError(
@@ -395,9 +392,12 @@ def add_condition(
             hint="polyzymd study add-condition LABEL --config path/to/config.yaml, or --new.",
         )
     file = find_study_file(study)
-    protocol = load_study_file(file)
-    folder = protocol.root / "conditions" / condition_folder(label)
-    if label in protocol.conditions or folder.exists():
+    # Only the existing labels are read, so a new study with no condition yet,
+    # or one still being filled in, takes its first conditions.
+    listed = (_read_yaml(file).get("conditions") or {}).keys()
+    root = file.parent
+    folder = root / "conditions" / condition_folder(label)
+    if label in listed or folder.exists():
         raise ProtocolError(
             f"{file} already has a condition {label!r} or a folder {folder}.",
             hint="Choose another label.",
@@ -406,9 +406,28 @@ def add_condition(
         copy_condition(Path(config), folder)
     else:
         _polyzymd_init(folder)
-    _list_condition(file, label, str((folder / "config.yaml").relative_to(protocol.root)))
-    load_study_file(file)
+    _list_condition(file, label, str((folder / "config.yaml").relative_to(root)))
+    if label not in (_read_yaml(file).get("conditions") or {}):
+        raise ProtocolError(
+            f"{file}: the condition {label!r} was not listed under conditions:.",
+            hint="Add it under conditions: by hand.",
+        )
     return folder / "config.yaml"
+
+
+def _read_yaml(file: Path) -> dict:
+    """Read a YAML mapping, or raise ProtocolError saying the file is not one."""
+    import yaml
+
+    try:
+        raw = yaml.safe_load(file.read_text()) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise ProtocolError(
+            f"Cannot read {file}: {exc}", hint="Check that it is valid YAML."
+        ) from exc
+    if not isinstance(raw, dict):
+        raise ProtocolError(f"{file} must be a YAML mapping.", hint="See the documented example.")
+    return raw
 
 
 def _list_condition(file: Path, label: str, path: str) -> None:

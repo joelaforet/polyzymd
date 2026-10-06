@@ -10,10 +10,6 @@
   ],
   "additionalProperties": false,
   "properties": {
-    "polyzymd": {
-      "type": "string",
-      "description": "PolyzyMD version that produced the results."
-    },
     "description": {
       "type": "string",
       "description": "What the study simulates, such as the protein and temperature."

@@ -47,7 +47,6 @@ def check_command(path: Path) -> None:
     not errors, so a study folder without its trajectories still checks.
     """
     _study_logging(path, "study-check")
-    import polyzymd
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.results import REPORT_FILE
     from polyzymd.analyses.study import with_data_dir
@@ -81,10 +80,6 @@ def check_command(path: Path) -> None:
 
         click.echo(
             f"stats {protocol.stats.qualname}: {stats_status(Study(protocol.path), protocol.stats)}"
-        )
-    if protocol.polyzymd and protocol.polyzymd != polyzymd.__version__:
-        click.echo(
-            f"warning: written for PolyzyMD {protocol.polyzymd}; this is {polyzymd.__version__}"
         )
     failed = False
     for index, (label, config_path) in enumerate(protocol.conditions.items()):

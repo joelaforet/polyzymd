@@ -1,4 +1,4 @@
-"""Projects: one paper's studies, one per protein, with shared analyses (projects.md, slice P1)."""
+"""Projects: one study per protein, shared analyses, statistics, project init and freeze."""
 
 from __future__ import annotations
 
@@ -60,7 +60,6 @@ def project(tmp_path: Path) -> Path:
         "{rg_all: {analysis: rg, selection: all}}",
     )
     (root / "project.yaml").write_text(
-        "polyzymd: 1.3.0\n"
         "studies: {lipa: lipa, rml: rml}\n"
         "analyses:\n"
         "  rg: {selection: region core}\n"
@@ -257,40 +256,6 @@ def test_a_moved_project_reuses_its_results(project: Path, tmp_path: Path) -> No
     assert str(project) not in record
 
 
-def _old_study(tmp_path: Path, name: str) -> Path:
-    """A study as Paper_1_REDO's: absolute condition paths and an absolute reference file."""
-    outside = tmp_path / "configs" / name
-    configs = {}
-    for condition, offset in (("none", 1.0), ("half", 2.0)):
-        config = write_simulation_config(
-            outside / condition, scratch=tmp_path / "data" / name / condition
-        )
-        for replicate in (1, 2):
-            write_openmm_replicate(config, replicate, [offset + 0.01 * k for k in range(5)])
-        configs[condition] = config
-    reference = tmp_path / "refs" / f"{name}_crystal.pdb"
-    reference.parent.mkdir(parents=True, exist_ok=True)
-    reference.write_text(f"REMARK {name}\nEND\n")
-    root = tmp_path / "old" / name
-    (root / "analyses").mkdir(parents=True)
-    (root / "analyses" / "shared.py").write_text(
-        "def size(atoms, reference):\n    return float(len(atoms))\n"
-    )
-    (root / "study.yaml").write_text(
-        "equilibration: 0ns\n"
-        f"conditions: {{No polymer: {configs['none']}, Half: {configs['half']}}}\n"
-        "analyses:\n"
-        "  rg: {selection: all}\n"
-        "  size:\n"
-        "    function: analyses/shared.py:size\n"
-        "    kind: timeseries\n"
-        "    selections: {atoms: all}\n"
-        f"    settings: {{reference: {reference}}}\n"
-        "metadata: {title: Old paper}\n"
-    )
-    return root
-
-
 class TestProjectInit:
     def test_new_project_scaffold(self, tmp_path: Path) -> None:
         result = CliRunner().invoke(
@@ -300,41 +265,36 @@ class TestProjectInit:
         )
         assert result.exit_code == 0, result.output
         text = (tmp_path / "P" / "project.yaml").read_text()
-        assert "studies:\n  lipa363: lipa363\n  rml333: rml333" in text
-        assert "title: TODO" in text
+        assert "studies:" in text and "  lipa363: lipa363\n  rml333: rml333" in text
+        assert "title: TODO" in text and "polyzymd:" not in text
         study = (tmp_path / "P" / "lipa363" / "study.yaml").read_text()
         assert "description: TODO" in study and "regions: {}" in study
+        assert not (tmp_path / "P" / "lipa363" / "LICENSE-code").exists()
+        assert (tmp_path / "P" / "LICENSE-code").is_file()
 
-    def test_moving_studies_in_keeps_their_results(self, tmp_path: Path) -> None:
-        import yaml
-
-        old = {name: _old_study(tmp_path, name) for name in ("lipa", "rml")}
-        for path in old.values():
-            assert _analyze("--study", str(path)).exit_code == 0
+    def test_conditions_are_added_to_a_new_study(self, tmp_path: Path) -> None:
+        config = write_simulation_config(tmp_path / "runs" / "a", scratch=tmp_path / "data")
+        write_openmm_replicate(config, 1, [1.0, 1.1, 1.2])
+        assert (
+            CliRunner()
+            .invoke(cli, ["project", "init", str(tmp_path / "P"), "--study", "lipa", "--no-git"])
+            .exit_code
+            == 0
+        )
         result = CliRunner().invoke(
             cli,
-            ["project", "init", str(tmp_path / "P")]
-            + [arg for name, path in old.items() for arg in ("--study", f"{name}={path}")]
-            + ["--no-git"],
+            ["study", "add-condition", "No polymer", "--config", str(config)]
+            + ["--study", str(tmp_path / "P" / "lipa")],
         )
         assert result.exit_code == 0, result.output
-        project = tmp_path / "P"
-        lipa = yaml.safe_load((project / "lipa" / "study.yaml").read_text())
-        assert lipa["structures"] == {"reference": "structures/lipa_crystal.pdb"}
-        assert lipa["conditions"]["Half"] == "conditions/half/config.yaml"
-        shared = yaml.safe_load((project / "project.yaml").read_text())
-        assert set(shared["analyses"]) == {"rg", "size"}
-        assert shared["analyses"]["size"]["settings"] == {"reference": "structure reference"}
-        assert shared["metadata"] == {"title": "Old paper"}
-        assert (project / "analyses" / "shared.py").is_file()
-        data = yaml.safe_load((project / "lipa" / "data.local.yaml").read_text())
-        assert data["Half"] == str((tmp_path / "data" / "lipa" / "half").resolve())
-        records = sorted((project / "lipa" / "results").rglob("record.json"))
-        before = {p: p.stat().st_mtime_ns for p in records}
-        assert records and _analyze("--project", str(project)).exit_code == 0
-        # Every stored result was reused: nothing was measured again.
-        assert {p: p.stat().st_mtime_ns for p in records} == before
-        assert (old["lipa"] / "study.yaml").read_text().startswith("equilibration: 0ns")
+        protocol = load_study_file(tmp_path / "P" / "lipa")
+        assert list(protocol.conditions) == ["No polymer"]
+
+    def test_labels_must_be_folder_names(self, tmp_path: Path) -> None:
+        result = CliRunner().invoke(
+            cli, ["project", "init", str(tmp_path / "P"), "--study", "LipA 363", "--no-git"]
+        )
+        assert result.exit_code == 2 and "'lipa_363'" in result.output
 
 
 class TestProjectFreeze:

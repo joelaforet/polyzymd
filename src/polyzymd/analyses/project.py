@@ -1,9 +1,11 @@
 """``Project``: the studies of one paper, one per protein, read together.
 
 :class:`Project` reads ``project.yaml`` (:mod:`polyzymd.analyses.project_file`)
-and gives each study as a :class:`~polyzymd.analyses.study.Study`. Its
+and gives each study as a :class:`~polyzymd.analyses.study.Study`.
 :meth:`Project.results` puts every study's stored results of one analysis in
-one table with a ``study`` column, without loading any trajectory.
+one table with a ``study`` column (a :class:`ProjectResults`), and
+:meth:`Project.replicate_table` does the same for the per-replicate values.
+Neither loads any trajectory.
 """
 
 from __future__ import annotations
@@ -39,10 +41,26 @@ class ProjectResults:
 class Project:
     """The studies listed in a ``project.yaml``, one per protein.
 
+    The file is read and checked when the object is made. Each study is
+    opened as a :class:`~polyzymd.analyses.study.Study` the first time it is
+    accessed and kept for later accesses. Iterating gives the studies in
+    the order ``project.yaml`` lists them; ``len`` gives their number.
+
     Parameters
     ----------
     path : str or Path
         The project folder or its ``project.yaml``.
+
+    Attributes
+    ----------
+    protocol : ProjectFile
+        The checked contents of ``project.yaml``
+        (:class:`~polyzymd.analyses.project_file.ProjectFile`).
+
+    Raises
+    ------
+    ProtocolError
+        If ``project.yaml`` cannot be read or fails its checks.
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -62,7 +80,23 @@ class Project:
         return list(self.protocol.studies)
 
     def __getitem__(self, label: str) -> Any:
-        """Return the study ``label`` as a :class:`~polyzymd.analyses.study.Study`."""
+        """Return the study ``label`` as a :class:`~polyzymd.analyses.study.Study`.
+
+        Parameters
+        ----------
+        label : str
+            A study label from ``project.yaml``.
+
+        Returns
+        -------
+        Study
+            The study, opened on first access and cached.
+
+        Raises
+        ------
+        ProtocolError
+            If the project lists no study ``label``.
+        """
         from polyzymd.analyses.study import Study
 
         if label not in self.protocol.studies:
@@ -75,25 +109,61 @@ class Project:
         return self._studies[label]
 
     def __iter__(self) -> Iterator[Any]:
+        """Iterate over the studies in the order ``project.yaml`` lists them."""
         return (self[label] for label in self.labels)
 
     def __len__(self) -> int:
+        """Return the number of studies."""
         return len(self.protocol.studies)
 
     def __repr__(self) -> str:
+        """Return ``Project(<root>, studies=[...])``."""
         return f"Project({self.root}, studies={self.labels})"
 
     def runs_in(self, run: str) -> list[str]:
-        """Return the labels of the studies that run the analysis ``run``."""
+        """Return the labels of the studies that run the analysis ``run``.
+
+        A study runs ``run`` when its analyses, those of its ``study.yaml``
+        together with the project analyses that apply to it, include
+        ``run``. Every study is opened to check.
+
+        Parameters
+        ----------
+        run : str
+            Name of the analysis run.
+
+        Returns
+        -------
+        list of str
+            The labels, in the order ``project.yaml`` lists the studies.
+        """
         return [label for label in self.labels if run in self[label].protocol.analyses]
 
     def replicate_table(self, run: str) -> Any:
         """Return one row per replicate of ``run`` in every study that runs it.
 
-        Each study's :meth:`Study.replicate_table
-        <polyzymd.analyses.study.Study.replicate_table>`, with its ``study``
-        column, one after another. A study that runs ``run`` without stored
-        results is an error naming it.
+        Concatenates each study's :meth:`Study.replicate_table
+        <polyzymd.analyses.study.Study.replicate_table>`, each with its
+        ``study`` column, in the order ``project.yaml`` lists the studies.
+        No trajectory is loaded.
+
+        Parameters
+        ----------
+        run : str
+            Name of the analysis run.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per replicate (and per label or part) of every study
+            that runs ``run``; factor columns a study does not declare are
+            empty for its rows.
+
+        Raises
+        ------
+        ProtocolError
+            If no study runs ``run``, or a study that runs it has no stored
+            results; the message names those studies.
         """
         import pandas as pd
 
@@ -106,6 +176,22 @@ class Project:
 
     def results(self, run: str) -> ProjectResults:
         """Return the stored results of ``run`` in every study that runs it, in one table.
+
+        Reads each study's stored results with
+        :meth:`Study.results <polyzymd.analyses.study.Study.results>`; no
+        trajectory is loaded. The tables are concatenated with a ``study``
+        column first.
+
+        Parameters
+        ----------
+        run : str
+            Name of the analysis run.
+
+        Returns
+        -------
+        ProjectResults
+            The combined table, and each study's report and results folder by
+            study label.
 
         Raises
         ------

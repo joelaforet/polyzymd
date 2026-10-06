@@ -51,7 +51,6 @@ def study_dir(tmp_path: Path) -> Path:
             )
     _write(
         root / "study.yaml",
-        "polyzymd: 1.3.0\n"
         "equilibration: 0.25ns\n"
         "conditions:\n"
         "  No polymer: conditions/no_polymer/config.yaml\n"

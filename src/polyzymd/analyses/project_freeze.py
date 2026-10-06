@@ -1,19 +1,11 @@
 """Freeze a project for publication: every study, one manifest, one citation, one deposit.
 
-Slice P3 of the "Projects and studies" design. :func:`freeze_project`
-
-1. freezes each study as :func:`~polyzymd.analyses.study_freeze.freeze` does
-   with ``publish=False``: its ``manifest.json``, ``md_checklist.yaml``,
-   ``system_summary.csv``, engine inputs and final frames, and its warnings,
-   each prefixed with the study's label;
-2. writes the project's ``manifest.json``, which lists each study's manifest
-   by SHA-256 and every condition as ``<study> / <condition>``, and its
-   ``CITATION.cff`` and ``.zenodo.json`` from ``project.yaml``'s metadata;
-3. commits the generated files and the results of every study, and tags the
-   project ``project-v<n>``;
-4. lays out ``deposit/`` at the project root: the tagged project (configs
-   without machine paths), the engine inputs and final frames of every study
-   under its label, and ``upload/`` with ``UPLOAD.md``, as a study's deposit.
+The module's public function is :func:`freeze_project`. It freezes each
+study of a project with :func:`~polyzymd.analyses.study_freeze.freeze`
+(``publish=False``), writes the project's ``manifest.json``,
+``CITATION.cff`` and ``.zenodo.json``, commits and tags the project in git
+when it is a repository, and lays out one ``deposit/`` folder for the whole
+project, in the same form as a study's deposit.
 """
 
 from __future__ import annotations
@@ -41,6 +33,7 @@ from polyzymd.analyses.study_freeze import (
     without_machine_paths,
 )
 
+#: Value of the ``schema`` key of a project's ``manifest.json``.
 PROJECT_MANIFEST_SCHEMA = "polyzymd-project-manifest/1"
 #: Files freeze writes in the project folder and commits.
 PROJECT_GENERATED = (MANIFEST, CITATION, ZENODO)
@@ -49,25 +42,71 @@ STUDY_GENERATED = (MANIFEST, CHECKLIST, SUMMARY)
 
 
 def _sha256(path: Path) -> str:
+    """Return the SHA-256 hex digest of the bytes of ``path``."""
     import hashlib
 
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _next_project_tag(root: Path) -> str:
+    """Return ``project-v<n>``, with ``n`` one more than the highest existing such tag."""
     existing = (_git(root, "tag", "--list", "project-v*") or "").split()
     numbers = [int(t.split("v")[-1]) for t in existing if t.split("v")[-1].isdigit()]
     return f"project-v{max(numbers, default=0) + 1}"
 
 
 def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
-    """Freeze the project in ``root`` and every study it lists; see the module docstring.
+    """Freeze the project in ``root`` and every study it lists, for one publication.
+
+    The function does the following, in order:
+
+    - Freezes each study with :func:`~polyzymd.analyses.study_freeze.freeze`
+      and ``publish=False``, which writes the study's ``manifest.json``,
+      ``md_checklist.yaml`` and ``system_summary.csv`` and copies its engine
+      inputs and final frames to its ``deposit/``. Each study's warnings are
+      added to the result, prefixed with its label.
+    - Writes the project's ``manifest.json``, which lists each study's
+      manifest with its SHA-256, every condition as ``<study> / <condition>``,
+      the studies that run each analysis, and the software versions; and
+      writes ``CITATION.cff`` and ``.zenodo.json`` from the ``metadata:`` of
+      ``project.yaml``. Adds ``deposit/``, ``logs/`` and ``data.local.yaml``
+      to ``.gitignore``.
+    - When the project is a git repository, commits the generated files,
+      ``.gitignore`` and the ``results/`` of the project and of every study,
+      and tags the commit (``project-v<n>`` unless ``tag`` is given).
+    - Rebuilds ``deposit/`` at the project root: under ``deposit/study`` the
+      tagged commit (from ``git archive``) or, without a commit, a copy of
+      the project folder without ``.git``, ``deposit/``, ``logs/`` and
+      ``data.local.yaml``, with machine-specific directories removed from
+      the condition configs inside the project; the engine inputs and final frames of each
+      study under ``deposit/<part>/<label>``; the project's manifest,
+      citation files and manifest schema; a ``README.md`` with a section per
+      study giving each analysis's stored verdicts; and the upload folder
+      and ``UPLOAD.md`` guide from
+      :func:`~polyzymd.analyses.study_upload_guide.prepare_upload`.
+
+    Nothing is uploaded.
+
+    Parameters
+    ----------
+    root : str or Path
+        The project folder or its ``project.yaml``.
+    tag : str, optional
+        Git tag for the frozen project. Defaults to the next ``project-v<n>``.
+
+    Returns
+    -------
+    FreezeResult
+        The project root, the tag and commit (both ``None`` when nothing was
+        committed), the deposit folder, the project manifest, the warnings,
+        and the paths of the upload guide and upload folder.
 
     Raises
     ------
     ProtocolError
-        When the project or a study file cannot be read, or the tag exists.
-        Everything else is a warning in the result.
+        If ``project.yaml`` or a study's files cannot be read, or if the tag
+        already exists. Other problems (missing metadata, uncommitted inputs,
+        a failed commit or tag) are added to the result's warnings.
     """
     import polyzymd
     from polyzymd.analyses.project import Project
@@ -236,7 +275,12 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
 
 
 def _studies_section(project: Any) -> str:
-    """The deposit README's account of each study: its protein and what each analysis found."""
+    """Return the deposit README's ``## Studies`` section: each study's description and verdicts.
+
+    For every study it gives the study's description and, for each of its
+    analyses, the ``verdict`` lines of the stored ``report.json``, or
+    ``no stored report`` when that file is missing or unreadable.
+    """
     lines = [
         "## Studies",
         "",
