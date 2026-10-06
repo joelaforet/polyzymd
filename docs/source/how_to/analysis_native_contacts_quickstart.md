@@ -1,4 +1,4 @@
-# Native contacts analysis: quick start
+# Run native contacts analysis
 
 Measure the fraction of native contacts Q, how many of the contacts of a
 reference structure are still formed, on every production frame of every

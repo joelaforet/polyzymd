@@ -1,4 +1,4 @@
-# Hydrogen bonds analysis: quick start
+# Run hydrogen bonds analysis
 
 Count the hydrogen bonds between named groups of atoms, or within one group,
 on the production frames of every replicate, and compare how many form, how
