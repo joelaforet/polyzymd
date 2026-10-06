@@ -81,3 +81,26 @@ def test_a_real_config_keeps_its_hash_when_its_data_moves(tmp_path: Path) -> Non
     first = compute_config_hash(SimulationConfig.from_yaml(path))
     path.write_text(path.read_text().replace(str(tmp_path / "data_here"), "/pl/active/moved"))
     assert compute_config_hash(SimulationConfig.from_yaml(path)) == first
+
+
+def test_the_config_hash_knows_the_cosolvents(tmp_path) -> None:
+    """A water condition and an SDS condition with the same name have different config hashes."""
+    import yaml
+
+    from polyzymd.analyses.identity import compute_config_hash
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_simulation_config
+
+    def config(folder, **solvent):
+        path = write_simulation_config(folder / "c", scratch=folder / "s")
+        (folder / "c" / "test.pdb").write_text("END\n")
+        data = yaml.safe_load(path.read_text())
+        if solvent:
+            data["solvent"] = solvent
+        path.write_text(yaml.safe_dump(data))
+        return SimulationConfig.from_yaml(path)
+
+    sds = {"name": "sds", "smiles": "CCCCCCCCCCCCOS(=O)(=O)[O-]", "count": 8}
+    assert compute_config_hash(config(tmp_path / "w")) != compute_config_hash(
+        config(tmp_path / "s", co_solvents=[sds])
+    )

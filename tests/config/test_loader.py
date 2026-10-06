@@ -187,3 +187,25 @@ class TestReactionDefaultSentinel:
             assert path.suffix == ".rxn"
             assert "atrp" in path.name
             assert path.exists()
+
+
+def test_output_folders_are_relative_to_the_config(tmp_path: Path) -> None:
+    """projects_directory '.' is the config's folder, from any shell folder."""
+    import os
+
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "water", scratch=Path("."))
+    data = yaml.safe_load(path.read_text())
+    data["output"]["projects_directory"] = "."
+    path.write_text(yaml.safe_dump(data))
+    old = Path.cwd()
+    os.chdir(tmp_path)
+    try:
+        config = SimulationConfig.from_yaml(path)
+    finally:
+        os.chdir(old)
+    assert Path(config.output.projects_directory) == (tmp_path / "water").resolve()

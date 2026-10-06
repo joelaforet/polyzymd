@@ -297,3 +297,21 @@ class TestErrors:
 
         with pytest.raises(ProtocolError, match="label\\(s\\) for"):
             analyze("rg", configs, labels=["only_one"], replicates=[1])
+
+
+def test_repeated_pair_labels_are_refused() -> None:
+    """Two distance pairs with one label would overwrite each other's values."""
+    from polyzymd.analyses.protocols import _analyze_pairs
+
+    pair = {"label": "d", "selection_a": "name C1", "selection_b": "name C2"}
+    with pytest.raises(ProtocolError, match="repeat"):
+        _analyze_pairs(
+            "distances",
+            None,
+            {"pairs": [pair, pair]},
+            None,
+            recompute=False,
+            output_dir=None,
+            eq_check=False,
+            plots=False,
+        )
