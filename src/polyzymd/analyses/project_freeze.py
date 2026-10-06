@@ -30,11 +30,11 @@ from polyzymd.analyses.study_freeze import (
     _finish_deposit,
     _git_preflight,
     _listed_files,
-    left_out_files,
     _versions,
     _write_citation,
     freeze,
     group_warnings,
+    left_out_files,
 )
 
 #: Value of the ``schema`` key of a project's ``manifest.json``.

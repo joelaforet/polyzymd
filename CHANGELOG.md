@@ -136,6 +136,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stray files in study and project folders (Joe's #163 review).** PolyzyMD reads, hashes and deposits only files whose names it chooses in advance:
+  - A function's stored results depend on the Python files of its folder and the files of `data/` beside it. Notes, figures or a copied trajectory in `analyses/` recompute nothing; the analysis log names the files it leaves out.
+  - `freeze` deposits only `study.yaml`, `project.yaml`, `README*`, `LICENSE*`, the files it writes, and `analyses/`, `stats/`, `figures/`, `results/` and `conditions/`, with or without git, and prints one `not deposited:` warning for the rest.
+  - GROMACS runs use `<prefix>.top`, the files it includes, `prod.tpr` and PolyzyMD's `.mdp` names, so a `backup.top` neither stops an analysis nor is deposited. `gromacs.analysis_topology` names another `.top`.
+
 - **Wave H of the 1.3 audit.**
   - `polyzymd clean-pdb` places hydrogens on the CPU platform, so a GPU with an older driver no longer stops it with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`. Set `OPENMM_DEFAULT_PLATFORM` to choose another platform.
   - A local `polyzymd run` with OpenMM writes `progress.json`, so it records each segment and its trajectory hash, as a SLURM run does.

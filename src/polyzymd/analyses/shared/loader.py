@@ -1725,9 +1725,7 @@ class TrajectoryLoader:
 
         # Load universe - MDAnalysis handles multiple trajectory files
         if len(info.trajectory_files) == 1:
-            u = open_universe(
-                info.topology_file, info.trajectory_files, info.gromacs_topology_file
-            )
+            u = open_universe(info.topology_file, info.trajectory_files, info.gromacs_topology_file)
         else:
             # Multiple segments - use ChainReader, but only after checking
             # that the segments actually chain (no branched/duplicate chains).
@@ -1741,9 +1739,7 @@ class TrajectoryLoader:
                 reference_dt = next((t.dt for t in timings if t.dt is not None and t.dt > 0), None)
                 if reference_dt is not None and all(t.first_time is not None for t in timings):
                     self._segment_joins[replicate] = _segment_join(timings, reference_dt)
-            u = open_universe(
-                info.topology_file, info.trajectory_files, info.gromacs_topology_file
-            )
+            u = open_universe(info.topology_file, info.trajectory_files, info.gromacs_topology_file)
         enrich_universe_elements(u, topology_key=info.topology_file)
         enrich_universe_force_field(u, openmm_system_file(info.trajectory_files[0]))
         apply_pbc_policy(u, pbc_policy, topology=info.topology_file)

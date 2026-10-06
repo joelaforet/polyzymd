@@ -78,9 +78,19 @@ class TestGromacsRunFiles:
     def _run(self, tmp_path: Path) -> Path:
         run = tmp_path / "run"
         run.mkdir()
-        (run / "LipA.top").write_text('#include "LipA_posre.itp"\n#include "amber.ff/forcefield.itp"\n')
+        (run / "LipA.top").write_text(
+            '#include "LipA_posre.itp"\n#include "amber.ff/forcefield.itp"\n'
+        )
         (run / "LipA_posre.itp").write_text("; restraints\n")
-        for name in ("prod.tpr", "em.mdp", "eq_01_nvt.mdp", "prod.mdp", "backup.top", "old.mdp", "x.itp"):
+        for name in (
+            "prod.tpr",
+            "em.mdp",
+            "eq_01_nvt.mdp",
+            "prod.mdp",
+            "backup.top",
+            "old.mdp",
+            "x.itp",
+        ):
             (run / name).write_text("x")
         return run
 
@@ -114,7 +124,11 @@ class TestGromacsRunFiles:
         ]
 
     def test_the_user_can_name_another_topology(self, tmp_path: Path) -> None:
-        from polyzymd.analyses.shared.gromacs import gromacs_topology_file, run_input_files, topology_name
+        from polyzymd.analyses.shared.gromacs import (
+            gromacs_topology_file,
+            run_input_files,
+            topology_name,
+        )
 
         run = self._run(tmp_path)
         config = self._config(top="backup.top")
