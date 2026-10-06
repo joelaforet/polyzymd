@@ -81,7 +81,7 @@ Some `last:` lines call for something other than a plain resubmit:
 | `FATAL: CUDA routing failed after 3 retries` | The chain landed on nodes whose driver is too old for the pinned CUDA environment. | Resubmit. Presets exclude the known nodes; the terminal message names any others to add with `--exclude`. |
 | `CONCURRENT: Another job is already running this replicate` | A duplicate chain exited to protect the running one. | Check whether the other chain is still alive before resubmitting. |
 | `Segment N failed: Particle coordinate is NaN` | The physics blew up. | Do not resubmit blindly; inspect the system. |
-| `Validation error: ... polymer atom(s) lie within ... of the solute` | The build refused the packed coordinates. | Rebuild; see {doc}`broken_molecules_debugging`. |
+| `Validation error: ... polymer atom(s) lie within ... of the solute` | The build refused the packed coordinates. | Rebuild the replicate. |
 
 ## Script it
 

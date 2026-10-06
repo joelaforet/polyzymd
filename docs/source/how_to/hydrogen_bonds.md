@@ -1,13 +1,9 @@
-# Hydrogen bonds analysis: quick start
+# Run hydrogen bonds analysis
 
 Count the hydrogen bonds between named groups of atoms, or within one group,
 on the production frames of every replicate, and compare how many form, how
 long they last, and which residues and residue pairs form them, with the
 replicate as the sampling unit.
-
-```{versionadded} 1.3.0
-Hydrogen bonds analysis runs on the study API from PolyzyMD 1.3.0.
-```
 
 ```{note}
 **Want to understand the measurement?** For what each shipped function

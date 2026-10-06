@@ -86,7 +86,7 @@ For which number to quote, see
 ## See Also
 
 - {doc}`analysis_protocol_report` -- every field of the report and its comparison rows
-- {doc}`../explanation/analysis_api` -- `summary()` and `compare()` on the study API
+- {doc}`study_api` -- `summary()` and `compare()` on the study API
 - {doc}`../explanation/analysis_statistics_best_practices` -- autocorrelation, FDR concepts, and interpretation guidance
 
 ## References

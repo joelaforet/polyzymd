@@ -1,126 +1,120 @@
-# How-To Guides
+# How-to guides
 
-How-to guides help you accomplish a specific task. Use this section when you
-already know your goal and need the shortest practical route to it.
-
-```{tip}
-If you're new to PolyzyMD, start with {doc}`../tutorials/index` instead.
-These guides assume you already have a working installation and know the
-basics.
-```
+Each guide solves one task. Use a guide when you know what you want to do.
+If you are new to PolyzyMD, do the {doc}`../get_started/quickstart` first.
 
 ::::{grid} 2
 :gutter: 3
 
-:::{grid-item-card} Simulation Setup
+:::{grid-item-card} Set up a simulation
 :link: polymers
 :link-type: doc
 
-Add polymers, prepare inputs, configure restraints, or export to GROMACS.
+Add polymers, restraints and equilibration stages. Fix a PDB that OpenFF
+refuses.
 :::
 
-:::{grid-item-card} Build Input Troubleshooting
-:link: troubleshoot_openff_pdb_ingestion
-:link-type: doc
-
-Diagnose OpenFF PDB ingestion failures before running a PolyzyMD build.
-:::
-
-:::{grid-item-card} Analysis Workflows
-:link: analysis_chooser
-:link-type: doc
-
-Pick the right analysis and get results in a few commands.
-:::
-
-:::{grid-item-card} HPC & Job Submission
+:::{grid-item-card} Run on a cluster
 :link: hpc_slurm
 :link-type: doc
 
-Submit simulations or analysis jobs via SLURM.
+Submit simulations and analysis jobs with SLURM, and monitor them.
 :::
 
-:::{grid-item-card} Plots & Troubleshooting
-:link: publication_plots
+:::{grid-item-card} Organize and publish studies
+:link: study_folder
 :link-type: doc
 
-Adjust themes, colors, and figure sizes for publication-quality output.
+Make a study folder for each protein, group studies into a project, and
+freeze them for publication.
+:::
+
+:::{grid-item-card} Analyze trajectories
+:link: analysis_chooser
+:link-type: doc
+
+Choose an analysis, run it on a study, and measure your own quantity.
 :::
 
 ::::
 
-## Simulation Setup & Input Preparation
-
-Prepare build inputs and configure your enzyme-polymer conjugate systems.
+## Set up a simulation
 
 ```{toctree}
 :maxdepth: 1
 
-Add Polymers to a Simulation <polymers>
-Generate Polymers from SMILES <dynamic_polymers>
-Troubleshoot OpenFF PDB Ingestion <troubleshoot_openff_pdb_ingestion>
-Add Distance Restraints <restraints>
-Set Up Equilibration Stages <equilibration>
-Run GROMACS Simulations on HPC Clusters <gromacs_export>
+polymers
+dynamic_polymers
+restraints
+equilibration
+troubleshoot_openff_pdb_ingestion
 ```
 
-## HPC & Job Submission
-
-Run on SLURM clusters — from individual jobs to daisy-chained workflows.
+## Run simulations
 
 ```{toctree}
 :maxdepth: 1
 
-Run Simulations on SLURM Clusters <hpc_slurm>
-Monitor a Simulation Campaign <monitor_simulations>
-Run OpenMM on Other Hardware <hardware_platforms>
-Run Analysis Jobs on SLURM <hpc_execution>
+hpc_slurm
+monitor_simulations
+hardware_platforms
+gromacs_export
 ```
 
-## Stable Analysis Workflows
-
-These analyses are well-tested and recommended for production use. Each runs
-with `polyzymd analyze NAME -c <config.yaml>` and on the study API in Python.
-See also {doc}`../tutorials/sasa_analysis` for a guided SASA walkthrough.
+## Organize and publish studies
 
 ```{toctree}
 :maxdepth: 1
 
-Which Analysis Should I Run? <analysis_chooser>
-Get a Validated Number with One Command <analysis_agent_protocol>
-Create a Study Folder <study_folder>
-Run a Study from study.yaml <study_yaml>
-Analyse Several Proteins as One Project <project>
-Publish a Study with study freeze <study_freeze>
-Compare Simulation Conditions <analysis_compare_conditions>
-Run RMSD Analysis <analysis_rmsd_quickstart>
-Run Rg Analysis <analysis_rg_quickstart>
-Run RMSF Analysis <analysis_rmsf_quickstart>
-Run Distance Analysis <analysis_distances_quickstart>
-Run Contacts Analysis <analysis_contacts_quickstart>
-Run SASA Analysis <analysis_sasa_quickstart>
-Run Secondary Structure Analysis <analysis_secondary_structure_quickstart>
-Run Native Contacts Analysis <analysis_native_contacts_quickstart>
-Analyze Hydrogen Bonds <hydrogen_bonds>
-Measure a Catalytic Triad on the Analysis API <analysis_triad_quickstart>
+study_folder
+study_yaml
+project
+move_studies_into_project
+study_freeze
 ```
 
-## Plots & Troubleshooting
-
-Customize publication-quality figures and debug common issues.
-
-```{tip}
-Want a figure PolyzyMD does not draw? See {doc}`custom_artifact_plotting` for
-plotting per-replicate values measured with the study API. Start with
-{doc}`publication_plots` if you want to customize PolyzyMD's standard analysis
-plots.
-```
+## Analyze trajectories
 
 ```{toctree}
 :maxdepth: 1
 
-Customizing Plots for Publication <publication_plots>
-Create Custom Plots from Study Results <custom_artifact_plotting>
-Broken Molecule Debugging <broken_molecules_debugging>
-Troubleshoot Common Problems <troubleshooting>
+analysis_chooser
+analysis_agent_protocol
+analysis_compare_conditions
+study_api
+hpc_execution
+```
+
+## Analyses
+
+```{toctree}
+:maxdepth: 1
+
+analysis_rmsd_quickstart
+analysis_rg_quickstart
+analysis_rmsf_quickstart
+analysis_distances_quickstart
+analysis_contacts_quickstart
+analysis_sasa_quickstart
+analysis_secondary_structure_quickstart
+analysis_native_contacts_quickstart
+hydrogen_bonds
+analysis_triad_quickstart
+```
+
+## Figures
+
+```{toctree}
+:maxdepth: 1
+
+publication_plots
+custom_artifact_plotting
+```
+
+## Fix problems
+
+```{toctree}
+:maxdepth: 1
+
+troubleshooting
 ```

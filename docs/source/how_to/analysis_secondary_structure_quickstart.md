@@ -1,18 +1,9 @@
-# Secondary structure analysis: quick start
+# Run secondary structure analysis
 
-Assign each residue a DSSP secondary-structure class on every production frame
-of every replicate, and compare how much of the protein is helix, strand or
-coil, overall or residue by residue, with the replicate as the sampling unit.
-
-```{versionadded} 1.3.0
-Secondary structure analysis was added in PolyzyMD 1.3.0.
-```
-
-```{note}
-**Want to understand the measurement?** For what each shipped function
-measures, see {doc}`../reference/analysis_functions`; for the statistics, see
-{doc}`../explanation/analysis_statistics_best_practices`.
-```
+Assign a DSSP secondary-structure class to each residue on each production
+frame of each replicate. Then compare how much of the protein is helix, strand
+or coil, for the whole protein or residue by residue, with one value per
+replicate.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -29,33 +20,28 @@ Alternatively, prefix each command with `pixi run -e analysis`.
 
 ## What is measured
 
-On every production frame, `mdtraj.compute_dssp` assigns each residue of the
-selection a DSSP class of Kabsch and Sander (1983) from its backbone hydrogen
-bonds and geometry. The `scheme` setting picks one of MDTraj's two schemes:
+On each production frame, `mdtraj.compute_dssp` assigns a DSSP class
+(Kabsch and Sander, 1983) to each residue of the selection. DSSP uses the
+backbone hydrogen bonds and geometry. The `scheme` setting selects the
+classes:
 
-| `scheme=full` class | DSSP code | `scheme=simplified` class (default) |
-|---|---|---|
-| `alpha_helix` | H | `helix` |
-| `3_10_helix` | G | `helix` |
-| `pi_helix` | I | `helix` |
-| `extended_strand` | E | `strand` |
-| `isolated_bridge` | B | `strand` |
-| `turn` | T | `coil` |
-| `bend` | S | `coil` |
-| `loop` | blank | `coil` |
-| `unassigned` | NA | `unassigned` |
+- `simplified` (default): `helix`, `strand` and `coil`.
+- `full`: the eight DSSP classes, such as `alpha_helix` and `3_10_helix`.
 
-`simplified` calls `mdtraj.compute_dssp(simplified=True)`, which joins the
-eight classes into helix, strand and coil as the table shows; `full` calls
-`simplified=False` and keeps the eight. MDTraj gives `NA` to a residue it cannot
-assign, for example one missing a backbone atom; PolyzyMD counts those as
-`unassigned` in either scheme and warns. For each replicate, each residue's
-value of a class is the fraction of production frames it spends in it.
+MDTraj gives `NA` to a residue that it cannot assign, for example a residue
+without a backbone atom. PolyzyMD counts it as `unassigned` and prints a
+warning. For each replicate, the value of a class for a residue is the fraction
+of production frames in that class. For the table of classes, see
+{ref}`DSSP classes <dssp-classes>`.
 
-The selection must hold whole residues, because DSSP reads every backbone atom.
-Each chain of the topology stays its own chain, so DSSP never pairs residues of
-different chains. The coordinates are used as loaded; make a protein split
-across a periodic boundary whole before relying on the assignment.
+Before you run the analysis, check these points:
+
+- The selection must contain whole residues, because DSSP reads every backbone
+  atom.
+- Each chain of the topology stays a separate chain, so DSSP never pairs
+  residues of two chains.
+- PolyzyMD uses the coordinates as loaded. Make a protein that crosses a
+  periodic boundary whole before you use the assignment.
 
 ## From the command line
 
@@ -65,53 +51,60 @@ polyzymd analyze secondary_structure -c noPoly/config.yaml -c SBMA50/config.yaml
 ```
 
 The first `-c` is the control. One pass over each replicate gives every class
-of the scheme. By default the scheme is `simplified` and the report shows
-`helix`: for each replicate, the fraction of residue-frames in helix, which is
-the mean over residues of each residue's helix fraction. The replicate values are summarised per
-condition, and every other condition is compared with the control by Welch's t
-test with the Benjamini-Hochberg correction. Pick another result with `--run`:
+of the scheme. By default, the scheme is `simplified` and the report shows
+`helix`. This is the fraction of residue-frames in helix: the mean over
+residues of the helix fraction of each residue. PolyzyMD compares each
+condition with the control by Welch's t test. It corrects the p values with the
+{term}`Benjamini-Hochberg` method.
+
+To report a different result, use `--run`:
 
 | `--run` | One value per replicate |
 |---|---|
 | a class of the scheme: `helix`, `strand`, `coil` or `unassigned` for `simplified` (default `helix`), or `alpha_helix` to `unassigned` for `full` (default `alpha_helix`) | Fraction of residue-frames in the class |
 | `<class>_residues` | Each residue's fraction of frames in the class, compared residue by residue |
 
-A per-residue comparison is corrected over every residue of every compared
-condition, and the text report gives, for each condition, how many residues
-are significantly lower and higher than in the control and lists them. Every
-per-residue row is kept in the JSON report.
+PolyzyMD corrects a per-residue comparison over every residue of every
+compared condition. For each condition, the text report gives the number of
+residues that are significantly lower and higher than in the control, and lists
+them. The JSON report keeps every per-residue row.
 
 Settings, passed with `--set`:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `selection` | `protein` | Whole residues to assign |
-| `scheme` | `simplified` | `simplified` for helix, strand and coil, or `full` for the eight DSSP classes |
+| `selection` | `protein` | The whole residues to assign |
+| `scheme` | `simplified` | `simplified` for helix, strand and coil. `full` for the eight DSSP classes |
 
-For example, to compare how much of each protein is 3-10 helix:
+For example, this command compares how much of each protein is 3-10 helix:
 
 ```bash
 polyzymd analyze secondary_structure -c noPoly/config.yaml -c SBMA50/config.yaml \
   --eq 200ns --set scheme=full --run 3_10_helix
 ```
 
-Or to compare the helix content of one domain, residue by residue:
+This command compares the helix content of one domain, residue by residue:
 
 ```bash
 polyzymd analyze secondary_structure -c noPoly/config.yaml -c SBMA50/config.yaml \
   --eq 200ns --set "selection=protein and resid 1:120" --run helix_residues
 ```
 
-Add `--stride 5` to assign every fifth production frame, `--format json` for
-the full report, `--replicates 1-3` to use only some replicates, and
-`--recompute` to ignore stored results. The selection and scheme are recorded
-under `provenance.settings` in the JSON report, and the two schemes are stored
+Useful options:
+
+- `--stride 5` assigns every fifth production frame.
+- `--format json` prints the full report.
+- `--replicates 1-3` uses only some replicates.
+- `--recompute` ignores stored results.
+
+The JSON report records the selection and the scheme under
+`provenance.settings`. PolyzyMD stores the results of the two schemes
 separately.
 
 ## Figures
 
 `polyzymd analyze secondary_structure` writes these figures to
-`<output-dir>/figures/secondary_structure/`; `--no-plots` skips them.
+`<output-dir>/figures/secondary_structure/`. Add `--no-plots` to skip them.
 
 | Figure | What it shows |
 |---|---|
@@ -144,13 +137,13 @@ print(helix.compare(control="No polymer").to_agent_text())
 print(rows["helix"].compare(control="No polymer").to_agent_text())  # residue by residue
 ```
 
-`dssp_occupancy(atoms, frames)` returns one row per class of `DSSP_SIMPLIFIED`
-(helix, strand, coil and unassigned), with one column per residue.
-`dssp_occupancy(atoms, frames, simplified=False)` returns one row per class of
-`DSSP_CLASSES` instead; pass `simplified=False` and `parts=list(DSSP_CLASSES)`
-for the eight classes. `DSSP_GROUPS` lists the eight classes each simplified
-class joins. `parts=` turns each row into its own result, and
-`over_labels("mean")` turns a residue profile into one value per replicate.
+`dssp_occupancy(atoms, frames)` returns one row for each class of
+`DSSP_SIMPLIFIED` (helix, strand, coil and unassigned), with one column for
+each residue. For the eight classes, give `simplified=False` and
+`parts=list(DSSP_CLASSES)`. `DSSP_GROUPS` lists the full classes that each
+simplified class joins. `parts=` makes each row a separate result.
+`over_labels("mean")` turns a residue profile into one value per replicate. To
+measure your own quantity, see {doc}`study_api`.
 
 ## References
 

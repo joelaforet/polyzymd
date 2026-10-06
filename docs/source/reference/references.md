@@ -1,10 +1,13 @@
 # Methods and references
 
-Every method PolyzyMD's analysis module implements or adapts comes from a
-published source, and this page lists them. If you add a method, add its
-reference here and in a NumPy-style `References` section in the module
-docstring. Entries marked as not implemented describe planned work and are
-listed so nobody cites them from code that does not yet run them.
+This list gives the published source of each method that the PolyzyMD
+analyses implement or adapt. An entry marked "not implemented" names a method
+that PolyzyMD does not run. Do not cite it as a method of PolyzyMD.
+
+```{note}
+For contributors: when you add a method, add its reference here and in the
+`References` section of the module docstring.
+```
 
 To cite PolyzyMD itself, see `CITATION.cff` in the repository root.
 

@@ -176,7 +176,7 @@ polymers:
 | `movebadrandom` | bool | No | false | Pass PACKMOL's `movebadrandom`; helps dense or heterogeneous systems converge |
 | `confine_to_sphere` | bool | No | true | Confine chains to a sphere centred on the solute (radius = half the solute bounding-box diagonal + `padding`) while packing inside the final periodic brick. Set `false` to let chains fill the whole brick |
 | `box_vectors` | list[float] (nm) | No | null | Explicit `[Lx, Ly, Lz]` packing box. **Opts out of the deterministic cell**: the periodic box is then derived from the packed topology, as before, and differs between replicates |
-| `exclude_solute_bbox` | bool | No | false | Confine chains to a rectangular shell outside the solute bounding box (legacy). Off by default because the tolerance against the fixed solute already prevents overlap and the shell over-constrains long chains |
+| `exclude_solute_bbox` | bool | No | false | Confine chains to a rectangular shell outside the solute bounding box. Off by default because the tolerance against the fixed solute already prevents overlap and the shell over-constrains long chains |
 | `nloop` | int | No | 200 | Maximum PACKMOL GENCAN loops per molecule type |
 
 PACKMOL is seeded with the replicate number for both polymer packing and
@@ -280,8 +280,7 @@ polymers are configured, `polymers.packing.padding` is added to it and the
 resulting cell is computed from the protein and substrate before any packing
 happens, so it is identical across replicates of a condition; the packed
 topology is not re-centred afterwards. Without polymers the box is computed
-from the solute at solvation time, exactly as before, so existing control
-bundles remain valid. The number of waters and ions follows from the box
+from the solute at solvation time. The number of waters and ions follows from the box
 volume and `target_density`, so a deterministic box means deterministic
 solvent counts.
 

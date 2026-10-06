@@ -684,16 +684,16 @@ The `-maxh` flag is automatically set so GROMACS exits cleanly before the
 SLURM wall-time limit.
 
 ```{note}
-**Stopping a job permanently.**
-A plain `scancel <job_id>` sends SIGTERM, which triggers the resubmission
-logic described above — the job will restart automatically. To cancel a job
-**without** resubmission, send SIGKILL instead:
+**Stop a GROMACS chain.**
+`scancel <job_id>` sends `SIGTERM`. The GROMACS job script reads it as a
+preemption and submits a successor. GROMACS job scripts do not check the
+`STOP` marker of `polyzymd cancel`, so `polyzymd cancel` does not stop them.
+Send `SIGKILL` to the batch shell, which the script cannot trap:
 
-    scancel --signal=KILL <job_id>
+    scancel --batch --signal=KILL <job_id>
 
-This bypasses the trap entirely so no checkpoint flush or resubmission occurs.
-See also: {ref}`need to stop a job permanently <hpc-slurm-stop-permanently>`
-in the general SLURM guide.
+Then cancel any successor that is already queued (`squeue -u $USER`). See
+{ref}`Stop a chain <hpc-slurm-stop-a-chain>` in the SLURM guide.
 ```
 
 ---

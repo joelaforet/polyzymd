@@ -51,8 +51,8 @@ follow `docs/source/how_to/analysis_triad_quickstart.md`
 and run `polyzymd analyze distances -c config.yaml --set pairs=pairs.yaml` for
 the triad distances. For any other question, write a function of an MDAnalysis
 `Universe` and run it with `Study.timeseries` or `Study.per_replicate`; see
-`docs/source/reference/analysis_functions.md` and
-`docs/source/how_to/analysis_agent_protocol.md`.
+`docs/source/how_to/study_api.md`, `docs/source/reference/study_api.md` and
+`docs/source/reference/analysis_functions.md`.
 
 Many replicates: add `--submit --preset <cluster>` (`alpine-cpu`,
 `blanca-shirts`, `blanca-chbe-rdi`, `bridges2-rm`; `--partition`, `--account`,
@@ -64,40 +64,52 @@ report lands in `report.txt` there (`report.json` with `--format json`, or
 scripts without submitting. Load the cluster's SLURM module first, such as
 `module load slurm/blanca`. See `docs/source/how_to/hpc_execution.md`.
 
-A study folder with a `study.yaml` needs no `-c` list. Run
-`pixi run -e analysis polyzymd study check STUDY` first: it reads no
-trajectory and prints each condition's runs and each analysis run, with
-whether it has stored results. Then `polyzymd analyze RUN --study STUDY`
-runs one entry of its `analyses:`, and `polyzymd analyze --study STUDY` runs
-them all; command-line options override the file, and results go to
-`STUDY/results/RUN/`. To read results back without trajectories, use
-`pz.Study("STUDY/study.yaml").results(RUN).table`. See
-`docs/source/how_to/study_yaml.md`. A study is one protein; a paper with
-several proteins is a project folder (`project.yaml` lists the studies and
-the analyses each runs): use `polyzymd project check PROJECT`,
-`polyzymd analyze RUN --project PROJECT`, and
-`pz.Project("PROJECT").results(RUN).table` (one table, a `study` column),
-never a loop over study folders by hand (`docs/source/how_to/project.md`).
-Before writing your own function, run `polyzymd analyze --list`: it names each
-shipped analysis, what it measures and its settings keys with defaults.
-For statistics beyond the report, use `replicate_table(RUN)` (one row per
-replicate) in a script in the project's `stats/` folder, which freeze
-publishes with the paper.
-When `study check` finds no runs for a
-condition, the trajectories are elsewhere: run `polyzymd study locate DIR`
-(writes the gitignored `data.local.yaml`) or pass `--data DIR`; never edit the
-configs' paths to point at moved data. Read `study check`'s production lengths
-before choosing `--eq`; if a report warns that conditions were analysed up to
-different times, rerun with `--until <shortest>` before comparing them. The
-console shows only reports and warnings; the full log is the `log:` path, so
-read it only when a run fails unexpectedly. If `freeze` warns that replicates
-have no recorded trajectory hashes, run the `polyzymd hash-trajectories
---study STUDY` it names (any engine; idempotent; it writes `trajectory_hashes.json`
-into each run's folder, so it needs write access to the data; a batch job on a
-cluster, since it reads every trajectory once). To publish, fill `metadata:` and run
-`polyzymd study freeze STUDY`; its `warning:` lines list what is missing or stale
-(`docs/source/how_to/study_freeze.md`). Then hand the author `deposit/UPLOAD.md`:
-uploading and publishing on Zenodo are theirs, never an agent's.
+Study folders and projects. A study is one protein; a project is one paper
+with several proteins (`project.yaml` lists the studies and the analyses each
+runs).
+
+- Before you write your own function, run `polyzymd analyze --list`. It names
+  each shipped analysis, what it measures, and its settings with defaults.
+- A study folder needs no `-c` list. First run
+  `pixi run -e analysis polyzymd study check STUDY --production`. It prints
+  the replicates of each condition, their production length, and whether each
+  analysis run has stored results. Choose `--eq` from the production lengths.
+- `polyzymd analyze RUN --study STUDY` runs one entry of `analyses:`.
+  `polyzymd analyze --study STUDY` runs them all. Command-line options
+  override the file. Results go to `STUDY/results/RUN/`
+  (`docs/source/how_to/study_yaml.md`).
+- For a project, use `polyzymd project check PROJECT` and
+  `polyzymd analyze RUN --project PROJECT`. Read the results with
+  `pz.Project("PROJECT").results(RUN).table`: one table with a `study`
+  column. Never loop over study folders by hand
+  (`docs/source/how_to/project.md`).
+- Read stored results without trajectories with
+  `pz.Study("STUDY/study.yaml").results(RUN).table` (one row per stored
+  value, so one row per frame for a time series).
+- For statistics beyond the report, use `replicate_table(RUN)` (one row per
+  replicate) in a script in the `stats/` folder of the project. Freeze
+  publishes it with the paper.
+- If `study check` finds no replicates for a condition, the trajectories are
+  elsewhere. Run `polyzymd study locate DIR`, which writes the gitignored
+  `data.local.yaml`, or pass `--data DIR`. Never edit the paths of the
+  configs to point at moved data.
+- If a report warns that conditions were analysed up to different times, run
+  again with `--until <shortest>` (or `--until common`) before you compare
+  them.
+- The console shows only reports and warnings. The full log is at the `log:`
+  path. Read it only when a run fails.
+- If `freeze` warns that replicates have no recorded trajectory hashes, run
+  the `polyzymd hash-trajectories --study STUDY` command that it names. It
+  writes `trajectory_hashes.json` into each replicate folder, so it needs
+  write access to the data. It reads every trajectory once, so run it in a
+  batch job on a cluster.
+- To publish, fill in `metadata:`, commit every input (freeze refuses
+  uncommitted inputs and names them), and run `polyzymd study freeze STUDY`,
+  or `polyzymd project freeze PROJECT` for a study of a project. Its
+  `warning:` lines list what is missing or stale
+  (`docs/source/how_to/study_freeze.md`).
+- Then hand the author `deposit/UPLOAD.md`. Uploading and publishing on
+  Zenodo are the author's steps, never an agent's.
 
 ## 2. Reading the output
 

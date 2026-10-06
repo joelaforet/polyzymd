@@ -1,7 +1,7 @@
 # SASA implementation verification
 
-This page records how the SASA analysis computes its values, what they are
-checked against, and a defect in MDTraj that the implementation works around.
+The SASA analysis computes its values with MDTraj. PolyzyMD checked the values
+against independent calculations, and works around one defect in MDTraj.
 
 ## What the code does
 
@@ -19,6 +19,18 @@ frame:
    `sasa` or per residue for `residue_sasa`, and convert nm² to Å².
 
 `residue_sasa` then averages each residue over the production frames.
+
+`mdtraj.shrake_rupley` puts `n_sphere_points` points on a sphere around each
+atom of the **context**. The radius of the sphere is the radius of the atom
+from the MDTraj element table plus the probe radius. MDTraj counts the points
+that are inside no sphere of another context atom. The SASA of an atom is the
+area of its sphere times the fraction of free points. The SASA of the
+**target** is the sum over the target atoms. Context atoms that are not in the
+target, such as polymer atoms, cover part of the target surface but are not
+counted. The calculation does not use periodic images.
+
+The elements come from the loaded universe. PolyzyMD fills them in from the
+atom types or names.
 
 ## MDTraj gives later frames of one call too much area
 

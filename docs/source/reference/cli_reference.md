@@ -15,14 +15,8 @@ polyzymd --openff-logs <command>  # Show OpenFF toolkit logging
 polyzymd --no-color <command>     # Disable colored output
 ```
 
-> **Note:** Global options must appear *before* the subcommand.
-> For example: `polyzymd --no-color check-progress -c config.yaml`
-> (not `polyzymd check-progress --no-color -c config.yaml`).
-> `--version` prints the installed version and exits immediately.
-> `--help` shows top-level help; use `polyzymd <command> --help` for subcommand help.
-> `--verbose`/`-v` enables verbose output.
-> `--openff-logs` enables OpenFF toolkit logging.
-> `--no-color` disables colored output.
+Global options go *before* the subcommand: `polyzymd --no-color status -c
+config.yaml`, not `polyzymd status --no-color -c config.yaml`.
 
 ### Colored Output
 
@@ -47,31 +41,32 @@ polyzymd --openff-logs build -c config.yaml
 polyzymd --openff-logs run -c config.yaml --engine gromacs
 ```
 
-**OpenFF logs:** OpenFF Interchange and Toolkit libraries are suppressed by default (they generate per-atom INFO messages during system building). Use `--openff-logs` to enable them for debugging force field issues.
-- Investigating charge assignment problems
-- Troubleshooting system building failures
+Use `--openff-logs` to investigate charge assignment problems and build
+failures.
 
 ---
 
 ## polyzymd init
 
-Initialize a new PolyzyMD project directory with template files.
+Create a simulation folder for one condition, with a template `config.yaml`.
+This folder is not a {term}`project`: a project is one paper and is made with
+`polyzymd project init`.
 
 ```bash
-polyzymd init --name <project_name>
-polyzymd init -n <project_name>
+polyzymd init --name <name>
+polyzymd init -n <name>
 ```
 
 ### Options
 
 | Option | Short | Required | Description |
 |--------|-------|----------|-------------|
-| `--name` | `-n` | Yes | Name of the project directory to create |
+| `--name` | `-n` | Yes | Name of the folder to create |
 
 ### What It Creates
 
 ```
-<project_name>/
+<name>/
 ├── config.yaml              <- Template configuration (edit this)
 ├── structures/              <- Add your PDB/SDF files here
 │   ├── place_protein_here.placeholder.txt
@@ -83,7 +78,7 @@ polyzymd init -n <project_name>
 ### Example
 
 ```bash
-# Create a new project
+# Create a simulation folder
 polyzymd init --name lipase_dmso_study
 cd lipase_dmso_study
 
@@ -531,9 +526,9 @@ and `POLYZYMD_STOP_FILE=<path>` to relocate the marker.
   `polyzymd submit` afterwards.
 - Outside a SLURM environment (no `scancel`) the marker is still written and
   the missing scheduler is reported as a warning.
-- Already-running chains keep the job script that was rendered at submission
-  time. A chain submitted before this feature existed does not check the
-  marker; stop those with `scancel --batch --signal=KILL <job_id>`.
+- A running chain keeps the job script that `submit` wrote. Job scripts of
+  PolyzyMD 1.2 and earlier, and GROMACS job scripts, do not check the marker.
+  Stop those chains with `scancel --batch --signal=KILL <job_id>`.
 
 ---
 
@@ -812,6 +807,35 @@ To resume, run:
 
 ---
 
+## polyzymd clean-pdb
+
+Replace nonstandard residues with their standard residues, and add the
+missing hydrogens, with PDBFixer.
+
+```bash
+polyzymd clean-pdb -i <input.pdb> [-o <output.pdb>] [--ph 7.4]
+```
+
+### Options
+
+| Option | Short | Required | Default | Description |
+|--------|-------|----------|---------|-------------|
+| `--input` | `-i` | Yes | - | The input PDB file |
+| `--output` | `-o` | No | `<input name>_clean.pdb` | The cleaned PDB file |
+| `--ph` | - | No | `7.4` | The pH for the protonation states of the added hydrogens |
+
+### Notes
+
+- The output keeps the chain IDs and residue numbers of the input.
+- The command does not remove waters or other molecules, does not select one
+  copy of a protein, does not set chain IDs, and does not add missing residues
+  or heavy atoms. See {doc}`../tutorials/prepare_pdb_for_openff`.
+- PDBFixer places the hydrogens with OpenMM, on the fastest platform. If the
+  command stops with a CUDA error, run it with `OPENMM_DEFAULT_PLATFORM=CPU`.
+- Run it in the `build` environment, which holds PDBFixer.
+
+---
+
 ## polyzymd info
 
 Display PolyzyMD installation and dependency information.
@@ -1056,7 +1080,7 @@ Writes a project folder at `PATH`: `project.yaml` listing the studies,
 per `--study` with a `study.yaml` to fill in. Labels are also folder names
 (lower case, digits, `_`). Without `--no-git` the project becomes a git
 repository with one commit. To move existing studies in, see
-{doc}`../tutorials/move_studies_into_project`.
+{doc}`../how_to/move_studies_into_project`.
 
 ### polyzymd project freeze
 
@@ -1259,9 +1283,9 @@ PolyzyMD expands environment variables in configuration paths:
 
 | Variable | Example | Description |
 |----------|---------|-------------|
-| `$USER` | jola3134 | Current username |
-| `$HOME` | /home/jola3134 | Home directory |
-| `~` | /home/jola3134 | Home directory shortcut |
+| `$USER` | `me` | Current username |
+| `$HOME` | `/home/me` | Home directory |
+| `~` | `/home/me` | Home directory shortcut |
 | `${VAR}` | - | Any environment variable |
 
 ### Example

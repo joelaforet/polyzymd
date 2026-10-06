@@ -1,9 +1,8 @@
 # Analysis System Concepts
 
-Your simulations are done. You have trajectories on disk and you want to
-measure something — RMSF, contacts, distances, whatever. This page explains how
-PolyzyMD's analysis system is put together so that when you run a command or
-read an output file, you know what happened and where to look.
+PolyzyMD analyzes finished trajectories in four steps, for its shipped
+analyses and for your own functions. This page explains the steps, the terms
+of the output, and the reasons behind the choices.
 
 ## The analysis pipeline
 
@@ -23,19 +22,38 @@ load replicates  →  measure  →  reduce per replicate  →  summarise or comp
 `polyzymd analyze NAME -c A/config.yaml -c B/config.yaml` runs these steps for
 a shipped analysis and prints a report in which every number states its unit,
 its uncertainty and its sample size. The first `-c` config is the control. The
-same steps are open to your own functions in Python; see {doc}`analysis_api`.
+same steps are open to your own functions in Python; see
+{doc}`../how_to/study_api`.
 
 Figures are drawn from the stored values into `figures/<name>/`. They do not
 reload trajectories or rerun the measurement.
 
-## Conditions and the control
+## Conditions, replicates and the control
 
-`polyzymd analyze` takes one `-c config.yaml` per condition, and `--label` gives
-each one the name that appears in reports and figures; by default the label is
-the config's directory name. `--replicates 1-3` picks the replicates, by
-default those found on disk, and `--eq 10ns` sets the equilibration window
-removed from the start of every replicate's production trajectory. The first
-condition is the control against which every other condition is compared.
+A **condition** is one simulation setup, such as "No polymer", "SBMA 100%"
+or "Urea 2 M". Each condition has its own `config.yaml`, which defines the
+system: the protein, the polymer or co-solvent, the force field and the
+temperature.
+
+A **replicate** is one independent simulation of a condition. Replicates
+have the numbers 1, 2, 3 and so on, and use the same `config.yaml`. The
+replicate number seeds the starting structure. The starting velocities and
+the thermostat noise are random in each simulation. These choices separate
+the trajectories, but they do not make them statistically independent by
+themselves. Independence also depends on equilibration, stationarity and
+whether the simulated time is long enough for the process that you measure.
+
+The replicate is the sampling unit: every interval and test uses one value
+per replicate. With 2 conditions of 3 replicates each, a comparison rests on
+3 values against 3 values, whatever the number of frames.
+
+`polyzymd analyze` takes one `-c config.yaml` per condition. `--label` gives
+each condition the name of the reports and figures. The default label is the
+name of the folder of the config. `--replicates 1-3` selects the replicates;
+the default is every replicate found. `--eq 10ns` sets the equilibration
+window, removed from the start of the production trajectory of every
+replicate. The first condition is the control. PolyzyMD compares every other
+condition with it.
 
 In Python the same inputs go to `Study.from_configs`:
 
@@ -43,36 +61,14 @@ In Python the same inputs go to `Study.from_configs`:
 import polyzymd as pz
 
 study = pz.Study.from_configs(
-    {"No Polymer": "no_polymer/config.yaml", "100% SBMA": "sbma_100/config.yaml"},
+    {"No polymer": "no_polymer/config.yaml", "SBMA 100%": "sbma_100/config.yaml"},
     equilibration="10ns",
 )
 ```
 
-When labels appear in directory names, PolyzyMD sanitizes them for the
-filesystem; for example, `100% SBMA` may be written as `100_SBMA` in paths
-while remaining `100% SBMA` in reports and figures.
-
-## Conditions and replicates
-
-These two terms come up everywhere in the analysis output, so it helps to be
-precise about what they mean in PolyzyMD.
-
-A **condition** is one simulation setup. Examples: "No Polymer", "SBMA-100",
-"PEG-50". Each condition has its own `config.yaml` that defines the system
-(which protein, which polymer, which force field, etc.).
-
-A **replicate** is a separate run of the same condition, intended to sample the
-same setup independently. Replicates are identified by number — 1, 2, 3, and so
-on. Each replicate uses the same
-`config.yaml` but usually starts from a different random seed, initial velocity
-assignment, or starting configuration. These choices help separate trajectories,
-but they do not guarantee statistical independence by themselves. Interpretation
-also depends on equilibration, stationarity, decorrelation, and whether the
-simulated timescales are long enough for the process being measured.
-
-The replicate is the sampling unit: every interval and test is computed from
-one value per replicate. With 2 conditions of 3 replicates each, a comparison
-rests on 3 values against 3 values, however many frames each replicate has.
+In folder names, PolyzyMD replaces characters that a file system cannot hold.
+For example, `SBMA 100%` can become `SBMA_100_` in a path, and stays
+`SBMA 100%` in reports and figures.
 
 ## The shipped analyses
 
@@ -146,7 +142,7 @@ trajectory stores them.
   its bond requirement:
   <https://docs.mdanalysis.org/stable/documentation_pages/transformations/wrap.html>
 
-### Why hydrogen bonds exclude carbon
+## Why hydrogen bonds exclude carbon
 
 MDAnalysis finds hydrogen bonds from geometry alone: it pairs each hydrogen with
 a nearby heavy atom, then keeps the triplets whose donor-acceptor distance and
@@ -230,11 +226,12 @@ Reuse is therefore conditional rather than automatic. A stored result is read
 back only when every field of its `record.json`, except the versions and the
 plot bounds, equals the record the new call would write: the same function
 source, arguments, config, equilibration window, stride and frames, and a
-topology and set of trajectory files with the recorded sizes and modification
-times. Size and modification time are weaker than a content hash, but they are
-cheap on a multi-gigabyte trajectory and they catch the case that actually
-happens, which is a file that grew. Any other result is measured again, and
-`--recompute` measures every replicate again whatever its record says.
+topology and set of trajectory files with the recorded relative paths, sizes
+and SHA-256 hashes. A file that grew, or changed in any other way, therefore
+does not match. PolyzyMD reads a trajectory hash from `progress.json` or
+`trajectory_hashes.json` when the run recorded it, or else computes it once
+and caches it. Any other result is measured again, and `--recompute` measures
+every replicate again whatever its record says.
 
 ## Why an unfinished segment is not read
 
@@ -244,8 +241,8 @@ than the run directory suggests, and the result records nothing about the
 difference. The mean is a real average over fewer nanoseconds, the provenance
 describes the whole run, and no later check can separate the two cases.
 
-The OpenMM engine already writes a status for each segment in `progress.json`.
-The loader now reads that status and skips segments marked `running` or
+The OpenMM engine writes a status for each segment in `progress.json`.
+The loader reads that status and skips segments marked `running` or
 `failed`, and it lists the skipped indices in the provenance. Segments marked
 `interrupted` are kept, because the continuation chain restarts from an
 interrupted segment's saved state and its frames belong to the same time line.
@@ -259,5 +256,6 @@ segments that were kept, and the lineage check would refuse the trajectory.
   first analysis
 - {doc}`../how_to/analysis_compare_conditions` — Practical guide to comparing
   several conditions
-- {doc}`analysis_api` — Running your own functions on a study
+- {doc}`../how_to/study_api` — Running your own functions on a study
+- {doc}`analysis_api` — How the study API works
 - {doc}`../reference/analysis_functions` — What each shipped function measures

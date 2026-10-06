@@ -1,7 +1,9 @@
 # Troubleshoot OpenFF PDB ingestion
 
 Use this guide when a PolyzyMD build fails while OpenFF loads an enzyme PDB, or
-when direct `openff.toolkit.Topology.from_pdb()` validation fails.
+when direct `openff.toolkit.Topology.from_pdb()` validation fails. For a first
+structure that prepares without problems, see
+{doc}`../tutorials/prepare_pdb_for_openff`.
 
 ```{important}
 Do not bypass a charge mismatch or monkeypatch OpenFF to continue. OpenFF is
@@ -15,9 +17,9 @@ graph. Fix or curate the structure first.
 2. Run simple structural checks on the PDB.
 3. Read the OpenFF error dump for the residue names, atom names, and charges it
    expected versus found.
-4. Fix the PDB upstream, or use a documented narrow proof of concept only when
-   the user accepts the caveat.
-5. Add newly diagnosed error signatures to the durable error catalog.
+4. Fix the PDB before you build.
+5. If you find an error that this page does not list, open an issue on
+   GitHub with the full OpenFF message.
 
 ## Check the structure first
 
@@ -103,19 +105,17 @@ can ingest the enzyme PDB.
 
 ## Check multi-molecule enzyme inputs
 
-Some valid enzyme PDBs contain more than one disconnected protein molecule. For
-example, homodimer preparations may load with more than one OpenFF molecule
-(`Topology.from_pdb(...).n_molecules > 1`). Older PolyzyMD builds only carried
-`molecule(0)` forward, so output PDB/GRO files silently kept one monomer and
-dropped the other.
+Some valid enzyme PDBs contain more than one disconnected protein molecule.
+For example, a homodimer loads as two OpenFF molecules
+(`Topology.from_pdb(...).n_molecules` is 2). The validation script above
+prints the molecule count.
 
-Use the direct OpenFF validation script above and check the printed molecule
-count. If `n_molecules` is greater than one, the fixed behavior is that PolyzyMD
-retains all enzyme molecules in OpenFF order. All retained enzyme/protein
-molecules are assigned chain `A`; substrate remains chain `B`, polymers chain
-`C`, and solvent starts at `D`. Generated PDB/GRO outputs renumber protein
-residues continuously across retained enzyme molecules, so a homodimer with two
-source monomers numbered 1-99 becomes chain `A` residues 1-198.
+PolyzyMD keeps every protein molecule, in OpenFF order, and puts all of them
+on chain `A`. The substrate is chain `B`, the polymers are chain `C`, and the
+solvent starts at chain `D`. The built PDB and GRO files number the protein
+residues continuously across the molecules. A homodimer of two monomers
+numbered 1-99 becomes chain `A` residues 1-198. See
+{doc}`../explanation/residue_assignment`.
 
 ## Interpret OpenFF error dumps
 
@@ -139,7 +139,6 @@ consistent model and validate it again.
 | Failure around `CYS#0001`, terminal `H`, or N-terminal cysteine | N-terminal cysteine/cystine has terminal hydrogens and disulfide state OpenFF does not match cleanly | Check N-terminal atom names, SG-HG absence, and SG-SG bond | Curate the terminal cystine or use a narrow `NCYX` custom substructure proof of concept | Private OpenFF API; not universal |
 | Residue names include `CYX`, but OpenFF still fails | `CYX` may be treated as a cysteine alias, not a complete public template solution | Compare residue atoms and SG-SG connectivity | Add/verify disulfide connectivity and hydrogens; consider upstream issue/PR | Do not assume renaming to CYX is sufficient |
 | Failure near residues reported in `REMARK 465` | Missing-coordinate residues or missing heavy atoms affect chemistry or termini | Read PDB header and visualize gaps | Model missing regions with an external tool when scientifically appropriate | PolyzyMD should receive a curated result |
-| OpenFF validation succeeds with `n_molecules > 1`, but older PolyzyMD output has one monomer | Historical PolyzyMD builds retained only enzyme `molecule(0)` after OpenFF parsing | Print `Topology.from_pdb(path).n_molecules` and compare output atom counts to the input enzyme copies | Use a fixed PolyzyMD build; all enzyme molecules are retained before substrate and polymers | All enzyme/protein molecules use chain `A`; generated residues are continuous across molecules |
 
 ## Disulfides
 
@@ -174,27 +173,103 @@ bonds, hydrogens, and protonation state consistent, not to suppress the error.
 
 ## 4CHA case study
 
-The 4CHA alpha-chymotrypsin preparation can pass structural checks after selecting
-one enzyme copy, relabeling protein atoms to chain `A`, preserving TER records,
-removing waters, and adding hydrogens. Direct OpenFF validation may still fail
-around the N-terminal cystine and nearby residues. That failure separates PDB
-cleanup from chemistry assignment.
+PDB entry 4CHA (alpha-chymotrypsin) shows the problems of a harder
+structure. The scripts are in `examples/pdb_preparation/4cha/`.
 
-See `examples/pdb_preparation/4cha/` for proof-of-concept scripts, including an
-`NCYX` custom substructure example. The `_custom_substructures` argument is a
-private OpenFF API, so this example is evidence for a targeted workaround or
-upstream contribution, not a production-ready universal preparation method.
+### Read the header before you delete anything
 
-## Keep the error catalog current
+The 4CHA header records say:
 
-When you diagnose a new OpenFF PDB ingestion error, update this page and
-{doc}`../reference/openff_pdb_ingestion` before marking the task complete. Add:
+- COMPND puts one enzyme copy on chains `A`, `B` and `C`, and a second copy
+  on chains `E`, `F` and `G`.
+- Mature alpha-chymotrypsin is cleaved into three peptide fragments.
+  Residues 14-15 and 147-148 are excised activation peptides. So TER records
+  between the fragments are correct.
+- REMARK 465 lists residues without coordinates, such as `GLY A 12` and
+  `LEU A 13` of the first copy.
 
-- exact error text or shortest unique traceback excerpt
-- likely cause
-- diagnostic snippet or command
-- acceptable fix
-- caveats, especially private APIs or structure-specific assumptions
+REMARK 465 records are not a list of residues to add. They show that the
+crystal model is incomplete. If the missing residues matter for your study,
+model them with an external tool and check the result.
 
-If the user explicitly defers the update, record that deferral in your final
-response.
+### Look at the copies in PyMOL
+
+```text
+load structures/4CHA.pdb, raw4cha
+hide everything, raw4cha
+show cartoon, polymer.protein
+show sticks, polymer.protein and resn CYS
+show spheres, solvent
+
+select first_copy, raw4cha and polymer.protein and chain A+B+C
+select second_copy, raw4cha and polymer.protein and chain E+F+G
+color marine, first_copy
+color orange, second_copy
+distance disulfides, first_copy and name SG, first_copy and name SG, 2.2
+zoom first_copy
+```
+
+### Prepare one copy
+
+`prepare_4cha.py` does these steps with PDBFixer:
+
+1. It keeps chains `A`, `B` and `C`, the first copy.
+2. It removes the waters and the other heterogens.
+3. It adds hydrogens at pH 7. It does not add missing residues or heavy
+   atoms.
+4. It puts every protein atom on chain `A`, and keeps the TER records
+   between the three fragments.
+
+```bash
+curl -L https://files.rcsb.org/download/4CHA.pdb -o structures/4CHA.pdb
+python examples/pdb_preparation/4cha/prepare_4cha.py \
+  structures/4CHA.pdb structures/4cha_chain_a.pdb
+python examples/pdb_preparation/4cha/validate_openff.py structures/4cha_chain_a.pdb
+```
+
+### Result: the structure checks pass, and OpenFF refuses the file
+
+The prepared file has every atom on chain `A`, three TER records, no waters,
+no second copy, and hydrogens. `Topology.from_pdb()` still fails. It reports
+errors at the terminal hydrogens and the disulfide of the N-terminal
+cysteine `CYS#0001`, and at `SER#0011`. The structure is clean, but its
+chemistry does not match the OpenFF templates. The file is not ready for
+PolyzyMD.
+
+`validate_openff.py --custom-substructures nterminal_cystine_substructure.json`
+tests an `NCYX` template for the N-terminal cystine. It uses the private
+OpenFF argument `_custom_substructures`. Use it only to test a fix that you
+then propose to OpenFF, not for production simulations.
+
+### Curate the structure
+
+To make the file usable, fix its chemistry outside PolyzyMD. Check these
+items:
+
+- the atom names and the hydrogen count of each terminus;
+- the protonation of each disulfide cysteine (no `HG` on SG), and the SG-SG
+  bond;
+- the residues without coordinates that the header lists;
+- missing heavy atoms in residues that are present;
+- excised residues, which stay absent, with TER records between the
+  fragments.
+
+Tools for this work are PyMOL or ChimeraX for manual editing, PDBFixer with
+a review of each added atom, `pdb4amber`, and MODELLER, AlphaFold or
+SWISS-MODEL to rebuild missing regions. After you curate the file, keep the
+PolyzyMD conventions: all protein atoms on chain `A`, and TER records between
+disconnected fragments. Then validate again with `Topology.from_pdb()`.
+
+`polyzymd clean-pdb` only replaces nonstandard residues and adds hydrogens.
+It does not select a copy, remove molecules, set chain IDs or model missing
+atoms.
+
+## Report a new error
+
+If you find an OpenFF error that this page and
+{doc}`../reference/openff_pdb_ingestion` do not list, open an issue on GitHub.
+Include:
+
+- the exact error text, or the shortest unique part of the traceback;
+- the PDB entry or the file;
+- the steps that you used to prepare it.

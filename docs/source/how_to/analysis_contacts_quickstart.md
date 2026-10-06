@@ -1,20 +1,9 @@
-# Polymer-protein contacts analysis: quick start
+# Run contacts analysis
 
-Measure how often the polymer covers or touches each protein residue on the
-production frames of every replicate, and compare how much of the protein the
-polymer covers, overall, per monomer type, per amino-acid class, per region or
-residue by residue, with the replicate as the sampling unit.
-
-```{versionadded} 1.3.0
-Contacts analysis was added in PolyzyMD 1.3.0.
-```
-
-```{note}
-**Want to understand the measurement?** For what each shipped function
-measures, see {doc}`../reference/analysis_functions`; for how the occlusion
-values were checked, see {doc}`../explanation/analysis_contacts_verification`;
-for the statistics, see {doc}`../explanation/analysis_statistics_best_practices`.
-```
+Measure how often the polymer covers or touches each protein residue in each
+replicate. Then compare the conditions, with one value per replicate. You can
+compare the whole protein, each monomer type, each amino-acid class, each
+region or each residue.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -31,57 +20,36 @@ Alternatively, prefix each command with `pixi run -e analysis`.
 
 ## What is measured
 
-A protein residue is either in contact with the polymer on a frame or not.
-The `method` setting picks what contact means.
+On each frame, a protein residue is in contact with the polymer or it is not.
+The `method` setting selects the meaning of contact:
 
-**`method=occlusion`** (default): the polymer covers the residue's surface. On
-every frame, each residue's solvent-accessible surface area (SASA) is computed
-twice, with MDTraj's Shrake-Rupley code as in {doc}`analysis_sasa_quickstart`:
-with the protein alone, and with the protein and the polymer, whose atoms
-cover the protein without being counted. A residue's relative SASA is its SASA
-divided by its maximum accessible surface area from Tien et al. (2013). The
-residue is **exposed** on a frame when its relative SASA with the protein
-alone is at least `exposed_threshold` (0.2), and in contact when it is exposed
-and the polymer **buries** it: its relative SASA with the polymer is below
-`buried_threshold` (0.2) and lower than without the polymer.
-`exposed_threshold=0` counts every residue as exposed, so any residue the
-polymer brings below `buried_threshold` is in contact, including one the
-protein itself already partly buries. The polymer's SASA
-loss on each residue, `max(0, alone - with)`, is also reported in Å².
+- `occlusion` (default): the polymer buries the residue. PolyzyMD computes the
+  SASA of each residue with the protein alone and with the protein and the
+  polymer. A residue is in contact if it is exposed without the polymer and
+  buried with it.
+- `distance`: a polymer atom is within `cutoff` (4.0 Å) of an atom of the
+  residue.
 
-Before the SASA with the polymer is computed, each polymer molecule (each
-bonded fragment of the polymer selection) is moved whole by the box vector
-that brings it to the periodic image nearest the protein, because the SASA
-calculation does not consider periodic images. Molecules must be whole in the
-trajectory, as OpenMM writes them. Residues with no maximum ASA, such as
-terminal caps or non-standard residues, still cover their neighbours but are
-not measured; a warning names them.
+The **contact fraction** of a residue is the fraction of production frames in
+which it is in contact. PolyzyMD also measures it for each polymer residue
+name, such as each monomer type. A residue can touch several types on one
+frame, so the per-type fractions do not add up to the total.
 
-**`method=distance`**: the polymer touches the residue. On every frame,
-MDAnalysis `lib.distances.capped_distance` finds every pair of a polymer atom
-and a protein atom within `cutoff` (4.0 Å) of each other, using the minimum
-image of the frame's box. Only heavy atoms are compared unless
-`heavy_atoms=false`. A residue is in contact when any of its atoms is in such
-a pair.
+For the steps of each method and the checks against an independent script,
+see {doc}`../explanation/analysis_contacts_verification`. For the arguments of
+each function, see {doc}`../reference/analysis_functions`.
 
-For either method, each residue's **contact fraction** is the fraction of
-production frames it is in contact, and the same is measured for each polymer
-residue name, such as each monomer type. For occlusion, a type's contact
-fraction counts frames on which that type's atoms alone bury the residue. A
-residue can be in contact with several types on one frame, so the per-type
-fractions do not add up to the total.
+Before you run the analysis, check these points:
 
-PolyzyMD topologies put the protein on chain A and the polymer on chain C:
-
-| Chain | Contents |
-|-------|----------|
-| A | Protein/enzyme |
-| B | Substrate/ligand |
-| C | Polymer |
-| D+ | Solvent and ions |
-
-The default selections, `chainid A` and `chainid C`, follow that convention.
-Water and ions are never part of either calculation.
+- Molecules must be whole in the trajectory. OpenMM writes them whole.
+  `occlusion` moves each polymer molecule to its periodic image nearest the
+  protein, because the SASA calculation does not use periodic images.
+- A residue with no maximum ASA, such as a terminal cap or a non-standard
+  residue, still covers its neighbors. PolyzyMD does not measure it, and a
+  warning names it.
+- The default selections follow the PolyzyMD chain convention: the protein is
+  chain A (`chainid A`) and the polymer is chain C (`chainid C`). Water and
+  ions are never part of the calculation.
 
 ## From the command line
 
@@ -91,22 +59,28 @@ polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml \
 ```
 
 The first `-c` is the control. One pass over each replicate gives every result.
-By default the report shows `coverage`: for each replicate, the fraction of
-measured residues in contact on at least one production frame. The replicate
-values are summarised per condition, and every other condition is compared with
-the control by Welch's t test with the Benjamini-Hochberg correction. A
-replicate where `polymer_selection` matches no atoms, such as every replicate
-of a no-polymer control, has no contact: its values are 0 (0 events, no
-lifetime), it is compared like any other, and a warning names it. A replicate
-where `protein_selection` matches no atoms is left out with a warning, and a
-`protein_selection` that matches no atoms in any replicate is refused.
+By default, the report shows `coverage`. This is the fraction of measured
+residues that are in contact on at least one production frame. PolyzyMD
+compares each condition with the control by Welch's t test. It corrects the p
+values with the {term}`Benjamini-Hochberg` method.
 
-Occlusion computes the SASA of the whole protein twice per frame, plus once
-more per monomer type, so it takes about 2 s per frame for a 180-residue
-lipase with 7,700 polymer atoms on four threads. `--stride 10` measures every
-tenth production frame.
+Empty selections:
 
-Pick another result with `--run`:
+- **A control without polymer.** If `polymer_selection` matches no atoms in a
+  replicate, the replicate has no contact. Its values are 0, with 0 events and
+  no lifetime. PolyzyMD keeps it in the statistics, compares it like any other
+  replicate, and prints a warning that names it. So you can put a control
+  without polymer first, as the control.
+- **No protein.** If `protein_selection` matches no atoms in a replicate,
+  PolyzyMD leaves the replicate out and prints a warning. If it matches no
+  atoms in any replicate, PolyzyMD stops with an error.
+
+`occlusion` computes the SASA of the whole protein two times per frame, and
+one more time for each monomer type. For a 180-residue lipase with 7,700
+polymer atoms on four threads, this takes about 2 s per frame. `--stride 10`
+measures every tenth production frame.
+
+To report a different result, use `--run`:
 
 | `--run` | One value per replicate |
 |---|---|
@@ -125,10 +99,10 @@ Pick another result with `--run`:
 | `lifetime_events` | Number of contact events |
 | `censored_fraction` | Fraction of contact events cut off by the first or last production frame |
 
-A per-residue comparison is corrected over every residue of every compared
-condition, and the text report gives, for each condition, how many residues
-are significantly lower and higher than in the control and lists them. Every
-per-residue row is kept in the JSON report.
+PolyzyMD corrects a per-residue comparison over every residue of every
+compared condition. For each condition, the text report gives the number of
+residues that are significantly lower and higher than in the control, and lists
+them. The JSON report keeps every per-residue row.
 
 Settings, passed with `--set`:
 
@@ -137,7 +111,7 @@ Settings, passed with `--set`:
 | `method` | `occlusion` | `occlusion` or `distance`, as above |
 | `protein_selection` | `chainid A` | Protein atoms whose residues are measured |
 | `polymer_selection` | `chainid C` | Polymer atoms |
-| `polymer_types` | every residue name of the polymer in any condition | Monomers reported one by one, such as `[SBM]`; a replicate without one reports 0 for it. Narrow the polymer itself with `polymer_selection` |
+| `polymer_types` | every residue name of the polymer in any condition | The monomers to report one by one, such as `[SBM]`. A replicate without a listed monomer reports 0 for it. This setting does not narrow the polymer. To narrow the polymer, use `polymer_selection` |
 | `use_pbc` | `true` | Use the frame's box: the minimum image for `distance`, and for `occlusion` each polymer molecule moved to its image nearest the protein |
 | `regions` | none | Mapping of region names to selections, each reported as `<region>_contact_fraction`; a region cannot be named `coverage`, `mean`, `contact`, `classes`, `occluded`, `occlusion`, a monomer type or an amino-acid class |
 | `exposed_threshold` | `0.2` | Occlusion only: relative SASA with the protein alone at or above which a residue is exposed; 0 counts every residue as exposed |
@@ -149,8 +123,8 @@ Settings, passed with `--set`:
 | `cutoff` | `4.0` | Distance only: contact distance in Å |
 | `heavy_atoms` | `true` | Distance only: compare heavy atoms only |
 
-A setting of the other method is refused. For example, to compare how much
-SBMA buries the active site of two polymer conditions:
+PolyzyMD refuses a setting of the other method. For example, this command
+compares how much SBMA buries the active site in two polymer conditions:
 
 ```bash
 polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml --eq 200ns \
@@ -158,46 +132,51 @@ polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml --eq 200n
   --run active_site_contact_fraction
 ```
 
-or to count contacts by distance instead:
+This command counts contacts by distance:
 
 ```bash
 polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml --eq 200ns \
   --set method=distance --set cutoff=4.5
 ```
 
-The resolved selections, the monomer types found, the unmeasured residues and
-the residues of each amino-acid class and region are recorded under
-`provenance.settings` in the JSON report. Add `--format json` for the full
-report, `--replicates 1-3` to use only some replicates, and `--recompute` to
-ignore stored results.
+The JSON report records these items under `provenance.settings`: the
+selections, the monomer types found, the residues not measured, and the
+residues of each amino-acid class and region.
+
+Useful options:
+
+- `--format json` prints the full report.
+- `--replicates 1-3` uses only some replicates.
+- `--recompute` ignores stored results.
 
 ## How long contacts last
 
-An event is a run of consecutive production frames in which one residue is in
-contact, by the chosen method. `--run mean_lifetime` reports, for each
-replicate, the Kaplan-Meier restricted mean duration of the events of all
-measured residues, in ns: the estimate treats an event under way at the first
-or last frame as lasting at least as long as observed, instead of counting it
-as finished. `lifetime_events` and `censored_fraction` report how many events
-there were and how many were cut off. The lifetime results need a pass over
-the frames of their own and are measured only when chosen:
+An event is a series of consecutive production frames in which one residue is
+in contact. `--run mean_lifetime` reports the Kaplan-Meier restricted mean
+duration of the events of all measured residues, in ns, for each replicate.
+An event that continues at the first or last frame is censored: the estimate
+counts it as at least as long as observed. `lifetime_events` gives the number
+of events. `censored_fraction` gives the fraction of events that were cut off.
+
+The lifetime results need their own pass over the frames. PolyzyMD measures
+them only when you select them:
 
 ```bash
 polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml --eq 200ns \
   --set method=distance --run mean_lifetime
 ```
 
-The result depends on the spacing of the frames, since a contact or a break
-shorter than the spacing is not seen, so compare conditions at the same frame
-spacing and `--stride` only. `--set tolerance_ps=40` lets breaks of up to
-40 ps continue an event; a tolerance changes the result strongly and should be
-reported with it. {doc}`../explanation/analysis_contact_lifetimes` explains
-the estimator, the censoring and these choices, with references.
+The result depends on the frame spacing. A contact or a break shorter than the
+spacing is not seen. Compare conditions only at the same frame spacing and the
+same `--stride`. `--set tolerance_ps=40` lets breaks of up to 40 ps continue an
+event. A tolerance changes the result strongly. Report it with the result. For
+the estimator and the censoring, see
+{doc}`../explanation/analysis_contact_lifetimes`.
 
 ## Figures
 
 `polyzymd analyze contacts` writes these figures to
-`<output-dir>/figures/contacts/`; `--no-plots` skips them.
+`<output-dir>/figures/contacts/`. Add `--no-plots` to skip them.
 
 | Figure | What it shows |
 |---|---|
@@ -235,23 +214,10 @@ print(profile.over_labels("mean", "mean_contact_fraction").compare(control="SBMA
 print(profile.compare(control="SBMA 50%").to_agent_text())  # residue by residue
 ```
 
-`residue_occlusion(protein, occluder, frames, exposed_threshold=0.2,
-buried_threshold=0.2, types=(), max_asa="theoretical", pbc=True)` returns the rows of `OCCLUSION_PARTS`,
-`contact_fraction`, `exposed_fraction`, `occluded_area` and `exposed_area`, then
-one contact-fraction row per residue name in `types`, with one column per
-residue that has a maximum ASA. `residue_contacts(protein, polymer, frames,
-cutoff=4.0, types=(), pbc=True)` returns one row of contact fractions, then one
-per residue name in `types`, with one column per residue; pass heavy-atom
-selections, such as `pz.select("chainid A and not element H")`, for the
-default of `polyzymd analyze contacts --set method=distance`.
-
-`contact_lifetimes(protein, polymer, frames, method="occlusion", types=(),
-tolerance_ps=0.0, **options)` returns the rows of `LIFETIME_PARTS`,
-`mean_lifetime`, `n_events` and `censored_fraction`, with one column for the
-polymer and one per residue name in `types`; `options` are the settings of the
-method, such as `cutoff` or `buried_threshold`. Run it with
-`study.per_replicate(contact_lifetimes, ..., labels=["polymer", *types],
-parts=list(LIFETIME_PARTS), types=types)`.
+For the arguments and return values of `residue_occlusion`,
+`residue_contacts` and `contact_lifetimes`, see
+{doc}`../reference/analysis_functions`. To measure your own quantity, see
+{doc}`study_api`.
 
 ## References
 

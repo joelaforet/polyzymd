@@ -1,472 +1,189 @@
-# Analysing a set of simulations
+# How the study API analyzes a set of simulations
 
-PolyzyMD runs your analysis code on every replicate of every condition in a
-study and turns the results into comparisons you can report. You write the
-science, as a function of an MDAnalysis `AtomGroup` or `Universe`. PolyzyMD
-finds the replicates from each `config.yaml`, loads each one as a `Universe`,
-removes the equilibration window, runs your function over the production
-frames, stores every per-replicate result with a record of how it was made,
-and computes intervals and tests with the replicate as the sampling unit.
+The study API runs your analysis code on every replicate of every condition
+of a study. It stores each result with a record of its inputs, and compares
+the conditions with the replicate as the sampling unit. This page explains
+what the API does and why. To use it, see {doc}`../how_to/study_api`. For
+every signature, see {doc}`../reference/study_api`.
 
-That interface is described below. The shipped analyses, such as radius of
-gyration or hydrogen-bond occupancy, are ordinary functions written against the
-same interface, so anything they do, your own code can do too.
-
-:::{admonition} Environment Setup
-:class: tip
-
-The examples on this page assume you have activated the PolyzyMD analysis pixi
-environment, which provides MDAnalysis and the statistics dependencies:
-
-```bash
-pixi shell -e analysis
-```
-
-Alternatively, prefix each command with `pixi run -e analysis`, for example
-`pixi run -e analysis python my_analysis.py`.
-:::
+The shipped analyses, such as the radius of gyration or the hydrogen-bond
+occupancy, are ordinary functions that use the same interface. So your own
+code can do anything that they do.
 
 ## What you write and what PolyzyMD does
 
 | You write | PolyzyMD does |
 |---|---|
-| A function that measures one frame, or an MDAnalysis analysis class you already use | Loads each replicate as a `Universe` with its production segments in order and its equilibration window removed |
-| The atom selections your function needs, as selection strings | Builds the `AtomGroup` for each replicate's `Universe` and runs your function on the production frames |
-| Optionally, how one replicate's frames become one value | Stores every per-frame and per-replicate result, keyed by the code, arguments and input files that produced it, and reuses it only when all of those match |
-| Optionally, your own aggregation or comparison | Computes the mean, standard error and 95 percent Student t interval across replicates, runs the tests between conditions, and corrects for multiple comparisons |
-
-## Load the replicates
-
-```python
-import polyzymd as pz
-
-study = pz.Study.from_configs(
-    {"No polymer": "noPoly/config.yaml", "SBMA 50%": "SBMA50/config.yaml"},
-    equilibration="100ns",
-)
-```
-
-A study folder loads the same way with `pz.Study("path/to/study.yaml")`: its
-`study.yaml` names the conditions, the equilibration window and the settings
-of every analysis, and `study.results(run)` reads stored results back without
-any trajectory; see {doc}`../how_to/study_yaml`. The first condition is the control unless you name
-another one when you compare. The equilibration window is measured in
-simulation time from the start of each replicate's production trajectory, with
-its segments joined in order.
-
-Every replicate gives you its `Universe` and the frames PolyzyMD will analyse:
-
-```python
-for replicate in study["SBMA 50%"].replicates:
-    u = replicate.universe()      # production segments in order
-    frames = replicate.frames     # frame indices after the equilibration window
-```
-
-You can use these universes for anything, including analyses PolyzyMD does not
-support, such as a principal component basis fitted on all replicates at once.
-
-To analyse fewer frames, for example with an expensive measurement such as
-SASA, pass `stride=`:
-
-```python
-study = pz.Study.from_configs(configs, equilibration="100ns", stride=5)
-```
-
-`replicate.frames` then keeps every fifth production frame, starting with the
-first after the equilibration window, and every measurement, reference
-structure, time and report uses those frames only. A `frame` reference counts
-them from 1. The stride is stored in each record, so a stored result from
-another stride is never reused, and a report prints `stride 5` in its header.
-The replicate stays the sampling unit whatever the stride.
-
-```{note}
-`replicate.frames` holds trajectory frame indices, counted from 0 from the first
-loaded frame. A frame you name yourself, such as the `frame` of
-`pz.reference("frame", ...)` or `--set reference_frame=N`, is counted
-differently: it is a production frame counted from 1 after the equilibration
-window, so `1` is the first production frame and the same number points at a
-different structure if you change the window. The trajectory frame actually
-used is stored in each record. To compare with a structure from before the
-window, such as the starting structure, use `external` mode with its file.
-```
-
-## Measure something on every frame
-
-This follows MDAnalysis
-[`AnalysisFromFunction`](https://docs.mdanalysis.org/stable/documentation_pages/analysis/base.html):
-your function receives `AtomGroup` arguments positioned at the current frame
-and returns a number or a one-dimensional array.
-
-```python
-def radius_of_gyration(atoms):
-    return atoms.radius_of_gyration()
-
-rg = study.timeseries(radius_of_gyration, pz.select("protein"), unit="Å")
-```
-
-`pz.select("protein")` stands for an `AtomGroup`. The string is an ordinary
-MDAnalysis selection string. An `AtomGroup` belongs to one `Universe`, so
-PolyzyMD builds it again for each replicate from the selection string, and
-records the string. Several `pz.select` arguments reach your function in the
-order you give them. Use `pz.universe()` where your function takes
-the `Universe` itself. Every other argument is passed to your function
-unchanged and recorded.
-
-PolyzyMD runs `AnalysisFromFunction` on each replicate with that replicate's
-production frames, so your function never sees an equilibration frame. Pass
-`step=5` to measure every fifth production frame, for an expensive measurement
-such as solvent-accessible surface area; the step is recorded with the result.
-The result holds, for each replicate, the per-frame values, the frame indices
-and the simulation times. Give `unit=None` for a dimensionless quantity.
-
-A function that returns an array gives one value per frame for each entry of
-the array. Name the entries with `labels`, either a list or a function of the
-`Universe`:
-
-```python
-def per_residue_sasa(u): ...
-
-sasa = study.timeseries(
-    per_residue_sasa, pz.universe(),
-    unit="Å^2", labels=lambda u: u.select_atoms("protein").residues.resids,
-)
-```
-
-Labels are how replicates are lined up. Values are aggregated per label, never
-per position, so residue 57 in one replicate is always compared with residue
-57 in another.
-
-## Compare each frame with a reference structure
-
-Many measurements compare a frame with a reference structure. Pass
-`pz.reference(mode, selection, frame=None, file=None, alignment=None)` where
-your function takes the reference atoms:
-
-```python
-from polyzymd.analyses.functions import rmsd
-
-ca = "protein and name CA"
-deviation = study.timeseries(
-    rmsd, pz.select(ca), pz.reference("external", ca, file="structures/1ISP.pdb"), unit="Å"
-)
-```
-
-The reference is built once per replicate, in a separate universe, so the
-trajectory is never modified. `external` reads `file`; `frame` takes production
-frame `frame`, counted from 1 after the equilibration window; `average` is the
-mean structure after superposing the `alignment` atoms; and `centroid` is the
-production frame closest to the MDAnalysis `align.iterative_average` of the
-`alignment` atoms. The record holds the mode, the selections, the frame the
-reference used and, for a file, its name and SHA-256 hash. Any argument that
-names an existing file is recorded the same way, by name and content and not
-by location, so editing the file measures the replicates again while moving
-the study folder does not.
-
-## Use an MDAnalysis analysis you already run
-
-Many analyses already exist as MDAnalysis `AnalysisBase` classes, in
-MDAnalysis itself or in an MDAKit. Pass the class, its arguments, and a
-function that reads the result you want from the finished analysis:
-
-```python
-from MDAnalysis.analysis.hydrogenbonds import HydrogenBondAnalysis
-
-hbonds = study.run(
-    HydrogenBondAnalysis, pz.universe(),
-    donors_sel="protein", acceptors_sel="resname SBM",
-    timeseries=lambda analysis: analysis.count_by_time(),
-)
-```
-
-PolyzyMD constructs the class for each replicate, calls
-`run(frames=replicate.frames)`, and passes the finished object to your
-function. Use `timeseries=` when the function returns one value per frame, and
-`value=` when it returns one value, or one labelled array, for the whole
-replicate.
-
-## Turn each replicate into one value
-
-Comparisons between conditions need one value per replicate, or one value per
-label. A time series becomes one with `reduce`:
-
-```python
-mean_rg = rg.reduce("mean")
-```
-
-The named reductions are `"mean"`, `"fraction"` (the mean of a series of 0 and
-1, rejected for any other values) and `"std"` (the sample standard deviation
-over frames). A stored time series can be transformed frame by frame before it
-is reduced, without measuring the trajectory again. For example, the fraction
-of frames in which a distance is below 4 Å comes from the stored distances:
-
-```python
-distance = study.timeseries(atom_distance, pz.select("resid 77 and name OG"),
-                            pz.select("resid 156 and name NE2"), unit="Å")
-mean_distance = distance.reduce("mean")
-below_4 = distance.transform(lambda d: d < 4.0, unit=None).reduce("fraction")
-```
-
-The transform is recorded with the result like any other function. It also
-takes further stored series, `a.transform(f, b)`, whose values reach `f` frame by
-frame after those of `a`, and keyword arguments, which are recorded; pass
-values such as a threshold as keyword arguments rather than through a closure,
-so they appear in the record.
-
-Besides the named reductions, any function that takes the per-frame values and
-times of one replicate and returns a number or a labelled array works as a
-reduction, for example a residence time or the slope of a mean squared
-displacement:
-
-```python
-def mean_lifetime(values, times): ...
-
-lifetime = contact.reduce(mean_lifetime, unit="ns", bounds=(0.0, None))
-```
-
-Give a quantity with a physical limit its bounds when you measure it, with
-`study.timeseries(..., bounds=(low, high))`, using `None` for a side with no
-limit; `transform` keeps the bounds of the series it starts from unless you pass
-new ones. The shipped radius of gyration, RMSD and distances are bounded below
-by 0. `reduce` takes the series bounds for `"mean"`, 0 and 1 for `"fraction"`, 0
-and no upper limit for `"std"`, and no bounds for a function of your own, and
-also accepts `bounds=` to set them. Bounds never change a measured value, and
-changing them does not measure a replicate again.
-
-When you want to compute the per-replicate value yourself from the `Universe`,
-use `study.per_replicate`. Your function receives the `Universe` and the
-production frames and returns a number or a labelled array:
-
-```python
-def my_quantity(u, frames): ...
-
-values = study.per_replicate(my_quantity, pz.universe(), unit="kcal/mol")
-```
-
-PolyzyMD cannot check how such a value was computed. It records the function
-and its arguments like any other result.
-
-A function can return one value per label instead, such as one value per
-residue. Pass `labels=`, a list or a function of the replicate's `Universe`
-that returns them, and the replicates are lined up by label, never by
-position. A label that one replicate lacks is an error unless you pass
-`missing=` with the value to give it. A function that measures several
-quantities in one pass can return one row per quantity; name the rows with
-`parts=`, and each becomes its own result:
-
-```python
-from polyzymd.analyses.functions import RMS_PARTS, rms_decomposition
-
-ca = "protein and name CA"
-rows = study.per_replicate(
-    rms_decomposition, pz.select(ca), pz.select(ca), pz.reference("average", ca),
-    unit="A", labels=lambda u: u.select_atoms(ca).residues.resids, parts=RMS_PARTS,
-)
-rmsf = rows["rmsf"]                                     # one value per residue
-mean_rmsf = rmsf.over_labels("mean")                    # one value per replicate
-loop = rmsf.over_labels("mean", "loop_rmsf", labels=range(40, 51))
-```
-
-`over_labels(how, metric, labels)` turns each replicate's labelled array into
-one number, with `"mean"` or a function that receives the replicate's array
-for the chosen labels, over every label or only the ones in `labels`.
-
-## Compare conditions
-
-```python
-summary = mean_rg.summary()                     # one row per condition
-report = mean_rg.compare(control="No polymer")  # every condition against the control
-print(report.to_agent_text())
-
-polymers = contacts.compare(control="SBMA 50%", conditions=["SBMA 50%", "EGMA 50%"])
-print(pz.report(mean_distance, below_4, polymers).to_agent_text())
-```
-
-`conditions=` limits a summary or a comparison to some of the study's
-conditions, for example when the control has no polymer and the quantity
-concerns the polymer. `summary()` and `compare()` results both print with
-`to_agent_text()`, and `pz.report` joins several of them into one text block
-and one JSON document, each result under its own name. A result is named after
-its function unless you pass `name=`.
-
-`summary()` gives, for each condition, the number of replicates, the mean, the
-standard error and the 95 percent interval, along with every replicate value.
-`compare()` gives, for each condition against the control, the difference in
-means with its 95 percent interval, the p value, the p value adjusted for
-multiple comparisons, and Cohen's d. For a labelled result there is one row per
-label, and every label is one test in the correction. Leave a label out with
-`untested=["coil"]` when its value is fixed by the others, for example the last
-of a set of fractions that sum to one. It is still summarised with its interval
-but takes no part in the tests or the correction. A label with the same value
-in every replicate of both conditions, such as a residue that is never in
-contact, has no variance to test; it is reported as not testable and is left
-out of the correction automatically.
-
-The statistics follow Grossfield et al. (2018), the LiveCoMS best practices for
-quantifying uncertainty in molecular simulations:
-
-- The replicate is the sampling unit. Frames inside one replicate are
-  correlated, so their number never shrinks an interval. The statistical
-  inefficiency and effective sample size of each replicate's time series,
-  computed with `pymbar.timeseries`, are reported as diagnostics.
-- The equilibration window is the one you set, applied to every replicate of
-  every condition. For each time series, the start of the equilibrated region
-  found by `pymbar.timeseries.detect_equilibration` (Chodera 2016) is also
-  reported. A warning is added when that point falls after your window, which
-  suggests the window is too short for that replicate. The window you set is
-  never changed automatically.
-- The 95 percent interval is the mean plus or minus the Student t coverage
-  factor for n replicates times the standard error.
-- Tests are Welch's t test by default, or Student's t test, with the
-  Benjamini-Hochberg correction.
-- The correction family is one outcome: the conditions compared with the
-  control for one quantity, such as one pair's mean distance. A family is the
-  set of tests behind one conclusion (Bender and Lange 2001; Rubin 2021), and a
-  false discovery rate controlled in separate families stays controlled overall
-  (Benjamini and Yekutieli 2001), while pooling unrelated outcomes can hide
-  real effects or inflate weak ones (Efron 2008). For a labelled result, such
-  as a per-residue profile, the family is every label of every compared
-  condition: scanning a profile for the labels that changed is a search over
-  that whole set, and a false discovery rate holds for the discoveries of a
-  search only when the family is the set searched (Benjamini 2010). The text
-  report then gives, for each condition, how many labels are significantly
-  lower and higher and lists them, and the JSON report keeps every row. Every
-  comparison line gives
-  the raw p value, the adjusted p value and the family size, `family <m>`. If
-  you make one claim from several outcomes together, such as "any of these
-  pairs changed", those outcomes belong in one family; pass their p values to
-  `polyzymd.analyses.shared.inferential_statistics.benjamini_hochberg` yourself
-  and report that family.
-- Grossfield et al. recommend plotting every point when there are fewer than
-  10 independent measurements, so every figure shows each replicate, and
-  `ReplicateValues.plot` draws each replicate value next to the mean and
-  interval.
-- Grossfield et al. point out that a quantity with a strict upper or lower
-  limit is not Gaussian, and that a t interval can then extend past the limit.
-  They recommend bootstrapping for such quantities, but also caution that
-  bootstrap intervals are unreliable for small samples, which is the usual
-  case of three to five replicates. PolyzyMD therefore keeps the t interval
-  and adds a warning when
-  the interval extends past a limit, using the `bounds` of the result. When
-  every replicate has
-  the same value, the interval is reported as not estimable rather than as a
-  zero-width interval.
-
-## Draw figures
-
-```python
-rg.plot()                                  # every replicate's series against time
-rg.plot_distribution(threshold=None)       # per-condition distribution of frame values
-mean_rg.plot()                             # condition means with every replicate value
-```
-
-`Timeseries.plot` draws every replicate's per-frame series against simulation
-time, one colour per condition, with each condition's mean and its 95 percent
-interval across replicates as a band when the replicates share their frame
-times, and the equilibration window shaded. `Timeseries.plot_distribution`
-draws, for each condition, the Gaussian kernel density estimate of all
-production frames pooled across replicates as a thick line and one thin line
-per replicate, with an optional threshold line. Near a finite bound of the
-series the estimate is corrected by reflection (Schuster 1985; Silverman 1986,
-section 2.10), so the curve is drawn only within the physical range and still
-integrates to 1. `ReplicateValues.plot` draws a
-bar at each condition's mean with its 95 percent Student t interval and every
-replicate value as a point. For a labelled result it draws a profile instead:
-each replicate's value at every label as a thin line and each condition's mean
-with its interval as a thick line and band, numeric labels such as residue IDs
-placed at their value, and `highlight=` labels marked. Every figure that draws
-error bars or a band is footnoted under its axes with what they are, what they
-are the interval of and the replicates they are computed across, as Grossfield
-et al. (2018) ask, for example "Error bars: 95% Student t confidence interval
-of the condition mean across n = 5 replicates; production window t >= 10ns."
-When the conditions have different numbers of replicates, the footnote says
-that n is given per condition.
-
-Several results that share a unit can go in one figure:
-
-```python
-pz.plot_values([ser_his_below, his_asp_below, simultaneous], labels=["Ser-His", "His-Asp", "All pairs"])
-pz.plot_distributions([ser_his, his_asp], thresholds=[3.5, 3.5])
-```
-
-`pz.plot_values` draws one group of bars per result, one bar per condition, with
-the same intervals, replicate points and footnote. `pz.plot_distributions` draws
-one panel per series with a shared axis and each panel's own threshold. Results
-with different units are refused, because they cannot share an axis.
-
-For labelled results, `polyzymd.analyses.figures.plot_differences(values,
-report, output_dir, name)` draws one panel per condition with its difference
-from the control at every label, the 95 percent interval of the difference
-from the `compare()` report's test (Welch's t by default, which the footnote
-names), and a point on each label that is
-significant after the correction, so the figure shows the numbers of the
-report. `plot_decomposition(parts, output_dir, name)` draws several labelled
-results of one unit together, one panel per condition, such as the deviation,
-RMSF and offset of every residue.
-
-The figures are drawn from the stored results, so no trajectory is read. They
-are written to a `figures/` folder next to `polyzymd_results/`, or to
-`output_dir=`, in the format and style of the `PlotSettings` passed as
-`plot_settings=`. `polyzymd analyze` draws the figures for its analysis by
-default; pass `--no-plots` to skip them.
-
-## Write your own aggregation or comparison
-
-A custom aggregation or comparison can work from the stored results, which is
-fast because nothing is recomputed, or from the universes, when it needs the
-structures:
-
-```python
-def my_comparison(results): ...          # stored results, keyed by condition
-
-report = mean_rg.compare(control="No polymer", method=my_comparison)
-
-def my_structural_comparison(study): ...  # replicates and their universes
-
-report = study.compare(my_structural_comparison)
-```
-
-Either way the function and its arguments are recorded with the report.
-
-## What is recorded
-
-Every per-replicate result is stored under the study's results folder with:
-
-- the name, module and source-code hash of the function, and of the reduction
-  if there is one;
-- every argument, including the selection strings;
-- the simulation config hash, and the size and hash of every topology and
-  trajectory file read;
-- the equilibration window, the frame indices and the simulation times used;
-- the PolyzyMD, MDAnalysis, NumPy and Python versions;
-- the unit and the labels.
-
-A stored result is reused only when every one of these matches the new
-request. Changing the function, an argument or an input file, or extending a
-trajectory, recomputes the affected replicates. `recompute=True` forces a
-recomputation. A function defined in a notebook cell or as a lambda has no
-stable source file, so its code is hashed from its bytecode and a warning says
-that the record identifies it less reliably.
+| A function that measures one frame, or one replicate | Loads each replicate as a `Universe`, with its production segments in order and its equilibration window removed |
+| The atom selections of the function, as selection strings | Builds the `AtomGroup` of each selection in each replicate, and runs the function on the production frames |
+| Optionally, how the frames of one replicate become one value | Stores each per-frame and per-replicate result with the code, arguments and input files that produced it, and reuses it only when all of them match |
+| Nothing more for the statistics | Computes the mean, the standard error and the 95 % Student t interval across replicates, tests each condition against the control, and corrects for multiple tests |
+
+The per-frame interface follows MDAnalysis
+[`AnalysisFromFunction`](https://docs.mdanalysis.org/stable/documentation_pages/analysis/base.html).
+Your function receives `AtomGroup`s at the current frame and returns a
+number. An `AtomGroup` belongs to one `Universe`. So you give a selection
+string, `pz.select("protein")`, and PolyzyMD builds the `AtomGroup` again for
+each replicate. It records the string.
+
+## Why replicates line up by label
+
+A function can return one value per label, such as one value per residue.
+PolyzyMD aggregates the values by label, never by position. Residue 57 of
+one replicate is always compared with residue 57 of another, even when a
+replicate has a different number of entries. A label that one replicate
+lacks is an error, unless you say which value it takes. This prevents a
+silent shift of a whole profile by one residue.
+
+## Why references and files are recorded by content
+
+PolyzyMD builds a reference structure once per replicate, in a separate
+universe. So the trajectory never changes.
+
+The record of a result names each file that an argument points to by its
+name and its SHA-256, not by its location. So an edit to a reference file
+measures the replicates again, and a move of the study folder does not.
+
+## The statistics
+
+The statistics follow Grossfield et al. (2018), the LiveCoMS best practices
+for the uncertainty of molecular simulations.
+
+**The replicate is the sampling unit.** The frames of one replicate are
+correlated, so their number never makes an interval narrower. PolyzyMD
+reports the {term}`statistical inefficiency` g and the {term}`n_eff` of each
+replicate's time series, computed with `pymbar.timeseries`, as diagnostics.
+
+**One equilibration window for all replicates.** The window that you set
+applies to every replicate of every condition. For each time series, PolyzyMD
+also reports where `pymbar.timeseries.detect_equilibration` (Chodera 2016)
+finds the start of the equilibrated region. If that point is after your
+window, a warning says that the window can be too short for that replicate.
+PolyzyMD never changes the window. See {doc}`convergence_detection`.
+
+**The interval.** The 95 % confidence interval is the mean plus or minus the
+Student t factor for n replicates times the standard error.
+
+**The test.** PolyzyMD uses Welch's t test by default, or Student's t test,
+with the {term}`Benjamini-Hochberg` correction.
+
+**The correction family is one outcome.** For one number per replicate, the
+family is the conditions compared with the control for one quantity, such as
+the mean distance of one pair. A family is the set of tests behind one
+conclusion (Bender and Lange 2001; Rubin 2021). A false discovery rate that is
+controlled in separate families stays controlled overall (Benjamini and
+Yekutieli 2001). A pool of unrelated outcomes can hide real effects or
+inflate weak ones (Efron 2008).
+
+For a labelled result, such as a per-residue profile, the family is every
+label of every compared condition. A scan of a profile for the labels that
+changed is a search over that whole set. A false discovery rate holds for the
+discoveries of a search only when the family is the set searched (Benjamini
+2010). The text report gives, for each condition, the number of labels that
+are significantly lower and higher, and lists them. The JSON report keeps
+every row. Each comparison line gives the raw p value, the adjusted p value
+and the family size, `family <m>`.
+
+If you make one claim from several outcomes together, such as "any of these
+pairs changed", put those outcomes in one family. Pass their p values to
+`polyzymd.analyses.shared.inferential_statistics.benjamini_hochberg`, and
+report that family.
+
+**Untestable rows.** A row is not testable when a condition has fewer than
+two replicates, or when both conditions have the same value in every
+replicate, such as a residue that is never in contact. Such a row takes no
+part in the correction. You can also leave out a label whose value the other
+labels fix, such as the last of a set of fractions that sum to 1.
+
+**Bounded quantities.** A quantity with a strict lower or upper limit is not
+Gaussian, and a t interval can extend past the limit. Grossfield et al.
+recommend the bootstrap for such quantities, but also say that bootstrap
+intervals are unreliable for small samples. Three to five replicates is the
+usual case. So PolyzyMD keeps the t interval, and warns when it extends past
+the `bounds` of the result. When every replicate has the same value,
+PolyzyMD reports the interval as not estimable, not as an interval of zero
+width.
+
+## The figures
+
+Grossfield et al. recommend that a figure shows every point when there are
+fewer than 10 independent measurements. So every PolyzyMD figure shows each
+replicate value, beside the mean and the interval.
+
+Each figure with error bars or a band has a footnote. The footnote says what
+the bars are, of which quantity, and across which replicates. An example is
+"Error bars: 95% Student t confidence interval of the condition mean across
+n = 5 replicates; production window t >= 10ns." When the conditions have
+different numbers of replicates, the footnote says that n is given per
+condition.
+
+A distribution figure draws a Gaussian kernel density estimate of the frame
+values. Near a finite bound of the series, PolyzyMD corrects the estimate by
+reflection (Schuster 1985; Silverman 1986, section 2.10). So the curve stays
+within the physical range and still integrates to 1.
+
+Figures read the stored results, so they read no trajectory.
+
+## Why stored results are reused
+
+A per-replicate result is stored with a record of the function, the
+arguments, the config hash, the input files, the window, the frames and the
+software versions. PolyzyMD reuses the result only when every field except
+the versions and the bounds matches the new call. A change to the function,
+an argument or an input file, or a longer trajectory, measures the affected
+replicates again.
+
+A function defined in a notebook cell, or a lambda, has no stable source
+file. PolyzyMD then hashes its bytecode, and warns that the record
+identifies the function less reliably.
 
 ## What is out of scope
 
 - An analysis that needs all replicates at once inside the measurement, such
-  as a principal component basis, clustering or a Markov state model. Load the
-  universes with `replicate.universe()` and fit such models yourself.
-- A quantity defined between two conditions rather than for one replicate, such
-  as a divergence between two distributions. Write it as a custom comparison.
+  as a principal component basis, clustering or a Markov state model. Load
+  the universes with `replicate.universe()` and fit such models yourself.
+- A quantity defined between two conditions, not for one replicate, such as
+  a divergence between two distributions. Compute it in your own script from
+  the stored values (`replicate_table`) or from the universes.
 - Intervals that are exact for a non-Gaussian quantity from three to five
-  replicates. No method gives these, so an interval that extends past a limit
-  is flagged with a warning instead.
+  replicates. No method gives these. So PolyzyMD warns when an interval
+  extends past a limit.
 
 ## Shipped analyses
 
-The analyses PolyzyMD ships are functions in `polyzymd.analyses` written
-against this interface, and `polyzymd analyze NAME` runs them from the command
-line. Each one calls MDAnalysis or MDTraj for the per-frame measurement. The
-list, with the measurement each one makes and the reduction it uses, is in
+The shipped analyses are functions in `polyzymd.analyses.functions` that use
+this interface. `polyzymd analyze NAME` runs them from the command line. Each
+one calls MDAnalysis or MDTraj for the per-frame measurement. For the list,
+with the measurement and the reduction of each one, see
 {doc}`../reference/analysis_functions`.
 
 ## References
+
+Bender, R.; Lange, S. Adjusting for Multiple Testing: When and How? *J. Clin.
+Epidemiol.* **2001**, 54 (4), 343-349. doi:10.1016/S0895-4356(00)00314-0
+
+Benjamini, Y. Discovering the False Discovery Rate. *J. R. Stat. Soc. B*
+**2010**, 72 (4), 405-416. doi:10.1111/j.1467-9868.2010.00746.x
+
+Benjamini, Y.; Yekutieli, D. The Control of the False Discovery Rate in
+Multiple Testing under Dependency. *Ann. Stat.* **2001**, 29 (4), 1165-1188.
+doi:10.1214/aos/1013699998
+
+Chodera, J. D. A Simple Method for Automated Equilibration Detection in
+Molecular Simulations. *J. Chem. Theory Comput.* **2016**, 12 (4), 1799-1805.
+doi:10.1021/acs.jctc.5b00784
+
+Efron, B. Simultaneous Inference: When Should Hypothesis Testing Problems Be
+Combined? *Ann. Appl. Stat.* **2008**, 2 (1), 197-223. doi:10.1214/07-AOAS141
+
+Grossfield, A.; Patrone, P. N.; Roe, D. R.; Schultz, A. J.; Siderius, D. W.;
+Zuckerman, D. M. Best Practices for Quantifying Uncertainty and Sampling
+Quality in Molecular Simulations. *Living J. Comput. Mol. Sci.* **2018**, 1 (1),
+5067. doi:10.33011/livecoms.1.1.5067
+
+Rubin, M. When to Adjust Alpha during Multiple Testing: A Consideration of
+Disjunction, Conjunction, and Individual Testing. *Synthese* **2021**, 199,
+10969-11000. doi:10.1007/s11229-021-03276-4
 
 Schuster, E. F. Incorporating Support Constraints into Nonparametric Estimators
 of Densities. *Commun. Stat. Theory Methods* **1985**, 14 (5), 1123-1136.
@@ -474,29 +191,3 @@ doi:10.1080/03610928508828965
 
 Silverman, B. W. *Density Estimation for Statistics and Data Analysis*; Chapman
 and Hall: London, 1986; Section 2.10.
-
-Bender, R.; Lange, S. Adjusting for Multiple Testing: When and How? *J. Clin.
-Epidemiol.* **2001**, 54 (4), 343-349. doi:10.1016/S0895-4356(00)00314-0
-
-Benjamini, Y.; Yekutieli, D. The Control of the False Discovery Rate in
-Multiple Testing under Dependency. *Ann. Stat.* **2001**, 29 (4), 1165-1188.
-doi:10.1214/aos/1013699998
-
-Benjamini, Y. Discovering the False Discovery Rate. *J. R. Stat. Soc. B*
-**2010**, 72 (4), 405-416. doi:10.1111/j.1467-9868.2010.00746.x
-
-Efron, B. Simultaneous Inference: When Should Hypothesis Testing Problems Be
-Combined? *Ann. Appl. Stat.* **2008**, 2 (1), 197-223. doi:10.1214/07-AOAS141
-
-Rubin, M. When to Adjust Alpha during Multiple Testing: A Consideration of
-Disjunction, Conjunction, and Individual Testing. *Synthese* **2021**, 199,
-10969-11000. doi:10.1007/s11229-021-03276-4
-
-Grossfield, A.; Patrone, P. N.; Roe, D. R.; Schultz, A. J.; Siderius, D. W.;
-Zuckerman, D. M. Best Practices for Quantifying Uncertainty and Sampling
-Quality in Molecular Simulations. *Living J. Comput. Mol. Sci.* **2018**, 1 (1),
-5067. doi:10.33011/livecoms.1.1.5067
-
-Chodera, J. D. A Simple Method for Automated Equilibration Detection in
-Molecular Simulations. *J. Chem. Theory Comput.* **2016**, 12 (4), 1799-1805.
-doi:10.1021/acs.jctc.5b00784
