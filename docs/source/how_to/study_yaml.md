@@ -193,9 +193,10 @@ analyses:
 | `missing: .nan` | With `labels: returned`, the value a replicate gets for a label that other replicates returned and it did not, such as a frame index past the end of a shorter run. Without it such a replicate stops the report, with a message saying so |
 | `allow_empty: true` | Pass a selection that matches no atoms, such as a polymer selection in a no-polymer control, to the function as an empty AtomGroup, so the function decides the value there (for example `0.0` when `len(polymer) == 0`). Without it such a replicate stops the run, with a message saying so |
 
-The stored results are keyed on the whole file, not only the function: edit
-any helper in it and the next run recomputes. The file is compiled from its
-current text every time, never from a cached `.pyc`.
+The stored results are keyed on every Python file in the function's folder,
+not only the function: edit any helper in it, or a helper module it imports
+from that folder, and the next run recomputes. The files are compiled from
+their current text every time, never from a cached `.pyc`.
 
 `polyzymd study check` imports every listed function, so a broken file is
 reported before any trajectory is read.

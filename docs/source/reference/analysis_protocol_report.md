@@ -10,13 +10,16 @@ reads back exactly what `model_dump_json()` wrote.
 | Field | Type | Meaning |
 |---|---|---|
 | `analysis` | `str` | Canonical analysis name, for example `rg`. |
+| `status` | `str` | `complete`, or `partial` when a condition could not be measured or compared and the report covers the others. |
+| `problems` | `list[str]` | For a partial report, each condition left out, or the comparison that failed, with its error. Empty for a complete report. `polyzymd study check`, `study freeze` and `project freeze` name them. |
+| `trends` | `list[TrendReport]` | For a run from a study whose conditions declare numeric factors: one slope test per factor. Empty otherwise. |
 | `protocol_version` | `str` | Version of the report protocol, `"2"` for every report of the study API. With `analysis` it identifies the code that defined the metric; it changes when the meaning, unit or estimator of a reported metric changes. |
 | `metric` | `str` | Name of the reported values, for example `mean_rg`. |
 | `unit` | `str \| None` | Unit of `metric`, for example `A` or `%`. `None` marks a dimensionless metric, such as a fraction. |
 | `run` | `str \| None` | Selected result when the analysis reports several: for sasa each context's total and per-residue SASA; for distances each pair's mean distance (`<label>`) and fraction below threshold; for hydrogen_bonds each summary's counts, lifetimes, per-residue and per-pair occupancies; for rmsf and rmsd_per_residue the core, region and plain-mean values and the per-residue profiles. `None` when the analysis reports one result. |
 | `all_metrics` | `list[str]` | Other metric names of the result, `metric` first. Empty in the reports of the shipped analyses, which name each result in `all_runs` instead. |
 | `all_runs` | `list[str]` | Every result the analysis measured, the reported one first. Empty when it measures one. Select another with `--run LABEL`. |
-| `equilibration` | `str` | Equilibration window discarded from the start of every replicate, for example `10ns`. Applied uniformly to every replicate of every condition. |
+| `equilibration` | `str` | Equilibration window discarded from the start of every replicate, for example `10ns`. Applied uniformly to every replicate of every condition; a study's analysis entry may set its own. |
 | `stride` | `int` | Every `stride`-th production frame was measured, 1 by default. |
 | `frames_per_replicate` | `dict[str, int \| list[int] \| None]` | Production frames each replicate of a condition contributed after the equilibration window and stride, keyed by condition label, one number per replicate in replicate order. |
 | `conditions` | `list[ConditionReport]` | One entry per condition, in the order the configs were given; for a labelled result such as a per-residue profile, one entry per condition and label. |
@@ -72,6 +75,22 @@ rows the JSON form holds; every one of them is kept there.
 | `significant` | `bool` | Whether `p_adjusted` is at most 0.05. Always `False` when `testable` is `False`. |
 | `testable` | `bool` | `False` when a condition has fewer than two replicates, or both conditions have the same value in every replicate, which makes the test undefined rather than non-significant. |
 
+## TrendReport
+
+| Field | Type | Meaning |
+|---|---|---|
+| `factor` | `str` | The condition factor, for example `sbma_fraction`. |
+| `conditions` | `list[str]` | Conditions that declare the factor and were fitted; a control without it is left out. |
+| `n_replicates` | `int` | Replicate values fitted, one per replicate. |
+| `slope` | `float \| None` | Ordinary least-squares slope of the replicate values against the factor, in the metric's unit per unit of the factor. |
+| `slope_ci95` | `tuple[float, float] \| None` | 95 percent t interval on `slope`. |
+| `p`, `p_adjusted` | `float \| None` | Two-sided t test of zero slope, and the same corrected with Benjamini-Hochberg over the study's numeric factors. |
+| `family_size` | `int \| None` | Number of factors in that family. |
+| `r_squared` | `float \| None` | Coefficient of determination of the fit. |
+| `significant` | `bool` | Whether `p_adjusted` is at most 0.05. |
+| `testable` | `bool` | `False` when a replicate value is not finite, there are fewer than three factor levels or four replicate values, or the values all agree. |
+| `reason` | `str \| None` | Why the trend is not testable. |
+
 ## ProtocolProvenance
 
 | Field | Type | Meaning |
@@ -81,7 +100,7 @@ rows the JSON form holds; every one of them is kept there.
 | `config_hashes` | `dict[str, str]` | `polyzymd.analyses.identity.compute_config_hash` of each simulation config, keyed by condition label: the first 16 hex characters of the SHA-256 of the config fields that locate and describe its trajectories. |
 | `settings_fingerprint` | `str \| None` | `None`: no shipped analysis sets it. |
 | `settings` | `dict` | Settings a study-API analysis ran with. For rmsf and rmsd_per_residue: every setting, the resolved `reference_mode`, and under `residues` the residue IDs of the core and of each region. Empty for other analyses. |
-| `study` | `dict \| None` | Set for a run from a study file: `path` and `sha256` of `study.yaml`, the `run`, the `settings` it was given (from the file and `--set`), and `git`, with the study folder's `commit`, its `uncommitted` files and `inputs_uncommitted`, those outside `results/` and `data.local.yaml`; `git` is `None` outside a repository. |
+| `study` | `dict \| None` | Set for a run from a study file: `path` and `sha256` of `study.yaml`; the `run`; the `settings` it was given (from the file and `--set`), with paths inside the study or project written relative to the study and any other path as its file name; the `selections` of a study's own function; the condition `factors` its trend tests used; for a study of a project, `project` with the `path`, study `label` and `sha256` of `project.yaml`; and `git`, with the `commit` of the study folder (of the project folder for a study of a project), its `uncommitted` files and `inputs_uncommitted`, those outside `results/`, `logs/`, `deposit/` and `data.local.yaml`; `git` is `None` outside a repository. |
 | `output_paths` | `dict[str, str]` | `results` is the `polyzymd_results/<name>/` folder holding every replicate's stored values and record; `figures` is the directory holding the generated plots, absent with `--no-plots`. |
 
 ## Verdict vocabulary

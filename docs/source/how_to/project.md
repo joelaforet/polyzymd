@@ -48,8 +48,21 @@ polyzymd project init Paper_1 --study lipa363 --study calb343 --study rml333
 
 writes `project.yaml`, `analyses/`, `stats/`, `figures/`, licences and one
 study folder per protein, each with a `study.yaml` to fill in, and makes the
-project a git repository. Add each protein's conditions with
-`polyzymd study add-condition Paper_1/lipa363 ...`.
+project a git repository. Add each protein's conditions, control first:
+
+```bash
+polyzymd study add-condition "No Polymer" --config path/to/no_polymer/config.yaml --study Paper_1/lipa363
+polyzymd study add-condition "SBMA 50%" --config path/to/sbma50/config.yaml --study Paper_1/lipa363
+```
+
+Then give each polymer condition its factor by editing its line in
+`study.yaml` (there is no command for it):
+
+```yaml
+conditions:
+  No Polymer: conditions/no_polymer/config.yaml
+  SBMA 50%: {config: conditions/sbma_50/config.yaml, factors: {sbma_fraction: 0.5}}
+```
 
 To bring studies you already have into a project, follow the tutorial
 {doc}`../tutorials/move_studies_into_project`.
@@ -101,6 +114,8 @@ metadata:
 - `region <name>` in a selection becomes that study's region, so `rmsf`
   aligns on each protein's own core. `structure <name>` as a value becomes the
   path of that study's structure.
+- A `function:` path is relative to the file that lists it: in `project.yaml`,
+  `analyses/lid.py` is `Paper_1/analyses/lid.py`.
 - A name a study does not define stops the command with a message naming the
   study. Limit an analysis to the proteins that have the region with
   `studies: [...]`, or put a protein's own analysis in its `study.yaml`.
@@ -112,6 +127,7 @@ metadata:
 ```bash
 polyzymd project check Paper_1                    # which studies run each analysis, then each study's check
 polyzymd analyze rmsf --project Paper_1           # every study that runs rmsf, one after another
+polyzymd analyze --project Paper_1                # every analysis of every study
 polyzymd analyze rmsf --study Paper_1/lipa363     # one protein
 ```
 
@@ -127,6 +143,14 @@ paper = pz.Project("Paper_1")
 rmsf = paper.results("rmsf")
 rmsf.table          # every study's rows, with a study column and a column per factor
 rmsf.reports        # each study's report: comparisons stay within a protein
+paper.replicate_table("rmsf")   # one row per replicate: the values every test uses
+
+# Every study's comparisons with its control, and its trend tests, side by side:
+for study, report in rmsf.reports.items():
+    for pair in report.pairwise:
+        print(study, pair.b, "vs", pair.a, pair.delta, pair.p_adjusted, pair.significant)
+    for trend in report.trends:
+        print(study, trend.factor, trend.slope, trend.p_adjusted, trend.reason)
 ```
 
 A study that runs the analysis but has no stored results is named in the
@@ -157,7 +181,10 @@ verdict: core_rmsf falls with sbma_fraction (slope ...)
 ```
 
 It is a straight-line fit: look at the per-condition means before reading it
-as a dose response. Labelled results (one value per residue) get none.
+as a dose response. It needs at least three factor levels and four replicate
+values (with two levels it would only restate a pairwise comparison), and it
+is reported as not testable, with the reason, when a replicate value is not
+finite. Labelled results (one value per residue) get none.
 
 **Your own statistical plan.** A plan that goes further is a function in the project (or study) folder:
 
@@ -194,9 +221,17 @@ polyzymd project freeze Paper_1
 
 freezes every study (its manifest, checklist, system summary, engine inputs
 and final frames), then writes the project's `manifest.json`, which lists
-each study's manifest by SHA-256 and every condition as `<study> /
-<condition>`, and one `CITATION.cff` and `.zenodo.json` from
+each study's manifest by SHA-256, every condition as `<study> /
+<condition>`, and the size and SHA-256 of every project file outside the
+studies (`project.yaml`, the shared `analyses/` and `stats/` code, figures,
+the stats plan's output), and one `CITATION.cff` and `.zenodo.json` from
 `project.yaml`'s `metadata:`. It commits and tags the project
 (`project-v1`, ...) and lays out one `deposit/` with `deposit/UPLOAD.md`, as
 `polyzymd study freeze` does for a study ({doc}`study_freeze`): one dataset,
 one DOI, for the paper.
+
+Before writing anything, freeze warns about every run whose stored results no
+longer match the project (a changed config, window, stride, function or
+helper module, setting, selection, file content, factor, or replicate set),
+every partial report, and a stats plan that is stale or was never run. Each
+warning names what to rerun; freezing anyway is your call.
