@@ -21,6 +21,8 @@ from polyzymd.analyses.exceptions import ProtocolError
 
 #: Attribute that tells the stored record to hash the function's whole file.
 MODULE_FILE_ATTRIBUTE = "__polyzymd_module_file__"
+#: Folders that function files were loaded from in this process.
+_FOLDERS: set[Path] = set()
 
 
 def load_function(file: Path, qualname: str) -> Callable:
@@ -55,7 +57,8 @@ def load_module(file: Path) -> types.ModuleType:
 
     The file's folder is put first on ``sys.path`` while it imports, so it
     can import helper modules beside it; helpers imported earlier from that
-    folder are imported again, so edits since then take effect.
+    folder or another study's are imported again, so edits since then take
+    effect and a ``helper.py`` of another study is never used.
 
     Raises
     ------
@@ -72,14 +75,16 @@ def load_module(file: Path) -> types.ModuleType:
     module.__file__ = str(file)
     sys.modules.setdefault("polyzymd_study", types.ModuleType("polyzymd_study"))
     sys.modules[module_name] = module
-    # A helper module imported from the file's folder earlier in this process
-    # may have been edited since; drop it so the import reads it again, as
-    # its current content is what the stored results' hash covers. Only
-    # modules imported through that folder are dropped (helper.py,
+    # A helper module imported earlier in this process from this folder may
+    # have been edited since, and one from another study's folder may have
+    # the same name; drop both so the import reads this folder's current
+    # file, whose content is what the stored results' hash covers. Only
+    # modules imported through such a folder are dropped (helper.py,
     # util/k.py): an installed package that merely lies under it, in a
     # .pixi environment or a source checkout, is left alone.
+    _FOLDERS.add(file.parent)
     for name, loaded in list(sys.modules.items()):
-        if _imported_from(loaded, name, file.parent):
+        if any(_imported_from(loaded, name, folder) for folder in _FOLDERS):
             del sys.modules[name]
     sys.path.insert(0, str(file.parent))
     # Helpers it imports are compiled into a fresh cache: a .pyc beside them is
