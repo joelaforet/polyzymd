@@ -547,6 +547,7 @@ def gromacs_study(tmp_path: Path) -> Path:
         with mda.Writer(str(working / "prod.xtc"), n_atoms=4, dt=100.0) as writer:
             for k in range(10):
                 universe.atoms.positions = cross * (1.0 + 0.01 * k) + 10.0
+                universe.trajectory.ts.frame = k  # the writer stamps time dt * frame
                 writer.write(universe.atoms)
         (working / "prod.log").write_text(
             "                      :-) GROMACS - gmx mdrun, 2025.2 (-:\n"
