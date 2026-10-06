@@ -165,6 +165,11 @@ def _mock_sim_config(scratch_dir: Path) -> MagicMock:
     mock.simulation_phases.production.samples = 250
     mock._format_run_directory_name.return_value = "fnIII_apo_none_100ns_310K_run1"
     mock.output.effective_scratch_directory = scratch_dir
+    # A real path, so that check-progress saves progress.json under tmp_path
+    # instead of under a MagicMock path in the current directory.
+    mock.get_working_directory.side_effect = lambda replicate=1: (
+        scratch_dir / f"fnIII_apo_none_100ns_310K_run{replicate}"
+    )
     return mock
 
 
