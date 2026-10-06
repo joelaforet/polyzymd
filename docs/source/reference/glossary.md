@@ -12,7 +12,7 @@ project
   {doc}`../explanation/projects`.
 
 study
-  A set of conditions that you compare with each other: a slice of the space
+  A set of conditions that you compare with each other: a part of the space
   of independent variables. All its conditions share one analysis frame: the
   same atom and residue numbering, reference structures, named regions,
   equilibration window and control. PolyzyMD compares conditions only within
