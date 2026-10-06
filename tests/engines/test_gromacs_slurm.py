@@ -1741,6 +1741,23 @@ class TestGlobalTermHandling:
         end_idx = script.index('CURRENT_PHASE="idle"', trjconv_idx)
         assert start_idx < trjconv_idx < end_idx
 
+    def test_trjconv_failure_is_reported_not_hidden(self, monkeypatch) -> None:
+        """A failed trjconv prints a warning; the uncentred prod.xtc stays for analysis."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        lines = [line for line in script.splitlines() if "trjconv" in line and "$GMX" in line]
+        assert len(lines) == 2 and not any("|| true" in line for line in lines)
+        assert "WARNING: trjconv could not center prod.xtc" in script
+
     def test_progress_update_uses_foreground_phase(self, monkeypatch) -> None:
         """Progress update calls should run inside foreground phase tracking."""
         monkeypatch.setattr(
