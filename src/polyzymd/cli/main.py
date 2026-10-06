@@ -802,7 +802,7 @@ def build(
                     phase="build",
                 )
                 colored_echo(
-                    "or 'polyzymd run-segment' to run a single segment locally.",
+                    "or 'polyzymd run' to run it on this machine.",
                     phase="build",
                 )
             build_lock.__exit__(None, None, None)

@@ -1273,7 +1273,7 @@ stderr and exit 2:
   and `.claude/skills/polyzymd-analyze/SKILL.md`, the skill to point an agent at.
 - `polyzymd new-analysis ...` says to write a function of an MDAnalysis
   `Universe` and run it with `Study.per_replicate` or `Study.timeseries`, and
-  prints the address of {doc}`../explanation/analysis_api` and the same skill.
+  prints the address of {doc}`../how_to/study_api` and the same skill.
 
 ---
 

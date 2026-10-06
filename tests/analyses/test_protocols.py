@@ -255,7 +255,7 @@ class TestErrors:
         hint = excinfo.value.hint or ""
         assert hint.startswith(f"Use one of {', '.join(FUNCTION_ANALYSES)}.")
         assert "Study.timeseries or Study.per_replicate" in hint
-        assert "explanation/analysis_api.html" in hint
+        assert "how_to/study_api.html" in hint
 
     @pytest.mark.parametrize("name", ["toy_protocol", "radius_of_gyration", "catalytic_triad_v1"])
     def test_names_outside_the_analyses_are_refused_before_any_config_is_read(

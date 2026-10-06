@@ -47,7 +47,7 @@ ANALYZE_PROTOCOL_URL = (
 ANALYZE_AGENT_SKILL = ".claude/skills/polyzymd-analyze/SKILL.md"
 
 #: Published page on writing an analysis as a function for the study API.
-ANALYSIS_API_URL = "https://polyzymd.readthedocs.io/en/latest/explanation/analysis_api.html"
+ANALYSIS_API_URL = "https://polyzymd.readthedocs.io/en/latest/how_to/study_api.html"
 
 #: Published page of the catalytic triad routine on the study API.
 TRIAD_ROUTINE_URL = (

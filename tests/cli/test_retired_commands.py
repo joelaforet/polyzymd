@@ -47,9 +47,9 @@ def test_new_analysis_names_the_study_api_docs_and_skill(arguments: list[str]) -
     assert "polyzymd new-analysis is retired" in result.stderr
     assert "Study.per_replicate" in result.stderr and "Study.timeseries" in result.stderr
     assert (
-        "https://polyzymd.readthedocs.io/en/latest/explanation/analysis_api.html" in result.stderr
+        "https://polyzymd.readthedocs.io/en/latest/how_to/study_api.html" in result.stderr
     )
-    assert "docs/source/explanation/analysis_api.md" in result.stderr
+    assert "docs/source/how_to/study_api.md" in result.stderr
     assert SKILL in result.stderr
 
 

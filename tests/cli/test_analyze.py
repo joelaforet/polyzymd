@@ -256,7 +256,7 @@ class TestExitCodes:
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         assert "error: No analysis named 'definitely_not_an_analysis'." in result.stderr
         assert "fix: Use one of rg, rmsd, rmsf" in result.stderr
-        assert "explanation/analysis_api.html" in result.stderr
+        assert "how_to/study_api.html" in result.stderr
 
     def test_missing_config_exits_two(self, tmp_path: Path) -> None:
         """A config path that does not exist is reported before any work."""
