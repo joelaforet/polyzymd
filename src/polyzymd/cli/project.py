@@ -140,7 +140,7 @@ def freeze_command(path: Path, tag: str | None) -> None:
     )
     click.echo(
         f"manifest: {len(result.manifest['studies'])} studies, {len(conditions)} conditions, "
-        f"{replicates} replicates hashed"
+        f"{replicates} replicates' files hashed for the manifest"
     )
     click.echo(f"deposit: {result.deposit}; files to upload in {result.upload}")
     for warning in result.warnings:

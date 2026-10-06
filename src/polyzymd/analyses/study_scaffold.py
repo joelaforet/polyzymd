@@ -45,6 +45,9 @@ logs/
 # machine's paths, and SLURM logs of the simulations.
 results/*/slurm/
 conditions/*/slurm_logs/
+# Software environments, which are rebuilt, never committed.
+.pixi/
+.venv/
 """
 
 DATA_EXAMPLE = """\

@@ -43,10 +43,12 @@ def load_function(file: Path, qualname: str) -> Callable:
     module.__file__ = str(file)
     # A helper module imported from the file's folder earlier in this process
     # may have been edited since; drop it so the import reads it again, as
-    # its current content is what the stored results' hash covers.
+    # its current content is what the stored results' hash covers. Only
+    # modules imported through that folder are dropped (helper.py,
+    # util/k.py): an installed package that merely lies under it, in a
+    # .pixi environment or a source checkout, is left alone.
     for name, loaded in list(sys.modules.items()):
-        origin = getattr(loaded, "__file__", None)
-        if origin and Path(origin).resolve().is_relative_to(file.parent):
+        if _imported_from(loaded, name, file.parent):
             del sys.modules[name]
     sys.path.insert(0, str(file.parent))
     # Helpers it imports are compiled into a fresh cache: a .pyc beside them is
@@ -80,6 +82,25 @@ def load_function(file: Path, qualname: str) -> Callable:
     except (AttributeError, TypeError):
         pass
     return function
+
+
+def _imported_from(module: Any, name: str, folder: Path) -> bool:
+    """Return whether ``module`` was imported through ``folder`` on ``sys.path``.
+
+    True when its top-level name is a file or package directly in ``folder``
+    and its file lies there: ``helper`` from ``folder/helper.py``, or
+    ``util.k`` from ``folder/util/k.py``.
+    """
+    origin = getattr(module, "__file__", None)
+    if not origin:
+        return False
+    try:
+        relative = Path(origin).resolve().relative_to(folder)
+    except ValueError:
+        return False
+    top = name.split(".")[0]
+    first = relative.parts[0]
+    return first == top or first == f"{top}.py"
 
 
 def run_user_analysis(

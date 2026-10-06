@@ -196,9 +196,12 @@ analyses:
 The stored results are keyed on every file under the function's folder, not
 only the function: edit a helper in the file, a helper module or package it
 imports from that folder, or a data file it reads there, and the next run
-recomputes. Only `results/`, `logs/`, `deposit/`, `conditions/` and `slurm/`
-folders, other studies' folders, `data.local.yaml` and the files freeze
-writes are left out. The files are compiled from their current text every
+recomputes. Left out are hidden files and folders (`.git`, `.pixi`, `.venv`),
+`results/`, `logs/`, `deposit/`, `conditions/`, `figures/` and job folders,
+other studies' folders, `data.local.yaml` and the files freeze writes. A
+function file placed beside `study.yaml` or `project.yaml` is keyed on the
+Python files there only, so keep data files a function reads in
+`analyses/`, or pass them as arguments. The files are compiled from their current text every
 time, never from a cached `.pyc`.
 
 `polyzymd study check` imports every listed function, so a broken file is

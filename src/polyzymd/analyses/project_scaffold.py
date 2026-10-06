@@ -34,8 +34,11 @@ deposit/
 logs/
 # Job scripts and logs of polyzymd analyze --submit, which name this
 # machine's paths, and SLURM logs of the simulations.
-*/results/*/slurm/
-*/conditions/*/slurm_logs/
+**/results/*/slurm/
+**/conditions/*/slurm_logs/
+# Software environments, which are rebuilt, never committed.
+.pixi/
+.venv/
 """
 
 PROJECT_YAML = """\
@@ -157,7 +160,7 @@ def create_project(
     Raises
     ------
     ProtocolError
-        If ``root`` already holds a ``project.yaml``, no study is given, a
+        If ``root`` exists and is not empty, no study is given, a
         label is given twice, or a label is not a folder name (lower case,
         digits and ``_``).
     """
@@ -166,8 +169,11 @@ def create_project(
     from polyzymd.analyses.study_scaffold import CC_BY, MIT, condition_folder, create_study
 
     root = Path(root).expanduser().resolve()
-    if (root / PROJECT_FILE).exists():
-        raise ProtocolError(f"{root} already holds a {PROJECT_FILE}.", hint="Choose a new folder.")
+    if root.exists() and any(root.iterdir()):
+        raise ProtocolError(
+            f"{root} is not empty.",
+            hint="Choose a new folder: project init writes and commits everything in it.",
+        )
     if not studies or len(set(studies)) != len(studies):
         raise ProtocolError(
             "A project needs at least one study, each with its own label.",

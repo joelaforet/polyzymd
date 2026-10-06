@@ -30,6 +30,7 @@ from polyzymd.analyses.study_freeze import (
     FreezeResult,
     _git,
     _versions,
+    committable,
     drop_machine_files,
     freeze,
     is_machine_file,
@@ -213,6 +214,7 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
             paths.append("results")
         paths += EXCLUDE_MACHINE_FILES
         _git(root, "add", "--", *paths)
+        paths = committable(root, paths)
         if _git(root, "commit", "--quiet", "-m", f"Freeze project as {tag}", "--", *paths) is None:
             warnings.append("git could not commit the frozen files (is user.name set?)")
         elif (
@@ -305,7 +307,11 @@ def _project_files(project: Any, state: dict | None) -> dict[str, dict[str, Any]
             _git(root, "ls-files", "--others", "--exclude-standard", "--", "results") or ""
         ).splitlines()
     else:
-        listed = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
+        listed = [
+            str(p.relative_to(root))
+            for p in root.rglob("*")
+            if p.is_file() and not is_machine_file(str(p.relative_to(root)))
+        ]
     files = {}
     for name in sorted(set(listed)):
         parts = Path(name).parts

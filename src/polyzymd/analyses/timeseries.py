@@ -136,9 +136,10 @@ def _function_record(function: Callable) -> dict[str, Any]:
     module_file = getattr(function, "__polyzymd_module_file__", None)
     try:
         if module_file:
-            code, basis = _folder_code(Path(module_file)), "module_folder"
+            digest, basis = folder_hash(Path(module_file)), "module_folder"
         else:
-            code, basis = inspect.getsource(function).encode(), "source"
+            source = inspect.getsource(function).encode()
+            digest, basis = hashlib.sha256(source).hexdigest(), "source"
     except (OSError, TypeError):
         warnings.warn(
             f"No source file for {function!r}, so its bytecode is hashed instead; a changed "
@@ -147,17 +148,27 @@ def _function_record(function: Callable) -> dict[str, Any]:
         )
         body = getattr(function, "__code__", None)
         code = repr((body.co_code, body.co_consts) if body else function).encode()
-        basis = "bytecode"
+        digest, basis = hashlib.sha256(code).hexdigest(), "bytecode"
     return {
         "qualname": getattr(function, "__qualname__", repr(function)),
         "module": getattr(function, "__module__", None),
-        "hash": hashlib.sha256(code).hexdigest(),
+        "hash": digest,
         "hash_of": basis,
     }
 
 
 #: Folders whose files are outputs or inputs of their own, never code a function uses.
-_NOT_CODE = {"__pycache__", ".git", "results", "logs", "deposit", "conditions", "slurm"}
+_NOT_CODE = {
+    "__pycache__",
+    "results",
+    "logs",
+    "deposit",
+    "conditions",
+    "figures",
+    "slurm",
+    "slurm_logs",
+    "site-packages",
+}
 #: Files beside code that say where data is on one machine, or that freeze writes.
 _NOT_CODE_FILES = {
     "data.local.yaml",
@@ -173,12 +184,19 @@ def code_files(folder: Path) -> list[Path]:
     """Return every file a function or plan in ``folder`` may use, in path order.
 
     Every file under ``folder``, in subfolders too (helper packages, data
-    files the code reads), except compiled bytecode and the files of
-    ``results/``, ``logs/``, ``deposit/``, ``conditions/``, ``slurm/`` and
-    ``.git/`` folders and of any folder holding a ``study.yaml``, which are
-    a study's data rather than its code, and ``data.local.yaml`` and the
-    files ``freeze`` writes, which change with the machine or the freeze.
+    files the code reads), except compiled bytecode, hidden files and
+    folders (``.git``, ``.pixi``, ``.venv``), ``data.local.yaml`` and the
+    files ``freeze`` writes, and the files of ``results/``, ``logs/``,
+    ``deposit/``, ``conditions/``, ``figures/``, ``slurm/`` and
+    ``site-packages/`` folders and of any folder holding a ``study.yaml``.
+
+    When ``folder`` is itself a study's or project's folder (a function or
+    plan file placed beside ``study.yaml`` or ``project.yaml``), only its
+    Python files count, so editing a description or drawing a figure does
+    not recompute anything; data files the code reads belong in an
+    ``analyses/`` or ``stats/`` folder, or are passed as arguments.
     """
+    root_of_study = (folder / "study.yaml").is_file() or (folder / "project.yaml").is_file()
     files = []
     for path in sorted(folder.rglob("*")):
         relative = path.relative_to(folder)
@@ -186,7 +204,9 @@ def code_files(folder: Path) -> list[Path]:
             not path.is_file()
             or path.suffix == ".pyc"
             or path.name in _NOT_CODE_FILES
+            or any(part.startswith(".") for part in relative.parts)
             or any(part in _NOT_CODE for part in relative.parts[:-1])
+            or (root_of_study and path.suffix != ".py")
         ):
             continue
         if any(
@@ -198,14 +218,21 @@ def code_files(folder: Path) -> list[Path]:
     return files
 
 
-def _folder_code(module_file: Path) -> bytes:
-    """Return the path and content of every file :func:`code_files` gives for the file's folder."""
+def folder_hash(module_file: Path) -> str:
+    """Return the SHA-256 of the path and content of every file :func:`code_files` gives.
+
+    The files are read in blocks, so a large data file beside the code is
+    never held in memory whole.
+    """
     folder = module_file.parent
-    parts = []
+    digest = hashlib.sha256()
     for path in code_files(folder):
-        name = path.relative_to(folder).as_posix().encode()
-        parts.append(name + b"\0" + path.read_bytes() + b"\0")
-    return b"".join(parts)
+        digest.update(path.relative_to(folder).as_posix().encode() + b"\0")
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1 << 22), b""):
+                digest.update(block)
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _file_record(path: str | Path) -> dict[str, str]:

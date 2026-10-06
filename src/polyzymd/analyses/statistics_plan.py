@@ -148,7 +148,13 @@ def replicate_table(study: Any, run: str) -> Any:
     if len(framed):
         how = _REDUCE.get(reduce, "mean")
         grouped = framed.groupby(keys, dropna=False, sort=False)
-        values = grouped["value"].std(ddof=1) if how == "std" else grouped["value"].mean()
+        # A frame that is not finite makes its replicate's value NaN, as in the
+        # report, rather than being skipped as pandas does by default.
+        values = grouped["value"].agg(
+            (lambda v: v.std(ddof=1, skipna=False))
+            if how == "std"
+            else (lambda v: v.mean(skipna=False))
+        )
         framed = values.reset_index().assign(unit=grouped["unit"].first().to_numpy())
     rows = table[~per_frame][[*keys, "value", "unit"]]
     import pandas as pd
@@ -386,16 +392,15 @@ def _science_hash(path: Path) -> str:
 
 
 def _plan_hash(plan: StatsPlan) -> str:
-    """Return the SHA-256 of the plan's file with every Python file beside it.
+    """Return the SHA-256 of the plan's folder: its file and what it may use there.
 
-    The plan's folder is on ``sys.path`` while it runs, so a helper it imports
-    from there is part of the plan.
+    The plan's folder is on ``sys.path`` while it runs, so a helper module or
+    data file it reads from there is part of the plan
+    (:func:`~polyzymd.analyses.timeseries.code_files`).
     """
-    import hashlib
+    from polyzymd.analyses.timeseries import folder_hash
 
-    from polyzymd.analyses.timeseries import _folder_code
-
-    return hashlib.sha256(_folder_code(plan.file)).hexdigest()
+    return folder_hash(plan.file)
 
 
 def stats_folder(target: Any, plan: StatsPlan) -> Path:
@@ -500,8 +505,8 @@ def run_stats_plan(target: Any, plan: StatsPlan) -> Path:
 def stats_status(target: Any, plan: StatsPlan) -> str:
     """Return whether a stats plan's stored output matches its code and the current reports.
 
-    Compares the SHA-256 of the plan's code (its file and every Python file
-    beside it), of the target's stored reports, and of its ``study.yaml`` and
+    Compares the SHA-256 of the plan's code (its file and what it may use in
+    its folder), of the target's stored reports, and of its ``study.yaml`` and
     ``project.yaml`` files (factors, regions, analyses) with those in the
     plan's ``record.json``.
 

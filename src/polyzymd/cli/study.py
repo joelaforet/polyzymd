@@ -163,10 +163,16 @@ def check_command(path: Path) -> None:
 
     try:
         _, gaps = check_metadata(protocol.metadata)
+        # A study of a project publishes with the project's metadata.
+        owner, command = (
+            ("project.yaml", "project freeze")
+            if protocol.project is not None
+            else ("study.yaml", "study freeze")
+        )
         click.echo(
-            f"metadata: {len(gaps)} gaps for publishing; polyzymd study freeze lists them"
+            f"metadata ({owner}): {len(gaps)} gaps for publishing; polyzymd {command} lists them"
             if gaps
-            else "metadata: complete"
+            else f"metadata ({owner}): complete"
         )
     except ProtocolError as exc:
         click.echo(f"error: {' '.join(str(exc).split())}")
@@ -547,7 +553,7 @@ def freeze_command(path: Path, tag: str | None) -> None:
     )
     click.echo(
         f"manifest: {len(result.manifest['files'])} study files, {len(conditions)} conditions, "
-        f"{replicates} replicates hashed"
+        f"{replicates} replicates' files hashed for the manifest"
     )
     click.echo(f"deposit: {result.deposit}; files to upload in {result.upload}")
     for warning in result.warnings:

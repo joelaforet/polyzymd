@@ -541,3 +541,92 @@ class TestSecondAuditFindings:
         )
         assert str(project) not in deposited
         assert not list((result.deposit / "study").rglob("slurm"))
+
+
+class TestThirdAuditFindings:
+    """Regressions for the third pre-release reproducibility audit."""
+
+    def test_missing_nan_is_not_stale_after_a_fresh_analyze(self, tmp_path: Path) -> None:
+        from polyzymd.analyses.study_freeze import stale_runs
+        from tests.analyses.test_study_hardening import TestMissingLabels
+
+        root = TestMissingLabels()._study(tmp_path, ".nan")
+        assert _analyze("byf", "--study", str(root)).exit_code == 0
+        assert "byf" not in stale_runs(load_study_file(root))
+
+    def test_replicate_table_keeps_a_nan_frame(self, project: Path) -> None:
+        (project / "analyses" / "lid.py").write_text(
+            "import math\n\ndef lid_size(lid, reference):\n"
+            "    return math.nan if lid.universe.trajectory.frame == 2 else 1.0\n"
+        )
+        assert _analyze("lid", "--project", str(project)).exit_code == 0
+        table = pz.Project(project).replicate_table("lid")
+        assert table["value"].isna().all()
+
+    def test_root_level_code_hashes_only_python(self, tmp_path: Path) -> None:
+        from polyzymd.analyses.timeseries import code_files
+
+        root = tmp_path / "study"
+        (root / "figures").mkdir(parents=True)
+        (root / ".pixi" / "envs").mkdir(parents=True)
+        for name in ("study.yaml", "count.py", "big.dat", "figures/fig.png", ".pixi/envs/x.py"):
+            (root / name).write_text("x")
+        assert [p.name for p in code_files(root)] == ["count.py"]
+        analyses = root / "analyses"
+        (analyses / "util").mkdir(parents=True)
+        for name in ("f.py", "table.json", "util/k.py"):
+            (analyses / name).write_text("x")
+        assert [p.relative_to(analyses).as_posix() for p in code_files(analyses)] == [
+            "f.py",
+            "table.json",
+            "util/k.py",
+        ]
+
+    def test_purge_spares_packages_installed_under_the_folder(self, tmp_path: Path) -> None:
+        import types
+
+        from polyzymd.analyses.user_functions import _imported_from
+
+        folder = tmp_path / "study"
+        helper = types.ModuleType("helper")
+        helper.__file__ = str(folder / "helper.py")
+        package = types.ModuleType("util.k")
+        package.__file__ = str(folder / "util" / "k.py")
+        installed = types.ModuleType("numpy")
+        installed.__file__ = str(
+            folder / ".pixi" / "envs" / "site-packages" / "numpy" / "__init__.py"
+        )
+        source = types.ModuleType("polyzymd")
+        source.__file__ = str(folder / "src" / "polyzymd" / "__init__.py")
+        resolved = folder.resolve()
+        assert _imported_from(helper, "helper", resolved)
+        assert _imported_from(package, "util.k", resolved)
+        assert not _imported_from(installed, "numpy", resolved)
+        assert not _imported_from(source, "polyzymd", resolved)
+
+    def test_machine_and_hidden_folders_stay_out_of_the_deposit(
+        self, project: Path, monkeypatch
+    ) -> None:
+        from polyzymd.analyses.project_freeze import freeze_project
+
+        assert _analyze("--project", str(project)).exit_code == 0
+        logs = project / "lipa" / "conditions" / "half" / "slurm_logs"
+        logs.mkdir(parents=True)
+        (logs / "run.out").write_text(f"{project}/somewhere\n")
+        (project / ".venv").mkdir()
+        (project / ".venv" / "pyvenv.cfg").write_text(f"home = {project}\n")
+        result = freeze_project(project)  # no git: the copy is made file by file
+        shipped = [p.relative_to(result.deposit).as_posix() for p in result.deposit.rglob("*")]
+        assert not any("slurm_logs" in p or ".venv" in p for p in shipped)
+        assert (
+            "conditions/half/slurm_logs/run.out"
+            not in (project / "lipa" / "manifest.json").read_text()
+        )
+
+    def test_project_init_refuses_a_folder_with_files(self, tmp_path: Path) -> None:
+        (tmp_path / "P").mkdir()
+        (tmp_path / "P" / "notes.txt").write_text("mine")
+        result = CliRunner().invoke(
+            cli, ["project", "init", str(tmp_path / "P"), "--study", "a", "--no-git"]
+        )
+        assert result.exit_code == 2 and "is not empty" in result.output

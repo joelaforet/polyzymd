@@ -187,10 +187,14 @@ class TestStale:
             "        total += atoms.radius_of_gyration()\n"
             "    return factor * total / len(frames)\n"
         )
-        text = (study / "study.yaml").read_text().replace(
-            "  rg: {selection: all}",
-            "  rg: {selection: all}\n  scaled:\n    function: analyses/metrics.py:scaled_rg\n"
-            "    kind: per_replicate\n    selections: {atoms: all}\n    settings: {factor: 2.0}",
+        text = (
+            (study / "study.yaml")
+            .read_text()
+            .replace(
+                "  rg: {selection: all}",
+                "  rg: {selection: all}\n  scaled:\n    function: analyses/metrics.py:scaled_rg\n"
+                "    kind: per_replicate\n    selections: {atoms: all}\n    settings: {factor: 2.0}",
+            )
         )
         (study / "study.yaml").write_text(text)
         result = CliRunner().invoke(
@@ -362,7 +366,7 @@ class TestReproduce:
 
     def test_check_reports_metadata_gaps_and_the_next_step(self, study: Path) -> None:
         result = CliRunner().invoke(cli, ["study", "check", str(study)])
-        assert "metadata: 2 gaps" in result.output
+        assert "metadata (study.yaml): 2 gaps" in result.output
         assert "publish: when the analyses are final, run polyzymd study freeze" in result.output
         freeze(study)
         result = CliRunner().invoke(cli, ["study", "check", str(study)])

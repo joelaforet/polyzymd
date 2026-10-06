@@ -88,9 +88,10 @@ before choosing `--eq`; if a report warns that conditions were analysed up to
 different times, rerun with `--until <shortest>` before comparing them. The
 console shows only reports and warnings; the full log is the `log:` path, so
 read it only when a run fails unexpectedly. If `freeze` warns that replicates
-have no trajectory hashes in progress.json, run the `polyzymd hash-trajectories
---study STUDY` it names (any engine; idempotent; a batch job on a cluster, since it reads
-every trajectory once). To publish, fill `metadata:` and run
+have no recorded trajectory hashes, run the `polyzymd hash-trajectories
+--study STUDY` it names (any engine; idempotent; it writes `trajectory_hashes.json`
+into each run's folder, so it needs write access to the data; a batch job on a
+cluster, since it reads every trajectory once). To publish, fill `metadata:` and run
 `polyzymd study freeze STUDY`; its `warning:` lines list what is missing or stale
 (`docs/source/how_to/study_freeze.md`). Then hand the author `deposit/UPLOAD.md`:
 uploading and publishing on Zenodo are theirs, never an agent's.

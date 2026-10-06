@@ -236,19 +236,22 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
         if ran_with is not None:
             ran_with = portable(ran_with, protocol.root, project_root)
             for key in sorted(set(expected) | set(ran_with)):
-                if json.dumps(expected.get(key), sort_keys=True) != json.dumps(
-                    ran_with.get(key), sort_keys=True
-                ):
+                if _canon(expected.get(key)) != _canon(ran_with.get(key)):
                     found.append(f"setting {key} differs from the one the results were made with")
         if entry.function is not None and "selections" in study:
             if study["selections"] != dict(entry.function.selections):
                 found.append("the selections differ from the ones the results were made with")
+        if study and "entry" not in study:
+            found.append(
+                "the report predates the recording of its analysis entry; rerun polyzymd "
+                "analyze (stored values are reused) so later changes to the entry are seen"
+            )
         if study.get("entry") is not None:
             now_entry = entry_record(protocol, run)
             changed = sorted(
                 key
                 for key in set(now_entry) | set(study["entry"])
-                if now_entry.get(key) != study["entry"].get(key)
+                if _canon(now_entry.get(key)) != _canon(study["entry"].get(key))
             )
             inner = []
             if "function" in changed and isinstance(now_entry.get("function"), dict):
@@ -256,7 +259,7 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
                 inner = sorted(
                     key
                     for key in set(now_entry["function"]) | set(then)
-                    if now_entry["function"].get(key) != then.get(key)
+                    if _canon(now_entry["function"].get(key)) != _canon(then.get(key))
                 )
             for key in [k for k in changed if k != "function"] + inner:
                 found.append(f"the entry's {key} changed since the report")
@@ -283,19 +286,66 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
 
 #: Pathspecs ``git add`` and ``git commit`` leave out when freezing: job files of
 #: ``polyzymd analyze --submit`` and logs, which name one machine's paths.
-EXCLUDE_MACHINE_FILES = [":(exclude)**/slurm/**", ":(exclude)**/logs/**"]
+EXCLUDE_MACHINE_FILES = [
+    ":(exclude)**/slurm/**",
+    ":(exclude)**/slurm_logs/**",
+    ":(exclude)**/logs/**",
+]
+
+
+#: Folders that hold one machine's job files, logs or environments, never published.
+MACHINE_FOLDERS = ("slurm", "slurm_logs", "logs")
 
 
 def is_machine_file(path: str) -> bool:
-    """Return whether ``path`` lies in a ``slurm/`` or ``logs/`` folder, never published."""
-    return any(part in ("slurm", "logs") for part in Path(path).parts[:-1])
+    """Return whether ``path`` is never published: in a job, log or hidden folder, or hidden.
+
+    Job and log folders (``slurm/``, ``slurm_logs/``, ``logs/``) name one
+    machine's paths; hidden ones (``.git``, ``.pixi``, ``.venv``) hold
+    repositories and environments.
+    """
+    parts = Path(path).parts
+    return any(part in MACHINE_FOLDERS for part in parts[:-1]) or any(
+        part.startswith(".") and part not in (".gitignore", ".zenodo.json") for part in parts
+    )
 
 
 def drop_machine_files(folder: Path) -> None:
-    """Delete every ``slurm/`` and ``logs/`` folder under ``folder``, a copy being deposited."""
+    """Delete every job, log and hidden folder under ``folder``, a copy being deposited."""
     for path in sorted(folder.rglob("*"), reverse=True):
-        if path.is_dir() and path.name in ("slurm", "logs"):
+        if path.is_dir() and (path.name in MACHINE_FOLDERS or path.name.startswith(".")):
             shutil.rmtree(path, ignore_errors=True)
+
+
+def _canon(value: Any) -> str:
+    """Return ``value`` as canonical JSON, with NaN and infinities as the strings reports use.
+
+    A report stores ``missing: .nan`` as ``"NaN"``, and NaN never equals
+    itself, so values are compared through this form.
+    """
+    import math
+
+    def plain(item: Any) -> Any:
+        if isinstance(item, float) and not math.isfinite(item):
+            return "NaN" if math.isnan(item) else ("Infinity" if item > 0 else "-Infinity")
+        if isinstance(item, dict):
+            return {str(k): plain(v) for k, v in item.items()}
+        if isinstance(item, (list, tuple)):
+            return [plain(v) for v in item]
+        return item
+
+    return json.dumps(plain(value), sort_keys=True, default=str)
+
+
+def committable(root: Path, paths: list[str]) -> list[str]:
+    """Return the paths git can commit after ``git add``: the pathspecs that match a file.
+
+    A folder holding only excluded files (a ``results/`` with only
+    ``slurm/``) matches nothing, and naming it would make ``git commit`` fail.
+    """
+    return [
+        p for p in paths if p.startswith(":(") or (_git(root, "ls-files", "--", p) or "").strip()
+    ]
 
 
 def report_problems(protocol: Any) -> list[str]:
@@ -1061,7 +1111,8 @@ def freeze(
             str(p.relative_to(root))
             for p in root.rglob("*")
             if p.is_file()
-            and p.relative_to(root).parts[0] not in (DEPOSIT, ".git", "data.local.yaml")
+            and p.relative_to(root).parts[0] not in (DEPOSIT, "data.local.yaml")
+            and not is_machine_file(str(p.relative_to(root)))
         }
     study_files = sorted(
         p
@@ -1151,6 +1202,7 @@ def freeze(
         paths = [p for p in (*GENERATED, ".gitignore", "results") if (root / p).exists()]
         paths += EXCLUDE_MACHINE_FILES
         _git(root, "add", "--", *paths)
+        paths = committable(root, paths)
         if (
             _git(
                 root,
