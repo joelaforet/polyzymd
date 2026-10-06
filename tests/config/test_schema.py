@@ -383,6 +383,18 @@ class TestRunDirectoryNaming:
 
         assert config.format_run_directory_name() == "acn_meoh"
 
+    def test_duration_below_one_ns_is_not_rounded_to_zero(self, minimal_config_data):
+        """A 5 ps run is named 0.005ns, not 0ns; whole-ns durations are unchanged."""
+        from polyzymd.config.schema import SimulationConfig
+
+        minimal_config_data["simulation_phases"]["production"]["duration"] = 0.005
+        assert (
+            SimulationConfig(**minimal_config_data).format_run_directory_name(1)
+            == "TestEnzyme_apo_none_0.005ns_300K_run1"
+        )
+        minimal_config_data["simulation_phases"]["production"]["duration"] = 100.0
+        assert "_100ns_" in SimulationConfig(**minimal_config_data).format_run_directory_name(1)
+
     def test_format_run_directory_name_and_working_directory_match(
         self, minimal_config_data, tmp_path
     ):
@@ -460,7 +472,7 @@ class TestSimulationPhasesConfig:
             time_step=2.0,
         )
 
-        with pytest.raises(ValidationError, match="requires 'equilibration_stages'"):
+        with pytest.raises(ValidationError, match="equilibration_stages is missing: list at least one stage"):
             SimulationPhasesConfig(production=production)
 
     def test_rejects_empty_equilibration_stages(self):

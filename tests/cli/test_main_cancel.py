@@ -7,7 +7,7 @@ writes a STOP marker that the wrapper honours, then cancels the jobs.
 
 Covers:
 - STOP marker contents and location
-- job lookup and cancellation by job name
+- job lookup and cancellation by run directory
 - --resume, --stop-only and --dry-run
 - cancel_slurm_jobs best-effort behaviour outside SLURM
 """
@@ -40,7 +40,6 @@ def _invoke(config_path, sim_config, args, job_ids=("4242",)):
     runner = CliRunner()
     with (
         patch("polyzymd.config.schema.SimulationConfig.from_yaml", return_value=sim_config),
-        patch("polyzymd.workflow.daisy_chain.create_job_name", return_value="pzmd_r1"),
         patch(
             "polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=list(job_ids)
         ) as lookup,
@@ -97,7 +96,7 @@ class TestCancelCommand:
 
         assert result.exit_code == 0, result.output
         assert stop_file_path(working_dir).exists()
-        lookup.assert_called_once_with("pzmd_r1")
+        lookup.assert_called_once_with(working_dir)
         cancel_jobs.assert_called_once_with(["4242"])
         assert "4242" in result.output
 

@@ -332,10 +332,10 @@ def _emit_reference_warnings(sim_config: object, *, phase: str = "cli") -> bool:
     help="Disable colored output (also respects NO_COLOR env var)",
 )
 def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
-    """PolyzyMD: MD simulations for enzyme-polymer systems.
+    """PolyzyMD: MD simulations of proteins with polymers, ligands and co-solvents.
 
     A toolkit for building, running, and analyzing molecular dynamics
-    simulations of enzymes with co-polymers.
+    simulations of proteins alone or with polymers, ligands and co-solvents.
     """
     # Replace the bootstrap handler with the colored formatter
     setup_colored_logging(verbose=verbose, no_color=no_color)
@@ -504,9 +504,9 @@ def build(
                         f"    Monomer: {monomer.label} ({monomer.probability * 100:.0f}%)",
                         phase="build",
                     )
-            else:
-                colored_echo("  Chain C (Polymer): none (no polymer)", phase="build")
-            colored_echo(f"  Chain D+ (Solvent): {sim_config.solvent.primary.model}", phase="build")
+            colored_echo(
+                f"  Chain D+ (Solvent): {sim_config.solvent.primary.model.name}", phase="build"
+            )
             colored_echo(f"    Box padding: {sim_config.solvent.box.padding} nm", phase="build")
             colored_echo(
                 f"    NaCl concentration: {sim_config.solvent.ions.nacl_concentration} M, "
@@ -532,7 +532,7 @@ def build(
             colored_echo(
                 f"  Small molecule FF: {sim_config.force_field.small_molecule}", phase="build"
             )
-            colored_echo(f"  Water model: {sim_config.solvent.primary.model}", phase="build")
+            colored_echo(f"  Water model: {sim_config.solvent.primary.model.name}", phase="build")
             colored_echo(phase="build")
 
             colored_echo("Thermodynamics:", phase="build")
@@ -557,7 +557,7 @@ def build(
                         ramp_info = ""
                     colored_echo(
                         f"    Stage {i}: {stage.resolved_duration:.6f} ns, "
-                        f"{stage.ensemble}{ramp_info}",
+                        f"{stage.ensemble.value}{ramp_info}",
                         phase="build",
                     )
             colored_echo(
@@ -710,7 +710,7 @@ def build(
                 )
                 colored_echo(phase="export")
                 colored_echo(
-                    f"To run: cd {export_dir} && ./{export_result['run_script'].name}",
+                    f"To run: polyzymd run -c {config} -r {rep} --engine gromacs",
                     phase="export",
                 )
 
@@ -971,7 +971,9 @@ def run(
     """Build and run a simulation locally.
 
     For each replicate, this command builds the system and executes the full
-    local simulation workflow using the selected engine.
+    local simulation workflow using the selected engine. It reuses the build
+    of an earlier ``polyzymd build`` when one exists for the config, and logs
+    which build it uses.
 
     Use ``--dry-run`` to validate the configuration and preview planned output
     without building or running.
@@ -1109,6 +1111,7 @@ def _run_gromacs_impl(
     gmx_path : str
         Path to GROMACS executable.
     """
+    from polyzymd.analyses.shared.gromacs import system_prefix
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
 
@@ -1116,54 +1119,57 @@ def _run_gromacs_impl(
     # Determine output directory for GROMACS files
     gromacs_dir = working_dir / "gromacs"
 
-    click.echo(f"Building system for replicate {replicate}...")
-    builder = SystemBuilder.from_config(sim_config)
-    interchange = builder.build_from_config(
-        config=sim_config,
-        working_dir=working_dir,
-        polymer_seed=replicate,
-    )
+    # Reuse the files of an earlier `polyzymd build --format gromacs`.
+    prefix = system_prefix(sim_config)
+    exported = (f"{prefix}.top", f"{prefix}.gro", "em.mdp", "prod.mdp")
+    if all((gromacs_dir / name).is_file() for name in exported):
+        colored_echo(f"Reusing the GROMACS files in {gromacs_dir}", phase="export")
+        eq_mdp_names = sorted(path.name for path in gromacs_dir.glob("eq_*.mdp"))
+    else:
+        click.echo(f"Building system for replicate {replicate}...")
+        builder = SystemBuilder.from_config(sim_config)
+        interchange = builder.build_from_config(
+            config=sim_config,
+            working_dir=working_dir,
+            polymer_seed=replicate,
+        )
 
-    # Get component info for position restraints
-    component_info = builder.get_component_info()
+        # Get component info for position restraints
+        component_info = builder.get_component_info()
 
-    # Export to GROMACS format
-    colored_echo("Exporting to GROMACS format...", phase="export")
-    exporter = GromacsExporter(
-        interchange=interchange,
-        config=sim_config,
-        component_info=component_info,
-        replicate=replicate,
-    )
-    export_result = exporter.export(
-        output_dir=gromacs_dir,
-        gmx_command=gmx_path,
-    )
+        # Export to GROMACS format
+        colored_echo("Exporting to GROMACS format...", phase="export")
+        exporter = GromacsExporter(
+            interchange=interchange,
+            config=sim_config,
+            component_info=component_info,
+            replicate=replicate,
+        )
+        export_result = exporter.export(
+            output_dir=gromacs_dir,
+            gmx_command=gmx_path,
+        )
 
-    colored_echo(f"\nGROMACS files exported to: {gromacs_dir}", phase="export")
-    colored_echo("Files generated:", phase="export")
-    colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
-    colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
-    colored_echo("  - *.itp (molecule parameters)", phase="export")
-    colored_echo(f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export")
-    for eq_mdp in export_result["eq_mdps"]:
-        colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
-    colored_echo(f"  - {export_result['prod_mdp'].name} (production)", phase="export")
-    if export_result.get("posres_defines"):
-        colored_echo("Position restraints added to molecule ITP files:", phase="export")
-        for component, define in export_result["posres_defines"].items():
-            colored_echo(f"  - {component}: #ifdef {define}", phase="export")
-    colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
+        colored_echo(f"\nGROMACS files exported to: {gromacs_dir}", phase="export")
+        colored_echo("Files generated:", phase="export")
+        colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
+        colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
+        colored_echo("  - *.itp (molecule parameters)", phase="export")
+        colored_echo(f"  - {export_result['em_mdp'].name} (energy minimization)", phase="export")
+        for eq_mdp in export_result["eq_mdps"]:
+            colored_echo(f"  - {eq_mdp.name} (equilibration)", phase="export")
+        colored_echo(f"  - {export_result['prod_mdp'].name} (production)", phase="export")
+        if export_result.get("posres_defines"):
+            colored_echo("Position restraints added to molecule ITP files:", phase="export")
+            for component, define in export_result["posres_defines"].items():
+                colored_echo(f"  - {component}: #ifdef {define}", phase="export")
+        colored_echo(f"  - {export_result['run_script'].name} (run script)", phase="export")
+        eq_mdp_names = [p.name for p in export_result["eq_mdps"]]
+        prefix = export_result["gro"].stem
 
     # Run GROMACS workflow
     colored_echo("\nStarting GROMACS simulation...", phase="export")
     colored_echo(f"Using GROMACS executable: {gmx_path}", phase="export")
-
-    # Get equilibration MDP filenames
-    eq_mdp_names = [p.name for p in export_result["eq_mdps"]]
-
-    # Generate prefix from export result
-    prefix = export_result["gro"].stem  # e.g., "lysozyme_PEG" from "lysozyme_PEG.gro"
 
     try:
         runner = GromacsRunner(
@@ -1208,6 +1214,10 @@ def _run_openmm_impl(
     config_path : str
         The config file, recorded in ``progress.json``.
     """
+    from polyzymd.simulation.artifact_integrity import (
+        ArtifactIntegrityError,
+        validate_build_bundle,
+    )
     from polyzymd.simulation.progress import (
         calculate_report_interval,
         load_or_scan_progress,
@@ -1234,12 +1244,21 @@ def _run_openmm_impl(
         ),
     )
 
-    colored_echo(f"Building and running OpenMM in {working_dir}", phase="simulation")
+    # Reuse the build of an earlier `polyzymd build` when it matches this config.
+    try:
+        validate_build_bundle(working_dir, sim_config, allow_legacy=False)
+        reuse_build = True
+    except ArtifactIntegrityError:
+        reuse_build = False
+    if reuse_build:
+        colored_echo(f"Reusing the build in {working_dir}", phase="simulation")
+    else:
+        colored_echo(f"Building the system in {working_dir}", phase="simulation")
     _run_initial_segment(
         sim_config=sim_config,
         working_dir=working_dir,
         replicate=replicate,
-        skip_build=False,
+        skip_build=reuse_build,
         duration_ns=production.duration,
         num_samples=production.samples,
         timestep_fs=production.time_step,
@@ -1253,6 +1272,47 @@ def _run_openmm_impl(
 # =============================================================================
 # Submit Command (SLURM)
 # =============================================================================
+
+
+def _warn_job_hardware(
+    sim_config: "SimulationConfig",
+    engine_name: str,
+    preset: str,
+    partition: str | None,
+    job_gpus: int,
+) -> None:
+    """Print dry-run warnings when the job's hardware does not fit its config.
+
+    Warns when an OpenMM config uses the CPU platform (generated OpenMM job
+    scripts need CUDA), when a job asks for no GPU on the preset's GPU
+    partition, and when a GROMACS config sets neither ``module_load`` nor
+    ``command_prefix`` (a container), so ``gmx`` may be missing on the node.
+    """
+    from polyzymd.workflow.slurm import SlurmConfig
+
+    preset_slurm = SlurmConfig.from_preset(preset)
+    platform = str(getattr(getattr(sim_config, "openmm", None), "platform", "") or "")
+    if engine_name == "openmm" and platform.upper().endswith("CPU"):
+        colored_echo(
+            "  warning: generated OpenMM job scripts need CUDA, but the config sets "
+            "openmm.platform: CPU. Set openmm.platform: CUDA, or run on a CPU with "
+            "`polyzymd run`.",
+            phase="workflow",
+        )
+    elif not job_gpus and not partition and preset_slurm.gpus:
+        colored_echo(
+            f"  warning: the job asks for no GPU, but preset {preset} uses the GPU "
+            f"partition {preset_slurm.partition}; choose a CPU partition with --partition",
+            phase="workflow",
+        )
+    gromacs_cfg = getattr(sim_config, "gromacs", None)
+    if engine_name == "gromacs" and not (gromacs_cfg.module_load or gromacs_cfg.command_prefix):
+        colored_echo(
+            "  warning: neither gromacs.module_load nor gromacs.command_prefix is set; the "
+            "job runs the gmx on the node's PATH and fails if there is none. Set "
+            "gromacs.module_load, or command_prefix for a container.",
+            phase="workflow",
+        )
 
 
 def _print_gromacs_dry_run_details(
@@ -1363,6 +1423,7 @@ def _print_gromacs_dry_run_details(
         colored_echo(f"    Module load:    {gromacs_cfg.module_load}", phase=phase)
     colored_echo(phase=phase)
 
+    _warn_job_hardware(sim_config, "gromacs", preset, partition, effective.gpus)
     colored_echo("  Per-replicate output:", phase=phase)
     for rep in replicate_list:
         working_dir = sim_config.get_working_directory(rep) / "gromacs"
@@ -1660,13 +1721,7 @@ def submit(
                 f"GPUs {slurm.gpus}",
                 phase="workflow",
             )
-            platform = str(getattr(getattr(sim_config, "openmm", None), "platform", "") or "")
-            if platform.upper().endswith("CPU") and slurm.gpus:
-                colored_echo(
-                    f"  warning: the config runs on the CPU platform, but preset {preset} asks "
-                    "for GPUs; choose a CPU partition (--partition) or set openmm.platform: CUDA",
-                    phase="workflow",
-                )
+            _warn_job_hardware(sim_config, engine_name, preset, partition, slurm.gpus)
 
         colored_echo(phase="workflow")
         colored_echo("Dry run complete. No files were written.", phase="workflow")
@@ -1724,7 +1779,7 @@ def submit(
             job_name = create_job_name(sim_config, rep)
 
             if not force:
-                existing = check_existing_slurm_jobs(job_name)
+                existing = check_existing_slurm_jobs(sim_config.get_working_directory(rep))
                 if existing:
                     ids = ", ".join(existing)
                     colored_echo(
@@ -2725,8 +2780,8 @@ def cancel(
     exits 99, and the wrapper reads that as "interrupted, work remains" and
     queues a successor within seconds.  This command writes a STOP marker
     into each replicate's working directory first — the wrapper refuses to
-    submit a successor while it exists — and then cancels the matching
-    queued and running jobs by name.
+    submit a successor while it exists — and then cancels the queued and
+    running jobs that work in that directory.
 
     \b
     Examples:
@@ -2734,11 +2789,7 @@ def cancel(
       polyzymd cancel -c config.yaml -r 1-3 --resume
     """
     from polyzymd.config.schema import SimulationConfig
-    from polyzymd.workflow.daisy_chain import (
-        cancel_slurm_jobs,
-        check_existing_slurm_jobs,
-        create_job_name,
-    )
+    from polyzymd.workflow.daisy_chain import cancel_slurm_jobs, check_existing_slurm_jobs
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
@@ -2755,7 +2806,6 @@ def cancel(
         else:
             working_dir = Path(sim_config.get_working_directory(replicate))
         marker = stop_file_path(working_dir)
-        job_name = create_job_name(sim_config, replicate)
 
         if resume:
             if dry_run:
@@ -2779,13 +2829,13 @@ def cancel(
                 )
             continue
 
-        job_ids = [] if stop_only else check_existing_slurm_jobs(job_name)
+        job_ids = [] if stop_only else check_existing_slurm_jobs(working_dir)
 
         if dry_run:
             queued = ", ".join(job_ids) if job_ids else "none"
             colored_echo(
                 f"[dry-run] replicate {replicate}: would write {marker} "
-                f"and cancel job(s) {queued} (name '{job_name}')",
+                f"and cancel job(s) {queued}",
                 phase="simulation",
             )
             continue
@@ -2797,7 +2847,7 @@ def cancel(
 
         if stop_only:
             colored_echo(
-                f"Replicate {replicate}: leaving job(s) named '{job_name}' running; "
+                f"Replicate {replicate}: leaving job(s) in {working_dir} running; "
                 f"the chain will stop after the current segment",
                 phase="simulation",
             )
@@ -2818,7 +2868,7 @@ def cancel(
             )
         else:
             colored_echo(
-                f"Replicate {replicate}: no queued or running job named '{job_name}'",
+                f"Replicate {replicate}: no queued or running job in {working_dir}",
                 phase="simulation",
             )
 
@@ -2924,7 +2974,6 @@ def _status_report(
     from polyzymd.cli.status_report import (
         SystemReport,
         build_system_report,
-        jobs_by_name,
         query_user_jobs,
         render_agent,
         render_json,
@@ -2939,7 +2988,6 @@ def _status_report(
     now = datetime.now(timezone.utc)
     jobs = None if no_slurm else query_user_jobs()
     slurm_available = jobs is not None
-    jobs_index = jobs_by_name(jobs) if jobs is not None else None
 
     reports: list[SystemReport] = []
     for config_path in config_paths:
@@ -2963,7 +3011,7 @@ def _status_report(
                 sim_config,
                 config_path,
                 engine_inst=engine_inst,
-                jobs_index=jobs_index,
+                jobs=jobs,
                 now=now,
                 save_progress_fn=save_progress,
             )
@@ -3088,9 +3136,11 @@ def _status_table(config: str) -> None:
             need_attention += 1
 
         # Format: "  run1  ████░░░░  100.0%  100.0/100.0 ns  completed"
+        # Runs shorter than 1 ns are shown in ps.
+        scale, unit = (1000, "ps") if total_ns < 1.0 else (1, "ns")
         click.echo(
             f"  {label:<{label_width}}  {bar}  {pct:5.1f}%  "
-            f"{completed_ns:6.1f}/{total_ns:.1f} ns  {status_display}"
+            f"{completed_ns * scale:6.1f}/{total_ns * scale:.1f} {unit}  {status_display}"
         )
 
     click.echo()
@@ -3144,6 +3194,7 @@ def validate(config: str) -> None:
         colored_echo()
         colored_echo("Summary:")
         colored_echo(f"  Name: {sim_config.name}")
+        colored_echo(f"  Engine: {sim_config.engine}")
         colored_echo(f"  Enzyme: {sim_config.enzyme.name}")
 
         if sim_config.substrate:
@@ -3159,6 +3210,8 @@ def validate(config: str) -> None:
                 colored_echo(f"    Monomer {m.label}: {m.probability * 100:.1f}%")
         else:
             colored_echo("  Polymers: Disabled")
+        cosolvents = [cosolvent.name for cosolvent in sim_config.solvent.co_solvents]
+        colored_echo(f"  Co-solvents: {', '.join(cosolvents) or 'none'}")
 
         colored_echo(f"  Temperature: {sim_config.thermodynamics.temperature} K")
         colored_echo(f"  Pressure: {sim_config.thermodynamics.pressure} atm")
@@ -3197,7 +3250,11 @@ def validate(config: str) -> None:
         click.echo(click.style(f"Error: {e}", fg="red"), err=True)
         sys.exit(1)
     except (yaml.YAMLError, ValidationError, ValueError) as e:
-        click.echo(click.style(f"Validation failed: {e}", fg="red"), err=True)
+        # Drop Pydantic's "For further information visit <url>" lines.
+        message = "\n".join(
+            line for line in str(e).splitlines() if "errors.pydantic.dev" not in line
+        )
+        click.echo(click.style(f"Validation failed: {message}", fg="red"), err=True)
         sys.exit(1)
 
 
@@ -3293,7 +3350,9 @@ def init(name: str) -> None:
         colored_echo()
         colored_echo("Next steps:")
         colored_echo(f"  1. Add structure files to {name}/structures/")
-        colored_echo(f"  2. Edit {name}/config.yaml (uncomment and customize sections)")
+        colored_echo(
+            f"  2. Edit {name}/config.yaml: set enzyme.pdb_path, uncomment optional sections"
+        )
         colored_echo(f"  3. Validate: polyzymd validate -c {name}/config.yaml")
         colored_echo(f"  4. Build:    polyzymd build -c {name}/config.yaml -r 1")
         colored_echo()
@@ -3618,12 +3677,12 @@ def recover(
 
     # Best-effort duplicate guard
     if not force:
-        existing = check_existing_slurm_jobs(job_name)
+        existing = check_existing_slurm_jobs(working_dir)
         if existing:
             ids = ", ".join(existing)
             colored_echo(
                 f"Replicate {replicate} already has RUNNING/PENDING SLURM "
-                f"job(s): {ids} (job name '{job_name}'). "
+                f"job(s): {ids} (run directory {working_dir}). "
                 "Use --force to submit anyway.",
                 err=True,
                 phase="workflow",
@@ -3804,7 +3863,10 @@ def info() -> None:
     from polyzymd import __version__
 
     _echo_branding()
-    colored_echo("PolyzyMD - Molecular Dynamics for Enzyme-Polymer Systems", phase="cli")
+    colored_echo(
+        "PolyzyMD - Molecular Dynamics of Proteins with Polymers, Ligands and Co-solvents",
+        phase="cli",
+    )
     colored_echo(f"Version: {__version__}", phase="cli")
     colored_echo("", phase="cli")
 
@@ -3838,6 +3900,12 @@ def info() -> None:
         colored_echo(f"  Pydantic: {pydantic.__version__}", phase="cli")
     except ImportError:
         colored_echo("  Pydantic: NOT INSTALLED", phase="cli")
+
+    import shutil
+
+    for program in ("packmol", "gmx"):
+        found = shutil.which(program)
+        colored_echo(f"  {program}: {found or 'NOT ON PATH'}", phase="cli")
 
     colored_echo("", phase="cli")
     colored_echo("Example configs: polyzymd/templates/examples/", phase="cli")

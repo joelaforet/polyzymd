@@ -190,11 +190,10 @@ class SystemComponentInfo:
                 "Ensure the PDB was built by PolyzyMD with proper chain assignments."
             )
 
-        logger.info(
-            f"Parsed topology: {n_protein} protein atoms (chain A), "
-            f"{n_substrate} substrate atoms (chain B), "
-            f"{n_polymer} polymer atoms (chain C)"
-        )
+        parsed = f"{n_protein} protein atoms (chain A), {n_substrate} substrate atoms (chain B)"
+        if n_polymer:
+            parsed += f", {n_polymer} polymer atoms (chain C)"
+        logger.info(f"Parsed topology: {parsed}")
 
         return cls(
             n_protein_atoms=n_protein,

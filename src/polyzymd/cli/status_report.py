@@ -31,7 +31,9 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Iterable, Mapping, Sequence
+from typing import Callable, Iterable, Sequence
+
+from polyzymd.workflow.daisy_chain import is_within_run_dir
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +54,7 @@ _ERROR_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^\w*Error: .*"),
 )
 _LOG_TAIL_LINES = 80
+_LOG_HEAD_LINES = 200
 _ERROR_MAX_CHARS = 160
 
 
@@ -70,6 +73,7 @@ class SlurmJob:
     elapsed: str = ""
     node: str = ""
     reason: str = ""
+    work_dir: str = ""
 
 
 @dataclass
@@ -160,7 +164,7 @@ def query_user_jobs(user: str | None = None, timeout: int = 20) -> list[SlurmJob
         "--states",
         "RUNNING,PENDING,COMPLETING,CONFIGURING,SUSPENDED,REQUEUED",
         "--format",
-        "%i|%j|%t|%M|%N|%R",
+        "%i|%j|%t|%M|%N|%R|%Z",
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -177,7 +181,7 @@ def query_user_jobs(user: str | None = None, timeout: int = 20) -> list[SlurmJob
 
 
 def parse_squeue_output(text: str) -> list[SlurmJob]:
-    """Parse ``squeue --format "%i|%j|%t|%M|%N|%R"`` output."""
+    """Parse ``squeue --format "%i|%j|%t|%M|%N|%R|%Z"`` output."""
     jobs: list[SlurmJob] = []
     for raw in text.splitlines():
         line = raw.strip()
@@ -186,8 +190,8 @@ def parse_squeue_output(text: str) -> list[SlurmJob]:
         parts = line.split("|")
         if len(parts) < 3:
             continue
-        parts += [""] * (6 - len(parts))
-        job_id, name, state, elapsed, node, reason = parts[:6]
+        parts += [""] * (7 - len(parts))
+        job_id, name, state, elapsed, node, reason, work_dir = parts[:7]
         jobs.append(
             SlurmJob(
                 job_id=job_id.strip(),
@@ -196,16 +200,10 @@ def parse_squeue_output(text: str) -> list[SlurmJob]:
                 elapsed=elapsed.strip(),
                 node=node.strip(),
                 reason=reason.strip(),
+                work_dir=work_dir.strip(),
             )
         )
     return jobs
-
-
-def jobs_by_name(jobs: Iterable[SlurmJob]) -> dict[str, list[SlurmJob]]:
-    out: dict[str, list[SlurmJob]] = {}
-    for job in jobs:
-        out.setdefault(job.name, []).append(job)
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -284,14 +282,35 @@ def estimate_eta_days(remaining_ns: float, rate_ns_per_day: float | None) -> flo
 # ---------------------------------------------------------------------------
 
 
-def find_latest_log(logs_dir: Path | None, job_name: str) -> Path | None:
-    """Newest ``<job_name>.<jobid>.out`` in *logs_dir* by modification time."""
+def find_latest_log(logs_dir: Path | None, job_name: str, run_dir: Path) -> Path | None:
+    """Newest ``<job_name>.<jobid>.out`` in *logs_dir* written for *run_dir*.
+
+    Two conditions can share a job name and a logs folder, so a log counts
+    only when its ``Work dir:`` header line names *run_dir* or a folder
+    inside it.
+    """
     if logs_dir is None or not logs_dir.is_dir():
         return None
-    candidates = list(logs_dir.glob(f"{job_name}.*.out"))
+    candidates = [
+        path
+        for path in logs_dir.glob(f"{job_name}.*.out")
+        if is_within_run_dir(_logged_work_dir(path), run_dir)
+    ]
     if not candidates:
         return None
     return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def _logged_work_dir(path: Path) -> str | None:
+    """The ``Work dir:`` value in the header of a job log, or None."""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for _, line in zip(range(_LOG_HEAD_LINES), fh):
+                if line.startswith("Work dir:"):
+                    return line.partition(":")[2].strip()
+    except OSError:
+        pass
+    return None
 
 
 def _tail_lines(path: Path, n: int) -> list[str]:
@@ -354,7 +373,7 @@ def build_system_report(
     config_path: str | Path,
     *,
     engine_inst,
-    jobs_index: Mapping[str, list[SlurmJob]] | None,
+    jobs: Sequence[SlurmJob] | None,
     now: datetime | None = None,
     job_name_fn: Callable[[object, int], str] | None = None,
     save_progress_fn: Callable[[Path, object], object] | None = None,
@@ -371,9 +390,10 @@ def build_system_report(
     engine_inst
         Engine created for *sim_config*; supplies working-directory resolution
         and ``load_or_scan_progress``.
-    jobs_index
-        ``{job_name: [SlurmJob, ...]}`` for the user's live jobs, or ``None``
-        when SLURM could not be queried.
+    jobs
+        The user's live jobs, or ``None`` when SLURM could not be queried.
+        A job belongs to a replicate when it works in the replicate's run
+        directory.
     """
     from polyzymd.simulation.progress import SimulationStatus
 
@@ -398,7 +418,8 @@ def build_system_report(
     replicates: list[ReplicateReport] = []
     for rep_num, rep_path in sorted(dict(sim_config.discover_replicate_dirs()).items()):
         job_name = job_name_fn(sim_config, rep_num)
-        jobs = list(jobs_index.get(job_name, [])) if jobs_index is not None else []
+        run_dir = rep_path or sim_config.get_working_directory(rep_num)
+        rep_jobs = [job for job in jobs or [] if is_within_run_dir(job.work_dir, run_dir)]
 
         if rep_path is None:
             replicates.append(
@@ -410,7 +431,7 @@ def build_system_report(
                     total_ns=total_ns,
                     fraction=0.0,
                     verdict=VERDICT_NOT_FOUND,
-                    jobs=jobs,
+                    jobs=rep_jobs,
                 )
             )
             continue
@@ -432,7 +453,7 @@ def build_system_report(
         )
         completed_ns = steps_for_display * progress.timestep_fs / 1e6
 
-        verdict = classify(status_str, jobs, has_dir=True)
+        verdict = classify(status_str, rep_jobs, has_dir=True)
         live = verdict == VERDICT_RUNNING
         rate = None
         eta = None
@@ -444,7 +465,7 @@ def build_system_report(
         last_err = None
         last_log = None
         if verdict in (VERDICT_DEAD, VERDICT_NOT_STARTED):
-            log_path = find_latest_log(logs_dir, job_name)
+            log_path = find_latest_log(logs_dir, job_name, run_dir)
             if log_path is None and logs_dir is not None and logs_dir.is_dir():
                 # Build logs are named build_r<N>_<jobid>.out
                 builds = list(logs_dir.glob(f"build_r{rep_num}_*.out"))
@@ -455,7 +476,7 @@ def build_system_report(
                 last_err = last_error_line(log_path)
 
         note = None
-        if jobs_index is None:
+        if jobs is None:
             note = "slurm unavailable"
 
         replicates.append(
@@ -467,7 +488,7 @@ def build_system_report(
                 total_ns=total_ns,
                 fraction=fraction,
                 verdict=verdict,
-                jobs=jobs,
+                jobs=rep_jobs,
                 rate_ns_per_day=rate,
                 eta_days=eta,
                 last_error=last_err,

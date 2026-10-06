@@ -720,8 +720,9 @@ output:
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `{enzyme}` | Enzyme name | "LipA" |
-| `{substrate}` | Substrate name | "ResorufinButyrate" |
-| `{polymer_type}` | Polymer type | "SBMA-EGPMA" |
+| `{substrate}` | Substrate name (hyphens removed), or `apo` without a substrate | "ResorufinButyrate" |
+| `{polymer_type}` | Polymer type prefix and composition, or `none` without polymers | "SBMA-EGPMA_A70_B30" |
+| `{duration}` | Production duration in ns: whole ns from 1 ns up, in full below 1 ns | "100", "0.005" |
 | `{temperature}` | Temperature in K | "300" |
 | `{replicate}` | Replicate number | "1" |
 | `{primary_solvent}` | Primary solvent token | "water_tip3p" |

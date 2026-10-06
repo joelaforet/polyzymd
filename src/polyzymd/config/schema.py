@@ -1254,9 +1254,7 @@ class SimulationPhasesConfig(_ConfigModel):
         """Ensure staged equilibration is configured."""
         if self.equilibration_stages is None:
             raise ValueError(
-                "PolyzyMD now requires 'equilibration_stages' in simulation_phases. "
-                "The legacy 'equilibration' block is no longer supported. "
-                "Convert your config to one or more staged equilibration entries."
+                "simulation_phases.equilibration_stages is missing: list at least one stage"
             )
 
         if len(self.equilibration_stages) == 0:
@@ -1409,7 +1407,9 @@ class OutputConfig(_ConfigModel):
         replicate : int or str
             Replicate number or glob token.
         duration : float, optional
-            Production duration in ns, by default 0.0.
+            Production duration in ns, by default 0.0. Written as whole ns
+            from 1 ns up (``100``) and in full below 1 ns (``0.005``), so a
+            short run does not become ``0``.
         primary_solvent : str, optional
             Primary solvent token, by default ``"water_tip3p"``.
         cosolvent_composition : str, optional
@@ -1436,7 +1436,7 @@ class OutputConfig(_ConfigModel):
             polymer_type=polymer_type,
             temperature=int(temperature),
             replicate=replicate,
-            duration=int(duration),
+            duration=int(duration) if duration >= 1 else f"{duration:g}",
             primary_solvent=primary_solvent,
             cosolvent_composition=cosolvent_composition,
             solvent_composition=solvent_composition,
@@ -1843,7 +1843,7 @@ class SimulationConfig(_ConfigModel):
             "polymer_type": polymer_type,
             "temperature": int(self.thermodynamics.temperature),
             "replicate": replicate,
-            "duration": int(self.simulation_phases.production.duration),
+            "duration": self.simulation_phases.production.duration,
             "primary_solvent": primary_solvent,
             "cosolvent_composition": cosolvent_composition,
             "solvent_composition": solvent_composition,
