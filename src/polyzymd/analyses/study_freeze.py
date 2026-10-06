@@ -1292,18 +1292,24 @@ def is_deposited_name(root: Path, path: str) -> bool:
     )
 
 
+#: Untracked paths that freeze lists in a git repository; it commits them.
+_UNTRACKED = ("results", ".gitignore")
+
+
 def _candidate_files(root: Path, state: dict[str, Any] | None) -> list[str]:
     """Return the files under ``root`` that freeze may publish, before the name rule.
 
-    In a git repository (``state`` given), the tracked files and the untracked
-    files under ``results/``; otherwise every file. Job, log and hidden files
+    In a git repository (``state`` given), the tracked files, the untracked
+    files under ``results/`` and an untracked ``.gitignore`` (freeze writes
+    one and commits it); otherwise every file. Job, log and hidden files
     (:func:`is_machine_file`), anything under a ``deposit/`` folder and
     ``data.local.yaml`` are left out.
     """
     if state is not None:
         # -z: names separated by NUL and not quoted, as git quotes non-ASCII names.
         listed = (_git(root, "ls-files", "-z") or "").split("\0") + (
-            _git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", "results") or ""
+            _git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", *_UNTRACKED)
+            or ""
         ).split("\0")
     else:
         listed = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
@@ -1372,7 +1378,7 @@ def _write_citation(
     commit: str | None,
     method: str,
 ) -> None:
-    """Write ``CITATION.cff`` and ``.zenodo.json`` from ``meta``, and ignore freeze's outputs in git."""
+    """Write ``CITATION.cff`` and ``.zenodo.json`` from ``meta``."""
     from polyzymd.analyses.study_metadata import citation_cff, dump_cff, zenodo_json
 
     (root / CITATION).write_text(
@@ -1382,6 +1388,10 @@ def _write_citation(
         json.dumps(zenodo_json(meta, version=version, released=released, method=method), indent=2)
         + "\n"
     )
+
+
+def _write_gitignore(root: Path) -> None:
+    """Add the entries of :data:`_IGNORED` that ``root/.gitignore`` lacks, creating it if needed."""
     gitignore = root / ".gitignore"
     lines = gitignore.read_text().splitlines() if gitignore.exists() else []
     missing = [(entry, why) for entry, why in _IGNORED if entry not in lines]
@@ -1604,6 +1614,8 @@ def freeze(
 
     from polyzymd.analyses.study_file import STUDY_FILE
 
+    if publish:
+        _write_gitignore(root)
     study_files = [p for p in _listed_files(root, state) if p not in GENERATED]
     # A project names the files it leaves out once, for all its studies.
     left_out = left_out_files(root, state) if publish else None
@@ -1681,9 +1693,8 @@ def freeze(
         commit = _commit_and_tag(root, paths, tag, "study", warnings)
         if commit is None:
             _drop_tag(root, manifest, meta, released, _method(protocol))
-    # Listed again now that the files freeze writes exist (a first .gitignore).
     generated = [p for p in GENERATED if (root / p).exists()]
-    files = sorted({*_listed_files(root, state), *generated})
+    files = sorted({*study_files, *generated})
     _copy_frozen_folder(root, deposit, tag, commit, files, _condition_configs(protocol))
     from polyzymd.analyses.study_upload_guide import deposit_readme
 

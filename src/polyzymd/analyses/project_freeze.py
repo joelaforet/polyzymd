@@ -33,6 +33,7 @@ from polyzymd.analyses.study_freeze import (
     _listed_files,
     _versions,
     _write_citation,
+    _write_gitignore,
     freeze,
     group_warnings,
     left_out_files,
@@ -136,6 +137,7 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
     warnings[:] = group_warnings(warnings, names)
     released = date.today().isoformat()
     version = tag or "unversioned"
+    _write_gitignore(root)
     manifest: dict[str, Any] = {
         "schema": PROJECT_MANIFEST_SCHEMA,
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),

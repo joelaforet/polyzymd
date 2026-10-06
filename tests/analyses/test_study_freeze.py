@@ -722,6 +722,17 @@ def test_the_gitignore_written_by_a_first_freeze_is_deposited(study: Path) -> No
     assert ".gitignore" in _zip_names(result.deposit, "study")
 
 
+def test_the_manifest_lists_the_gitignore_written_by_a_first_freeze(study: Path) -> None:
+    """The study zip holds the files manifest.json lists and the files freeze writes."""
+    from polyzymd.analyses.study_freeze import GENERATED
+
+    _git(study, "rm", "-q", ".gitignore")
+    _git(study, "commit", "-qm", "No .gitignore")
+    result = freeze(study)
+    assert ".gitignore" in result.manifest["files"]
+    assert _zip_names(result.deposit, "study") - set(GENERATED) == set(result.manifest["files"])
+
+
 def test_freeze_refuses_a_condition_config_outside_the_study(tmp_path: Path) -> None:
     """Analysis reads a config outside the study, but freeze could not deposit it."""
     root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
