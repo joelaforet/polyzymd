@@ -121,8 +121,8 @@ trpcage_300K_run1/
 
 ## Step 4: Make a study folder
 
-A study holds the conditions of one protein, the analysis protocol and the
-stored results. This study has one condition, `Water`:
+A study holds conditions that you compare with each other, the analysis
+protocol and the stored results. This study has one condition, `Water`:
 
 ```bash
 polyzymd study init study --condition "Water=config.yaml" --equilibration 0ns

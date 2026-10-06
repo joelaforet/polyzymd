@@ -160,8 +160,8 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
     }
     (root / MANIFEST).write_text(json.dumps(manifest, indent=1) + "\n")
     method = (
-        f"Analysed with PolyzyMD {polyzymd.__version__}: {len(studies)} studies, one per "
-        f"protein ({', '.join(studies)}), each against its own control; the replicate is "
+        f"Analysed with PolyzyMD {polyzymd.__version__}: {len(studies)} studies "
+        f"({', '.join(studies)}), each against its own control; the replicate is "
         "the sampling unit."
     )
     _write_citation(
@@ -237,7 +237,7 @@ def _studies_section(project: Any) -> str:
     lines = [
         "## Studies",
         "",
-        "This deposit is a project: `project.yaml` lists one study per protein, and the "
+        "This deposit is a project: `project.yaml` lists its studies, and the "
         "analyses each runs. Reproduce every study's analyses with "
         "`polyzymd analyze --project .`, and read every result with "
         '`pz.Project(".").results(run)`.',

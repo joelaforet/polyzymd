@@ -1053,7 +1053,7 @@ polyzymd analyze rg -c A/config.yaml -c B/config.yaml --set selection='protein a
 
 ## polyzymd project
 
-Commands on a project folder: one paper's studies, one per protein; see
+Commands on a project folder: the studies of one paper; see
 {doc}`../how_to/project` and {doc}`../explanation/projects`.
 
 ### polyzymd project check

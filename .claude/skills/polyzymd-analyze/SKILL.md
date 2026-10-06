@@ -64,9 +64,12 @@ report lands in `report.txt` there (`report.json` with `--format json`, or
 scripts without submitting. Load the cluster's SLURM module first, such as
 `module load slurm/blanca`. See `docs/source/how_to/hpc_execution.md`.
 
-Study folders and projects. A study is one protein; a project is one paper
-with several proteins (`project.yaml` lists the studies and the analyses each
-runs).
+Study folders and projects. A study is a set of conditions compared with each
+other in one analysis frame (same residue numbering, reference structures,
+regions, equilibration window and control); a different protein usually needs
+its own study, and one study can vary several factors, such as temperature
+and polymer. A project is one paper with several studies (`project.yaml`
+lists the studies and the analyses each runs).
 
 - Before you write your own function, run `polyzymd analyze --list`. It names
   each shipped analysis, what it measures, and its settings with defaults.

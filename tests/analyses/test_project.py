@@ -1,4 +1,4 @@
-"""Projects: one study per protein, shared analyses, statistics, project init and freeze."""
+"""Projects: the studies of one paper, shared analyses, statistics, project init and freeze."""
 
 from __future__ import annotations
 

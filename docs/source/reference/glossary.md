@@ -6,18 +6,27 @@ The docs use each of these terms with one meaning only.
 
 ```{glossary}
 project
-  One paper. A project folder holds one study for each protein or system in
-  the paper. Make one with `polyzymd project init`. See
+  The studies of one paper. `project.yaml` lists the studies and holds the
+  analyses that they share, the `stats/` scripts, the figure code and the
+  publishing metadata. Make one with `polyzymd project init`. See
   {doc}`../explanation/projects`.
 
 study
-  One protein or system, simulated under several conditions. A study folder
-  holds the conditions, `study.yaml`, the stored results and the figures. Make
-  one with `polyzymd study init`. See {doc}`../explanation/study_folders`.
+  A set of conditions that you compare with each other: a slice of the space
+  of independent variables. All its conditions share one analysis frame: the
+  same atom and residue numbering, reference structures, named regions,
+  equilibration window and control. PolyzyMD compares conditions only within
+  one study. Conditions that cannot share one frame, most often because the
+  protein differs, go in separate studies. A study folder holds the
+  conditions, `study.yaml`, the stored results and the figures. Make one with
+  `polyzymd study init`. See {doc}`../explanation/projects` and
+  {doc}`../explanation/study_folders`.
 
 condition
-  One simulated system: one `config.yaml`. Two conditions of a study differ
-  in a polymer, a co-solvent, a temperature or another setting.
+  One point in the space of independent variables: one value of each
+  variable, such as the protein variant, the polymer composition, the
+  co-solvent and the temperature. One `config.yaml`. Its `factors:` name its
+  coordinates.
 
 replicate
   One independent simulation of a condition. The replicate number seeds the

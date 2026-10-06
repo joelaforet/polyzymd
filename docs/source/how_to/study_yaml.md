@@ -1,14 +1,17 @@
 # Run a study from `study.yaml`
 
-A {term}`study` is one protein (or other system) under its conditions.
+A {term}`study` is a set of conditions that you compare with each other.
+All its conditions share one analysis frame: the same residue numbering,
+reference structures, named regions, equilibration window and control.
 `study.yaml` holds the analysis protocol of the study: the conditions, the
 equilibration window and the settings of each analysis. The simulation of
 each condition stays in its own `config.yaml`.
 
 Use `study.yaml` when you analyze a study again and again, or when someone
-else must reproduce it. To analyze several proteins the same way, put one
-study per protein in a {doc}`project <project>`. For the design of study
-folders and how they are published, see {doc}`../explanation/study_folders`.
+else must reproduce it. To analyze several studies the same way, such as one
+study for each protein, put them in a {doc}`project <project>`. For the
+design of study folders and how they are published, see
+{doc}`../explanation/study_folders`.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -341,4 +344,4 @@ trajectories are present, the conditions load as usual
 | The settings of a run | `study.settings("rg")` |
 | A file of the study, from a relative path in its settings | `study.path(study.settings("rmsf")["reference_file"])`. `study.root` is the folder |
 | The Python code of the study, as the analyses import it | `study.module("interface")` for `analyses/interface.py` (also looked up in the project folder) |
-| Several proteins | `pz.Project("Paper_1")`, with the same `results` and `replicate_table`, and a `study` column |
+| Several studies | `pz.Project("Paper_1")`, with the same `results` and `replicate_table`, and a `study` column |

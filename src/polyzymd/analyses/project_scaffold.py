@@ -1,8 +1,8 @@
 """Create a project folder: the layout ``polyzymd project init`` writes.
 
 A project holds one paper: ``project.yaml``, the shared ``analyses/``,
-``stats/`` and ``figures/`` folders, and one study folder per protein, each
-with a ``study.yaml`` to fill in. See the "Projects and studies" explanation
+``stats/`` and ``figures/`` folders, and one study folder for each study
+label, each with a ``study.yaml`` to fill in. See the "Projects and studies" explanation
 page and the tutorial on moving existing studies into a project.
 """
 
@@ -43,9 +43,9 @@ logs/
 
 PROJECT_YAML = """\
 # The analyses and publishing metadata of this project: one paper or thesis
-# chapter. Each study below is one protein (or other system) with its own
-# conditions, structures and regions; the analyses listed here run in every
-# study. See https://polyzymd.readthedocs.io/en/latest/how_to/project.html
+# chapter. Each study below is a set of conditions compared with each other,
+# with its own conditions, structures and regions; the analyses listed here
+# run in every study. See https://polyzymd.readthedocs.io/en/latest/how_to/project.html
 
 {studies}
 # Run in every study, with that study's regions and structures.
@@ -59,7 +59,7 @@ analyses: {{}}
 #     selection: protein and not element H
 #     reference_file: structure reference
 #     equilibration: 0ns
-#   lid_opening:                               # only the studies that have a lid
+#   lid_opening:                               # only the studies whose protein has a lid
 #     function: analyses/lid.py:lid_distance
 #     kind: timeseries
 #     unit: A
@@ -77,9 +77,10 @@ metadata:                     # TODO before polyzymd project freeze
 """
 
 STUDY_YAML = """\
-# One protein (or other system) of the project: its conditions, structures
-# and regions. Analyses come from ../project.yaml; add this protein's own
-# analyses under analyses:.
+# One study of the project: conditions compared with each other. They share
+# one residue numbering, these structures and regions, one equilibration
+# window and the control (the first condition). Analyses come from
+# ../project.yaml; add this study's own analyses under analyses:.
 description: TODO             # e.g. B. subtilis lipase A (1ISP) at 363 K
 equilibration: 0ns            # TODO: the burn-in to discard from every replicate
 
@@ -102,7 +103,7 @@ conditions: {}
 #     config: conditions/sbma_50
 #     factors: {sbma_fraction: 0.5}           # optional: what varies, for trend tests and plots
 
-# Optional: analyses only this protein runs.
+# Optional: analyses only this study runs.
 analyses: {}
 """
 
@@ -148,7 +149,7 @@ def create_project(
     root : str or Path
         The new project folder.
     studies : list of str
-        Study labels, one per protein; each is also its folder name.
+        Study labels; each is also its folder name.
     holder : str, optional
         Copyright holder written into the licence files.
     git : bool, optional
@@ -179,7 +180,7 @@ def create_project(
     if not studies or len(set(studies)) != len(studies):
         raise ProtocolError(
             "A project needs at least one study, each with its own label.",
-            hint="Give --study LABEL once per protein, such as --study lipa363 --study rml333.",
+            hint="Give --study LABEL once per study, such as --study lipa363 --study rml333.",
         )
     for label in studies:
         if condition_folder(label) != label:
@@ -209,9 +210,9 @@ def create_project(
     (root / "LICENSE-code").write_text(MIT.format(year=year, holder=holder))
     (root / "LICENSE-data").write_text(CC_BY.format(year=year, holder=holder))
     (root / "README.md").write_text(
-        f"# {root.name}\n\nA PolyzyMD project: one paper, one study per protein "
+        f"# {root.name}\n\nA PolyzyMD project: the studies of one paper "
         f"({', '.join(studies)}).\n`project.yaml` lists the studies and the analyses each "
-        "runs; each study's `study.yaml` holds that protein's conditions, structures and "
+        "runs; each study's `study.yaml` holds its conditions, structures and "
         "regions.\n\n```bash\npolyzymd project check .\npolyzymd analyze --project .\n"
         "polyzymd project freeze .\n```\n"
     )

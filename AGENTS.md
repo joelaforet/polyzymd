@@ -136,7 +136,9 @@ protocol: conditions, the equilibration window (an entry may set its own
 `equilibration:`/`until:`, `StudyFile.window`) and each analysis run's
 settings, including the study's own functions (`function: file.py:name`,
 `analyses/user_functions.py`, keyed on the whole file's hash).
-A study is one protein (or system); a project (`project.yaml`,
+A study is a set of conditions compared in one analysis frame (same residue
+numbering, structures, regions, window and control; a different protein
+usually needs its own study); a project (`project.yaml`,
 `analyses/project_file.py`, `analyses/project.py`, `cli/project.py`) lists a
 paper's studies and the analyses each runs, with each study's `regions:` and
 `structures:` resolved into `region <name>` / `structure <name>`

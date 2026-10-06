@@ -1,4 +1,4 @@
-"""``Project``: the studies of one paper, one per protein, read together.
+"""``Project``: the studies of one paper, read together.
 
 :class:`Project` reads ``project.yaml`` (:mod:`polyzymd.analyses.project_file`)
 and gives each study as a :class:`~polyzymd.analyses.study.Study`.
@@ -39,7 +39,7 @@ class ProjectResults:
 
 
 class Project:
-    """The studies listed in a ``project.yaml``, one per protein.
+    """The studies listed in a ``project.yaml``.
 
     The file is read and checked when the object is made. Each study is
     opened as a :class:`~polyzymd.analyses.study.Study` the first time it is

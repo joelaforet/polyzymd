@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/joelaforet/polyzymd/schemas/project-1.schema.json",
   "title": "PolyzyMD project.yaml",
-  "description": "One paper: its studies, one per protein, the analyses each study runs with its own regions and structures, and publishing metadata. See docs/source/explanation/projects.md.",
+  "description": "One paper: its studies, the analyses each study runs with its own regions and structures, and publishing metadata. See docs/source/explanation/projects.md.",
   "type": "object",
   "required": [
     "studies"
