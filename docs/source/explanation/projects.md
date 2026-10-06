@@ -1,15 +1,12 @@
 # Projects and studies: one paper, one study per protein
 
-A paper about polymer–enzyme systems rarely studies one protein. It asks the
-same questions of several (does a zwitterionic copolymer preserve the native
-structure of lipase A, of CALB, of RML?) and answers them with the same
-analyses. PolyzyMD organises that work in four levels:
+PolyzyMD organizes experiments in four levels:
 
 | Level | Is | Holds | File |
 |---|---|---|---|
-| Project | One paper or thesis chapter | The analyses every study runs, the statistical plan, publishing metadata, figures | `project.yaml` |
-| **Study** | **One protein (or other system) under its conditions**, such as lipase A at 363 K | Its equilibration window, its structures, its named residue regions, its conditions | `study.yaml` |
-| Condition | One simulated variant of that protein, such as a polymer composition | A simulation `config.yaml`, optionally its `factors:` | `conditions/<name>/config.yaml` |
+| Project | One paper | The analyses every study runs, the statistical plan, publishing metadata, figures | `project.yaml` |
+| **Study** | **One protein (or other system) under its conditions**, such as protein X | Its equilibration window, its structures, its named residue regions, its conditions | `study.yaml` |
+| Condition | One simulated variant of that protein, such as a polymer composition or a different temperature | A simulation `config.yaml`, optionally its `factors:` | `conditions/<name>/config.yaml` |
 | Replicate | One run of a condition | Trajectories; its number is its random seed | the run directory |
 
 ## A study is tied to its protein
