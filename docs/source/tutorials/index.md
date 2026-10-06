@@ -13,6 +13,8 @@ want a worked example with a clear beginning, middle, and end.
   Follow the full path from finished trajectories to comparison figures.
 - [Measure Surface Accessibility with SASA](sasa_analysis.md)
   Compare the protein's SASA with and without polymer to quantify shielding.
+- [Move Existing Studies into a Project](move_studies_into_project.md)
+  Start a project for a paper and move one study per protein into it, keeping their results.
 
 ## What Belongs Here
 
@@ -38,4 +40,5 @@ Run Your First Analysis <first_analysis>
 Prepare a PDB for OpenFF and PolyzyMD <prepare_pdb_for_openff>
 Analyze a Multi-Condition Study <analysis_complete_workflow>
 Measure Surface Accessibility with SASA <sasa_analysis>
+Move Existing Studies into a Project <move_studies_into_project>
 ```

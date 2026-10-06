@@ -51,32 +51,8 @@ study folder per protein, each with a `study.yaml` to fill in, and makes the
 project a git repository. Add each protein's conditions with
 `polyzymd study add-condition Paper_1/lipa363 ...`.
 
-### Move existing studies in
-
-Studies made before projects existed, one `study.yaml` per protein, move in
-with `LABEL=path`:
-
-```bash
-polyzymd project init Paper_1 \
-    --study lipa363=Paper_1_REDO/lipa363 \
-    --study calb343=Paper_1_REDO/calb343 \
-    --study rml333=Paper_1_REDO/rml333
-```
-
-Each old study is only read. Its conditions' configs and input files are
-copied into `conditions/`, where its runs are today goes into the study's
-`data.local.yaml`, and its `analyses/` code and `results/` are copied. A
-setting that names a file, such as a `reference_file`, is copied into the
-study's `structures/` and written as `structure reference` (or the file's
-name, when the study names several). Analyses that every study defines alike
-move into `project.yaml`. The command lists settings it left as absolute
-paths. Stored results stay valid: the next `polyzymd analyze --project`
-reuses them, unless they were written by a PolyzyMD version that identified
-input files differently, in which case they are measured again once.
-
-Then name each protein's regions and replace residue lists that differ only
-by numbering with `region <name>`, so the analysis can move into
-`project.yaml`.
+To bring studies you already have into a project, follow the tutorial
+{doc}`../tutorials/move_studies_into_project`.
 
 ## Write each protein's `study.yaml`
 
@@ -104,7 +80,6 @@ conditions; factors become columns of the results table.
 ## Write `project.yaml`
 
 ```yaml
-polyzymd: 1.3.0
 studies:                       # label: folder
   lipa363: lipa363
   calb343: calb343

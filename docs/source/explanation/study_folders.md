@@ -1,37 +1,22 @@
 # Study folders: publishing a reproducible MD study
 
-```{admonition} Status: design, partly implemented
-:class: warning
-This page is the agreed design of PolyzyMD study folders. It is implemented in
-slices: A (the protocol file), B (the folder), C (publishing) and D (upload to
-Zenodo), plus a small slice that records trajectory hashes when segments
-finish. Each section names its slice. Slices A, B and C are implemented:
-`study.yaml`, `polyzymd analyze --study`, `polyzymd study check` and
-`Study.results` ({doc}`../how_to/study_yaml`); `polyzymd study init`,
-`data.local.yaml`, `polyzymd study locate`, `--data` and git provenance
-({doc}`../how_to/study_folder`); and `polyzymd study freeze`
-({doc}`../how_to/study_freeze`), which also prepares the upload to Zenodo
-and writes the steps (slice D: PolyzyMD uploads and publishes nothing). The
-segment hashes recorded when simulations finish and identity by content do
-not exist yet.
-```
-
-A **study folder** holds one MD study: every condition's simulation config,
+A **study folder** holds one MD study, one protein (or other system) under
+its conditions: every condition's simulation config,
 the analysis protocol, the analysis and figure code, and the stored results.
 You can version it with git, zip it, and publish it with the paper, with the
 trajectories deposited on Zenodo. Someone who installs the PolyzyMD version
-the study names can then reproduce every reported figure from the folder
+its manifest records can then reproduce every reported figure from the folder
 alone, and every analysis from the folder plus the trajectories. The design
 follows the FAIR principles (Wilkinson et al. 2016; Barker et al. 2022) and the
 TRUE principles for molecular simulation (Thompson et al. 2020).
 
 ## Three levels of reproduction
 
-| Level | The reproducer has | Command | Slice |
-|---|---|---|---|
-| 1. Figures | The study folder only | Run the scripts in `figures/`, which read stored results with `pz.Study("study.yaml").results(name)` and need no trajectories | A |
-| 2. Analyses | The folder plus the trajectories | `polyzymd study locate DIR`, then `polyzymd analyze --study study.yaml` | A, B |
-| 3. Simulations | The folder plus compute | Each `conditions/<label>/config.yaml`, with the replicate number as the random seed | existing |
+| Level | The reproducer has | Command |
+|---|---|---|
+| 1. Figures | The study folder only | Run the scripts in `figures/`, which read stored results with `pz.Study("study.yaml").results(name)` and need no trajectories |
+| 2. Analyses | The folder plus the trajectories | `polyzymd study locate DIR`, then `polyzymd analyze --study study.yaml` |
+| 3. Simulations | The folder plus compute | Each `conditions/<label>/config.yaml`, with the replicate number as the random seed |
 
 Level 3 reproduces results within the statistical noise of MD, not bit for
 bit: floating-point arithmetic, parallel reduction order and hardware differ
@@ -57,12 +42,12 @@ my_study/
 └── .gitignore
 ```
 
-`polyzymd study init DIR` (slice B) writes this layout, runs `git init` and
+`polyzymd study init DIR` writes this layout, runs `git init` and
 makes the first commit. Conditions point at their configs in place; nothing
 is copied. Structures are duplicated across conditions that share them,
 which costs little next to the trajectories.
 
-## `study.yaml`, the analysis protocol (slice A)
+## `study.yaml`, the analysis protocol
 
 `config.yaml` describes one simulation. `study.yaml` holds everything else
 needed to regenerate the paper's figures from the trajectories: the
@@ -71,7 +56,6 @@ Analysis settings change far more often than simulation settings, which is
 why they live in their own file.
 
 ```yaml
-polyzymd: 1.3.0                 # the version that produced the results
 equilibration: 100ns            # one window for every condition and replicate
 stride: 1                       # optional
 replicates: [1, 2, 3, 4, 5]     # optional; default: every run found
@@ -109,7 +93,7 @@ metadata: {}                    # see "Publishing metadata"
 | `polyzymd analyze --study study.yaml` | Runs every listed analysis; with `--submit`, one SLURM array per analysis |
 | `polyzymd study check` | Validates paths, configs, setting names and that every function imports, without loading trajectories; prints where each condition's runs were found |
 
-## Where the trajectories are: `data.local.yaml` (slice B)
+## Where the trajectories are: `data.local.yaml`
 
 A trajectory's path is a pointer to where the file lives now, not part of the
 study. Moving data from cluster storage to a Zenodo download must not change
@@ -142,20 +126,23 @@ that test must not depend on where the files sit, so a moved or downloaded
 study keeps its results and its numbers can be checked against the published
 ones.
 
-| Input | Identified by | Status |
-|---|---|---|
-| A condition's config | Its simulation content: input structures by the SHA-256 of their content; projects and scratch directories left out | Implemented |
-| A function | Its source, or its whole module file for user functions | Implemented |
-| Trajectory and topology files | Their path relative to the folder holding the runs, their size and their SHA-256 | Implemented |
+| Input | Identified by |
+|---|---|
+| A condition's config | Its simulation content: input structures by the SHA-256 of their content; projects and scratch directories left out |
+| A function | Its source, or its whole module file for user functions |
+| Trajectory and topology files | Their path relative to the folder holding the runs, their size and their SHA-256 |
+| A file an analysis is given, such as a reference structure | Its name and its SHA-256, not its location |
 
 The SHA-256 of a trajectory comes from `progress.json`, where the simulation
 runner records it when each production segment completes (bookkeeping only:
-trajectories and results do not change), or else is computed once and kept
+trajectories and results do not change), or from `trajectory_hashes.json`,
+where `polyzymd hash-trajectories` records it for runs whose runner did not,
+or else is computed once and kept
 in a cache (`~/.cache/polyzymd/hashes`, or `$POLYZYMD_CACHE_DIR/hashes`) for
 as long as the file's size and modification time are unchanged. So copied or
 downloaded data is hashed once and its stored results are reused.
 
-## Git and provenance (slice B)
+## Git and provenance
 
 - Reuse is decided by content, never by commit, so committing a fix to a
   figure script recomputes nothing.
@@ -164,7 +151,7 @@ downloaded data is hashed once and its stored results are reused.
 - Uncommitted changes give a warning, never a refusal.
 - PolyzyMD never commits for you after `study init`.
 
-## Publishing: `polyzymd study freeze` (slice C)
+## Publishing: `polyzymd study freeze`
 
 `freeze` prepares the folder for deposit:
 
@@ -195,7 +182,7 @@ downloaded data is hashed once and its stored results are reused.
    `CITATION.cff` at the top level, unzipped so that they stay indexed and
    previewable (Tiemann et al. 2024).
 
-Slice D prepares the upload rather than doing it: publishing on Zenodo is
+`freeze` prepares the upload rather than doing it: publishing on Zenodo is
 permanent and mints a DOI, so it stays the author's step. `freeze` writes
 `deposit/upload/`, exactly the files to add to a Zenodo record within its
 limits (100 files and 50 GB by default), with the study, engine inputs and

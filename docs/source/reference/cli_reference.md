@@ -1047,17 +1047,15 @@ Exits 2 when the project file or a study cannot be read.
 ### polyzymd project init
 
 ```bash
-polyzymd project init PATH --study LABEL[=OLD_STUDY] [--study ...] [--holder NAME] [--no-git]
+polyzymd project init PATH --study LABEL [--study ...] [--holder NAME] [--no-git]
 ```
 
-Writes a project folder at `PATH`: `project.yaml`, `analyses/`, `stats/`,
-`figures/`, licences, and one study folder per `--study`. `LABEL` alone makes
-a new study; `LABEL=path` copies in the study whose `study.yaml` is at that
-path or in that folder (configs and input files, `data.local.yaml` from where
-its runs are, `analyses/`, `results/`; file settings become `structure
-<name>`), reading it only. Analyses every moved study defines alike go into
-`project.yaml`. Labels must be folder names (lower case, digits, `_`).
-Without `--no-git` the project becomes a git repository with one commit.
+Writes a project folder at `PATH`: `project.yaml` listing the studies,
+`analyses/`, `stats/` and `figures/`, licences, a README, and one study folder
+per `--study` with a `study.yaml` to fill in. Labels are also folder names
+(lower case, digits, `_`). Without `--no-git` the project becomes a git
+repository with one commit. To move existing studies in, see
+{doc}`../tutorials/move_studies_into_project`.
 
 ### polyzymd project freeze
 

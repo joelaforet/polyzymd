@@ -28,7 +28,6 @@ Put it at the top of the study folder. Paths are relative to the file, so
 the folder can be moved as a whole.
 
 ```yaml
-polyzymd: 1.3.0                 # the version that produced the results
 equilibration: 100ns            # the window for every analysis that sets none
 stride: 1                       # optional
 replicates: 1-5                 # optional; default: every run found
@@ -55,7 +54,6 @@ analyses:
 | `stride`, `replicates` | Optional, as `--stride` and `--replicates` |
 | `until` | Optional end of a common analysis window, such as `38ns`, as `--until`: production after it is left out for every condition. `common` ends every replicate at the shortest one's last time |
 | `analyses` | Run name to settings. The settings are those `--set` takes; `analysis:` names the shipped analysis when the run name is not one |
-| `polyzymd` | The PolyzyMD version the study was run with; a different version gives a warning |
 | `metadata` | Publishing metadata, read by `polyzymd study freeze`; see {doc}`study_freeze` |
 
 A key PolyzyMD does not know is refused with the nearest known spelling, so a

@@ -109,8 +109,9 @@ per replicate, the test unit), a slope test per numeric condition factor in
 every `--study` report (`TrendReport`), and `stats: {plan: file.py:fn}` run
 by `polyzymd stats` (`cli/stats.py`), stored with a record that check uses
 to say when it is stale.
-`polyzymd project init` (`analyses/project_scaffold.py`) writes a project or
-copies existing studies in (`LABEL=path`), and `polyzymd project freeze`
+`polyzymd project init` (`analyses/project_scaffold.py`) writes a project
+with empty studies (existing studies are moved in by hand, following
+`docs/source/tutorials/move_studies_into_project.md`), and `polyzymd project freeze`
 (`analyses/project_freeze.py`) freezes every study with
 `freeze(..., publish=False)` and publishes the project once. File arguments
 are recorded by name and SHA-256, never location, so moved studies reuse
