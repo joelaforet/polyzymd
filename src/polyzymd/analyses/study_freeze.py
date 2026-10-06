@@ -529,7 +529,36 @@ def without_machine_paths(text: str) -> str:
     saying how a reproducer points the study at their copy. The config hash
     leaves both out, so stored results still match. A ``Copied by polyzymd
     study init from <path>`` header keeps only the file name.
+
+    The lines are rewritten in place, so comments stay. When that leaves
+    either key with another value, or the text no longer reads as YAML (a
+    flow-style ``output: {...}`` or a block scalar), the config is read and
+    written back with the two keys set, without its comments.
     """
+    import re
+
+    import yaml
+
+    rewritten = _rewrite_machine_lines(text)
+    try:
+        output = (yaml.safe_load(rewritten) or {}).get("output") or {}
+        wanted = {"projects_directory": ".", "scratch_directory": "data"}
+        if all(output.get(key, value) in (value, None) for key, value in wanted.items()):
+            return rewritten
+    except (yaml.YAMLError, AttributeError):
+        pass
+    data = yaml.safe_load(text) or {}
+    output = data.get("output")
+    if isinstance(output, dict):
+        output["projects_directory"] = "."
+        if "scratch_directory" in output:
+            output["scratch_directory"] = "data"
+    header = [line for line in rewritten.splitlines()[:1] if line.startswith("# Copied by")]
+    return "\n".join([*header, f"# {_PLACEHOLDER}", yaml.safe_dump(data, sort_keys=False)])
+
+
+def _rewrite_machine_lines(text: str) -> str:
+    """Rewrite the ``projects_directory``/``scratch_directory`` lines and the copy header."""
     import re
 
     lines = []
@@ -732,10 +761,12 @@ def _replicates(
                 protocol.stride,
                 protocol.data.get(label),
             )
-        except ProtocolError as exc:
+        except ProtocolError:
+            # The error names this machine's paths, which the manifest must not.
             warnings.append(
                 f"{label}: the trajectories are not on this machine, so its replicates are not "
-                f"hashed and its engine inputs and final frames are not deposited ({exc})"
+                "hashed and its engine inputs and final frames are not deposited; run polyzymd "
+                "study check on a machine that has them"
             )
             conditions[label] = {**record, "replicates": {}}
             continue
@@ -810,8 +841,6 @@ def _replicates(
                 },
                 "production_frames": int(universe.trajectory.n_frames),
                 "production_ns": round((universe.trajectory.n_frames - 1) * dt / 1000.0, 6),
-                "frames_analysed": int(len(replicate.frames)),
-                "first_analysed_ns": float(replicate.times[0]) if len(replicate.times) else None,
                 "trajectory_variant": provenance.trajectory_variant,
                 "bond_source": provenance.bond_source,
                 "warnings": list(provenance.warnings),
@@ -930,10 +959,8 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
             f"equilibration window {protocol.equilibration} removed from every replicate"
             + _own_windows(protocol)
             + f"; stride {protocol.stride}",
-            {
-                label: {r: v["frames_analysed"] for r, v in c["replicates"].items()}
-                for label, c in manifest["conditions"].items()
-            },
+            # Each analysis has its own window, so its report holds the frames it used.
+            {run: f"results/{run}/report.json: frames_per_replicate" for run in protocol.analyses},
         ),
         "1c_replicates_and_statistics": item(
             "the replicate is the sampling unit; 95% Student t intervals and Welch tests with "
@@ -1004,6 +1031,15 @@ def _next_tag(root: Path, prefix: str = "study") -> str:
     return f"{prefix}-v{max(numbers, default=0) + 1}"
 
 
+def _has_identity(root: Path) -> bool:
+    """Return whether git has a user name and email for commits in ``root``, set or in the environment."""
+    return all(
+        os.environ.get(f"GIT_COMMITTER_{key.upper()}")
+        or (_git(root, "config", f"user.{key}") or "").strip()
+        for key in ("name", "email")
+    )
+
+
 def _git_preflight(
     root: Path, tag: str | None, what: str
 ) -> tuple[dict[str, Any] | None, str | None, list[str]]:
@@ -1026,9 +1062,23 @@ def _git_preflight(
     if state is None:
         warnings.append(f"the {what} is not a git repository, so freeze cannot commit or tag it")
     elif state["inputs_uncommitted"]:
-        warnings.append(
-            f"uncommitted inputs are not part of the tagged {what}: "
-            + ", ".join(state["inputs_uncommitted"])
+        # The tag and the deposit hold the committed files; the manifest must
+        # describe exactly those, so every input is committed first.
+        listed = state["inputs_uncommitted"]
+        raise ProtocolError(
+            f"The {what} has {len(listed)} uncommitted input files, which the tag and the "
+            f"deposit would not contain: {', '.join(listed[:10])}"
+            + (f" and {len(listed) - 10} more" if len(listed) > 10 else "")
+            + ".",
+            hint=f"Commit them first: git -C {root} add -A && git -C {root} commit -m 'Inputs "
+            "for publication'. List files that must stay private in .gitignore. Results, logs "
+            "and the deposit are committed by freeze itself.",
+        )
+    elif not _has_identity(root):
+        raise ProtocolError(
+            "git has no user name and email here, so freeze could not commit and tag.",
+            hint=f"Set them: git -C {root} config user.name 'Your Name' && git -C {root} config "
+            "user.email you@example.org",
         )
     tag = tag or (_next_tag(root, what) if state else None)
     if state and tag and _git(root, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}"):
@@ -1231,15 +1281,24 @@ def freeze(
 
     protocol = load_study_file(root)
     root = protocol.root
+    if publish and protocol.project is not None:
+        raise ProtocolError(
+            f"{root.name} is a study of the project {protocol.project.root}, whose "
+            "project.yaml and shared analyses/ its results depend on.",
+            hint=f"Freeze the whole project: polyzymd project freeze {protocol.project.root}",
+        )
     meta, warnings = check_metadata(protocol.metadata)
-    state = None
     if publish:
         state, tag, found = _git_preflight(root, tag, "study")
         warnings += found
     else:
         # The project checks and publishes the metadata once, for every study,
-        # and commits and tags them together.
+        # and commits and tags them together; the study's files are those git
+        # tracks in the project's repository.
         warnings, tag = [], None
+        from polyzymd.analyses.study_git import git_state
+
+        state = git_state(root)
     for run, why in stale_runs(protocol).items():
         warnings.append(f"run {run} may be stale: {'; '.join(why)}")
     warnings.extend(report_problems(protocol))
@@ -1328,7 +1387,7 @@ def freeze(
         meta,
         version=version,
         released=released,
-        commit=manifest["git"]["commit"],
+        commit=None,
         method=_method(protocol),
     )
     commit = None

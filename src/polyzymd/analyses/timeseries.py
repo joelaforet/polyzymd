@@ -34,6 +34,7 @@ Benjamini, Y. (2010). Discovering the false discovery rate. Journal of the
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import inspect
 import json
@@ -132,11 +133,19 @@ def _function_record(function: Callable) -> dict[str, Any]:
     helper module or package it imports from there, or a data file it reads,
     is part of what produced the result. Editing any of those files changes
     the record.
+
+    A function shipped with PolyzyMD is hashed with its module's file and the
+    files of the PolyzyMD modules that file imports (:func:`_shipped_code_hash`),
+    so a fix to a helper it calls, such as ``_occlusion_frames``, recomputes
+    the results it made.
     """
     module_file = getattr(function, "__polyzymd_module_file__", None)
+    module = getattr(function, "__module__", None) or ""
     try:
         if module_file:
             digest, basis = folder_hash(Path(module_file)), "module_folder"
+        elif module.startswith("polyzymd.") and _shipped_code_hash(module):
+            digest, basis = _shipped_code_hash(module), "polyzymd_modules"
         else:
             source = inspect.getsource(function).encode()
             digest, basis = hashlib.sha256(source).hexdigest(), "source"
@@ -155,6 +164,53 @@ def _function_record(function: Callable) -> dict[str, Any]:
         "hash": digest,
         "hash_of": basis,
     }
+
+
+#: PolyzyMD modules whose text never changes a result: error messages and hints.
+_NOT_RESULT_MODULES = {"polyzymd.analyses.exceptions"}
+
+
+def _json_number(value: float) -> float | str:
+    """Return ``value``, or its name when it is not finite, so a record compares equal to itself."""
+    return value if math.isfinite(value) else str(value)
+
+
+@functools.lru_cache(maxsize=None)
+def _shipped_code_hash(module: str) -> str | None:
+    """Return the SHA-256 of a PolyzyMD module's file and the PolyzyMD modules it imports.
+
+    The imports are read from the module's source (``import polyzymd.x`` and
+    ``from polyzymd.x import y``, at any depth of the file, as PolyzyMD
+    imports inside functions), one level deep. Each file is hashed by module
+    name and content. :data:`_NOT_RESULT_MODULES` are left out. Returns
+    ``None`` when the module has no source file.
+    """
+    import ast
+    import importlib.util
+
+    def located(name: str) -> Path | None:
+        try:
+            spec = importlib.util.find_spec(name)
+        except (ImportError, ValueError):
+            return None
+        origin = getattr(spec, "origin", None) if spec else None
+        return Path(origin) if origin and origin.endswith(".py") else None
+
+    own = located(module)
+    if own is None:
+        return None
+    names = {module}
+    for node in ast.walk(ast.parse(own.read_text())):
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            names.add(node.module)
+        elif isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+    digest = hashlib.sha256()
+    for name in sorted(n for n in names if n.split(".")[0] == "polyzymd"):
+        path = located(name)
+        if path is not None and name not in _NOT_RESULT_MODULES:
+            digest.update(name.encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()
 
 
 #: Folders whose files are outputs or inputs of their own, never code a function uses.
@@ -425,6 +481,8 @@ def run_timeseries(
             "kwargs": {key: _argument_record(value) for key, value in kwargs.items()},
         },
         "unit": unit,
+        # The order of the parts names the stored columns, so it keys reuse.
+        **({"parts": list(parts)} if parts is not None else {}),
     }
     series: dict[str, list[ReplicateSeries]] = {}
     for condition in study:
@@ -476,8 +534,7 @@ def run_timeseries(
                     json.dumps({**stored, "versions": _versions()}, indent=1)
                 )
                 if parts is not None:
-                    # The part names, for polyzymd.analyses.results; the function's
-                    # source, in the record, already decides reuse.
+                    # The part names, for polyzymd.analyses.results.
                     (folder / "parts.json").write_text(json.dumps(list(parts)))
             else:
                 stored = json.loads((folder / "record.json").read_text())
@@ -662,6 +719,10 @@ def run_per_replicate(
             "kwargs": {key: _argument_record(value) for key, value in kwargs.items()},
         },
         "unit": unit,
+        # The order of the parts names the stored columns, so it keys reuse.
+        **({"parts": list(parts)} if parts is not None else {}),
+        # Readers fill a label a replicate lacks with it, as the report does.
+        **({"missing": _json_number(missing)} if missing is not None else {}),
     }
     rows: dict[str, list[tuple]] = {}
     found: dict[str, list[Path]] = {}
@@ -720,10 +781,9 @@ def run_per_replicate(
                 (folder / "record.json").write_text(
                     json.dumps({**record, "chosen": chosen, "versions": _versions()}, indent=1)
                 )
-            if parts is not None and not (folder / "parts.json").is_file():
-                # The part names, for polyzymd.analyses.results. They are not in
-                # the record, so they decide nothing about reuse.
-                (folder / "parts.json").write_text(json.dumps(list(parts)))
+                if parts is not None:
+                    # The part names, for polyzymd.analyses.results; the record keys them.
+                    (folder / "parts.json").write_text(json.dumps(list(parts)))
             if given is None:
                 value = float(values) if parts is None else values.tolist()
             else:

@@ -214,7 +214,8 @@ def record_data_location(study_root: Path, label: str, config: Path) -> None:
     """Write where the runs of ``config`` are into the study's ``data.local.yaml``, for ``label``.
 
     The directory is the config's own scratch directory, read before the
-    copy takes it out; entries for other conditions are kept.
+    copy takes it out; a relative one is relative to the config's folder.
+    Entries for other conditions are kept.
     """
     import yaml
 
@@ -225,10 +226,13 @@ def record_data_location(study_root: Path, label: str, config: Path) -> None:
         where = SimulationConfig.from_yaml(Path(config)).output.effective_scratch_directory
     except (OSError, ValueError):
         return
+    where = Path(where).expanduser()
+    if not where.is_absolute():
+        where = Path(config).resolve().parent / where
     file = Path(study_root) / DATA_FILE
     current = yaml.safe_load(file.read_text()) if file.is_file() else None
     current = dict(current or {})
-    current[label] = str(where)
+    current[label] = str(where.resolve())
     file.write_text(
         "# Where this machine keeps each condition's runs; never committed or published.\n"
         + yaml.safe_dump(current, sort_keys=False)

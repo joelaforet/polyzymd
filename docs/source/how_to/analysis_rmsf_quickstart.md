@@ -108,7 +108,7 @@ Change what is measured and what it is measured against with `--set`:
 |---|---|---|
 | `selection` | `protein and name CA` | Atoms measured |
 | `alignment_selection` | `protein and name CA` | Atoms superposed on the reference |
-| `reference_mode` | `centroid` for `rmsf`; for `rmsd_per_residue`, `external` when `reference_file` is set and `centroid` otherwise | `centroid`, `average`, `frame` or `external` |
+| `reference_mode` | `external` when `reference_file` is set, otherwise `centroid` | `centroid`, `average`, `frame` or `external` |
 | `reference_frame` | `1` | Production frame used by `frame` mode, counted from 1 after the equilibration window |
 | `reference_file` | none | Structure file used by `external` mode |
 | `core` | all selected residues | MDAnalysis selection of the residues combined into the `core_*` values |

@@ -77,8 +77,9 @@ see {doc}`../how_to/analysis_triad_quickstart`.
 `rms_decomposition` once per replicate, with `selection` measured and
 `alignment_selection` fitted (both `protein and name CA` by default) against
 `pz.reference(reference_mode, "(selection) or (alignment_selection)", frame=reference_frame, file=reference_file, alignment=alignment_selection)`.
-`reference_mode` defaults to `centroid` for `rmsf`; for `rmsd_per_residue` it is
-`external` when `reference_file` is set and `centroid` otherwise. Each
+Without `reference_mode`, the reference is `reference_file` when one is set
+(`external`), otherwise the `centroid` frame. A `reference_file` with another
+mode is refused. Each
 replicate's `core_<part>` value is the square root of the mean over the core
 residues of the part's mean-square row, so
 `core_rmsd_per_residue² = core_rmsf² + core_offset²`. The core is the residues of

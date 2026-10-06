@@ -120,9 +120,11 @@ Freezing:
    has its own, `study-1.schema.json`.
 
 4. Commits those files and `results/`, and only those, and tags the commit
-   `study-v1` (then `study-v2`, ...; `--tag NAME` chooses). Your uncommitted
-   inputs are never committed: they are listed as a warning and are not part
-   of the tagged study.
+   `study-v1` (then `study-v2`, ...; `--tag NAME` chooses). Freeze refuses to
+   start while any input is uncommitted, and names those files: the tag and
+   the deposit hold only committed files, and the manifest must describe
+   exactly them. Commit your inputs first. Freeze also refuses when git has
+   no user name and email.
 5. Lays out `deposit/`, and prepares the upload: `deposit/upload/`,
    `deposit/trajectories.csv` and `deposit/UPLOAD.md`.
 

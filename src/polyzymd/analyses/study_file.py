@@ -265,7 +265,9 @@ def _analysis_entry(run: str, raw: Any, path: Path) -> AnalysisEntry:
         (*_ENTRY_KEYS, *WINDOW_KEYS, *FUNCTION_ANALYSES[analysis]),
         f"{path}: analyses.{run}",
     )
-    return AnalysisEntry(run, analysis, settings, **own)
+    # A relative file, such as reference_file: structures/ref.pdb, is relative
+    # to the file that lists the analysis, whatever the shell's folder.
+    return AnalysisEntry(run, analysis, _resolve_files(settings, path.parent), **own)
 
 
 def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:

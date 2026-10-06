@@ -56,7 +56,7 @@ Change what is measured and what it is measured against with `--set`:
 |---|---|---|
 | `selection` | `protein and name CA` | Atoms whose RMSD is measured; each frame is superposed on these atoms |
 | `alignment_selection` | `protein and name CA` | Atoms superposed to build the `average` and `centroid` references |
-| `reference_mode` | `centroid` | `centroid`, `average`, `frame` or `external` |
+| `reference_mode` | `external` when `reference_file` is set, otherwise `centroid` | `centroid`, `average`, `frame` or `external` |
 | `reference_frame` | `1` | Production frame used by `frame` mode, counted from 1 after the equilibration window |
 | `reference_file` | none | Structure file used by `external` mode |
 

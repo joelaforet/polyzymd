@@ -277,13 +277,19 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
         sys.exit(EXIT_STUDY_ERROR)
     located = {label: str(folder) for label, folder in protocol.data.items()}
     missing = []
+    configs = {}
     for label, config_path in protocol.conditions.items():
         try:
-            config = SimulationConfig.from_yaml(config_path)
+            configs[label] = SimulationConfig.from_yaml(config_path)
         except (OSError, ValueError) as exc:
             click.echo(f"error: {label}: cannot read {config_path}: {' '.join(str(exc).split())}")
             missing.append(label)
-            continue
+    # Run directories are found by name only, so two conditions whose configs
+    # name their runs alike cannot be told apart, except by manifest.json.
+    named: dict[str, list[str]] = {}
+    for label, config in configs.items():
+        named.setdefault(config.format_run_directory_name("*"), []).append(label)
+    for label, config in configs.items():
         parents = find_run_parents(config, directory)
         if not parents:
             click.echo(
@@ -293,6 +299,27 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
             missing.append(label)
             continue
         matching = [p for p in parents if _matches_manifest(protocol.root, label, p, verify)]
+        alike = [other for other in named[config.format_run_directory_name("*")] if other != label]
+        if alike and not matching:
+            # One folder per condition, named as in the study (no_polymer/,
+            # sds/), as a deposit lays them out, tells them apart.
+            from polyzymd.analyses.study_scaffold import condition_folder
+
+            matching = [p for p in parents if condition_folder(label) in p.parts]
+            matching = matching if len(matching) == 1 else []
+        if alike and not matching:
+            click.echo(
+                f"error: {label}: its runs are named like those of {', '.join(alike)} "
+                f"({config.format_run_directory_name('*')}), so their folders cannot be told "
+                f"apart: {', '.join(str(p) for p in parents)}"
+            )
+            click.echo(
+                f"fix: Write the folder of {label}'s runs into {protocol.root / DATA_FILE} by "
+                f"hand ('{label}: /path/to/folder'), or run study locate on a directory that "
+                "holds only its runs."
+            )
+            missing.append(label)
+            continue
         candidates = matching or list(parents)
         best = max(candidates, key=lambda parent: (len(parents[parent]), -len(parent.parts)))
         located[label] = str(best)

@@ -395,7 +395,7 @@ def test_submit_passes_the_study_monomers_to_tasks_only(monomer_configs, tmp_pat
     assert result.exit_code == 0, result.output
     (tasks,) = (tmp_path / "out").rglob("replicates.sbatch")
     task = shlex.split(tasks.read_text().splitlines()[-1])
-    assert 'polymer_types=["EGM", "SBM"]' in task
+    assert "polymer_types=[EGM, SBM]" in task
     report = (tasks.parent / "report.sbatch").read_text()
     assert "polymer_types" not in report
 

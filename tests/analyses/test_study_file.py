@@ -194,10 +194,14 @@ class TestAnalyzeStudy:
         assert "-c cannot be given" in result.output
 
     def test_label_picks_conditions(self, study_dir: Path) -> None:
-        result = _analyze("rg", "--study", str(study_dir), "--label", "Polymer")
+        import json
+
+        result = _analyze("rg", "--study", str(study_dir), "--label", "Polymer", "--format", "json")
         assert result.exit_code == 0, result.output
-        report = read_results(study_dir / "results" / "rg").report
-        assert [c.label for c in report.conditions] == ["Polymer"]
+        report = json.loads(result.stdout[result.stdout.index("{") :])
+        assert [c["label"] for c in report["conditions"]] == ["Polymer"]
+        # A run of some conditions never replaces the run's report.
+        assert not (study_dir / "results" / "rg" / "report.json").exists()
         assert _analyze("rg", "--study", str(study_dir), "--label", "Nope").exit_code == 2
 
     def test_unlisted_shipped_analysis_runs_with_a_note(self, study_dir: Path) -> None:

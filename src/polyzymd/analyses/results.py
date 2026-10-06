@@ -105,6 +105,32 @@ def _rows(record: dict[str, Any], folder: Path) -> list[tuple]:
     ]
 
 
+def _missing_rows(filled: list[tuple[dict, list[tuple]]], rows: list[tuple]) -> list[tuple]:
+    """Return the rows of labels a replicate lacks, with the run's ``missing`` value.
+
+    A function with ``labels="returned"`` stores only the labels each
+    replicate returned. The report gives a label that some replicate lacks
+    the value ``missing`` (an unformed hydrogen bond is 0), so the stored
+    table does the same: each replicate whose record names ``missing`` gets a
+    row for every label of that quantity and part found in any replicate.
+    """
+    labels: dict[tuple, set] = {}
+    for name, _c, _r, part, label, *_ in rows:
+        if label is not None:
+            labels.setdefault((name, part), set()).add(label)
+    extra = []
+    for record, own in filled:
+        missing = float(record["missing"])
+        base = (record["name"], record["condition"], int(record["replicate"]))
+        have = {(part, label) for _n, _c, _r, part, label, *_ in own}
+        for (name, part), every in labels.items():
+            if name != record["name"]:
+                continue
+            for label in sorted(every - {lab for p, lab in have if p == part}, key=str):
+                extra.append((*base, part, label, None, None, missing, record.get("unit")))
+    return extra
+
+
 def read_results(folder: str | Path) -> StoredResults:
     """Read every stored value and the report of one analysis run's results folder.
 
@@ -126,8 +152,14 @@ def read_results(folder: str | Path) -> StoredResults:
             "trajectories.",
         )
     rows: list[tuple] = []
+    filled: list[tuple[dict, list[tuple]]] = []
     for path in records:
-        rows.extend(_rows(json.loads(path.read_text()), path.parent))
+        record = json.loads(path.read_text())
+        own = _rows(record, path.parent)
+        rows.extend(own)
+        if record.get("missing") is not None:
+            filled.append((record, own))
+    rows.extend(_missing_rows(filled, rows))
     report_path = folder / REPORT_FILE
     report = (
         ProtocolReport.model_validate_json(report_path.read_text())

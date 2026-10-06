@@ -238,7 +238,7 @@ class TestFreeze:
         manifest = freeze(study).manifest
         assert manifest["schema"] == "polyzymd-study-manifest/1"
         replicate = manifest["conditions"]["Polymer"]["replicates"]["2"]
-        assert replicate["frames_analysed"] == 7 and replicate["production_frames"] == 10
+        assert "frames_analysed" not in replicate and replicate["production_frames"] == 10
         assert all(len(f["sha256"]) == 64 for f in replicate["files"])
         assert not any(f["path"].startswith("/") for f in replicate["files"])
         assert manifest["conditions"]["Polymer"]["resolved_config"]["enzyme"][
@@ -320,12 +320,13 @@ class TestFreeze:
         with pytest.raises(ProtocolError, match="already exists"):
             freeze(study, tag="study-v1")
 
-    def test_warnings_never_block(self, study: Path) -> None:
+    def test_uncommitted_inputs_are_refused(self, study: Path) -> None:
+        """The tag and deposit hold committed files, so the manifest may describe only those."""
         (study / "analyses" / "draft.py").write_text("x = 1\n")
-        result = freeze(study)
-        assert result.tag
-        assert any("analyses/draft.py" in w for w in result.warnings)
-        assert "analyses/draft.py" not in _git(study, "show", "--name-only", "--format=", "HEAD")
+        with pytest.raises(ProtocolError, match="uncommitted input") as info:
+            freeze(study)
+        assert "analyses/draft.py" in str(info.value) and "git" in info.value.hint
+        assert not _git(study, "tag")
 
     def test_without_trajectories(self, study: Path, tmp_path: Path) -> None:
         shutil.rmtree(tmp_path / "scratch")

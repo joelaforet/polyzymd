@@ -39,8 +39,8 @@ def replicate_table(study: Any, run: str) -> Any:
     Returns
     -------
     pandas.DataFrame
-        Columns ``study``, ``condition``, ``replicate``, ``part``, ``label``,
-        ``value``, ``unit``, then one per factor the conditions declare
+        Columns ``study``, ``condition``, ``replicate``, ``name`` (the stored
+        quantity), ``part``, ``label``, ``value``, ``unit``, then one per factor the conditions declare
         (``None`` where a condition does not declare it). ``study`` holds the
         study's label in its project, or else the name of its folder.
 
@@ -53,7 +53,9 @@ def replicate_table(study: Any, run: str) -> Any:
     table = stored.table
     entry = study.protocol.analyses.get(run) if study.protocol is not None else None
     reduce = entry.function.reduce if entry is not None and entry.function is not None else "mean"
-    keys = ["condition", "replicate", "part", "label"]
+    # A run can store several quantities (two hydrogen-bond summaries), so the
+    # quantity's name is part of every row's identity.
+    keys = ["condition", "replicate", "name", "part", "label"]
     per_frame = table["frame"].notna()
     framed = table[per_frame]
     if len(framed):

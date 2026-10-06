@@ -209,12 +209,22 @@ class TestData:
     def test_data_option(self, tmp_path: Path, sources: dict[str, Path]) -> None:
         root = _study(tmp_path, sources, git=False)
         shutil.move(tmp_path / "scratch" / "polymer", tmp_path / "elsewhere")
+        import json
+
         result = _analyze(
-            "rg", "--study", str(root), "--label", "Polymer", "--data", str(tmp_path / "elsewhere")
+            "rg",
+            "--study",
+            str(root),
+            "--label",
+            "Polymer",
+            "--data",
+            str(tmp_path / "elsewhere"),
+            "--format",
+            "json",
         )
         assert result.exit_code == 0, result.output
-        report = read_results(root / "results" / "rg").report
-        assert report.conditions[0].mean == pytest.approx(2.21)
+        report = json.loads(result.stdout[result.stdout.index("{") :])
+        assert report["conditions"][0]["mean"] == pytest.approx(2.21)
 
     def test_locate_writes_data_local_yaml(self, tmp_path: Path, sources: dict[str, Path]) -> None:
         root = _study(tmp_path, sources, git=False)

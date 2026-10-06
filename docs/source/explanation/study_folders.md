@@ -148,7 +148,8 @@ downloaded data is hashed once and its stored results are reused.
   figure script recomputes nothing.
 - Every stored record and report records the study's commit and whether the
   working tree had uncommitted changes, and which files.
-- Uncommitted changes give a warning, never a refusal.
+- During analysis, uncommitted changes give a warning, never a refusal.
+  `freeze` publishes, so it refuses uncommitted inputs.
 - PolyzyMD never commits for you after `study init`.
 
 ## Publishing: `polyzymd study freeze`

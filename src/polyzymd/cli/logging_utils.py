@@ -7,6 +7,7 @@ logging with visual emphasis on warnings and errors in terminal output.
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from typing import TYPE_CHECKING
 
@@ -147,7 +148,12 @@ def analysis_logging(log_dir: "Path", command: str, verbose: bool = False) -> "P
 
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
-    path = log_dir / f"polyzymd-{command}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+    # Array tasks can start in the same second; the task ID or process ID
+    # keeps their logs apart.
+    task = os.environ.get("SLURM_ARRAY_TASK_ID")
+    tag = f"task{task}" if task else f"pid{os.getpid()}"
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = log_dir / f"polyzymd-{command}-{stamp}-{tag}.log"
     root = logging.getLogger()
     for handler in root.handlers:
         if isinstance(handler, logging.StreamHandler) and not isinstance(

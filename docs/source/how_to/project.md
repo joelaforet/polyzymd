@@ -100,7 +100,7 @@ trend is fitted over the polymer conditions only.
 ## Write `project.yaml`
 
 ```yaml
-studies:                       # label: folder
+studies:                       # label: folder directly inside the project
   lipa363: lipa363
   calb343: calb343
   rml333: rml333

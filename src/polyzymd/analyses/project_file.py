@@ -167,6 +167,14 @@ def load_project_file(path: str | Path) -> ProjectFile:
         for label, folder in studies_raw.items()
     }
     for label, folder in studies.items():
+        # A study finds its project in the folder above it, and the project
+        # publishes only what is under it, so each study is directly inside.
+        if folder.parent != file.parent.resolve():
+            raise ProtocolError(
+                f"{file}: study {label} is {folder}, not a folder directly inside the project.",
+                hint=f"Move it to {file.parent / folder.name} and list it as "
+                f"'{label}: {folder.name}'.",
+            )
         if not (folder / STUDY_FILE).is_file():
             raise ProtocolError(
                 f"{file}: study {label} has no {STUDY_FILE} in {folder}.",
@@ -181,6 +189,12 @@ def load_project_file(path: str | Path) -> ProjectFile:
     analyses: dict[str, dict[str, Any]] = {}
     runs_in: dict[str, list[str] | None] = {}
     for run, entry in analyses_raw.items():
+        if entry is not None and not isinstance(entry, Mapping):
+            raise ProtocolError(
+                f"{file}: analyses.{run} must be a mapping of settings, got {entry!r}.",
+                hint=f"For example '{run}: {{selection: protein}}', or '{run}: {{}}' for the "
+                "defaults.",
+            )
         entry = dict(entry or {})
         listed = entry.pop(STUDIES_KEY, None)
         if listed is not None:

@@ -98,14 +98,14 @@ FUNCTION_ANALYSES = {
     "rmsd": {
         "selection": "protein and name CA",
         "alignment_selection": "protein and name CA",
-        "reference_mode": "centroid",
+        "reference_mode": None,
         "reference_frame": 1,
         "reference_file": None,
     },
     "rmsf": {
         "selection": "protein and name CA",
         "alignment_selection": "protein and name CA",
-        "reference_mode": "centroid",
+        "reference_mode": None,
         "reference_frame": 1,
         "reference_file": None,
         "highlight_residues": [],
@@ -535,7 +535,9 @@ def _analyze_function(
     of ``selection``. ``rmsd`` measures :func:`~polyzymd.analyses.functions.rmsd`
     of ``selection`` from the reference that ``reference_mode``,
     ``reference_frame``, ``reference_file`` and ``alignment_selection`` give
-    to :func:`~polyzymd.analyses.reference.reference`. Settings left out take
+    to :func:`~polyzymd.analyses.reference.reference`; a missing
+    ``reference_mode`` is ``"external"`` when a ``reference_file`` is given and
+    ``"centroid"`` otherwise. Settings left out take
     the defaults in :data:`FUNCTION_ANALYSES`. With one config the report
     summarises it; with several it compares each one with the first by
     Welch's t test. With ``plots``, ``rg`` and ``rmsd`` draw
@@ -600,6 +602,10 @@ def _analyze_function(
     settings = {**FUNCTION_ANALYSES[name], **(settings or {})}
     arguments = [select(str(settings["selection"]))]
     if name == "rmsd":
+        # A reference file given without a mode is the reference.
+        settings["reference_mode"] = settings["reference_mode"] or (
+            "external" if settings["reference_file"] else "centroid"
+        )
         arguments.append(
             reference(
                 str(settings["reference_mode"]),
@@ -649,9 +655,8 @@ def _analyze_rmsf(
     together, and gives for each residue of ``selection`` its RMS deviation
     from the reference, its RMSF about the mean position and the offset of
     the mean position from the reference, labelled by residue ID, with
-    their mean squares. For ``rmsd_per_residue`` a missing ``reference_mode``
-    is ``"external"`` when a ``reference_file`` is given and ``"centroid"``
-    otherwise; ``rmsf`` defaults to ``"centroid"``.
+    their mean squares. A missing ``reference_mode`` is ``"external"`` when a
+    ``reference_file`` is given and ``"centroid"`` otherwise.
 
     Each replicate's headline value of a quantity is the root of its mean
     square over the core residues, ``core_rmsd_per_residue``, ``core_rmsf`` and
@@ -1922,6 +1927,15 @@ def _analyze_pairs(
             f"{name} needs pairs, a list of mappings with label, selection_a and selection_b, "
             f"and optionally threshold, below_label and above_label; got {pairs!r}.",
             hint="Write the list to pairs.yaml and pass --set pairs=pairs.yaml.",
+        )
+    labels = [str(pair["label"]) for pair in pairs]
+    repeated = sorted({label for label in labels if labels.count(label) > 1})
+    if repeated:
+        # Each pair's series is stored under its label, so a repeat would
+        # overwrite the other pair's values.
+        raise ProtocolError(
+            f"{name}: the pair labels {repeated} repeat.",
+            hint="Give every pair its own label.",
         )
     results, distances, thresholds = {}, [], []
     for pair in pairs:

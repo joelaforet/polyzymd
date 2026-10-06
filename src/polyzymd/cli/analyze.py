@@ -23,6 +23,17 @@ ANALYSIS_PIXI_ENVS = ("analysis",)
 EXIT_ANALYSIS_ERROR = 2
 
 
+def _set_value(value: Any) -> str:
+    """Return ``value`` written for ``--set key=VALUE``, so :func:`_settings` reads it back unchanged.
+
+    YAML, not JSON: JSON writes ``1e-05``, which YAML reads as a string.
+    """
+    import yaml
+
+    text = yaml.safe_dump(value, default_flow_style=True, width=float("inf"))
+    return text.removesuffix("\n...\n").strip()
+
+
 def _settings(raw: tuple[str, ...]) -> dict[str, Any]:
     """Parse flat ``key=value`` pairs, reading each value as YAML."""
     import yaml
@@ -441,6 +452,9 @@ def analyze_command(
     _quiet_console(ctx, study_path, output_dir, "analyze")
     run_name = name
     data: dict | None = None
+    # --label with --study runs some of the study's conditions: a --submit
+    # task, or a quick look. Such a run never replaces the run's report.
+    subset = study_path is not None and bool(labels)
     if study_path is not None:
         requested_output = output_dir
         try:
@@ -489,8 +503,14 @@ def analyze_command(
     if until == "common":
         # Resolved once over every condition, so --submit tasks and a partial
         # report, which each run some of them, end at the same time.
+        every = (configs, labels)
+        if subset:
+            from polyzymd.analyses.study_file import load_study_file
+
+            conditions = load_study_file(study_path).conditions
+            every = (tuple(conditions.values()), tuple(conditions))
         try:
-            until = _common_until(configs, labels, equilibration, replicate_spec, stride, data)
+            until = _common_until(*every, equilibration, replicate_spec, stride, data)
         except AnalysisError as exc:
             hint = getattr(exc, "hint", None)
             click.echo(f"error: {_one_line(str(exc))}", err=True)
@@ -615,6 +635,13 @@ def analyze_command(
         report.provenance.study = study_record
         study_root = Path(study_path).expanduser().resolve()
         study_root = study_root if study_root.is_dir() else study_root.parent
+        from polyzymd.analyses.study_file import load_study_file, portable
+
+        # report.json is committed and deposited: no path of this machine in it.
+        owner = load_study_file(study_root).project
+        report.provenance.settings = portable(
+            report.provenance.settings, study_root, owner.root if owner is not None else None
+        )
         report.provenance.output_paths = {
             key: (
                 str(Path(value).resolve().relative_to(study_root))
@@ -623,9 +650,15 @@ def analyze_command(
             )
             for key, value in report.provenance.output_paths.items()
         }
-        # A --submit task measures one condition and replicate; its report
-        # must not replace the run's.
-        if not is_task:
+        # A --submit task measures one condition and replicate, and --label
+        # picks some conditions; neither report replaces the run's.
+        if subset and not is_task:
+            click.echo(
+                f"note: --label ran some conditions of the study, so this report is not saved "
+                f"as {run_name}'s report.json; run without --label to update it.",
+                err=True,
+            )
+        if not is_task and not subset:
             saved = Path(output_dir) / REPORT_FILE
             saved.parent.mkdir(parents=True, exist_ok=True)
             saved.write_text(report.model_dump_json(indent=2) + "\n")
@@ -693,6 +726,9 @@ def _analyze_project(
         if exc.hint:
             click.echo(f"fix: {_one_line(exc.hint)}", err=True)
         sys.exit(EXIT_ANALYSIS_ERROR)
+    # One log for the whole command, in the project's logs/, before any study
+    # sets up its own.
+    _quiet_console(ctx, None, project.root, "analyze")
     if not labels:
         click.echo(f"error: no study of {project.protocol.path} runs {name}.", err=True)
         click.echo("fix: Add it under analyses: in project.yaml or a study.yaml.", err=True)
@@ -888,7 +924,7 @@ def _from_study(
         analysis, settings = None, {}
     else:
         analysis, settings = entry.analysis, entry.settings
-    from_file = tuple(f"{key}={json.dumps(value)}" for key, value in settings.items())
+    from_file = tuple(f"{key}={_set_value(value)}" for key, value in settings.items())
     if replicate_spec is None and protocol.replicates is not None:
         replicate_spec = ",".join(str(index) for index in protocol.replicates)
     # The command line wins, then the analysis entry, then the study.
@@ -990,12 +1026,18 @@ def _submit(
     # same ones itself, so its record keeps only the settings given.
     if name is not None:
         for key, value in study_wide_settings(name, study, _settings(setting_overrides)).items():
-            task_options += ["--set", f"{key}={json.dumps(value)}"]
+            task_options += ["--set", f"{key}={_set_value(value)}"]
     report_arguments = []
     if study_path is not None:
         # The report job reads the study file too, so it saves report.json for
         # results(); every option below repeats what the file resolved to.
         report_arguments += ["--study", str(Path(study_path).expanduser().resolve())]
+        from polyzymd.analyses.study_file import load_study_file
+
+        # The report job reports the conditions the tasks measured.
+        if tuple(labels) != tuple(load_study_file(study_path).conditions):
+            for label in labels:
+                report_arguments += ["--label", label]
     else:
         for condition in study:
             report_arguments += ["-c", str(condition.config_path), "--label", condition.label]
