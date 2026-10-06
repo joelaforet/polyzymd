@@ -441,18 +441,19 @@ class TestSecondAuditFindings:
         (project / "analyses" / "util").mkdir()
         (project / "analyses" / "util" / "__init__.py").write_text("")
         (project / "analyses" / "util" / "k.py").write_text("K = 1.0\n")
-        (project / "analyses" / "scale.json").write_text('{"s": 1.0}')
+        (project / "analyses" / "data").mkdir()
+        (project / "analyses" / "data" / "scale.json").write_text('{"s": 1.0}')
         (project / "analyses" / "lid.py").write_text(
             "import json, pathlib\nfrom util.k import K\n\n"
             "def lid_size(lid, reference):\n"
-            "    s = json.loads((pathlib.Path(__file__).parent / 'scale.json').read_text())['s']\n"
+            "    s = json.loads((pathlib.Path(__file__).parent / 'data' / 'scale.json').read_text())['s']\n"
             "    return K * s * float(len(lid))\n"
         )
         assert _analyze("lid", "--project", str(project)).exit_code == 0
         (project / "analyses" / "util" / "k.py").write_text("K = 2.0\n")
         assert _analyze("lid", "--project", str(project)).exit_code == 0
         assert set(pz.Project(project).results("lid").table["value"]) == {2.0}
-        (project / "analyses" / "scale.json").write_text('{"s": 3.0}')
+        (project / "analyses" / "data" / "scale.json").write_text('{"s": 3.0}')
         assert _analyze("lid", "--project", str(project)).exit_code == 0
         assert set(pz.Project(project).results("lid").table["value"]) == {6.0}
 

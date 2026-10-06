@@ -1168,8 +1168,38 @@ def _git_preflight(
     return state, tag, warnings
 
 
-def _listed_files(root: Path, state: dict[str, Any] | None) -> list[str]:
-    """Return the files under ``root`` that freeze hashes and deposits, relative to it.
+#: Folders of a study or project whose files freeze deposits.
+DEPOSITED_FOLDERS = ("analyses", "stats", "figures", "results", "conditions")
+#: Files at the top of a study or project that freeze deposits, besides those it writes.
+DEPOSITED_FILES = ("study.yaml", "project.yaml", ".gitignore")
+#: Prefixes of other top-level files that freeze deposits (README.md, LICENSE, ...).
+DEPOSITED_PREFIXES = ("README", "LICENSE")
+
+
+def is_deposited_name(root: Path, path: str) -> bool:
+    """Return whether freeze deposits ``path``, relative to the study or project ``root``.
+
+    Freeze deposits only names that PolyzyMD chooses: ``study.yaml``,
+    ``project.yaml``, ``README*``, ``LICENSE*``, ``.gitignore``, the files
+    freeze writes, and the files under ``analyses/``, ``stats/``,
+    ``figures/``, ``results/`` and ``conditions/``. In a project, the same
+    rule applies inside each study folder (a folder that holds ``study.yaml``).
+    """
+    parts = Path(path).parts
+    if len(parts) > 1 and (root / parts[0] / "study.yaml").is_file():
+        parts = parts[1:]
+    if len(parts) > 1:
+        return parts[0] in DEPOSITED_FOLDERS
+    name = parts[0]
+    return (
+        name in DEPOSITED_FILES
+        or name in GENERATED
+        or name.startswith(DEPOSITED_PREFIXES)
+    )
+
+
+def _candidate_files(root: Path, state: dict[str, Any] | None) -> list[str]:
+    """Return the files under ``root`` that freeze may publish, before the name rule.
 
     In a git repository (``state`` given), the tracked files and the untracked
     files under ``results/``; otherwise every file. Job, log and hidden files
@@ -1192,6 +1222,40 @@ def _listed_files(root: Path, state: dict[str, Any] | None) -> list[str]:
             and not is_machine_file(p)
             and (root / p).is_file()
         }
+    )
+
+
+def _listed_files(root: Path, state: dict[str, Any] | None) -> list[str]:
+    """Return the files under ``root`` that freeze hashes and deposits, relative to it.
+
+    The files of :func:`_candidate_files` whose names :func:`is_deposited_name`
+    accepts. Other files, such as notes or a copied trajectory, stay out of
+    the deposit; :func:`left_out_files` names them.
+    """
+    return [p for p in _candidate_files(root, state) if is_deposited_name(root, p)]
+
+
+def left_out_files(root: Path, state: dict[str, Any] | None) -> str | None:
+    """Return a warning that names the files freeze does not deposit, or ``None``.
+
+    A folder is named once, with a trailing ``/``, for all the files in it.
+    """
+    entries = []
+    for path in _candidate_files(root, state):
+        if is_deposited_name(root, path):
+            continue
+        parts = Path(path).parts
+        study = len(parts) > 1 and (root / parts[0] / "study.yaml").is_file()
+        depth = 2 if study else 1
+        entry = "/".join(parts[:depth]) + ("/" if len(parts) > depth else "")
+        if entry not in entries:
+            entries.append(entry)
+    if not entries:
+        return None
+    return (
+        f"not deposited: {', '.join(entries)}. Freeze deposits only study.yaml, project.yaml, "
+        f"README*, LICENSE*, the files it writes, and {', '.join(f'{f}/' for f in DEPOSITED_FOLDERS)}"
+        "; move a file there to publish it"
     )
 
 
@@ -1410,6 +1474,9 @@ def freeze(
     from polyzymd.analyses.study_file import STUDY_FILE
 
     study_files = [p for p in _listed_files(root, state) if p not in GENERATED]
+    left_out = left_out_files(root, state)
+    if left_out:
+        warnings.append(left_out)
     # The same warning for several conditions is one line naming them.
     warnings[:] = group_warnings(warnings, list(protocol.conditions))
     manifest: dict[str, Any] = {
