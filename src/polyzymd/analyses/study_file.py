@@ -206,16 +206,19 @@ def find_study_file(path: str | Path) -> Path:
     return candidate
 
 
-def check_folder_names(labels: Any, where: str) -> None:
+def check_folder_names(labels: Any, where: str, study_folders: bool = True) -> None:
     """Raise ProtocolError when two condition labels give one folder name.
 
-    Results are stored in one folder per label, and a study folder or deposit
-    has one folder per condition, so ``SBMA 50`` and ``SBMA 50%`` would share one.
+    Results are stored in one folder per label, so ``SBMA 50`` and
+    ``SBMA 50%`` would share one. With ``study_folders`` (a study.yaml), the
+    lower-case folder names of ``conditions/`` and of the deposit are
+    checked too, so ``WT`` and ``wt`` are refused there; conditions made in
+    code (``Study.from_configs``) have no such folders.
     """
     from polyzymd.analyses.study_scaffold import condition_folder
     from polyzymd.analyses.timeseries import _safe
 
-    for name in (_safe, condition_folder):
+    for name in (_safe, condition_folder) if study_folders else (_safe,):
         seen: dict[str, str] = {}
         for label in map(str, labels):
             other = seen.setdefault(name(label), label)

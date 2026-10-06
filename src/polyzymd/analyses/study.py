@@ -641,7 +641,7 @@ class Study:
         else:
             paths = [Path(path).expanduser().resolve() for path in configs]
             labels = _labels(paths, None)
-        check_folder_names(labels, "Study.from_configs")
+        check_folder_names(labels, "Study.from_configs", study_folders=False)
         missing = [str(path) for path in paths if not path.is_file()]
         if not paths or missing:
             raise ProtocolError(

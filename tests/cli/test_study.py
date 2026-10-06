@@ -73,6 +73,34 @@ def test_runs_of_equal_size_go_to_the_folder_named_for_each_condition(tmp_path: 
     assert data["Polymer"] != data["No polymer"]
 
 
+def test_conditions_with_runs_named_apart_can_share_one_folder(tmp_path: Path) -> None:
+    """One scratch folder holds the runs of two enzymes; locate writes it for both."""
+    import yaml
+
+    from polyzymd.analyses.study_scaffold import create_study
+    from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+
+    configs = {}
+    for label, enzyme in (("Wild type", "WT"), ("Mutant", "MUT")):
+        folder = tmp_path / "runs" / enzyme
+        config = write_simulation_config(folder, scratch=tmp_path / "scratch")
+        data = yaml.safe_load(config.read_text())
+        data["enzyme"]["name"] = enzyme
+        config.write_text(yaml.safe_dump(data, sort_keys=False))
+        (folder / "test.pdb").write_text("REMARK input\nEND\n")
+        for replicate in (1, 2):
+            write_openmm_replicate(config, replicate, [1.0 + 0.01 * k for k in range(10)])
+        configs[label] = config
+    root = tmp_path / "study"
+    create_study(root, conditions=configs, equilibration="0.25ns")
+    (root / "data.local.yaml").unlink(missing_ok=True)
+    scratch = tmp_path / "scratch"
+    result = CliRunner().invoke(cli, ["study", "locate", str(scratch), "--study", str(root)])
+    assert result.exit_code == 0, result.output
+    data = load_study_file(root).data
+    assert data["Wild type"] == data["Mutant"] == scratch.resolve()
+
+
 def test_locate_keeps_the_data_file_when_nothing_is_located(tmp_path: Path) -> None:
     """Entries written by hand survive a locate that finds no condition, and nothing is written."""
     root = write_committed_study(tmp_path, "  rg: {selection: all}\n")

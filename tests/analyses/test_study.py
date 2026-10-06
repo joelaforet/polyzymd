@@ -34,7 +34,17 @@ def test_labels_that_share_a_folder_name_are_refused(tmp_path: Path) -> None:
 
     configs = {
         label: write_simulation_config(tmp_path / name, scratch=tmp_path / "scratch" / name)
-        for label, name in (("SBMA 50", "a"), ("sbma 50%", "b"))
+        for label, name in (("SBMA 50", "a"), ("SBMA 50%", "b"))
     }
-    with pytest.raises(ProtocolError, match="SBMA 50.*sbma 50%"):
+    with pytest.raises(ProtocolError, match="SBMA 50.*SBMA 50%"):
         Study.from_configs(configs, equilibration="0ns")
+
+
+def test_labels_differing_in_case_are_refused_only_in_a_study_file() -> None:
+    """WT and wt keep separate results folders, but share one conditions/ folder name."""
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.study_file import check_folder_names
+
+    check_folder_names(["WT", "wt"], "Study.from_configs", study_folders=False)
+    with pytest.raises(ProtocolError, match="'WT' and 'wt'"):
+        check_folder_names(["WT", "wt"], "study.yaml")

@@ -1193,9 +1193,11 @@ prefers a folder whose files have the recorded sizes (and with `--verify`,
 SHA-256), and prints `<label>: <n> files match manifest.json`. When two
 conditions name their runs alike, a folder named for the condition
 (`no_polymer/`) is chosen before file sizes, and one folder is never written
-for two conditions. Prints `<label>: runs <numbers> under <folder>` per
+for two such conditions. Conditions whose runs are named apart can share one
+folder. Prints `<label>: runs <numbers> under <folder>` per
 condition found. Writes nothing when no condition is found. Exits 2 when a
-condition is not found, two conditions are found in one folder, or a file is
+condition is not found, two conditions with alike run names are found in one
+folder, or a file is
 missing or different. See
 {doc}`../how_to/study_folder` and {doc}`../how_to/study_freeze`.
 

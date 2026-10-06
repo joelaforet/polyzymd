@@ -176,7 +176,9 @@ def check_command(path: Path, production: bool = False) -> None:
     if not in_project:
         click.echo(describe(git_state(project.root if project is not None else protocol.root)))
     if not (in_project and protocol.metadata == project.metadata):
-        owner = "project.yaml" if project is not None else "study.yaml"
+        # A study's own metadata, differing from its project's, is its study.yaml's.
+        own = project is None or protocol.metadata != project.metadata
+        owner = "study.yaml" if own else "project.yaml"
         if not _echo_metadata(protocol.metadata, owner):
             failed = True
     guide = protocol.root / "deposit" / "UPLOAD.md"
@@ -324,8 +326,17 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
             click.echo(line)
             if line.startswith("error"):
                 missing.append(label)
-    for folder in set(located.values()):
-        shared = [label for label, where in located.items() if where == folder]
+    # One folder may hold the runs of several conditions when their runs are
+    # named apart. Conditions whose runs are named alike and land in one
+    # folder would read the same runs, so neither is written.
+    for folder, pattern in {
+        (where, configs[label].format_run_directory_name("*")) for label, where in located.items()
+    }:
+        shared = [
+            label
+            for label, where in located.items()
+            if where == folder and configs[label].format_run_directory_name("*") == pattern
+        ]
         if len(shared) > 1:
             click.echo(
                 f"error: {' and '.join(shared)} were both located in {folder}; neither is written"
