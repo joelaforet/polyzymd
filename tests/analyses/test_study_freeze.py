@@ -430,3 +430,27 @@ def test_a_study_of_a_project_is_frozen_with_the_project(tmp_path: Path) -> None
     with pytest.raises(ProtocolError, match="is a study of the project") as info:
         freeze(root)
     assert "polyzymd project freeze" in info.value.hint
+
+
+def test_freeze_names_cosolvents_and_missing_build_files(tmp_path: Path) -> None:
+    """Freeze recognises co-solvents in the composition check and names a listed build file that is missing."""
+    from types import SimpleNamespace
+
+    from polyzymd.analyses.study_freeze import _missing_build_files, composition_warnings
+
+    config = SimpleNamespace(
+        substrate=None,
+        polymers=None,
+        solvent=SimpleNamespace(co_solvents=[SimpleNamespace(name="sds", residue_name="SDS")]),
+    )
+
+    class Residues:
+        resnames = ["SDS", "SDS"]
+
+    universe = SimpleNamespace(select_atoms=lambda selection: SimpleNamespace(residues=Residues()))
+    assert composition_warnings("SDS", config, universe) == []
+    (tmp_path / "build_manifest.json").write_text(
+        json.dumps({"artifacts": {"system.prmtop": {}, "system.xml": {}}})
+    )
+    (tmp_path / "system.xml").write_text("<x/>")
+    assert _missing_build_files(tmp_path) == ["system.prmtop"]

@@ -1033,3 +1033,21 @@ class TestPolymerPackingSphereConfinement:
         with_block = copy.deepcopy(base)
         with_block["simulation_phases"]["minimization"] = {"freeze_solute": False}
         assert config_hash(without) == config_hash(SimulationConfig(**with_block))
+
+
+def test_checkpoint_interval_has_a_default_and_unknown_keys_are_refused(tmp_path: Path) -> None:
+    """checkpoint_interval defaults to 60 s, and a key a section does not define is refused."""
+    import yaml
+
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    del data["simulation_phases"]["production"]["checkpoint_interval"]
+    path.write_text(yaml.safe_dump(data))
+    assert SimulationConfig.from_yaml(path).simulation_phases.production.checkpoint_interval == 60.0
+    data["solvent"] = {"co_solvents": [{"name": "x", "smiles": "CO", "concentration": 1.0, "bananas": 3}]}
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValidationError, match="bananas"):
+        SimulationConfig.from_yaml(path)

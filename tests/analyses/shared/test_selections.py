@@ -61,3 +61,10 @@ def test_validate_selection_propagates_unexpected_runtime_error() -> None:
 
     with pytest.raises(RuntimeError, match="boom"):
         validate_selection(_RaisingUniverse(RuntimeError("boom")), "protein")
+
+
+def test_pdbindex_means_the_same_in_analyses_and_restraints() -> None:
+    """pdbindex N is the N-th atom (bynum), as restraints read it."""
+    from polyzymd.analyses.shared.selections import translate_selection
+
+    assert translate_selection("pdbindex 100 and name CA") == "bynum 100 and name CA"

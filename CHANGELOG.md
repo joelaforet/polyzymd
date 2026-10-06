@@ -122,7 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Simulation correctness (1.3 audit, wave B).**
+- **Simulation correctness.**
   - Ions get atom names (`NA`, `CL`) in the built system and in `system.prmtop`. Their blank names made MDAnalysis refuse the Amber topology, so analysis of any system with ions failed. `analysis-topology --overwrite` repairs older runs.
   - A topology that cannot be loaded is reported as such, not as an equilibration-window problem.
   - `neutralize` counts the charge of co-solvents. A charged SMILES (`...OS(=O)(=O)[O-]`) gets counter-ions; one that carries its counter-ion (`...[O-].[Na+]`) needs none. A system left charged is an error with `neutralize: true` and a warning without it.
