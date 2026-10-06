@@ -536,14 +536,18 @@ class TestThirdAuditFindings:
             (root / name).write_text("x")
         assert [p.name for p in code_files(root)] == ["count.py"]
         analyses = root / "analyses"
-        (analyses / "util").mkdir(parents=True)
-        for name in ("f.py", "table.json", "util/k.py"):
+        for folder in ("util", "data/sub", "notes"):
+            (analyses / folder).mkdir(parents=True)
+        for name in ("f.py", "table.json", "data/sub/t.csv", "util/k.py", "notes/a.pdf"):
             (analyses / name).write_text("x")
         assert [p.relative_to(analyses).as_posix() for p in code_files(analyses)] == [
+            "data/sub/t.csv",
             "f.py",
-            "table.json",
             "util/k.py",
         ]
+        (root / "data").mkdir()
+        (root / "data" / "traj.xtc").write_text("x")
+        assert "traj.xtc" not in [p.name for p in code_files(root)]
 
     def test_purge_spares_packages_installed_under_the_folder(self, tmp_path: Path) -> None:
         import types

@@ -86,3 +86,4 @@ def test_clean_pdb_runs_on_the_cpu(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert (tmp_path / "clean.pdb").is_file()
     assert os.environ["OPENMM_DEFAULT_PLATFORM"] == "CPU"
+
