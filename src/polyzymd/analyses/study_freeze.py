@@ -688,7 +688,8 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
     ``segments`` lists each distinct (PolyzyMD, OpenMM, pixi environment)
     combination that ``progress.json`` records for its production segments,
     so a reproducer knows which engine produced the trajectories, not only
-    which PolyzyMD analysed them.
+    which PolyzyMD analysed them. For a GROMACS run, ``gromacs_version`` is
+    the version that ``gmx mdrun`` wrote into ``gromacs/prod.log``.
     """
     from polyzymd.simulation.progress import load_progress
 
@@ -711,6 +712,17 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
             {"polyzymd_version": a, "openmm_version": b, "pixi_environment": c}
             for a, b, c in sorted(combos, key=lambda t: tuple(str(x) for x in t))
         ]
+    from polyzymd.engines.gromacs.engine import GromacsEngine
+
+    try:
+        with open(working_dir / GromacsEngine.engine_subdir / "prod.log", errors="ignore") as log:
+            versions = {
+                line.split(":", 1)[1].strip() for line in log if line.startswith("GROMACS version:")
+            }
+    except OSError:
+        versions = set()
+    if versions:
+        found["gromacs_version"] = ", ".join(sorted(versions))
     return found
 
 
@@ -909,10 +921,15 @@ def _replicates(
                 "build_manifest.json, and progress.json predates version recording); state the "
                 "engine version in the methods"
             )
-        if engine != "openmm" and replicates:
+        no_gromacs = [
+            index
+            for index, r in replicates.items()
+            if engine == "gromacs" and not r["simulated_with"].get("gromacs_version")
+        ]
+        if no_gromacs:
             warnings.append(
-                f"{label}: PolyzyMD does not record the {engine} version that ran the "
-                "replicates; state it in the methods"
+                f"{label}: replicates {', '.join(no_gromacs)} record no GROMACS version (no "
+                "gromacs/prod.log in the run directory); state the engine version in the methods"
             )
         for index, replicate_record in replicates.items():
             for name in replicate_record.get("missing_build_files", []):
@@ -981,6 +998,7 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
         c["resolved_config"] for c in manifest["conditions"].values() if "resolved_config" in c
     ]
     first = resolved[0] if resolved else {}
+    polymers = _has_polymers(protocol)
 
     def item(answer: Any, evidence: Any = None) -> dict[str, Any]:
         return {"answer": answer, **({"evidence": evidence} if evidence is not None else {})}
@@ -1011,8 +1029,8 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
         ),
         "1d_independent_starting_configurations": item(
             "each replicate's starting structure is built with its replicate number as the "
-            "seed of Packmol and of polymer draws; the replicate number also seeds the initial "
-            "velocities and the thermostat noise of each stage",
+            "seed of Packmol" + (" and of polymer draws" if polymers else "") + "; the replicate "
+            "number also seeds the initial velocities and the thermostat noise of each stage",
             None,
         ),
         "2a_connection_to_experiment": item(
@@ -1034,6 +1052,12 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
                         for k in ("thermodynamics", "simulation_phases")
                     },
                     "restraints": restraints.get(label, []),
+                    # The config names OpenMM's algorithms; GROMACS runs these instead.
+                    **(
+                        {"gromacs_production": _gromacs_production(c["resolved_config"])}
+                        if c.get("engine") == "gromacs"
+                        else {}
+                    ),
                 }
                 for label, c in manifest["conditions"].items()
                 if "resolved_config" in c
@@ -1046,10 +1070,21 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
         ),
         "4e_custom_code_and_parameters": item(
             "analyses/ and figures/ hold the custom code; the parameters of every molecule"
-            + (", generated polymers included," if _has_polymers(protocol) else "")
+            + (", generated polymers included," if polymers else "")
             + " are in the serialized engine inputs in deposit/engine_inputs/"
         ),
     }
+
+
+def _gromacs_production(config: dict[str, Any]) -> dict[str, str]:
+    """Return the integrator and coupling settings GROMACS runs for the production phase."""
+    from polyzymd.exporters.gromacs import BAROSTAT_MAP, THERMOSTAT_MAP
+
+    production = config["simulation_phases"]["production"]
+    integrator, tcoupl = THERMOSTAT_MAP[production["thermostat"]]
+    barostat = production.get("barostat") if production["ensemble"] == "NPT" else None
+    pcoupl, pcoupltype = BAROSTAT_MAP.get(barostat, ("no", "isotropic"))
+    return {"integrator": integrator, "tcoupl": tcoupl, "pcoupl": pcoupl, "pcoupltype": pcoupltype}
 
 
 def _has_polymers(protocol: Any) -> bool:
