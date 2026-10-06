@@ -100,11 +100,23 @@ def replicate_table(study: Any, run: str) -> Any:
     return result
 
 
+def _number_or_number_text(level: Any) -> bool:
+    """Return whether ``level`` is a number, or text such as ``"1e-3"`` that reads as one."""
+    if isinstance(level, str):
+        try:
+            float(level)
+        except ValueError:
+            return False
+        return True
+    return isinstance(level, (int, float)) and not isinstance(level, bool)
+
+
 def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[Any]:
     """Fit the slope of the condition means against each numeric factor of the conditions.
 
     A factor is numeric when every condition that declares it gives an
-    ``int`` or ``float`` (not a ``bool``). For each numeric factor, each
+    ``int`` or ``float`` (not a ``bool``). A factor with any other level,
+    such as ``polymer: PEG`` or ``true``, gets no trend. For each numeric factor, each
     condition that declares it contributes one point: the mean of its
     replicate values (the values its comparisons used), at the factor's
     level. The condition, not the replicate, is the unit, because the
@@ -127,8 +139,9 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
     Returns
     -------
     list of TrendReport
-        One :class:`~polyzymd.analyses.protocols.TrendReport` per factor. A
-        factor that is not numeric, or has a replicate value that is not
+        One :class:`~polyzymd.analyses.protocols.TrendReport` per factor whose
+        levels are all numbers or text that reads as a number. A factor with
+        a level in text (YAML reads ``1e-3`` as text), or a replicate value that is not
         finite, fewer than three levels (two make it a pairwise comparison),
         or condition means that are all equal, has ``testable=False``, its
         ``reason``, and no slope. The list is empty when the report holds labelled results
@@ -160,11 +173,10 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
         return []
     trends = []
     for name in dict.fromkeys(n for values in factors.values() for n in values):
-        numeric = all(
-            isinstance(values.get(name), (int, float)) and not isinstance(values.get(name), bool)
-            for values in factors.values()
-            if name in values
-        )
+        declared = [values[name] for values in factors.values() if name in values]
+        if not all(_number_or_number_text(level) for level in declared):
+            continue
+        numeric = not any(isinstance(level, str) for level in declared)
         levels, means, used, n_values, bad = [], [], [], 0, 0
         for item in report.conditions:
             level = factors.get(item.label, {}).get(name)
@@ -179,7 +191,7 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
                 means.append(sum(values) / len(values))
         trend = TrendReport(factor=name, conditions=used, n_replicates=n_values)
         if not numeric:
-            reason = "its levels are not all numbers (YAML reads 1e-3 as text; write 1.0e-3)"
+            reason = "some levels are text (YAML reads 1e-3 as text; write 1.0e-3)"
         elif bad:
             reason = f"{bad} replicate value{'s are' if bad != 1 else ' is'} not finite"
         elif len(set(levels)) < 3:

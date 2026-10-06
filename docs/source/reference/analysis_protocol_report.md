@@ -12,7 +12,7 @@ reads back exactly what `model_dump_json()` wrote.
 | `analysis` | `str` | Canonical analysis name, for example `rg`. |
 | `status` | `str` | `complete`, or `partial` when a condition could not be measured or compared and the report covers the others. |
 | `problems` | `list[str]` | For a partial report, each condition left out, or the comparison that failed, with its error. Empty for a complete report. `polyzymd study check`, `study freeze` and `project freeze` name them. |
-| `trends` | `list[TrendReport]` | For a run from a study whose conditions declare factors: one slope test per factor, untestable for a factor that is not numeric. Empty otherwise. |
+| `trends` | `list[TrendReport]` | For a run from a study whose conditions declare factors: one slope test per factor whose levels are all numbers or numbers written as text (untestable then). Empty otherwise. |
 | `protocol_version` | `str` | Version of the report protocol, `"2"` for every report of the study API. With `analysis` it identifies the code that defined the metric; it changes when the meaning, unit or estimator of a reported metric changes. |
 | `metric` | `str` | Name of the reported values, for example `mean_rg`. |
 | `unit` | `str \| None` | Unit of `metric`, for example `A` or `%`. `None` marks a dimensionless metric, such as a fraction. |
@@ -88,7 +88,7 @@ rows the JSON form holds; every one of them is kept there.
 | `family_size` | `int \| None` | Number of factors in that family. |
 | `r_squared` | `float \| None` | Coefficient of determination of the fit. |
 | `significant` | `bool` | Whether `p_adjusted` is at most 0.05. |
-| `testable` | `bool` | `False` when the factor is not a number in every condition, a replicate value is not finite, there are fewer than three factor levels, or the condition means all agree. |
+| `testable` | `bool` | `False` when a level is a number written as text (YAML reads `1e-3` as text), a replicate value is not finite, there are fewer than three factor levels, or the condition means all agree. |
 | `reason` | `str \| None` | Why the trend is not testable. |
 
 ## ProtocolProvenance

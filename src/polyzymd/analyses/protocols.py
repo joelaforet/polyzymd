@@ -261,7 +261,7 @@ class TrendReport(BaseModel):
     percent t interval on ``k - 2`` degrees of freedom for ``k`` conditions;
     ``p`` tests zero slope and ``p_adjusted`` corrects it over the study's
     numeric factors (Benjamini-Hochberg). ``testable`` is ``False``, with the
-    ``reason``, when the factor is not numeric, a replicate value is not
+    ``reason``, when a level is text such as ``"1e-3"``, a replicate value is not
     finite, there are fewer than three factor levels (two levels make the
     trend a pairwise comparison), or the condition means all agree.
     """
