@@ -181,7 +181,7 @@ def check_command(path: Path, production: bool = False) -> None:
             else ("study.yaml", "study freeze")
         )
         click.echo(
-            f"metadata ({owner}): {len(gaps)} gaps for publishing; polyzymd {command} lists them"
+            f"metadata ({owner}): {len(gaps)} gaps for publishing: {'; '.join(gaps)}"
             if gaps
             else f"metadata ({owner}): complete"
         )

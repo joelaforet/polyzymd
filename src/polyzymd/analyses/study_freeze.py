@@ -895,7 +895,9 @@ def _replicates(
             warnings.append(
                 f"{label}: replicates {', '.join(unhashed)} have no recorded trajectory "
                 f"hashes; record them, once, by running polyzymd hash-trajectories {where}, "
-                "so anyone can check the trajectories without hashing them again"
+                "so anyone can check the trajectories without hashing them again (it writes "
+                "trajectory_hashes.json beside the trajectories, so whoever can write there "
+                "runs it)"
             )
         if unknown:
             warnings.append(
@@ -1080,6 +1082,35 @@ def _next_tag(root: Path, prefix: str = "study") -> str:
     existing = (_git(root, "tag", "--list", f"{prefix}-v*") or "").split()
     numbers = [int(t.split("v")[-1]) for t in existing if t.split("v")[-1].isdigit()]
     return f"{prefix}-v{max(numbers, default=0) + 1}"
+
+
+def group_warnings(warnings: list[str], names: list[str]) -> list[str]:
+    """Return ``warnings`` with those that differ only in a leading name merged into one.
+
+    A warning ``"<name>: <text>"`` for several names in ``names`` (conditions,
+    or ``"<study>: <condition>"`` in a project) becomes ``"<name>, <name>:
+    <text>"``, at the place of its first one. Nothing is dropped; the same
+    text for eight conditions is one line instead of eight.
+    """
+    order: list[str] = []
+    grouped: dict[str, list[str]] = {}
+    for warning in warnings:
+        name = next(
+            (n for n in sorted(names, key=len, reverse=True) if warning.startswith(f"{n}: ")),
+            None,
+        )
+        if name is None:
+            order.append(warning)
+            continue
+        text = warning[len(name) + 2 :]
+        if text not in grouped:
+            grouped[text] = []
+            order.append("\0" + text)
+        grouped[text].append(name)
+    return [
+        f"{', '.join(grouped[item[1:]])}: {item[1:]}" if item.startswith("\0") else item
+        for item in order
+    ]
 
 
 def _has_identity(root: Path) -> bool:
@@ -1379,6 +1410,8 @@ def freeze(
     from polyzymd.analyses.study_file import STUDY_FILE
 
     study_files = [p for p in _listed_files(root, state) if p not in GENERATED]
+    # The same warning for several conditions is one line naming them.
+    warnings[:] = group_warnings(warnings, list(protocol.conditions))
     manifest: dict[str, Any] = {
         "$schema": MANIFEST_SCHEMA_FILE,
         "schema": MANIFEST_SCHEMA,

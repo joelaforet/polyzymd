@@ -132,6 +132,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Console and messages (1.3 audit, wave D).**
+  - The uncommitted-inputs warning prints once per command, with a count and the first five files.
+  - Freeze merges a warning that several conditions share into one line naming them.
+  - The GROMACS TPR fallback warns once per command.
+  - `project check --production` passes `--production` to each study's check.
+  - `study check` and `project check` list the metadata gaps instead of counting them.
+  - A narrow 95 % interval prints with enough digits to show both ends.
+  - `status` shows ps for runs shorter than 1 ns, and says "SLURM not queried" with `--no-slurm` instead of "squeue unavailable".
+  - `submit --dry-run` shows the partition, QOS, time limit, account and GPUs, and warns when a CPU-platform config would go to a GPU preset.
+  - A pair that cannot be tested says why: too few replicates, or no variance.
+  - A missing Packmol is named as such.
+  - The `hash-trajectories` advice says that it writes beside the trajectories.
+  - The scaffold YAML puts comments above `{}` stubs, so filling a stub leaves no stray comment.
+  - The `init` template names its relaxation stage without "polymer", lists only thermostats both engines run, and links the quickstart page where it is.
+
 - **Simulation correctness (1.3 audit, wave B).**
   - Ions get atom names (`NA`, `CL`) in the built system and in `system.prmtop`. Their blank names made MDAnalysis refuse the Amber topology, so analysis of any system with ions failed. `analysis-topology --overwrite` repairs older runs.
   - A topology that cannot be loaded is reported as such, not as an equilibration-window problem.

@@ -33,6 +33,7 @@ from polyzymd.analyses.study_freeze import (
     _versions,
     _write_citation,
     freeze,
+    group_warnings,
 )
 
 #: Value of the ``schema`` key of a project's ``manifest.json``.
@@ -128,6 +129,9 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         for name, condition in result.manifest["conditions"].items():
             conditions[f"{label} / {name}"] = condition
 
+    # The same warning for several studies or conditions is one line naming them.
+    names = [*project.labels, *(c.replace(" / ", ": ") for c in conditions)]
+    warnings[:] = group_warnings(warnings, names)
     released = date.today().isoformat()
     version = tag or "unversioned"
     manifest: dict[str, Any] = {

@@ -277,7 +277,7 @@ class TestGitProvenance:
 
         (root / "analyses" / "new.py").write_text("x = 1\n")
         result = _analyze("rg", "--study", str(root), "--set", "selection=all")
-        assert "uncommitted changes (analyses/new.py)" in result.output
+        assert "1 uncommitted input files (analyses/new.py)" in result.output
         study = json.loads((root / "results/rg/report.json").read_text())["provenance"]["study"]
         assert "analyses/new.py" in study["git"]["inputs_uncommitted"]
 

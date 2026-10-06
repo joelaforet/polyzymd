@@ -509,10 +509,17 @@ def _fmt_job(job: SlurmJob) -> str:
     return " ".join(parts)
 
 
+def _progress_text(done_ns: float, total_ns: float) -> str:
+    """Return ``done/total`` in ns, or in ps when the run is shorter than 1 ns."""
+    if total_ns < 1.0:
+        return f"{done_ns * 1000:6.1f}/{total_ns * 1000:.0f}ps"
+    return f"{done_ns:6.1f}/{total_ns:.0f}ns"
+
+
 def render_replicate_line(rep: ReplicateReport, label_width: int) -> str:
     label = f"run{rep.replicate}"
     pct = f"{rep.fraction * 100:3.0f}%"
-    ns = f"{rep.completed_ns:6.1f}/{rep.total_ns:.0f}ns"
+    ns = _progress_text(rep.completed_ns, rep.total_ns)
     verdict = rep.verdict.upper()
     fields = [f"{label:<{label_width}}", ns, pct, f"{verdict:<11}"]
 
@@ -546,6 +553,7 @@ def render_agent(
     now: datetime | None = None,
     slurm_available: bool = True,
     preset_hint: str | None = None,
+    slurm_queried: bool = True,
 ) -> str:
     """Compact, colour-free, fixed-vocabulary text for agents and terminals."""
     if now is None:
@@ -565,7 +573,9 @@ def render_agent(
         f"{len(reports)} system(s)  {n_reps} replicate(s): {summary or 'none'}"
     )
     lines.append(header)
-    if not slurm_available:
+    if not slurm_queried:
+        lines.append("# SLURM not queried (--no-slurm): verdicts below come from progress.json")
+    elif not slurm_available:
         lines.append(
             "# WARNING: squeue unavailable — DEAD/QUEUED cannot be distinguished from RUNNING; "
             "verdicts below fall back to progress.json only"

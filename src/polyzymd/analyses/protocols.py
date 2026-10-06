@@ -2126,9 +2126,15 @@ def _verdict(
             f"p_adj {_num(pair.p_adjusted)}, p {_num(pair.p)}, {n_text}"
         )
         if not pair.testable:
+            few = min(counts.get(pair.a, 0), counts.get(pair.b, 0)) < 2
+            why = (
+                "needs at least two replicates per condition"
+                if few
+                else "has the same value in every replicate of both conditions, so no "
+                "variance to test"
+            )
             sentences.append(
-                f"{VERDICT_NOT_TESTABLE}: {metric} for {pair.a} vs {pair.b} needs at least two "
-                f"replicates per condition and a value that varies ({n_text})"
+                f"{VERDICT_NOT_TESTABLE}: {metric} for {pair.a} vs {pair.b} {why} ({n_text})"
             )
         elif pair.p_adjusted is None:
             sentences.append(
@@ -2167,8 +2173,21 @@ def _signed(value: float | None) -> str:
 
 
 def _interval(limits: Sequence[float] | None) -> str:
-    """Format an interval as ``low to high``, or ``na``."""
-    return "na" if limits is None else f"{_num(limits[0])} to {_num(limits[1])}"
+    """Format an interval as ``low to high``, or ``na``.
+
+    Four significant digits, or more when four would print a narrow interval
+    as one number (``2 to 2``).
+    """
+    if limits is None:
+        return "na"
+    low, high = (float(limit) for limit in limits)
+    if math.isnan(low) or math.isnan(high):
+        return f"{_num(low)} to {_num(high)}"
+    for digits in range(4, 16):
+        shown = (f"{low:.{digits}g}", f"{high:.{digits}g}")
+        if shown[0] != shown[1] or low == high:
+            break
+    return f"{shown[0]} to {shown[1]}"
 
 
 def _condition_line(condition: ConditionReport) -> str:

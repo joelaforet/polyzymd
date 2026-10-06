@@ -616,12 +616,7 @@ def run_packmol(
         If Packmol exits with a non-zero return code or does not print
         ``'Success!'`` in its output.
     """
-    packmol_binary = shutil.which("packmol")
-    if packmol_binary is None:
-        raise OSError(
-            "Packmol binary not found on PATH. "
-            "Install Packmol and make sure it is accessible as 'packmol'."
-        )
+    packmol_binary = _require_packmol()
 
     working_directory = Path(working_directory)
     working_directory.mkdir(parents=True, exist_ok=True)
@@ -692,6 +687,18 @@ def run_packmol(
 # ---------------------------------------------------------------------------
 # High-level polymer packing helper
 # ---------------------------------------------------------------------------
+
+
+def _require_packmol() -> str:
+    """Return the path of the ``packmol`` binary, or raise an error that says it is missing."""
+    packmol_binary = shutil.which("packmol")
+    if packmol_binary is None:
+        raise OSError(
+            "Packmol is not on PATH, and PolyzyMD packs every system with it. Run PolyzyMD in "
+            "its pixi environment (pixi run -e build ...), which installs Packmol, or install "
+            "Packmol and make it callable as 'packmol'."
+        )
+    return packmol_binary
 
 
 def pack_polymers(
@@ -783,6 +790,7 @@ def pack_polymers(
         If any atom of the packed system ends up closer than
         ``0.5 * tolerance_angstrom`` to one of its own periodic images.
     """
+    _require_packmol()
     import numpy as np
     from openff.packmol._packmol import (
         _center_topology_at,
@@ -1017,6 +1025,7 @@ def solvate_with_packmol(
         If any atom of the solvated system ends up closer than
         ``0.5 * tolerance_angstrom`` to one of its own periodic images.
     """
+    _require_packmol()
     import numpy as np
     from openff.packmol._packmol import (
         _center_topology_at,

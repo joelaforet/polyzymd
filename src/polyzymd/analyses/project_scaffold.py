@@ -48,7 +48,8 @@ PROJECT_YAML = """\
 # study. See https://polyzymd.readthedocs.io/en/latest/how_to/project.html
 
 {studies}
-analyses: {{}}                  # run in every study, with that study's regions and structures
+# Run in every study, with that study's regions and structures.
+analyses: {{}}
 # analyses:
 #   native_contacts:
 #     selection: protein and not element H
@@ -82,23 +83,27 @@ STUDY_YAML = """\
 description: TODO             # e.g. B. subtilis lipase A (1ISP) at 363 K
 equilibration: 0ns            # TODO: the burn-in to discard from every replicate
 
-structures: {}                # name: file under structures/, used as 'structure <name>'
+# name: file under structures/, used as 'structure <name>'.
+structures: {}
 # structures:
 #   reference: structures/1ISP_clean.pdb
 
-regions: {}                   # name: selection, used as 'region <name>'
+# name: selection, used as 'region <name>'.
+regions: {}
 # regions:
 #   core: resid 5-8 15-27 32-37
 #   catalytic_triad: resid 76 132 155
 
-conditions: {}                # control first; add with polyzymd study add-condition
+# Control first; add each with polyzymd study add-condition.
+conditions: {}
 # conditions:
 #   No Polymer: conditions/no_polymer
 #   SBMA-EGMA 50:50:
 #     config: conditions/sbma_50
 #     factors: {sbma_fraction: 0.5}           # optional: what varies, for trend tests and plots
 
-analyses: {}                  # optional: analyses only this protein runs
+# Optional: analyses only this protein runs.
+analyses: {}
 """
 
 

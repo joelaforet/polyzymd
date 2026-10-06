@@ -433,16 +433,18 @@ def open_universe(topology_file: str | Path, trajectory_files: Sequence[str | Pa
         if not (is_tpr and tpr_unsupported(error)):
             raise
         top_file = gromacs_topology_file(topology.parent)
-        if topology not in _WARNED_TPR_FALLBACK_PATHS:
-            _WARNED_TPR_FALLBACK_PATHS.add(topology)
-            LOGGER.warning(
-                "MDAnalysis %s cannot read %s (%s); reading its topology from %s instead, "
-                "laid out as MDAnalysis lays out a TPR.",
-                mda.__version__,
-                topology,
-                str(error.__context__).strip(),
-                top_file.name,
-            )
+        # The same MDAnalysis cannot read any run's TPR: say so once, then log each.
+        level = logging.DEBUG if _WARNED_TPR_FALLBACK_PATHS else logging.WARNING
+        _WARNED_TPR_FALLBACK_PATHS.add(topology)
+        LOGGER.log(
+            level,
+            "MDAnalysis %s cannot read %s (%s); reading its topology from %s instead, "
+            "laid out as MDAnalysis lays out a TPR. Other runs' TPRs are read the same way.",
+            mda.__version__,
+            topology,
+            str(error.__context__).strip(),
+            top_file.name,
+        )
         universe = universe_from_gromacs_top(top_file, files)
         universe._polyzymd_bond_source = "top"
         universe._polyzymd_topology_source = str(top_file)

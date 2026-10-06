@@ -1611,10 +1611,35 @@ def submit(
                 email=email,
             )
         else:
+            from polyzymd.workflow.slurm import SlurmConfig
+
             script_dir = (
                 Path(output_dir) if output_dir else sim_config.output.get_job_scripts_directory()
             )
             colored_echo(f"  Script dir:  {script_dir}", phase="workflow")
+            slurm = SlurmConfig.from_preset(preset)
+            for key, value in (
+                ("time_limit", time_limit),
+                ("memory", memory),
+                ("account", account),
+                ("partition", partition),
+                ("qos", qos),
+            ):
+                if value:
+                    setattr(slurm, key, value)
+            colored_echo(
+                f"  SLURM:       partition {slurm.partition}, qos {slurm.qos or '(none)'}, "
+                f"time {slurm.time_limit}, account {slurm.account or '(none)'}, "
+                f"GPUs {slurm.gpus}",
+                phase="workflow",
+            )
+            platform = str(getattr(getattr(sim_config, "openmm", None), "platform", "") or "")
+            if platform.upper().endswith("CPU") and slurm.gpus:
+                colored_echo(
+                    f"  warning: the config runs on the CPU platform, but preset {preset} asks "
+                    "for GPUs; choose a CPU partition (--partition) or set openmm.platform: CUDA",
+                    phase="workflow",
+                )
 
         colored_echo(phase="workflow")
         colored_echo("Dry run complete. No files were written.", phase="workflow")
@@ -2918,7 +2943,11 @@ def _status_report(
     else:
         click.echo(
             render_agent(
-                reports, now=now, slurm_available=slurm_available, preset_hint=preset_hint
+                reports,
+                now=now,
+                slurm_available=slurm_available,
+                preset_hint=preset_hint,
+                slurm_queried=not no_slurm,
             ),
             nl=False,
         )
@@ -3238,7 +3267,7 @@ def init(name: str) -> None:
         colored_echo(f"  4. Build:    polyzymd build -c {name}/config.yaml -r 1")
         colored_echo()
         colored_echo(
-            "Documentation: https://polyzymd.readthedocs.io/en/latest/tutorials/quickstart.html"
+            "Documentation: https://polyzymd.readthedocs.io/en/latest/get_started/quickstart.html"
         )
 
     except Exception as e:

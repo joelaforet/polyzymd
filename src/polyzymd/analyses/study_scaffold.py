@@ -245,7 +245,7 @@ def _study_yaml(conditions: dict[str, str], equilibration: str | None) -> str:
     listed = (
         yaml.safe_dump({"conditions": conditions}, sort_keys=False)
         if conditions
-        else ("conditions: {}   # add each condition: label: conditions/<name>/config.yaml\n")
+        else ("# Add each condition: label: conditions/<name>/config.yaml\nconditions: {}\n")
     )
     window = equilibration or "0ns"
     note = "" if equilibration else "   # set the window to discard from every replicate"

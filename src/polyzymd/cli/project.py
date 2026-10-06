@@ -20,13 +20,20 @@ def project_group() -> None:
 
 @project_group.command("check")
 @click.argument("path", type=click.Path(path_type=Path), default=Path("."))
+@click.option(
+    "--production",
+    is_flag=True,
+    help="Also give each condition's production length, as study check --production does; "
+    "this reads every run's trajectory.",
+)
 @click.pass_context
-def check_command(ctx: click.Context, path: Path) -> None:
-    """Check a project.yaml and each of its studies without loading any trajectory.
+def check_command(ctx: click.Context, path: Path, production: bool = False) -> None:
+    """Check a project.yaml and each of its studies.
 
     PATH is the project.yaml or the folder holding it (default: here). Prints
     which studies run each project analysis, then the polyzymd study check of
-    every study. Exits 2 when the project file or any study cannot be read.
+    every study. No trajectory is loaded unless --production is given. Exits
+    2 when the project file or any study cannot be read.
     """
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.project import Project
@@ -48,7 +55,7 @@ def check_command(ctx: click.Context, path: Path) -> None:
     for label, folder in project.protocol.studies.items():
         click.echo(f"== study {label}")
         try:
-            ctx.invoke(study_check, path=folder)
+            ctx.invoke(study_check, path=folder, production=production)
         except SystemExit as exit_:
             if exit_.code:
                 failed.append(label)

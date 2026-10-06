@@ -796,6 +796,10 @@ def _analyze_every_run(ctx: click.Context, study_path: Path | None) -> None:
         sys.exit(EXIT_ANALYSIS_ERROR)
 
 
+#: Warnings this command has already printed.
+_SAID: set[str] = set()
+
+
 def _study_record(study_path: Path, run: str, settings: dict) -> dict:
     """Return the study file and git state a report records, warning about uncommitted inputs.
 
@@ -826,12 +830,17 @@ def _study_record(study_path: Path, run: str, settings: dict) -> dict:
     # from the project's analyses/, so the git state is the whole project's.
     state = git_state(project.root if project is not None else file.parent)
     if state and state["inputs_uncommitted"]:
-        click.echo(
-            f"warning: the {'project' if project is not None else 'study'} has uncommitted "
-            f"changes ({', '.join(state['inputs_uncommitted'])}); the report records them, "
-            "and committing them makes it reproducible.",
-            err=True,
+        listed = state["inputs_uncommitted"]
+        shown = ", ".join(listed[:5]) + (f" and {len(listed) - 5} more" if len(listed) > 5 else "")
+        text = (
+            f"warning: the {'project' if project is not None else 'study'} has "
+            f"{len(listed)} uncommitted input files ({shown}); the report records them, and "
+            "committing them makes it reproducible."
         )
+        # One command analyses several studies and runs; say it once.
+        if text not in _SAID:
+            _SAID.add(text)
+            click.echo(text, err=True)
     root = protocol.root
     project_root = project.root if project is not None else None
     record = {
