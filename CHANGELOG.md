@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`enzyme.custom_substructures_path` (1.3 audit, wave H).**  A JSON file of residue templates for residues OpenFF's template matcher does not know, such as the N-terminal cystine of 4CHA. The path is relative to the config, checked for shape on load, passed to `Topology.from_pdb(_custom_substructures=...)`, and part of the config hash. The docs described this key before any code read it.
+
 - **Seeded dynamics (1.3 audit, wave G).**  The replicate number now seeds the initial velocities and the thermostat noise, on both engines. Each equilibration stage and production segment gets its own seed from `polyzymd.simulation.seeds.dynamics_seed(replicate, phase)`, so no stage repeats another's noise. OpenMM sets `integrator.setRandomNumberSeed` and `setVelocitiesToTemperature(T, seed)`; GROMACS MDP files get `gen_seed` and `ld_seed`. A replicate run again gives the same trajectory only on the same platform, precision and software versions.
 
 - **Systems without polymers (1.3 audit, wave C).**
@@ -133,6 +135,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `--resume` removes the marker.
 
 ### Fixed
+
+- **Wave H of the 1.3 audit.**
+  - `polyzymd clean-pdb` places hydrogens on the CPU platform, so a GPU with an older driver no longer stops it with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`. Set `OPENMM_DEFAULT_PLATFORM` to choose another platform.
+  - A local `polyzymd run` with OpenMM writes `progress.json`, so it records each segment and its trajectory hash, as a SLURM run does.
+  - `polyzymd cancel` stops GROMACS chains: the GROMACS job script checks the `STOP` file at start and before each resubmission.
+  - The `study freeze` help says that freeze refuses uncommitted inputs. The build message names `polyzymd run`, and the "write a function" hint links to the study API how-to.
 
 - **Console and messages (1.3 audit, wave D).**
   - The uncommitted-inputs warning prints once per command, with a count and the first five files.
