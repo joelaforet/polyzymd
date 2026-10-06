@@ -185,6 +185,3 @@ distance method.
   - [Run Contacts Analysis](../how_to/analysis_contacts_quickstart.md)
   - [Run Distance Analysis](../how_to/analysis_distances_quickstart.md)
   - [Measure a Catalytic Triad on the Analysis API](../how_to/analysis_triad_quickstart.md)
-- For removed experimental analyses, see
-  [Experimental analyses](../reference/experimental_analyses_archive.md); they
-  are not active v1.3 workflows.

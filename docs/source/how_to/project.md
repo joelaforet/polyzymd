@@ -65,7 +65,7 @@ conditions:
 ```
 
 To bring studies you already have into a project, follow the tutorial
-{doc}`../tutorials/move_studies_into_project`.
+{doc}`move_studies_into_project`.
 
 ## Write each protein's `study.yaml`
 

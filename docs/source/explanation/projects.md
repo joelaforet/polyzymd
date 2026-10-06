@@ -123,5 +123,5 @@ are unchanged.
 ## See also
 
 - {doc}`../how_to/project`: analyse, test and publish a project.
-- {doc}`../tutorials/move_studies_into_project`: bring existing studies into a project.
+- {doc}`../how_to/move_studies_into_project`: bring existing studies into a project.
 - {doc}`study_folders`: what a study folder holds and how it is published.

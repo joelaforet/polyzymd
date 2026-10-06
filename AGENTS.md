@@ -110,7 +110,7 @@ in every `--study` report (`TrendReport`). A paper's own statistics are
 scripts in the project's `stats/` folder; freeze hashes and publishes them.
 `polyzymd project init` (`analyses/project_scaffold.py`) writes a project
 with empty studies (existing studies are moved in by hand, following
-`docs/source/tutorials/move_studies_into_project.md`), and `polyzymd project freeze`
+`docs/source/how_to/move_studies_into_project.md`), and `polyzymd project freeze`
 (`analyses/project_freeze.py`) freezes every study with
 `freeze(..., publish=False)` and publishes the project once. File arguments
 are recorded by name and SHA-256, never location, so moved studies reuse

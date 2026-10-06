@@ -1056,7 +1056,7 @@ Writes a project folder at `PATH`: `project.yaml` listing the studies,
 per `--study` with a `study.yaml` to fill in. Labels are also folder names
 (lower case, digits, `_`). Without `--no-git` the project becomes a git
 repository with one commit. To move existing studies in, see
-{doc}`../tutorials/move_studies_into_project`.
+{doc}`../how_to/move_studies_into_project`.
 
 ### polyzymd project freeze
 

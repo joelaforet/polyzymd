@@ -580,9 +580,7 @@ interval changed part way through the chain.
 
 **Solutions:**
 
-1. **For atom order mismatch:** This is a subtle but devastating bug where the atom order in your DCD trajectory doesn't match the atom order in your topology file. We encountered this exact issue during PolyzyMD development and wrote a detailed guide:
-   
-   See: {doc}`broken_molecules_debugging` - A complete debugging case study with diagnosis steps, root cause analysis, and solutions.
+1. **For atom order mismatch:** If some molecules are broken and others are not, the atom order of the trajectory does not match the topology. Load the trajectory with the topology PDB from the same `production_N/` folder.
 
 2. **For PBC wrapping:** Use your visualization software's unwrap/make-whole tools:
    - **PyMOL:** Use `intra_fit` command or external post-processing tools
