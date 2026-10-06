@@ -18,7 +18,7 @@ the same way on both engines, and PolyzyMD writes a warning.
 | `thermostat_timescale` τ (ps) | friction = 1/τ | `tau-t` = τ | 1:1 |
 | `time_step` (fs) | integrator step | `dt` (ps) | 1:1 |
 | `barostat: MC` | `MonteCarloBarostat(P, T, barostat_frequency)` | `pcoupl = c-rescale`, `pcoupltype = isotropic`, `tau-p = 5 ps`, compressibility 4.5e-5 bar⁻¹ | approximate. GROMACS has no Monte Carlo barostat. Stochastic cell rescaling samples the same NPT ensemble. |
-| `barostat: MCA` | `MonteCarloAnisotropicBarostat` | `pcoupl = c-rescale`, `pcoupltype = anisotropic` | approximate, as above |
+| `barostat: MCA` | not supported: `validate` refuses it | `pcoupl = c-rescale`, `pcoupltype = anisotropic` | differs: runs only on GROMACS |
 | `pressure` (atm) | atm | `ref-p` in bar (× 1.01325) | 1:1 |
 
 ## Seeds
@@ -58,6 +58,7 @@ that GROMACS computes the same energies as OpenMM through Interchange.
 
 | What | OpenMM | GROMACS | Match |
 |---|---|---|---|
+| Minimization with `freeze_solute: true` (the default) | protein and substrate heavy atoms held fixed | `em.mdp` turns on the protein and ligand restraints of the first equilibration stage. If that stage restrains neither, the solute can move. | approximate. GROMACS restrains the atoms that OpenMM freezes. |
 | Position restraints | a harmonic force on the selected atoms | `define = -DPOSRES_...` with restraint `.itp` files | 1:1 |
 | Temperature ramp | the target changes every `temperature_interval_steps` steps | `annealing`, a piecewise-linear schedule that changes the target over one step at each boundary | 1:1: the same target at every step |
 
