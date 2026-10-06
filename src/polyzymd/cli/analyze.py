@@ -130,7 +130,8 @@ def _partial_report(options: dict[str, Any], error: Exception) -> "ProtocolRepor
     """Build a report from the conditions that can be reported, after the whole run failed.
 
     Each condition is run alone, which reuses its stored results, and the
-    conditions that fail are named in ``problems`` with their error. The
+    conditions that fail are named in ``problems`` with the type and hint of
+    their error, not its message, which can name this machine's paths. The
     comparison is then run over the conditions that worked, control first;
     without the control, or when that comparison fails too, the report holds
     each condition's summary. Returns ``None`` when there is no second
@@ -152,10 +153,9 @@ def _partial_report(options: dict[str, Any], error: Exception) -> "ProtocolRepor
         )
 
     def reason(exc: Exception) -> str:
+        # The message can name this machine's paths, and the report is published.
         hint = getattr(exc, "hint", None)
-        return f"{type(exc).__name__}: {_one_line(str(exc))}" + (
-            f" (fix: {_one_line(hint)})" if hint else ""
-        )
+        return type(exc).__name__ + (f" (fix: {_one_line(hint)})" if hint else "")
 
     alone: dict[int, "ProtocolReport"] = {}
     problems = []

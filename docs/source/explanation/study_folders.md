@@ -198,7 +198,8 @@ results.
      waters, the salt and the composition (Reliability and reproducibility
      checklist 2023).
 3. It writes `manifest.json`: the file hashes and sizes, the package versions,
-   the provenance above, the trajectory DOIs and the git commit.
+   the provenance above, the trajectory DOIs and the parent of the tagged
+   commit.
 4. It writes `md_checklist.yaml`, the reliability and reproducibility
    checklist of Communications Biology (2023), filled in from the manifest.
    The checklist is for information. You can send it with a journal

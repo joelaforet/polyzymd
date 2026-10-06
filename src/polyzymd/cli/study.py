@@ -602,6 +602,11 @@ def freeze_command(path: Path, tag: str | None) -> None:
         f"next: follow {result.guide}, which says how to reserve the DOI, upload and publish "
         "on Zenodo; PolyzyMD uploads nothing"
     )
+    if result.git_failed:
+        click.echo(
+            "error: git could not commit and tag the study; fix that and freeze again", err=True
+        )
+        sys.exit(EXIT_STUDY_ERROR)
 
 
 @study_group.command("add-condition")

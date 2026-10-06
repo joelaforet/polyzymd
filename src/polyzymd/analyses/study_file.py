@@ -608,8 +608,9 @@ def load_study_file(path: str | Path) -> StudyFile:
     ------
     ProtocolError
         If the file is missing or not YAML, a key is unknown, a required key
-        (``equilibration``, ``conditions``) is missing, or a value has the
-        wrong type.
+        (``equilibration``, ``conditions``) is missing, a value has the
+        wrong type, or a condition config is outside the study folder and
+        its project folder.
     """
     import yaml
 
@@ -694,6 +695,16 @@ def load_study_file(path: str | Path) -> StudyFile:
 
     found = find_project(file.parent)
     project, project_label = found if found is not None else (None, None)
+    # Freeze deposits only the study folder (and its project), so a config
+    # outside it would be missing from the deposit.
+    inside = [file.parent.resolve()] + ([project.path.parent.resolve()] if project else [])
+    for label, config in conditions.items():
+        if not any(config.is_relative_to(folder) for folder in inside):
+            raise ProtocolError(
+                f"{file}: the config of condition {label} is {config}, outside the study folder.",
+                hint=f'Copy it into the study with: polyzymd study add-condition "{label}" '
+                f"--config {config}",
+            )
     analyses: dict[str, AnalysisEntry] = {}
     if project is not None:
         # The project's analyses, for this study: its regions and structures resolved.

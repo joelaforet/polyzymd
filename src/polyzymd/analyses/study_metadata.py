@@ -132,7 +132,7 @@ def check_metadata(raw: Any, what: str = "study") -> tuple[dict[str, Any], list[
     if is_placeholder(doi):
         warnings.append(
             f"metadata.doi is not set: reserve a DOI for the {what} in Zenodo, add it here and "
-            "refreeze (deposit/UPLOAD.md says how)"
+            "refreeze"
         )
         meta["doi"] = None
     else:

@@ -17,15 +17,18 @@ if TYPE_CHECKING:
     from polyzymd.config.schema import SimulationConfig
 
 
-def _content(path: object) -> str:
-    """Return the SHA-256 of the file at ``path``, or its file name when it cannot be read."""
+def _content(path: object) -> str | None:
+    """Return the SHA-256 of the file at ``path``, or ``None`` when it cannot be read.
+
+    A missing file is not hashed by its name, which changes when the file is
+    moved, so a config that names it hashes the same on every machine.
+    """
     from pathlib import Path
 
-    file = Path(str(path))
     try:
-        return hashlib.sha256(file.read_bytes()).hexdigest()
+        return hashlib.sha256(Path(str(path)).read_bytes()).hexdigest()
     except OSError:
-        return file.name
+        return None
 
 
 def compute_config_hash(config: "SimulationConfig") -> str:

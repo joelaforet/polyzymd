@@ -111,6 +111,17 @@ class TestSchema:
         if hint:
             assert hint in caught.value.hint
 
+    def test_refuses_a_condition_config_outside_the_study(self, tmp_path: Path) -> None:
+        """The deposit holds only the study folder, so every condition config is inside it."""
+        (tmp_path / "study").mkdir()
+        path = _write(
+            tmp_path / "study" / "study.yaml",
+            "equilibration: 1ns\nconditions: {Ext: ../external/cfg/config.yaml}\n",
+        )
+        with pytest.raises(ProtocolError, match="outside the study") as caught:
+            load_study_file(path)
+        assert "polyzymd study add-condition" in caught.value.hint
+
     def test_replicate_range(self, tmp_path: Path) -> None:
         path = _write(
             tmp_path / "study.yaml",

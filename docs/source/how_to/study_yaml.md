@@ -54,7 +54,7 @@ analyses:
 | Key | Meaning |
 |---|---|
 | `equilibration` | Required. The time that each analysis removes from the start of the production trajectory of each replicate |
-| `conditions` | Required. Condition label to `config.yaml`. The first condition is the control |
+| `conditions` | Required. Condition label to `config.yaml`. The first condition is the control. Each config must be inside the study folder (or its project folder); `polyzymd study add-condition --config` copies one in |
 | `stride`, `replicates` | Optional. The same as `--stride` and `--replicates` |
 | `until` | Optional. The end of a common analysis window, such as `38ns`, the same as `--until`. See {ref}`study-until` |
 | `analyses` | Run name to settings. Each entry is one {term}`run`. The settings are the keys that `--set` takes. `analysis:` names the shipped analysis when the run name is not its name |

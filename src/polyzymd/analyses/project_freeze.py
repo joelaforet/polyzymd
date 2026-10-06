@@ -27,6 +27,7 @@ from polyzymd.analyses.study_freeze import (
     FreezeResult,
     _commit_and_tag,
     _copy_frozen_folder,
+    _drop_tag,
     _finish_deposit,
     _git_preflight,
     _listed_files,
@@ -140,14 +141,14 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "tag": tag,
         "git": {
-            "commit": state["commit"] if state else None,
+            "parent_commit": state["commit"] if state else None,
             "inputs_uncommitted": state["inputs_uncommitted"] if state else None,
         },
         "project_file": {
             "path": project.protocol.path.name,
             "sha256": _sha256(project.protocol.path),
         },
-        "versions": _versions(),
+        "versions": _versions(root),
         "metadata": meta,
         "studies": studies,
         "conditions": conditions,
@@ -180,6 +181,8 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
                 if (root / folder / p).exists()
             ]
         commit = _commit_and_tag(root, paths, tag, "project", warnings)
+        if commit is None:
+            _drop_tag(root, manifest, meta, released, method)
 
     deposit = root / DEPOSIT
     if deposit.exists():
@@ -207,9 +210,11 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         root=root,
         project=True,
     )
-    return _finish_deposit(
+    result = _finish_deposit(
         root, deposit, tag, commit, manifest, readme + _studies_section(project), warnings
     )
+    result.git_failed = bool(state and tag and commit is None)
+    return result
 
 
 def _project_files(project: Any, state: dict | None) -> dict[str, dict[str, Any]]:
