@@ -280,10 +280,16 @@ def apply_build_chain_ids(universe: Any, pdb_file: str | Path | None) -> dict[st
 
     A TPR or ``.top`` names chains after molecule types (``MOL0``, ...), and
     an OpenMM ``system.prmtop`` has no chain IDs, while PolyzyMD's build puts
-    the protein on chain A, the substrate on B and the polymers on C. The ``chainIDs`` of
-    ``pdb_file`` replace those of ``universe`` when it has the same number of
-    atoms with the same residue names in order (water and ion atom names
-    differ between the two files). Otherwise the universe is left unchanged.
+    the protein on chain A, the substrate on B and the polymers on C. The chain
+    IDs of ``pdb_file`` replace those of ``universe`` when it has the same
+    number of atoms with the same residue names in order (water and ion atom
+    names differ between the two files). Otherwise, or when ``pdb_file``
+    cannot be read, the universe is left unchanged.
+
+    Only the residue name and chain ID columns of the ``ATOM`` and ``HETATM``
+    records of the first model are read. Serial numbers and ``CONECT``
+    records are not, so a PDB from OpenMM above 99,999 atoms, with hex
+    serials, is read like any other.
 
     Returns
     -------
@@ -291,29 +297,37 @@ def apply_build_chain_ids(universe: Any, pdb_file: str | Path | None) -> dict[st
         ``applied``, the ``source`` path and, when nothing was applied, the
         ``reason``; also stored as ``universe._polyzymd_chain_ids``.
     """
-    import MDAnalysis as mda
-
     metadata: dict[str, Any]
     if pdb_file is None:
         metadata = {"applied": False, "source": None, "reason": f"no {BUILD_PDB}"}
     else:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            build = mda.Universe(str(pdb_file))
-        if len(build.atoms) != len(universe.atoms):
-            reason = f"{len(build.atoms)} atoms in {BUILD_PDB} for {len(universe.atoms)}"
-        elif not np.array_equal(build.atoms.resnames, universe.atoms.resnames):
-            reason = f"residue names of {BUILD_PDB} differ from the topology's"
-        elif not hasattr(build.atoms, "chainIDs"):
-            reason = f"{BUILD_PDB} has no chain IDs"
+        resnames: list[str] = []
+        chains: list[str] = []
+        try:
+            with open(pdb_file) as handle:
+                for line in handle:
+                    if line.startswith(("ATOM  ", "HETATM")):
+                        resnames.append(line[17:21].strip())
+                        chains.append(line[21:22].strip())
+                    elif line.startswith("ENDMDL") or line[:6].strip() == "END":
+                        break
+        except (OSError, UnicodeDecodeError) as error:
+            reason = f"cannot read {BUILD_PDB}: {error}"
         else:
-            reason = None
-        if reason is None:
-            chains = np.asarray(build.atoms.chainIDs, dtype=object)
-            if hasattr(universe.atoms, "chainIDs"):
-                universe.atoms.chainIDs = chains
+            if len(chains) != len(universe.atoms):
+                reason = f"{len(chains)} atoms in {BUILD_PDB} for {len(universe.atoms)}"
+            elif not np.array_equal(np.asarray(resnames), universe.atoms.resnames.astype(str)):
+                reason = f"residue names of {BUILD_PDB} differ from the topology's"
+            elif not any(chains):
+                reason = f"{BUILD_PDB} has no chain IDs"
             else:
-                universe.add_TopologyAttr("chainIDs", chains)
+                reason = None
+        if reason is None:
+            chain_ids = np.asarray(chains, dtype=object)
+            if hasattr(universe.atoms, "chainIDs"):
+                universe.atoms.chainIDs = chain_ids
+            else:
+                universe.add_TopologyAttr("chainIDs", chain_ids)
             metadata = {"applied": True, "source": str(pdb_file)}
         else:
             metadata = {"applied": False, "source": str(pdb_file), "reason": reason}

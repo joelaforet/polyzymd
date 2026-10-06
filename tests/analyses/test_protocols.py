@@ -380,3 +380,17 @@ def test_a_test_with_three_varying_replicates_has_no_power_warning() -> None:
     ]
     pair = PairwiseReport(a="A", b="B", delta=0.0, p=0.9, p_adjusted=0.9, testable=True)
     assert "power" not in " ".join(_verdict("m", None, conditions, [pair]))
+
+
+def test_a_single_replicate_is_not_said_to_have_the_same_value_in_every_replicate() -> None:
+    """At n 1 the power note names only the replicate count."""
+    from polyzymd.analyses.protocols import _verdict
+
+    conditions = [
+        ConditionReport(label="Water", n_replicates=1, mean=0.0, replicate_values=[0.0]),
+        ConditionReport(label="SDS", n_replicates=3, mean=0.4, replicate_values=[0.3, 0.4, 0.5]),
+    ]
+    pair = PairwiseReport(a="Water", b="SDS", delta=0.4, p=0.03, p_adjusted=0.03, testable=True)
+    (text,) = _verdict("coverage", None, conditions, [pair])
+    assert "little power: Water has fewer than 3 replicates" in text
+    assert "same value in every replicate" not in text

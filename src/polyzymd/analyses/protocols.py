@@ -2148,7 +2148,7 @@ def _verdict(
         weak = [
             f"{label} has the same value in every replicate"
             for label in (pair.a, pair.b)
-            if len(set(values.get(label, []))) == 1
+            if counts.get(label, 0) >= 2 and len(set(values.get(label, []))) == 1
         ]
         if few:
             verb = "has" if len(few) == 1 else "have"
