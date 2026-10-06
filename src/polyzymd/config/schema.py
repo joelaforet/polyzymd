@@ -1742,15 +1742,27 @@ class SimulationConfig(_ConfigModel):
     @model_validator(mode="after")
     def validate_barostat_for_engine(self) -> "SimulationConfig":
         """Refuse barostat MCA with engine openmm, which runs only the isotropic barostat."""
+        if self.engine == "openmm":
+            self.require_engine_barostats("openmm")
+        return self
+
+    def require_engine_barostats(self, engine: str) -> None:
+        """Raise ``ValueError`` when ``engine`` cannot run a barostat this config names.
+
+        The OpenMM engine runs only the isotropic Monte Carlo barostat, so
+        barostat MCA (anisotropic) needs GROMACS. Commands that run OpenMM on
+        a config call this, so ``run --engine openmm`` on a GROMACS config
+        with MCA is refused too.
+        """
         phases = self.simulation_phases
         barostats = [stage.barostat for stage in phases.equilibration_stages or []]
         barostats.append(phases.production.barostat)
-        if self.engine == "openmm" and BarostatType.MONTE_CARLO_ANISOTROPIC in barostats:
+        if engine == "openmm" and BarostatType.MONTE_CARLO_ANISOTROPIC in barostats:
             raise ValueError(
                 "barostat MCA (anisotropic) runs only with engine gromacs. The OpenMM engine "
-                "runs only the isotropic Monte Carlo barostat; use barostat MC."
+                "runs only the isotropic Monte Carlo barostat: set engine: gromacs, or use "
+                "barostat MC."
             )
-        return self
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "SimulationConfig":
