@@ -378,12 +378,14 @@ gromacs/
 ├── prod.cpt                  # Checkpoint for restart (state.cpt in a SLURM job)
 │
 ├── prod_nojump.xtc           # Trajectory with PBC jumps removed
-└── prod_centered.xtc         # Centered trajectory for visualization
+├── prod_centered.xtc         # Centered trajectory for visualization
+└── progress.json             # Stage and segment records: times, seeds
 ```
 
 Each `mdrun` stage also writes a `.log` file, and a `.trr` file when the stage
-writes full-precision coordinates. `solvated_system.pdb` is in the replicate
-folder, beside `gromacs/`.
+writes full-precision coordinates. `solvated_system.pdb` and
+`build_manifest.json` (PACKMOL seeds, box and the SHA-256 of each input file)
+are in the replicate folder, beside `gromacs/`.
 
 Position restraints are appended as `#ifdef POSRES_*` blocks inside the
 molecule `.itp` files. MDP files use `-DPOSRES_PROTEIN`, `-DPOSRES_POLYMER`,

@@ -16,6 +16,7 @@ not frame by frame.
 from __future__ import annotations
 
 import hashlib
+from typing import Any
 
 #: Largest seed both engines accept (a positive 32-bit integer).
 MAX_SEED = 2**31 - 1
@@ -31,3 +32,20 @@ def dynamics_seed(replicate: int, phase: str) -> int:
     """
     digest = hashlib.sha256(f"{int(replicate)}:{phase}".encode()).digest()
     return int.from_bytes(digest[:8], "big") % MAX_SEED + 1
+
+
+def openmm_seeds(simulation: Any, velocities: int | None = None) -> dict[str, int]:
+    """Return the random seeds an OpenMM ``Simulation`` runs with, for ``progress.json``.
+
+    ``integrator`` is the thermostat noise seed and ``barostat`` the seed of
+    the Monte Carlo volume moves, read back from the integrator and the
+    system; 0 means OpenMM chose a random one. ``velocities`` is the seed the
+    phase drew its starting velocities with, given only when it drew them.
+    """
+    seeds = {"integrator": int(simulation.integrator.getRandomNumberSeed())}
+    for force in simulation.system.getForces():
+        if "Barostat" in type(force).__name__:
+            seeds["barostat"] = int(force.getRandomNumberSeed())
+    if velocities is not None:
+        seeds["velocities"] = int(velocities)
+    return seeds

@@ -715,6 +715,14 @@ class ContinuationManager:
         LOGGER.info(f"Saved final state to {state_path}")
         LOGGER.info(f"Saved system to {system_path}")
 
+    def _dynamics_seeds(self) -> Dict[str, int] | None:
+        """Return the seeds the segment's integrator and barostat run with, or None before setup."""
+        if self._simulation is None:
+            return None
+        from polyzymd.simulation.seeds import openmm_seeds
+
+        return openmm_seeds(self._simulation)
+
     def _write_segment_started(self, total_steps: int) -> None:
         """Write a RUNNING segment record to progress.json at segment start.
 
@@ -748,6 +756,7 @@ class ContinuationManager:
             steps_requested=total_steps,
             samples_written=0,
             status=SegmentStatus.RUNNING,
+            seeds=self._dynamics_seeds(),
         )
 
         self._apply_frame_fields(record)
@@ -846,6 +855,7 @@ class ContinuationManager:
             samples_written=num_samples,
             status=SegmentStatus.COMPLETED,
             duration_ns=duration_ns,
+            seeds=self._dynamics_seeds(),
             **record_provenance(self._simulation),
             **trajectory_digest(segment_dir / f"production_{self._segment_index}_trajectory.dcd"),
         )
@@ -893,6 +903,7 @@ class ContinuationManager:
             SegmentRecord,
             SegmentStatus,
             SimulationStatus,
+            _now_iso,
             _update_or_append_segment,
             load_progress,
             save_progress,
@@ -913,6 +924,8 @@ class ContinuationManager:
             samples_written=0,  # Replaced by the tracker's count when known
             status=SegmentStatus.INTERRUPTED,
             duration_ns=actual_duration_ns,
+            finished_at=_now_iso(),
+            seeds=self._dynamics_seeds(),
         )
         self._apply_frame_fields(record)
 

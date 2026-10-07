@@ -127,6 +127,9 @@ class SimulationRunner:
         >>> runner.run_production(temperature=300, duration_ns=100)
     """
 
+    #: Seeds of the running production segment, recorded in ``progress.json``.
+    _segment_seeds: Optional[Dict[str, int]] = None
+
     def __init__(
         self,
         topology: Any,
@@ -275,13 +278,17 @@ class SimulationRunner:
 
         return dynamics_seed(self._replicate, phase)
 
-    def _set_velocities(self, temperature: float, phase: str) -> None:
-        """Draw Maxwell-Boltzmann velocities at ``temperature`` K, seeded by the replicate number."""
+    def _set_velocities(self, temperature: float, phase: str) -> int:
+        """Draw Maxwell-Boltzmann velocities at ``temperature`` K, seeded by the replicate number.
+
+        Returns the seed, or 0 when OpenMM chose a random one.
+        """
         seed = self._seed(f"velocities:{phase}")
         if seed is None:
             self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)
-        else:
-            self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin, seed)
+            return 0
+        self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin, seed)
+        return seed
 
     def _add_barostat(
         self,
@@ -696,7 +703,9 @@ class SimulationRunner:
             add_position_restraints_to_system,
             remove_position_restraints_from_system,
         )
+        from polyzymd.simulation.progress import _now_iso
 
+        started_at = _now_iso()
         stage_name = f"equilibration_{stage_index}_{stage.name}"
         LOGGER.info(
             f"Starting equilibration stage: {stage.name} ({stage.resolved_duration:.6f} ns)"
@@ -789,12 +798,17 @@ class SimulationRunner:
         # velocities for the first stage. Subsequent stages inherit velocities
         # from the previous stage for physical continuity — matching the
         # GROMACS convention (gen_vel=yes only for stage 0).
+        velocity_seed = None
         if (stage_index == 0 and resume_from_step == 0) or self._current_velocities is None:
-            self._set_velocities(start_temp, f"equilibration:{stage_index}")
+            velocity_seed = self._set_velocities(start_temp, f"equilibration:{stage_index}")
             LOGGER.info(f"Stage {stage_index}: initialized velocities at {start_temp} K")
         else:
             self._simulation.context.setVelocities(self._current_velocities)
             LOGGER.info(f"Stage {stage_index}: inherited velocities from previous stage")
+
+        from polyzymd.simulation.seeds import openmm_seeds
+
+        seeds = openmm_seeds(self._simulation, velocity_seed)
 
         # Log initial energy
         _state = self._simulation.context.getState(getEnergy=True)
@@ -1066,6 +1080,9 @@ class SimulationRunner:
             ),
             "trajectory_path": str(traj_path),
             "checkpoint_path": str(checkpoint_path),
+            "started_at": started_at,
+            "finished_at": _now_iso(),
+            "seeds": seeds,
         }
 
         LOGGER.info(f"Equilibration stage '{stage.name}' complete")
@@ -1523,13 +1540,17 @@ class SimulationRunner:
         # - Otherwise generate new velocities at target temperature
         # Note: For continuation segments (segment > 0), ContinuationManager uses
         # loadState() which restores both positions and velocities from the XML state file
+        velocity_seed = None
         if segment_index == 0:
             if self._current_velocities is not None:
                 self._simulation.context.setVelocities(self._current_velocities)
                 LOGGER.info("Using velocities preserved from equilibration")
             else:
-                self._set_velocities(temperature, "production")
+                velocity_seed = self._set_velocities(temperature, "production")
                 LOGGER.info("Initialized velocities from Maxwell-Boltzmann distribution")
+        from polyzymd.simulation.seeds import openmm_seeds
+
+        self._segment_seeds = openmm_seeds(self._simulation, velocity_seed)
 
         # Add reporters
         traj_path = phase_dir / f"{phase_name}_trajectory.dcd"
@@ -1906,6 +1927,7 @@ class SimulationRunner:
             steps_requested=total_steps,
             samples_written=0,
             status=SegmentStatus.RUNNING,
+            seeds=self._segment_seeds,
             **record_provenance(self._simulation),
         )
         self._apply_frame_fields(record)
@@ -2012,6 +2034,7 @@ class SimulationRunner:
             samples_written=num_samples,
             status=SegmentStatus.COMPLETED,
             duration_ns=duration_ns,
+            seeds=self._segment_seeds,
             **record_provenance(self._simulation),
             **trajectory_digest(segment_dir / f"production_{segment_index}_trajectory.dcd"),
         )
@@ -2060,6 +2083,7 @@ class SimulationRunner:
             SegmentRecord,
             SegmentStatus,
             SimulationStatus,
+            _now_iso,
             _update_or_append_segment,
             load_progress,
             save_progress,
@@ -2080,6 +2104,8 @@ class SimulationRunner:
             samples_written=0,  # Replaced by the tracker's count when known
             status=SegmentStatus.INTERRUPTED,
             duration_ns=actual_duration_ns,
+            finished_at=_now_iso(),
+            seeds=self._segment_seeds,
             **record_provenance(self._simulation),
         )
         self._apply_frame_fields(record)

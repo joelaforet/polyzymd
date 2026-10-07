@@ -1,4 +1,4 @@
-"""Integrity checks and transactional publication for OpenMM build artifacts."""
+"""Integrity checks and transactional publication for build artifacts."""
 
 from __future__ import annotations
 
@@ -73,6 +73,65 @@ def _atomic_write(path: Path, data: bytes) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
+def _manifest(
+    config: Any,
+    particle_count: int,
+    openmm_version: str | None,
+    provenance: dict[str, Any] | None,
+    artifacts: dict[str, Path],
+) -> dict[str, Any]:
+    """Return a build manifest; ``artifacts`` maps each recorded path to the file to hash."""
+    from polyzymd.utils.version import get_polyzymd_version
+
+    return {
+        "schema_version": 1,
+        "build_uuid": str(uuid.uuid4()),
+        "config_hash": config_hash(config),
+        "particle_count": int(particle_count),
+        "openmm_version": openmm_version,
+        "polyzymd_version": get_polyzymd_version(),
+        "provenance": dict(provenance or {}),
+        "artifacts": {
+            name: {"path": name, "sha256": file_sha256(path, use_cache=False)}
+            for name, path in artifacts.items()
+        },
+    }
+
+
+def write_gromacs_build_manifest(
+    replicate_dir: Path,
+    gromacs_dir: Path,
+    config: Any,
+    particle_count: int,
+    provenance: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Write ``build_manifest.json`` for a GROMACS build into the replicate folder.
+
+    It has the keys of an OpenMM build's manifest, with ``openmm_version``
+    null. The artifacts are ``solvated_system.pdb``, the exported
+    ``<prefix>.gro``, and the topology, the files it includes and the MDP
+    files (:func:`polyzymd.analyses.shared.gromacs.run_input_files`), each
+    by its path relative to the replicate folder.
+    """
+    from polyzymd.analyses.shared.gromacs import run_input_files, system_prefix
+
+    candidates = [
+        replicate_dir / _BUILD_ARTIFACTS[0],
+        gromacs_dir / _BUILD_ARTIFACTS[0],
+        gromacs_dir / f"{system_prefix(config)}.gro",
+        *run_input_files(gromacs_dir, config),
+    ]
+    artifacts = {
+        path.relative_to(replicate_dir).as_posix(): path for path in candidates if path.is_file()
+    }
+    manifest = _manifest(config, particle_count, None, provenance, artifacts)
+    _atomic_write(
+        replicate_dir / MANIFEST_NAME,
+        (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
+    )
+    return manifest
+
+
 def publish_build_bundle(
     working_dir: Path,
     topology: Any,
@@ -90,8 +149,6 @@ def publish_build_bundle(
     from openmm import XmlSerializer, version
     from openmm.app import PDBFile
 
-    from polyzymd.utils.version import get_polyzymd_version
-
     working_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".build-bundle-", dir=working_dir) as staging_text:
         staging = Path(staging_text)
@@ -104,22 +161,13 @@ def publish_build_bundle(
         if write_analysis_topology(topology, system, positions, staging / ANALYSIS_TOPOLOGY_NAME):
             written.append(ANALYSIS_TOPOLOGY_NAME)
 
-        manifest = {
-            "schema_version": 1,
-            "build_uuid": str(uuid.uuid4()),
-            "config_hash": config_hash(config),
-            "particle_count": int(system.getNumParticles()),
-            "openmm_version": version.full_version,
-            "polyzymd_version": get_polyzymd_version(),
-            "provenance": dict(provenance or {}),
-            "artifacts": {
-                name: {
-                    "path": name,
-                    "sha256": file_sha256(staging / name, use_cache=False),
-                }
-                for name in written
-            },
-        }
+        manifest = _manifest(
+            config,
+            system.getNumParticles(),
+            version.full_version,
+            provenance,
+            {name: staging / name for name in written},
+        )
         previous = {
             name: (working_dir / name).read_bytes()
             for name in (*_BUILD_ARTIFACTS, *_OPTIONAL_ARTIFACTS, MANIFEST_NAME)
