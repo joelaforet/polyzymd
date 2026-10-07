@@ -25,8 +25,8 @@ Submit simulations and analysis jobs with SLURM, and monitor them.
 :link: study_folder
 :link-type: doc
 
-Make a study folder for each protein, group studies into a project, and
-freeze them for publication.
+Make a study folder for each set of compared conditions, group studies into
+a project, and freeze them for publication.
 :::
 
 :::{grid-item-card} Analyze trajectories

@@ -1,7 +1,7 @@
 """Read ``project.yaml``, the analyses a paper runs in each of its studies.
 
 A project folder holds one paper: its ``project.yaml`` lists the study
-folders, one per protein, and the analyses every study runs; see the
+folders and the analyses every study runs; see the
 "Projects and studies" explanation page. This module contains:
 
 - :func:`load_project_file`, which reads and checks ``project.yaml`` into a

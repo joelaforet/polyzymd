@@ -696,7 +696,7 @@ def load_study_file(path: str | Path) -> StudyFile:
     project, project_label = found if found is not None else (None, None)
     analyses: dict[str, AnalysisEntry] = {}
     if project is not None:
-        # The project's analyses, for this protein: its regions and structures resolved.
+        # The project's analyses, for this study: its regions and structures resolved.
         for run, entry in project.analyses.items():
             listed = project.runs_in[run]
             if listed is not None and project_label not in listed:

@@ -1534,6 +1534,14 @@ class GromacsEngineConfig(_ConfigModel):
     """
 
     gmx_binary: str | None = Field(None, description="GROMACS binary path or name")
+    analysis_topology: str | None = Field(
+        None,
+        description=(
+            "File name of the run's GROMACS topology (.top) in the run folder. Analyses "
+            "read it when MDAnalysis cannot read prod.tpr, and freeze deposits it with the "
+            "files it includes. Default: <prefix>.top, the file PolyzyMD writes."
+        ),
+    )
     mdrun_flags: str = Field("", description="Extra flags for gmx mdrun (all stages)")
     grompp_flags: str = Field(
         "",

@@ -38,6 +38,7 @@ import functools
 import hashlib
 import inspect
 import json
+import logging
 import math
 import re
 import sys
@@ -47,6 +48,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from polyzymd.analyses.exceptions import ProtocolError
+
+LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import numpy as np
@@ -128,11 +131,11 @@ def _function_record(function: Callable) -> dict[str, Any]:
 
     A function loaded from a study's or project's own file
     (:func:`~polyzymd.analyses.user_functions.load_function`) is hashed with
-    every file under that file's folder (:func:`code_files`), by path and
-    content: the folder is on ``sys.path`` while the function runs, so a
-    helper module or package it imports from there, or a data file it reads,
-    is part of what produced the result. Editing any of those files changes
-    the record.
+    the Python files under that file's folder and the files of its ``data/``
+    folder (:func:`code_files`), by path and content: the folder is on
+    ``sys.path`` while the function runs, so a helper module or package it
+    imports from there, or a data file it reads from ``data/``, is part of
+    what produced the result. Editing any of those files changes the record.
 
     A function shipped with PolyzyMD is hashed with its module's file and the
     files of the PolyzyMD modules that file imports (:func:`_shipped_code_hash`),
@@ -236,33 +239,27 @@ _NOT_CODE_FILES = {
 }
 
 
-def code_files(folder: Path) -> list[Path]:
-    """Return every file a function or plan in ``folder`` may use, in path order.
+#: The folder, beside a function's file, whose files of any type count as its data.
+DATA_FOLDER = "data"
 
-    Every file under ``folder``, in subfolders too (helper packages, data
-    files the code reads), except compiled bytecode, hidden files and
-    folders (``.git``, ``.pixi``, ``.venv``), ``data.local.yaml`` and the
-    files ``freeze`` writes, and the files of ``results/``, ``logs/``,
-    ``deposit/``, ``conditions/``, ``figures/``, ``slurm/`` and
-    ``site-packages/`` folders and of any folder holding a ``study.yaml``.
 
-    When ``folder`` is itself a study's or project's folder (a function or
-    plan file placed beside ``study.yaml`` or ``project.yaml``), only its
-    Python files count, so editing a description or drawing a figure does
-    not recompute anything; data files the code reads belong in an
-    ``analyses/`` or ``stats/`` folder, or are passed as arguments.
+def _candidate_files(folder: Path) -> list[tuple[Path, Path]]:
+    """Return ``(path, relative path)`` of each file under ``folder`` outside skipped folders.
+
+    Skipped: hidden files and folders (``.git``, ``.pixi``, ``.venv``),
+    output and job folders (``results/``, ``logs/``, ``deposit/``,
+    ``conditions/``, ``figures/``, ``slurm/``, ``site-packages/``,
+    ``__pycache__``), the folders of other studies and the files that
+    ``freeze`` writes.
     """
-    root_of_study = (folder / "study.yaml").is_file() or (folder / "project.yaml").is_file()
-    files = []
+    found = []
     for path in sorted(folder.rglob("*")):
         relative = path.relative_to(folder)
         if (
             not path.is_file()
-            or path.suffix == ".pyc"
             or path.name in _NOT_CODE_FILES
             or any(part.startswith(".") for part in relative.parts)
             or any(part in _NOT_CODE for part in relative.parts[:-1])
-            or (root_of_study and path.suffix != ".py")
         ):
             continue
         if any(
@@ -270,8 +267,49 @@ def code_files(folder: Path) -> list[Path]:
             for i in range(1, len(relative.parts))
         ):
             continue
-        files.append(path)
-    return files
+        found.append((path, relative))
+    return found
+
+
+def code_files(folder: Path) -> list[Path]:
+    """Return the files a function or plan in ``folder`` may use, in path order.
+
+    Two kinds of files count, in subfolders too:
+
+    - every Python file (``*.py``): the function's own file, and the helper
+      modules and packages it imports from ``folder``;
+    - every file under ``folder/data/``: the data files the function reads.
+
+    When ``folder`` holds ``study.yaml`` or ``project.yaml`` (a function file
+    beside it), only the Python files count: a ``data/`` folder there may
+    hold trajectories. Keep data files in ``analyses/data/`` or
+    ``stats/data/``. Other files, such as notes, figures or a copied
+    trajectory, never count, so adding them recomputes nothing.
+    :func:`ignored_files` names them.
+    Skipped folders are listed in :func:`_candidate_files`.
+    """
+    root_of_study = (folder / "study.yaml").is_file() or (folder / "project.yaml").is_file()
+    return [
+        path
+        for path, relative in _candidate_files(folder)
+        if path.suffix == ".py" or (relative.parts[0] == DATA_FOLDER and not root_of_study)
+    ]
+
+
+def ignored_files(folder: Path) -> list[Path]:
+    """Return the files under ``folder`` that :func:`code_files` leaves out of the hash.
+
+    Compiled bytecode (``*.pyc``) is not listed. For a study's or project's
+    own folder, where only Python files count by design, the list is empty.
+    """
+    if (folder / "study.yaml").is_file() or (folder / "project.yaml").is_file():
+        return []
+    counted = set(code_files(folder))
+    return [
+        path
+        for path, _ in _candidate_files(folder)
+        if path not in counted and path.suffix != ".pyc"
+    ]
 
 
 def folder_hash(module_file: Path) -> str:
@@ -281,6 +319,16 @@ def folder_hash(module_file: Path) -> str:
     never held in memory whole.
     """
     folder = module_file.parent
+    ignored = ignored_files(folder)
+    if ignored:
+        LOGGER.info(
+            "The stored results of %s do not depend on %s: only Python files and the "
+            "files in %s/ count. Move a file the function reads into %s/.",
+            module_file.name,
+            ", ".join(path.relative_to(folder).as_posix() for path in ignored),
+            DATA_FOLDER,
+            DATA_FOLDER,
+        )
     digest = hashlib.sha256()
     for path in code_files(folder):
         digest.update(path.relative_to(folder).as_posix().encode() + b"\0")

@@ -34,6 +34,7 @@ from polyzymd.analyses.study_freeze import (
     _write_citation,
     freeze,
     group_warnings,
+    left_out_files,
 )
 
 #: Value of the ``schema`` key of a project's ``manifest.json``.
@@ -160,8 +161,8 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
     }
     (root / MANIFEST).write_text(json.dumps(manifest, indent=1) + "\n")
     method = (
-        f"Analysed with PolyzyMD {polyzymd.__version__}: {len(studies)} studies, one per "
-        f"protein ({', '.join(studies)}), each against its own control; the replicate is "
+        f"Analysed with PolyzyMD {polyzymd.__version__}: {len(studies)} studies "
+        f"({', '.join(studies)}), each against its own control; the replicate is "
         "the sampling unit."
     )
     _write_citation(
@@ -189,6 +190,9 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         for config in project[label].protocol.conditions.values()
         if config.is_relative_to(root)
     ]
+    left_out = left_out_files(root, None)
+    if left_out:
+        warnings.append(left_out)
     _copy_frozen_folder(root, deposit, tag, commit, _listed_files(root, None), configs)
     for label in project.labels:
         for part in ("engine_inputs", "final_frames"):
@@ -237,7 +241,7 @@ def _studies_section(project: Any) -> str:
     lines = [
         "## Studies",
         "",
-        "This deposit is a project: `project.yaml` lists one study per protein, and the "
+        "This deposit is a project: `project.yaml` lists its studies, and the "
         "analyses each runs. Reproduce every study's analyses with "
         "`polyzymd analyze --project .`, and read every result with "
         '`pz.Project(".").results(run)`.',

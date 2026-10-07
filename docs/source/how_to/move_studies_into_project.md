@@ -1,9 +1,9 @@
 # Move existing studies into a project
 
 This tutorial starts from a blank `polyzymd project init` and moves studies
-you already have, one `study.yaml` per protein, into it. You end with one
-project folder for the paper, whose analyses are written once and run on every
-protein, and whose stored results are kept.
+you already have, each with its own `study.yaml`, into it. You end with one
+project folder for the paper, whose analyses are written once and run in every
+study, and whose stored results are kept.
 
 The example is a paper about three lipases, each simulated under six polymer
 conditions, with an old study folder per enzyme:
@@ -14,6 +14,13 @@ old/
 ├── calb343/   study.yaml  analyses/  results/
 └── rml333/    study.yaml  analyses/  results/
 ```
+
+In this paper, each study is one enzyme at one temperature: `lipa363` is
+lipase A at 363 K. That is one layout, not a rule. A study holds every
+condition that shares one analysis frame (residue numbering, reference
+structures, regions, equilibration window and control). So one study can
+vary the temperature and the polymer composition together, with factors such
+as `temperature_K` and `sbma_fraction`. See {doc}`../explanation/projects`.
 
 Each old `study.yaml` lists its conditions by absolute config path and names
 its reference structure by absolute path. Nothing in `old/` is changed.
@@ -36,8 +43,8 @@ Alternatively, prefix each command with `pixi run -e analysis`.
 
 ## 1. Create the project
 
-One study per protein. A study label is also its folder name, so use lower
-case, digits and `_`:
+One study for each old study folder. A study label is also its folder name,
+so use lower case, digits and `_`:
 
 ```bash
 polyzymd project init Paper_1 --study lipa363 --study calb343 --study rml333
@@ -50,7 +57,7 @@ created project Paper_1 with studies lipa363, calb343, rml333
 `Paper_1/` now holds `project.yaml`, `analyses/`, `stats/`, `figures/`, the
 licenses, and one folder per study, each with a `study.yaml` full of `TODO`s.
 
-## 2. Add each protein's conditions
+## 2. Add the conditions of each study
 
 For each old study, add its conditions in the order the old `study.yaml` lists
 them: the first is the control. `--config` copies the config, with the input
@@ -93,7 +100,7 @@ conditions:
   SBMA-EGMA 25:75: {config: conditions/sbma-egma_25_75/config.yaml, factors: {sbma_fraction: 0.25}}
 ```
 
-## 3. Describe the protein and its window
+## 3. Describe the study and its window
 
 In each new `study.yaml`, replace the `TODO`s, copying the window from the old
 file:
@@ -119,7 +126,7 @@ structures:
   reference: structures/1ISP_clean.pdb
 ```
 
-Use the same name for the equivalent structure of every protein (here
+Use the same name for the equivalent structure in every study (here
 `reference` for each crystal structure), so one analysis can say
 `structure reference` for all of them. A protein with a second structure,
 such as RML's closed conformation, names it too: `closed: structures/3TGL....pdb`.
@@ -127,7 +134,7 @@ such as RML's closed conformation, names it too: `closed: structures/3TGL....pdb
 ## 5. Name the regions
 
 Every residue set the old analyses list (a core, the catalytic triad, the
-active site) becomes a named region, in that protein's own numbering:
+active site) becomes a named region, in the residue numbering of that study:
 
 ```yaml
 regions:
@@ -144,11 +151,11 @@ Give the same region the same name in every study: `core` is LipA's core in
 
 Each old analysis entry goes to one of three places:
 
-- **every protein runs it:** `analyses:` in `Paper_1/project.yaml`, written
+- **every study runs it:** `analyses:` in `Paper_1/project.yaml`, written
   once, with `structure <name>` and `region <name>` where the old entry had a
   path or a residue list;
-- **only some proteins run it:** the same, with `studies: [...]` listing them;
-- **only one protein has it** (RML's lid gate): `analyses:` in that study's
+- **only some studies run it:** the same, with `studies: [...]` listing them;
+- **only one study runs it** (RML's lid gate): `analyses:` in that study's
   `study.yaml`.
 
 An old entry
@@ -173,7 +180,7 @@ analyses:
 ```
 
 Copy the Python files the entries name: shared functions into
-`Paper_1/analyses/`, a protein's own into `Paper_1/<study>/analyses/`. A
+`Paper_1/analyses/`, the functions of one study into `Paper_1/<study>/analyses/`. A
 `function:` path is relative to the file that lists it, so
 `function: analyses/dssp.py:dssp_core` in `project.yaml` is
 `Paper_1/analyses/dssp.py`.
@@ -235,7 +242,7 @@ are measured once more.
   `pz.Project(".").replicate_table(run)` ({doc}`../how_to/project`).
 - Commit: `git -C Paper_1 add -A && git -C Paper_1 commit -m "Move the studies into a project"`.
 
-Read every protein's results in one table:
+Read the results of every study in one table:
 
 ```python
 import polyzymd as pz
@@ -246,4 +253,4 @@ pz.Project("Paper_1").results("rmsf").table
 ## Next steps
 
 - {doc}`../how_to/project`: analyse, run statistics and publish a project.
-- {doc}`../explanation/projects`: why each study is tied to its protein.
+- {doc}`../explanation/projects`: why the conditions of a study share one analysis frame.
