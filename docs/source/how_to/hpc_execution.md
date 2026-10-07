@@ -65,18 +65,16 @@ out `--format json` to print the short agent-format lines instead.
 
 ## Rerun from the stored results
 
-A replicate result is read back instead of measured when its record matches
-the new call: the same function, selections and settings, the same config,
-the same input files, the same equilibration window and the same frames. For
-example, `--run protein_polymer_any_fraction` reads back the values that a
-run of the default `protein_polymer_mean_hbonds` stored, because both come
-from one `functions.hydrogen_bonds` call per replicate. Add `--recompute` to
-measure every replicate again.
+Run the same script again. PolyzyMD reads back each stored replicate result
+whose record matches the new call, and measures only the replicates whose
+inputs changed, for example a trajectory that grew. For the rule, see "Why a
+cached result is checked against its inputs" in
+{doc}`../explanation/analysis_concepts`. Add `--recompute` to measure every
+replicate again.
 
-A replicate whose input files changed since its result was stored, for
-example because its trajectory grew, is measured again, so rerunning the same
-script while a campaign is still producing trajectories measures only the
-replicates that changed.
+For example, `--run protein_polymer_any_fraction` reads back the values that a
+run of the default `protein_polymer_mean_hbonds` stored. Both come from one
+`functions.hydrogen_bonds` call per replicate.
 
 ## Measure replicates in parallel
 
@@ -85,7 +83,6 @@ cluster preset to the command, and PolyzyMD submits one SLURM array task per
 condition and replicate and a report job that runs after them:
 
 ```bash
-module load slurm/blanca        # CU Boulder: put Blanca's sbatch on PATH
 pixi run -e analysis polyzymd analyze hydrogen_bonds \
     -c noPoly_CALB_pNPB/config.yaml \
     -c SBMA_100_CALB_pNPB/config.yaml \
@@ -105,6 +102,9 @@ pixi run -e analysis polyzymd analyze hydrogen_bonds \
  └──────────────────────────────────────┘     └──────────────────────────┘
                                    --dependency=afterany
 ```
+
+On a site with several SLURM clusters, load the module of the cluster first.
+For CU Boulder, see {doc}`site_cu_boulder`.
 
 The command writes `analysis_results/slurm/hydrogen_bonds_<YYYYmmdd-HHMMSS>/`:
 
@@ -226,71 +226,14 @@ others stored. `--stride N` measures every N-th production frame, which
 shortens a first look at a long campaign; a stored result is reused only for
 the same stride.
 
-## Cluster settings: an example
+## Cluster settings
 
 Every cluster needs its own partition, account and QoS flags in the
-`#SBATCH` lines. The settings below are those of CU Boulder Research
-Computing. For analysis jobs, `polyzymd analyze --submit --preset` carries
-them for the clusters in the table under
-[Measure replicates in parallel](#measure-replicates-in-parallel); for
-simulation jobs, `polyzymd submit --preset` does, see {doc}`hpc_slurm`.
-
-CU Boulder's Research Computing provides two SLURM clusters: **Alpine**
-(shared campus resource) and **Blanca** (condo model with PI-owned nodes).
-Both require `--partition`, `--account`, and `--qos` to be set for job
-submission.
-
-### CU Boulder: switching between clusters
-
-Use environment modules to select which cluster's SLURM scheduler you target:
-
-```bash
-# Target Blanca (PI-owned condo nodes)
-module load slurm/blanca
-
-# Target Alpine (shared campus resource)
-module load slurm/alpine
-```
-
-Run the appropriate `module load slurm/<cluster>` command **before** `sbatch`.
-The module swap points `sbatch`, `squeue`, and the other SLURM utilities at the
-selected cluster.
-
-### CU Boulder: required SLURM flags
-
-Both clusters require all three scheduling flags. Omitting any of them causes
-`sbatch` to reject the job.
-
-| Flag | Alpine (shared) | Blanca (condo) |
-|------|-----------------|----------------|
-| `--partition` | `amilan` (CPU), `aa100` or `ami100` (GPU) | `blanca-<group>` (e.g. `blanca-shirts`) |
-| `--account` | Your allocation, such as `<account>` | Same as partition (e.g. `blanca-shirts`) |
-| `--qos` | `normal` | Same as partition (e.g. `blanca-shirts`) |
-
-Add them to the batch script, for example on Blanca:
-
-```bash
-#SBATCH --partition=blanca-shirts
-#SBATCH --account=blanca-shirts
-#SBATCH --qos=blanca-shirts
-```
-
-:::{warning}
-If you omit `--partition` on Blanca, `sbatch` fails with
-*"A partition has not been provided"*, and the error message references
-Alpine documentation. This does not mean you need to switch to Alpine. Add
-`--partition=blanca-<group>` and resubmit.
-:::
-
-:::{tip}
-If you are unsure which accounts and partitions you have access to, run:
-
-```bash
-sacctmgr show association user=$USER format=account,partition,qos
-```
-
-This lists every account/partition/QoS combination available to your user.
-:::
+`#SBATCH` lines. `polyzymd analyze --submit --preset` sets them for the
+clusters in the preset table under
+[Measure replicates in parallel](#measure-replicates-in-parallel). For
+simulation jobs, `polyzymd submit --preset` sets them, see {doc}`hpc_slurm`.
+For the values on the CU Boulder clusters, see {doc}`site_cu_boulder`.
 
 ## See Also
 
