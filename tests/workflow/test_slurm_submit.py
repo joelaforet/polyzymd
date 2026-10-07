@@ -103,3 +103,15 @@ class TestRunSbatch:
         args = mock_run.call_args
         shell_cmd = args[0][0][2]
         assert "my job.sh" in shell_cmd
+
+    @patch("polyzymd.workflow.slurm_submit.subprocess.run")
+    def test_the_log_folder_is_made_before_sbatch(self, mock_run, tmp_path):
+        """sbatch cannot write a log into a missing folder, so it is made first."""
+        logs = tmp_path / "slurm_logs"
+        script = tmp_path / "job.sh"
+        script.write_text(f"#!/bin/bash\n#SBATCH --output={logs}/job.%j.out\n")
+        mock_run.side_effect = lambda *a, **kw: MagicMock(returncode=0, stdout="", stderr="")
+
+        run_sbatch(script)
+
+        assert logs.is_dir()

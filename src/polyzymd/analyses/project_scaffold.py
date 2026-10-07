@@ -214,14 +214,15 @@ def create_project(
 
 
 def _check_study_label(label: str) -> None:
-    """Refuse a study label that is not its own folder name (lower case, digits and ``_``)."""
-    from polyzymd.analyses.study_scaffold import condition_folder
+    """Refuse a study label that is not a folder name (lower case, digits and ``_``) or is reserved."""
+    from polyzymd.analyses.study_scaffold import check_label, condition_folder
 
     if condition_folder(label) != label:
         raise ProtocolError(
             f"The study label {label!r} is not a folder name.",
             hint=f"Use lower case, digits and _ only, such as {condition_folder(label)!r}.",
         )
+    check_label(label, "study")
 
 
 def _write_study(folder: Path) -> Path:
@@ -241,19 +242,20 @@ def add_study(project: str | Path, label: str) -> Path:
 
     The study folder is ``<project>/<label>``, as :func:`create_project`
     writes it. The study is added as one line under ``studies:``, so the
-    rest of ``project.yaml``, comments included, is kept. Nothing is
+    rest of ``project.yaml``, comments included, is kept. ``runs/`` is
+    added to the project's ``.gitignore`` if it lacks it. Nothing is
     committed. Returns the study folder.
 
     Raises
     ------
     ProtocolError
-        If there is no ``project.yaml``, the label is not a folder name, or
-        the project already lists the label or holds its folder.
+        If there is no ``project.yaml``, the label is not a folder name or is
+        reserved, or the project already lists the label or holds its folder.
     """
     import yaml
 
     from polyzymd.analyses.project_file import find_project_file
-    from polyzymd.analyses.study_scaffold import _list_entry
+    from polyzymd.analyses.study_scaffold import _list_entry, ignore_runs
 
     file = find_project_file(project)
     _check_study_label(label)
@@ -265,5 +267,6 @@ def add_study(project: str | Path, label: str) -> Path:
             hint="Choose another label.",
         )
     _write_study(folder)
+    ignore_runs(file.parent)
     _list_entry(file, "studies", label, label)
     return folder

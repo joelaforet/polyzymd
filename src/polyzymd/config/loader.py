@@ -71,9 +71,6 @@ def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
             # Convert relative paths to absolute based on config file location
             if not path.is_absolute():
                 path = base_path / path
-            if key in OUTPUT_PATH_KEYS:
-                # Runs in ../../runs are named without the "..".
-                path = Path(os.path.normpath(path))
             return str(path)
         elif isinstance(value, dict):
             return {k: expand_value(k, v) for k, v in value.items()}

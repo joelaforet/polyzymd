@@ -126,6 +126,28 @@ def condition_folder(label: str) -> str:
     return re.sub(r"[^\w.+-]+", "_", label.strip().lower()).strip("_") or "condition"
 
 
+#: Folder names a study or condition may not take: polyzymd writes folders of
+#: these names, and leaves job, log and run folders out of git and the deposit.
+RESERVED_FOLDERS = (
+    *("runs", "logs", "slurm", "slurm_logs", "deposit", "results"),
+    *("analyses", "stats", "figures", "conditions", "structures", "environment"),
+)
+
+
+def check_label(label: str, what: str) -> None:
+    """Refuse a study or condition ``label`` whose folder name is in :data:`RESERVED_FOLDERS`.
+
+    ``what`` (``"study"`` or ``"condition"``) names the label in the message.
+    """
+    name = condition_folder(label)
+    if name in RESERVED_FOLDERS:
+        raise ProtocolError(
+            f"The {what} label {label!r} gives the folder name {name!r}, which is reserved: "
+            "polyzymd uses folders of that name.",
+            hint=f"Choose another label. Reserved: {', '.join(RESERVED_FOLDERS)}.",
+        )
+
+
 #: What add-condition prints, and copied configs say, about where the runs go.
 RUNS_WARNING = (
     "the runs go into {runs} unless you set scratch_directory in config.yaml; trajectories "
@@ -140,12 +162,29 @@ def runs_folder(study_root: Path, label: str) -> Path:
     above the study holds a ``project.yaml``, and ``runs/<condition>`` in
     the study folder otherwise. Both ``runs/`` folders are git-ignored.
     """
+    root = Path(study_root).resolve()
+    home = runs_home(root)
+    return home / "runs" / root.relative_to(home) / condition_folder(label)
+
+
+def runs_home(study_root: Path) -> Path:
+    """Return the folder whose ``runs/`` holds the study's runs: its project's, or its own."""
     from polyzymd.analyses.project_file import PROJECT_FILE
 
     root = Path(study_root).resolve()
-    if (root.parent / PROJECT_FILE).is_file():
-        return root.parent / "runs" / root.name / condition_folder(label)
-    return root / "runs" / condition_folder(label)
+    return root.parent if (root.parent / PROJECT_FILE).is_file() else root
+
+
+def ignore_runs(folder: Path) -> None:
+    """Add ``runs/`` to ``folder/.gitignore`` when the file exists without it.
+
+    Studies and projects made before the runs went into ``runs/`` lack it.
+    """
+    gitignore = Path(folder) / ".gitignore"
+    if gitignore.is_file():
+        lines = gitignore.read_text().splitlines()
+        if "runs/" not in lines:
+            gitignore.write_text("\n".join([*lines, "runs/", ""]))
 
 
 def copy_condition(config: Path, folder: Path, runs: Path) -> tuple[list[str], list[str]]:
@@ -251,7 +290,8 @@ def copy_condition(config: Path, folder: Path, runs: Path) -> tuple[list[str], l
 def _with_output_lines(text: str, output: Any) -> str:
     """Return ``text`` with its ``projects_directory`` and ``scratch_directory`` set from ``output``.
 
-    Only those lines change; their comments stay.
+    Only those lines change; their comments stay, except the note of a
+    deposited config that its machine path was removed.
     """
     import json
 
@@ -261,7 +301,10 @@ def _with_output_lines(text: str, output: Any) -> str:
     def value(match: re.Match) -> str:
         new = output.get(match.group(2))
         written = "null" if new is None else json.dumps(str(new))
-        return f"{match.group(1)}{match.group(2)}: {written}{match.group(3) or ''}"
+        comment = match.group(3) or ""
+        if "machine path removed by polyzymd" in comment:
+            comment = ""
+        return f"{match.group(1)}{match.group(2)}: {written}{comment}"
 
     return re.sub(
         r"^(\s+)(projects_directory|scratch_directory):[^#\n]*?(\s+#.*)?$",
@@ -420,8 +463,8 @@ def create_study(
     Raises
     ------
     ProtocolError
-        If ``root`` already holds a ``study.yaml``, a label is given twice, or
-        a config cannot be copied.
+        If ``root`` already holds a ``study.yaml``, a label is given twice or
+        is reserved (:func:`check_label`), or a config cannot be copied.
     """
     from polyzymd.analyses.study_file import STUDY_FILE
     from polyzymd.analyses.study_git import init_repository
@@ -433,6 +476,8 @@ def create_study(
             hint="Choose a new folder, or edit the existing study.yaml.",
         )
     labels = [*(conditions or {}), *(new_conditions or [])]
+    for label in labels:
+        check_label(label, "condition")
     folders = [condition_folder(label) for label in labels]
     if len(set(labels)) != len(labels) or len(set(folders)) != len(folders):
         raise ProtocolError(
@@ -516,13 +561,15 @@ def add_condition(
     (:func:`new_condition`). The new config writes its runs into
     :func:`runs_folder`. The condition is added as one line under
     ``conditions:``, so the rest of ``study.yaml``, comments included, is kept
-    as written. Returns the new condition's config path.
+    as written, and ``runs/`` is added to the ``.gitignore`` beside the
+    ``runs/`` folder if it lacks it (:func:`ignore_runs`). Returns the new
+    condition's config path.
 
     Raises
     ------
     ProtocolError
         If not exactly one of ``config``, ``source`` and ``new`` is given,
-        the label or its folder is taken, ``source`` is not a condition of
+        the label or its folder is taken or reserved (:func:`check_label`), ``source`` is not a condition of
         the study, or the config cannot be copied.
     """
     from polyzymd.analyses.study_file import _condition, find_study_file
@@ -533,6 +580,7 @@ def add_condition(
             hint="polyzymd study add-condition LABEL --config path/to/config.yaml, "
             "--from OTHER_LABEL, or --new.",
         )
+    check_label(label, "condition")
     file = find_study_file(study)
     # Only the existing labels are read, so a new study with no condition yet,
     # or one still being filled in, takes its first conditions.
@@ -557,6 +605,7 @@ def add_condition(
             record_data_location(root, label, Path(config))
     else:
         new_condition(folder, runs_folder(root, label))
+    ignore_runs(runs_home(root))
     _list_entry(file, "conditions", label, str((folder / "config.yaml").relative_to(root)))
     if label not in (_read_yaml(file).get("conditions") or {}):
         raise ProtocolError(

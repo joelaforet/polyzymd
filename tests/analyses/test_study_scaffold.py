@@ -105,3 +105,50 @@ def test_a_copied_config_without_runs_records_no_data_location(tmp_path: Path) -
 
     assert not (created.root / "data.local.yaml").exists()
     assert _output(copy) == ((created.root / "runs" / "water").resolve(), None)
+
+
+def test_add_condition_git_ignores_runs_in_a_study_made_before_runs_existed(
+    tmp_path: Path,
+) -> None:
+    """A .gitignore without runs/ gets it when a condition whose runs go there is added."""
+    from polyzymd.analyses.study_scaffold import add_condition
+
+    created = create_study(tmp_path / "st", git=False)
+    gitignore = created.root / ".gitignore"
+    gitignore.write_text("data.local.yaml\n")
+
+    add_condition(created.root, "Water", new=True)
+
+    assert gitignore.read_text().splitlines() == ["data.local.yaml", "runs/"]
+
+
+@pytest.mark.parametrize("label", ["runs", "Logs", "slurm_logs", "results", "deposit", "figures"])
+def test_a_condition_may_not_take_a_folder_name_polyzymd_uses(tmp_path: Path, label: str) -> None:
+    """conditions/runs/ would be skipped as machine files; such labels are refused."""
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.study_scaffold import add_condition
+
+    created = create_study(tmp_path / "st", git=False)
+    with pytest.raises(ProtocolError, match="reserved"):
+        add_condition(created.root, label, new=True)
+    with pytest.raises(ProtocolError, match="reserved"):
+        create_study(tmp_path / "other", new_conditions=[label], git=False)
+    assert not (tmp_path / "other").exists()
+
+
+def test_a_copy_drops_the_machine_path_comment_of_a_deposited_config(tmp_path: Path) -> None:
+    """The output lines of a copy name runs/, so the deposit's 'machine path removed' note goes."""
+    from polyzymd.analyses.study_freeze import without_machine_paths
+    from polyzymd.analyses.study_scaffold import add_condition
+
+    created = create_study(tmp_path / "st", new_conditions=["Water"], git=False)
+    first = created.conditions["Water"]
+    (first.parent / "structures" / "protein_X.pdb").write_text("REMARK protein\nEND\n")
+    first.write_text(without_machine_paths(first.read_text()))
+    assert "machine path removed" in first.read_text()
+
+    copy = add_condition(created.root, "Water 350 K", source="Water")
+
+    assert "machine path removed" not in copy.read_text()
+    assert "# Enzyme Configuration (REQUIRED)" in copy.read_text()  # comments are kept
+    assert _output(copy) == ((created.root / "runs" / "water_350_k").resolve(), None)

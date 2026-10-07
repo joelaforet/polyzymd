@@ -822,3 +822,34 @@ def test_freeze_refuses_a_condition_config_outside_the_study(tmp_path: Path) -> 
         freeze(root)
     assert "conditions:" in caught.value.hint
     assert 'polyzymd study add-condition "Polymer" --config' in caught.value.hint
+
+
+def test_a_study_whose_gitignore_lacks_runs_freezes_with_a_run_in_it(study: Path) -> None:
+    """A study made before runs/ was git-ignored: a trajectory in runs/ is not an input."""
+    gitignore = study / ".gitignore"
+    gitignore.write_text(
+        "".join(line for line in gitignore.read_text().splitlines(True) if "runs" not in line)
+    )
+    _git(study, "commit", "-qam", "Old .gitignore")
+    (study / "runs" / "water" / "w_run1").mkdir(parents=True)
+    (study / "runs" / "water" / "w_run1" / "traj.dcd").write_text("x")
+
+    assert freeze(study).tag == "study-v1"
+    assert "runs/" in gitignore.read_text().splitlines()
+    assert "runs/water/w_run1/traj.dcd" not in _git(study, "ls-tree", "-r", "--name-only", "HEAD")
+
+
+def test_the_deposited_copied_config_names_no_runs_path() -> None:
+    """The header of a copied config, which says where the runs go, leaves the deposit."""
+    text = (
+        "# Copied by polyzymd from config.yaml\n"
+        "#   the runs go into ../../runs/water (relative to this file) unless you set\n"
+        "#   scratch_directory in config.yaml.\n"
+        "name: water\n"
+        "output:\n"
+        '  projects_directory: "../../runs/water"\n'
+        "  scratch_directory: null\n"
+    )
+    deposited = without_machine_paths(text)
+    assert "../../runs" not in deposited and "the runs go into" not in deposited
+    assert deposited.startswith("# Copied by polyzymd from config.yaml\nname: water\n")

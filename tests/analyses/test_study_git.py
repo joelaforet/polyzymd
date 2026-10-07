@@ -20,3 +20,9 @@ def test_describe_says_no_commit_yet_in_full() -> None:
     text = describe({"commit": None, "inputs_uncommitted": [], "outputs_uncommitted": []})
     assert "no commit yet" in text
 
+
+
+def test_runs_are_never_inputs() -> None:
+    """A trajectory under runs/, of a study or of a project, is not an uncommitted input."""
+    for path in ("runs/water/w_run1/traj.dcd", "runs/lipa/water/w_run1/traj.dcd"):
+        assert is_output(path), path

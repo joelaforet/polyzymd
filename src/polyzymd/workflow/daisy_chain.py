@@ -31,6 +31,7 @@ from polyzymd.workflow.slurm import (
     SlurmConfig,
     SlurmScriptGenerator,
 )
+from polyzymd.workflow.slurm_submit import make_log_folder
 
 LOGGER = logging.getLogger(__name__)
 
@@ -616,8 +617,10 @@ class DaisyChainSubmitter:
                 is_generated_only=False,
             )
 
-        # The job starts in its run directory (``#SBATCH --chdir``).
+        # The job starts in its run directory (``#SBATCH --chdir``), and sbatch
+        # does not create the folder of its log.
         Path(self._get_scratch_dir(replicate)).mkdir(parents=True, exist_ok=True)
+        make_log_folder(script_path)
 
         # Use --export=NONE to start with clean environment, letting the
         # script's pixi shell-hook initialization work properly regardless

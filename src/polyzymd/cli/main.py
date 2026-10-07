@@ -38,6 +38,15 @@ SIM_PIXI_ENVS = ("sim-cuda-12-0", "sim-cuda-12-4", "sim-cuda-12-6")
 KNOWN_SPLIT_PIXI_ENVS = (*BUILD_PIXI_ENVS, *SIM_PIXI_ENVS, "analysis", "test", "docs")
 
 
+def _shown(path: object) -> str:
+    """Return ``path`` without ``..`` parts, for printing.
+
+    The config keeps its output paths as written (``../../runs/...``), so
+    its hash does not change; only the printed path is shortened.
+    """
+    return os.path.normpath(str(path))
+
+
 def _echo_branding() -> None:
     """Print the PolyzyMD ASCII logo for top-level user-facing commands."""
     echo_logo()
@@ -570,9 +579,11 @@ def build(
             colored_echo(phase="build")
 
             colored_echo("Directories:", phase="build")
-            colored_echo(f"  Projects: {sim_config.output.projects_directory}", phase="build")
             colored_echo(
-                f"  Scratch: {sim_config.output.effective_scratch_directory}", phase="build"
+                f"  Projects: {_shown(sim_config.output.projects_directory)}", phase="build"
+            )
+            colored_echo(
+                f"  Scratch: {_shown(sim_config.output.effective_scratch_directory)}", phase="build"
             )
             colored_echo(phase="build")
 
@@ -580,10 +591,10 @@ def build(
             for rep in replicate_list:
                 working_dir = sim_config.get_working_directory(rep)
                 colored_echo(f"  Replicate {rep}:", phase="build")
-                colored_echo(f"    Working dir: {working_dir}", phase="build")
+                colored_echo(f"    Working dir: {_shown(working_dir)}", phase="build")
                 if export_format:
                     export_dir = sim_config.get_working_directory(rep) / export_format
-                    colored_echo(f"    Export dir:  {export_dir}", phase="build")
+                    colored_echo(f"    Export dir:  {_shown(export_dir)}", phase="build")
             colored_echo(phase="build")
 
             if export_format:
@@ -687,7 +698,7 @@ def build(
                 )
 
                 colored_echo(f"{export_format.upper()} export successful!", phase="export")
-                colored_echo(f"Output directory: {export_dir}", phase="export")
+                colored_echo(f"Output directory: {_shown(export_dir)}", phase="export")
                 colored_echo("Files generated:", phase="export")
                 colored_echo(f"  - {export_result['gro'].name} (coordinates)", phase="export")
                 colored_echo(f"  - {export_result['top'].name} (topology)", phase="export")
@@ -792,7 +803,7 @@ def build(
                 )
 
                 colored_echo("System built successfully!", phase="build")
-                colored_echo(f"Output directory: {working_dir}", phase="build")
+                colored_echo(f"Output directory: {_shown(working_dir)}", phase="build")
                 colored_echo("Files saved:", phase="build")
                 colored_echo("  - solvated_system.pdb (topology + positions)", phase="build")
                 colored_echo("  - system.xml (OpenMM system with restraints)", phase="build")
@@ -891,10 +902,10 @@ def _print_run_dry_run_report(
     for rep in replicate_list:
         working_dir = sim_config.get_working_directory(rep)
         colored_echo(f"  Replicate {rep}:", phase=phase)
-        colored_echo(f"    Working dir: {working_dir}", phase=phase)
+        colored_echo(f"    Working dir: {_shown(working_dir)}", phase=phase)
         if engine == "gromacs":
             gromacs_dir = sim_config.get_working_directory(rep) / "gromacs"
-            colored_echo(f"    GROMACS dir: {gromacs_dir}", phase=phase)
+            colored_echo(f"    GROMACS dir: {_shown(gromacs_dir)}", phase=phase)
         else:
             colored_echo(
                 "    Workflow: build -> minimize -> equilibrate -> production", phase=phase
@@ -1180,7 +1191,7 @@ def _run_gromacs_impl(
         runner.run_full_workflow()
 
         colored_echo("\nGROMACS simulation completed successfully!", phase="export")
-        colored_echo(f"Output directory: {gromacs_dir}", phase="export")
+        colored_echo(f"Output directory: {_shown(gromacs_dir)}", phase="export")
 
     except GromacsError as e:
         colored_echo(f"\nGROMACS simulation failed: {e}", err=True, level=logging.ERROR)
@@ -1267,7 +1278,7 @@ def _run_openmm_impl(
         checkpoint_interval_s=production.checkpoint_interval,
     )
     colored_echo("OpenMM simulation completed successfully.", phase="simulation")
-    colored_echo(f"Output directory: {working_dir}", phase="simulation")
+    colored_echo(f"Output directory: {_shown(working_dir)}", phase="simulation")
 
 
 # =============================================================================
@@ -1432,7 +1443,7 @@ def _print_gromacs_dry_run_details(
         script_dir = working_dir / "daisy_chain_scripts"
         script_name = f"run_rep{rep}.sh"
         colored_echo(f"    Rep {rep}:", phase=phase)
-        colored_echo(f"      Working dir: {working_dir}", phase=phase)
+        colored_echo(f"      Working dir: {_shown(working_dir)}", phase=phase)
         colored_echo(f"      Script:      {script_dir / script_name}", phase=phase)
 
 
@@ -2028,7 +2039,7 @@ def _run_segment_locked(
     total_steps = int(prod.duration * 1e6 / timestep_fs)
     total_samples = prod.samples
 
-    colored_echo(f"Working directory: {working_dir}", phase="simulation")
+    colored_echo(f"Working directory: {_shown(working_dir)}", phase="simulation")
     colored_echo(f"Total production: {prod.duration} ns = {total_steps} steps", phase="simulation")
 
     # Load or create progress
@@ -3525,7 +3536,7 @@ def recover(
     pct = progress.fraction_complete() * 100
     remaining_ns = (progress.steps_remaining * timestep_fs) / 1e6
 
-    colored_echo(f"Working directory: {working_dir}", phase="workflow")
+    colored_echo(f"Working directory: {_shown(working_dir)}", phase="workflow")
     colored_echo(
         f"Progress: {progress.total_steps_completed}/{progress.total_steps_requested} steps "
         f"({pct:.1f}%)",
@@ -3736,6 +3747,9 @@ def recover(
         # Submit
         import subprocess
 
+        from polyzymd.workflow.slurm_submit import make_log_folder
+
+        make_log_folder(script_path)
         result = subprocess.run(
             ["sbatch", str(script_path)],
             capture_output=True,

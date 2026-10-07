@@ -565,7 +565,8 @@ def without_machine_paths(text: str, folder: Path | None = None, root: Path | No
     keeps job files and runs; they become ``.`` and ``data``, with a comment
     saying how a reproducer points the study at their copy. The config hash
     leaves both out, so stored results still match. A ``Copied by polyzymd
-    study init from <path>`` header keeps only the file name. With
+    study init from <path>`` header keeps only the file name, and the lines
+    under it that say where the runs go are dropped. With
     ``folder`` (the folder that holds the config) and ``root`` (the study or
     project folder), an absolute input path (``config.loader.PATH_KEYS``)
     inside ``root`` becomes a path relative to ``folder``.
@@ -648,11 +649,16 @@ def _outside_inputs(protocol: Any) -> list[str]:
 
 
 def _rewrite_machine_lines(text: str) -> str:
-    """Rewrite the ``projects_directory``/``scratch_directory`` lines and the copy header."""
+    """Rewrite the ``projects_directory``/``scratch_directory`` lines and the copy header.
+
+    The ``#   `` lines under the header, which say where the runs go, are dropped.
+    """
     import re
 
     lines = []
     for line in text.splitlines():
+        if line.startswith("#   ") and lines and lines[-1].startswith("# Copied by polyzymd"):
+            continue
         match = re.match(r"^(\s*)(projects_directory|scratch_directory):\s*.*$", line)
         if match:
             value = "." if match.group(2) == "projects_directory" else "data"
@@ -1403,6 +1409,7 @@ _IGNORED = (
     (f"{DEPOSIT}/", "What polyzymd freeze lays out for upload."),
     ("logs/", "Full logs of polyzymd commands; the console shows only warnings."),
     ("data.local.yaml", "Where this machine keeps the trajectories."),
+    ("runs/", "Simulation runs: trajectories never go into git or the deposit."),
 )
 
 
