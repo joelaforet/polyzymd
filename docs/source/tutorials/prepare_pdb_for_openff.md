@@ -15,7 +15,9 @@ You learn these steps:
 
 1UBQ is a good first structure. It has one protein chain, no missing residues
 and no alternate locations. Many PDB entries need more work: several copies of
-the protein, missing residues, ligands or disulfide bonds. For those cases, see
+the protein, missing residues, ligands or disulfide bonds. The last section of
+this tutorial shows two of these steps on PDB entry 181L: a chain that ends
+early, and a crystal ligand. For the other cases, see
 {doc}`../how_to/troubleshoot_openff_pdb_ingestion` after this tutorial.
 
 :::{admonition} Environment Setup
@@ -182,6 +184,135 @@ Output directory: /home/me/ubq_prep/ubiquitin_300K_run1
 The build can also print a warning that a few atoms lie between 1 and 2 Å of
 a periodic image. Energy minimization removes these contacts before the
 simulation starts.
+
+## A chain that ends early, and a crystal ligand
+
+Many PDB entries need two more steps. Entry 181L, T4 lysozyme L99A with a
+bound benzene, needs both. Download it into a new folder:
+
+```bash
+mkdir -p t4l_prep/structures
+cd t4l_prep
+curl -L https://files.rcsb.org/download/181L.pdb -o structures/181L.pdb
+grep -v "^HETATM" structures/181L.pdb > structures/181L_protein.pdb
+```
+
+The `grep` keeps the protein. It removes the waters, the ions, the
+crystallization additives and the benzene.
+
+(add-terminal-oxt)=
+### Add the terminal oxygen of a chain that ends early
+
+181L has no coordinates for its last two residues, 163 and 164 (`REMARK 465`).
+So the chain ends at Lys 162, and Lys 162 has no terminal oxygen `OXT`.
+`polyzymd clean-pdb` does not add it, and OpenFF then fails at the last
+residue:
+
+```
+Input residue A:LYS#0162 contains atoms matching substructures {'PEPTIDE_BOND', 'NO MATCH'}
+```
+
+Add the `OXT` atom with PDBFixer before you run `clean-pdb`. Save this script
+as `add_terminal_oxt.py`. It adds the terminal atoms and nothing else: no
+missing residues and no missing side-chain atoms.
+
+```python
+"""Add the terminal OXT atoms of a protein chain, and nothing else."""
+
+import sys
+
+from openmm.app import PDBFile
+from pdbfixer import PDBFixer
+
+fixer = PDBFixer(filename=sys.argv[1])
+fixer.findMissingResidues()
+fixer.missingResidues = {}  # do not model missing residues
+fixer.findMissingAtoms()
+fixer.missingAtoms = {}  # do not model missing side-chain atoms
+print("adding:", {f"{res.name} {res.id}": atoms for res, atoms in fixer.missingTerminals.items()})
+fixer.addMissingAtoms()
+with open(sys.argv[2], "w") as handle:
+    PDBFile.writeFile(fixer.topology, fixer.positions, handle, keepIds=True)
+```
+
+```bash
+python add_terminal_oxt.py structures/181L_protein.pdb structures/181L_oxt.pdb
+polyzymd clean-pdb -i structures/181L_oxt.pdb -o structures/t4l_clean.pdb --ph 7.0
+```
+
+```
+adding: {'LYS 162': ['OXT']}
+```
+
+Run the OpenFF check of Step 5 on `structures/t4l_clean.pdb`. It now prints
+`OpenFF read 1 molecule, 2603 atoms, net charge 8`.
+
+(ligand-sdf-from-crystal)=
+### Make the ligand SDF from the crystal pose
+
+The `substrate:` block of the config needs an SDF file with bond orders and
+hydrogens. A PDB file has neither. RDKit, in the `build` environment, makes
+the SDF from the `HETATM` records of the ligand and a SMILES string. The SDF
+keeps the crystal coordinates, so the ligand stays in its pocket. Save this
+script as `ligand_to_sdf.py`:
+
+```python
+"""Write one ligand of a PDB file to an SDF, at its crystal coordinates."""
+
+import sys
+
+from rdkit import Chem
+from rdkit.Chem import AllChem
+
+pdb_path, residue_name, smiles, sdf_path = sys.argv[1:]
+
+# The HETATM records of the ligand hold its crystal pose.
+records = [
+    line
+    for line in open(pdb_path)
+    if line.startswith("HETATM") and line[17:20].strip() == residue_name
+]
+crystal = Chem.MolFromPDBBlock("".join(records))
+
+# A PDB file has no bond orders: take them from the SMILES.
+ligand = AllChem.AssignBondOrdersFromTemplate(Chem.MolFromSmiles(smiles), crystal)
+
+# Add hydrogens, placed from the heavy-atom coordinates.
+ligand = Chem.AddHs(ligand, addCoords=True)
+Chem.MolToMolFile(ligand, sdf_path)
+print(f"{sdf_path}: {ligand.GetNumAtoms()} atoms, formal charge {Chem.GetFormalCharge(ligand)}")
+```
+
+Give the PDB file, the residue name of the ligand, its SMILES and the SDF to
+write. The residue name of benzene in 181L is `BNZ`:
+
+```bash
+python ligand_to_sdf.py structures/181L.pdb BNZ "c1ccccc1" structures/benzene.sdf
+```
+
+```
+structures/benzene.sdf: 12 atoms, formal charge 0
+```
+
+Write the SMILES in the charge state that you want to simulate. RDKit takes
+the bond orders and the formal charges from it. For a symmetric molecule,
+such as benzene, RDKit also prints `More than one matching pattern found`.
+The matches are equivalent, so you can ignore this warning. If an entry has
+several copies of the ligand, keep the lines of one copy only, for example
+by its chain or residue number.
+
+Point the config at the two files:
+
+```yaml
+enzyme:
+  name: "t4l_l99a"
+  pdb_path: "structures/t4l_clean.pdb"
+
+substrate:
+  name: "benzene"
+  sdf_path: "structures/benzene.sdf"
+  residue_name: "BNZ"
+```
 
 ## What you did
 
