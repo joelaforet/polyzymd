@@ -942,6 +942,9 @@ def _replicates(
 
     conditions: dict[str, Any] = {}
     rows: list[dict[str, Any]] = []
+    # Engine inputs and final frames are recorded by their path in the deposit
+    # and its zips, where a project puts each study's in a folder of its own.
+    in_deposit = Path(protocol.project_label or "")
     for label, path in protocol.conditions.items():
         record: dict[str, Any] = {
             "config": str(path.relative_to(protocol.root))
@@ -1003,7 +1006,9 @@ def _replicates(
                 target = _gzip_copy(source, protocol.root / folder / (source.name + ".gz"))
                 inputs.append(
                     {
-                        "path": str(target.relative_to(protocol.root)),
+                        "path": str(
+                            "engine_inputs" / in_deposit / target.relative_to(deposit / "engine_inputs")
+                        ),
                         "source": source.name,
                         **hashes(target),
                     }
@@ -1030,7 +1035,9 @@ def _replicates(
                 "files": files,
                 "engine_inputs": inputs,
                 "final_frame": {
-                    "path": str(final.relative_to(protocol.root)),
+                    "path": str(
+                        "final_frames" / in_deposit / final.relative_to(deposit / "final_frames")
+                    ),
                     "time_ps": float(universe.trajectory.time),
                     **hashes(final),
                 },
@@ -1611,6 +1618,7 @@ def _finish_deposit(
     manifest: dict[str, Any],
     readme: str,
     warnings: list[str],
+    kind: str = "study",
 ) -> FreezeResult:
     """Copy the manifest, citation files and manifest schema into ``deposit``, write its README and upload guide.
 
@@ -1634,6 +1642,7 @@ def _finish_deposit(
         manifest=manifest,
         zenodo=json.loads((root / ZENODO).read_text()),
         warnings=warnings,
+        kind=kind,
     )
     return FreezeResult(
         root,

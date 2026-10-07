@@ -980,15 +980,20 @@ def test_every_deposited_file_matches_its_manifest_entry(study: Path, tmp_path: 
         if name != "manifest.json":
             assert manifest["files"].get(name) == entry(content), name
     replicates = [r for c in manifest["conditions"].values() for r in c["replicates"].values()]
-    recorded = [
-        {"size": f["size"], "sha256": f["sha256"]}
+    # An engine input's or final frame's path names it in the deposit and in its zip.
+    recorded = {
+        f["path"]: {"size": f["size"], "sha256": f["sha256"]}
         for r in replicates
         for f in [*r.get("engine_inputs", []), r.get("final_frame")]
         if f
-    ]
+    }
+    zipped = {}
     for part in ("engine_inputs", "final_frames"):
         with zipfile.ZipFile(result.upload / f"{part}.zip") as opened:
             for name in opened.namelist():
                 if not name.endswith("/"):
-                    assert entry(opened.read(name)) in recorded, name
+                    zipped[name] = entry(opened.read(name))
+    assert zipped == recorded
+    for path, recorded_entry in recorded.items():
+        assert entry((result.deposit / path).read_bytes()) == recorded_entry, path
     assert (result.upload / "CITATION.cff").read_bytes() == members["CITATION.cff"]

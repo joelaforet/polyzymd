@@ -85,3 +85,44 @@ def test_every_deposited_project_file_matches_a_manifest_entry(project: Path) ->
         if path.suffix != ".zip" and path.name not in ("manifest.json", "README.md"):
             if path.name != "manifest-1.schema.json":
                 assert path.read_bytes() == members[path.name], path.name
+
+
+def test_every_engine_input_and_final_frame_path_names_its_deposited_file(
+    project: Path,  # noqa: F811
+) -> None:
+    """Each study manifest's engine input and final frame paths name the file in the deposit and its zip."""
+    import hashlib
+    import zipfile
+
+    from polyzymd.analyses.project_freeze import freeze_project
+    from polyzymd.analyses.study_git import init_repository
+
+    (project / ".gitignore").write_text("data.local.yaml\n")
+    init_repository(project, "start")
+    result = freeze_project(project)
+    zipped = {}
+    for part in ("engine_inputs", "final_frames"):
+        with zipfile.ZipFile(result.upload / f"{part}.zip") as opened:
+            zipped.update({name: opened.read(name) for name in opened.namelist()})
+    checked = 0
+    for label in ("lipa", "rml"):
+        manifest = json.loads((result.deposit / "study" / label / "manifest.json").read_text())
+        for condition in manifest["conditions"].values():
+            for replicate in condition["replicates"].values():
+                for entry in [*replicate["engine_inputs"], replicate["final_frame"]]:
+                    content = (result.deposit / entry["path"]).read_bytes()
+                    assert hashlib.sha256(content).hexdigest() == entry["sha256"], entry["path"]
+                    assert zipped[entry["path"]] == content, entry["path"]
+                    checked += 1
+    assert checked
+
+
+def test_the_upload_guide_of_a_project_names_the_project_file_and_command(
+    project: Path,  # noqa: F811
+) -> None:
+    """A project's UPLOAD.md says to edit project.yaml and run project freeze."""
+    from polyzymd.analyses.project_freeze import freeze_project
+
+    text = freeze_project(project).guide.read_text()
+    assert "project.yaml" in text and "polyzymd project freeze" in text
+    assert "study.yaml" not in text and "study freeze" not in text
