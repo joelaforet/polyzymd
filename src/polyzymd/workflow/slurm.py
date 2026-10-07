@@ -392,6 +392,51 @@ class SlurmConfig:
         return cls(email=email, **config_dict)
 
 
+def sbatch_lines(config: SlurmConfig, mail_type: str = "FAIL") -> dict[str, str]:
+    """Return the optional ``#SBATCH`` lines of ``config``, keyed by template variable.
+
+    An unset setting gives an empty string. With ``gpu_directive_style ==
+    "gpus"`` and GPUs requested, the GPU line is ``--gpus=<type>:<n>`` and the
+    node line is ``-N <nodes>`` (Bridges2); otherwise ``--gres=gpu:...`` and
+    ``--nodes``/``--ntasks`` lines (Alpine, Blanca).
+    """
+    if config.gpus == 0:
+        gpu = ""
+    elif config.gpu_directive_style == "gpus" and config.gpu_type:
+        gpu = f"#SBATCH --gpus={config.gpu_type}:{config.gpus}"
+    elif config.gpu_type:
+        gpu = f"#SBATCH --gres=gpu:{config.gpu_type}:{config.gpus}"
+    else:
+        gpu = f"#SBATCH --gres=gpu:{config.gpus}"
+    if config.gpu_directive_style == "gpus" and config.gpus > 0:
+        nodes = f"#SBATCH -N {config.nodes}"
+    else:
+        nodes = f"#SBATCH --nodes={config.nodes}\n#SBATCH --ntasks={config.ntasks}"
+    mail = (
+        f"#SBATCH --mail-type={mail_type}\n#SBATCH --mail-user={config.email}"
+        if config.email
+        else ""
+    )
+
+    def line(flag: str, value: object) -> str:
+        return f"#SBATCH --{flag}={value}" if value else ""
+
+    return {
+        "qos_line": line("qos", config.qos),
+        "nodes_line": nodes,
+        "cpus_line": (
+            line("cpus-per-task", config.cpus_per_task) if config.cpus_per_task > 1 else ""
+        ),
+        "mem_line": line("mem", config.memory),
+        "gpu_line": gpu,
+        "mail_line": mail,
+        "account_line": line("account", config.account),
+        "exclude_line": line("exclude", config.exclude),
+        "nodelist_line": line("nodelist", config.nodelist),
+        "constraint_line": line("constraint", config.constraint),
+    }
+
+
 @dataclass
 class JobContext:
     """Context for job script template rendering.
@@ -474,86 +519,6 @@ class SlurmScriptGenerator:
     def config(self) -> SlurmConfig:
         """Get the SLURM configuration."""
         return self._config
-
-    # ------------------------------------------------------------------
-    # Internal helpers — compute optional SBATCH directive lines
-    # ------------------------------------------------------------------
-
-    def _gpu_line(self) -> str:
-        """Return the appropriate GPU SBATCH directive for this config.
-
-        Returns ``#SBATCH --gpus=<type>:<n>`` for clusters that use the newer
-        ``--gpus`` syntax (e.g. Bridges2), or ``#SBATCH --gres=gpu:<n>`` for
-        clusters that use the classic Generic RESources syntax (Alpine).
-        """
-        if self._config.gpus == 0:
-            return ""
-        if self._config.gpu_directive_style == "gpus" and self._config.gpu_type:
-            return f"#SBATCH --gpus={self._config.gpu_type}:{self._config.gpus}"
-        if self._config.gpu_type:
-            return f"#SBATCH --gres=gpu:{self._config.gpu_type}:{self._config.gpus}"
-        return f"#SBATCH --gres=gpu:{self._config.gpus}"
-
-    def _nodes_line(self) -> str:
-        """Return the nodes/tasks SBATCH directive(s) appropriate for this config.
-
-        Alpine-style (``gpu_directive_style == "gres"``) emits two lines::
-
-            #SBATCH --nodes=N
-            #SBATCH --ntasks=N
-
-        Bridges2-style (``gpu_directive_style == "gpus"``) emits a single
-        short-flag line::
-
-            #SBATCH -N N
-        """
-        if self._config.gpu_directive_style == "gpus" and self._config.gpus > 0:
-            return f"#SBATCH -N {self._config.nodes}"
-        return f"#SBATCH --nodes={self._config.nodes}\n#SBATCH --ntasks={self._config.ntasks}"
-
-    def _cpus_line(self) -> str:
-        """Return the CPUs-per-task directive when requested."""
-        if self._config.cpus_per_task > 1:
-            return f"#SBATCH --cpus-per-task={self._config.cpus_per_task}"
-        return ""
-
-    def _qos_line(self) -> str:
-        """Return the QoS SBATCH directive, or an empty string to omit it."""
-        return f"#SBATCH --qos={self._config.qos}" if self._config.qos else ""
-
-    def _mem_line(self) -> str:
-        """Return the memory SBATCH directive, or an empty string to omit it."""
-        return f"#SBATCH --mem={self._config.memory}" if self._config.memory else ""
-
-    def _account_line(self) -> str:
-        """Return the account SBATCH directive, or an empty string to omit it.
-
-        An empty account string means the cluster infers the allocation from the
-        submitting user's login (e.g. Bridges2).
-        """
-        return f"#SBATCH --account={self._config.account}" if self._config.account else ""
-
-    def _mail_line(self) -> str:
-        """Return the mail-type + mail-user SBATCH directives, or empty string.
-
-        Both ``--mail-type`` and ``--mail-user`` are omitted together when no
-        email address is configured, keeping the script clean.
-        """
-        if self._config.email:
-            return f"#SBATCH --mail-type=FAIL\n#SBATCH --mail-user={self._config.email}"
-        return ""
-
-    def _exclude_line(self) -> str:
-        """Return the exclude SBATCH directive, or an empty string to omit it."""
-        return f"#SBATCH --exclude={self._config.exclude}" if self._config.exclude else ""
-
-    def _nodelist_line(self) -> str:
-        """Return the nodelist SBATCH directive, or empty string when unset."""
-        return f"#SBATCH --nodelist={self._config.nodelist}" if self._config.nodelist else ""
-
-    def _constraint_line(self) -> str:
-        """Return the constraint SBATCH directive, or an empty string to omit it."""
-        return f"#SBATCH --constraint={self._config.constraint}" if self._config.constraint else ""
 
     # ------------------------------------------------------------------
     # Self-resubmitting job generation
@@ -650,18 +615,9 @@ class SlurmScriptGenerator:
                 "partition": self._config.partition,
                 "job_name": job_name,
                 "output_file": output_file,
-                "qos_line": self._qos_line(),
-                "nodes_line": self._nodes_line(),
-                "cpus_line": self._cpus_line(),
-                "mem_line": self._mem_line(),
+                **sbatch_lines(self._config),
                 "time_limit": self._config.time_limit,
-                "gpu_line": self._gpu_line(),
-                "mail_line": self._mail_line(),
-                "account_line": self._account_line(),
-                "exclude_line": self._exclude_line(),
                 "configured_exclude": self._config.exclude or "",
-                "nodelist_line": self._nodelist_line(),
-                "constraint_line": self._constraint_line(),
                 "pixi_env": self._pixi_env,
                 "manifest_path": manifest_path,
                 "config_path": config_path,
