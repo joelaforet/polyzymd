@@ -88,8 +88,16 @@ def check_command(path: Path, production: bool = False) -> None:
     from polyzymd.analyses.study_file import outside_configs
 
     outside = outside_configs(protocol)
-    for index, (label, config_path) in enumerate(protocol.conditions.items()):
-        role = "control" if index == 0 else "condition"
+    labels = list(protocol.conditions)
+    controls = labels[:1]
+    if protocol.comparison is not None:
+        from polyzymd.analyses.study_statistics import comparison_pairs
+
+        within, control = protocol.comparison["within"], protocol.comparison["control"]
+        pairs = comparison_pairs(labels, labels, protocol.factors, within, control)
+        controls = [label for label in labels if label not in {pair[1] for pair in pairs}]
+    for label, config_path in protocol.conditions.items():
+        role = "control" if label in controls else "condition"
         if label in outside:
             click.echo(
                 f"warning: {role} {label}: the config is outside the study folder, so "

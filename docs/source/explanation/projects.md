@@ -34,7 +34,8 @@ Each part of the frame is something that an analysis must know:
 - **Equilibration.** PolyzyMD removes the same start of production from
   every condition of the study.
 - **The control.** PolyzyMD compares each condition with the first condition
-  of the study. A polymer condition has meaning only against the same system
+  of the study, or, with a `comparison:` block, with the control of its own
+  stratum. A polymer condition has meaning only against the same system
   without polymer.
 
 So two conditions go in one study when they share all of these parts. A
@@ -52,12 +53,32 @@ conditions:                    # control first
   SBMA 360 K: {config: conditions/sbma_360, factors: {temperature_K: 360, polymer: SBMA}}
 ```
 
-PolyzyMD compares each condition with the first condition, the control. In
-this study, `SBMA 360 K` is compared with `No polymer 300 K`, so that
-difference holds the effect of the polymer and the effect of the temperature.
+By default, PolyzyMD compares each condition with the first condition, the
+control. In this study, `SBMA 360 K` is then compared with `No polymer 300 K`,
+so that difference holds the effect of the polymer and the effect of the
+temperature.
+
 To compare each polymer condition with the no-polymer condition at the same
-temperature, make one study for each temperature, or fit a model with both
-factors in a `stats/` script.
+temperature, add a `comparison:` block:
+
+```yaml
+comparison:
+  within: temperature_K        # one factor name, or a list
+```
+
+The conditions with the same `temperature_K` form one stratum. Each condition
+is compared with the control of its stratum: the condition whose other
+factors equal those of the first condition. Here the first condition has no
+factor other than `temperature_K`, so each control is the condition with no
+other factor: `No polymer 300 K`, `No polymer 330 K` and `No polymer 360 K`.
+`SBMA 360 K` is compared with `No polymer 360 K`, so the difference holds the
+effect of the polymer only. `control: {polymer: none}` names the control's
+factor values instead, when every condition declares `polymer`. PolyzyMD
+refuses a stratum with no control or with two.
+
+The Benjamini-Hochberg correction covers every comparison of the report,
+over all strata. The trend tests are unchanged. To fit both factors in one
+model, write a script in `stats/`.
 
 A point mutant keeps the residue numbering of its wild type. It can share the
 frame of the wild type when one reference structure fits both. A different

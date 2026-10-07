@@ -130,6 +130,69 @@ class TestSchema:
         assert load_study_file(path).replicates == [1, 2, 3]
 
 
+STRATA = (
+    "equilibration: 1ns\n"
+    "conditions:\n"
+    "  none 300: {config: a.yaml, factors: {temperature_K: 300, polymer: none}}\n"
+    "  SBMA 300: {config: b.yaml, factors: {temperature_K: 300, polymer: SBMA}}\n"
+    "  none 330: {config: c.yaml, factors: {temperature_K: 330, polymer: none}}\n"
+    "  SBMA 330: {config: d.yaml, factors: {temperature_K: 330, polymer: SBMA}}\n"
+)
+
+
+class TestComparison:
+    def test_reads_within_and_control(self, tmp_path: Path) -> None:
+        path = _write(
+            tmp_path / "study.yaml",
+            STRATA + "comparison: {within: temperature_K, control: {polymer: none}}\n",
+        )
+        protocol = load_study_file(path)
+        assert protocol.comparison == {"within": ["temperature_K"], "control": {"polymer": "none"}}
+        assert load_study_file(_write(path, STRATA)).comparison is None
+
+    def test_without_control_the_first_conditions_factor_values_are_stored(
+        self, tmp_path: Path
+    ) -> None:
+        path = _write(tmp_path / "study.yaml", STRATA + "comparison: {within: temperature_K}\n")
+        assert load_study_file(path).comparison == {
+            "within": ["temperature_K"],
+            "control": {"polymer": "none"},
+        }
+        lines = STRATA.splitlines(keepends=True)
+        reordered = "".join([*lines[:2], lines[3], lines[2], *lines[4:]])
+        _write(path, reordered + "comparison: {within: temperature_K}\n")
+        assert load_study_file(path).comparison["control"] == {"polymer": "SBMA"}
+
+    def test_the_schema_takes_a_comparison(self) -> None:
+        import yaml
+
+        jsonschema = pytest.importorskip("jsonschema")
+        schema = Path(pz.__file__).parent / "analyses" / "schemas" / "study-1.schema.json"
+        validator = jsonschema.Draft202012Validator(json.loads(schema.read_text()))
+        text = STRATA + "comparison: {within: [temperature_K], control: {polymer: none}}\n"
+        validator.validate(yaml.safe_load(text))
+
+    @pytest.mark.parametrize(
+        ("comparison", "message"),
+        [
+            (
+                "{within: temperature_K, control: {polymer: PEG}}",
+                "temperature_K 300 has no control",
+            ),
+            ("{within: salt_M}", "none 300 has no factor salt_M"),
+            ("{within: temperature_K, control: {temperature_K: 300}}", "names a within factor"),
+            ("{withn: temperature_K}", "unknown key 'withn'"),
+            ("{control: {polymer: none}}", "within"),
+        ],
+    )
+    def test_refuses_a_comparison_it_cannot_make(
+        self, tmp_path: Path, comparison: str, message: str
+    ) -> None:
+        path = _write(tmp_path / "study.yaml", STRATA + f"comparison: {comparison}\n")
+        with pytest.raises(ProtocolError, match=message):
+            load_study_file(path)
+
+
 class TestStudy:
     def test_conditions_from_the_file(self, study_dir: Path) -> None:
         study = pz.Study(study_dir / "study.yaml")

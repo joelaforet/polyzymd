@@ -966,6 +966,7 @@ def _study_record(study_path: Path, run: str, settings: dict) -> dict:
         "settings": portable(settings, root, project_root),
         "selections": selections,
         "factors": protocol.factors,
+        **({"comparison": protocol.comparison} if protocol.comparison else {}),
         "conditions": list(protocol.conditions),
         "entry": entry_record(protocol, run) if entry is not None else None,
         "git": state,
@@ -1031,6 +1032,25 @@ def _from_study(
                 hint=f"Use --label with one of {', '.join(conditions)}.",
             )
         conditions = {label: conditions[label] for label in conditions if label in labels}
+        if protocol.comparison is not None and len(conditions) > 1:
+            import shlex
+
+            from polyzymd.analyses.study_statistics import comparison_pairs
+
+            within, control = protocol.comparison["within"], protocol.comparison["control"]
+            pairs = comparison_pairs(
+                list(conditions), list(protocol.conditions), protocol.factors, within, control
+            )
+            needed = [
+                label for label in dict.fromkeys(a for a, _, _ in pairs) if label not in labels
+            ]
+            if needed:
+                raise ProtocolError(
+                    f"--label leaves out the stratum control {', '.join(needed)} that the "
+                    "conditions given are compared with.",
+                    hint=f"Add {' '.join(f'--label {shlex.quote(label)}' for label in needed)}, "
+                    "or give one --label to summarise one condition.",
+                )
     entry = protocol.analyses.get(run_name)
     if entry is None:
         if run_name not in ANALYSES:
@@ -1250,6 +1270,7 @@ def _run(
             data=data,
             until=until,
         )
+        study.factors, study.comparison = protocol.factors, protocol.comparison
         return run_user_analysis(
             study,
             run_name,
@@ -1278,4 +1299,5 @@ def _run(
         stride=stride,
         data=data,
         until=until,
+        study_file=study_path,
     )

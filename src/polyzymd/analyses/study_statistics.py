@@ -1,9 +1,11 @@
-"""Statistics on stored results: replicate tables and trend tests.
+"""Statistics on stored results: replicate tables, trend tests and comparison pairs.
 
 This module reads stored analysis results only; it loads no trajectory.
 
 - :func:`replicate_table` returns one row per replicate of an analysis run
   (and per label or part), the sampling unit of every test.
+- :func:`comparison_pairs` gives each condition the control it is compared
+  with: the study's first condition, or the control of its own stratum.
 - :func:`trend_tests` fits, for each numeric factor the conditions declare,
   the slope of the condition means against the factor, and corrects the
   family of factors with Benjamini-Hochberg.
@@ -12,7 +14,7 @@ This module reads stored analysis results only; it loads no trajectory.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 _REDUCE = {"mean": "mean", "fraction": "mean", "std": "std"}
@@ -98,6 +100,110 @@ def replicate_table(study: Any, run: str) -> Any:
     for name in dict.fromkeys(n for values in factors.values() for n in values):
         result[name] = result["condition"].map(lambda c, name=name: factors.get(c, {}).get(name))
     return result
+
+
+def stratum_control(
+    reference: str, factors: Mapping[str, Mapping[str, Any]], within: Sequence[str]
+) -> dict[str, Any]:
+    """Return the factor values of the control of each stratum, taken from condition ``reference``.
+
+    The values are those of every factor that is not a ``within`` factor,
+    with ``None`` for a factor that ``reference`` does not declare. So the
+    control of a stratum is its condition whose other factors equal those of
+    ``reference``.
+    """
+    names = dict.fromkeys(name for values in factors.values() for name in values)
+    return {name: factors.get(reference, {}).get(name) for name in names if name not in within}
+
+
+def comparison_pairs(
+    chosen: Sequence[str],
+    labels: Sequence[str],
+    factors: Mapping[str, Mapping[str, Any]],
+    within: Sequence[str] = (),
+    control: str | Mapping[str, Any] | None = None,
+) -> list[tuple[str, str, dict[str, Any] | None]]:
+    """Return ``(control, condition, stratum)`` for each condition of ``chosen`` to compare.
+
+    Without ``within`` every condition of ``chosen`` is compared with one
+    control: ``control``, or the first of ``labels``; ``stratum`` is ``None``.
+
+    With ``within``, a list of factor names, the conditions of ``labels``
+    that share their values of those factors form one stratum, and each
+    condition is compared with the control of its stratum; ``stratum`` maps
+    each ``within`` factor to its value there. The control of a stratum is
+    its one condition whose factors have the values of ``control``, a
+    mapping of factor names to values. A condition label as ``control``
+    (by default the first of ``labels``) stands for its other factors
+    (:func:`stratum_control`). A control is never compared with itself.
+
+    Raises
+    ------
+    ProtocolError
+        If ``control`` maps factor values without ``within``, names a
+        ``within`` factor, a condition does not declare a ``within`` factor,
+        or a stratum of ``chosen`` has no control or more than one.
+    """
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    within = list(within)
+    if not within:
+        if isinstance(control, Mapping):
+            raise ProtocolError(
+                f"The control {dict(control)} is given as factor values without within.",
+                hint="Name the factors that form each stratum with within, or give the control "
+                "condition's label.",
+            )
+        first = control or labels[0]
+        return [(first, label, None) for label in chosen if label != first]
+    for label in labels:
+        missing = [name for name in within if name not in factors.get(label, {})]
+        if missing:
+            raise ProtocolError(
+                f"Condition {label} has no factor {', '.join(missing)}, which within needs.",
+                hint="Give every condition each within factor under factors:.",
+            )
+    if isinstance(control, Mapping):
+        if set(control) & set(within):
+            raise ProtocolError(
+                f"The control {dict(control)} names a within factor.",
+                hint="The control's values are of the factors that vary inside a stratum; "
+                "give control= with those factors only.",
+            )
+        wanted = dict(control)
+    else:
+        wanted = stratum_control(control or labels[0], factors, within)
+
+    def stratum(label: str) -> tuple:
+        return tuple(factors[label][name] for name in within)
+
+    controls: dict[tuple, str] = {}
+    problems = []
+    for level in dict.fromkeys(stratum(label) for label in chosen):
+        found = [
+            label
+            for label in labels
+            if stratum(label) == level
+            and all(factors[label].get(key) == value for key, value in wanted.items())
+        ]
+        if len(found) == 1:
+            controls[level] = found[0]
+            continue
+        where = ", ".join(f"{name} {value}" for name, value in zip(within, level, strict=True))
+        count = "no control" if not found else f"{len(found)} controls ({', '.join(found)})"
+        problems.append(f"the stratum {where} has {count}")
+    if problems:
+        raise ProtocolError(
+            f"Each stratum needs one control, the condition whose factors are {wanted}, but "
+            f"{'; '.join(problems)}.",
+            hint="Give each stratum one control condition, or set the control's factor values "
+            "with control.",
+        )
+    return [
+        (controls[stratum(label)], label, dict(zip(within, stratum(label), strict=True)))
+        for label in chosen
+        if label != controls[stratum(label)]
+    ]
 
 
 def _number_or_number_text(level: Any) -> bool:

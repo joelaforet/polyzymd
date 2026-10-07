@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/joelaforet/polyzymd/schemas/study-1.schema.json",
   "title": "PolyzyMD study.yaml",
-  "description": "The analysis protocol of one PolyzyMD study: a set of conditions compared with each other in one analysis frame (one residue numbering, its structures and regions, one equilibration window and the control, the first condition), with its analyses. See docs/source/how_to/study_yaml.md and docs/source/explanation/projects.md.",
+  "description": "The analysis protocol of one PolyzyMD study: a set of conditions compared with each other in one analysis frame (one residue numbering, its structures and regions, one equilibration window and the control, the first condition by default), with its analyses. See docs/source/how_to/study_yaml.md and docs/source/explanation/projects.md.",
   "type": "object",
   "required": [
     "equilibration",
@@ -192,6 +192,43 @@
             "type": "null"
           }
         ]
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "description": "Compare each condition with the control of its own stratum: the conditions that share their values of the within factors. Without it, every condition is compared with the first.",
+      "required": [
+        "within"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "within": {
+          "description": "The factor, or list of factors, whose values form each stratum, such as temperature_K.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          ]
+        },
+        "control": {
+          "type": "object",
+          "description": "Factor values of the control of each stratum, such as polymer: none. Defaults to the other factors of the first condition.",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          }
+        }
       }
     },
     "metadata": {

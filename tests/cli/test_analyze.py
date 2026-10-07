@@ -537,3 +537,116 @@ def test_a_rerun_on_committed_inputs_changes_no_file(tmp_path: Path) -> None:
         ["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True
     )
     assert status.stdout == ""
+
+
+def _temperature_polymer_study(tmp_path: Path, comparison: str) -> Path:
+    """Write a study of three temperatures by two polymers, with ``comparison`` appended.
+
+    Replicate ``r`` of every condition has a radius of gyration of ``offset
+    + 0.1 r`` plus the frame term, where the offset grows by 1.0 per
+    temperature step and by 0.5 with the polymer.
+    """
+    from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+
+    root = tmp_path / "study"
+    lines = ["equilibration: 0.25ns", "conditions:"]
+    for polymer in ("none", "SBMA"):
+        for step, kelvin in enumerate((300, 330, 360)):
+            folder = f"{polymer}_{kelvin}"
+            config = write_simulation_config(
+                root / "conditions" / folder, scratch=tmp_path / "scratch" / folder
+            )
+            offset = 1.0 + step + (0.5 if polymer == "SBMA" else 0.0)
+            for replicate in (1, 2, 3):
+                write_openmm_replicate(
+                    config, replicate, [offset + 0.1 * replicate + 0.01 * k for k in range(10)]
+                )
+            lines.append(
+                f"  {folder}: {{config: conditions/{folder}, "
+                f"factors: {{temperature_K: {kelvin}, polymer: {polymer}}}}}"
+            )
+    lines += ["analyses:", "  rg: {selection: all}", comparison]
+    (root / "study.yaml").write_text("\n".join(lines) + "\n")
+    return root
+
+
+@pytest.mark.filterwarnings("ignore")
+def test_a_study_comparison_within_compares_each_temperature_with_its_control(
+    tmp_path: Path,
+) -> None:
+    """With comparison.within, each difference is the polymer effect at one temperature."""
+    import json
+
+    pytest.importorskip("MDAnalysis")
+    root = _temperature_polymer_study(tmp_path, "comparison: {within: temperature_K}")
+    result = _analyze_cli("rg", "--study", str(root), "--no-plots", "--no-eq-check")
+    assert result.exit_code == 0, result.output
+    report = json.loads((root / "results" / "rg" / "report.json").read_text())
+    rows = [(row["a"], row["b"], row["stratum"]) for row in report["pairwise"]]
+    assert rows == [
+        ("none_300", "SBMA_300", {"temperature_K": 300}),
+        ("none_330", "SBMA_330", {"temperature_K": 330}),
+        ("none_360", "SBMA_360", {"temperature_K": 360}),
+    ]
+    assert [row["delta"] for row in report["pairwise"]] == pytest.approx([0.5] * 3)
+    assert report["provenance"]["study"]["comparison"] == {
+        "within": ["temperature_K"],
+        "control": {"polymer": "none"},
+    }
+    from polyzymd.analyses.study_file import load_study_file
+    from polyzymd.analyses.study_freeze import stale_runs
+
+    assert stale_runs(load_study_file(root)) == {}
+    study_yaml = root / "study.yaml"
+    text = study_yaml.read_text()
+    lines = text.splitlines(keepends=True)
+    first = next(i for i, line in enumerate(lines) if line.startswith("  none_300:"))
+    moved = next(i for i, line in enumerate(lines) if line.startswith("  SBMA_300:"))
+    lines.insert(first, lines.pop(moved))
+    study_yaml.write_text("".join(lines))
+    assert stale_runs(load_study_file(root))["rg"] == [
+        "the comparison block changed since the report"
+    ]
+    study_yaml.write_text(text)
+    study_yaml.write_text(study_yaml.read_text().replace("comparison: {within: temperature_K}", ""))
+    assert stale_runs(load_study_file(root))["rg"] == [
+        "the comparison block changed since the report"
+    ]
+
+
+@pytest.mark.filterwarnings("ignore")
+def test_without_a_study_comparison_every_condition_is_compared_with_the_first(
+    tmp_path: Path,
+) -> None:
+    """The report keeps its fields and its first-condition control when no comparison is set."""
+    import json
+
+    pytest.importorskip("MDAnalysis")
+    root = _temperature_polymer_study(tmp_path, "")
+    result = _analyze_cli("rg", "--study", str(root), "--no-plots", "--no-eq-check")
+    assert result.exit_code == 0, result.output
+    report = json.loads((root / "results" / "rg" / "report.json").read_text())
+    assert {row["a"] for row in report["pairwise"]} == {"none_300"}
+    deltas = {row["b"]: row["delta"] for row in report["pairwise"]}
+    assert deltas["SBMA_360"] == pytest.approx(2.5)
+    fields = {
+        "a", "b", "entry", "delta", "delta_ci95", "p", "p_adjusted", "test", "correction",
+        "family_size", "cohens_d", "hedges_g", "direction", "significant", "testable",
+    }  # fmt: skip
+    assert all(set(row) == fields for row in report["pairwise"])
+    assert "comparison" not in report["provenance"]["study"]
+
+
+@pytest.mark.filterwarnings("ignore")
+def test_labels_without_their_stratum_control_name_the_control_once(tmp_path: Path) -> None:
+    """--label conditions whose controls are left out are refused with the control to add."""
+    pytest.importorskip("MDAnalysis")
+    root = _temperature_polymer_study(tmp_path, "comparison: {within: temperature_K}")
+    result = _analyze_cli(
+        "rg", "--study", str(root), "--label", "SBMA_300", "--label", "SBMA_330",
+        "--label", "none_330", "--no-plots", "--no-eq-check",
+    )  # fmt: skip
+    assert result.exit_code != 0
+    assert result.output.count("leaves out the stratum control none_300 that") == 1
+    assert "fix: Add --label none_300, or give one --label" in result.output
+    assert "none_330" not in result.output

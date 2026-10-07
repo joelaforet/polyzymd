@@ -45,7 +45,7 @@ import sys
 import warnings
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 from polyzymd.analyses.exceptions import ProtocolError
 from polyzymd.analyses.shared.file_hashes import file_sha256
@@ -1298,12 +1298,26 @@ class ReplicateValues:
 
     def compare(
         self,
-        control: str | None = None,
+        control: str | Mapping[str, Any] | None = None,
         conditions: Sequence[str] | None = None,
         test: str = "welch",
         untested: Sequence = (),
+        within: str | Sequence[str] | None = None,
     ) -> ProtocolReport:
         """Compare every condition against the control, per label for labelled values.
+
+        Without ``within`` every condition is compared with one control.
+        With ``within``, one factor name or a list, the conditions that share
+        their values of those factors form one stratum, and each condition is
+        compared with the control of its own stratum
+        (:func:`~polyzymd.analyses.study_statistics.comparison_pairs`); each
+        row names its control in ``a`` and its stratum in ``stratum``. The
+        factors are those of the study's ``study.yaml``. ``within`` and
+        ``control`` default to its ``comparison:`` block, and ``within``
+        given without ``control`` takes the block's control too;
+        ``within=[]`` turns the strata off. The control of a stratum is never
+        replaced by another condition: a control without replicate values,
+        or not among the conditions, is refused.
 
         Each row gives ``mean(b) - mean(a)`` with its 95 percent interval from
         the same t test, the p value, the Benjamini-Hochberg adjusted p value,
@@ -1313,8 +1327,12 @@ class ReplicateValues:
         part in the correction.
 
         The correction family is every tested row of this call. For one
-        number per replicate that is the conditions compared with the
-        control. For labelled values it is every label of every condition
+        number per replicate that is the conditions compared with their
+        control, over every stratum with ``within``, because together they
+        answer one question, whether the condition changes the metric in any
+        stratum, and a family is the set of tests behind one conclusion
+        (Bender and Lange 2001, doi:10.1016/S0895-4356(00)00314-0).
+        For labelled values it is every label of every condition
         compared, because scanning a profile for the labels that changed is a
         selective search over that set, and a false discovery rate holds for
         the discoveries of a search only when the family is the set searched
@@ -1324,22 +1342,73 @@ class ReplicateValues:
 
         Parameters
         ----------
-        control : str, optional
-            Control condition. Defaults to the first condition of the study.
+        control : str or mapping, optional
+            Control condition. Defaults to the first condition of the study,
+            or with ``within`` to the control of the ``comparison:`` block.
+            With ``within``, the control of each stratum is the condition
+            whose other factors equal this condition's, or, for a mapping
+            such as ``{"polymer": "none"}``, whose factors have those values.
         conditions : sequence of str, optional
-            Conditions to include, with the control. Defaults to all.
+            Conditions to include, with their controls. Defaults to all.
         test : {"welch", "student"}, optional
             Welch's t test (default) or Student's t test.
         untested : sequence, optional
             Labels left out of the tests, for example one whose value the
             others fix.
+        within : str or sequence of str, optional
+            Factors whose values form each stratum, such as
+            ``"temperature_K"``.
 
         Returns
         -------
         ProtocolReport
             The condition rows and one comparison row per non-control
             condition and tested label.
+
+        Raises
+        ------
+        ProtocolError
+            If a stratum has no control or more than one, a control or a
+            compared condition has no replicate values, a control is not
+            among the conditions, or a condition does not declare a
+            ``within`` factor.
         """
+        chosen = self._chosen(conditions)
+        return self._compare(chosen, self._pairs(chosen, control, within), test, untested)
+
+    def _pairs(
+        self,
+        chosen: list[str],
+        control: str | Mapping[str, Any] | None = None,
+        within: str | Sequence[str] | None = None,
+    ) -> list[tuple[str, str, dict[str, Any] | None]]:
+        """Return ``(control, condition, stratum)`` for each condition of ``chosen``; see :meth:`compare`.
+
+        Controls are looked up among every condition of the study, also those
+        with no replicate values, so a missing control is never replaced.
+        """
+        from polyzymd.analyses.study_statistics import comparison_pairs
+
+        study = self.source.study
+        default = getattr(study, "comparison", None) or {}
+        if within is None:
+            within = default.get("within") or []
+        within = [within] if isinstance(within, str) else list(within)
+        if within:
+            control = control or default.get("control")
+        factors = getattr(study, "factors", None) or {}
+        # The study file's factors also name the conditions left out with --label.
+        labels = list(dict.fromkeys([*self.rows, *factors]))
+        return comparison_pairs(chosen, labels, factors, within, control or study.control)
+
+    def _compare(
+        self,
+        chosen: list[str],
+        pairs: list[tuple[str, str, dict[str, Any] | None]],
+        test: str = "welch",
+        untested: Sequence = (),
+    ) -> ProtocolReport:
+        """Report the conditions of ``chosen`` and their controls, and test ``pairs``."""
         from polyzymd.analyses.protocols import PairwiseReport, _difference_ci
         from polyzymd.analyses.shared.inferential_statistics import (
             NO_SIGNIFICANT_CHANGE,
@@ -1348,18 +1417,31 @@ class ReplicateValues:
             independent_ttest,
         )
 
-        control = control or self.source.study.control
-        chosen = self._chosen(conditions)
-        if control not in chosen:
-            chosen = [control, *chosen]
+        problems = {}
+        for control, label, stratum in pairs:
+            where = ", ".join(f"{name} {value}" for name, value in (stratum or {}).items())
+            whose = f"the stratum {where} has no control values: its" if where else "the"
+            if control not in self.rows:
+                problems[control] = f"{whose} control {control} is not among the conditions"
+            elif not self.rows[control]:
+                problems[control] = f"{whose} control {control} has no replicate values"
+            if not self.rows[label]:
+                problems[label] = f"condition {label} has no replicate values"
+        if problems:
+            raise ProtocolError(
+                f"Cannot compare: {'; '.join(problems.values())}.",
+                hint="Give conditions= the conditions with replicate values, and include the "
+                "control of each (with polyzymd analyze --label, add a --label for it). A "
+                "condition is compared only with its own control.",
+            )
+        controls = dict.fromkeys(pair[0] for pair in pairs)
+        chosen = [label for label in controls if label not in chosen] + chosen
         if test not in ("welch", "student"):
             raise ProtocolError(f"Unknown test {test!r}.", hint="Use 'welch' or 'student'.")
         rows = []
         for position, entry in self._entries(untested):
             values = self._column(position)
-            for label in chosen:
-                if label == control:
-                    continue
+            for control, label, stratum in pairs:
                 a, b = values[control], values[label]
                 testable = min(len(a), len(b)) >= 2 and len(set(a)) + len(set(b)) > 2
                 effect = cohens_d(b, a)
@@ -1367,6 +1449,7 @@ class ReplicateValues:
                     PairwiseReport(
                         a=control,
                         b=label,
+                        stratum=stratum,
                         entry=entry,
                         delta=sum(b) / len(b) - sum(a) / len(a),
                         delta_ci95=_difference_ci(a, b, f"{test}_t"),
@@ -1378,8 +1461,8 @@ class ReplicateValues:
                     )
                 )
         # One Benjamini-Hochberg family per call: the conditions compared with
-        # the control, for every label compared. A family is the set of tests
-        # behind one conclusion (Bender and Lange 2001), FDR controlled in
+        # their control, over every stratum, for every label compared. A
+        # family is the set of tests behind one conclusion (Bender and Lange 2001), FDR controlled in
         # separate families stays controlled overall (Benjamini and Yekutieli
         # 2001), and a scan of labels for changes is corrected over the labels
         # scanned (Benjamini 2010).

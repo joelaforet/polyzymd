@@ -205,8 +205,11 @@ conditions:                    # control first
   SBMA 360 K: {config: conditions/sbma_360, factors: {temperature_K: 360, polymer: SBMA}}
 ```
 
-The report compares each condition with the control, `No polymer 300 K`. The
-trend test of `temperature_K` goes through all six condition means. `polymer`
+The report compares each condition with the control, `No polymer 300 K`.
+To compare each condition with the condition without polymer at its own
+temperature, add `comparison: {within: temperature_K}`; see
+{ref}`study-comparison`. The trend test of `temperature_K` goes through all
+six condition means. `polymer`
 is text, so it gets no trend test; it is a column of the results table. To
 fit both factors in one model, write a script in `stats/`.
 

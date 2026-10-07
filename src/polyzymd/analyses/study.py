@@ -417,18 +417,24 @@ class Study:
     its conditions, equilibration window, stride, replicates and analysis
     settings (:mod:`polyzymd.analyses.study_file`). :meth:`from_configs`
     builds one from config paths instead. Iterating yields the conditions in
-    order, and the first one is the default control.
+    order, and the first one is the default control. ``factors`` holds each
+    condition's factors and ``comparison`` the ``comparison:`` block of the
+    study file (``within`` and ``control``), or ``None``; comparisons use
+    both.
     """
 
     def __init__(self, conditions: Sequence[Condition] | str | Path) -> None:
         self.protocol: Any = None
         self._built: dict[str, Condition] | None = None
+        self.factors: dict[str, dict[str, Any]] = {}
+        self.comparison: dict[str, Any] | None = None
         if isinstance(conditions, (str, Path)):
             from polyzymd.analyses.study_file import load_study_file
 
             # Conditions are built on first use, so settings() and results()
             # work on a study folder whose trajectories are not on this machine.
             self.protocol = load_study_file(conditions)
+            self.factors, self.comparison = self.protocol.factors, self.protocol.comparison
         else:
             self._built = {condition.label: condition for condition in conditions}
 
