@@ -294,6 +294,36 @@ def _emit_reference_warnings(sim_config: object, *, phase: str = "cli") -> bool:
     return True
 
 
+def _echo_box_plan(sim_config: "SimulationConfig", *, phase: str) -> None:
+    """Print the periodic box the build will make, sized from the enzyme PDB."""
+    import numpy as np
+
+    from polyzymd.builders.solvent import SolventBuilder
+    from polyzymd.utils.boxvectors import describe_box_plan, plan_box
+
+    box = sim_config.solvent.box
+    padding = box.padding
+    if sim_config.polymers and sim_config.polymers.enabled:
+        padding += sim_config.polymers.packing.padding
+    try:
+        with open(sim_config.enzyme.pdb_path) as stream:
+            positions = [
+                [float(line[30:38]), float(line[38:46]), float(line[46:54])]
+                for line in stream
+                if line.startswith(("ATOM", "HETATM"))
+            ]
+        plan = plan_box(
+            np.asarray(positions) / 10.0,
+            SolventBuilder._get_box_shape_matrix(box.shape.value),
+            padding_nm=padding,
+            margin_nm=box.tolerance / 10.0,
+        )
+    except (OSError, ValueError) as exc:
+        colored_echo(f"    Box: not estimated ({exc})", phase=phase, level=logging.WARNING)
+        return
+    colored_echo(f"    Box ({box.shape.value}): {describe_box_plan(plan)}", phase=phase)
+
+
 @click.group()
 @click.version_option(prog_name="polyzymd")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
@@ -422,6 +452,9 @@ def build(
 
     colored_echo(f"Loading configuration from: {config}", phase="build")
 
+    # A run folder made by a build that then fails is removed, so a failed
+    # build leaves no empty folder behind.
+    new_run_dir: Path | None = None
     try:
         sim_config = SimulationConfig.from_yaml(config)
         colored_echo(f"Configuration validated: {sim_config.name}", phase="build")
@@ -484,6 +517,7 @@ def build(
                 f"  Chain D+ (Solvent): {sim_config.solvent.primary.model.name}", phase="build"
             )
             colored_echo(f"    Box padding: {sim_config.solvent.box.padding} nm", phase="build")
+            _echo_box_plan(sim_config, phase="build")
             colored_echo(
                 f"    NaCl concentration: {sim_config.solvent.ions.nacl_concentration} M, "
                 f"neutralize: {sim_config.solvent.ions.neutralize}",
@@ -623,6 +657,7 @@ def build(
         for rep in replicate_list:
             colored_echo(f"Building system for replicate {rep}...", phase="build")
             working_dir = sim_config.get_working_directory(rep)
+            new_run_dir = None if working_dir.exists() else working_dir
             from polyzymd.simulation.artifact_integrity import (
                 assert_rebuild_allowed,
                 replicate_lock,
@@ -774,6 +809,7 @@ def build(
                     phase="build",
                 )
             build_lock.__exit__(None, None, None)
+            new_run_dir = None
 
     except PydanticValidationError as e:
         colored_echo("Configuration error:", err=True, level=logging.ERROR)
@@ -806,6 +842,12 @@ def build(
 
             traceback.print_exc()
         sys.exit(1)
+
+    finally:
+        if new_run_dir is not None:
+            import shutil
+
+            shutil.rmtree(new_run_dir, ignore_errors=True)
 
 
 # =============================================================================
@@ -849,6 +891,7 @@ def _print_run_dry_run_report(
     colored_echo(f"  Engine: {engine}", phase=phase)
     if engine == "gromacs":
         colored_echo(f"  GROMACS executable: {gmx_path or 'gmx'}", phase=phase)
+    _echo_box_plan(sim_config, phase=phase)
     colored_echo(phase=phase)
 
     colored_echo("Replicates:", phase=phase)
@@ -1096,11 +1139,19 @@ def _run_gromacs_impl(
     else:
         click.echo(f"Building system for replicate {replicate}...")
         builder = SystemBuilder.from_config(sim_config)
-        interchange = builder.build_from_config(
-            config=sim_config,
-            working_dir=working_dir,
-            polymer_seed=replicate,
-        )
+        new_run_dir = not working_dir.exists()
+        try:
+            interchange = builder.build_from_config(
+                config=sim_config,
+                working_dir=working_dir,
+                polymer_seed=replicate,
+            )
+        except BaseException:
+            if new_run_dir:
+                import shutil
+
+                shutil.rmtree(working_dir, ignore_errors=True)
+            raise
 
         # Get component info for position restraints
         component_info = builder.get_component_info()

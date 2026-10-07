@@ -704,7 +704,8 @@ class BoxConfig(_ConfigModel):
     """Configuration for the simulation box.
 
     Attributes:
-        padding: Distance from solute to box edge in nm
+        padding: Distance from solute to box edge in nm. The cell edge is the
+            solute diameter plus 2 x padding.
         shape: Box geometry
         target_density: Target density in g/mL
         tolerance: Minimum molecular spacing for PACKMOL in Angstrom

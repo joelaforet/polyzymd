@@ -162,7 +162,7 @@ class _FakeConformer:
 
 
 class _FakeMolecule:
-    """Molecule exposing a single conformer, as get_topology_bbox expects."""
+    """Molecule exposing a single conformer, as get_topology_positions expects."""
 
     def __init__(self, coords):
         self.conformers = [_FakeConformer(coords)]
@@ -177,48 +177,84 @@ class _FakeTopology:
 
 
 def _solute_molecule():
-    """A solute spanning 10 x 20 x 30 Angstrom."""
+    """A solute spanning 10 x 20 x 30 Angstrom (diameter sqrt(1400) Angstrom)."""
     return _FakeMolecule([[0.0, 0.0, 0.0], [10.0, 20.0, 30.0]])
 
 
-def _legacy_box_vectors(topology, padding_nm):
-    """The box the pre-fix code computed: bbox + 2*padding, shaped."""
-    import openff.packmol as packmol
-    from openff.units import Quantity
-
-    from polyzymd.utils import boxvectors
-
-    bbox = boxvectors.get_topology_bbox(topology)
-    padded = boxvectors.pad_box_vectors_uniform(bbox, Quantity(padding_nm, "nanometer"))
-    return packmol.RHOMBIC_DODECAHEDRON @ padded
-
-
-def test_compute_box_vectors_matches_legacy_for_a_solute_only_build() -> None:
-    """Control bundles must keep the box they have today (no extra padding)."""
+def _elongated_solute():
+    """A filled ellipsoid spanning 37.5 x 41.8 x 50 Angstrom, long along z like T4 lysozyme."""
     import numpy as np
 
-    topology = _FakeTopology(_solute_molecule())
-    computed = SolventBuilder().compute_box_vectors(topology, padding=1.2)
-    legacy = _legacy_box_vectors(topology, 1.2)
+    semi_axes = np.array([18.75, 20.9, 25.0])
+    grid = np.mgrid[-25:26:3, -25:26:3, -25:26:3].reshape(3, -1).T.astype(float)
+    inside = grid[np.sum((grid / semi_axes) ** 2, axis=1) <= 1.0]
+    tips = np.vstack([np.diag(semi_axes), -np.diag(semi_axes)])
+    return _FakeMolecule(np.vstack([inside, tips]))
 
-    np.testing.assert_allclose(
-        computed.m_as("nanometer"), legacy.m_as("nanometer"), rtol=0, atol=1e-12
-    )
+
+def _closest_image_distance_nm(coords_angstrom, box_nm) -> float:
+    """Smallest distance between the solute and any of its periodic copies."""
+    import itertools
+
+    import numpy as np
+    from scipy.spatial.distance import cdist
+
+    coords = np.asarray(coords_angstrom, dtype=float) / 10.0
+    closest = np.inf
+    for shift in itertools.product((-1, 0, 1), repeat=3):
+        if shift == (0, 0, 0):
+            continue
+        image = coords + np.asarray(shift, dtype=float) @ box_nm
+        closest = min(closest, float(cdist(coords, image).min()))
+    return closest
 
 
 def test_compute_box_vectors_reserves_room_for_polymers() -> None:
-    """With polymers the cell grows by 2 * packing padding in every direction."""
+    """With polymers the cell edge grows by 2 * packing padding."""
     import numpy as np
 
     topology = _FakeTopology(_solute_molecule())
     without = SolventBuilder().compute_box_vectors(topology, padding=1.2)
     with_polymers = SolventBuilder().compute_box_vectors(topology, padding=1.2, extra_padding=2.0)
-    grown = _legacy_box_vectors(topology, 1.2 + 2.0)
 
-    np.testing.assert_allclose(
-        with_polymers.m_as("nanometer"), grown.m_as("nanometer"), rtol=0, atol=1e-12
-    )
+    edge = with_polymers.m_as("nanometer")[0, 0]
+    assert edge == pytest.approx(without.m_as("nanometer")[0, 0] + 4.0)
     assert np.linalg.det(with_polymers.m_as("nanometer")) > np.linalg.det(without.m_as("nanometer"))
+
+
+@pytest.mark.parametrize("shape", ["cube", "rhombic_dodecahedron"])
+def test_solute_is_two_paddings_from_its_periodic_copies(shape: str) -> None:
+    """Padding is the solute-to-box-edge distance: copies are 2 x padding apart."""
+    solute = _elongated_solute()
+    box = SolventBuilder().compute_box_vectors(_FakeTopology(solute), padding=1.2, box_shape=shape)
+
+    distance = _closest_image_distance_nm(solute.conformers[0].m_as("angstrom"), box.m_as("nm"))
+    assert distance >= 2 * 1.2 - 1e-9
+
+
+def test_cube_box_is_cubic() -> None:
+    """shape: cube gives three equal, orthogonal edges."""
+    import numpy as np
+
+    box = SolventBuilder().compute_box_vectors(
+        _FakeTopology(_elongated_solute()), padding=1.2, box_shape="cube"
+    )
+    edge = box.m_as("nanometer")[0, 0]
+    np.testing.assert_allclose(box.m_as("nanometer"), edge * np.eye(3))
+
+
+def test_default_box_fits_an_elongated_solute_in_the_brick() -> None:
+    """The default dodecahedron brick leaves at least the Packmol tolerance on every face."""
+    import numpy as np
+
+    solute = _elongated_solute()
+    config = SolventConfig()
+    box = SolventBuilder().compute_box_vectors_from_config(_FakeTopology(solute), config)
+
+    coords = solute.conformers[0].m_as("angstrom") / 10.0
+    extent = coords.max(axis=0) - coords.min(axis=0)
+    clearance = (np.diagonal(box.m_as("nanometer")) - extent) / 2.0
+    assert np.all(clearance >= config.box.tolerance / 10.0 - 1e-9), clearance
 
 
 def test_compute_box_vectors_is_independent_of_polymer_positions() -> None:
@@ -241,7 +277,7 @@ def test_compute_box_vectors_is_independent_of_polymer_positions() -> None:
 
 
 def test_compute_box_vectors_from_config_uses_config_padding() -> None:
-    """The config wrapper must forward padding, shape and the extra padding."""
+    """The config wrapper must forward padding, shape, tolerance and the extra padding."""
     import numpy as np
 
     topology = _FakeTopology(_solute_molecule())
@@ -254,6 +290,7 @@ def test_compute_box_vectors_from_config_uses_config_padding() -> None:
         padding=config.box.padding,
         box_shape=config.box.shape.value,
         extra_padding=2.0,
+        tolerance=config.box.tolerance,
     )
     np.testing.assert_array_equal(computed.m_as("nanometer"), expected.m_as("nanometer"))
 

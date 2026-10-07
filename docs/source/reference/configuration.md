@@ -188,8 +188,8 @@ The periodic cell is computed **before** anything is packed, from the protein
 and substrate alone:
 
 ```
-box vectors = shape_matrix @ diag(solute bbox + 2 * (polymers.packing.padding
-                                                     + solvent.box.padding))
+edge = solute diameter + 2 * (polymers.packing.padding + solvent.box.padding)
+box vectors = edge * shape_matrix
 ```
 
 Chains are then packed inside the rectangular *brick* of that cell (shrunk by
@@ -202,14 +202,12 @@ sphere radius are recorded under `provenance` in `build_manifest.json`
 be compared by diffing their manifests.
 
 ```{note}
-A rhombic-dodecahedron brick is not the padded extent. Along `x` and `y` the
-brick equals `bbox + 2 * padding`, but along `z` it is `sqrt(2)/2` (0.707)
-times that, so the clearance between the solute and the `z` faces is
-`0.707 * padding - 0.146 * bbox_z`, not `padding`. That is the geometry of the
-cell, not a defect: the missing corners are supplied by the periodic images.
-The build logs the clearance to each brick face and warns when the solute does
-not fit inside the brick at all, in which case you should raise the padding or
-use `shape: cube`.
+A rhombic-dodecahedron brick is one edge long along `x` and `y`, but only
+`sqrt(2)/2` (0.707) edges tall along `z`. The missing corners are supplied by
+the periodic images. If the solute's bounding box would come closer than
+`solvent.box.tolerance` to a brick face, the edge grows until it fits. The
+build log and `build --dry-run` print the edge, the brick and the clearance to
+each brick face.
 ```
 
 ### Monomer Specification
@@ -265,7 +263,7 @@ solvent:
     nacl_concentration: 0.15             # NaCl salt concentration (M)
   
   box:
-    padding: 1.2                         # nm from solute to box edge
+    padding: 1.2                         # nm from solute to box edge (see below)
     shape: "rhombic_dodecahedron"        # Box shape
     target_density: 1.0                  # g/mL
     tolerance: 2.0                       # PACKMOL tolerance (Angstrom)
@@ -275,7 +273,12 @@ solvent:
 the Na+ or Cl- ions that cancel the charge of the solute and co-solvents are
 added on top of the salt, as OpenMM `Modeller` and `gmx genion -neutral` do.
 
-`box.padding` is the clearance between the **solute** and the box edge. When
+`box.padding` is the distance from the **solute** to the box edge. The edge of
+the cell is the solute diameter (its largest atom-to-atom distance) plus
+`2 * padding`, as in `gmx editconf -d`. Every lattice vector of a cube, rhombic
+dodecahedron or truncated octahedron is at least one edge long. The solute
+therefore starts at least `2 * padding` from each of its periodic copies, in
+any orientation. The solute's bounding box is centred in the brick. When
 polymers are configured, `polymers.packing.padding` is added to it and the
 resulting cell is computed from the protein and substrate before any packing
 happens, so it is identical across replicates of a condition; the packed
@@ -297,9 +300,12 @@ solvent counts.
 
 | Shape | Description |
 |-------|-------------|
-| `cube` | Cubic box |
-| `rhombic_dodecahedron` | Space-efficient (default) |
-| `truncated_octahedron` | Alternative space-efficient |
+| `cube` | Cube: three equal edges at right angles |
+| `rhombic_dodecahedron` | Same edge, 71 % of the cube volume (default) |
+| `truncated_octahedron` | Same edge, 77 % of the cube volume |
+
+All three shapes use the same edge, so they keep the solute equally far from
+its periodic copies. The two non-cubic shapes need fewer waters.
 
 ### Co-solvents
 

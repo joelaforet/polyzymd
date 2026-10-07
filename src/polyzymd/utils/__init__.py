@@ -5,14 +5,12 @@ This module provides internal utilities for:
 - Force group assignment for energy decomposition
 - OpenFF topology utilities (SDF loading, molecule extraction)
 - Molecular charging with ML models (NAGL, Espaloma)
-- Box vector calculations (bounding boxes, padding, volumes)
+- Box vector calculations (box sizing, bounding boxes, volumes)
 """
 
 from polyzymd.utils.boxvectors import (
     get_box_volume,
-    get_topology_bbox,
     get_topology_bbox_bounds,
-    pad_box_vectors_uniform,
 )
 from polyzymd.utils.charging import (
     AM1BCCCharger,
@@ -39,9 +37,7 @@ __all__ = [
     "AM1BCCCharger",
     "get_charger",
     # Box vectors
-    "get_topology_bbox",
     "get_topology_bbox_bounds",
-    "pad_box_vectors_uniform",
     "get_box_volume",
     # Packing / solvation safeguards
     "SolvationClashError",

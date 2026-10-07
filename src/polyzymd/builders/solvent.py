@@ -235,21 +235,24 @@ class SolventBuilder:
         padding: float = 1.2,
         box_shape: BoxShapeType = "rhombic_dodecahedron",
         extra_padding: float = 0.0,
+        tolerance: float = 2.0,
     ) -> "Quantity":
         """Compute the periodic box vectors for a topology.
 
-        This is the single definition of the simulation cell: the topology's
-        axis-aligned bounding box, grown by ``2 * (padding + extra_padding)``
-        in every direction, transformed by the box-shape matrix.  It is a pure
-        function of the topology's coordinates, so calling it *before* polymers
-        are packed makes the cell deterministic — every replicate of a
-        condition gets the same box, and therefore the same water and ion
-        counts.
+        This is the single definition of the simulation cell (see
+        :func:`polyzymd.utils.boxvectors.plan_box`): the cell edge is the
+        solute diameter plus ``2 * (padding + extra_padding)``, so the solute
+        is at least that far from each of its periodic copies.  The edge grows
+        further if the solute bounding box would come closer than *tolerance*
+        to a face of the brick that Packmol fills.  It is a pure function of
+        the topology's coordinates, so calling it *before* polymers are packed
+        makes the cell deterministic — every replicate of a condition gets the
+        same box, and therefore the same water and ion counts.
 
         Parameters
         ----------
         topology : openff.toolkit.Topology
-            Topology whose bounding box sets the box size.  For a deterministic
+            Topology whose coordinates set the box size.  For a deterministic
             build this is the protein + substrate only, never the packed
             polymers.
         padding : float
@@ -261,6 +264,8 @@ class SolventBuilder:
             Additional padding in nm reserved for molecules that will be packed
             later (``polymers.packing.padding``).  ``0.0`` for a build without
             polymers.
+        tolerance : float
+            Packmol tolerance in Angstrom (``solvent.box.tolerance``).
 
         Returns
         -------
@@ -271,16 +276,14 @@ class SolventBuilder:
 
         from polyzymd.utils import boxvectors
 
-        box_shape_matrix = self._get_box_shape_matrix(box_shape)
-        total_padding = float(padding) + float(extra_padding)
-        padding_qty = Quantity(total_padding, "nanometer")
-
-        min_box_vecs = boxvectors.get_topology_bbox(topology)
-        box_vecs = boxvectors.pad_box_vectors_uniform(min_box_vecs, padding_qty)
-        box_vecs = box_shape_matrix @ box_vecs
-
-        self._warn_on_thin_brick(min_box_vecs, box_vecs)
-        return box_vecs
+        plan = boxvectors.plan_box(
+            boxvectors.get_topology_positions(topology) / 10.0,
+            self._get_box_shape_matrix(box_shape),
+            padding_nm=float(padding) + float(extra_padding),
+            margin_nm=float(tolerance) / 10.0,
+        )
+        LOGGER.info("Box: %s", boxvectors.describe_box_plan(plan))
+        return Quantity(plan["box_vectors"], "nanometer")
 
     def compute_box_vectors_from_config(
         self,
@@ -299,36 +302,8 @@ class SolventBuilder:
             padding=config.box.padding,
             box_shape=config.box.shape.value,
             extra_padding=extra_padding_nm,
+            tolerance=config.box.tolerance,
         )
-
-    @staticmethod
-    def _warn_on_thin_brick(bbox_vectors: "Quantity", box_vecs: "Quantity") -> None:
-        """Log the clearance between the solute bounding box and the brick faces.
-
-        The rectangular brick of a rhombic dodecahedron is shorter along ``z``
-        than the padded extent (``c_z = sqrt(2)/2 * L_z``), so the clearance
-        along ``z`` is not the requested padding.  A negative clearance means
-        the solute itself pokes through a brick face, which guarantees
-        periodic-image contacts.
-        """
-        bbox = np.diagonal(np.asarray(bbox_vectors.m_as("nanometer"), dtype=float))
-        brick = np.diagonal(np.asarray(box_vecs.m_as("nanometer"), dtype=float))
-        clearance = (brick - bbox) / 2.0
-        LOGGER.info(
-            "Brick %.2f x %.2f x %.2f nm; solute bbox %.2f x %.2f x %.2f nm; "
-            "clearance to the brick faces %.2f / %.2f / %.2f nm",
-            *brick,
-            *bbox,
-            *clearance,
-        )
-        if np.any(clearance < 0.0):
-            LOGGER.warning(
-                "The solute bounding box does not fit inside the periodic brick "
-                "(clearance %.2f / %.2f / %.2f nm). The rhombic-dodecahedron brick is "
-                "sqrt(2)/2 times shorter along z than the padded extent; increase the "
-                "padding or use a cubic box.",
-                *clearance,
-            )
 
     def solvate(
         self,
@@ -389,7 +364,9 @@ class SolventBuilder:
         # this topology, which is the behaviour for solute-only builds.
         center_solute = box_vectors is None
         if box_vectors is None:
-            box_vecs = self.compute_box_vectors(topology, padding=padding, box_shape=box_shape)
+            box_vecs = self.compute_box_vectors(
+                topology, padding=padding, box_shape=box_shape, tolerance=tolerance
+            )
             LOGGER.info(f"Computed box vectors: {box_vecs}")
 
             # Center topology in box
@@ -855,7 +832,8 @@ class SolventBuilder:
         water_count = total_neutral_molecules - sum(count for _, count in cosolvent_counts)
         return water_count, cosolvent_counts
 
-    def _get_box_shape_matrix(self, shape: BoxShapeType) -> NDArray:
+    @staticmethod
+    def _get_box_shape_matrix(shape: BoxShapeType) -> NDArray:
         """Get the transformation matrix for the box shape.
 
         Args:
