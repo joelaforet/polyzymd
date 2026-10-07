@@ -292,48 +292,35 @@ class SystemBuilder:
 
     def pack_polymers(
         self,
+        box_vectors: Any,
         padding: float = 2.0,
         tolerance: float = 2.0,
         movebadrandom: bool = False,
         working_directory: Optional[Union[str, Path]] = None,
-        box_vectors_nm: Optional[List[float]] = None,
         seed: Optional[int] = None,
-        exclude_solute_bbox: bool = False,
         confine_to_sphere: bool = True,
         nloop: int = 200,
-        box_vectors: Optional[Any] = None,
     ) -> Topology:
         """Pack polymers around the combined solute topology.
 
         Args:
-            padding: Box padding in nm. Larger values give polymers more room
-                and can significantly speed up PACKMOL convergence.  Ignored
-                when *box_vectors_nm* is provided.
+            box_vectors: Final periodic box vectors (3x3 Quantity) of the
+                simulation cell.  Chains are packed inside the rectangular
+                brick of this cell so that no atom can overlap its own
+                periodic image.
+            padding: Padding in nm of the confinement sphere around the solute.
             tolerance: PACKMOL tolerance in Angstrom.
             movebadrandom: When True, pass the ``movebadrandom`` keyword to
                 PACKMOL. Improves convergence for dense or heterogeneous
                 polymer systems (many unique chain types) by placing
                 badly-packed molecules at random positions in the box.
             working_directory: Directory for PACKMOL files.
-            box_vectors_nm: Optional explicit box dimensions ``[Lx, Ly, Lz]``
-                in nanometers.  When provided, overrides the auto-computed
-                bounding box + *padding*.  The protein is centered at the
-                midpoint of this box.
             seed: Packmol random seed (typically the replicate index).
                 ``None`` leaves Packmol on its fixed built-in default.
-            exclude_solute_bbox: Confine chains to a shell outside the solute
-                bounding box (legacy). Default ``False``.
             confine_to_sphere: Confine chains to a sphere around the solute
                 (radius = solute bounding-box circumradius + *padding*) while
                 packing inside the final periodic brick. Default ``True``.
             nloop: Maximum PACKMOL GENCAN loops per molecule type.
-            box_vectors: Final periodic box vectors (3x3 Quantity) of the
-                simulation cell.  When given, chains are packed inside the
-                rectangular brick of this cell so that no atom can overlap its
-                own periodic image, and *padding* is used only for the radius
-                of the confinement sphere.  ``None`` restores the legacy
-                behaviour of packing into a separate rectangular box of
-                solute bbox + 2 * *padding*.
 
         Returns:
             Topology with polymers packed.
@@ -349,35 +336,15 @@ class SystemBuilder:
             return self._combined_topology
 
         import numpy as np
-        from openff.units import Quantity
 
-        from polyzymd.utils import boxvectors
         from polyzymd.utils.packmol import pack_polymers as _pack_polymers
         from polyzymd.utils.packmol import solute_sphere_constraint
 
-        # Calculate box vectors — final cell, explicit override, or legacy
-        # bbox + padding.  The final cell is preferred: packing inside the
-        # brick of the box the system will actually be simulated in is what
-        # keeps the chains away from their own periodic images.
-        if box_vectors is not None:
-            box_vecs = box_vectors
-            LOGGER.info(
-                "Packing polymers inside the final periodic brick "
-                f"(box vectors {np.diagonal(np.asarray(box_vecs.m_as('nanometer'))).round(3)} nm "
-                "on the diagonal)"
-            )
-        elif box_vectors_nm is not None:
-            LOGGER.info(
-                f"Using explicit box vectors: "
-                f"[{box_vectors_nm[0]:.2f}, {box_vectors_nm[1]:.2f}, "
-                f"{box_vectors_nm[2]:.2f}] nm"
-            )
-            box_vecs = Quantity(np.diag(box_vectors_nm), "nanometer")
-        else:
-            padding_qty = Quantity(padding, "nanometer")
-            min_box_vecs = boxvectors.get_topology_bbox(self._combined_topology)
-            box_vecs = boxvectors.pad_box_vectors_uniform(min_box_vecs, padding_qty)
-
+        LOGGER.info(
+            "Packing polymers inside the final periodic brick "
+            f"(box vectors {np.diagonal(np.asarray(box_vectors.m_as('nanometer'))).round(3)} nm "
+            "on the diagonal)"
+        )
         LOGGER.info(
             f"Packing {sum(self._polymer_counts)} polymer chains "
             f"({len(self._polymer_molecules)} unique types), "
@@ -390,12 +357,11 @@ class SystemBuilder:
             molecules=self._polymer_molecules,
             number_of_copies=self._polymer_counts,
             solute=self._combined_topology,
-            box_vectors=box_vecs,
+            box_vectors=box_vectors,
             tolerance_angstrom=tolerance,
             movebadrandom=movebadrandom,
             nloop=nloop,
             seed=seed,
-            exclude_solute_bbox=exclude_solute_bbox,
             confine_to_sphere=confine_to_sphere,
             sphere_padding_angstrom=padding * 10.0,
             working_directory=str(working_directory) if working_directory else None,
@@ -983,9 +949,8 @@ class SystemBuilder:
         # Polymers get their room by reserving polymers.packing.padding on top
         # of solvent.box.padding.
         polymers_enabled = bool(config.polymers and config.polymers.enabled)
-        deterministic_box = polymers_enabled and config.polymers.packing.box_vectors is None
         box_vectors = None
-        if deterministic_box:
+        if polymers_enabled:
             box_vectors = self._solvent_builder.compute_box_vectors_from_config(
                 self._combined_topology,
                 config.solvent,
@@ -995,11 +960,6 @@ class SystemBuilder:
                 "Deterministic periodic cell from the protein + substrate bounding box "
                 f"+ 2 x ({config.polymers.packing.padding} + {config.solvent.box.padding}) nm: "
                 f"{box_vectors}"
-            )
-        elif polymers_enabled:
-            LOGGER.warning(
-                "polymers.packing.box_vectors is set: the periodic cell is derived from the "
-                "packed topology (legacy behaviour) and will differ between replicates."
             )
 
         # 4. Build and pack polymers (if configured)
@@ -1064,16 +1024,14 @@ class SystemBuilder:
             # Get packing config (uses defaults if not specified)
             packing = config.polymers.packing
             self.pack_polymers(
+                box_vectors=box_vectors,
                 padding=packing.padding,
                 tolerance=packing.tolerance,
                 movebadrandom=packing.movebadrandom,
                 working_directory=self._working_dir,
-                box_vectors_nm=packing.box_vectors,
                 seed=polymer_seed,
-                exclude_solute_bbox=packing.exclude_solute_bbox,
                 confine_to_sphere=packing.confine_to_sphere,
                 nloop=packing.nloop,
-                box_vectors=box_vectors,
             )
 
         # 5. Solvate.  With a precomputed cell the packed topology is already
@@ -1087,7 +1045,7 @@ class SystemBuilder:
         )
         self._solvated_topology = self._solvent_builder.solvated_topology
         self._build_provenance["solvent_packmol_seed"] = self._solvent_builder.packmol_seed
-        self._record_box_provenance(deterministic_box)
+        self._record_box_provenance(polymers_enabled)
 
         # Save solvated PDB if working dir specified
         self._assign_pdb_identifiers()

@@ -124,7 +124,7 @@ def publish_build_bundle(
     return manifest
 
 
-def validate_build_bundle(working_dir: Path, config: Any, *, allow_legacy: bool = True) -> None:
+def validate_build_bundle(working_dir: Path, config: Any) -> None:
     """Validate a prebuilt bundle against its manifest and current configuration."""
     manifest_path = working_dir / MANIFEST_NAME
     paths = {name: working_dir / name for name in _BUILD_ARTIFACTS}
@@ -133,50 +133,45 @@ def validate_build_bundle(working_dir: Path, config: Any, *, allow_legacy: bool 
         raise ArtifactIntegrityError(
             "Pre-built bundle is incomplete; missing: " + ", ".join(missing)
         )
-    manifest = None
     if not manifest_path.is_file():
-        if not allow_legacy:
-            raise ArtifactIntegrityError(f"Build manifest is missing: {manifest_path}")
-        warnings.warn(
-            f"Legacy build has no {MANIFEST_NAME}; accepting only after particle-count validation",
-            RuntimeWarning,
-            stacklevel=2,
+        raise ArtifactIntegrityError(
+            f"Build manifest is missing: {manifest_path}. Rebuild with "
+            "'polyzymd build -c <config> -r <replicate>', then run the same command again."
         )
-    else:
-        try:
-            manifest = json.loads(manifest_path.read_text())
-            artifacts = manifest["artifacts"]
-            expected_config = manifest["config_hash"]
-            int(manifest["particle_count"])
-        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-            raise ArtifactIntegrityError(f"Invalid build manifest {manifest_path}: {exc}") from exc
-        if expected_config != config_hash(config):
+    try:
+        manifest = json.loads(manifest_path.read_text())
+        artifacts = manifest["artifacts"]
+        expected_config = manifest["config_hash"]
+        int(manifest["particle_count"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise ArtifactIntegrityError(f"Invalid build manifest {manifest_path}: {exc}") from exc
+    if expected_config != config_hash(config):
+        raise ArtifactIntegrityError(
+            f"Configuration does not match {manifest_path}: expected {expected_config}, "
+            f"got {config_hash(config)}"
+        )
+    checked = dict(paths)
+    for name in _OPTIONAL_ARTIFACTS:
+        if name in artifacts:
+            checked[name] = working_dir / name
+    for name, path in checked.items():
+        if name in _OPTIONAL_ARTIFACTS and not path.is_file():
             raise ArtifactIntegrityError(
-                f"Configuration does not match {manifest_path}: expected {expected_config}, "
-                f"got {config_hash(config)}"
+                f"Manifest lists {name} but {path} is missing; rerun the build or "
+                "polyzymd analysis-topology"
             )
-        checked = dict(paths)
-        for name in _OPTIONAL_ARTIFACTS:
-            if name in artifacts:
-                checked[name] = working_dir / name
-        for name, path in checked.items():
-            if name in _OPTIONAL_ARTIFACTS and not path.is_file():
-                raise ArtifactIntegrityError(
-                    f"Manifest lists {name} but {path} is missing; rerun the build or "
-                    "polyzymd analysis-topology"
-                )
-            recorded_path = artifacts.get(name, {}).get("path")
-            if recorded_path != str(path.resolve()):
-                raise ArtifactIntegrityError(
-                    f"Artifact path mismatch for {name}: manifest={recorded_path!r}, "
-                    f"current={str(path.resolve())!r}"
-                )
-            expected = artifacts.get(name, {}).get("sha256")
-            actual = _file_hash(path)
-            if expected != actual:
-                raise ArtifactIntegrityError(
-                    f"Artifact hash mismatch for {path}: manifest={expected!r}, actual={actual}"
-                )
+        recorded_path = artifacts.get(name, {}).get("path")
+        if recorded_path != str(path.resolve()):
+            raise ArtifactIntegrityError(
+                f"Artifact path mismatch for {name}: manifest={recorded_path!r}, "
+                f"current={str(path.resolve())!r}"
+            )
+        expected = artifacts.get(name, {}).get("sha256")
+        actual = _file_hash(path)
+        if expected != actual:
+            raise ArtifactIntegrityError(
+                f"Artifact hash mismatch for {path}: manifest={expected!r}, actual={actual}"
+            )
 
     from openmm import XmlSerializer
     from openmm.app import PDBFile
@@ -189,7 +184,7 @@ def validate_build_bundle(working_dir: Path, config: Any, *, allow_legacy: bool 
         topology_path=paths["solvated_system.pdb"],
         system_path=paths["system.xml"],
     )
-    if manifest is not None and int(manifest["particle_count"]) != system.getNumParticles():
+    if int(manifest["particle_count"]) != system.getNumParticles():
         raise ArtifactIntegrityError(
             f"Manifest particle count mismatch for {manifest_path}: "
             f"manifest={manifest['particle_count']}, system={system.getNumParticles()}"

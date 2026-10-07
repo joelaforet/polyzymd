@@ -874,8 +874,7 @@ Example configs: polyzymd/templates/examples/
 
 Run one analysis and print a validated result. One `-c` gives a per-condition
 summary; two or more give pairwise comparisons with the first config as the
-control. The command reads the simulation configs given with `-c`; it reads
-no `comparison.yaml`.
+control. The command reads the simulation configs given with `-c`.
 
 ### Usage
 
@@ -895,9 +894,6 @@ every entry runs in turn. See {doc}`../how_to/study_yaml`.
 of their distance from the reference; `rmsd_per_residue` is one value per residue,
 the root mean square over frames of each atom's distance from the reference,
 as `gmx rmsf -od` reports. An unknown name is refused with the list of all of them.
-`catalytic_triad` is refused with a pointer to the triad routine on the study
-API, {doc}`../how_to/analysis_triad_quickstart`, and to `polyzymd analyze
-distances --set pairs=...` for the triad distances.
 
 ### Options
 
@@ -908,7 +904,6 @@ distances --set pairs=...` for the triad distances.
 | `--data DIR` | No | Directory holding the run directories of every condition, for this command only, in place of each config's `scratch_directory` and of a study's `data.local.yaml`. The config hash is that of the config as written. |
 | `--project PATH` | No | `project.yaml`, or the project folder. Runs `RUN` (or every analysis) in each study of the project that runs it, as `--study` would, one study after another; a study that fails is reported and the next runs, then the command exits 2. Refused with `--study`, `-c` or `--output-dir`. |
 | `--study PATH` | No | `study.yaml`, or the folder holding it. Gives the conditions, `--eq`, `--stride`, `--replicates` and the run's settings, and stores the run in `<study>/results/<run>/` with its `report.json`. Options given on the command line override the file; `--label` then picks conditions of the study, and that report is printed but not saved as the run's `report.json`. |
-| `-f, --file PATH` | No | Retired. With a `comparison.yaml`, the command runs nothing and exits 2: the `error:` line says that `comparison.yaml` is no longer read by `polyzymd analyze`, and the `fix:` line gives the equivalent `polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq ...` command built from the file's conditions, replicates and equilibration (or `--eq`), followed by the address of {doc}`../how_to/analysis_agent_protocol` and `.claude/skills/polyzymd-analyze/SKILL.md`, the skill to point an agent at. A file that cannot be read gives the command with placeholders. |
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
 | `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default `10ns`. |
 | `--label TEXT` | No | Condition label, one per `-c` in the same order. Default: the name of the directory holding the config. |
@@ -1014,7 +1009,7 @@ The verdict vocabulary is fixed so a caller can branch on it:
 | Code | Meaning |
 |------|---------|
 | 0 | The analysis ran and the report was printed |
-| 2 | A typed analysis error: unknown or retired analysis name, missing config, bad `--replicates` or `--set`, a `-f comparison.yaml`, an invalid study file, or a pipeline failure; with `--study` and no `RUN`, any run that failed. The message is printed on one line prefixed `error:` and the fix on the next prefixed `fix:`, both on stderr |
+| 2 | A typed analysis error: unknown analysis name, missing config, bad `--replicates` or `--set`, an invalid study file, or a pipeline failure; with `--study` and no `RUN`, any run that failed. The message is printed on one line prefixed `error:` and the fix on the next prefixed `fix:`, both on stderr |
 
 ### Example
 
@@ -1275,21 +1270,6 @@ gigabyte, so on a cluster run it in a batch job.
 
 ---
 
-## Retired commands
-
-Two hidden commands accept any arguments, print where their workflow went on
-stderr and exit 2:
-
-- `polyzymd compare ...` prints `polyzymd analyze NAME -c config.yaml ...
-  --eq 10ns` for running an analysis, `polyzymd analyze ... --submit --preset
-  <cluster>` for SLURM, the address of {doc}`../how_to/analysis_agent_protocol`
-  and `.claude/skills/polyzymd-analyze/SKILL.md`, the skill to point an agent at.
-- `polyzymd new-analysis ...` says to write a function of an MDAnalysis
-  `Universe` and run it with `Study.per_replicate` or `Study.timeseries`, and
-  prints the address of {doc}`../how_to/study_api` and the same skill.
-
----
-
 ## Environment Variables
 
 PolyzyMD expands environment variables in configuration paths:
@@ -1317,7 +1297,7 @@ output:
 |------|---------|
 | 0 | Success |
 | 1 | Error (validation failure, build failure, etc.) |
-| 2 | Typed analysis error from {ref}`polyzymd analyze <cli-analyze>`, whose message and fix are printed on stderr, one line each; also the exit code of the retired `compare` and `new-analysis` commands |
+| 2 | Typed analysis error from {ref}`polyzymd analyze <cli-analyze>`, whose message and fix are printed on stderr, one line each |
 | 99 | Graceful shutdown — simulation was interrupted but interrupted state was saved (see {doc}`../how_to/hpc_slurm`) |
 
 ---

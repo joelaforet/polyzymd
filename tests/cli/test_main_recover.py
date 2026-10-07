@@ -574,8 +574,9 @@ class TestRunInitialSegmentEquilibrationSkip:
         sim_config.simulation_phases.equilibration_stages = stages
         return sim_config
 
+    @patch("polyzymd.simulation.artifact_integrity.validate_build_bundle")
     @patch("polyzymd.simulation.runner.SimulationRunner")
-    def test_skips_equilibration_when_complete(self, MockRunner, tmp_path):
+    def test_skips_equilibration_when_complete(self, MockRunner, _validate, tmp_path):
         """With skip_build=True and equilibration complete, skip minimize + eq."""
         from polyzymd.cli.main import _run_initial_segment
 
@@ -636,8 +637,9 @@ class TestRunInitialSegmentEquilibrationSkip:
         assert call_kwargs["temperature"] == 310.0
         assert call_kwargs["duration_ns"] == 20.0
 
+    @patch("polyzymd.simulation.artifact_integrity.validate_build_bundle")
     @patch("polyzymd.simulation.runner.SimulationRunner")
-    def test_runs_equilibration_when_eq_not_complete(self, MockRunner, tmp_path):
+    def test_runs_equilibration_when_eq_not_complete(self, MockRunner, _validate, tmp_path):
         """With skip_build=True but no eq stages recorded, run full pipeline."""
         from polyzymd.cli.main import _run_initial_segment
         from polyzymd.simulation.progress import (

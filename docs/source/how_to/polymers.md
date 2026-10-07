@@ -143,16 +143,8 @@ Packing inside the brick keeps each chain away from its own periodic images.
 Two atoms inside the brick, shrunk by `tolerance`, are at least `tolerance`
 apart across every lattice vector.
 
-`exclude_solute_bbox: true` also keeps the chains out of the bounding box of
-the solute. It is off by default. The shell between the bounding box and the
-sphere is often thinner than a chain, and PACKMOL then stops at its loop limit
-without a solution.
-
-```{warning}
-Do not set `packing.box_vectors` unless you need an explicit packing box.
-With it, the builder computes the periodic cell after packing, from the packed
-system. The cell then differs between replicates. Use `padding` instead.
-```
+To give the chains more room, raise `padding`. The cell is always computed
+before packing, so every replicate of a condition gets the same cell.
 
 ### Checks after packing
 

@@ -38,27 +38,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from polyzymd.analyses.exceptions import NoMatchingAtomsError, ProtocolError
 
-#: Published page of the polyzymd analyze protocol.
-ANALYZE_PROTOCOL_URL = (
-    "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html"
-)
-
-#: Agent skill that teaches the polyzymd analyze protocol.
-ANALYZE_AGENT_SKILL = ".claude/skills/polyzymd-analyze/SKILL.md"
-
 #: Published page on writing an analysis as a function for the study API.
 ANALYSIS_API_URL = "https://polyzymd.readthedocs.io/en/latest/how_to/study_api.html"
-
-#: Published page of the catalytic triad routine on the study API.
-TRIAD_ROUTINE_URL = (
-    "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html"
-)
-
-#: Where a retirement message sends a reader, and what to point an agent at.
-RETIRED_DOCS_POINTER = (
-    f"Read {ANALYZE_PROTOCOL_URL}, or point an agent at {ANALYZE_AGENT_SKILL} or that page "
-    "to learn the protocol."
-)
 
 # Verdict vocabulary. Kept small so a caller can branch on it without parsing
 # the rest of the sentence.
@@ -458,10 +439,9 @@ def analyze(
     Raises
     ------
     ProtocolError
-        If the name is not in :data:`FUNCTION_ANALYSES` (``catalytic_triad``
-        gets the triad routine instead), a config is missing, the labels do
-        not match the configs, the settings are invalid, or no replicates are
-        found.
+        If the name is not in :data:`FUNCTION_ANALYSES`, a config is missing,
+        the labels do not match the configs, the settings are invalid, or no
+        replicates are found.
     """
     _require_known(name)
     return _analyze_function(
@@ -485,10 +465,8 @@ def analyze(
 def _require_known(name: str) -> None:
     """Raise ``ProtocolError`` unless ``name`` is in :data:`FUNCTION_ANALYSES`.
 
-    ``catalytic_triad`` gets :func:`_refuse_retired`; any other unknown name
-    gets the list of analyses and the page on writing a function instead.
+    The hint lists the analyses and the page on writing a function instead.
     """
-    _refuse_retired(name)
     if name not in FUNCTION_ANALYSES:
         raise ProtocolError(
             f"No analysis named {name!r}.",
@@ -496,22 +474,6 @@ def _require_known(name: str) -> None:
                 f"Use one of {', '.join(FUNCTION_ANALYSES)}. For another measurement, "
                 f"write a function and run it with Study.timeseries or Study.per_replicate: "
                 f"{ANALYSIS_API_URL}."
-            ),
-        )
-
-
-def _refuse_retired(name: str) -> None:
-    """Raise ``ProtocolError`` for ``catalytic_triad``, which is now a routine on the study API."""
-    if name == "catalytic_triad":
-        raise ProtocolError(
-            "catalytic_triad is no longer a polyzymd analyze analysis: the triad is now a "
-            "routine on the study API, which counts each triad hydrogen bond with "
-            "functions.hbond_count and combines them with Timeseries.transform.",
-            hint=(
-                f"Follow {TRIAD_ROUTINE_URL} (docs/source/how_to/analysis_triad_quickstart.md), "
-                "or point an agent at .claude/skills/polyzymd-analyze/SKILL.md or that page. "
-                "For the triad distances run polyzymd analyze distances -c <config.yaml> "
-                "--set pairs=<pairs.yaml>."
             ),
         )
 

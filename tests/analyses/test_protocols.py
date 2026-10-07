@@ -257,20 +257,13 @@ class TestErrors:
         assert "Study.timeseries or Study.per_replicate" in hint
         assert "how_to/study_api.html" in hint
 
-    @pytest.mark.parametrize("name", ["toy_protocol", "radius_of_gyration", "catalytic_triad_v1"])
+    @pytest.mark.parametrize("name", ["toy_protocol", "radius_of_gyration", "catalytic_triad"])
     def test_names_outside_the_analyses_are_refused_before_any_config_is_read(
         self, name: str, tmp_path: Path
     ) -> None:
         """No name outside FUNCTION_ANALYSES reaches a config, even a missing one."""
         with pytest.raises(ProtocolError, match="No analysis named"):
             analyze(name, [tmp_path / "missing" / "config.yaml"], stride=5)
-
-    def test_catalytic_triad_keeps_its_refusal(self, tmp_path: Path) -> None:
-        """The retired triad analysis points at the routine on the study API."""
-        with pytest.raises(ProtocolError, match="no longer a polyzymd analyze analysis") as info:
-            analyze("catalytic_triad", [tmp_path / "A" / "config.yaml"])
-
-        assert "how_to/analysis_triad_quickstart.html" in (info.value.hint or "")
 
     def test_missing_config_names_the_path(self, tmp_path: Path) -> None:
         """A config path that does not exist raises before any computation."""
