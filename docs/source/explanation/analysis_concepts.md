@@ -37,9 +37,9 @@ temperature.
 
 A **replicate** is one independent simulation of a condition. Replicates
 have the numbers 1, 2, 3 and so on, and use the same `config.yaml`. The
-replicate number seeds the starting structure. The starting velocities and
-the thermostat noise are random in each simulation. These choices separate
-the trajectories, but they do not make them statistically independent by
+replicate number seeds the starting structure, the starting velocities and
+the thermostat noise, so each replicate starts differently. These choices
+separate the trajectories, but they do not make them statistically independent by
 themselves. Independence also depends on equilibration, stationarity and
 whether the simulated time is long enough for the process that you measure.
 

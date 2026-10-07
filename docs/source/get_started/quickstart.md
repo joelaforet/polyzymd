@@ -209,9 +209,10 @@ verdict: Water mean_rg 7.138 A (no interval, n 1)
 
 Read the lines in this order:
 
-1. `verdict:` gives the result: a mean radius of gyration of about 7 Å.
-   Your value can differ a little, because each run of this short test
-   gives a slightly different value.
+1. `verdict:` gives the result: a mean radius of gyration of about 7.2 Å.
+   Your value differs a little. The replicate number fixes the starting
+   structure and the random seeds, but the CPU threads add up forces in a
+   different order on each run, so runs agree statistically, not exactly.
 2. The `Water` line gives `n 1`, one replicate. With one replicate there is
    no confidence interval, so `sem` and `ci95` are `na`.
 3. The two `warning:` lines come from the short test: one replicate of 4

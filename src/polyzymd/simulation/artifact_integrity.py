@@ -25,11 +25,38 @@ class ArtifactIntegrityError(RuntimeError):
     """Raised when molecular artifacts cannot belong to the same build."""
 
 
-def config_hash(config: Any) -> str:
-    """Return a stable SHA-256 identity for a validated simulation config."""
-    payload = config.model_dump(mode="json")
+def _digest(payload: Any) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _portable(value: Any, key: str | None = None) -> Any:
+    from polyzymd.config.loader import OUTPUT_PATH_KEYS, PATH_KEYS
+
+    if isinstance(value, dict):
+        return {k: _portable(v, k) for k, v in value.items() if k not in OUTPUT_PATH_KEYS}
+    if isinstance(value, list):
+        return [_portable(v, key) for v in value]
+    if key in PATH_KEYS and isinstance(value, str) and Path(value).is_absolute():
+        path = Path(value)
+        return _file_hash(path) if path.is_file() else path.name
+    return value
+
+
+def config_hash(config: Any) -> str:
+    """Return a SHA-256 identity for a validated simulation config that does not depend on its folder.
+
+    The hash covers the config's fields. An input file (such as ``enzyme.pdb_path``) counts by its SHA-256, a
+    folder by its name, and the output folders (``projects_directory``,
+    ``scratch_directory``) are left out. So copies of one config.yaml in two
+    folders give the same hash.
+    """
+    return _digest(_portable(config.model_dump(mode="json")))
+
+
+def _absolute_path_config_hash(config: Any) -> str:
+    """Return the hash that earlier builds recorded, which includes absolute paths."""
+    return _digest(config.model_dump(mode="json"))
 
 
 def _file_hash(path: Path) -> str:
@@ -145,7 +172,8 @@ def validate_build_bundle(working_dir: Path, config: Any) -> None:
         int(manifest["particle_count"])
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raise ArtifactIntegrityError(f"Invalid build manifest {manifest_path}: {exc}") from exc
-    if expected_config != config_hash(config):
+    # Builds written before the portable hash recorded the absolute-path hash.
+    if expected_config not in (config_hash(config), _absolute_path_config_hash(config)):
         raise ArtifactIntegrityError(
             f"Configuration does not match {manifest_path}: expected {expected_config}, "
             f"got {config_hash(config)}"

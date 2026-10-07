@@ -2356,7 +2356,14 @@ def _run_initial_segment(
 
         from polyzymd.simulation.artifact_integrity import publish_build_bundle
 
-        publish_build_bundle(working_dir, omm_topology, omm_system, omm_positions, sim_config)
+        publish_build_bundle(
+            working_dir,
+            omm_topology,
+            omm_system,
+            omm_positions,
+            sim_config,
+            provenance=builder.build_provenance,
+        )
     else:
         from openmm import XmlSerializer
         from openmm.app import PDBFile

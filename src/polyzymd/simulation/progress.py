@@ -132,6 +132,10 @@ class SegmentRecord(BaseModel):
         for records written by PolyzyMD versions that predate these fields.
         A change between consecutive segments means the restart chain
         switched environment (see the CUDA-driver routing history).
+    openmm_platform : dict | None
+        The OpenMM platform ``name`` and the ``properties`` its Context used
+        (:func:`polyzymd.simulation.platform.platform_record`), such as
+        ``DeterministicForces``. ``None`` for older records.
     trajectory_sha256, trajectory_bytes : str | None, int | None
         SHA-256 and size of the segment's trajectory file, recorded when the
         segment completes, so analyses and published studies identify the
@@ -150,6 +154,7 @@ class SegmentRecord(BaseModel):
     polyzymd_version: str | None = None
     openmm_version: str | None = None
     pixi_environment: str | None = None
+    openmm_platform: dict[str, Any] | None = None
     trajectory_sha256: str | None = None
     trajectory_bytes: int | None = None
 
@@ -629,12 +634,12 @@ def scan_filesystem(
     return progress
 
 
-def _read_segment_provenance(params_json: Path) -> Dict[str, str | None]:
+def _read_segment_provenance(params_json: Path) -> Dict[str, Any]:
     """Read the ``provenance`` block from a segment's parameters JSON.
 
     ``production_N_parameters.json`` records ``polyzymd_version``,
-    ``openmm_version`` and ``pixi_environment`` for the process that ran the
-    segment.  A ``progress.json`` rebuilt from a filesystem scan must recover
+    ``openmm_version``, ``pixi_environment`` and ``openmm_platform`` for the
+    process that ran the segment.  A ``progress.json`` rebuilt from a filesystem scan must recover
     those fields from there, otherwise a chain that was cancelled and
     resubmitted loses the provenance of every segment it already ran.
 
@@ -663,7 +668,7 @@ def _read_segment_provenance(params_json: Path) -> Dict[str, str | None]:
         return {}
     recovered = {
         key: provenance.get(key)
-        for key in ("polyzymd_version", "openmm_version", "pixi_environment")
+        for key in ("polyzymd_version", "openmm_version", "pixi_environment", "openmm_platform")
         if provenance.get(key) is not None
     }
     return recovered
@@ -1098,6 +1103,7 @@ def validate_progress(
                 polyzymd_version=file_rec.polyzymd_version or fs_rec.polyzymd_version,
                 openmm_version=file_rec.openmm_version or fs_rec.openmm_version,
                 pixi_environment=file_rec.pixi_environment or fs_rec.pixi_environment,
+                openmm_platform=file_rec.openmm_platform or fs_rec.openmm_platform,
                 # Only the runner records a segment's hash, so a scan never has one.
                 trajectory_sha256=file_rec.trajectory_sha256,
                 trajectory_bytes=file_rec.trajectory_bytes,

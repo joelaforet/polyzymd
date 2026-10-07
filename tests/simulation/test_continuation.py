@@ -585,3 +585,20 @@ class TestLoadPreviousStateValidation:
         assert paths["use_checkpoint"] is True
         assert "interrupted_checkpoint.chk" in str(paths["checkpoint"])
         assert "interrupted_system.xml" in str(paths["system"])
+
+
+def test_continuation_seeds_the_barostat_of_the_previous_segment():
+    """A segment reseeds the barostat it loads, so its volume moves repeat on a rerun."""
+    openmm = pytest.importorskip("openmm")
+    from polyzymd.simulation.continuation import ContinuationManager
+    from polyzymd.simulation.seeds import dynamics_seed
+
+    mgr = ContinuationManager.__new__(ContinuationManager)
+    mgr._replicate = 3
+    mgr._segment_index = 2
+    mgr._system = openmm.System()
+    mgr._system.addForce(openmm.MonteCarloBarostat(1.0, 300.0))
+    mgr._param_dict = {"__values__": {"thermo_params": {"__values__": {"barostat_params": {}}}}}
+    mgr._add_barostat_if_needed()
+    (barostat,) = mgr._system.getForces()
+    assert barostat.getRandomNumberSeed() == dynamics_seed(3, "barostat:production:2")

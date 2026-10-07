@@ -1037,3 +1037,19 @@ def test_openmm_integrator_noise_is_seeded() -> None:
         runner._create_integrator(temperature=300.0, phase="production:2").getRandomNumberSeed()
         == 0
     )
+
+
+def test_openmm_barostat_moves_are_seeded() -> None:
+    """The barostat's random seed is the replicate's dynamics seed of its phase."""
+    openmm = pytest.importorskip("openmm")
+    from polyzymd.simulation import runner as runner_module
+    from polyzymd.simulation.runner import SimulationRunner
+    from polyzymd.simulation.seeds import dynamics_seed
+
+    runner_module._ensure_openmm_loaded()
+    runner = SimulationRunner.__new__(SimulationRunner)
+    runner._replicate = 4
+    runner._system = openmm.System()
+    runner._add_barostat(phase="production:2")
+    (barostat,) = runner._system.getForces()
+    assert barostat.getRandomNumberSeed() == dynamics_seed(4, "barostat:production:2")

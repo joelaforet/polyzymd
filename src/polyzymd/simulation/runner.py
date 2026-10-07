@@ -285,6 +285,7 @@ class SimulationRunner:
         pressure: float = 1.0,
         temperature: float = 300.0,
         frequency: int = 25,
+        phase: str | None = None,
     ) -> None:
         """Add a Monte Carlo barostat to the system.
 
@@ -292,12 +293,17 @@ class SimulationRunner:
             pressure: Pressure in atmospheres.
             temperature: Temperature in Kelvin.
             frequency: Update frequency in steps.
+            phase: The phase the barostat runs in. With a replicate number,
+                it seeds the barostat's random volume moves.
         """
         barostat = openmm.MonteCarloBarostat(
             pressure * omm_unit.atmosphere,
             temperature * omm_unit.kelvin,
             frequency,
         )
+        seed = self._seed(None if phase is None else f"barostat:{phase}")
+        if seed is not None:
+            barostat.setRandomNumberSeed(seed)
         self._system.addForce(barostat)
         LOGGER.info(f"Added MC barostat: {pressure} atm, {temperature} K")
 
@@ -717,6 +723,7 @@ class SimulationRunner:
                 pressure=pressure,
                 temperature=start_temp,
                 frequency=barostat_freq,
+                phase=f"equilibration:{stage_index}:{resume_from_step}",
             )
         else:
             # NVT - ensure no barostat
@@ -1463,6 +1470,7 @@ class SimulationRunner:
             pressure=pressure,
             temperature=temperature,
             frequency=barostat_frequency,
+            phase=f"production:{segment_index}",
         )
 
         # Create output directory
@@ -1563,7 +1571,7 @@ class SimulationRunner:
         # Save parameters JSON (needed for continuation across segments)
         params_dict = {
             "__class__": "SimulationParameters",
-            "provenance": runtime_provenance(),
+            "provenance": runtime_provenance(self._simulation),
             "__values__": {
                 "thermo_params": {
                     "__class__": "ThermoParameters",
@@ -1868,7 +1876,7 @@ class SimulationRunner:
             steps_requested=total_steps,
             samples_written=0,
             status=SegmentStatus.RUNNING,
-            **record_provenance(),
+            **record_provenance(self._simulation),
         )
 
         _update_or_append_segment(progress, record)
@@ -1972,7 +1980,7 @@ class SimulationRunner:
             samples_written=num_samples,
             status=SegmentStatus.COMPLETED,
             duration_ns=duration_ns,
-            **record_provenance(),
+            **record_provenance(self._simulation),
             **trajectory_digest(segment_dir / f"production_{segment_index}_trajectory.dcd"),
         )
         record.finished_at = _now_iso()
@@ -2039,7 +2047,7 @@ class SimulationRunner:
             samples_written=0,  # Interrupted — samples may be partial
             status=SegmentStatus.INTERRUPTED,
             duration_ns=actual_duration_ns,
-            **record_provenance(),
+            **record_provenance(self._simulation),
         )
 
         _update_or_append_segment(progress, record)

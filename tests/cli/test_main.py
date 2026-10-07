@@ -711,6 +711,51 @@ class TestOpenMMRunImplementation:
         )
 
 
+class TestRunBuildManifest:
+    """The build of `polyzymd run` records its provenance like `polyzymd build`."""
+
+    @patch("polyzymd.simulation.runner.SimulationRunner")
+    @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
+    def test_run_build_manifest_records_packmol_seed(
+        self, from_config, _runner, tmp_path: Path
+    ) -> None:
+        import json
+        from unittest.mock import MagicMock
+
+        from openmm import System, Vec3, unit
+        from openmm.app import Element, Topology
+
+        from polyzymd.cli.main import _run_initial_segment
+        from polyzymd.config.loader import load_config
+
+        topology = Topology()
+        residue = topology.addResidue("HOH", topology.addChain("A"))
+        system = System()
+        for index in range(2):
+            topology.addAtom(f"H{index}", Element.getByAtomicNumber(1), residue)
+            system.addParticle(1.0)
+        positions = [Vec3(float(index), 0, 0) for index in range(2)] * unit.nanometer
+        builder = MagicMock(build_provenance={"polymer_packmol_seed": 1})
+        builder.get_openmm_components.return_value = (topology, system, positions)
+        from_config.return_value = builder
+
+        config = load_config(Path(__file__).parents[2] / "examples/quickstart/config.yaml")
+        _run_initial_segment(
+            sim_config=config,
+            working_dir=tmp_path,
+            replicate=1,
+            skip_build=False,
+            duration_ns=0.004,
+            num_samples=4,
+            timestep_fs=2.0,
+            report_interval=1,
+            checkpoint_interval_s=60.0,
+        )
+
+        manifest = json.loads((tmp_path / "build_manifest.json").read_text())
+        assert manifest["provenance"] == {"polymer_packmol_seed": 1}
+
+
 class TestRunReusesBuild:
     """`polyzymd run` reuses the build of an earlier `polyzymd build`."""
 

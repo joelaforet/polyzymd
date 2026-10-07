@@ -815,6 +815,27 @@ For more details on this behavior, see the OpenFF Interchange documentation:
 
 ---
 
+## OpenMM Engine Configuration
+
+The optional `openmm:` block selects the OpenMM platform. It is used when
+`engine` is `openmm`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `platform` | `str` | `"CUDA"` | OpenMM platform: `CUDA`, `OpenCL`, `CPU` or `Reference`. PolyzyMD never falls back to another platform. |
+| `device_index` | `str \| null` | `null` | GPU device index. |
+| `precision` | `str` | `"mixed"` | Floating-point precision on CUDA. |
+
+The replicate number fixes the starting structure and every random seed. On
+the CPU, OpenCL and CUDA platforms, CPU threads, PME and GPUs add up forces in
+a different order on each run, so two runs of a replicate differ from the
+first minimization on (the slow Reference platform is deterministic). They agree
+statistically, not frame by frame. Each production segment records the
+platform and the property values it used under `openmm_platform` in
+`progress.json`.
+
+---
+
 ## GROMACS Engine Configuration
 
 :::{versionadded} 1.3.0

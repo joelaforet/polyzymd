@@ -38,3 +38,23 @@ def test_explicit_cpu_caps_threads_from_slurm(monkeypatch):
     monkeypatch.setenv("SLURM_CPUS_PER_TASK", "8")
     monkeypatch.setattr(openmm.Platform, "getPlatformByName", lambda name: object())
     assert resolve_platform("CPU").properties == {"Threads": "8"}
+
+
+
+def test_platform_record_lists_the_values_the_context_uses():
+    """The record names the platform and every property value of the Context."""
+    import openmm
+    from openmm import unit
+
+    from polyzymd.simulation.platform import platform_record
+
+    system = openmm.System()
+    system.addParticle(1.0)
+    platform = openmm.Platform.getPlatformByName("CPU")
+    context = openmm.Context(
+        system, openmm.VerletIntegrator(1 * unit.femtosecond), platform, {"Threads": "2"}
+    )
+    assert platform_record(context) == {
+        "name": "CPU",
+        "properties": {"Threads": "2", "DeterministicForces": "false"},
+    }

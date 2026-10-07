@@ -1327,3 +1327,12 @@ def test_minimization_restraints_do_not_follow_the_stages(tmp_path: Path) -> Non
     assert "define" not in generator.generate_energy_minimization().to_mdp_string()
     text = generator.generate_energy_minimization(define="-DPOSRES_EM").to_mdp_string()
     assert "define          = -DPOSRES_EM\n" in text + "\n"
+
+
+def test_a_seeded_stage_writes_ld_seed_for_any_integrator() -> None:
+    """GROMACS seeds v-rescale and c-rescale noise with ld_seed, so a seeded md stage writes it."""
+    from polyzymd.exporters.gromacs import MDPParameters
+
+    params = MDPParameters(integrator="md", tcoupl="v-rescale", ld_seed=1234)
+    assert "ld_seed         = 1234" in params.to_mdp_string()
+    assert "ld_seed" not in MDPParameters(integrator="md", tcoupl="v-rescale").to_mdp_string()

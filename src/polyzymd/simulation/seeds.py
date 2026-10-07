@@ -1,10 +1,16 @@
 """Random seeds of the dynamics, derived from the replicate number.
 
 The replicate number seeds a replicate's starting structure (Packmol and
-polymer draws) and its dynamics: the initial velocities and the thermostat
-noise. Each phase of a run (an equilibration stage, a production segment)
-takes its own seed, so no phase repeats another's noise, and the same
-replicate run again draws the same numbers.
+polymer draws) and its dynamics: the initial velocities, the thermostat
+noise and the Monte Carlo barostat moves. Each phase of a run (an
+equilibration stage, a production segment) takes its own seed, so no phase
+repeats another's noise, and the same replicate run again draws the same
+numbers.
+
+The same seeds do not give the same trajectory. OpenMM's CPU threads, PME
+and GPUs add up forces in a different order on each run, so two runs of a
+replicate differ from the first minimization on and agree statistically,
+not frame by frame.
 """
 
 from __future__ import annotations

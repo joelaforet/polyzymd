@@ -330,7 +330,7 @@ class MDPParameters:
         # Temperature coupling
         lines.append("; Temperature coupling")
         lines.append(f"tcoupl          = {self.tcoupl}")
-        if self.integrator == "sd":
+        if self.integrator == "sd" or self.ld_seed != -1:
             lines.append(f"ld_seed         = {self.ld_seed}")
         lines.append(f"tc-grps         = {self.tc_grps}")
         lines.append(f"tau_t           = {self.tau_t}")
