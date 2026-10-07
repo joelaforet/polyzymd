@@ -403,7 +403,8 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     type=click.Choice(["gromacs", "lammps", "amber"], case_sensitive=False),
     help=(
         "Build-only export format: gromacs, lammps (planned), amber (planned). "
-        "Default: OpenMM build artifacts."
+        "Default: the config's engine (GROMACS inputs for engine: gromacs, "
+        "OpenMM build artifacts otherwise)."
     ),
 )
 def build(
@@ -2834,6 +2835,11 @@ def cancel(
         else:
             working_dir = Path(sim_config.get_working_directory(replicate))
         marker = stop_file_path(working_dir)
+        # A GROMACS job works in <replicate>/gromacs. Job scripts written
+        # before they also checked the replicate folder look only there.
+        gromacs_marker = (
+            stop_file_path(working_dir / "gromacs") if sim_config.engine == "gromacs" else None
+        )
 
         if resume:
             if dry_run:
@@ -2842,11 +2848,13 @@ def cancel(
                     phase="simulation",
                 )
                 continue
-            if marker.exists():
-                marker.unlink()
+            removed = [path for path in (marker, gromacs_marker) if path and path.exists()]
+            for path in removed:
+                path.unlink()
+            if removed:
                 colored_echo(
-                    f"Replicate {replicate}: removed {marker} — resubmit with "
-                    f"`polyzymd submit -c {config} -r {replicate}`",
+                    f"Replicate {replicate}: removed {', '.join(map(str, removed))} — "
+                    f"resubmit with `polyzymd submit -c {config} -r {replicate}`",
                     phase="simulation",
                 )
             else:
@@ -2876,6 +2884,9 @@ def cancel(
         # queued while scancel runs still sees it and exits without work.
         write_stop_file(working_dir, config_path, replicate)
         colored_echo(f"Replicate {replicate}: wrote {marker}", phase="simulation")
+        if gromacs_marker and gromacs_marker.parent.is_dir():
+            write_stop_file(gromacs_marker.parent, config_path, replicate)
+            colored_echo(f"Replicate {replicate}: wrote {gromacs_marker}", phase="simulation")
 
         if stop_only:
             colored_echo(

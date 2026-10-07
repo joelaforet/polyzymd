@@ -467,6 +467,11 @@ polyzymd submit -c config.yaml -r 1-3 --preset blanca-shirts
 host, when, the config path and the replicate, and how to undo it. Deleting
 the file by hand is equivalent to `--resume`.
 
+A GROMACS job works in `<working_dir>/gromacs` and checks for `STOP` there
+and in `<working_dir>`. For a GROMACS config, `cancel` also writes
+`<working_dir>/gromacs/STOP` when that folder exists, so that a job script
+written before this check stops too. `--resume` removes both files.
+
 The job wrapper also honours `POLYZYMD_STOP_CHAIN=1` in the job environment
 and `POLYZYMD_STOP_FILE=<path>` to relocate the marker.
 
@@ -1093,7 +1098,6 @@ directory) without loading any trajectory, and prints:
 | publish | `publish: follow <study>/deposit/UPLOAD.md` after a freeze, or `publish: when the analyses are final, run polyzymd study freeze` |
 | reproduce | In a downloaded frozen study (a `manifest.json` but no `deposit/`): how to point it at the trajectories and rerun or redraw |
 | citation | `cite: <how to cite PolyzyMD>` |
-| warning | `warning: written for PolyzyMD <version>; this is <version>` |
 
 `analyze` and the `study` commands print only reports and warnings on the
 console; the full log, with library messages, goes to `logs/polyzymd-<command>-<time>.log`
