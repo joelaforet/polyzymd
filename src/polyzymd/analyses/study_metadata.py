@@ -200,7 +200,20 @@ def check_metadata(raw: Any, what: str = "study") -> tuple[dict[str, Any], list[
         "communities": [str(c) for c in _sequence(zenodo.get("communities"), "communities")],
         "access_right": access,
     }
+    todo = _todo_fields(raw, "metadata")
+    if todo:
+        warnings.append(f"TODO placeholders left in {', '.join(todo)}")
     return meta, warnings
+
+
+def _todo_fields(value: Any, where: str) -> list[str]:
+    """Return the fields under ``where`` still holding a TODO placeholder, DOIs left out."""
+    if isinstance(value, Mapping):
+        return [f for key, item in value.items() for f in _todo_fields(item, f"{where}.{key}")]
+    if isinstance(value, (list, tuple)):
+        return [f for i, item in enumerate(value) for f in _todo_fields(item, f"{where}[{i}]")]
+    # A placeholder DOI has its own warning.
+    return [where] if TODO in str(value) and not where.endswith("doi") else []
 
 
 def _orcid_id(orcid: str) -> str:

@@ -12,6 +12,7 @@ Covers:
   _parse_itp_atom_and_residue_counts, _fix_gro_residue_numbering)
 """
 
+import shutil
 from bisect import bisect_right
 from importlib import resources
 from pathlib import Path
@@ -1336,3 +1337,76 @@ def test_a_seeded_stage_writes_ld_seed_for_any_integrator() -> None:
     params = MDPParameters(integrator="md", tcoupl="v-rescale", ld_seed=1234)
     assert "ld_seed         = 1234" in params.to_mdp_string()
     assert "ld_seed" not in MDPParameters(integrator="md", tcoupl="v-rescale").to_mdp_string()
+
+
+@pytest.mark.parametrize("interval", [150, 250, 9973])
+def test_nstcalcenergy_divides_every_energy_output_interval(interval: int) -> None:
+    """GROMACS stops when nstenergy is not a multiple of nstcalcenergy (default 100)."""
+    from polyzymd.exporters.gromacs import MDPParameters
+
+    text = MDPParameters(nstlog=interval, nstenergy=interval).to_mdp_string()
+    (line,) = [line for line in text.splitlines() if line.startswith("nstcalcenergy")]
+    nstcalcenergy = int(line.split("=")[1])
+    assert 1 <= nstcalcenergy <= 100
+    assert interval % nstcalcenergy == 0
+
+
+@pytest.mark.skipif(shutil.which("gmx") is None, reason="GROMACS is not installed")
+@pytest.mark.parametrize("steps_per_frame", [150, 250])
+def test_every_stage_passes_grompp_for_any_steps_per_frame(
+    tmp_path: Path, steps_per_frame: int
+) -> None:
+    """grompp accepts every stage's MDP when steps per frame is not a multiple of 100."""
+    import subprocess
+
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_simulation_config
+
+    gmx = shutil.which("gmx")
+    subprocess.run(
+        [gmx, "solvate", "-cs", "spc216.gro", "-box", "2.5", "-o", str(tmp_path / "w.gro")],
+        check=True,
+        capture_output=True,
+    )
+    n_water = int((tmp_path / "w.gro").read_text().splitlines()[1]) // 3
+    (tmp_path / "w.top").write_text(
+        '#include "oplsaa.ff/forcefield.itp"\n#include "oplsaa.ff/spc.itp"\n'
+        f"[ system ]\nwater\n[ molecules ]\nSOL {n_water}\n"
+    )
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    duration = steps_per_frame * 4 * 2e-6
+    phases = data["simulation_phases"]
+    phases["production"].update(duration=duration, samples=4, thermostat="NoseHoover")
+    phases["equilibration_stages"] = [
+        {"name": "eq1", "duration": duration, "temperature": 300.0, "samples": 4},
+        {
+            "name": "heat",
+            "temperature_start": 280.0,
+            "temperature_end": 300.0,
+            "temperature_increment": 10.0,
+            "temperature_interval_steps": steps_per_frame,
+            "samples": 4,
+        },
+    ]
+    path.write_text(yaml.safe_dump(data))
+    generator = MDPGenerator(SimulationConfig.from_yaml(path), replicate=1)
+    stages = [("em", generator.generate_energy_minimization())]
+    stages += generator.generate_equilibration_stages()
+    stages += [("prod", generator.generate_production())]
+    for name, params in stages:
+        mdp = tmp_path / f"{Path(name).stem}.mdp"
+        mdp.write_text(params.to_mdp_string())
+        result = subprocess.run(
+            [gmx, "grompp", "-f", str(mdp), "-c", str(tmp_path / "w.gro")]
+            + ["-p", str(tmp_path / "w.top"), "-o", str(tmp_path / f"{mdp.stem}.tpr")]
+            + ["-po", str(tmp_path / f"{mdp.stem}_out.mdp")],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"{name}: {result.stderr[-2000:]}"

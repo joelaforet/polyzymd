@@ -16,6 +16,7 @@ Made by PolyzyMD, by Joseph R. Laforet Jr.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -252,6 +253,15 @@ class MDPParameters:
 
         return "\n".join(lines)
 
+    def _nstcalcenergy(self) -> int:
+        """Return the largest divisor of nstenergy and nstlog that is at most 100.
+
+        grompp stops with a warning when nstenergy is not a multiple of
+        nstcalcenergy, whose default is 100.
+        """
+        interval = math.gcd(self.nstenergy, self.nstlog) or 100
+        return max(n for n in range(1, min(interval, 100) + 1) if interval % n == 0)
+
     def _generate_em_section(self) -> List[str]:
         """Generate MDP content for energy minimization."""
         lines = []
@@ -306,6 +316,7 @@ class MDPParameters:
         lines.append(f"nstvout         = {self.nstvout}")
         lines.append(f"nstlog          = {self.nstlog}")
         lines.append(f"nstenergy       = {self.nstenergy}")
+        lines.append(f"nstcalcenergy   = {self._nstcalcenergy()}")
         lines.append(f"nstxout-compressed = {self.nstxout_compressed}")
         if self.compressed_x_grps:
             lines.append(f"compressed-x-grps = {self.compressed_x_grps}")
