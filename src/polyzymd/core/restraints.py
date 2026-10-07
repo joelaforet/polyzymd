@@ -465,64 +465,6 @@ class RestraintFactory:
             enabled=config.get("enabled", True),
         )
 
-    @staticmethod
-    def create_flat_bottom(
-        name: str,
-        atom1_selection: str,
-        atom2_selection: str,
-        distance: float,
-        force_constant: float = 10000.0,
-    ) -> RestraintDefinition:
-        """Convenience method to create a flat-bottom restraint.
-
-        Args:
-            name: Restraint identifier
-            atom1_selection: Selection string for first atom
-            atom2_selection: Selection string for second atom
-            distance: Threshold distance in Angstroms
-            force_constant: Force constant in kJ/mol/nm^2
-
-        Returns:
-            RestraintDefinition for flat-bottom potential
-        """
-        return RestraintDefinition(
-            restraint_type=RestraintType.FLAT_BOTTOM,
-            name=name,
-            atom1=AtomSelection(atom1_selection),
-            atom2=AtomSelection(atom2_selection),
-            distance=_distance_in_angstroms(distance),
-            force_constant=_force_constant_in_kj_per_mol_nm2(force_constant),
-        )
-
-    @staticmethod
-    def create_harmonic(
-        name: str,
-        atom1_selection: str,
-        atom2_selection: str,
-        distance: float,
-        force_constant: float = 10000.0,
-    ) -> RestraintDefinition:
-        """Convenience method to create a harmonic restraint.
-
-        Args:
-            name: Restraint identifier
-            atom1_selection: Selection string for first atom
-            atom2_selection: Selection string for second atom
-            distance: Equilibrium distance in Angstroms
-            force_constant: Force constant in kJ/mol/nm^2
-
-        Returns:
-            RestraintDefinition for harmonic potential
-        """
-        return RestraintDefinition(
-            restraint_type=RestraintType.HARMONIC,
-            name=name,
-            atom1=AtomSelection(atom1_selection),
-            atom2=AtomSelection(atom2_selection),
-            distance=_distance_in_angstroms(distance),
-            force_constant=_force_constant_in_kj_per_mol_nm2(force_constant),
-        )
-
 
 def apply_restraints(
     restraints: List[RestraintDefinition], topology: OpenMMTopology, system: System

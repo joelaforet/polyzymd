@@ -8,11 +8,9 @@ for checkpoint/restart capabilities.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
 
 if TYPE_CHECKING:
     from openmm.unit import Quantity
@@ -410,18 +408,6 @@ class SimulationParameters:
             integ_params=IntegratorParameters.from_dict(values["integ_params"]),
             reporter_params=ReporterParameters.from_dict(values["reporter_params"]),
         )
-
-    def to_json(self, path: Union[str, Path]) -> None:
-        """Save parameters to JSON file."""
-        with open(path, "w") as f:
-            json.dump(self.to_dict(), f, indent=2)
-
-    @classmethod
-    def from_json(cls, path: Union[str, Path]) -> "SimulationParameters":
-        """Load parameters from JSON file."""
-        with open(path, "r") as f:
-            data = json.load(f)
-        return cls.from_dict(data)
 
 
 @dataclass

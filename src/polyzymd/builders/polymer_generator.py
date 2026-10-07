@@ -1133,40 +1133,6 @@ class PolymerGenerator:
 
         return charged_mol
 
-    def generate_polymers_batch(
-        self,
-        sequences: list[str],
-        monomer_names: dict[str, str],
-        residue_names: dict[str, str] | None = None,
-    ) -> dict[str, "OFFMolecule"]:
-        """Generate multiple polymers (sequential processing).
-
-        Parameters
-        ----------
-        sequences : list[str]
-            List of polymer sequences to generate.
-        monomer_names : dict[str, str]
-            Mapping of sequence labels to monomer names.
-        residue_names : dict[str, str] | None, optional
-            Optional mapping of monomer names to 3-char residue names.
-
-        Returns
-        -------
-        dict[str, OFFMolecule]
-            Dictionary mapping sequence to OpenFF Molecule.
-        """
-        results = {}
-        for i, sequence in enumerate(sequences):
-            logger.info(f"Generating polymer {i + 1}/{len(sequences)}: {sequence}")
-            try:
-                mol = self.generate_polymer(sequence, monomer_names, residue_names)
-                results[sequence] = mol
-            except Exception as e:
-                logger.error(f"Failed to generate polymer {sequence}: {e}")
-                raise
-
-        return results
-
     def get_cached_polymer(
         self,
         sequence: str,

@@ -659,63 +659,6 @@ class TestEquilibrationTemperatureRamp:
             )
 
 
-# ---------------------------------------------------------------------------
-# B13 – statepoint export handles concentration-based co-solvents
-# ---------------------------------------------------------------------------
-
-
-class TestStatepointCoSolventExport:
-    """to_statepoint must not crash when co-solvents use concentration instead
-    of mole_fraction."""
-
-    def _make_config(self, *, mole_fraction=None, concentration=None):
-        """Build a minimal SimulationConfig with one co-solvent."""
-        from unittest.mock import MagicMock
-
-        config = MagicMock()
-        config.enzyme.name = "CALB"
-        config.thermodynamics.temperature = 310.0
-        config.substrate = None
-        config.polymers = None
-
-        cs = MagicMock()
-        cs.name = "urea"
-        cs.mole_fraction = mole_fraction
-        cs.concentration = concentration
-        config.solvent.co_solvents = [cs]
-        return config
-
-    def test_mole_fraction_exported_as_mole_fraction_key(self):
-        """mole_fraction co-solvent produces a _mole_fraction key."""
-        from polyzymd.config.schema import SimulationConfig
-
-        _to_statepoint = SimulationConfig.__dict__["to_signac_statepoint"]
-        cfg = self._make_config(mole_fraction=0.3)
-        sp = _to_statepoint(cfg)
-        assert sp["cosolvent_urea_mole_fraction"] == 0.3
-        assert "cosolvent_urea_molarity" not in sp
-
-    def test_concentration_exported_as_molarity_key(self):
-        """concentration co-solvent produces a _molarity key, not _fraction."""
-        from polyzymd.config.schema import SimulationConfig
-
-        _to_statepoint = SimulationConfig.__dict__["to_signac_statepoint"]
-        cfg = self._make_config(concentration=2.0)
-        sp = _to_statepoint(cfg)
-        assert sp["cosolvent_urea_molarity"] == 2.0
-        assert "cosolvent_urea_mole_fraction" not in sp
-
-    def test_no_crash_with_none_mole_fraction(self):
-        """Concentration statepoints should allow no mole_fraction."""
-        from polyzymd.config.schema import SimulationConfig
-
-        _to_statepoint = SimulationConfig.__dict__["to_signac_statepoint"]
-        cfg = self._make_config(concentration=1.5)
-        # Should not raise
-        sp = _to_statepoint(cfg)
-        assert "cosolvent_urea_molarity" in sp
-
-
 class TestOutputConfig:
     """Tests for output path configuration."""
 

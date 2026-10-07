@@ -1296,62 +1296,6 @@ class PositionRestraintGenerator:
     # Multi-ITP path (polymers)
     # ------------------------------------------------------------------
 
-    def _add_posres_to_polymer_itps(
-        self,
-        output_dir: Path,
-        prefix: str,
-        force_constant: float,
-        posres_define: str,
-        group_name: str,
-    ) -> int:
-        """Add position restraints to polymer ITP files.
-
-        This compatibility helper uses topology-based component classification
-        when possible and falls back to historical polymer discovery only when
-        the topology layout is unavailable.
-
-        Parameters
-        ----------
-        output_dir : Path
-            Directory containing ITP files.
-        prefix : str
-            Filename prefix.
-        force_constant : float
-            Position restraint force constant in kJ/mol/nm^2.
-        posres_define : str
-            POSRES define name, such as ``"POSRES_POLYMER"``.
-        group_name : str
-            Atom group name for comment headers.
-
-        Returns
-        -------
-        int
-            Number of ITP files that received position restraints.
-        """
-        polymer_itps = self._find_component_itps(output_dir, prefix, "polymer")
-        if not polymer_itps:
-            logger.warning("No polymer ITP files found - skipping polymer position restraints")
-            return 0
-
-        count = 0
-        for itp_path in polymer_itps:
-            heavy_indices = self._get_heavy_atom_indices_from_itp(itp_path)
-            if not heavy_indices:
-                logger.warning(f"No heavy atoms found in {itp_path.name} - skipping")
-                continue
-
-            self._append_posres_to_itp(
-                itp_path, heavy_indices, force_constant, posres_define, group_name
-            )
-            count += 1
-            logger.info(
-                f"Added {len(heavy_indices)} position restraints to "
-                f"{itp_path.name} (#ifdef {posres_define})"
-            )
-
-        logger.info(f"Position restraints added to {count}/{len(polymer_itps)} polymer ITP files")
-        return count
-
     def _find_all_polymer_itps(
         self,
         output_dir: Path,
@@ -1744,37 +1688,6 @@ class RunScriptGenerator:
         _validate_local_shell_token(self._prefix, "prefix")
         for mdp_name in self._eq_mdps:
             _validate_local_shell_token(mdp_name, "equilibration_mdp")
-
-    def _generate_header(self) -> List[str]:
-        """Generate script header with configuration."""
-        return [
-            "#!/bin/bash",
-            "# GROMACS Workflow Script",
-            f"# {POLYZYMD_BRANDING}",
-            f"# Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            "#",
-            "# Usage: ./run_gromacs.sh",
-            "#",
-            "# This script runs the complete MD workflow:",
-            "#   1. Energy minimization",
-            "#   2. Equilibration (multiple stages if configured)",
-            "#   3. Production MD",
-            "#   4. Trajectory post-processing",
-            "",
-            "set -e  # Exit on error",
-            "",
-            "# Configuration",
-            f'GMX="{self._gmx}"',
-            f'PREFIX="{self._prefix}"',
-            "",
-            'echo "========================================"',
-            'echo "GROMACS Workflow for ${PREFIX}"',
-            'echo "========================================"',
-            f'echo "{SHORT_CREDIT_LINE}"',
-            'echo "Using GROMACS: $GMX"',
-            'echo ""',
-            "",
-        ]
 
     def _generate_energy_minimization(self) -> List[str]:
         """Generate energy minimization commands."""

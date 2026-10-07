@@ -2059,22 +2059,6 @@ class SimulationRunner:
             f"in segment {segment_index}"
         )
 
-    def save_history(self, path: Optional[Union[str, Path]] = None) -> None:
-        """Save simulation history to JSON.
-
-        Args:
-            path: Output path (defaults to working_dir/simulation_history.json).
-        """
-        if path is None:
-            path = self._working_dir / "simulation_history.json"
-        else:
-            path = Path(path)
-
-        with open(path, "w") as f:
-            json.dump(self._history, f, indent=2)
-
-        LOGGER.info(f"Saved simulation history to {path}")
-
     def load_checkpoint(self, checkpoint_path: Union[str, Path]) -> None:
         """Load state from a checkpoint file.
 
