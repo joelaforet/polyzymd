@@ -243,7 +243,7 @@ and the hardware change.
 - **Your own protein.** Follow {doc}`../tutorials/own_system`. It starts
   from `polyzymd study add-condition --new`, which writes a template config.
 - **GROMACS.** If `gmx` is installed, add `config_gromacs.yaml` as a
-  condition and run it. See {doc}`../how_to/gromacs_export`.
+  condition and run it. See {doc}`../how_to/run_gromacs`.
 - **A cluster.** Run long simulations on GPUs with `polyzymd submit`. See
   {doc}`../how_to/hpc_slurm` and {doc}`../how_to/monitor_simulations`.
 - **More conditions.** Copy a condition with

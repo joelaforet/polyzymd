@@ -20,13 +20,40 @@ config.yaml`, not `polyzymd status --no-color -c config.yaml`.
 
 ### Colored Output
 
-PolyzyMD uses per-module colored logging to help you visually distinguish
-which subsystem (building, simulation, workflow, etc.) produced each log
-line. Colors are auto-detected based on your terminal capabilities and can
-be disabled with `--no-color` or the `NO_COLOR` environment variable.
+The color of an INFO or DEBUG log line shows which part of PolyzyMD wrote
+it. WARNING lines are always yellow and ERROR lines are always red. The
+message text carries the same information, so a log without color loses
+nothing.
 
-See the [Colored Logging Guide](../explanation/colored_logging.md) for full details
-including the color table, terminal support levels, and HPC notes.
+| Part of PolyzyMD | Messages | Color (16-color fallback) |
+|---|---|---|
+| `polyzymd.cli`, `polyzymd.workflow` | Commands and job workflow | Lavender (bright blue) |
+| `polyzymd.builders` | System build | Sage green (bright green) |
+| `polyzymd.simulation.runner`, `.continuation` | OpenMM setup, continuation and recovery | Warm peach (bright magenta) |
+| `polyzymd.simulation.progress`, `.signals` | Progress and signal handling | Steel blue (bright cyan) |
+| `polyzymd.core` | Shared data structures | Parchment (dark yellow) |
+| `polyzymd.data` | Bundled data | Aqua (dark cyan) |
+| `polyzymd.exporters` | Export to other formats | Lilac (dark magenta) |
+| `polyzymd.utils` | Other utilities | Gray (white) |
+
+PolyzyMD reads the terminal to choose the color depth:
+
+| Depth | When |
+|---|---|
+| 24-bit color | `COLORTERM` is `truecolor` or `24bit` |
+| 256 colors | `TERM` contains `256color` |
+| 16 colors | Any other terminal, for example `TERM=xterm-16color` on many cluster login nodes |
+| No color | Standard error is not a terminal (a pipe or a file), `TERM=dumb`, `NO_COLOR` is set, or `--no-color` is given |
+
+To turn color off, use one of these:
+
+```bash
+polyzymd --no-color build -c config.yaml   # global option, before the command
+NO_COLOR=1 polyzymd build -c config.yaml   # any non-empty value (no-color.org)
+```
+
+Some messages, such as "Build complete!" and error exits, use Click's green
+and red styles instead of the colors above.
 
 ### Logging Behavior
 
@@ -120,7 +147,7 @@ polyzymd build -c <path> --format gromacs    # Export for GROMACS
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--dry-run` | - | No | false | Validate only, don't build |
-| `--format` | - | No | OpenMM | Export format (`gromacs`) |
+| `--format` | - | No | the config's `engine` | Export format (`gromacs`). Without it, PolyzyMD writes OpenMM files, or GROMACS files when the config's `engine` is `gromacs` |
 
 ### Example
 
@@ -159,17 +186,18 @@ solvent or polymer atoms overlap the solute (see
 ### Output Files (GROMACS)
 
 With `--format gromacs`, the build command creates a build-only handoff in
-`{projects_dir}/replicate_{N}/gromacs/`. The core handoff files are:
+`<replicate folder>/gromacs/`. For `<prefix>` and `<stage>`, see
+{ref}`gromacs-output-files`. The core handoff files are:
 
-- `{system}.gro` - GROMACS coordinate file
-- `{system}.top` - GROMACS topology file
+- `<prefix>.gro` - GROMACS coordinate file
+- `<prefix>.top` - GROMACS topology file
 - `*.itp` - Molecule parameter files (one per component)
 - Position restraints (`#ifdef POSRES_PROTEIN`, etc.) appended into molecule `.itp` files
 
 PolyzyMD may also generate convenience defaults:
 
 - `em.mdp` - Energy minimization parameters
-- `eq_XX_name.mdp` - Equilibration stage parameters
+- `eq_01_<stage>.mdp` - Equilibration stage parameters, one file per stage
 - `prod.mdp` - Production parameters
 - `run_*_gromacs.sh` - Convenience shell script
 
@@ -217,13 +245,14 @@ polyzymd analysis-topology /scratch/campaign/*/run_*
 
 Build and run a complete local simulation with OpenMM or GROMACS.
 
-Builds the system and executes the selected local engine workflow:
+Builds the system and runs it with the config's engine, or with the engine
+that `--engine` names:
 
-- `--engine gromacs` exports GROMACS files and runs the full GROMACS workflow
-- `--engine openmm` builds and runs the OpenMM simulation locally
+- `gromacs` exports GROMACS files and runs the full GROMACS workflow
+- `openmm` builds and runs the OpenMM simulation locally
 
 ```bash
-polyzymd run -c <path> --engine <gromacs|openmm> [options]
+polyzymd run -c <path> [--engine gromacs|openmm] [options]
 polyzymd run -c <path> --engine gromacs --gmx-path /usr/local/gromacs/bin/gmx
 polyzymd run -c <path> --engine openmm --dry-run
 ```
@@ -234,7 +263,7 @@ polyzymd run -c <path> --engine openmm --dry-run
 |--------|-------|----------|---------|-------------|
 | `--config` | `-c` | Yes | - | Path to YAML configuration file |
 | `--replicates` | `-r` | No | "1" | Replicate range (for example "1", "1-3", "1,3,5") |
-| `--engine` | - | Yes | - | Local engine to run: `gromacs` or `openmm` |
+| `--engine` | - | No | the config's `engine` | Local engine to run: `gromacs` or `openmm` |
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--gmx-path` | - | No | unset | Path to GROMACS executable (gromacs engine only) |
@@ -282,24 +311,8 @@ On any failure, execution stops immediately and intermediate files are preserved
 
 ### Output Files
 
-Files are created in `{projects_dir}/replicate_{N}/gromacs/`:
-
-```
-gromacs/
-├── {system}.gro              # Initial coordinates
-├── {system}.top              # Topology
-├── *.itp                     # Molecule parameters (one per component)
-├── em.mdp                    # Energy minimization parameters
-├── eq_01_heating.mdp         # Equilibration stage 1
-├── eq_02_free_equilibration.mdp  # Equilibration stage 2
-├── prod.mdp                  # Production parameters
-├── run_{system}_gromacs.sh   # Generated run script
-├── em.tpr, em.gro, em.edr    # Energy minimization outputs
-├── eq_01.*, eq_02.*          # Equilibration outputs
-├── prod.tpr, prod.xtc, ...   # Production outputs
-├── prod_nojump.xtc           # Trajectory without PBC jumps
-└── prod_centered.xtc         # Centered trajectory for visualization
-```
+A GROMACS run writes its files to `<replicate folder>/gromacs/`. For the list
+of files, see {ref}`gromacs-output-files`.
 
 ---
 
@@ -336,7 +349,7 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--gpu-type` | - | No | - | GPU type for GRES (e.g., "a100", "a40", "mi100") |
 | `--constraint` | - | No | - | SLURM `--constraint` for node features (e.g., "A40", "A40\|A100") |
 | `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
-| `--exclude` | - | No | from preset | SLURM `--exclude` override (e.g., "bgpu-g4-u20,bgpu-g4-u24"). Replaces the preset list; pass `""` to exclude nothing |
+| `--exclude` | - | No | from preset | SLURM `--exclude` override (e.g., "node01,node02"). Replaces the preset list; pass `""` to exclude nothing |
 | `--pixi-env` | - | No | engine-specific | Runtime for generated Slurm jobs; OpenMM `auto` uses a fixed environment for known-site presets, and GROMACS uses `build` |
 | `--skip-build` | - | No | false | Skip system building (use pre-built system from `polyzymd build`) |
 | `--force` | - | No | false | Skip duplicate-job check |
@@ -352,13 +365,8 @@ generate SLURM scripts for inspection without submitting them to the scheduler.
 
 ### SLURM Presets
 
-| Preset | Partition | Time Limit | Description |
-|--------|-----------|------------|-------------|
-| `aa100` | aa100 | 24:00:00 | NVIDIA A100 GPUs |
-| `al40` | al40 | 24:00:00 | NVIDIA L40 GPUs |
-| `blanca-shirts` | blanca-shirts | 7-00:00:00 | Blanca condo partition |
-| `bridges2` | GPU | 48:00:00 | PSC Bridges2 GPU |
-| `testing` | atesting | 01:00:00 | Quick tests |
+A preset sets the partition, QoS, account and time limit of each job. For the
+values of each preset, see the preset table in {doc}`../how_to/hpc_slurm`.
 
 ### Example
 
@@ -459,6 +467,11 @@ polyzymd submit -c config.yaml -r 1-3 --preset blanca-shirts
 host, when, the config path and the replicate, and how to undo it. Deleting
 the file by hand is equivalent to `--resume`.
 
+A GROMACS job works in `<working_dir>/gromacs` and checks for `STOP` there
+and in `<working_dir>`. For a GROMACS config, `cancel` also writes
+`<working_dir>/gromacs/STOP` when that folder exists, so that a job script
+written before this check stops too. `--resume` removes both files.
+
 The job wrapper also honours `POLYZYMD_STOP_CHAIN=1` in the job environment
 and `POLYZYMD_STOP_FILE=<path>` to relocate the marker.
 
@@ -470,9 +483,10 @@ and `POLYZYMD_STOP_FILE=<path>` to relocate the marker.
   `polyzymd submit` afterwards.
 - Outside a SLURM environment (no `scancel`) the marker is still written and
   the missing scheduler is reported as a warning.
-- A running chain keeps the job script that `submit` wrote. Job scripts of
-  PolyzyMD 1.2 and earlier, and GROMACS job scripts, do not check the marker.
-  Stop those chains with `scancel --batch --signal=KILL <job_id>`.
+- A running chain keeps the job script that `submit` wrote. OpenMM and
+  GROMACS job scripts check the marker. Job scripts of PolyzyMD 1.2 and
+  earlier do not. Stop those chains with
+  `scancel --batch --signal=KILL <job_id>`.
 
 ---
 
@@ -584,6 +598,7 @@ polyzymd status -c config.yaml
 | `--format table\|agent\|json` | No | `table` (default) prints progress bars for one config. `agent` prints one compact line per replicate with SLURM state, throughput and ETA. `json` emits the same data as JSON. |
 | `--no-slurm` | No | Skip the `squeue` query. Verdicts then rely on `progress.json` alone and cannot separate dead chains from running ones. |
 | `--preset NAME` | No | Preset name to print in the resubmit hint for dead chains (`agent` format). |
+| `--unfinished` | No | `agent` and `json` only. Omit completed replicates; a fully completed system collapses to its header line. |
 
 ### Agent format
 
@@ -613,6 +628,8 @@ run4     0.0/1000ns    0%  NOT_STARTED  no job  last: Validation error: 354 poly
 # dead chains — resume from checkpoint with:
 polyzymd submit -c RML/noPoly_RML_water_333K/config.yaml -r 3 --preset blanca-shirts
 ```
+
+Each system header ends with `done/total completed`, which answers "does every condition have enough finished replicates" without reading the rows. When a `DEAD` replicate's newest log holds no error line, as after a node failure or power loss, its `last:` field shows the SLURM end state from one `sacct` call, for example `slurm: NODE_FAIL exit 0:0`.
 
 Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 
@@ -998,7 +1015,7 @@ Commands on a project folder: the studies of one paper; see
 ### polyzymd project check
 
 ```bash
-polyzymd project check [PATH]
+polyzymd project check [PATH] [--production]
 ```
 
 Reads `project.yaml` (`PATH` is the file or its folder, by default the
@@ -1008,6 +1025,8 @@ analysis, `stats <function>: up to date|stale: ...|not run` when it names a
 plan, then `== study <label>` and the `polyzymd study check` of each study,
 then `== project` with the git line and the project's metadata line, once.
 A study's metadata line is printed only when the study has its own metadata.
+`--production` adds each condition's production length to each study's
+lines, as `study check --production` does. It reads every run's trajectory.
 Exits 2 when the project file or a study cannot be read.
 
 ### polyzymd project init
@@ -1081,13 +1100,12 @@ directory) without loading any trajectory, and prints:
 | metadata | `metadata: complete`, or `metadata: <n> gaps for publishing; ...` |
 | publish | `publish: follow <study>/deposit/UPLOAD.md` after a freeze, or `publish: when the analyses are final, run polyzymd study freeze` |
 | reproduce | In a downloaded frozen study (a `manifest.json` but no `deposit/`): how to point it at the trajectories and rerun or redraw |
+| citation | `cite: <how to cite PolyzyMD>` |
 
 `analyze` and the `study` commands print only reports and warnings on the
 console; the full log, with library messages, goes to `logs/polyzymd-<command>-<time>.log`
 (in the study folder, or the output directory), whose path is printed first
 as `log: <path>`. `polyzymd -v` keeps INFO on the console.
-| citation | `cite: <how to cite PolyzyMD>` |
-| warning | `warning: written for PolyzyMD <version>; this is <version>` |
 
 It exits 2 when the study file, a condition's config or a listed function
 cannot be read, and 0 otherwise; missing runs are not errors.

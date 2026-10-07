@@ -208,6 +208,104 @@ class TestCancelCommand:
 
 
 # ---------------------------------------------------------------------------
+# GROMACS chains
+# ---------------------------------------------------------------------------
+
+
+def _run_gromacs_job_script(tmp_path: Path, replicate_dir: Path, monkeypatch) -> list[str]:
+    """Run a GROMACS job script for *replicate_dir* with stub tools; return the tools it called."""
+    import os
+    import subprocess
+
+    from polyzymd.engines.gromacs.slurm import GromacsSlurmScriptGenerator
+    from polyzymd.workflow.slurm import SlurmConfig
+
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path", lambda: "/tmp/pixi.toml"
+    )
+    script = tmp_path / "job.sh"
+    script.write_text(
+        GromacsSlurmScriptGenerator(slurm_config=SlurmConfig()).generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            # `polyzymd submit` runs a GROMACS job in <replicate>/gromacs.
+            working_dir=str(replicate_dir / "gromacs"),
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    calls = tmp_path / "calls"
+    calls.unlink(missing_ok=True)
+    for tool in ("sbatch", "module", "gmx", "pixi", "nvidia-smi"):
+        stub = bin_dir / tool
+        stub.write_text(f'#!/bin/sh\necho {tool} >> "{calls}"\nexit 1\n')
+        stub.chmod(0o755)
+    subprocess.run(
+        ["bash", "--noprofile", "--norc", str(script)],
+        # A cluster's Lmod `module` (an exported function, or one BASH_ENV
+        # defines) would shadow the stubs.
+        env={
+            **{
+                k: v
+                for k, v in os.environ.items()
+                if not k.startswith("BASH_FUNC_") and k != "BASH_ENV"
+            },
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    return calls.read_text().split() if calls.exists() else []
+
+
+class TestCancelGromacsChain:
+    """`polyzymd cancel` stops and restarts a GROMACS chain, whose job works in <replicate>/gromacs."""
+
+    def _gromacs_config(self, tmp_path: Path, replicate_dir: Path):
+        config_path, sim_config = _config_and_mock(tmp_path, lambda r: replicate_dir)
+        sim_config.engine = "gromacs"
+        return config_path, sim_config
+
+    def test_cancel_stops_a_gromacs_job(self, tmp_path, monkeypatch):
+        replicate_dir = tmp_path / "run_1"
+        config_path, sim_config = self._gromacs_config(tmp_path, replicate_dir)
+
+        result, _, _ = _invoke(config_path, sim_config, ["-r", "1", "--stop-only"])
+        assert result.exit_code == 0, result.output
+
+        calls = _run_gromacs_job_script(tmp_path, replicate_dir, monkeypatch)
+        assert "gmx" not in calls and "sbatch" not in calls, calls
+
+    def test_cancel_writes_stop_where_a_running_gromacs_job_looks(self, tmp_path):
+        """A chain submitted earlier checks only <replicate>/gromacs/STOP."""
+        replicate_dir = tmp_path / "run_1"
+        (replicate_dir / "gromacs").mkdir(parents=True)
+        config_path, sim_config = self._gromacs_config(tmp_path, replicate_dir)
+
+        result, _, _ = _invoke(config_path, sim_config, ["-r", "1", "--stop-only"])
+        assert result.exit_code == 0, result.output
+        assert stop_file_path(replicate_dir / "gromacs").exists()
+
+    def test_resume_lets_a_gromacs_job_run_again(self, tmp_path, monkeypatch):
+        replicate_dir = tmp_path / "run_1"
+        (replicate_dir / "gromacs").mkdir(parents=True)
+        stop_file_path(replicate_dir).write_text("PolyzyMD STOP marker\n")
+        stop_file_path(replicate_dir / "gromacs").write_text("PolyzyMD STOP marker\n")
+        config_path, sim_config = self._gromacs_config(tmp_path, replicate_dir)
+
+        result, _, _ = _invoke(config_path, sim_config, ["-r", "1", "--resume"])
+        assert result.exit_code == 0, result.output
+        assert not stop_file_path(replicate_dir).exists()
+        assert not stop_file_path(replicate_dir / "gromacs").exists()
+
+        calls = _run_gromacs_job_script(tmp_path, replicate_dir, monkeypatch)
+        assert "pixi" in calls or "gmx" in calls, calls
+
+
+# ---------------------------------------------------------------------------
 # cancel_slurm_jobs
 # ---------------------------------------------------------------------------
 

@@ -24,11 +24,23 @@ import pytest
 from polyzymd.analyses.protocols import FUNCTION_ANALYSES
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "quickstart"
+GROMACS_GUIDE = EXAMPLE.parents[1] / "docs" / "source" / "how_to" / "run_gromacs.md"
 
 pytestmark = [
     pytest.mark.skipif(shutil.which("packmol") is None, reason="Packmol is not installed"),
     pytest.mark.filterwarnings("ignore"),
 ]
+
+
+def _documented_gromacs_files() -> list[str]:
+    """The file names in the output tree of the GROMACS guide."""
+    section = GROMACS_GUIDE.read_text().split("(gromacs-output-files)=", 1)[1]
+    tree = section.split("```text", 1)[1].split("```", 1)[0]
+    names = []
+    for line in tree.splitlines():
+        entry = line.split("#", 1)[0].lstrip("│├└─ ").strip()
+        names += [name.strip() for name in entry.split(",") if name.strip()]
+    return [name for name in names if not name.endswith("/")]
 
 
 def _polyzymd(folder: Path, *arguments: str) -> subprocess.CompletedProcess:
@@ -70,6 +82,12 @@ def test_the_quickstart_runs_and_analyzes(tmp_path: Path, config: str) -> None:
     project.write_text(project.read_text().replace("analyses: {}", "analyses:\n  rg: {}"))
     result = _polyzymd(folder, "analyze", "--project", "paper", "--no-plots")
     assert result.returncode == 0 and "verdict: Water" in result.stdout, result.stderr
+    if config == "config_gromacs.yaml":
+        # Every file the GROMACS guide lists is in the run's gromacs/ folder.
+        (gromacs,) = (folder / "paper" / "runs").rglob("gromacs")
+        for name in _documented_gromacs_files():
+            pattern = name.replace("<prefix>", "trpcage").replace("<stage>", "equil")
+            assert list(gromacs.glob(pattern)), name
     if config == "config.yaml":
         # A local OpenMM run records the hash of its trajectory, as a SLURM run does.
         (progress,) = folder.rglob("progress.json")
