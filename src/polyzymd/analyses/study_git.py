@@ -24,15 +24,16 @@ def is_output(path: str) -> bool:
 
     ``results/``, ``logs/`` and ``deposit/`` folders and ``data.local.yaml``
     count wherever they are, so a project's ``<study>/results/`` is an output too.
-    So do compiled Python (``__pycache__/``, ``*.pyc``) and one machine's job
-    and log folders (``slurm/``, ``slurm_logs/``), which are never inputs.
+    So do compiled Python (``__pycache__/``, ``*.pyc``), one machine's job
+    and log folders (``slurm/``, ``slurm_logs/``) and the simulations in
+    ``runs/``, which are never inputs.
     """
     parts = Path(path).parts
     return bool(parts) and (
         parts[-1] == "data.local.yaml"
         or parts[-1].endswith(".pyc")
         or any(f"{part}/" in OUTPUTS for part in parts[:-1])
-        or any(part in ("__pycache__", "slurm", "slurm_logs") for part in parts[:-1])
+        or any(part in ("__pycache__", "slurm", "slurm_logs", "runs") for part in parts[:-1])
     )
 
 

@@ -59,6 +59,18 @@ def test_shipped_analyses_hash_every_analysis_file(tmp_path: Path) -> None:
     assert timeseries._shipped_code_hash(before) != timeseries._shipped_code_hash(after)
 
 
+def test_files_under_runs_do_not_change_the_code_hash(tmp_path: Path) -> None:
+    """runs/ beside a function holds simulations; its files never enter the code hash."""
+    from polyzymd.analyses.timeseries import folder_hash
+
+    (tmp_path / "study.yaml").write_text("conditions: {}\n")
+    (tmp_path / "f.py").write_text("def f(u):\n    return 1.0\n")
+    before = folder_hash(tmp_path / "f.py")
+    (tmp_path / "runs" / "water" / "w_run1").mkdir(parents=True)
+    (tmp_path / "runs" / "water" / "w_run1" / "job.py").write_text("print(1)\n")
+    assert folder_hash(tmp_path / "f.py") == before
+
+
 def test_stray_files_do_not_change_the_code_hash(tmp_path: Path, caplog) -> None:
     """A function's hash covers the Python files beside it and data/, not other files.
 

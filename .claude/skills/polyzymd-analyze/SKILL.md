@@ -77,6 +77,13 @@ lists the studies and the analyses each runs).
   `polyzymd analyze --study STUDY` runs them all. Command-line options
   override the file. Results go to `STUDY/results/RUN/`
   (`docs/source/how_to/study_yaml.md`).
+- A project is made top down: `polyzymd project init`, then
+  `polyzymd study add-condition LABEL --new` (or `--from OTHER`, or
+  `--config CONFIG`) in each study. Its runs are in the git-ignored
+  `PROJECT/runs/<study>/<condition>/` unless a config sets
+  `scratch_directory`; `study check` finds them through the config.
+  `analyze --project` runs the analyses listed under `analyses:` in
+  `project.yaml` or a `study.yaml`, so list a run there first.
 - For a project, use `polyzymd project check PROJECT` and
   `polyzymd analyze RUN --project PROJECT`. Read the results with
   `pz.Project("PROJECT").results(RUN).table`: one table with a `study`

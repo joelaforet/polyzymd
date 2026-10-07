@@ -35,9 +35,9 @@ replicate
   the thermostat noise and the barostat moves, on both engines.
 
 simulation folder
-  The folder that `polyzymd init` makes: a template `config.yaml` and a
-  `structures/` folder. It is a place to write one config. It is not a
-  {term}`project`.
+  The folder of one condition, `conditions/<name>/` of a {term}`study`: its
+  `config.yaml` and a `structures/` folder with the inputs.
+  `polyzymd study add-condition` makes it.
 
 replicate folder
   The folder of one replicate's output, named by `output.naming_template`

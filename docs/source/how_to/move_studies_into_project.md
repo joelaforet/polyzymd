@@ -203,8 +203,10 @@ cp -r old/lipa363/results Paper_1/lipa363/
 
 ## 8. Point at the trajectories
 
-The copied configs still say where their runs are. If that is right on this
-machine, there is nothing to do. Otherwise, for each study:
+`add-condition --config` wrote where each condition's runs are into the
+study's `data.local.yaml` when it found them in the config's
+`scratch_directory`. The copied configs write new runs into `Paper_1/runs/`.
+If `polyzymd project check` finds no runs for a condition, for each study run:
 
 ```bash
 polyzymd study locate /path/to/the/runs --study Paper_1/lipa363

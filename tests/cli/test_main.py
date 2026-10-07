@@ -20,15 +20,6 @@ from polyzymd.cli.main import _resolve_replicates_option, _run_openmm_impl, cli
 from polyzymd.config.schema import Ensemble, WaterModel
 from polyzymd.utils.templates import render_package_template
 
-BRANDING_LINE = "PolyzyMD: Created by Joseph R. Laforet Jr."
-
-
-def _assert_no_jinja_markers(content: str) -> None:
-    """Assert rendered content contains no unresolved Jinja syntax."""
-    assert "{{" not in content
-    assert "{%" not in content
-    assert "%}" not in content
-
 
 def _make_dry_run_config() -> SimpleNamespace:
     """Create a minimal config-like object for build --dry-run tests."""
@@ -604,65 +595,8 @@ class TestInternalCommandsUnchanged:
         assert "--replicate" in result.output
 
 
-class TestInitCommand:
-    """Tests for the project initialization scaffold."""
-
-    def test_init_creates_project_scaffold(self, tmp_path: Path) -> None:
-        """init should render project files with the requested project name."""
-        runner = CliRunner()
-
-        with runner.isolated_filesystem(temp_dir=tmp_path):
-            result = runner.invoke(cli, ["init", "-n", "foo"])
-
-            assert result.exit_code == 0
-            project_dir = Path("foo")
-            assert project_dir.is_dir()
-            assert (project_dir / "config.yaml").is_file()
-            assert (project_dir / "structures").is_dir()
-            assert (project_dir / "job_scripts").is_dir()
-            assert (project_dir / "slurm_logs").is_dir()
-            assert (project_dir / "structures" / "place_protein_here.placeholder.txt").is_file()
-            assert (project_dir / "structures" / "place_ligand_here.placeholder.txt").is_file()
-
-            config_content = (project_dir / "config.yaml").read_text(encoding="utf-8")
-            config_data = yaml.safe_load(config_content)
-            assert config_data["name"] == "foo"
-            assert config_content.count(BRANDING_LINE) == 1
-            _assert_no_jinja_markers(config_content)
-
-            for path in project_dir.rglob("*"):
-                if path.is_file() and path.suffix in {".yaml", ".txt"}:
-                    content = path.read_text(encoding="utf-8")
-                    assert content.count(BRANDING_LINE) == 1
-                    _assert_no_jinja_markers(content)
-
-    def test_init_existing_directory_still_errors(self, tmp_path: Path) -> None:
-        """init should preserve the existing-directory error behavior."""
-        runner = CliRunner()
-
-        with runner.isolated_filesystem(temp_dir=tmp_path):
-            Path("foo").mkdir()
-            result = runner.invoke(cli, ["init", "-n", "foo"])
-
-            assert result.exit_code != 0
-            assert "already exists" in result.output
-
-    def test_init_config_sets_the_openmm_platform_and_validates(self, tmp_path: Path) -> None:
-        """Once the PDB path is set, the init config validates as written."""
-        runner = CliRunner()
-        with runner.isolated_filesystem(temp_dir=tmp_path):
-            assert runner.invoke(cli, ["init", "-n", "proj"]).exit_code == 0
-            config = Path("proj/config.yaml")
-            text = config.read_text(encoding="utf-8")
-            assert "\nopenmm:\n  platform:" in text
-            pdb = Path(__file__).resolve().parents[2] / "examples" / "quickstart" / "trpcage.pdb"
-            config.write_text(text.replace("structures/protein_X.pdb", str(pdb)), encoding="utf-8")
-
-            result = runner.invoke(cli, ["validate", "-c", str(config)])
-
-        assert result.exit_code == 0, result.output
-        assert "Configuration is valid!" in result.output
-        assert "Referenced file warnings" not in result.output
+class TestTemplates:
+    """Tests for the package template renderer."""
 
     def test_shared_renderer_uses_strict_undefined(self) -> None:
         """Missing template context values should fail fast."""

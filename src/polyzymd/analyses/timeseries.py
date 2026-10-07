@@ -204,6 +204,7 @@ _NOT_CODE = {
     "figures",
     "slurm",
     "slurm_logs",
+    "runs",
     "site-packages",
 }
 #: Files beside code that say where data is on one machine, or that freeze writes.
@@ -226,7 +227,7 @@ def _candidate_files(folder: Path) -> list[tuple[Path, Path]]:
 
     Skipped: hidden files and folders (``.git``, ``.pixi``, ``.venv``),
     output and job folders (``results/``, ``logs/``, ``deposit/``,
-    ``conditions/``, ``figures/``, ``slurm/``, ``site-packages/``,
+    ``conditions/``, ``figures/``, ``slurm/``, ``runs/``, ``site-packages/``,
     ``__pycache__``), the folders of other studies and the files that
     ``freeze`` writes.
     """

@@ -46,64 +46,6 @@ failures.
 
 ---
 
-## polyzymd init
-
-Create a simulation folder for one condition, with a template `config.yaml`.
-This folder is not a {term}`project`: a project is one paper and is made with
-`polyzymd project init`.
-
-```bash
-polyzymd init --name <name>
-polyzymd init -n <name>
-```
-
-### Options
-
-| Option | Short | Required | Description |
-|--------|-------|----------|-------------|
-| `--name` | `-n` | Yes | Name of the folder to create |
-
-### What It Creates
-
-```
-<name>/
-├── config.yaml              <- Template configuration (edit this)
-├── structures/              <- Add your PDB/SDF files here
-│   ├── place_protein_here.placeholder.txt
-│   └── place_ligand_here.placeholder.txt
-├── job_scripts/             <- Generated SLURM scripts go here
-└── slurm_logs/              <- SLURM output logs go here
-```
-
-### Example
-
-```bash
-# Create a simulation folder
-polyzymd init --name lipase_dmso_study
-cd lipase_dmso_study
-
-# Add your structure files
-cp ~/structures/LipA.pdb structures/enzyme.pdb
-cp ~/docking/substrate.sdf structures/substrate.sdf
-
-# Remove placeholder files
-rm structures/*.placeholder.txt
-
-# Edit the configuration
-nano config.yaml
-
-# Validate
-polyzymd validate -c config.yaml
-```
-
-### Notes
-
-- The command will fail if the directory already exists
-- The template `config.yaml` has all sections commented out with example values
-- Uncomment and modify only the sections you need
-
----
-
 ## polyzymd validate
 
 Validate a configuration file without building or running.
@@ -1081,6 +1023,19 @@ per `--study` with a `study.yaml` to fill in. Labels are also folder names
 repository with one commit. To move existing studies in, see
 {doc}`../how_to/move_studies_into_project`.
 
+### polyzymd project add-study
+
+```bash
+polyzymd project add-study LABEL [--project PATH]
+```
+
+Writes the study folder `LABEL` in the project at `PATH` (the
+`project.yaml` or its folder, by default the current directory), with a
+`study.yaml` to fill in, as `project init --study` does. Adds one line under
+`studies:` in `project.yaml` and keeps the rest of the file. Commits nothing.
+Exits 2 when the label is not a folder name (lower case, digits, `_`), or the
+project already lists the label or holds its folder.
+
 ### polyzymd project freeze
 
 ```bash
@@ -1151,8 +1106,8 @@ Creates a study folder: `study.yaml`, `conditions/`, `structures/`,
 
 | Option | Description |
 |---|---|
-| `--condition LABEL=CONFIG` | Copies an existing `config.yaml` to `conditions/<label>/config.yaml`, with every input file it names copied to `conditions/<label>/structures/` and its path made relative. The scratch and projects directories are kept. Repeatable; the first is the control |
-| `--new-condition LABEL` | Creates `conditions/<label>/` with `polyzymd init`. Repeatable |
+| `--condition LABEL=CONFIG` | Copies an existing `config.yaml` to `conditions/<label>/config.yaml`, with every input file it names copied to `conditions/<label>/structures/` and its path made relative. The copy writes new runs into `runs/<label>/` of the study; where the existing runs are goes into `data.local.yaml`. Repeatable; the first is the control |
+| `--new-condition LABEL` | Creates `conditions/<label>/` with a template `config.yaml` and `structures/`. Repeatable |
 | `--equilibration TEXT` | The study's equilibration window; `0ns` with a note when left out |
 | `--holder NAME` | Copyright holder in both LICENSE files. Default: `git config user.name` |
 | `--no-git` | Do not make a git repository |
@@ -1163,17 +1118,28 @@ unreadable config.
 ### polyzymd study add-condition
 
 ```bash
-polyzymd study add-condition LABEL (--config CONFIG | --new) [--study PATH]
+polyzymd study add-condition LABEL (--config CONFIG | --from OTHER_LABEL | --new) [--study PATH]
 ```
 
-Adds a condition to an existing study: `--config` copies `CONFIG` and the
-input files it names into `conditions/<label>/`, as `study init --condition`
-does; `--new` creates `conditions/<label>/` with `polyzymd init`. The condition
-is added as one line under `conditions:` in `study.yaml`, keeping the rest of
-the file. With `--config`, the config's `scratch_directory` is written to
-`data.local.yaml` and printed as `data <label>: <path> (from the config's
-scratch_directory)`, with a warning when that folder holds no run directories.
-Exits 2 when neither or both options are given, or the label or its
+Adds a condition to an existing study, in `conditions/<label>/`:
+
+- `--new` writes a template `config.yaml` to fill in, and `structures/` with
+  placeholder files.
+- `--from OTHER_LABEL` copies the config of that condition of the study, with
+  the input files it names.
+- `--config CONFIG` copies `CONFIG`, with the input files it names, as
+  `study init --condition` does. When the config's `scratch_directory` holds
+  runs of the config, that folder is written to `data.local.yaml` and printed
+  as `data <label>: <path> (from the config's scratch_directory)`.
+
+The new config writes its runs into `runs/<study>/<label>/` of the project,
+or into `runs/<label>/` of a study in no project. Git ignores `runs/`, and
+freeze never publishes it. The command prints this as a warning, because
+trajectories can use a lot of disk space: on a cluster, set
+`scratch_directory` in the config to scratch storage. The condition is added
+as one line under `conditions:` in `study.yaml`, keeping the rest of the
+file. Exits 2 when not exactly one of `--config`, `--from` and `--new` is
+given, `OTHER_LABEL` is not a condition of the study, or the label or its
 folder is taken.
 
 ### polyzymd study locate
@@ -1267,6 +1233,15 @@ It prints one line per replicate, such as `SBMA 50% replicate 1 (openmm):
 hashed 11, already recorded 1`, and `<label>: no runs found in <folder>` for
 a config whose runs are not where it says. Reading takes about a second per
 gigabyte, so on a cluster run it in a batch job.
+
+---
+
+## Retired commands
+
+`polyzymd init ...` is hidden. It accepts any arguments, says to make a project
+with `polyzymd project init PATH --study LABEL`, then a condition with
+`polyzymd study add-condition LABEL --new`, which writes the template config,
+and exits 2.
 
 ---
 

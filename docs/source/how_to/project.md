@@ -24,6 +24,7 @@ Alternatively, prefix each command with `pixi run -e analysis`.
 Do these steps in this order. The sections below give the details.
 
 1. Make the project: `polyzymd project init Paper_1 --study lipa363 --study calb343`.
+   Add a study later with `polyzymd project add-study rml333 --project Paper_1`.
 2. Add the conditions of each study, control first, with `polyzymd study add-condition`.
 3. Edit each `study.yaml`: add the structures, the regions and the factors.
 4. Check the project: `polyzymd project check Paper_1`. To see how long each
@@ -90,26 +91,55 @@ It then makes the project a git repository and commits these files. Use
 `--no-git` to skip git, and `--holder NAME` to set the copyright holder of
 the licenses.
 
+To add a study later, give its label:
+
+```bash
+polyzymd project add-study rml333 --project Paper_1
+```
+
+`add-study` writes the study folder `Paper_1/rml333/` with a `study.yaml` to
+fill in, and adds one line under `studies:` in `project.yaml`. It commits
+nothing. The label is also the folder name, so use lower case letters,
+digits and `_`.
+
 To bring studies that you already have into a project, see
 {doc}`move_studies_into_project`.
 
 ## Add the conditions
 
-Add the conditions of each study. Add the control first.
+Add the conditions of each study. Add the control first. For a condition
+that you have not simulated yet, write a template config, fill it in, and
+copy it for the next condition:
+
+```bash
+polyzymd study add-condition "No polymer" --new --study Paper_1/lipa363
+polyzymd study add-condition "SBMA 50%" --from "No polymer" --study Paper_1/lipa363
+```
+
+The tutorial {doc}`../tutorials/own_system` shows how to fill in the
+template. For a condition that you already simulated, copy its config:
 
 ```bash
 polyzymd study add-condition "No polymer" --config path/to/no_polymer/config.yaml --study Paper_1/lipa363
-polyzymd study add-condition "SBMA 50%" --config path/to/sbma50/config.yaml --study Paper_1/lipa363
 ```
 
 For each condition, `add-condition` does these steps:
 
-1. It copies the config to `conditions/<name>/config.yaml`.
+1. It writes or copies the config to `conditions/<name>/config.yaml`.
 2. It copies each input file that the config names into
    `conditions/<name>/structures/`.
-3. It writes the folder that holds the simulations of the condition into the
-   study's `data.local.yaml`. Git ignores this file.
-4. It adds one line under `conditions:` in `study.yaml`.
+3. It points the config at `Paper_1/runs/<study>/<name>/` for new runs.
+4. With `--config`, if the config's `scratch_directory` holds its runs, it
+   writes that folder into the study's `data.local.yaml`. Git ignores this
+   file.
+5. It adds one line under `conditions:` in `study.yaml`.
+
+:::{warning}
+The runs go into the project folder, in `runs/`, unless you set
+`scratch_directory` in the config. Trajectories can use a lot of disk space.
+On a cluster, set `scratch_directory` to scratch storage. Git ignores
+`runs/`, and freeze never publishes it.
+:::
 
 ## Write the `study.yaml` of each study
 

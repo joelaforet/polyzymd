@@ -209,3 +209,22 @@ def test_output_folders_are_relative_to_the_config(tmp_path: Path) -> None:
     finally:
         os.chdir(old)
     assert Path(config.output.projects_directory) == (tmp_path / "water").resolve()
+
+
+def test_an_output_folder_with_dots_is_kept_as_written(tmp_path: Path) -> None:
+    """projects_directory '../sims' keeps its '..', so the config hash of existing builds holds."""
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "water", scratch=Path("."))
+    data = yaml.safe_load(path.read_text())
+    data["output"]["projects_directory"] = "../sims"
+    data["output"]["scratch_directory"] = "../sims"
+    path.write_text(yaml.safe_dump(data))
+
+    config = SimulationConfig.from_yaml(path)
+
+    assert str(config.output.projects_directory) == str(tmp_path / "water" / ".." / "sims")
+    assert str(config.output.scratch_directory) == str(tmp_path / "water" / ".." / "sims")

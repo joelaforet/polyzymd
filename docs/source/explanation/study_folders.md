@@ -50,6 +50,7 @@ my_study/
 ├── figures/                   # notebooks and scripts: stored results -> paper figures
 ├── results/                   # stored per-replicate values, reports, default figures
 ├── environment/               # how to install the PolyzyMD version; add pixi.toml and pixi.lock
+├── runs/                      # new runs of the conditions, in a study with no project (git ignores it)
 └── .gitignore
 ```
 
@@ -57,7 +58,10 @@ my_study/
 first commit. For each condition, `study init` and `study add-condition` copy
 the config into `conditions/<label>/`, with the input files that it names.
 Conditions that share a structure each get a copy. These copies are small
-compared with the trajectories.
+compared with the trajectories. The trajectories are not part of the study
+folder: a new config writes its runs into the git-ignored `runs/` folder of
+the project, or of the study when it is in no project, unless it sets
+`scratch_directory`.
 
 ## `study.yaml`, the analysis protocol
 

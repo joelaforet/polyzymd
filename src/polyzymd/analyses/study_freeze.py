@@ -316,23 +316,25 @@ def stale_runs(protocol: Any, conditions: dict[str, Any] | None = None) -> dict[
 
 
 #: Pathspecs ``git add`` and ``git commit`` leave out when freezing: job files of
-#: ``polyzymd analyze --submit`` and logs, which name one machine's paths.
+#: ``polyzymd analyze --submit``, logs, which name one machine's paths, and runs.
 EXCLUDE_MACHINE_FILES = [
     ":(exclude)**/slurm/**",
     ":(exclude)**/slurm_logs/**",
     ":(exclude)**/logs/**",
+    ":(exclude)**/runs/**",
 ]
 
 
-#: Folders that hold one machine's job files, logs or environments, never published.
-MACHINE_FOLDERS = ("slurm", "slurm_logs", "logs")
+#: Folders that hold one machine's job files, logs, runs or environments, never published.
+MACHINE_FOLDERS = ("slurm", "slurm_logs", "logs", "runs")
 
 
 def is_machine_file(path: str) -> bool:
-    """Return whether ``path`` is never published: in a job, log or hidden folder, or hidden.
+    """Return whether ``path`` is never published: in a job, log, run or hidden folder, or hidden.
 
     Job and log folders (``slurm/``, ``slurm_logs/``, ``logs/``) name one
-    machine's paths; hidden ones (``.git``, ``.pixi``, ``.venv``) hold
+    machine's paths; ``runs/`` holds the simulations, which are deposited
+    apart from the study; hidden ones (``.git``, ``.pixi``, ``.venv``) hold
     repositories and environments.
     """
     parts = Path(path).parts
@@ -342,7 +344,7 @@ def is_machine_file(path: str) -> bool:
 
 
 def drop_machine_files(folder: Path) -> None:
-    """Delete every job, log and hidden folder under ``folder``, a copy being deposited."""
+    """Delete every job, log, run and hidden folder under ``folder``, a copy being deposited."""
     for path in sorted(folder.rglob("*"), reverse=True):
         if path.is_dir() and (path.name in MACHINE_FOLDERS or path.name.startswith(".")):
             shutil.rmtree(path, ignore_errors=True)
@@ -563,7 +565,8 @@ def without_machine_paths(text: str, folder: Path | None = None, root: Path | No
     keeps job files and runs; they become ``.`` and ``data``, with a comment
     saying how a reproducer points the study at their copy. The config hash
     leaves both out, so stored results still match. A ``Copied by polyzymd
-    study init from <path>`` header keeps only the file name. With
+    study init from <path>`` header keeps only the file name, and the lines
+    under it that say where the runs go are dropped. With
     ``folder`` (the folder that holds the config) and ``root`` (the study or
     project folder), an absolute input path (``config.loader.PATH_KEYS``)
     inside ``root`` becomes a path relative to ``folder``.
@@ -646,11 +649,16 @@ def _outside_inputs(protocol: Any) -> list[str]:
 
 
 def _rewrite_machine_lines(text: str) -> str:
-    """Rewrite the ``projects_directory``/``scratch_directory`` lines and the copy header."""
+    """Rewrite the ``projects_directory``/``scratch_directory`` lines and the copy header.
+
+    The ``#   `` lines under the header, which say where the runs go, are dropped.
+    """
     import re
 
     lines = []
     for line in text.splitlines():
+        if line.startswith("#   ") and lines and lines[-1].startswith("# Copied by polyzymd"):
+            continue
         match = re.match(r"^(\s*)(projects_directory|scratch_directory):\s*.*$", line)
         if match:
             value = "." if match.group(2) == "projects_directory" else "data"
@@ -1413,6 +1421,7 @@ _IGNORED = (
     (f"{DEPOSIT}/", "What polyzymd freeze lays out for upload."),
     ("logs/", "Full logs of polyzymd commands; the console shows only warnings."),
     ("data.local.yaml", "Where this machine keeps the trajectories."),
+    ("runs/", "Simulation runs: trajectories never go into git or the deposit."),
 )
 
 

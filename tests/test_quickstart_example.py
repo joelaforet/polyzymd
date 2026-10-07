@@ -2,8 +2,9 @@
 
 ``examples/quickstart/`` holds Trp-cage (PDB 1L2Y) and one config per
 engine. Each test copies the folder, runs the commands the quickstart
-tutorial gives, and checks that every shipped analysis runs with its
-defaults. A protein in water with ions is the system every new user starts
+tutorial gives (a project, the example config added as its condition,
+validate, run, analyze --project), and checks that every shipped analysis
+runs with its defaults. A protein in water with ions is the system every new user starts
 from, so a fault in any step of that path (an invalid quickstart config, an
 analysis topology MDAnalysis cannot read, a topology without chain IDs)
 fails here.
@@ -54,13 +55,21 @@ def _polyzymd(folder: Path, *arguments: str) -> subprocess.CompletedProcess:
 )
 def test_the_quickstart_runs_and_analyzes(tmp_path: Path, config: str) -> None:
     folder = Path(shutil.copytree(EXAMPLE, tmp_path / "quickstart"))
+    condition = "paper/trpcage/conditions/water/config.yaml"
     for step in (
-        ("validate", "-c", config),
-        ("run", "-c", config, "-r", "1"),
-        ("study", "init", "study", "--condition", f"Water={config}", "--equilibration", "0ns", "--no-git"),
+        ("project", "init", "paper", "--study", "trpcage", "--no-git"),
+        ("study", "add-condition", "Water", "--config", config, "--study", "paper/trpcage"),
+        ("validate", "-c", condition),
+        ("run", "-c", condition, "-r", "1"),
     ):
         result = _polyzymd(folder, *step)
         assert result.returncode == 0, f"{' '.join(step)}\n{result.stdout}\n{result.stderr}"
+    # The run went into the project's runs/ folder.
+    assert list((folder / "paper" / "runs" / "trpcage" / "water").glob("trpcage_300K_run1"))
+    project = folder / "paper" / "project.yaml"
+    project.write_text(project.read_text().replace("analyses: {}", "analyses:\n  rg: {}"))
+    result = _polyzymd(folder, "analyze", "--project", "paper", "--no-plots")
+    assert result.returncode == 0 and "verdict: Water" in result.stdout, result.stderr
     if config == "config.yaml":
         # A local OpenMM run records the hash of its trajectory, as a SLURM run does.
         (progress,) = folder.rglob("progress.json")
@@ -82,6 +91,8 @@ def test_the_quickstart_runs_and_analyzes(tmp_path: Path, config: str) -> None:
     )
     for name in FUNCTION_ANALYSES:
         settings = ("--set", "pairs=pairs.yaml") if name == "distances" else ()
-        result = _polyzymd(folder, "analyze", name, "--study", "study", "--no-plots", *settings)
+        result = _polyzymd(
+            folder, "analyze", name, "--study", "paper/trpcage", "--no-plots", *settings
+        )
         assert result.returncode == 0, f"{name}\n{result.stdout}\n{result.stderr}"
         assert "verdict: Water" in result.stdout, name

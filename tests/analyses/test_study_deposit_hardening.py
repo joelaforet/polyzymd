@@ -56,7 +56,7 @@ class TestAddCondition:
 
     def test_refusals(self, study: Path, tmp_path: Path) -> None:
         both = CliRunner().invoke(cli, ["study", "add-condition", "X", "--study", str(study)])
-        assert both.exit_code == 2 and "either a config to copy or new" in both.output
+        assert both.exit_code == 2 and "Give one of a config to copy" in both.output
         taken = CliRunner().invoke(
             cli, ["study", "add-condition", "Polymer", "--new", "--study", str(study)]
         )

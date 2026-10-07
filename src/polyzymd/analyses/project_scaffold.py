@@ -24,6 +24,8 @@ PROJECT_FOLDERS = {
 PROJECT_GITIGNORE = """\
 # Where this machine keeps the trajectories: never commit or publish it.
 data.local.yaml
+# The runs of the conditions' configs, unless they set scratch_directory.
+runs/
 # Python and notebook caches.
 __pycache__/
 *.pyc
@@ -169,7 +171,7 @@ def create_project(
     """
     from polyzymd.analyses.project_file import PROJECT_FILE
     from polyzymd.analyses.study_git import init_repository
-    from polyzymd.analyses.study_scaffold import CC_BY, MIT, condition_folder, create_study
+    from polyzymd.analyses.study_scaffold import CC_BY, MIT
 
     root = Path(root).expanduser().resolve()
     if root.exists() and any(root.iterdir()):
@@ -183,24 +185,14 @@ def create_project(
             hint="Give --study LABEL once per study, such as --study lipa363 --study rml333.",
         )
     for label in studies:
-        if condition_folder(label) != label:
-            raise ProtocolError(
-                f"The study label {label!r} is not a folder name.",
-                hint=f"Use lower case, digits and _ only, such as {condition_folder(label)!r}.",
-            )
+        _check_study_label(label)
     root.mkdir(parents=True, exist_ok=True)
     for folder, what in PROJECT_FOLDERS.items():
         (root / folder).mkdir(exist_ok=True)
         (root / folder / "README.md").write_text(f"# {folder}/\n\n{what}.\n")
     created = CreatedProject(root, {})
     for label in studies:
-        folder = root / label
-        create_study(folder, git=False)
-        # The project holds the licences, once.
-        for name in ("LICENSE-code", "LICENSE-data"):
-            (folder / name).unlink(missing_ok=True)
-        (folder / "study.yaml").write_text(STUDY_YAML)
-        created.studies[label] = folder
+        created.studies[label] = _write_study(root / label)
     listed = "studies:                      # label: folder holding its study.yaml\n" + "".join(
         f"  {label}: {label}\n" for label in studies
     )
@@ -219,3 +211,62 @@ def create_project(
     if git:
         created.commit = init_repository(root, "Create project with polyzymd project init")
     return created
+
+
+def _check_study_label(label: str) -> None:
+    """Refuse a study label that is not a folder name (lower case, digits and ``_``) or is reserved."""
+    from polyzymd.analyses.study_scaffold import check_label, condition_folder
+
+    if condition_folder(label) != label:
+        raise ProtocolError(
+            f"The study label {label!r} is not a folder name.",
+            hint=f"Use lower case, digits and _ only, such as {condition_folder(label)!r}.",
+        )
+    check_label(label, "study")
+
+
+def _write_study(folder: Path) -> Path:
+    """Write an empty study of a project into ``folder``, without licences, and return it."""
+    from polyzymd.analyses.study_scaffold import create_study
+
+    create_study(folder, git=False)
+    # The project holds the licences, once.
+    for name in ("LICENSE-code", "LICENSE-data"):
+        (folder / name).unlink(missing_ok=True)
+    (folder / "study.yaml").write_text(STUDY_YAML)
+    return folder
+
+
+def add_study(project: str | Path, label: str) -> Path:
+    """Write an empty study ``label`` into the project at ``project`` and list it in ``project.yaml``.
+
+    The study folder is ``<project>/<label>``, as :func:`create_project`
+    writes it. The study is added as one line under ``studies:``, so the
+    rest of ``project.yaml``, comments included, is kept. ``runs/`` is
+    added to the project's ``.gitignore`` if it lacks it. Nothing is
+    committed. Returns the study folder.
+
+    Raises
+    ------
+    ProtocolError
+        If there is no ``project.yaml``, the label is not a folder name or is
+        reserved, or the project already lists the label or holds its folder.
+    """
+    import yaml
+
+    from polyzymd.analyses.project_file import find_project_file
+    from polyzymd.analyses.study_scaffold import _list_entry, ignore_runs
+
+    file = find_project_file(project)
+    _check_study_label(label)
+    listed = (yaml.safe_load(file.read_text()) or {}).get("studies") or {}
+    folder = file.parent / label
+    if label in listed or folder.exists():
+        raise ProtocolError(
+            f"{file} already has a study {label!r} or a folder {folder}.",
+            hint="Choose another label.",
+        )
+    _write_study(folder)
+    ignore_runs(file.parent)
+    _list_entry(file, "studies", label, label)
+    return folder

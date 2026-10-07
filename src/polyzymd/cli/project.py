@@ -94,8 +94,9 @@ def init_command(path: Path, studies: tuple[str, ...], holder: str | None, no_gi
 
     Writes project.yaml listing the studies, analyses/, stats/, figures/,
     licences and a README, and one study folder per --study with a
-    study.yaml to fill in. To bring existing studies in, follow the tutorial
-    "Move existing studies into a project".
+    study.yaml to fill in. Add a study later with polyzymd project
+    add-study. To bring existing studies in, follow the how-to "Move
+    existing studies into a project".
 
     \b
     Examples:
@@ -113,6 +114,41 @@ def init_command(path: Path, studies: tuple[str, ...], holder: str | None, no_gi
         "next: fill description:, structures:, regions: and conditions: in each study.yaml "
         "(polyzymd study add-condition adds a condition), the analyses and metadata: in "
         "project.yaml, then polyzymd project check"
+    )
+
+
+@project_group.command("add-study")
+@click.argument("label")
+@click.option(
+    "--project",
+    "project_path",
+    type=click.Path(path_type=Path),
+    default=Path("."),
+    show_default=True,
+    help="project.yaml, or the folder holding it.",
+)
+def add_study_command(label: str, project_path: Path) -> None:
+    """Add the study LABEL to a project: a study folder named LABEL, listed in project.yaml.
+
+    The folder gets a study.yaml to fill in, as project init writes. LABEL
+    must be a folder name: lower case, digits and _. Nothing is committed.
+
+    \b
+    Examples:
+        polyzymd project add-study calb343 --project Paper_1
+    """
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.project_scaffold import add_study
+
+    try:
+        folder = add_study(project_path, label)
+    except ProtocolError as exc:
+        _fail(exc)
+    click.echo(f"study {label}: {folder}, listed in project.yaml")
+    click.echo(
+        f"next: fill in {folder / 'study.yaml'}, add conditions with "
+        f"polyzymd study add-condition LABEL --new --study {folder}, commit, "
+        "and run polyzymd project check"
     )
 
 
