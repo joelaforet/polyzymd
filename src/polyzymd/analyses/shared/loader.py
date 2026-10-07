@@ -1426,7 +1426,11 @@ class TrajectoryLoader:
         if self._engine is None:
             from polyzymd.engines import create_engine
 
-            self._engine = create_engine(self.config, override=self._engine_override)
+            # Reading a run needs no engine binary: a GROMACS run is analysed
+            # on a machine without GROMACS.
+            self._engine = create_engine(
+                self.config, override=self._engine_override, defer_binary=True
+            )
         return self._engine
 
     def _resolve_layout(
