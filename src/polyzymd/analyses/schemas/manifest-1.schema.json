@@ -20,8 +20,8 @@
       "required": ["files", "production_ns"],
       "properties": {
         "files": {"type": "array", "items": {"$ref": "#/$defs/file"}},
-        "engine_inputs": {"type": "array", "items": {"$ref": "#/$defs/file"}},
-        "final_frame": {"$ref": "#/$defs/file"},
+        "engine_inputs": {"type": "array", "items": {"$ref": "#/$defs/file"}, "description": "Each path is relative to the deposit folder, and is the file's name in engine_inputs.zip."},
+        "final_frame": {"$ref": "#/$defs/file", "description": "Its path is relative to the deposit folder, and is the file's name in final_frames.zip."},
         "production_frames": {"type": "integer"},
         "production_ns": {"type": "number", "description": "Time of the last production frame, in ns."},
         "trajectory_variant": {"type": ["string", "null"]},
