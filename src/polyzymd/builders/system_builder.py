@@ -871,7 +871,7 @@ class SystemBuilder:
                 extra_padding_nm=config.polymers.packing.padding,
             )
             LOGGER.info(
-                "Deterministic periodic cell from the protein + substrate bounding box "
+                "Deterministic periodic cell from the protein + substrate diameter "
                 f"+ 2 x ({config.polymers.packing.padding} + {config.solvent.box.padding}) nm: "
                 f"{box_vectors}"
             )

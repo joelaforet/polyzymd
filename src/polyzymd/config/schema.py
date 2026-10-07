@@ -92,7 +92,6 @@ class BoxShape(str, Enum):
 
     CUBE = "cube"
     RHOMBIC_DODECAHEDRON = "rhombic_dodecahedron"
-    TRUNCATED_OCTAHEDRON = "truncated_octahedron"
 
 
 class Ensemble(str, Enum):

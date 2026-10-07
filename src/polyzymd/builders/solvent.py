@@ -45,7 +45,7 @@ ION_CHARGE_TOLERANCE = 1.0e-5
 WaterModelType = Literal["tip3p", "spce", "tip4p", "tip4pew", "opc"]
 
 # Box shape type
-BoxShapeType = Literal["cube", "rhombic_dodecahedron", "truncated_octahedron"]
+BoxShapeType = Literal["cube", "rhombic_dodecahedron"]
 
 
 @dataclass
@@ -258,8 +258,7 @@ class SolventBuilder:
         padding : float
             Solute-to-box-edge padding in nm (``solvent.box.padding``).
         box_shape : str
-            Box geometry (``cube``, ``rhombic_dodecahedron``,
-            ``truncated_octahedron``).
+            Box geometry (``cube`` or ``rhombic_dodecahedron``).
         extra_padding : float
             Additional padding in nm reserved for molecules that will be packed
             later (``polymers.packing.padding``).  ``0.0`` for a build without
@@ -848,8 +847,6 @@ class SolventBuilder:
             return packmol.UNIT_CUBE
         elif shape == "rhombic_dodecahedron":
             return packmol.RHOMBIC_DODECAHEDRON
-        elif shape == "truncated_octahedron":
-            return packmol.TRUNCATED_OCTAHEDRON
         else:
             LOGGER.warning(f"Unknown box shape '{shape}', using cube")
             return packmol.UNIT_CUBE

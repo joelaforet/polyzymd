@@ -318,10 +318,25 @@ def _echo_box_plan(sim_config: "SimulationConfig", *, phase: str) -> None:
             padding_nm=padding,
             margin_nm=box.tolerance / 10.0,
         )
-    except (OSError, ValueError) as exc:
+    except Exception as exc:  # a diagnostic never stops the dry run
         colored_echo(f"    Box: not estimated ({exc})", phase=phase, level=logging.WARNING)
         return
-    colored_echo(f"    Box ({box.shape.value}): {describe_box_plan(plan)}", phase=phase)
+    source = " (from the enzyme PDB only; the substrate is not included)"
+    colored_echo(
+        f"    Box ({box.shape.value}): {describe_box_plan(plan)}"
+        f"{source if sim_config.substrate else ''}",
+        phase=phase,
+    )
+
+
+def _remove_empty_run_dir(run_dir: Path) -> None:
+    """Remove a run folder that holds nothing but its replicate lock file."""
+    try:
+        if {path.name for path in run_dir.iterdir()} <= {".polyzymd.lock"}:
+            (run_dir / ".polyzymd.lock").unlink(missing_ok=True)
+            run_dir.rmdir()
+    except OSError:
+        pass
 
 
 @click.group()
@@ -452,8 +467,8 @@ def build(
 
     colored_echo(f"Loading configuration from: {config}", phase="build")
 
-    # A run folder made by a build that then fails is removed, so a failed
-    # build leaves no empty folder behind.
+    # A run folder made by a build that then fails is removed if it is still
+    # empty, so a failed build leaves no empty folder behind.
     new_run_dir: Path | None = None
     try:
         sim_config = SimulationConfig.from_yaml(config)
@@ -657,7 +672,7 @@ def build(
         for rep in replicate_list:
             colored_echo(f"Building system for replicate {rep}...", phase="build")
             working_dir = sim_config.get_working_directory(rep)
-            new_run_dir = None if working_dir.exists() else working_dir
+            made_run_dir = not working_dir.exists()
             from polyzymd.simulation.artifact_integrity import (
                 assert_rebuild_allowed,
                 replicate_lock,
@@ -665,6 +680,7 @@ def build(
 
             build_lock = replicate_lock(working_dir)
             build_lock.__enter__()
+            new_run_dir = working_dir if made_run_dir else None
             assert_rebuild_allowed(working_dir)
             builder = SystemBuilder.from_config(sim_config)
             interchange = builder.build_from_config(
@@ -845,9 +861,7 @@ def build(
 
     finally:
         if new_run_dir is not None:
-            import shutil
-
-            shutil.rmtree(new_run_dir, ignore_errors=True)
+            _remove_empty_run_dir(new_run_dir)
 
 
 # =============================================================================
@@ -1148,9 +1162,7 @@ def _run_gromacs_impl(
             )
         except BaseException:
             if new_run_dir:
-                import shutil
-
-                shutil.rmtree(working_dir, ignore_errors=True)
+                _remove_empty_run_dir(working_dir)
             raise
 
         # Get component info for position restraints

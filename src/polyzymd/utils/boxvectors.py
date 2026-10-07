@@ -100,7 +100,7 @@ def plan_box(
     """Size a periodic cell for a solute.
 
     The cell edge is the solute diameter plus ``2 * padding_nm``. Every
-    lattice vector of a cube, rhombic dodecahedron or truncated octahedron is
+    lattice vector of a cube or a rhombic dodecahedron is
     at least one edge long, so the solute is at least ``2 * padding_nm`` from
     each of its periodic copies, in any orientation.
 

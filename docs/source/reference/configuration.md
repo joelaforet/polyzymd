@@ -275,8 +275,8 @@ added on top of the salt, as OpenMM `Modeller` and `gmx genion -neutral` do.
 
 `box.padding` is the distance from the **solute** to the box edge. The edge of
 the cell is the solute diameter (its largest atom-to-atom distance) plus
-`2 * padding`, as in `gmx editconf -d`. Every lattice vector of a cube, rhombic
-dodecahedron or truncated octahedron is at least one edge long. The solute
+`2 * padding`, as in `gmx editconf -d`. Every lattice vector of a cube or a
+rhombic dodecahedron is at least one edge long. The solute
 therefore starts at least `2 * padding` from each of its periodic copies, in
 any orientation. The solute's bounding box is centred in the brick. When
 polymers are configured, `polymers.packing.padding` is added to it and the
@@ -302,10 +302,9 @@ solvent counts.
 |-------|-------------|
 | `cube` | Cube: three equal edges at right angles |
 | `rhombic_dodecahedron` | Same edge, 71 % of the cube volume (default) |
-| `truncated_octahedron` | Same edge, 77 % of the cube volume |
 
-All three shapes use the same edge, so they keep the solute equally far from
-its periodic copies. The two non-cubic shapes need fewer waters.
+Both shapes use the same edge, so they keep the solute equally far from its
+periodic copies. The rhombic dodecahedron needs fewer waters.
 
 ### Co-solvents
 
