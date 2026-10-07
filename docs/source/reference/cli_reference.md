@@ -1230,7 +1230,7 @@ recorded is never replaced.
 | `--rehash-changed` | Hash again the entries of `trajectory_hashes.json` whose file size changed |
 
 It prints one line per replicate, such as `SBMA 50% replicate 1 (openmm):
-hashed 11, already recorded 1`, and `<label>: no runs found in <folder>` for
+hashed 11, already recorded 1`, and `<label>: no replicates found under <folder>` for
 a config whose runs are not where it says. Reading takes about a second per
 gigabyte, so on a cluster run it in a batch job.
 

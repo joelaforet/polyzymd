@@ -453,7 +453,7 @@ class TestHashExistingRuns:
         none = CliRunner().invoke(
             cli, ["hash-trajectories", "-c", str(config), "--replicates", "7"]
         )
-        assert none.exit_code == 0 and "A: no runs found in" in none.output
+        assert none.exit_code == 0 and "A: no replicates found under" in none.output
         usage = CliRunner().invoke(cli, ["hash-trajectories"])
         assert usage.exit_code == 2 and "give -c config.yaml or --study" in usage.output
 
