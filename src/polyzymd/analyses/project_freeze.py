@@ -208,7 +208,14 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         project=True,
     )
     result = _finish_deposit(
-        root, deposit, tag, commit, manifest, readme + _studies_section(project), warnings
+        root,
+        deposit,
+        tag,
+        commit,
+        manifest,
+        readme + _studies_section(project),
+        warnings,
+        kind="project",
     )
     result.git_failed = bool(state and tag and commit is None)
     return result

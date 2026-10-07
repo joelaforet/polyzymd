@@ -199,8 +199,9 @@ def write_guide(
     batches: list[Batch],
     notes: list[str],
     warnings: list[str],
+    kind: str = "study",
 ) -> Path:
-    """Write ``deposit/UPLOAD.md``, the steps to publish this frozen study on Zenodo."""
+    """Write ``deposit/UPLOAD.md``, the steps to publish this frozen study or project (``kind``) on Zenodo."""
     from polyzymd.citation import citation_line
 
     doi = meta.get("doi")
@@ -218,27 +219,27 @@ def write_guide(
     gaps = "\n".join(f"- {w}" for w in warnings) or "- none"
     trajectory_notes = "\n".join(f"- {n}" for n in notes)
     step1 = (
-        f"The study's DOI is already set: `{doi}`. Use **Yes, I already have one** and enter it, "
+        f"The {kind}'s DOI is already set: `{doi}`. Use **Yes, I already have one** and enter it, "
         "or open the draft that reserved it."
         if doi
-        else """1. On https://zenodo.org, choose **New upload**.
+        else f"""1. On https://zenodo.org, choose **New upload**.
 2. Under *Digital Object Identifier*, answer **No** and press **Get a DOI now!**. Zenodo
    reserves a DOI for this draft; it is registered only when you publish, and is
    lost if you delete the draft.
-3. Put the DOI in `study.yaml`:
+3. Put the DOI in `{kind}.yaml`:
 
    ```yaml
    metadata:
      doi: "10.5281/zenodo.NNNNNNN"
    ```
 
-4. Commit, and run `polyzymd study freeze` again: the next tag carries the DOI in
+4. Commit, and run `polyzymd {kind} freeze` again: the next tag carries the DOI in
    `CITATION.cff`, `.zenodo.json` and `manifest.json`. Then upload that freeze's
    `deposit/upload/` to the same draft."""
     )
     text = f"""# Publish {study_name} on Zenodo
 
-Written by `polyzymd study freeze` for `{tag or "an untagged freeze"}`. PolyzyMD prepares
+Written by `polyzymd {kind} freeze` for `{tag or "an untagged freeze"}`. PolyzyMD prepares
 the files and this guide; uploading and publishing are yours, because publishing
 on Zenodo is permanent and mints a DOI. Test on https://sandbox.zenodo.org first
 if you like: it is a separate account, and nothing there is real.
@@ -250,7 +251,7 @@ from the deposit:
 
 {gaps}
 
-## 1. Reserve the study's DOI
+## 1. Reserve the {kind}'s DOI
 
 {step1}
 
@@ -269,7 +270,7 @@ most {RECORD_FILES} files, and Zenodo shows what is inside a zip.
 ## 3. Fill in the form
 
 Every value comes from `.zenodo.json`, which `freeze` wrote from `metadata:` in
-`study.yaml`:
+`{kind}.yaml`:
 
 | Zenodo field | Value |
 |---|---|
@@ -284,7 +285,7 @@ After publishing:
   30 days, leaving a tombstone;
 - files can no longer be changed after a short period (Zenodo's help pages give 30
   and 45 days); metadata can be edited at any time;
-- to change files later, edit `study.yaml`, freeze again and upload the new
+- to change files later, edit `{kind}.yaml`, freeze again and upload the new
   `deposit/upload/` as a **New version** of the record. Each version gets its own
   DOI; the record's concept DOI always resolves to the latest. Cite the version
   DOI for reproducibility.
@@ -304,8 +305,8 @@ to {_gb(RECORD_BYTES_INCREASED)} with a quota increase from the draft's storage 
 
 Deposit each batch as its own record, on Zenodo or in a repository that suits
 data this size, keeping the paths of `{TRAJECTORIES}` under one folder per condition.
-Then list each DOI under `metadata.related.trajectories` in `study.yaml`,
-with the conditions it holds, and freeze again; edit the study record's metadata
+Then list each DOI under `metadata.related.trajectories` in `{kind}.yaml`,
+with the conditions it holds, and freeze again; edit the {kind} record's metadata
 (Related works) to add them. Anyone who downloads them runs
 `polyzymd study locate DOWNLOAD_DIR --verify`, which checks every file against
 `manifest.json`.
@@ -356,6 +357,7 @@ def prepare_upload(
     manifest: dict[str, Any],
     zenodo: dict[str, Any],
     warnings: list[str],
+    kind: str = "study",
 ) -> dict[str, Path]:
     """Write ``deposit/upload/``, ``deposit/trajectories.csv`` and ``deposit/UPLOAD.md``; return their paths."""
     upload = upload_folder(deposit, f"{study_name}-{tag or 'untagged'}")
@@ -371,6 +373,7 @@ def prepare_upload(
         batches=batches,
         notes=notes,
         warnings=warnings,
+        kind=kind,
     )
     return {"upload": deposit / UPLOAD, "trajectories": trajectories, "guide": guide}
 
