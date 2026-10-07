@@ -840,11 +840,15 @@ class TestRunReusesBuild:
         gromacs_dir.mkdir(parents=True)
         for name in ("sys.top", "sys.gro", "em.mdp", "eq_01_nvt.mdp", "eq_01.gro", "prod.mdp"):
             (gromacs_dir / name).write_text("")
+        (gromacs_dir / "eq_02.gro").write_text("")
+        # eq_02 ran before this run; this run skipped it.
+        (gromacs_dir / "eq_02.log").write_text("Started mdrun on rank 0 Wed Oct  7 00:00:00 2020\n")
 
         _run_gromacs_impl(self._config(tmp_path), replicate=1, gmx_path="gmx")
 
-        (stage,) = load_progress(gromacs_dir).equilibration_stages
-        assert stage.polyzymd_version == __version__
+        first, earlier = load_progress(gromacs_dir).equilibration_stages
+        assert first.polyzymd_version == __version__
+        assert earlier.polyzymd_version is None
 
 
 class TestCliExceptionHandlingNarrowing:

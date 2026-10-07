@@ -1149,6 +1149,8 @@ def _run_gromacs_impl(
     config_path : str
         The config file, recorded in ``gromacs/progress.json``.
     """
+    from datetime import datetime, timezone
+
     from polyzymd.analyses.shared.gromacs import system_prefix
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
@@ -1224,6 +1226,7 @@ def _run_gromacs_impl(
     colored_echo("\nStarting GROMACS simulation...", phase="export")
     colored_echo(f"Using GROMACS executable: {gmx_path}", phase="export")
 
+    run_start = datetime.now(timezone.utc).replace(microsecond=0)
     try:
         runner = GromacsRunner(
             working_dir=gromacs_dir,
@@ -1240,7 +1243,13 @@ def _run_gromacs_impl(
         engine = create_engine(sim_config, override="gromacs", defer_binary=True)
         progress = engine.load_or_scan_progress(gromacs_dir, replicate)
         progress.config_path = config_path
-        record_run_provenance(progress)
+        record_run_provenance(
+            [
+                record
+                for record in (*progress.equilibration_stages, *progress.segments)
+                if datetime.fromisoformat(record.started_at) >= run_start
+            ]
+        )
         save_progress(gromacs_dir, progress)
 
         colored_echo("\nGROMACS simulation completed successfully!", phase="export")

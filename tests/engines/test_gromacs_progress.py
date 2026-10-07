@@ -219,3 +219,38 @@ def test_records_keep_the_polyzymd_version_that_ran_mdrun(tmp_path: Path, monkey
     rescanned = load_or_scan_gromacs_progress(tmp_path)
     assert rescanned.equilibration_stages[0].polyzymd_version == "1.3.0"
     assert scan_gromacs_progress(tmp_path).segments[0].polyzymd_version is None
+
+
+def test_update_records_its_version_only_on_what_it_ran(tmp_path: Path, monkeypatch) -> None:
+    """Records saved earlier without a version stay without one; new and re-run ones get it."""
+    from polyzymd.engines.gromacs.progress import load_or_scan_gromacs_progress
+    from polyzymd.simulation.progress import save_progress
+
+    (tmp_path / "eq_01.gro").write_text("eq")
+    (tmp_path / "eq_01.log").write_text("Started mdrun on rank 0 Wed Oct  7 00:00:00 2026\n")
+    (tmp_path / "prod.log").write_text("nsteps = 200\n Step Time\n 100 0.2\n")
+    save_progress(tmp_path, load_or_scan_gromacs_progress(tmp_path))
+    monkeypatch.setattr("polyzymd.utils.version.get_polyzymd_version", lambda: "1.3.0")
+
+    (tmp_path / "prod.log").write_text("nsteps = 200\n Step Time\n 200 0.4\nFinished mdrun\n")
+    progress = update_gromacs_progress(tmp_path)
+    assert [r.polyzymd_version for r in progress.segments] == [None, "1.3.0"]
+    assert progress.equilibration_stages[0].polyzymd_version is None
+
+    progress.equilibration_stages[0].polyzymd_version = "1.2.0"
+    save_progress(tmp_path, progress)
+    (tmp_path / "eq_01.log").write_text(
+        "Started mdrun on rank 0 Wed Oct  7 02:00:00 2026\n"
+        "Finished mdrun on rank 0 Wed Oct  7 02:01:00 2026\n"
+    )
+    rerun = update_gromacs_progress(tmp_path)
+    assert rerun.equilibration_stages[0].polyzymd_version == "1.3.0"
+
+
+def test_unreadable_stage_log_does_not_stop_a_scan(tmp_path: Path) -> None:
+    """A stage log that cannot be read gives a stage record of length 0."""
+    (tmp_path / "eq_01.gro").write_text("eq")
+    (tmp_path / "eq_01.log").mkdir()
+
+    (stage,) = _scan_equilibration_gromacs(tmp_path)
+    assert stage.duration_ns == 0.0

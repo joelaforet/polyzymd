@@ -157,8 +157,16 @@ def update_gromacs_progress(
 
     if existing is None:
         progress = scanned
+        ran = [*scanned.equilibration_stages, *scanned.segments]
     else:
         progress = existing
+        earlier = {record.index: record for record in existing.equilibration_stages}
+        ran = [
+            record
+            for record in scanned.equilibration_stages
+            if record.index not in earlier
+            or earlier[record.index].finished_at != record.finished_at
+        ]
         progress.equilibration_stages = _keep_provenance(
             scanned.equilibration_stages, existing.equilibration_stages
         )
@@ -174,6 +182,7 @@ def update_gromacs_progress(
         old_steps = progress.total_steps_completed
         new_steps = scanned.total_steps_completed
         delta_steps = max(0, new_steps - old_steps)
+        old_segments = len(progress.segments)
 
         if delta_steps > 0:
             status = (
@@ -194,6 +203,7 @@ def update_gromacs_progress(
             )
         elif not progress.segments and new_steps > 0 and scanned.segments:
             progress.segments.extend(scanned.segments)
+        ran.extend(progress.segments[old_segments:])
 
         progress.status = scanned.status
 
@@ -205,7 +215,7 @@ def update_gromacs_progress(
                 progress.segments[-1].finished_at or datetime.now(timezone.utc).isoformat()
             )
 
-    record_run_provenance(progress)
+    record_run_provenance(ran)
     save_progress(working_dir, progress)
     return progress
 
@@ -228,15 +238,15 @@ def _parse_gromacs_log(log_path: Path) -> dict:
         - ``is_finished``: bool
         - ``nsteps_requested``: int
     """
-    if not log_path.exists():
+    try:
+        text = log_path.read_text(errors="ignore")
+    except OSError:
         return {
             "steps_completed": 0,
             "time_completed_ps": 0.0,
             "is_finished": False,
             "nsteps_requested": 0,
         }
-
-    text = log_path.read_text(errors="ignore")
     is_finished = "Finished mdrun" in text
 
     nsteps_match = re.search(r"\bnsteps\s*=\s*(\d+)", text)
@@ -376,19 +386,19 @@ def _keep_provenance(
     return scanned
 
 
-def record_run_provenance(progress: SimulationProgress) -> None:
-    """Record this process's PolyzyMD version and pixi environment on records without one.
+def record_run_provenance(records: list[EquilibrationStageRecord | SegmentRecord]) -> None:
+    """Record this process's PolyzyMD version and pixi environment on ``records``.
 
-    Only the process that ran mdrun calls this, so a later scan by another
-    version never records itself. ``openmm_version`` stays None.
+    Pass only the records of stages and segments that this process ran, so a
+    scan never records a version that did not run them. ``openmm_version``
+    stays None.
     """
     from polyzymd.utils.version import record_provenance
 
     found = record_provenance()
-    for record in (*progress.equilibration_stages, *progress.segments):
-        if record.polyzymd_version is None:
-            record.polyzymd_version = found["polyzymd_version"]
-            record.pixi_environment = found["pixi_environment"]
+    for record in records:
+        record.polyzymd_version = found["polyzymd_version"]
+        record.pixi_environment = found["pixi_environment"]
 
 
 def _seeds(mdp_path: Path | None, log_path: Path) -> dict[str, int | None] | None:

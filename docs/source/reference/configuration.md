@@ -849,13 +849,14 @@ platform and the property values it used under `openmm_platform` in
 :::
 
 The optional `gromacs:` block sets how PolyzyMD calls GROMACS and which SLURM
-resources a GROMACS job asks for. Only the SLURM scripts that `polyzymd submit`
-and `polyzymd recover` write use it, when the engine is GROMACS:
-`engine: gromacs` in the config, or `--engine gromacs`. A local `polyzymd run`
-and the `run_<prefix>_gromacs.sh` script that `build --format gromacs` writes
-do not read it: they call `gmx` (or `--gmx-path`) as
-`gmx mdrun -deffnm <stage> -v` with no extra flags. To use other flags locally,
-run the GROMACS commands yourself.
+resources a GROMACS job asks for. `analysis_topology` is read by the analyses
+and by freeze. Every other field is used only by the SLURM scripts that
+`polyzymd submit` and `polyzymd recover` write when the engine is GROMACS
+(`engine: gromacs` in the config, or `--engine gromacs`). A local
+`polyzymd run` and the `run_<prefix>_gromacs.sh` script that
+`build --format gromacs` writes do not read those fields: they call `gmx` (or
+`--gmx-path`) as `gmx mdrun -deffnm <stage> -v` with no extra flags. To use
+other flags locally, run the GROMACS commands yourself.
 
 ### Minimal Example
 
