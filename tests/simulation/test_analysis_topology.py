@@ -101,11 +101,11 @@ def test_build_bundle_publishes_and_validates_the_prmtop(tmp_path: Path, water_b
     assert (tmp_path / ANALYSIS_TOPOLOGY_NAME).is_file()
     on_disk = json.loads((tmp_path / "build_manifest.json").read_text())
     assert on_disk["artifacts"][ANALYSIS_TOPOLOGY_NAME]["sha256"]
-    validate_build_bundle(tmp_path, _Config(), allow_legacy=False)
+    validate_build_bundle(tmp_path, _Config())
 
     (tmp_path / ANALYSIS_TOPOLOGY_NAME).unlink()
     with pytest.raises(ArtifactIntegrityError, match="analysis-topology"):
-        validate_build_bundle(tmp_path, _Config(), allow_legacy=False)
+        validate_build_bundle(tmp_path, _Config())
 
 
 def test_atoms_without_names_get_their_element() -> None:

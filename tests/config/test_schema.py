@@ -460,20 +460,18 @@ class TestRunDirectoryNaming:
 class TestSimulationPhasesConfig:
     """Test staged equilibration requirements."""
 
-    def test_ignores_deprecated_report_interval(self, caplog):
-        """Legacy intervals are ignored so samples controls trajectory cadence."""
+    def test_refuses_report_interval_and_names_samples(self):
+        """production.report_interval is refused; the error says samples sets the cadence."""
         from polyzymd.config.schema import SimulationPhaseConfig
 
-        phase = SimulationPhaseConfig(
-            ensemble="NPT",
-            duration=1.0,
-            samples=10,
-            report_interval=50000,
-            checkpoint_interval=60.0,
-        )
-
-        assert "report_interval" not in phase.model_dump()
-        assert "Ignoring deprecated" in caplog.text
+        with pytest.raises(ValidationError, match="'report_interval' was removed.*'samples'"):
+            SimulationPhaseConfig(
+                ensemble="NPT",
+                duration=1.0,
+                samples=10,
+                report_interval=50000,
+                checkpoint_interval=60.0,
+            )
 
     def test_requires_equilibration_stages(self):
         from pydantic import ValidationError
@@ -608,39 +606,31 @@ class TestEquilibrationTemperatureRamp:
         with pytest.raises(ValidationError, match="must be <"):
             self._stage(temperature_end=end)
 
-    def test_migrates_legacy_increment_and_interval(self, caplog):
+    def test_refuses_temperature_interval_and_names_the_step_key(self):
         from polyzymd.config.schema import EquilibrationStageConfig
 
-        with pytest.warns(DeprecationWarning, match="temperature_interval_steps"):
-            stage = EquilibrationStageConfig(
+        removed = "'temperature_interval' was removed.*'temperature_interval_steps'"
+        with pytest.raises(ValidationError, match=removed):
+            EquilibrationStageConfig(
                 name="heating",
-                duration=0.1,
                 temperature_start=60.0,
                 temperature_end=300.0,
                 temperature_increment=1.0,
                 temperature_interval=1200.0,
             )
 
-        assert stage.temperature_increment == pytest.approx(1.0)
-        assert stage.temperature_interval_steps == 600
-        assert stage.resolved_duration == pytest.approx(0.288)
-        assert "converted to temperature_interval_steps=600" in caplog.text
-
-    def test_migrates_duration_only_ramp_with_legacy_defaults(self, caplog):
+    def test_refuses_duration_only_ramp_and_names_the_step_key(self):
         from polyzymd.config.schema import EquilibrationStageConfig
 
-        with pytest.warns(DeprecationWarning, match="legacy 1200 fs default"):
-            stage = EquilibrationStageConfig(
+        with pytest.raises(
+            ValidationError, match="Do not specify 'duration'.*'temperature_interval_steps'"
+        ):
+            EquilibrationStageConfig(
                 name="heating",
                 duration=0.3,
                 temperature_start=60.0,
                 temperature_end=300.0,
             )
-
-        assert stage.temperature_increment == pytest.approx(1.0)
-        assert stage.temperature_interval_steps == 600
-        assert stage.resolved_duration == pytest.approx(0.288)
-        assert "legacy 1200 fs default" in caplog.text
 
     def test_constant_stage_does_not_emit_ramp_deprecation_warning(self):
         import warnings
@@ -666,19 +656,6 @@ class TestEquilibrationTemperatureRamp:
                 temperature_start=60.0,
                 temperature_end=300.0,
                 temperature_ramp_rate=0.8333333333333334,
-            )
-
-    def test_rejects_old_and_new_intervals_together(self):
-        from polyzymd.config.schema import EquilibrationStageConfig
-
-        with pytest.raises(ValidationError, match="Cannot specify both"):
-            EquilibrationStageConfig(
-                name="heating",
-                temperature_start=60.0,
-                temperature_end=300.0,
-                temperature_increment=1.0,
-                temperature_interval=1200.0,
-                temperature_interval_steps=600,
             )
 
 
@@ -1029,6 +1006,23 @@ class TestPolymerPackingSphereConfinement:
         from polyzymd.config.schema import PolymerPackingConfig
 
         assert PolymerPackingConfig(confine_to_sphere=False).confine_to_sphere is False
+
+    def test_refuses_exclude_solute_bbox_and_names_the_sphere(self):
+        from polyzymd.config.schema import PolymerPackingConfig
+
+        with pytest.raises(
+            ValidationError, match="'exclude_solute_bbox' was removed.*'confine_to_sphere'"
+        ):
+            PolymerPackingConfig(exclude_solute_bbox=True)
+
+    def test_refuses_packing_box_vectors_and_names_the_paddings(self):
+        from polyzymd.config.schema import PolymerPackingConfig
+
+        with pytest.raises(
+            ValidationError,
+            match="'box_vectors' was removed.*'polymers.packing.padding'.*'solvent.box.padding'",
+        ):
+            PolymerPackingConfig(box_vectors=[8.0, 10.0, 12.0])
 
     def test_changes_the_build_hash_of_polymer_configs(self, minimal_config_data):
         """Polymer systems built before this change must be rebuilt."""

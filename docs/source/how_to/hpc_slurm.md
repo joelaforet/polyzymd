@@ -230,8 +230,8 @@ to build again in a folder that has progress, minimization, equilibration or
 production files. Use a new output folder for a new molecular system.
 
 A continuation loads `production_N_topology.pdb`, the System and the State of
-the previous segment. If no previous segment has them, it uses the
-`solvated_system.pdb` of the replicate folder and logs a warning. If an error
+the previous segment. If the segment has no `production_N_topology.pdb`, the
+continuation stops with an error. If an error
 names two different particle counts, restore all files from the same build. Do
 not copy single files until the counts agree.
 

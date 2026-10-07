@@ -224,16 +224,6 @@ class ContinuationManager:
             if pdb_path.exists():
                 return pdb_path
 
-        legacy_root = self._working_dir / "solvated_system.pdb"
-        if legacy_root.exists():
-            LOGGER.warning(
-                "No segment-owned topology exists for production_%s; using legacy root "
-                "topology %s after particle-count validation",
-                self._prev_segment,
-                legacy_root,
-            )
-            return legacy_root
-
         # Arbitrary recursive PDB discovery is disallowed to avoid selecting decoys or inputs
 
         raise FileNotFoundError(f"Could not find solvated PDB file in {self._working_dir}")

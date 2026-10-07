@@ -176,8 +176,6 @@ polymers:
 | `tolerance` | float (Å) | No | 2.0 | PACKMOL minimum distance between any two atoms, including polymer to protein |
 | `movebadrandom` | bool | No | false | Pass PACKMOL's `movebadrandom`; helps dense or heterogeneous systems converge |
 | `confine_to_sphere` | bool | No | true | Confine chains to a sphere centred on the solute (radius = half the solute bounding-box diagonal + `padding`) while packing inside the final periodic brick. Set `false` to let chains fill the whole brick |
-| `box_vectors` | list[float] (nm) | No | null | Explicit `[Lx, Ly, Lz]` packing box. **Opts out of the deterministic cell**: the periodic box is then derived from the packed topology, as before, and differs between replicates |
-| `exclude_solute_bbox` | bool | No | false | Confine chains to a rectangular shell outside the solute bounding box. Off by default because the tolerance against the fixed solute already prevents overlap and the shell over-constrains long chains |
 | `nloop` | int | No | 200 | Maximum PACKMOL GENCAN loops per molecule type |
 
 PACKMOL is seeded with the replicate number for both polymer packing and
@@ -658,8 +656,8 @@ simulation_phases:
 See {doc}`../explanation/simulation_safeguards` for why the solute is frozen.
 
 ```{note}
-`production.report_interval` is deprecated and ignored. The trajectory frame
-interval is derived from `production.duration` and `production.samples`.
+The trajectory frame interval is derived from `production.duration` and
+`production.samples`. A config with `production.report_interval` is refused.
 ```
 
 For a temperature ramp, omit `duration`. Set `temperature_increment` in K and

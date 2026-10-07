@@ -719,18 +719,6 @@ def test_bad_options_exit_2_and_write_nothing(configs, tmp_path, extra, message)
     assert not (tmp_path / "out" / "slurm").exists()
 
 
-def test_submit_with_a_comparison_file_gives_the_retirement_error(tmp_path) -> None:
-    comparison = tmp_path / "comparison.yaml"
-    comparison.write_text("name: x\n")
-    arguments = ["rg", "-f", str(comparison), "--output-dir", str(tmp_path / "out")]
-    result = CliRunner().invoke(analyze_command, [*arguments, "--submit", "--dry-run"])
-    direct = CliRunner().invoke(analyze_command, arguments[:3])
-    assert result.exit_code == EXIT_ANALYSIS_ERROR
-    assert direct.exit_code == EXIT_ANALYSIS_ERROR
-    assert result.stderr == direct.stderr
-    assert not (tmp_path / "out").exists()
-
-
 def test_submit_of_an_unknown_analysis_is_refused(configs, tmp_path) -> None:
     arguments = ["no_such", "-c", str(configs["A"]), "--output-dir", str(tmp_path / "out")]
     result = CliRunner().invoke(analyze_command, [*arguments, "--submit", "--dry-run"])

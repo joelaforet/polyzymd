@@ -98,7 +98,7 @@ update it, give Joe the stale file and the replacement text.
 
 ```
 src/polyzymd/
-├── cli/          # Click CLI (main.py = entry point, analyze.py = polyzymd analyze, retired.py = hidden compare/new-analysis stubs)
+├── cli/          # Click CLI (main.py = entry point, analyze.py = polyzymd analyze)
 ├── config/       # Pydantic v2 models (schema.py), YAML loading
 ├── builders/     # System construction (PDB → parameterized topology)
 ├── simulation/   # OpenMM simulation runners
@@ -122,14 +122,11 @@ src/polyzymd/
 | **Loading and identity** | `universe.py`, `identity.py` | `UniverseProvider` loads each replicate's `Universe` and records its input files; `compute_config_hash` is recorded by every stored result and must not change |
 
 The catalytic triad is not an analysis: it is a routine on the study API
-(`docs/source/how_to/analysis_triad_quickstart.md`), and `polyzymd analyze
-catalytic_triad` exits with a pointer to it. `polyzymd analyze` does not read
-`comparison.yaml`: `-f comparison.yaml` exits with the equivalent `-c` command.
-An unknown name exits 2 listing `FUNCTION_ANALYSES`. `polyzymd analyze NAME -c
-... --submit --preset <cluster>` runs one SLURM array task per condition and
-replicate and a report job (`workflow/analysis_submit.py`). The hidden
-`polyzymd compare` and `polyzymd new-analysis` commands (`cli/retired.py`) only
-exit 2 and name their replacements.
+(`docs/source/how_to/analysis_triad_quickstart.md`). An unknown analysis
+name, `catalytic_triad` included, exits 2 listing `FUNCTION_ANALYSES`.
+`polyzymd analyze NAME -c ... --submit --preset <cluster>` runs one SLURM
+array task per condition and replicate and a report job
+(`workflow/analysis_submit.py`).
 
 A study folder's `study.yaml` (`analyses/study_file.py`) holds the analysis
 protocol: conditions, the equilibration window (an entry may set its own
@@ -211,7 +208,7 @@ PolyzyMD never uploads or publishes: that is the author's step. The design of st
   Treat a charge mismatch as a chemistry or connectivity error: fix the
   structure upstream. Never monkeypatch OpenFF or weaken its validation.
 - **OpenMM build identity:** A completed prebuild is committed by `build_manifest.json`. Never copy `solvated_system.pdb`,
-  `system.xml`, or segment State/topology files independently. Continuation prefers the predecessor topology; root PDB fallback is legacy-only and must pass count validation.
+  `system.xml`, or segment State/topology files independently. Continuation loads the predecessor segment's topology and stops if it is missing; a build without `build_manifest.json` is refused.
 - **OpenMM site runtime:** Run submission commands from `build`. Known-site
   presets pin one simulation environment per campaign: Blanca uses
   `sim-cuda-12-4`, and Bridges-2 uses `sim-cuda-12-6`. A node probe can reject

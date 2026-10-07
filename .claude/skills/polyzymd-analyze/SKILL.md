@@ -15,11 +15,7 @@ One `-c` gives a per-condition summary. Two or more give pairwise comparisons
 with the first config as the control. `--format agent` is the default and
 prints one line per condition and comparison, every one of them. Use
 `--format json` when you need every field of the report.
-`polyzymd analyze` does not read `comparison.yaml`: `-f comparison.yaml` exits 2
-and prints the equivalent `-c ... --label ... --replicates ... --eq ...` command
-built from the file, which is the command to run. `polyzymd compare` and
-`polyzymd new-analysis` are retired: with any arguments they exit 2 and print
-the replacement. An unknown analysis name exits 2 with the list of names.
+An unknown analysis name exits 2 with the list of names.
 
 Environment: in the PolyzyMD checkout, only the `analysis` and `sim-cuda-12-4`
 pixi envs have the CLI, so go through `pixi run -e analysis` there; a bare

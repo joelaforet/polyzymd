@@ -111,7 +111,7 @@ never retired: the next job resumes from that portable state.
 | `solvent_packmol_seed` | Seed passed to the solvation PACKMOL run |
 | `box_vectors_nm` | The periodic cell as a 3x3 row-major matrix in nm |
 | `brick_nm` | Diagonal of the cell — the rectangular brick that PACKMOL fills, in nm |
-| `deterministic_box` | `true` when the cell was computed from the protein + substrate before packing (the default for polymer builds); `false` for solute-only builds and when `polymers.packing.box_vectors` is set |
+| `deterministic_box` | `true` when the cell was computed from the protein + substrate before packing (the default for polymer builds); `false` for solute-only builds |
 | `polymer_sphere_radius_nm` | Radius of the confinement sphere used for the chains (absent when `confine_to_sphere: false`) |
 
 Replicates of one condition must agree on `box_vectors_nm`, `brick_nm` and

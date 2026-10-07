@@ -182,13 +182,11 @@ they overlap their own periodic images. PACKMOL cannot see this, because it
 runs without periodic boundaries. Minimization cannot remove an overlap this
 close, so the build stops.
 
-1. If you set `polymers.packing.box_vectors`, remove it. An explicit packing
-   box can be larger than the brick.
-2. If the solute is long along `z`, it may not fit in the brick of a rhombic
+1. If the solute is long along `z`, it may not fit in the brick of a rhombic
    dodecahedron at the configured padding. The `z` clearance is
    `0.707 * padding - 0.146 * bbox_z`. Raise `solvent.box.padding`, or set
    `solvent.box.shape: cube`.
-3. A system built by PolyzyMD 1.2 must be built again. Do not edit it.
+2. A system built by PolyzyMD 1.2 must be built again. Do not edit it.
 
 A contact between half the tolerance and the full tolerance gives only a
 warning. Minimization removes it.
