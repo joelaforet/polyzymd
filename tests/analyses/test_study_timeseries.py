@@ -386,6 +386,89 @@ class TestSummaryAndCompare:
         assert "values 1, 2, 4" in text and "g 1, 1, 1" in text and "A vs B" in text
 
 
+#: Polymer effect 0.5 at every temperature; temperature effect 10 per step.
+POLYMER_EFFECT, TEMPERATURE_EFFECT = 0.5, 10.0
+NOISE = ([0.0, 0.3, 0.1], [0.3, 0.1, 0.0], [0.1, 0.0, 0.3])
+
+
+def temperature_polymer_values() -> object:
+    """Three temperatures by two polymers, every condition with the same mean noise."""
+    data, factors = {}, {}
+    for polymer in ("none", "SBMA"):
+        for step, kelvin in enumerate((300, 330, 360)):
+            label = f"{polymer} {kelvin} K"
+            shift = TEMPERATURE_EFFECT * step + (POLYMER_EFFECT if polymer == "SBMA" else 0.0)
+            data[label] = [1.0 + shift + noise for noise in NOISE[step]]
+            factors[label] = {"temperature_K": kelvin, "polymer": polymer}
+    values = replicate_values(data)
+    values.source.study.factors = factors
+    return values
+
+
+class TestCompareWithinStrata:
+    """``within`` compares each condition with the control of its own stratum."""
+
+    def test_within_isolates_the_polymer_effect(self) -> None:
+        report = temperature_polymer_values().compare(within="temperature_K")
+        pairs = [(row.a, row.b, row.stratum) for row in report.pairwise]
+        assert pairs == [
+            ("none 300 K", "SBMA 300 K", {"temperature_K": 300}),
+            ("none 330 K", "SBMA 330 K", {"temperature_K": 330}),
+            ("none 360 K", "SBMA 360 K", {"temperature_K": 360}),
+        ]
+        assert [row.delta for row in report.pairwise] == pytest.approx([POLYMER_EFFECT] * 3)
+        # One correction family: every comparison of the call, over the strata.
+        assert {row.family_size for row in report.pairwise} == {3}
+        adjusted = benjamini_hochberg([row.p for row in report.pairwise])
+        assert [row.p_adjusted for row in report.pairwise] == [
+            item.adjusted_p_value for item in adjusted
+        ]
+        for row in report.pairwise:
+            a, b = (next(c for c in report.conditions if c.label == x) for x in (row.a, row.b))
+            expected = stats.ttest_ind(b.replicate_values, a.replicate_values, equal_var=False)
+            assert row.p == pytest.approx(expected.pvalue)
+        assert "none 330 K vs SBMA 330 K  temperature_K 330  delta" in report.to_agent_text()
+
+    def test_without_within_the_differences_mix_both_effects(self) -> None:
+        report = temperature_polymer_values().compare()
+        assert {row.a for row in report.pairwise} == {"none 300 K"}
+        assert all(row.stratum is None for row in report.pairwise)
+        deltas = {row.b: row.delta for row in report.pairwise}
+        assert deltas["SBMA 360 K"] == pytest.approx(2 * TEMPERATURE_EFFECT + POLYMER_EFFECT)
+        assert deltas["none 360 K"] == pytest.approx(2 * TEMPERATURE_EFFECT)
+        assert "stratum" not in report.pairwise[0].model_dump()
+
+    def test_control_given_as_factor_values(self) -> None:
+        values = temperature_polymer_values()
+        report = values.compare(within=["temperature_K"], control={"polymer": "SBMA"})
+        assert [row.a for row in report.pairwise] == ["SBMA 300 K", "SBMA 330 K", "SBMA 360 K"]
+        assert [row.delta for row in report.pairwise] == pytest.approx([-POLYMER_EFFECT] * 3)
+
+    def test_the_study_comparison_is_the_default(self) -> None:
+        values = temperature_polymer_values()
+        values.source.study.comparison = {"within": ["temperature_K"], "control": None}
+        assert len(values.compare().pairwise) == 3
+        assert len(values.compare(within=[]).pairwise) == 5
+
+    def test_a_stratum_without_its_control_is_refused(self) -> None:
+        values = temperature_polymer_values()
+        values.source.study.factors["none 330 K"]["polymer"] = "PEG"
+        with pytest.raises(ProtocolError, match="temperature_K 330 has no control"):
+            values.compare(within="temperature_K")
+
+    def test_a_control_without_replicate_values_is_refused(self) -> None:
+        values = temperature_polymer_values()
+        values.rows["none 330 K"] = []
+        with pytest.raises(ProtocolError, match="temperature_K 330 has no control"):
+            values.compare(within="temperature_K")
+
+    def test_a_stratum_with_two_controls_is_refused(self) -> None:
+        values = temperature_polymer_values()
+        values.source.study.factors["SBMA 330 K"]["polymer"] = "none"
+        with pytest.raises(ProtocolError, match="temperature_K 330 has 2 controls"):
+            values.compare(within="temperature_K")
+
+
 class TestDetectedEquilibration:
     """pymbar detect_equilibration is reported per replicate and changes nothing.
 

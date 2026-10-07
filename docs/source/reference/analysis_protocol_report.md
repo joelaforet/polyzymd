@@ -60,6 +60,7 @@ rows the JSON form holds; every one of them is kept there.
 | Field | Type | Meaning |
 |---|---|---|
 | `a` | `str` | Control condition label. |
+| `stratum` | `dict \| None` | With a `comparison:` block or `within=`, each `within` factor and its value in this row's stratum, printed after the condition labels on the comparison line. Left out of the JSON otherwise. |
 | `b` | `str` | Compared condition label. |
 | `entry` | `str \| None` | Label compared in a labelled result, such as a residue ID. `None` for a result with one value per replicate. |
 | `delta` | `float` | `mean(b) - mean(a)`, in the metric's unit. |
@@ -68,7 +69,7 @@ rows the JSON form holds; every one of them is kept there.
 | `p_adjusted` | `float \| None` | Benjamini-Hochberg adjusted p value. `None` for a row that was not tested. |
 | `test` | `str` | `welch_t` (the default of `polyzymd analyze` and `compare()`) or `student_t`. |
 | `correction` | `str` | `BH` (Benjamini-Hochberg). |
-| `family_size` | `int \| None` | Number of tests in the Benjamini-Hochberg family this row was corrected in: the conditions compared with the control for this one outcome, or for a labelled result every tested label of every compared condition. `None` for a row that was not tested. Printed as `family <m>` on the comparison line. |
+| `family_size` | `int \| None` | Number of tests in the Benjamini-Hochberg family this row was corrected in: the conditions compared with their control for this one outcome, over every stratum, or for a labelled result every tested label of every compared condition. `None` for a row that was not tested. Printed as `family <m>` on the comparison line. |
 | `cohens_d` | `float \| None` | Standardised mean difference, the difference of the means over the pooled standard deviation, oriented like `delta`: positive means `b` is larger. |
 | `hedges_g` | `float \| None` | `cohens_d` with the Hedges small-sample correction, oriented like `cohens_d`. |
 | `direction` | `str` | `increased` or `decreased` for a significant row, otherwise `no significant change`. |
@@ -100,7 +101,7 @@ rows the JSON form holds; every one of them is kept there.
 | `config_hashes` | `dict[str, str]` | `polyzymd.analyses.identity.compute_config_hash` of each simulation config, keyed by condition label: the first 16 hex characters of the SHA-256 of the config fields that locate and describe its trajectories. |
 | `settings_fingerprint` | `str \| None` | `None`: no shipped analysis sets it. |
 | `settings` | `dict` | Settings a study-API analysis ran with. For rmsf and rmsd_per_residue: every setting, the resolved `reference_mode`, and under `residues` the residue IDs of the core and of each region. Empty for other analyses. |
-| `study` | `dict \| None` | Set for a run from a study file: `path` and `sha256` of `study.yaml`; the `run`; the `settings` it was given (from the file and `--set`), with paths inside the study or project written relative to the study and any other path as its file name; the `selections` of a study's own function; the condition `factors` its trend tests used; for a study of a project, `project` with the `path`, study `label` and `sha256` of `project.yaml`; and `git`, with the `commit` of the study folder (of the project folder for a study of a project), its `uncommitted` files and `inputs_uncommitted`, those outside `results/`, `logs/`, `deposit/` and `data.local.yaml`; `git` is `None` outside a repository. A rerun whose report differs from the saved `report.json` only in that `commit` keeps the saved file. |
+| `study` | `dict \| None` | Set for a run from a study file: `path` and `sha256` of `study.yaml`; the `run`; the `settings` it was given (from the file and `--set`), with paths inside the study or project written relative to the study and any other path as its file name; the `selections` of a study's own function; the condition `factors` its trend tests used; the `comparison` block, when `study.yaml` has one; for a study of a project, `project` with the `path`, study `label` and `sha256` of `project.yaml`; and `git`, with the `commit` of the study folder (of the project folder for a study of a project), its `uncommitted` files and `inputs_uncommitted`, those outside `results/`, `logs/`, `deposit/` and `data.local.yaml`; `git` is `None` outside a repository. A rerun whose report differs from the saved `report.json` only in that `commit` keeps the saved file. |
 | `output_paths` | `dict[str, str]` | `results` is the `polyzymd_results/<name>/` folder holding every replicate's stored values and record; `figures` is the directory holding the generated plots, absent with `--no-plots`. |
 
 ## Verdict vocabulary

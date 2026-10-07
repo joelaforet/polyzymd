@@ -37,10 +37,12 @@ _TOP_KEYS = (
     "structures",
     "regions",
     "analyses",
+    "comparison",
     "metadata",
 )
 #: Keys of a condition written as a mapping.
 _CONDITION_KEYS = ("config", "factors")
+_COMPARISON_KEYS = ("within", "control")
 _ENTRY_KEYS = ("analysis",)
 #: Keys of any ``analyses:`` entry that set its own analysis window.
 WINDOW_KEYS = ("equilibration", "until", "stride")
@@ -161,6 +163,9 @@ class StudyFile:
     regions: dict[str, str] = field(default_factory=dict)
     #: Each condition's factors, such as ``{"sbma_fraction": 0.5}``.
     factors: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: ``within`` (factor names) and ``control`` (factor values or ``None``)
+    #: of the ``comparison:`` block, or ``None`` without one.
+    comparison: dict[str, Any] | None = None
     #: The project this study belongs to, and its label there.
     project: Any = None
     project_label: str | None = None
@@ -584,6 +589,46 @@ def _condition(label: str, value: Any, file: Path) -> tuple[Path, dict[str, Any]
     return path, factors
 
 
+def _comparison(
+    value: Any, conditions: list[str], factors: dict[str, dict[str, Any]], file: Path
+) -> dict[str, Any] | None:
+    """Read ``comparison:``: the ``within`` factors and the ``control`` of each stratum.
+
+    Every stratum must have exactly one control
+    (:func:`~polyzymd.analyses.study_statistics.comparison_pairs`).
+    """
+    from polyzymd.analyses.study_statistics import comparison_pairs
+
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ProtocolError(
+            f"{file}: comparison must be a mapping.",
+            hint="For example 'comparison: {within: temperature_K}'.",
+        )
+    _unknown(value, _COMPARISON_KEYS, f"{file}: comparison")
+    within = value.get("within")
+    within = [within] if isinstance(within, str) else within
+    control = value.get("control")
+    if (
+        not isinstance(within, list)
+        or not within
+        or not all(isinstance(name, str) for name in within)
+        or not (control is None or isinstance(control, Mapping))
+    ):
+        raise ProtocolError(
+            f"{file}: comparison needs within, one factor name or a list, and takes control "
+            "as factor values.",
+            hint="For example 'comparison: {within: temperature_K, control: {polymer: none}}'.",
+        )
+    control = None if control is None else {str(k): v for k, v in control.items()}
+    try:
+        comparison_pairs(conditions, conditions, factors, within, control)
+    except ProtocolError as exc:
+        raise ProtocolError(f"{file}: comparison: {exc}", hint=exc.hint) from exc
+    return {"within": within, "control": control}
+
+
 def _named(value: Any, key: str, file: Path) -> dict[str, Any]:
     """Read ``structures:`` or ``regions:``: a mapping of names to values."""
     if value is None:
@@ -773,6 +818,7 @@ def load_study_file(path: str | Path) -> StudyFile:
         structures=structures,
         regions=regions,
         factors={label: value for label, value in factors.items() if value},
+        comparison=_comparison(raw.get("comparison"), list(conditions), factors, file),
         project=project,
         project_label=project_label,
     )

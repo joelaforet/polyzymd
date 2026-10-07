@@ -387,3 +387,18 @@ def test_a_single_replicate_is_not_said_to_have_the_same_value_in_every_replicat
     (text,) = _verdict("coverage", None, conditions, [pair])
     assert "little power: Water has fewer than 3 replicates" in text
     assert "same value in every replicate" not in text
+
+
+def test_a_stratum_whose_control_is_left_out_is_summarised_not_compared() -> None:
+    """With within, a control without matching atoms leaves every condition uncompared."""
+    from polyzymd.analyses.protocols import _report_skipping
+    from tests.analyses.test_study_timeseries import temperature_polymer_values
+
+    values = temperature_polymer_values()
+    values.source.study.comparison = {"within": ["temperature_K"], "control": None}
+    study = [SimpleNamespace(label=label) for label in values.rows]
+    empty = {("none 330 K", index): ["polymer"] for index in (1, 2, 3)}
+    report = _report_skipping(values, study, empty, "hydrogen_bonds")
+    assert report.pairwise == []
+    assert any("temperature_K 330 has no control" in text for text in report.warnings)
+    assert len(_report_skipping(temperature_polymer_values(), study, {}, "x").pairwise) == 5

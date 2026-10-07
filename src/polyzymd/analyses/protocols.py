@@ -34,7 +34,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from polyzymd.analyses.exceptions import NoMatchingAtomsError, ProtocolError
 
@@ -214,13 +214,17 @@ class PairwiseReport(BaseModel):
     is the number of tests in the Benjamini-Hochberg family this row was
     corrected in, one family per outcome, and ``None`` when that is not known
     or the row was not tested. ``entry`` is the label compared in a labelled
-    result, such as a residue ID, and ``None`` otherwise.
+    result, such as a residue ID, and ``None`` otherwise. ``a`` is the control.
+    ``stratum`` maps each ``within`` factor to its value when the conditions
+    are compared with the control of their stratum; without ``within`` it is
+    ``None`` and left out of the JSON.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
 
     a: str
     b: str
+    stratum: dict[str, Any] | None = None
     entry: str | None = None
     delta: float
     delta_ci95: tuple[float, float] | None = None
@@ -234,6 +238,13 @@ class PairwiseReport(BaseModel):
     direction: str = "unchanged"
     significant: bool = False
     testable: bool = True
+
+    @model_serializer(mode="wrap")
+    def _without_empty_stratum(self, handler: Any) -> dict[str, Any]:
+        data = handler(self)
+        if data.get("stratum") is None:
+            data.pop("stratum", None)
+        return data
 
 
 class TrendReport(BaseModel):
@@ -384,12 +395,13 @@ def analyze(
     stride: int = 1,
     data: dict[str, Path] | None = None,
     until: str | None = None,
+    study_file: Path | None = None,
 ) -> ProtocolReport:
     """Run one analysis over one or more simulation conditions.
 
     The first config is the control: every comparison is control against one
-    other condition. With a single config no comparison is possible and
-    ``pairwise`` is empty.
+    other condition, unless ``study_file`` sets a ``comparison:`` block. With a
+    single config no comparison is possible and ``pairwise`` is empty.
 
     Parameters
     ----------
@@ -430,6 +442,10 @@ def analyze(
     until : str, optional
         End of a common analysis window, such as ``"38ns"``; see
         :class:`~polyzymd.analyses.study.Condition`.
+    study_file : Path, optional
+        The ``study.yaml`` the configs come from. Its condition ``factors``
+        and its ``comparison:`` block set the control of each comparison;
+        see :meth:`~polyzymd.analyses.timeseries.ReplicateValues.compare`.
 
     Returns
     -------
@@ -459,6 +475,7 @@ def analyze(
         stride=stride,
         data=data,
         until=until,
+        study_file=study_file,
     )
 
 
@@ -494,6 +511,7 @@ def _analyze_function(
     stride: int = 1,
     data: dict[str, Path] | None = None,
     until: str | None = None,
+    study_file: Path | None = None,
 ) -> ProtocolReport:
     """Measure ``name`` on every production frame and report its per-replicate mean.
 
@@ -539,7 +557,7 @@ def _analyze_function(
                 else f"--set {next(iter(FUNCTION_ANALYSES[name]))}=..., one of the settings above."
             ),
         )
-    study = _study(configs, labels, equilibration, replicates, stride, data, until)
+    study = _study(configs, labels, equilibration, replicates, stride, data, until, study_file)
     if name in ("rmsf", "rmsd_per_residue"):
         return _analyze_rmsf(name, study, settings, run, recompute, output_dir, plots)
     if name == "sasa":
@@ -829,8 +847,8 @@ def _report_skipping(
 
     Those replicates are left out of every statistic, and a condition left
     without replicates is left out of the report, each with a warning. When
-    the control is left out, the other conditions are summarised and not
-    compared.
+    the control is left out, or a stratum's control with ``within``, the
+    other conditions are summarised and not compared.
     """
     if empty:
         values.rows = {
@@ -840,9 +858,13 @@ def _report_skipping(
     labels = [condition.label for condition in study]
     kept = [label for label in labels if values.rows.get(label)]
     control = labels[0]
+    report, lost = None, None
     if len(kept) > 1 and control in kept:
-        report = values.compare(control=control, conditions=kept)
-    else:
+        try:
+            report = values.compare(conditions=kept)
+        except ProtocolError as exc:  # a stratum's control is left out
+            lost = f"{analysis}: {exc} The conditions are summarised and not compared."
+    if report is None:
         report = values.summary(conditions=kept)
     by_condition: dict[str, list[str]] = {}
     for (label, index), missing in sorted(empty.items()):
@@ -860,6 +882,8 @@ def _report_skipping(
             "atoms, so the other conditions are summarised and not compared. Give a condition "
             "with those atoms first to compare against it."
         )
+    if lost:
+        report.warnings.append(lost)
     return report
 
 
@@ -1830,13 +1854,18 @@ def _study(
     stride: int = 1,
     data: dict[str, Path] | None = None,
     until: str | None = None,
+    study_file: Path | None = None,
 ) -> Any:
-    """Build the Study of ``configs``, with the package default equilibration window."""
+    """Build the Study of ``configs``, with the package default equilibration window.
+
+    With ``study_file``, the study takes its condition factors and its
+    ``comparison:`` block.
+    """
     from polyzymd.analyses.study import Study
     from polyzymd.config.analysis_settings import AnalysisDefaults
 
     paths = [Path(item).expanduser().resolve() for item in configs]
-    return Study.from_configs(
+    study = Study.from_configs(
         dict(zip(_labels(paths, labels), paths, strict=True)),
         equilibration=equilibration or AnalysisDefaults().equilibration_time,
         replicates=replicates,
@@ -1844,6 +1873,12 @@ def _study(
         data=data,
         until=until,
     )
+    if study_file is not None:
+        from polyzymd.analyses.study_file import load_study_file
+
+        protocol = load_study_file(study_file)
+        study.factors, study.comparison = protocol.factors, protocol.comparison
+    return study
 
 
 def _analyze_pairs(
@@ -2212,8 +2247,9 @@ def _pairwise_line(pair: PairwiseReport) -> str:
         flag = "significant" if pair.significant else "not_significant"
     family = "" if pair.family_size is None else f"  family {pair.family_size}"
     entry = "" if pair.entry is None else f"{pair.entry}  "
+    stratum = "".join(f"  {name} {value}" for name, value in (pair.stratum or {}).items())
     return (
-        f"{entry}{pair.a} vs {pair.b}  delta {_signed(pair.delta)}  ci95 {_interval(pair.delta_ci95)}"
+        f"{entry}{pair.a} vs {pair.b}{stratum}  delta {_signed(pair.delta)}  ci95 {_interval(pair.delta_ci95)}"
         f"  p {_num(pair.p)}  p_adj {_num(pair.p_adjusted)}  test {pair.test}"
         f"  correction {pair.correction}{family}  d {_num(pair.cohens_d)}  {flag}"
     )

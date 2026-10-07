@@ -114,7 +114,7 @@ recorded.
 | Method | Returns |
 |---|---|
 | `summary(conditions=None)` | A `ProtocolReport` with n, the mean, the standard error, the 95 % interval and every replicate value of each condition |
-| `compare(control=None, conditions=None, test="welch", untested=())` | A `ProtocolReport` with each condition against the control |
+| `compare(control=None, conditions=None, test="welch", untested=(), within=None)` | A `ProtocolReport` with each condition against the control, or against the control of its stratum |
 | `over_labels(how="mean", metric=None, labels=None)` | One number per replicate from a labelled array, over every label or over `labels` |
 | `plot(output_dir=None, name=None, title=None, plot_settings=None, highlight=(), xlabel="label")` | The path of a figure of the mean and interval of each condition, with every replicate value. For a labelled result, a profile |
 | `values` | The stored values |
@@ -123,10 +123,18 @@ recorded.
 
 - `control` defaults to the first condition. `test` is `"welch"` or
   `"student"`.
+- `within`, a factor name or a list, compares each condition with the
+  control of its stratum: the conditions with the same values of those
+  factors. The control of a stratum is the condition whose other factors
+  equal those of `control`, or, for `control={"polymer": "none"}`, whose
+  factors have those values. The factors come from `study.yaml`. `within`
+  and `control` default to its `comparison:` block; `within=[]` turns it off.
+  A stratum with no control or two is refused.
 - Each row gives `mean(b) - mean(a)` with its 95 % interval, the p value, the
   {term}`Benjamini-Hochberg` adjusted p value, and Cohen's d and Hedges' g.
-- The correction family is every tested row of the call. For a labelled
-  result, that is every label of every compared condition.
+- The correction family is every tested row of the call, over every stratum
+  with `within`. For a labelled result, that is every label of every compared
+  condition.
 - A row is not testable when a condition has fewer than two replicates, or
   when both conditions have the same value in every replicate. It then takes
   no part in the correction.

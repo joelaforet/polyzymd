@@ -17,7 +17,7 @@ entries of the {doc}`ProtocolReport <analysis_protocol_report>`.
 
 | Setting | `polyzymd analyze` | `ReplicateValues.compare()` |
 |---|---|---|
-| Control | first `-c` | `control=`, default the first condition of the study |
+| Control | first `-c`; with `--study`, the control of each stratum when `study.yaml` has a `comparison:` block | `control=`, default the first condition of the study; `within=` for the control of each stratum |
 | Test | Welch's t test | `test="welch"` (default) or `test="student"` |
 | Correction | Benjamini-Hochberg over every tested row of the report | Benjamini-Hochberg over every tested row of the call |
 | Significance threshold | adjusted p at most 0.05 | adjusted p at most 0.05 |

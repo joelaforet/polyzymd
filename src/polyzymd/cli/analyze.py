@@ -967,6 +967,7 @@ def _study_record(study_path: Path, run: str, settings: dict) -> dict:
         "settings": portable(settings, root, project_root),
         "selections": selections,
         "factors": protocol.factors,
+        **({"comparison": protocol.comparison} if protocol.comparison else {}),
         "conditions": list(protocol.conditions),
         "entry": entry_record(protocol, run) if entry is not None else None,
         "git": state,
@@ -1251,6 +1252,7 @@ def _run(
             data=data,
             until=until,
         )
+        study.factors, study.comparison = protocol.factors, protocol.comparison
         return run_user_analysis(
             study,
             run_name,
@@ -1279,4 +1281,5 @@ def _run(
         stride=stride,
         data=data,
         until=until,
+        study_file=study_path,
     )

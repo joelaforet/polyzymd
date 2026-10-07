@@ -58,7 +58,38 @@ analyses:
 | `stride`, `replicates` | Optional. The same as `--stride` and `--replicates`. `analyze` deletes the stored results of a replicate that `replicates` does not list and the run did not use |
 | `until` | Optional. The end of a common analysis window, such as `38ns`, the same as `--until`. See {ref}`study-until` |
 | `analyses` | Run name to settings. Each entry is one {term}`run`. The settings are the keys that `--set` takes. `analysis:` names the shipped analysis when the run name is not its name |
+| `comparison` | Optional. `within:` names the factor, or a list of factors, whose values form each stratum, such as `temperature_K`. Each condition is then compared with the control of its stratum, not with the first condition. `control:` gives the control's factor values, such as `{polymer: none}`; without it, the control of a stratum is the condition whose other factors equal those of the first condition. See {ref}`study-comparison` |
 | `metadata` | Publishing metadata for `polyzymd study freeze`; see {doc}`study_freeze` |
+
+(study-comparison)=
+### Compare each condition with the control of its stratum
+
+A study that varies the temperature and the polymer gives each condition
+both factors. With `comparison:`, each polymer condition is compared with the
+no-polymer condition at its own temperature:
+
+```yaml
+conditions:
+  none 300 K: {config: conditions/none_300, factors: {temperature_K: 300, polymer: none}}
+  SBMA 300 K: {config: conditions/sbma_300, factors: {temperature_K: 300, polymer: SBMA}}
+  none 360 K: {config: conditions/none_360, factors: {temperature_K: 360, polymer: none}}
+  SBMA 360 K: {config: conditions/sbma_360, factors: {temperature_K: 360, polymer: SBMA}}
+comparison:
+  within: temperature_K
+  control: {polymer: none}
+```
+
+- Every condition must give each `within` factor.
+- Each stratum must have exactly one control. PolyzyMD refuses the file
+  otherwise and names the stratum.
+- Each comparison line of the report names its control and its stratum, for
+  example `none 360 K vs SBMA 360 K  temperature_K 360  delta ...`. In the
+  JSON report, `a` is the control and `stratum` holds the `within` values.
+- The Benjamini-Hochberg correction covers every comparison of the report,
+  over all strata.
+- Without `comparison:`, every condition is compared with the first one.
+- A changed `comparison:` block makes the stored report stale for
+  `polyzymd study freeze`.
 
 PolyzyMD refuses a key that it does not know, and gives the nearest known
 spelling. So a typo never falls back to a default:

@@ -170,9 +170,10 @@ def stale_runs(protocol: Any, conditions: dict[str, Any] | None = None) -> dict[
     from the runs when they are here), stride, function hash (with its
     folder's helper modules), or the content of a file it was given; the
     replicates found on disk; or the report's settings, selections, condition
-    factors (which its trend tests used) or PolyzyMD version. Trajectories are
-    read only to work out ``until: common``. ``conditions`` are the manifest's
-    conditions (from :func:`_replicates`); with them, a replicate whose
+    factors (which its trend tests used), comparison block or PolyzyMD
+    version. Trajectories are read only to work out ``until: common``.
+    ``conditions`` are the manifest's conditions (from
+    :func:`_replicates`); with them, a replicate whose
     trajectory hashes differ from those its record names is a reason too.
     """
     import polyzymd
@@ -310,6 +311,8 @@ def stale_runs(protocol: Any, conditions: dict[str, Any] | None = None) -> dict[
             then = {k: v for k, v in study["factors"].items() if k in labels}
             if now != then:
                 found.append("the condition factors changed since the report's trend tests")
+            if study.get("comparison") != protocol.comparison:
+                found.append("the comparison block changed since the report")
         if found:
             reasons[run] = sorted(set(found))
     return reasons
