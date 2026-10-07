@@ -1,0 +1,4209 @@
+{
+ "figures": [
+  "contacts/contacts_class_bars.png",
+  "contacts/contacts_coverage_comparison.png"
+ ],
+ "one condition": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": null,
+     "ci_method": "not_estimable",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.666667,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.666667,
+      0.666667,
+      0.666667
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "coverage",
+   "pairwise": [],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/one/polyzymd_results/residue_contacts"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "residues": {
+      "classes": {
+       "polar": [
+        12,
+        30,
+        45
+       ]
+      },
+      "first": [
+       12,
+       30
+      ]
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "coverage",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "A coverage 0.6667 (no interval, n 3)"
+   ],
+   "warnings": [
+    "condition A has the same coverage in every replicate, so its interval is not estimable"
+   ]
+  },
+  "text": "# polyzymd analyze contacts  metric coverage  unit none  run coverage  eq 0ns  conditions 1  replicates 3  protocol contacts/2\nA  n 3  mean 0.6667  sem 0  ci95 na  values 0.6667, 0.6667, 0.6667\nwarning: condition A has the same coverage in every replicate, so its interval is not estimable\nverdict: A coverage 0.6667 (no interval, n 3)\n"
+ },
+ "records": {
+  "contact_lifetimes/A/replicate_1/parts.json": [
+   "mean_lifetime",
+   "n_events",
+   "censored_fraction"
+  ],
+  "contact_lifetimes/A/replicate_1/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "(chainid A) and not element H"
+     },
+     {
+      "select": "(chainid C) and not element H"
+     }
+    ],
+    "kwargs": {
+     "cutoff": 6.0,
+     "method": "distance",
+     "types": [
+      "EGM",
+      "SBM"
+     ]
+    }
+   },
+   "chosen": {},
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "contact_lifetimes"
+   },
+   "labels": [
+    "polymer",
+    "EGM",
+    "SBM"
+   ],
+   "name": "contact_lifetimes",
+   "parts": [
+    "mean_lifetime",
+    "n_events",
+    "censored_fraction"
+   ],
+   "replicate": 1,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run1/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 1017
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run1/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 2900
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "contact_lifetimes/A/replicate_1/values.npz": {
+   "values": [
+    [
+     0.128571,
+     0.133333,
+     0.375
+    ],
+    [
+     7.0,
+     3.0,
+     4.0
+    ],
+    [
+     0.142857,
+     0.0,
+     0.25
+    ]
+   ]
+  },
+  "contact_lifetimes/A/replicate_2/parts.json": [
+   "mean_lifetime",
+   "n_events",
+   "censored_fraction"
+  ],
+  "contact_lifetimes/A/replicate_2/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "(chainid A) and not element H"
+     },
+     {
+      "select": "(chainid C) and not element H"
+     }
+    ],
+    "kwargs": {
+     "cutoff": 6.0,
+     "method": "distance",
+     "types": [
+      "EGM",
+      "SBM"
+     ]
+    }
+   },
+   "chosen": {},
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "contact_lifetimes"
+   },
+   "labels": [
+    "polymer",
+    "EGM",
+    "SBM"
+   ],
+   "name": "contact_lifetimes",
+   "parts": [
+    "mean_lifetime",
+    "n_events",
+    "censored_fraction"
+   ],
+   "replicate": 2,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run2/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 1017
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run2/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 2900
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "contact_lifetimes/A/replicate_2/values.npz": {
+   "values": [
+    [
+     0.54,
+     0.65,
+     0.466667
+    ],
+    [
+     5.0,
+     2.0,
+     3.0
+    ],
+    [
+     0.4,
+     0.5,
+     0.333333
+    ]
+   ]
+  },
+  "contact_lifetimes/A/replicate_3/parts.json": [
+   "mean_lifetime",
+   "n_events",
+   "censored_fraction"
+  ],
+  "contact_lifetimes/A/replicate_3/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "(chainid A) and not element H"
+     },
+     {
+      "select": "(chainid C) and not element H"
+     }
+    ],
+    "kwargs": {
+     "cutoff": 6.0,
+     "method": "distance",
+     "types": [
+      "EGM",
+      "SBM"
+     ]
+    }
+   },
+   "chosen": {},
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "contact_lifetimes"
+   },
+   "labels": [
+    "polymer",
+    "EGM",
+    "SBM"
+   ],
+   "name": "contact_lifetimes",
+   "parts": [
+    "mean_lifetime",
+    "n_events",
+    "censored_fraction"
+   ],
+   "replicate": 3,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run3/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 1017
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run3/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 2900
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "contact_lifetimes/A/replicate_3/values.npz": {
+   "values": [
+    [
+     0.378571,
+     0.375,
+     0.533333
+    ],
+    [
+     7.0,
+     4.0,
+     3.0
+    ],
+    [
+     0.285714,
+     0.25,
+     0.333333
+    ]
+   ]
+  },
+  "contact_lifetimes/B/replicate_1/parts.json": [
+   "mean_lifetime",
+   "n_events",
+   "censored_fraction"
+  ],
+  "contact_lifetimes/B/replicate_1/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "(chainid A) and not element H"
+     },
+     {
+      "select": "(chainid C) and not element H"
+     }
+    ],
+    "kwargs": {
+     "cutoff": 6.0,
+     "method": "distance",
+     "types": [
+      "EGM",
+      "SBM"
+     ]
+    }
+   },
+   "chosen": {},
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "contact_lifetimes"
+   },
+   "labels": [
+    "polymer",
+    "EGM",
+    "SBM"
+   ],
+   "name": "contact_lifetimes",
+   "parts": [
+    "mean_lifetime",
+    "n_events",
+    "censored_fraction"
+   ],
+   "replicate": 1,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run1/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 1017
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run1/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 2900
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "contact_lifetimes/B/replicate_1/values.npz": {
+   "values": [
+    [
+     0.242857,
+     0.3,
+     0.2
+    ],
+    [
+     7.0,
+     3.0,
+     4.0
+    ],
+    [
+     0.285714,
+     0.333333,
+     0.25
+    ]
+   ]
+  },
+  "contact_lifetimes/B/replicate_2/parts.json": [
+   "mean_lifetime",
+   "n_events",
+   "censored_fraction"
+  ],
+  "contact_lifetimes/B/replicate_2/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "(chainid A) and not element H"
+     },
+     {
+      "select": "(chainid C) and not element H"
+     }
+    ],
+    "kwargs": {
+     "cutoff": 6.0,
+     "method": "distance",
+     "types": [
+      "EGM",
+      "SBM"
+     ]
+    }
+   },
+   "chosen": {},
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "contact_lifetimes"
+   },
+   "labels": [
+    "polymer",
+    "EGM",
+    "SBM"
+   ],
+   "name": "contact_lifetimes",
+   "parts": [
+    "mean_lifetime",
+    "n_events",
+    "censored_fraction"
+   ],
+   "replicate": 2,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run2/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 1017
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run2/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 2900
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "contact_lifetimes/B/replicate_2/values.npz": {
+   "values": [
+    [
+     0.58,
+     0.65,
+     0.533333
+    ],
+    [
+     5.0,
+     2.0,
+     3.0
+    ],
+    [
+     0.4,
+     0.5,
+     0.333333
+    ]
+   ]
+  },
+  "contact_lifetimes/B/replicate_3/parts.json": [
+   "mean_lifetime",
+   "n_events",
+   "censored_fraction"
+  ],
+  "contact_lifetimes/B/replicate_3/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "(chainid A) and not element H"
+     },
+     {
+      "select": "(chainid C) and not element H"
+     }
+    ],
+    "kwargs": {
+     "cutoff": 6.0,
+     "method": "distance",
+     "types": [
+      "EGM",
+      "SBM"
+     ]
+    }
+   },
+   "chosen": {},
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "contact_lifetimes"
+   },
+   "labels": [
+    "polymer",
+    "EGM",
+    "SBM"
+   ],
+   "name": "contact_lifetimes",
+   "parts": [
+    "mean_lifetime",
+    "n_events",
+    "censored_fraction"
+   ],
+   "replicate": 3,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run3/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 1017
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run3/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 2900
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "contact_lifetimes/B/replicate_3/values.npz": {
+   "values": [
+    [
+     0.166667,
+     0.15,
+     0.175
+    ],
+    [
+     6.0,
+     2.0,
+     4.0
+    ],
+    [
+     0.166667,
+     0.0,
+     0.25
+    ]
+   ]
+  },
+  "residue_contacts/A/replicate_1/parts.json": [
+   "contact_fraction",
+   "EGM_contact_fraction",
+   "SBM_contact_fraction"
+  ],
+  "residue_contacts/A/replicate_1/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "(chainid A) and not element H"
+     },
+     {
+      "select": "(chainid C) and not element H"
+     }
+    ],
+    "kwargs": {
+     "cutoff": 6.0,
+     "types": [
+      "EGM",
+      "SBM"
+     ]
+    }
+   },
+   "chosen": {},
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "residue_contacts"
+   },
+   "labels": [
+    12,
+    30,
+    45
+   ],
+   "name": "residue_contacts",
+   "parts": [
+    "contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction"
+   ],
+   "replicate": 1,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run1/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 1017
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run1/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 2900
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "residue_contacts/A/replicate_1/values.npz": {
+   "values": [
+    [
+     0.333333,
+     0.0,
+     0.333333
+    ],
+    [
+     0.0,
+     0.0,
+     0.333333
+    ],
+    [
+     0.333333,
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "residue_contacts/A/replicate_2/parts.json": [
+   "contact_fraction",
+   "EGM_contact_fraction",
+   "SBM_contact_fraction"
+  ],
+  "residue_contacts/A/replicate_2/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "(chainid A) and not element H"
+     },
+     {
+      "select": "(chainid C) and not element H"
+     }
+    ],
+    "kwargs": {
+     "cutoff": 6.0,
+     "types": [
+      "EGM",
+      "SBM"
+     ]
+    }
+   },
+   "chosen": {},
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "residue_contacts"
+   },
+   "labels": [
+    12,
+    30,
+    45
+   ],
+   "name": "residue_contacts",
+   "parts": [
+    "contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction"
+   ],
+   "replicate": 2,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run2/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 1017
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run2/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 2900
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "residue_contacts/A/replicate_2/values.npz": {
+   "values": [
+    [
+     0.25,
+     0.0,
+     0.25
+    ],
+    [
+     0.0,
+     0.0,
+     0.25
+    ],
+    [
+     0.25,
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "residue_contacts/A/replicate_3/parts.json": [
+   "contact_fraction",
+   "EGM_contact_fraction",
+   "SBM_contact_fraction"
+  ],
+  "residue_contacts/A/replicate_3/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "(chainid A) and not element H"
+     },
+     {
+      "select": "(chainid C) and not element H"
+     }
+    ],
+    "kwargs": {
+     "cutoff": 6.0,
+     "types": [
+      "EGM",
+      "SBM"
+     ]
+    }
+   },
+   "chosen": {},
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "residue_contacts"
+   },
+   "labels": [
+    12,
+    30,
+    45
+   ],
+   "name": "residue_contacts",
+   "parts": [
+    "contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction"
+   ],
+   "replicate": 3,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run3/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 1017
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run3/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 2900
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "residue_contacts/A/replicate_3/values.npz": {
+   "values": [
+    [
+     0.583333,
+     0.0,
+     0.333333
+    ],
+    [
+     0.0,
+     0.0,
+     0.333333
+    ],
+    [
+     0.583333,
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "residue_contacts/B/replicate_1/parts.json": [
+   "contact_fraction",
+   "EGM_contact_fraction",
+   "SBM_contact_fraction"
+  ],
+  "residue_contacts/B/replicate_1/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "(chainid A) and not element H"
+     },
+     {
+      "select": "(chainid C) and not element H"
+     }
+    ],
+    "kwargs": {
+     "cutoff": 6.0,
+     "types": [
+      "EGM",
+      "SBM"
+     ]
+    }
+   },
+   "chosen": {},
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "residue_contacts"
+   },
+   "labels": [
+    12,
+    30,
+    45
+   ],
+   "name": "residue_contacts",
+   "parts": [
+    "contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction"
+   ],
+   "replicate": 1,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run1/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 1017
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run1/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 2900
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "residue_contacts/B/replicate_1/values.npz": {
+   "values": [
+    [
+     0.5,
+     0.0,
+     0.5
+    ],
+    [
+     0.0,
+     0.0,
+     0.5
+    ],
+    [
+     0.5,
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "residue_contacts/B/replicate_2/parts.json": [
+   "contact_fraction",
+   "EGM_contact_fraction",
+   "SBM_contact_fraction"
+  ],
+  "residue_contacts/B/replicate_2/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "(chainid A) and not element H"
+     },
+     {
+      "select": "(chainid C) and not element H"
+     }
+    ],
+    "kwargs": {
+     "cutoff": 6.0,
+     "types": [
+      "EGM",
+      "SBM"
+     ]
+    }
+   },
+   "chosen": {},
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "residue_contacts"
+   },
+   "labels": [
+    12,
+    30,
+    45
+   ],
+   "name": "residue_contacts",
+   "parts": [
+    "contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction"
+   ],
+   "replicate": 2,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run2/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 1017
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run2/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 2900
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "residue_contacts/B/replicate_2/values.npz": {
+   "values": [
+    [
+     0.666667,
+     0.0,
+     0.25
+    ],
+    [
+     0.0,
+     0.0,
+     0.25
+    ],
+    [
+     0.666667,
+     0.0,
+     0.0
+    ]
+   ]
+  },
+  "residue_contacts/B/replicate_3/parts.json": [
+   "contact_fraction",
+   "EGM_contact_fraction",
+   "SBM_contact_fraction"
+  ],
+  "residue_contacts/B/replicate_3/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "(chainid A) and not element H"
+     },
+     {
+      "select": "(chainid C) and not element H"
+     }
+    ],
+    "kwargs": {
+     "cutoff": 6.0,
+     "types": [
+      "EGM",
+      "SBM"
+     ]
+    }
+   },
+   "chosen": {},
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "residue_contacts"
+   },
+   "labels": [
+    12,
+    30,
+    45
+   ],
+   "name": "residue_contacts",
+   "parts": [
+    "contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction"
+   ],
+   "replicate": 3,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run3/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 1017
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run3/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 2900
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "residue_contacts/B/replicate_3/values.npz": {
+   "values": [
+    [
+     0.5,
+     0.0,
+     0.25
+    ],
+    [
+     0.0,
+     0.0,
+     0.25
+    ],
+    [
+     0.5,
+     0.0,
+     0.0
+    ]
+   ]
+  }
+ },
+ "two conditions, run EGM_contact_fraction": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": [
+      0.0620125,
+      0.141691
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.101852,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.111111,
+      0.0833333,
+      0.111111
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.00925926,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -0.00840702,
+      0.230629
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.111111,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.166667,
+      0.0833333,
+      0.0833333
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0277778,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "EGM_contact_fraction",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.258199,
+     "correction": "BH",
+     "delta": 0.00925926,
+     "delta_ci95": [
+      -0.097304,
+      0.115822
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": 0.206559,
+     "p": 0.776898,
+     "p_adjusted": 0.776898,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/residue_contacts"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "residues": {
+      "classes": {
+       "polar": [
+        12,
+        30,
+        45
+       ]
+      },
+      "first": [
+       12,
+       30
+      ]
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "EGM_contact_fraction",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "no significant difference in EGM_contact_fraction between A and B (delta +0.009259, 95% CI -0.0973 to 0.1158, p_adj 0.7769, p 0.7769, n 3 vs 3)"
+   ],
+   "warnings": [
+    "the 95 percent interval of condition B extends past the bounds 0 to 1 of EGM_contact_fraction, where a t interval is not reliable"
+   ]
+  },
+  "text": "# polyzymd analyze contacts  metric EGM_contact_fraction  unit none  run EGM_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0.1019  sem 0.009259  ci95 0.06201 to 0.1417  values 0.1111, 0.08333, 0.1111\nB  n 3  mean 0.1111  sem 0.02778  ci95 -0.008407 to 0.2306  values 0.1667, 0.08333, 0.08333\nA vs B  delta +0.009259  ci95 -0.0973 to 0.1158  p 0.7769  p_adj 0.7769  test welch_t  correction BH  family 1  d 0.2582  not_significant\nwarning: the 95 percent interval of condition B extends past the bounds 0 to 1 of EGM_contact_fraction, where a t interval is not reliable\nverdict: no significant difference in EGM_contact_fraction between A and B (delta +0.009259, 95% CI -0.0973 to 0.1158, p_adj 0.7769, p 0.7769, n 3 vs 3)\n"
+ },
+ "two conditions, run EGM_contact_fraction_residues": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": null,
+     "ci_method": "not_estimable",
+     "entry": "12",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.0,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": null,
+     "ci_method": "not_estimable",
+     "entry": "12",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.0,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": null,
+     "ci_method": "not_estimable",
+     "entry": "30",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.0,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": null,
+     "ci_method": "not_estimable",
+     "entry": "30",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.0,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.186037,
+      0.425074
+     ],
+     "ci_method": "student_t",
+     "entry": "45",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.305556,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.333333,
+      0.25,
+      0.333333
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0277778,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -0.0252211,
+      0.691888
+     ],
+     "ci_method": "student_t",
+     "entry": "45",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.333333,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.5,
+      0.25,
+      0.25
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0833333,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "EGM_contact_fraction",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.0,
+     "correction": "BH",
+     "delta": 0.0,
+     "delta_ci95": null,
+     "direction": "no significant change",
+     "entry": "12",
+     "family_size": null,
+     "hedges_g": 0.0,
+     "p": null,
+     "p_adjusted": null,
+     "significant": false,
+     "test": "welch_t",
+     "testable": false
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.0,
+     "correction": "BH",
+     "delta": 0.0,
+     "delta_ci95": null,
+     "direction": "no significant change",
+     "entry": "30",
+     "family_size": null,
+     "hedges_g": 0.0,
+     "p": null,
+     "p_adjusted": null,
+     "significant": false,
+     "test": "welch_t",
+     "testable": false
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.258199,
+     "correction": "BH",
+     "delta": 0.0277778,
+     "delta_ci95": [
+      -0.291912,
+      0.347467
+     ],
+     "direction": "no significant change",
+     "entry": "45",
+     "family_size": 1,
+     "hedges_g": 0.206559,
+     "p": 0.776898,
+     "p_adjusted": 0.776898,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/residue_contacts"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "residues": {
+      "classes": {
+       "polar": [
+        12,
+        30,
+        45
+       ]
+      },
+      "first": [
+       12,
+       30
+      ]
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "EGM_contact_fraction_residues",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "B vs A: 0 of 1 tested labels differ in EGM_contact_fraction after BH over a family of 1; larger at none; smaller at none"
+   ],
+   "warnings": [
+    "condition A has the same EGM_contact_fraction at 12 in every replicate, so its interval is not estimable",
+    "condition B has the same EGM_contact_fraction at 12 in every replicate, so its interval is not estimable",
+    "condition A has the same EGM_contact_fraction at 30 in every replicate, so its interval is not estimable",
+    "condition B has the same EGM_contact_fraction at 30 in every replicate, so its interval is not estimable",
+    "the 95 percent interval of condition B at 45 extends past the bounds 0 to 1 of EGM_contact_fraction, where a t interval is not reliable",
+    "A vs B at 12 is not testable: a condition has fewer than two replicates, or both have one value in every replicate",
+    "A vs B at 30 is not testable: a condition has fewer than two replicates, or both have one value in every replicate"
+   ]
+  },
+  "text": "# polyzymd analyze contacts  metric EGM_contact_fraction  unit none  run EGM_contact_fraction_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA vs B  labels 3  tested 1  family 1  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition A has the same EGM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition A has the same EGM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: the 95 percent interval of condition B at 45 extends past the bounds 0 to 1 of EGM_contact_fraction, where a t interval is not reliable\nwarning: A vs B at 12 is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nwarning: A vs B at 30 is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: B vs A: 0 of 1 tested labels differ in EGM_contact_fraction after BH over a family of 1; larger at none; smaller at none\n"
+ },
+ "two conditions, run EGM_mean_lifetime": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": [
+      -0.256069,
+      1.02829
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.386111,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.133333,
+      0.65,
+      0.375
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.149252,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -0.270714,
+      1.00405
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.366667,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.3,
+      0.65,
+      0.15
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.148137,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "EGM_mean_lifetime",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -0.0754983,
+     "correction": "BH",
+     "delta": -0.0194444,
+     "delta_ci95": [
+      -0.603308,
+      0.564419
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": -0.0603986,
+     "p": 0.930774,
+     "p_adjusted": 0.930774,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/contact_lifetimes"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "EGM_mean_lifetime",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": "ns",
+   "verdict": [
+    "no significant difference in EGM_mean_lifetime between A and B (delta -0.01944 ns, 95% CI -0.6033 to 0.5644, p_adj 0.9308, p 0.9308, n 3 vs 3)"
+   ],
+   "warnings": [
+    "the 95 percent interval of condition A extends past the bounds 0 to inf of EGM_mean_lifetime, where a t interval is not reliable",
+    "the 95 percent interval of condition B extends past the bounds 0 to inf of EGM_mean_lifetime, where a t interval is not reliable"
+   ]
+  },
+  "text": "# polyzymd analyze contacts  metric EGM_mean_lifetime  unit ns  run EGM_mean_lifetime  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0.3861  sem 0.1493  ci95 -0.2561 to 1.028  values 0.1333, 0.65, 0.375\nB  n 3  mean 0.3667  sem 0.1481  ci95 -0.2707 to 1.004  values 0.3, 0.65, 0.15\nA vs B  delta -0.01944  ci95 -0.6033 to 0.5644  p 0.9308  p_adj 0.9308  test welch_t  correction BH  family 1  d -0.0755  not_significant\nwarning: the 95 percent interval of condition A extends past the bounds 0 to inf of EGM_mean_lifetime, where a t interval is not reliable\nwarning: the 95 percent interval of condition B extends past the bounds 0 to inf of EGM_mean_lifetime, where a t interval is not reliable\nverdict: no significant difference in EGM_mean_lifetime between A and B (delta -0.01944 ns, 95% CI -0.6033 to 0.5644, p_adj 0.9308, p 0.9308, n 3 vs 3)\n"
+ },
+ "two conditions, run SBM_contact_fraction": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": [
+      -0.0140133,
+      0.273273
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.12963,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.111111,
+      0.0833333,
+      0.194444
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0333847,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.105506,
+      0.264864
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.185185,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.166667,
+      0.222222,
+      0.166667
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0185185,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "SBM_contact_fraction",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.18818,
+     "correction": "BH",
+     "delta": 0.0555556,
+     "delta_ci95": [
+      -0.0632506,
+      0.174362
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": 0.950542,
+     "p": 0.23814,
+     "p_adjusted": 0.23814,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/residue_contacts"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "residues": {
+      "classes": {
+       "polar": [
+        12,
+        30,
+        45
+       ]
+      },
+      "first": [
+       12,
+       30
+      ]
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "SBM_contact_fraction",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "no significant difference in SBM_contact_fraction between A and B (delta +0.05556, 95% CI -0.06325 to 0.1744, p_adj 0.2381, p 0.2381, n 3 vs 3)"
+   ],
+   "warnings": [
+    "the 95 percent interval of condition A extends past the bounds 0 to 1 of SBM_contact_fraction, where a t interval is not reliable"
+   ]
+  },
+  "text": "# polyzymd analyze contacts  metric SBM_contact_fraction  unit none  run SBM_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0.1296  sem 0.03338  ci95 -0.01401 to 0.2733  values 0.1111, 0.08333, 0.1944\nB  n 3  mean 0.1852  sem 0.01852  ci95 0.1055 to 0.2649  values 0.1667, 0.2222, 0.1667\nA vs B  delta +0.05556  ci95 -0.06325 to 0.1744  p 0.2381  p_adj 0.2381  test welch_t  correction BH  family 1  d 1.188  not_significant\nwarning: the 95 percent interval of condition A extends past the bounds 0 to 1 of SBM_contact_fraction, where a t interval is not reliable\nverdict: no significant difference in SBM_contact_fraction between A and B (delta +0.05556, 95% CI -0.06325 to 0.1744, p_adj 0.2381, p 0.2381, n 3 vs 3)\n"
+ },
+ "two conditions, run SBM_contact_fraction_residues": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": [
+      -0.0420399,
+      0.819818
+     ],
+     "ci_method": "student_t",
+     "entry": "12",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.388889,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.333333,
+      0.25,
+      0.583333
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.100154,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.316519,
+      0.794592
+     ],
+     "ci_method": "student_t",
+     "entry": "12",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.555556,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.5,
+      0.666667,
+      0.5
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0555556,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": null,
+     "ci_method": "not_estimable",
+     "entry": "30",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.0,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": null,
+     "ci_method": "not_estimable",
+     "entry": "30",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.0,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": null,
+     "ci_method": "not_estimable",
+     "entry": "45",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.0,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": null,
+     "ci_method": "not_estimable",
+     "entry": "45",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.0,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "SBM_contact_fraction",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.18818,
+     "correction": "BH",
+     "delta": 0.166667,
+     "delta_ci95": [
+      -0.189752,
+      0.523085
+     ],
+     "direction": "no significant change",
+     "entry": "12",
+     "family_size": 1,
+     "hedges_g": 0.950542,
+     "p": 0.23814,
+     "p_adjusted": 0.23814,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.0,
+     "correction": "BH",
+     "delta": 0.0,
+     "delta_ci95": null,
+     "direction": "no significant change",
+     "entry": "30",
+     "family_size": null,
+     "hedges_g": 0.0,
+     "p": null,
+     "p_adjusted": null,
+     "significant": false,
+     "test": "welch_t",
+     "testable": false
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.0,
+     "correction": "BH",
+     "delta": 0.0,
+     "delta_ci95": null,
+     "direction": "no significant change",
+     "entry": "45",
+     "family_size": null,
+     "hedges_g": 0.0,
+     "p": null,
+     "p_adjusted": null,
+     "significant": false,
+     "test": "welch_t",
+     "testable": false
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/residue_contacts"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "residues": {
+      "classes": {
+       "polar": [
+        12,
+        30,
+        45
+       ]
+      },
+      "first": [
+       12,
+       30
+      ]
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "SBM_contact_fraction_residues",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "B vs A: 0 of 1 tested labels differ in SBM_contact_fraction after BH over a family of 1; larger at none; smaller at none"
+   ],
+   "warnings": [
+    "the 95 percent interval of condition A at 12 extends past the bounds 0 to 1 of SBM_contact_fraction, where a t interval is not reliable",
+    "condition A has the same SBM_contact_fraction at 30 in every replicate, so its interval is not estimable",
+    "condition B has the same SBM_contact_fraction at 30 in every replicate, so its interval is not estimable",
+    "condition A has the same SBM_contact_fraction at 45 in every replicate, so its interval is not estimable",
+    "condition B has the same SBM_contact_fraction at 45 in every replicate, so its interval is not estimable",
+    "A vs B at 30 is not testable: a condition has fewer than two replicates, or both have one value in every replicate",
+    "A vs B at 45 is not testable: a condition has fewer than two replicates, or both have one value in every replicate"
+   ]
+  },
+  "text": "# polyzymd analyze contacts  metric SBM_contact_fraction  unit none  run SBM_contact_fraction_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA vs B  labels 3  tested 1  family 1  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: the 95 percent interval of condition A at 12 extends past the bounds 0 to 1 of SBM_contact_fraction, where a t interval is not reliable\nwarning: condition A has the same SBM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition A has the same SBM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: A vs B at 30 is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nwarning: A vs B at 45 is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: B vs A: 0 of 1 tested labels differ in SBM_contact_fraction after BH over a family of 1; larger at none; smaller at none\n"
+ },
+ "two conditions, run SBM_mean_lifetime": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": [
+      0.260857,
+      0.65581
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.458333,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.375,
+      0.466667,
+      0.533333
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0458964,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -0.194193,
+      0.799749
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.302778,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.2,
+      0.533333,
+      0.175
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.115503,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "SBM_mean_lifetime",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -1.0219,
+     "correction": "BH",
+     "delta": -0.155556,
+     "delta_ci95": [
+      -0.586036,
+      0.274925
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": -0.817524,
+     "p": 0.31096,
+     "p_adjusted": 0.31096,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/contact_lifetimes"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "SBM_mean_lifetime",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": "ns",
+   "verdict": [
+    "no significant difference in SBM_mean_lifetime between A and B (delta -0.1556 ns, 95% CI -0.586 to 0.2749, p_adj 0.311, p 0.311, n 3 vs 3)"
+   ],
+   "warnings": [
+    "the 95 percent interval of condition B extends past the bounds 0 to inf of SBM_mean_lifetime, where a t interval is not reliable"
+   ]
+  },
+  "text": "# polyzymd analyze contacts  metric SBM_mean_lifetime  unit ns  run SBM_mean_lifetime  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0.4583  sem 0.0459  ci95 0.2609 to 0.6558  values 0.375, 0.4667, 0.5333\nB  n 3  mean 0.3028  sem 0.1155  ci95 -0.1942 to 0.7997  values 0.2, 0.5333, 0.175\nA vs B  delta -0.1556  ci95 -0.586 to 0.2749  p 0.311  p_adj 0.311  test welch_t  correction BH  family 1  d -1.022  not_significant\nwarning: the 95 percent interval of condition B extends past the bounds 0 to inf of SBM_mean_lifetime, where a t interval is not reliable\nverdict: no significant difference in SBM_mean_lifetime between A and B (delta -0.1556 ns, 95% CI -0.586 to 0.2749, p_adj 0.311, p 0.311, n 3 vs 3)\n"
+ },
+ "two conditions, run censored_fraction": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": [
+      -0.0438552,
+      0.596236
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.27619,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.142857,
+      0.4,
+      0.285714
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0743833,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -0.0057092,
+      0.573963
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.284127,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.285714,
+      0.4,
+      0.166667
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0673622,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "censored_fraction",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.0645739,
+     "correction": "BH",
+     "delta": 0.00793651,
+     "delta_ci95": [
+      -0.271762,
+      0.287635
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": 0.0516592,
+     "p": 0.940797,
+     "p_adjusted": 0.940797,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/contact_lifetimes"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "censored_fraction",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "no significant difference in censored_fraction between A and B (delta +0.007937, 95% CI -0.2718 to 0.2876, p_adj 0.9408, p 0.9408, n 3 vs 3)"
+   ],
+   "warnings": [
+    "the 95 percent interval of condition A extends past the bounds 0 to 1 of censored_fraction, where a t interval is not reliable",
+    "the 95 percent interval of condition B extends past the bounds 0 to 1 of censored_fraction, where a t interval is not reliable"
+   ]
+  },
+  "text": "# polyzymd analyze contacts  metric censored_fraction  unit none  run censored_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0.2762  sem 0.07438  ci95 -0.04386 to 0.5962  values 0.1429, 0.4, 0.2857\nB  n 3  mean 0.2841  sem 0.06736  ci95 -0.005709 to 0.574  values 0.2857, 0.4, 0.1667\nA vs B  delta +0.007937  ci95 -0.2718 to 0.2876  p 0.9408  p_adj 0.9408  test welch_t  correction BH  family 1  d 0.06457  not_significant\nwarning: the 95 percent interval of condition A extends past the bounds 0 to 1 of censored_fraction, where a t interval is not reliable\nwarning: the 95 percent interval of condition B extends past the bounds 0 to 1 of censored_fraction, where a t interval is not reliable\nverdict: no significant difference in censored_fraction between A and B (delta +0.007937, 95% CI -0.2718 to 0.2876, p_adj 0.9408, p 0.9408, n 3 vs 3)\n"
+ },
+ "two conditions, run contact_fraction_residues": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": [
+      -0.0420399,
+      0.819818
+     ],
+     "ci_method": "student_t",
+     "entry": "12",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.388889,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.333333,
+      0.25,
+      0.583333
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.100154,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.316519,
+      0.794592
+     ],
+     "ci_method": "student_t",
+     "entry": "12",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.555556,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.5,
+      0.666667,
+      0.5
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0555556,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": null,
+     "ci_method": "not_estimable",
+     "entry": "30",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.0,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": null,
+     "ci_method": "not_estimable",
+     "entry": "30",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.0,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.186037,
+      0.425074
+     ],
+     "ci_method": "student_t",
+     "entry": "45",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.305556,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.333333,
+      0.25,
+      0.333333
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0277778,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -0.0252211,
+      0.691888
+     ],
+     "ci_method": "student_t",
+     "entry": "45",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.333333,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.5,
+      0.25,
+      0.25
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0833333,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "contact_fraction",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.18818,
+     "correction": "BH",
+     "delta": 0.166667,
+     "delta_ci95": [
+      -0.189752,
+      0.523085
+     ],
+     "direction": "no significant change",
+     "entry": "12",
+     "family_size": 2,
+     "hedges_g": 0.950542,
+     "p": 0.23814,
+     "p_adjusted": 0.476279,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.0,
+     "correction": "BH",
+     "delta": 0.0,
+     "delta_ci95": null,
+     "direction": "no significant change",
+     "entry": "30",
+     "family_size": null,
+     "hedges_g": 0.0,
+     "p": null,
+     "p_adjusted": null,
+     "significant": false,
+     "test": "welch_t",
+     "testable": false
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.258199,
+     "correction": "BH",
+     "delta": 0.0277778,
+     "delta_ci95": [
+      -0.291912,
+      0.347467
+     ],
+     "direction": "no significant change",
+     "entry": "45",
+     "family_size": 2,
+     "hedges_g": 0.206559,
+     "p": 0.776898,
+     "p_adjusted": 0.776898,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/residue_contacts"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "residues": {
+      "classes": {
+       "polar": [
+        12,
+        30,
+        45
+       ]
+      },
+      "first": [
+       12,
+       30
+      ]
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "contact_fraction_residues",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "B vs A: 0 of 2 tested labels differ in contact_fraction after BH over a family of 2; larger at none; smaller at none"
+   ],
+   "warnings": [
+    "the 95 percent interval of condition A at 12 extends past the bounds 0 to 1 of contact_fraction, where a t interval is not reliable",
+    "condition A has the same contact_fraction at 30 in every replicate, so its interval is not estimable",
+    "condition B has the same contact_fraction at 30 in every replicate, so its interval is not estimable",
+    "the 95 percent interval of condition B at 45 extends past the bounds 0 to 1 of contact_fraction, where a t interval is not reliable",
+    "A vs B at 30 is not testable: a condition has fewer than two replicates, or both have one value in every replicate"
+   ]
+  },
+  "text": "# polyzymd analyze contacts  metric contact_fraction  unit none  run contact_fraction_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA vs B  labels 3  tested 2  family 2  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: the 95 percent interval of condition A at 12 extends past the bounds 0 to 1 of contact_fraction, where a t interval is not reliable\nwarning: condition A has the same contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: the 95 percent interval of condition B at 45 extends past the bounds 0 to 1 of contact_fraction, where a t interval is not reliable\nwarning: A vs B at 30 is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: B vs A: 0 of 2 tested labels differ in contact_fraction after BH over a family of 2; larger at none; smaller at none\n"
+ },
+ "two conditions, run coverage": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": null,
+     "ci_method": "not_estimable",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.666667,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.666667,
+      0.666667,
+      0.666667
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": null,
+     "ci_method": "not_estimable",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.666667,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.666667,
+      0.666667,
+      0.666667
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "coverage",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.0,
+     "correction": "BH",
+     "delta": 0.0,
+     "delta_ci95": null,
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": null,
+     "hedges_g": 0.0,
+     "p": null,
+     "p_adjusted": null,
+     "significant": false,
+     "test": "welch_t",
+     "testable": false
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/residue_contacts"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "residues": {
+      "classes": {
+       "polar": [
+        12,
+        30,
+        45
+       ]
+      },
+      "first": [
+       12,
+       30
+      ]
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "coverage",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "not testable: coverage for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)"
+   ],
+   "warnings": [
+    "condition A has the same coverage in every replicate, so its interval is not estimable",
+    "condition B has the same coverage in every replicate, so its interval is not estimable",
+    "A vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate"
+   ]
+  },
+  "text": "# polyzymd analyze contacts  metric coverage  unit none  run coverage  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0.6667  sem 0  ci95 na  values 0.6667, 0.6667, 0.6667\nB  n 3  mean 0.6667  sem 0  ci95 na  values 0.6667, 0.6667, 0.6667\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same coverage in every replicate, so its interval is not estimable\nwarning: condition B has the same coverage in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: not testable: coverage for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n"
+ },
+ "two conditions, run first_contact_fraction": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": [
+      -0.0210199,
+      0.409909
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.194444,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.166667,
+      0.125,
+      0.291667
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0500771,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.15826,
+      0.397296
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.277778,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.25,
+      0.333333,
+      0.25
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0277778,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "first_contact_fraction",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.18818,
+     "correction": "BH",
+     "delta": 0.0833333,
+     "delta_ci95": [
+      -0.0948759,
+      0.261543
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": 0.950542,
+     "p": 0.23814,
+     "p_adjusted": 0.23814,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/residue_contacts"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "residues": {
+      "classes": {
+       "polar": [
+        12,
+        30,
+        45
+       ]
+      },
+      "first": [
+       12,
+       30
+      ]
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "first_contact_fraction",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "no significant difference in first_contact_fraction between A and B (delta +0.08333, 95% CI -0.09488 to 0.2615, p_adj 0.2381, p 0.2381, n 3 vs 3)"
+   ],
+   "warnings": [
+    "the 95 percent interval of condition A extends past the bounds 0 to 1 of first_contact_fraction, where a t interval is not reliable"
+   ]
+  },
+  "text": "# polyzymd analyze contacts  metric first_contact_fraction  unit none  run first_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0.1944  sem 0.05008  ci95 -0.02102 to 0.4099  values 0.1667, 0.125, 0.2917\nB  n 3  mean 0.2778  sem 0.02778  ci95 0.1583 to 0.3973  values 0.25, 0.3333, 0.25\nA vs B  delta +0.08333  ci95 -0.09488 to 0.2615  p 0.2381  p_adj 0.2381  test welch_t  correction BH  family 1  d 1.188  not_significant\nwarning: the 95 percent interval of condition A extends past the bounds 0 to 1 of first_contact_fraction, where a t interval is not reliable\nverdict: no significant difference in first_contact_fraction between A and B (delta +0.08333, 95% CI -0.09488 to 0.2615, p_adj 0.2381, p 0.2381, n 3 vs 3)\n"
+ },
+ "two conditions, run lifetime_events": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": [
+      3.4649,
+      9.20177
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 6.33333,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      7.0,
+      5.0,
+      7.0
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.666667,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      3.51586,
+      8.48414
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 6.0,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      7.0,
+      5.0,
+      6.0
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.57735,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "lifetime_events",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -0.308607,
+     "correction": "BH",
+     "delta": -0.333333,
+     "delta_ci95": [
+      -2.80176,
+      2.1351
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": -0.246885,
+     "p": 0.72503,
+     "p_adjusted": 0.72503,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/contact_lifetimes"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "lifetime_events",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "no significant difference in lifetime_events between A and B (delta -0.3333, 95% CI -2.802 to 2.135, p_adj 0.725, p 0.725, n 3 vs 3)"
+   ],
+   "warnings": []
+  },
+  "text": "# polyzymd analyze contacts  metric lifetime_events  unit none  run lifetime_events  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 6.333  sem 0.6667  ci95 3.465 to 9.202  values 7, 5, 7\nB  n 3  mean 6  sem 0.5774  ci95 3.516 to 8.484  values 7, 5, 6\nA vs B  delta -0.3333  ci95 -2.802 to 2.135  p 0.725  p_adj 0.725  test welch_t  correction BH  family 1  d -0.3086  not_significant\nverdict: no significant difference in lifetime_events between A and B (delta -0.3333, 95% CI -2.802 to 2.135, p_adj 0.725, p 0.725, n 3 vs 3)\n"
+ },
+ "two conditions, run mean_contact_fraction": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": [
+      0.0578257,
+      0.405137
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.231481,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.222222,
+      0.166667,
+      0.305556
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0403602,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.190891,
+      0.401701
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.296296,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.333333,
+      0.305556,
+      0.25
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0244977,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "mean_contact_fraction",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.1209,
+     "correction": "BH",
+     "delta": 0.0648148,
+     "delta_ci95": [
+      -0.078052,
+      0.207682
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": 0.896718,
+     "p": 0.255736,
+     "p_adjusted": 0.255736,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/residue_contacts"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "residues": {
+      "classes": {
+       "polar": [
+        12,
+        30,
+        45
+       ]
+      },
+      "first": [
+       12,
+       30
+      ]
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "mean_contact_fraction",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "no significant difference in mean_contact_fraction between A and B (delta +0.06481, 95% CI -0.07805 to 0.2077, p_adj 0.2557, p 0.2557, n 3 vs 3)"
+   ],
+   "warnings": []
+  },
+  "text": "# polyzymd analyze contacts  metric mean_contact_fraction  unit none  run mean_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0.2315  sem 0.04036  ci95 0.05783 to 0.4051  values 0.2222, 0.1667, 0.3056\nB  n 3  mean 0.2963  sem 0.0245  ci95 0.1909 to 0.4017  values 0.3333, 0.3056, 0.25\nA vs B  delta +0.06481  ci95 -0.07805 to 0.2077  p 0.2557  p_adj 0.2557  test welch_t  correction BH  family 1  d 1.121  not_significant\nverdict: no significant difference in mean_contact_fraction between A and B (delta +0.06481, 95% CI -0.07805 to 0.2077, p_adj 0.2557, p 0.2557, n 3 vs 3)\n"
+ },
+ "two conditions, run mean_lifetime": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": [
+      -0.165907,
+      0.864002
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.349048,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.128571,
+      0.54,
+      0.378571
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.119683,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -0.216589,
+      0.876271
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.329841,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.242857,
+      0.58,
+      0.166667
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.126998,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "mean_lifetime",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -0.0898642,
+     "correction": "BH",
+     "delta": -0.0192063,
+     "delta_ci95": [
+      -0.504387,
+      0.465974
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": -0.0718914,
+     "p": 0.91768,
+     "p_adjusted": 0.91768,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/contact_lifetimes"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "mean_lifetime",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": "ns",
+   "verdict": [
+    "no significant difference in mean_lifetime between A and B (delta -0.01921 ns, 95% CI -0.5044 to 0.466, p_adj 0.9177, p 0.9177, n 3 vs 3)"
+   ],
+   "warnings": [
+    "the 95 percent interval of condition A extends past the bounds 0 to inf of mean_lifetime, where a t interval is not reliable",
+    "the 95 percent interval of condition B extends past the bounds 0 to inf of mean_lifetime, where a t interval is not reliable"
+   ]
+  },
+  "text": "# polyzymd analyze contacts  metric mean_lifetime  unit ns  run mean_lifetime  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0.349  sem 0.1197  ci95 -0.1659 to 0.864  values 0.1286, 0.54, 0.3786\nB  n 3  mean 0.3298  sem 0.127  ci95 -0.2166 to 0.8763  values 0.2429, 0.58, 0.1667\nA vs B  delta -0.01921  ci95 -0.5044 to 0.466  p 0.9177  p_adj 0.9177  test welch_t  correction BH  family 1  d -0.08986  not_significant\nwarning: the 95 percent interval of condition A extends past the bounds 0 to inf of mean_lifetime, where a t interval is not reliable\nwarning: the 95 percent interval of condition B extends past the bounds 0 to inf of mean_lifetime, where a t interval is not reliable\nverdict: no significant difference in mean_lifetime between A and B (delta -0.01921 ns, 95% CI -0.5044 to 0.466, p_adj 0.9177, p 0.9177, n 3 vs 3)\n"
+ },
+ "two conditions, run polar_contact_fraction": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "coverage",
+    "mean_contact_fraction",
+    "EGM_contact_fraction",
+    "SBM_contact_fraction",
+    "polar_contact_fraction",
+    "first_contact_fraction",
+    "contact_fraction_residues",
+    "EGM_contact_fraction_residues",
+    "SBM_contact_fraction_residues",
+    "mean_lifetime",
+    "EGM_mean_lifetime",
+    "SBM_mean_lifetime",
+    "lifetime_events",
+    "censored_fraction"
+   ],
+   "analysis": "contacts",
+   "conditions": [
+    {
+     "ci95": [
+      0.0578257,
+      0.405137
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 0.231481,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.222222,
+      0.166667,
+      0.305556
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0403602,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.190891,
+      0.401701
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 0.296296,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.333333,
+      0.305556,
+      0.25
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0244977,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     12,
+     12,
+     12
+    ],
+    "B": [
+     12,
+     12,
+     12
+    ]
+   },
+   "metric": "polar_contact_fraction",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.1209,
+     "correction": "BH",
+     "delta": 0.0648148,
+     "delta_ci95": [
+      -0.078052,
+      0.207682
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": 0.896718,
+     "p": 0.255736,
+     "p_adjusted": 0.255736,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/residue_contacts"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "cutoff": 6.0,
+     "heavy_atoms": true,
+     "method": "distance",
+     "polymer_selection": "(chainid C) and not element H",
+     "polymer_types": [
+      "EGM",
+      "SBM"
+     ],
+     "polymer_types_found": [
+      "EGM",
+      "SBM"
+     ],
+     "protein_selection": "(chainid A) and not element H",
+     "regions": {
+      "first": "resid 12 30"
+     },
+     "residues": {
+      "classes": {
+       "polar": [
+        12,
+        30,
+        45
+       ]
+      },
+      "first": [
+       12,
+       30
+      ]
+     },
+     "tolerance_ps": 0.0,
+     "unmeasured_residues": [],
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "polar_contact_fraction",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "no significant difference in polar_contact_fraction between A and B (delta +0.06481, 95% CI -0.07805 to 0.2077, p_adj 0.2557, p 0.2557, n 3 vs 3)"
+   ],
+   "warnings": []
+  },
+  "text": "# polyzymd analyze contacts  metric polar_contact_fraction  unit none  run polar_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0.2315  sem 0.04036  ci95 0.05783 to 0.4051  values 0.2222, 0.1667, 0.3056\nB  n 3  mean 0.2963  sem 0.0245  ci95 0.1909 to 0.4017  values 0.3333, 0.3056, 0.25\nA vs B  delta +0.06481  ci95 -0.07805 to 0.2077  p 0.2557  p_adj 0.2557  test welch_t  correction BH  family 1  d 1.121  not_significant\nverdict: no significant difference in polar_contact_fraction between A and B (delta +0.06481, 95% CI -0.07805 to 0.2077, p_adj 0.2557, p 0.2557, n 3 vs 3)\n"
+ },
+ "unknown run": {
+  "hint": "Use --run with one of ['coverage', 'mean_contact_fraction', 'EGM_contact_fraction', 'SBM_contact_fraction', 'polar_contact_fraction', 'first_contact_fraction', 'contact_fraction_residues', 'EGM_contact_fraction_residues', 'SBM_contact_fraction_residues', 'mean_lifetime', 'EGM_mean_lifetime', 'SBM_mean_lifetime', 'lifetime_events', 'censored_fraction'].",
+  "message": "contacts: no result named 'bogus'."
+ },
+ "unknown setting": {
+  "hint": "Run polyzymd analyze contacts -c A/config.yaml --set method=..., one of the settings above.",
+  "message": "contacts takes no setting other than method, polymer_selection, protein_selection, polymer_types, use_pbc, regions, cutoff, heavy_atoms, exposed_threshold, buried_threshold, max_asa, probe_radius_nm, n_sphere_points, tolerance_ps."
+ }
+}

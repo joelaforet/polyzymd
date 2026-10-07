@@ -1,0 +1,158 @@
+{
+ "agent": "# polyzymd analyze rmsf  metric core_rmsf  unit A  run core_rmsf  eq 0ns  conditions 2  replicates 3,3  protocol rmsf/2\nA  n 3  mean 2.927  sem 0.12  ci95 2.411 to 3.443  values 2.855, 3.161, 2.764\nB  n 3  mean 3.406  sem 0.1174  ci95 2.901 to 3.911  values 3.542, 3.172, 3.503\nA vs B  delta +0.479  ci95 0.01268 to 0.9453  p 0.04631  p_adj 0.04631  test welch_t  correction BH  family 1  d 2.329  significant\nverdict: B larger core_rmsf than A (delta +0.479 A, 95% CI 0.01268 to 0.9453, p_adj 0.04631, p 0.04631, n 3 vs 3)\n\n",
+ "json": {
+  "all_metrics": [],
+  "all_runs": [
+   "core_rmsd_per_residue",
+   "core_rmsf",
+   "core_offset",
+   "mean_rmsd_per_residue",
+   "mean_rmsf",
+   "mean_offset",
+   "rmsd_per_residue",
+   "rmsf",
+   "offset"
+  ],
+  "analysis": "rmsf",
+  "conditions": [
+   {
+    "ci95": [
+     2.41069,
+     3.44343
+    ],
+    "ci_method": "student_t",
+    "entry": null,
+    "eq_detected_frame": [],
+    "eq_detected_ns": [],
+    "label": "A",
+    "mean": 2.92706,
+    "n_effective": [],
+    "n_replicates": 3,
+    "replicate_values": [
+     2.85541,
+     3.16127,
+     2.7645
+    ],
+    "replicates": [
+     1,
+     2,
+     3
+    ],
+    "sem": 0.120011,
+    "statistical_inefficiency": []
+   },
+   {
+    "ci95": [
+     2.90073,
+     3.91132
+    ],
+    "ci_method": "student_t",
+    "entry": null,
+    "eq_detected_frame": [],
+    "eq_detected_ns": [],
+    "label": "B",
+    "mean": 3.40603,
+    "n_effective": [],
+    "n_replicates": 3,
+    "replicate_values": [
+     3.54241,
+     3.17223,
+     3.50344
+    ],
+    "replicates": [
+     1,
+     2,
+     3
+    ],
+    "sem": 0.117438,
+    "statistical_inefficiency": []
+   }
+  ],
+  "equilibration": "0ns",
+  "frames_per_replicate": {
+   "A": [
+    24,
+    24,
+    24
+   ],
+   "B": [
+    24,
+    24,
+    24
+   ]
+  },
+  "metric": "core_rmsf",
+  "pairwise": [
+   {
+    "a": "A",
+    "b": "B",
+    "cohens_d": 2.32904,
+    "correction": "BH",
+    "delta": 0.478966,
+    "delta_ci95": [
+     0.0126813,
+     0.945251
+    ],
+    "direction": "increased",
+    "entry": null,
+    "family_size": 1,
+    "hedges_g": 1.86323,
+    "p": 0.046305,
+    "p_adjusted": 0.046305,
+    "significant": true,
+    "test": "welch_t",
+    "testable": true
+   }
+  ],
+  "problems": [],
+  "protocol_version": "2",
+  "provenance": {
+   "config_hashes": {
+    "A": "c4429a507b8cea42",
+    "B": "c4429a507b8cea42"
+   },
+   "mdanalysis_version": "<masked>",
+   "output_paths": {
+    "results": "<out>/polyzymd_results/rms_decomposition"
+   },
+   "polyzymd_version": "<masked>",
+   "settings": {
+    "alignment_selection": "protein and name CA",
+    "core": null,
+    "highlight_residues": [],
+    "reference_file": null,
+    "reference_frame": 1,
+    "reference_mode": "centroid",
+    "regions": {},
+    "residues": {
+     "core": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+     ]
+    },
+    "selection": "protein and name CA"
+   },
+   "settings_fingerprint": null,
+   "study": null
+  },
+  "run": "core_rmsf",
+  "status": "complete",
+  "stride": 1,
+  "trends": [],
+  "unit": "A",
+  "verdict": [
+   "B larger core_rmsf than A (delta +0.479 A, 95% CI 0.01268 to 0.9453, p_adj 0.04631, p 0.04631, n 3 vs 3)"
+  ],
+  "warnings": []
+ }
+}

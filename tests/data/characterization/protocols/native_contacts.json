@@ -1,0 +1,2794 @@
+{
+ "figures": [
+  "native_contacts/native_contacts_comparison_q.png",
+  "native_contacts/native_contacts_timeseries_q.png"
+ ],
+ "one condition": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "q",
+    "start_q"
+   ],
+   "analysis": "native_contacts",
+   "conditions": [
+    {
+     "ci95": [
+      0.448795,
+      0.934315
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [
+      0,
+      0,
+      5
+     ],
+     "eq_detected_ns": [
+      0.0,
+      0.0,
+      0.5
+     ],
+     "label": "A",
+     "mean": 0.691555,
+     "n_effective": [
+      19.4356,
+      17.2881,
+      11.3754
+     ],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.637527,
+      0.632774,
+      0.804364
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.056421,
+     "statistical_inefficiency": [
+      1.23485,
+      1.38824,
+      2.10981
+     ]
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     24,
+     24,
+     24
+    ]
+   },
+   "metric": "mean_q",
+   "pairwise": [],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/one/polyzymd_results/native_contacts_q"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "beta": 5.0,
+     "lambda_constant": 1.8,
+     "min_separation": 2,
+     "radius": 8.0,
+     "reference_file": null,
+     "reference_frame": 1,
+     "reference_mode": "frame",
+     "regions": {
+      "start": "resid 1-4"
+     },
+     "selection": "protein and not element H",
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "q",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "A mean_q 0.6916 (95% CI 0.4488 to 0.9343, n 3)"
+   ],
+   "warnings": [
+    "condition A: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected"
+   ]
+  },
+  "text": "# polyzymd analyze native_contacts  metric mean_q  unit none  run q  eq 0ns  conditions 1  replicates 3  protocol native_contacts/2\nA  n 3  mean 0.6916  sem 0.05642  ci95 0.4488 to 0.9343  values 0.6375, 0.6328, 0.8044  replicates 1, 2, 3  g 1.235, 1.388, 2.11  n_eff 19.44, 17.29, 11.38  eq_detected 0.5 ns\nwarning: condition A: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected\nverdict: A mean_q 0.6916 (95% CI 0.4488 to 0.9343, n 3)\n"
+ },
+ "records": {
+  "native_contacts_q/A/replicate_1/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and not element H"
+     },
+     {
+      "reference": {
+       "alignment": "protein and not element H",
+       "file": null,
+       "frame": 1,
+       "mode": "frame",
+       "selection": "protein and not element H"
+      }
+     }
+    ],
+    "kwargs": {
+     "min_separation": 2,
+     "radius": 8.0
+    }
+   },
+   "bounds": [
+    0.0,
+    1.0
+   ],
+   "chosen": {
+    "1": {
+     "frame": 1,
+     "trajectory_frame": 0
+    }
+   },
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "native_contacts"
+   },
+   "name": "native_contacts_q",
+   "replicate": 1,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run1/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run1/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "native_contacts_q/A/replicate_1/series.npz": {
+   "frames": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0
+   ],
+   "times": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "values": [
+    0.999676,
+    0.5592,
+    0.495402,
+    0.666945,
+    0.640289,
+    0.629452,
+    0.704344,
+    0.728211,
+    0.692949,
+    0.700977,
+    0.58951,
+    0.816719,
+    0.573372,
+    0.585726,
+    0.686083,
+    0.625349,
+    0.480827,
+    0.581683,
+    0.552798,
+    0.640289,
+    0.569359,
+    0.564082,
+    0.517045,
+    0.700365
+   ]
+  },
+  "native_contacts_q/A/replicate_2/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and not element H"
+     },
+     {
+      "reference": {
+       "alignment": "protein and not element H",
+       "file": null,
+       "frame": 1,
+       "mode": "frame",
+       "selection": "protein and not element H"
+      }
+     }
+    ],
+    "kwargs": {
+     "min_separation": 2,
+     "radius": 8.0
+    }
+   },
+   "bounds": [
+    0.0,
+    1.0
+   ],
+   "chosen": {
+    "1": {
+     "frame": 1,
+     "trajectory_frame": 0
+    }
+   },
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "native_contacts"
+   },
+   "name": "native_contacts_q",
+   "replicate": 2,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run2/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run2/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "native_contacts_q/A/replicate_2/series.npz": {
+   "frames": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0
+   ],
+   "times": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "values": [
+    0.999676,
+    0.709887,
+    0.580817,
+    0.722197,
+    0.65178,
+    0.573372,
+    0.502283,
+    0.58864,
+    0.497423,
+    0.580817,
+    0.516457,
+    0.654029,
+    0.686083,
+    0.539785,
+    0.55765,
+    0.840985,
+    0.573372,
+    0.58951,
+    0.517459,
+    0.716108,
+    0.563341,
+    0.850964,
+    0.580817,
+    0.593123
+   ]
+  },
+  "native_contacts_q/A/replicate_3/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and not element H"
+     },
+     {
+      "reference": {
+       "alignment": "protein and not element H",
+       "file": null,
+       "frame": 1,
+       "mode": "frame",
+       "selection": "protein and not element H"
+      }
+     }
+    ],
+    "kwargs": {
+     "min_separation": 2,
+     "radius": 8.0
+    }
+   },
+   "bounds": [
+    0.0,
+    1.0
+   ],
+   "chosen": {
+    "1": {
+     "frame": 1,
+     "trajectory_frame": 0
+    }
+   },
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "native_contacts"
+   },
+   "name": "native_contacts_q",
+   "replicate": 3,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run3/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run3/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "native_contacts_q/A/replicate_3/series.npz": {
+   "frames": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0
+   ],
+   "times": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "values": [
+    0.999999,
+    0.80021,
+    0.846004,
+    0.913547,
+    0.887991,
+    0.794534,
+    0.852871,
+    0.703491,
+    0.833469,
+    0.708742,
+    0.797026,
+    0.744378,
+    0.873453,
+    0.798238,
+    0.645044,
+    0.747334,
+    0.634857,
+    0.767922,
+    0.850583,
+    0.830165,
+    0.747334,
+    0.80021,
+    0.746498,
+    0.980826
+   ]
+  },
+  "native_contacts_q/B/replicate_1/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and not element H"
+     },
+     {
+      "reference": {
+       "alignment": "protein and not element H",
+       "file": null,
+       "frame": 1,
+       "mode": "frame",
+       "selection": "protein and not element H"
+      }
+     }
+    ],
+    "kwargs": {
+     "min_separation": 2,
+     "radius": 8.0
+    }
+   },
+   "bounds": [
+    0.0,
+    1.0
+   ],
+   "chosen": {
+    "1": {
+     "frame": 1,
+     "trajectory_frame": 0
+    }
+   },
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "native_contacts"
+   },
+   "name": "native_contacts_q",
+   "replicate": 1,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run1/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run1/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "native_contacts_q/B/replicate_1/series.npz": {
+   "frames": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0
+   ],
+   "times": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "values": [
+    0.999866,
+    0.182884,
+    0.549777,
+    0.447542,
+    0.446495,
+    0.738921,
+    0.331828,
+    0.622389,
+    0.252353,
+    0.467949,
+    0.220954,
+    0.278954,
+    0.727909,
+    0.228007,
+    0.411198,
+    0.212164,
+    0.257102,
+    0.249286,
+    0.368317,
+    0.271638,
+    0.52668,
+    0.332365,
+    0.392298,
+    0.280208
+   ]
+  },
+  "native_contacts_q/B/replicate_2/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and not element H"
+     },
+     {
+      "reference": {
+       "alignment": "protein and not element H",
+       "file": null,
+       "frame": 1,
+       "mode": "frame",
+       "selection": "protein and not element H"
+      }
+     }
+    ],
+    "kwargs": {
+     "min_separation": 2,
+     "radius": 8.0
+    }
+   },
+   "bounds": [
+    0.0,
+    1.0
+   ],
+   "chosen": {
+    "1": {
+     "frame": 1,
+     "trajectory_frame": 0
+    }
+   },
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "native_contacts"
+   },
+   "name": "native_contacts_q",
+   "replicate": 2,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run2/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run2/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "native_contacts_q/B/replicate_2/series.npz": {
+   "frames": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0
+   ],
+   "times": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "values": [
+    1.0,
+    0.99946,
+    0.999466,
+    0.999466,
+    0.998932,
+    0.99946,
+    0.999466,
+    0.99946,
+    0.999474,
+    0.999466,
+    0.998939,
+    0.999466,
+    0.99894,
+    0.999474,
+    0.998931,
+    0.999474,
+    0.99946,
+    0.999995,
+    0.99946,
+    1.0,
+    1.0,
+    0.999466,
+    0.999474,
+    0.99894
+   ]
+  },
+  "native_contacts_q/B/replicate_3/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and not element H"
+     },
+     {
+      "reference": {
+       "alignment": "protein and not element H",
+       "file": null,
+       "frame": 1,
+       "mode": "frame",
+       "selection": "protein and not element H"
+      }
+     }
+    ],
+    "kwargs": {
+     "min_separation": 2,
+     "radius": 8.0
+    }
+   },
+   "bounds": [
+    0.0,
+    1.0
+   ],
+   "chosen": {
+    "1": {
+     "frame": 1,
+     "trajectory_frame": 0
+    }
+   },
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "native_contacts"
+   },
+   "name": "native_contacts_q",
+   "replicate": 3,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run3/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run3/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "native_contacts_q/B/replicate_3/series.npz": {
+   "frames": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0
+   ],
+   "times": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "values": [
+    0.999999,
+    0.812262,
+    0.404383,
+    0.710512,
+    0.468183,
+    0.403904,
+    0.467946,
+    0.853641,
+    0.9761,
+    0.812027,
+    0.482971,
+    0.630913,
+    0.404143,
+    0.403904,
+    0.796506,
+    0.631152,
+    0.947434,
+    0.923009,
+    0.631152,
+    0.468183,
+    0.63303,
+    0.403908,
+    0.404143,
+    0.999999
+   ]
+  },
+  "native_contacts_start_q/A/replicate_1/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and not element H"
+     },
+     {
+      "reference": {
+       "alignment": "protein and not element H",
+       "file": null,
+       "frame": 1,
+       "mode": "frame",
+       "selection": "protein and not element H"
+      }
+     },
+     {
+      "select": "(protein and not element H) and (resid 1-4)"
+     }
+    ],
+    "kwargs": {
+     "min_separation": 2,
+     "radius": 8.0
+    }
+   },
+   "bounds": [
+    0.0,
+    1.0
+   ],
+   "chosen": {
+    "1": {
+     "frame": 1,
+     "trajectory_frame": 0
+    }
+   },
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "native_contacts"
+   },
+   "name": "native_contacts_start_q",
+   "replicate": 1,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run1/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run1/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "native_contacts_start_q/A/replicate_1/series.npz": {
+   "frames": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0
+   ],
+   "times": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "values": [
+    0.999517,
+    0.524509,
+    0.350032,
+    0.53103,
+    0.56661,
+    0.50412,
+    0.697361,
+    0.639585,
+    0.586912,
+    0.667137,
+    0.488779,
+    0.829373,
+    0.46855,
+    0.479766,
+    0.559618,
+    0.544945,
+    0.334564,
+    0.479544,
+    0.436571,
+    0.56661,
+    0.474414,
+    0.475521,
+    0.384411,
+    0.666223
+   ]
+  },
+  "native_contacts_start_q/A/replicate_2/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and not element H"
+     },
+     {
+      "reference": {
+       "alignment": "protein and not element H",
+       "file": null,
+       "frame": 1,
+       "mode": "frame",
+       "selection": "protein and not element H"
+      }
+     },
+     {
+      "select": "(protein and not element H) and (resid 1-4)"
+     }
+    ],
+    "kwargs": {
+     "min_separation": 2,
+     "radius": 8.0
+    }
+   },
+   "bounds": [
+    0.0,
+    1.0
+   ],
+   "chosen": {
+    "1": {
+     "frame": 1,
+     "trajectory_frame": 0
+    }
+   },
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "native_contacts"
+   },
+   "name": "native_contacts_start_q",
+   "replicate": 2,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run2/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run2/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "native_contacts_start_q/A/replicate_2/series.npz": {
+   "frames": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0
+   ],
+   "times": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "values": [
+    0.999517,
+    0.670573,
+    0.479672,
+    0.682725,
+    0.508378,
+    0.46855,
+    0.353874,
+    0.491232,
+    0.353853,
+    0.479672,
+    0.39989,
+    0.511737,
+    0.559618,
+    0.418379,
+    0.439934,
+    0.815983,
+    0.46855,
+    0.488779,
+    0.411966,
+    0.679865,
+    0.474414,
+    0.870819,
+    0.479672,
+    0.496633
+   ]
+  },
+  "native_contacts_start_q/A/replicate_3/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and not element H"
+     },
+     {
+      "reference": {
+       "alignment": "protein and not element H",
+       "file": null,
+       "frame": 1,
+       "mode": "frame",
+       "selection": "protein and not element H"
+      }
+     },
+     {
+      "select": "(protein and not element H) and (resid 1-4)"
+     }
+    ],
+    "kwargs": {
+     "min_separation": 2,
+     "radius": 8.0
+    }
+   },
+   "bounds": [
+    0.0,
+    1.0
+   ],
+   "chosen": {
+    "1": {
+     "frame": 1,
+     "trajectory_frame": 0
+    }
+   },
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "native_contacts"
+   },
+   "name": "native_contacts_start_q",
+   "replicate": 3,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run3/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run3/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "native_contacts_start_q/A/replicate_3/series.npz": {
+   "frames": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0
+   ],
+   "times": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "values": [
+    1.0,
+    0.868968,
+    0.950097,
+    0.971914,
+    0.907642,
+    0.750593,
+    0.874113,
+    0.637733,
+    0.846866,
+    0.853922,
+    0.86624,
+    0.745704,
+    0.915389,
+    0.859744,
+    0.514816,
+    0.730564,
+    0.522878,
+    0.80462,
+    0.941118,
+    0.91752,
+    0.730564,
+    0.868968,
+    0.894521,
+    1.0
+   ]
+  },
+  "native_contacts_start_q/B/replicate_1/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and not element H"
+     },
+     {
+      "reference": {
+       "alignment": "protein and not element H",
+       "file": null,
+       "frame": 1,
+       "mode": "frame",
+       "selection": "protein and not element H"
+      }
+     },
+     {
+      "select": "(protein and not element H) and (resid 1-4)"
+     }
+    ],
+    "kwargs": {
+     "min_separation": 2,
+     "radius": 8.0
+    }
+   },
+   "bounds": [
+    0.0,
+    1.0
+   ],
+   "chosen": {
+    "1": {
+     "frame": 1,
+     "trajectory_frame": 0
+    }
+   },
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "native_contacts"
+   },
+   "name": "native_contacts_start_q",
+   "replicate": 1,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run1/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run1/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "native_contacts_start_q/B/replicate_1/series.npz": {
+   "frames": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0
+   ],
+   "times": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "values": [
+    0.999828,
+    0.144506,
+    0.460514,
+    0.447474,
+    0.446132,
+    0.689776,
+    0.203876,
+    0.600475,
+    0.230837,
+    0.400765,
+    0.0950146,
+    0.161989,
+    0.675653,
+    0.199788,
+    0.434716,
+    0.182229,
+    0.121641,
+    0.134152,
+    0.250669,
+    0.127707,
+    0.428923,
+    0.228543,
+    0.220671,
+    0.232357
+   ]
+  },
+  "native_contacts_start_q/B/replicate_2/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and not element H"
+     },
+     {
+      "reference": {
+       "alignment": "protein and not element H",
+       "file": null,
+       "frame": 1,
+       "mode": "frame",
+       "selection": "protein and not element H"
+      }
+     },
+     {
+      "select": "(protein and not element H) and (resid 1-4)"
+     }
+    ],
+    "kwargs": {
+     "min_separation": 2,
+     "radius": 8.0
+    }
+   },
+   "bounds": [
+    0.0,
+    1.0
+   ],
+   "chosen": {
+    "1": {
+     "frame": 1,
+     "trajectory_frame": 0
+    }
+   },
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "native_contacts"
+   },
+   "name": "native_contacts_start_q",
+   "replicate": 2,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run2/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run2/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "native_contacts_start_q/B/replicate_2/series.npz": {
+   "frames": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0
+   ],
+   "times": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "values": [
+    1.0,
+    0.999988,
+    0.998776,
+    1.0,
+    0.998776,
+    0.999988,
+    0.998776,
+    0.998776,
+    0.998795,
+    0.998775,
+    0.998794,
+    0.998776,
+    0.998776,
+    0.998794,
+    0.998775,
+    0.998794,
+    0.998775,
+    1.0,
+    0.998775,
+    1.0,
+    1.0,
+    0.998775,
+    1.0,
+    0.998775
+   ]
+  },
+  "native_contacts_start_q/B/replicate_3/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and not element H"
+     },
+     {
+      "reference": {
+       "alignment": "protein and not element H",
+       "file": null,
+       "frame": 1,
+       "mode": "frame",
+       "selection": "protein and not element H"
+      }
+     },
+     {
+      "select": "(protein and not element H) and (resid 1-4)"
+     }
+    ],
+    "kwargs": {
+     "min_separation": 2,
+     "radius": 8.0
+    }
+   },
+   "bounds": [
+    0.0,
+    1.0
+   ],
+   "chosen": {
+    "1": {
+     "frame": 1,
+     "trajectory_frame": 0
+    }
+   },
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "native_contacts"
+   },
+   "name": "native_contacts_start_q",
+   "replicate": 3,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run3/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run3/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": null,
+   "versions": "<masked>"
+  },
+  "native_contacts_start_q/B/replicate_3/series.npz": {
+   "frames": [
+    0.0,
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0,
+    13.0,
+    14.0,
+    15.0,
+    16.0,
+    17.0,
+    18.0,
+    19.0,
+    20.0,
+    21.0,
+    22.0,
+    23.0
+   ],
+   "times": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "values": [
+    1.0,
+    0.999998,
+    0.806639,
+    0.999159,
+    0.97091,
+    0.806639,
+    0.970079,
+    0.999134,
+    0.999992,
+    0.999172,
+    0.807479,
+    0.865483,
+    0.807479,
+    0.806639,
+    0.999223,
+    0.866323,
+    0.99916,
+    0.999992,
+    0.866323,
+    0.97091,
+    0.843235,
+    0.806652,
+    0.807479,
+    1.0
+   ]
+  }
+ },
+ "two conditions, run q": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "q",
+    "start_q"
+   ],
+   "analysis": "native_contacts",
+   "conditions": [
+    {
+     "ci95": [
+      0.448795,
+      0.934315
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [
+      0,
+      0,
+      5
+     ],
+     "eq_detected_ns": [
+      0.0,
+      0.0,
+      0.5
+     ],
+     "label": "A",
+     "mean": 0.691555,
+     "n_effective": [
+      19.4356,
+      17.2881,
+      11.3754
+     ],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.637527,
+      0.632774,
+      0.804364
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.056421,
+     "statistical_inefficiency": [
+      1.23485,
+      1.38824,
+      2.10981
+     ]
+    },
+    {
+     "ci95": [
+      -0.0511271,
+      1.42483
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [
+      6,
+      0,
+      0
+     ],
+     "eq_detected_ns": [
+      0.6,
+      0.0,
+      0.0
+     ],
+     "label": "B",
+     "mean": 0.686849,
+     "n_effective": [
+      23.3816,
+      14.7785,
+      24.0
+     ],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.408212,
+      0.999444,
+      0.652892
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.171517,
+     "statistical_inefficiency": [
+      1.02645,
+      1.62398,
+      1.0
+     ]
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     24,
+     24,
+     24
+    ],
+    "B": [
+     24,
+     24,
+     24
+    ]
+   },
+   "metric": "mean_q",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -0.0212787,
+     "correction": "BH",
+     "delta": -0.00470553,
+     "delta_ci95": [
+      -0.664075,
+      0.654664
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": -0.017023,
+     "p": 0.981197,
+     "p_adjusted": 0.981197,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/native_contacts_q"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "beta": 5.0,
+     "lambda_constant": 1.8,
+     "min_separation": 2,
+     "radius": 8.0,
+     "reference_file": null,
+     "reference_frame": 1,
+     "reference_mode": "frame",
+     "regions": {
+      "start": "resid 1-4"
+     },
+     "selection": "protein and not element H",
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "q",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "no significant difference in mean_q between A and B (delta -0.004706, 95% CI -0.6641 to 0.6547, p_adj 0.9812, p 0.9812, n 3 vs 3)"
+   ],
+   "warnings": [
+    "condition A: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected",
+    "condition B: replicates 2 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected",
+    "condition B replicate 1: pymbar detect_equilibration puts the start of the equilibrated region at 0.6 ns, production frame 7 of 24, after the equilibration window; the window may be too short for it",
+    "the 95 percent interval of condition B extends past the bounds 0 to 1 of mean_q, where a t interval is not reliable"
+   ]
+  },
+  "text": "# polyzymd analyze native_contacts  metric mean_q  unit none  run q  eq 0ns  conditions 2  replicates 3,3  protocol native_contacts/2\nA  n 3  mean 0.6916  sem 0.05642  ci95 0.4488 to 0.9343  values 0.6375, 0.6328, 0.8044  replicates 1, 2, 3  g 1.235, 1.388, 2.11  n_eff 19.44, 17.29, 11.38  eq_detected 0.5 ns\nB  n 3  mean 0.6868  sem 0.1715  ci95 -0.05113 to 1.425  values 0.4082, 0.9994, 0.6529  replicates 1, 2, 3  g 1.026, 1.624, 1  n_eff 23.38, 14.78, 24  eq_detected 0.6 ns\nA vs B  delta -0.004706  ci95 -0.6641 to 0.6547  p 0.9812  p_adj 0.9812  test welch_t  correction BH  family 1  d -0.02128  not_significant\nwarning: condition A: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected\nwarning: condition B: replicates 2 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected\nwarning: condition B replicate 1: pymbar detect_equilibration puts the start of the equilibrated region at 0.6 ns, production frame 7 of 24, after the equilibration window; the window may be too short for it\nwarning: the 95 percent interval of condition B extends past the bounds 0 to 1 of mean_q, where a t interval is not reliable\nverdict: no significant difference in mean_q between A and B (delta -0.004706, 95% CI -0.6641 to 0.6547, p_adj 0.9812, p 0.9812, n 3 vs 3)\n"
+ },
+ "two conditions, run start_q": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "q",
+    "start_q"
+   ],
+   "analysis": "native_contacts",
+   "conditions": [
+    {
+     "ci95": [
+      0.232918,
+      1.05137
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [
+      0,
+      11,
+      3
+     ],
+     "eq_detected_ns": [
+      0.0,
+      1.1,
+      0.3
+     ],
+     "label": "A",
+     "mean": 0.642146,
+     "n_effective": [
+      21.3881,
+      15.5705,
+      14.8423
+     ],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.552321,
+      0.541845,
+      0.83227
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0951106,
+     "statistical_inefficiency": [
+      1.12212,
+      1.54137,
+      1.617
+     ]
+    },
+    {
+     "ci95": [
+      -0.143238,
+      1.64593
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [
+      6,
+      0,
+      0
+     ],
+     "eq_detected_ns": [
+      0.6,
+      0.0,
+      0.0
+     ],
+     "label": "B",
+     "mean": 0.751344,
+     "n_effective": [
+      18.0271,
+      12.1151,
+      23.4417
+     ],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.33826,
+      0.999186,
+      0.916587
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.207914,
+     "statistical_inefficiency": [
+      1.33133,
+      1.981,
+      1.02382
+     ]
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     24,
+     24,
+     24
+    ],
+    "B": [
+     24,
+     24,
+     24
+    ]
+   },
+   "metric": "mean_start_q",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.389968,
+     "correction": "BH",
+     "delta": 0.109199,
+     "delta_ci95": [
+      -0.648404,
+      0.866801
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": 0.311974,
+     "p": 0.66769,
+     "p_adjusted": 0.66769,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/native_contacts_start_q"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "beta": 5.0,
+     "lambda_constant": 1.8,
+     "min_separation": 2,
+     "radius": 8.0,
+     "reference_file": null,
+     "reference_frame": 1,
+     "reference_mode": "frame",
+     "regions": {
+      "start": "resid 1-4"
+     },
+     "selection": "protein and not element H",
+     "use_pbc": true
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "start_q",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": null,
+   "verdict": [
+    "no significant difference in mean_start_q between A and B (delta +0.1092, 95% CI -0.6484 to 0.8668, p_adj 0.6677, p 0.6677, n 3 vs 3)"
+   ],
+   "warnings": [
+    "condition A: replicates 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected",
+    "the 95 percent interval of condition A extends past the bounds 0 to 1 of mean_start_q, where a t interval is not reliable",
+    "condition B: replicates 1, 2 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected",
+    "the 95 percent interval of condition B extends past the bounds 0 to 1 of mean_start_q, where a t interval is not reliable"
+   ]
+  },
+  "text": "# polyzymd analyze native_contacts  metric mean_start_q  unit none  run start_q  eq 0ns  conditions 2  replicates 3,3  protocol native_contacts/2\nA  n 3  mean 0.6421  sem 0.09511  ci95 0.2329 to 1.051  values 0.5523, 0.5418, 0.8323  replicates 1, 2, 3  g 1.122, 1.541, 1.617  n_eff 21.39, 15.57, 14.84  eq_detected 1.1 ns\nB  n 3  mean 0.7513  sem 0.2079  ci95 -0.1432 to 1.646  values 0.3383, 0.9992, 0.9166  replicates 1, 2, 3  g 1.331, 1.981, 1.024  n_eff 18.03, 12.12, 23.44  eq_detected 0.6 ns\nA vs B  delta +0.1092  ci95 -0.6484 to 0.8668  p 0.6677  p_adj 0.6677  test welch_t  correction BH  family 1  d 0.39  not_significant\nwarning: condition A: replicates 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected\nwarning: the 95 percent interval of condition A extends past the bounds 0 to 1 of mean_start_q, where a t interval is not reliable\nwarning: condition B: replicates 1, 2 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected\nwarning: the 95 percent interval of condition B extends past the bounds 0 to 1 of mean_start_q, where a t interval is not reliable\nverdict: no significant difference in mean_start_q between A and B (delta +0.1092, 95% CI -0.6484 to 0.8668, p_adj 0.6677, p 0.6677, n 3 vs 3)\n"
+ },
+ "unknown run": {
+  "hint": "Use --run with one of ['q', 'start_q'].",
+  "message": "native_contacts: no result named 'bogus'."
+ },
+ "unknown setting": {
+  "hint": "Run polyzymd analyze native_contacts -c A/config.yaml --set selection=..., one of the settings above.",
+  "message": "native_contacts takes no setting other than selection, reference_mode, reference_frame, reference_file, radius, min_separation, beta, lambda_constant, use_pbc, regions."
+ }
+}

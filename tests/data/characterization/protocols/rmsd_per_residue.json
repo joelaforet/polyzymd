@@ -1,0 +1,5311 @@
+{
+ "figures": [
+  "rmsd_per_residue/offset_difference.png",
+  "rmsd_per_residue/offset_profile.png",
+  "rmsd_per_residue/rms_decomposition.png",
+  "rmsd_per_residue/rmsd_per_residue_difference.png",
+  "rmsd_per_residue/rmsd_per_residue_profile.png",
+  "rmsd_per_residue/rmsf_comparison.png",
+  "rmsd_per_residue/rmsf_difference.png",
+  "rmsd_per_residue/rmsf_profile.png"
+ ],
+ "one condition": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "core_rmsd_per_residue",
+    "core_rmsf",
+    "core_offset",
+    "mean_rmsd_per_residue",
+    "mean_rmsf",
+    "mean_offset",
+    "rmsd_per_residue",
+    "rmsf",
+    "offset"
+   ],
+   "analysis": "rmsd_per_residue",
+   "conditions": [
+    {
+     "ci95": [
+      3.27942,
+      3.60449
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.44196,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.38611,
+      3.51395,
+      3.42581
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.037776,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     24,
+     24,
+     24
+    ]
+   },
+   "metric": "core_rmsd_per_residue",
+   "pairwise": [],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/one/polyzymd_results/rms_decomposition"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "alignment_selection": "protein and name CA",
+     "core": null,
+     "highlight_residues": [
+      4
+     ],
+     "reference_file": null,
+     "reference_frame": 1,
+     "reference_mode": "centroid",
+     "regions": {},
+     "residues": {
+      "core": [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10,
+       11,
+       12
+      ]
+     },
+     "selection": "protein and name CA"
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "core_rmsd_per_residue",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": "A",
+   "verdict": [
+    "A core_rmsd_per_residue 3.442 A (95% CI 3.279 to 3.604, n 3)"
+   ],
+   "warnings": []
+  },
+  "text": "# polyzymd analyze rmsd_per_residue  metric core_rmsd_per_residue  unit A  run core_rmsd_per_residue  eq 0ns  conditions 1  replicates 3  protocol rmsd_per_residue/2\nA  n 3  mean 3.442  sem 0.03778  ci95 3.279 to 3.604  values 3.386, 3.514, 3.426\nverdict: A core_rmsd_per_residue 3.442 A (95% CI 3.279 to 3.604, n 3)\n"
+ },
+ "records": {
+  "rms_decomposition/A/replicate_1/parts.json": [
+   "rmsd_per_residue",
+   "rmsf",
+   "offset",
+   "ms_deviation",
+   "msf",
+   "ms_offset"
+  ],
+  "rms_decomposition/A/replicate_1/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and name CA"
+     },
+     {
+      "select": "protein and name CA"
+     },
+     {
+      "reference": {
+       "alignment": "protein and name CA",
+       "file": null,
+       "frame": null,
+       "mode": "centroid",
+       "selection": "(protein and name CA) or (protein and name CA)"
+      }
+     }
+    ],
+    "kwargs": {}
+   },
+   "chosen": {
+    "2": {
+     "frame": 15,
+     "trajectory_frame": 14
+    }
+   },
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "rms_decomposition"
+   },
+   "labels": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+   ],
+   "name": "rms_decomposition",
+   "parts": [
+    "rmsd_per_residue",
+    "rmsf",
+    "offset",
+    "ms_deviation",
+    "msf",
+    "ms_offset"
+   ],
+   "replicate": 1,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run1/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run1/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": "A",
+   "versions": "<masked>"
+  },
+  "rms_decomposition/A/replicate_1/values.npz": {
+   "values": [
+    [
+     3.5286,
+     2.78555,
+     3.34211,
+     2.65116,
+     3.3348,
+     3.67299,
+     2.68624,
+     2.94039,
+     2.97709,
+     3.75684,
+     3.80656,
+     4.60871
+    ],
+    [
+     3.22202,
+     2.53443,
+     2.88994,
+     2.44335,
+     2.8465,
+     3.1126,
+     2.38307,
+     2.09292,
+     2.58147,
+     2.92695,
+     3.21848,
+     3.64339
+    ],
+    [
+     1.4386,
+     1.15583,
+     1.67867,
+     1.02894,
+     1.73733,
+     1.95003,
+     1.2397,
+     2.06533,
+     1.48292,
+     2.35517,
+     2.03256,
+     2.82238
+    ],
+    [
+     12.451,
+     7.75928,
+     11.1697,
+     7.02866,
+     11.1209,
+     13.4909,
+     7.21589,
+     8.64592,
+     8.86305,
+     14.1138,
+     14.4899,
+     21.2402
+    ],
+    [
+     10.3814,
+     6.42333,
+     8.35173,
+     5.96994,
+     8.10256,
+     9.68828,
+     5.67903,
+     4.38033,
+     6.664,
+     8.56702,
+     10.3586,
+     13.2743
+    ],
+    [
+     2.06958,
+     1.33595,
+     2.81793,
+     1.05872,
+     3.01832,
+     3.80261,
+     1.53686,
+     4.26559,
+     2.19905,
+     5.5468,
+     4.1313,
+     7.96584
+    ]
+   ]
+  },
+  "rms_decomposition/A/replicate_2/parts.json": [
+   "rmsd_per_residue",
+   "rmsf",
+   "offset",
+   "ms_deviation",
+   "msf",
+   "ms_offset"
+  ],
+  "rms_decomposition/A/replicate_2/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and name CA"
+     },
+     {
+      "select": "protein and name CA"
+     },
+     {
+      "reference": {
+       "alignment": "protein and name CA",
+       "file": null,
+       "frame": null,
+       "mode": "centroid",
+       "selection": "(protein and name CA) or (protein and name CA)"
+      }
+     }
+    ],
+    "kwargs": {}
+   },
+   "chosen": {
+    "2": {
+     "frame": 3,
+     "trajectory_frame": 2
+    }
+   },
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "rms_decomposition"
+   },
+   "labels": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+   ],
+   "name": "rms_decomposition",
+   "parts": [
+    "rmsd_per_residue",
+    "rmsf",
+    "offset",
+    "ms_deviation",
+    "msf",
+    "ms_offset"
+   ],
+   "replicate": 2,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run2/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run2/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": "A",
+   "versions": "<masked>"
+  },
+  "rms_decomposition/A/replicate_2/values.npz": {
+   "values": [
+    [
+     4.72219,
+     3.5662,
+     3.15511,
+     3.13191,
+     2.86499,
+     3.07604,
+     2.94816,
+     3.09196,
+     2.68404,
+     2.88841,
+     3.99015,
+     5.09934
+    ],
+    [
+     4.1202,
+     3.11918,
+     2.80188,
+     2.81772,
+     2.71841,
+     2.98043,
+     2.88364,
+     2.98244,
+     2.51821,
+     2.57395,
+     3.43034,
+     4.3831
+    ],
+    [
+     2.30716,
+     1.72872,
+     1.4506,
+     1.36722,
+     0.904679,
+     0.760932,
+     0.613389,
+     0.81567,
+     0.928811,
+     1.31059,
+     2.03815,
+     2.60609
+    ],
+    [
+     22.2991,
+     12.7178,
+     9.95474,
+     9.80887,
+     8.20818,
+     9.462,
+     8.69163,
+     9.56024,
+     7.20406,
+     8.3429,
+     15.9213,
+     26.0032
+    ],
+    [
+     16.9761,
+     9.72929,
+     7.85051,
+     7.93956,
+     7.38974,
+     8.88298,
+     8.31538,
+     8.89492,
+     6.34137,
+     6.62524,
+     11.7673,
+     19.2115
+    ],
+    [
+     5.323,
+     2.98849,
+     2.10423,
+     1.8693,
+     0.818443,
+     0.579018,
+     0.376246,
+     0.665317,
+     0.86269,
+     1.71766,
+     4.15407,
+     6.79171
+    ]
+   ]
+  },
+  "rms_decomposition/A/replicate_3/parts.json": [
+   "rmsd_per_residue",
+   "rmsf",
+   "offset",
+   "ms_deviation",
+   "msf",
+   "ms_offset"
+  ],
+  "rms_decomposition/A/replicate_3/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and name CA"
+     },
+     {
+      "select": "protein and name CA"
+     },
+     {
+      "reference": {
+       "alignment": "protein and name CA",
+       "file": null,
+       "frame": null,
+       "mode": "centroid",
+       "selection": "(protein and name CA) or (protein and name CA)"
+      }
+     }
+    ],
+    "kwargs": {}
+   },
+   "chosen": {
+    "2": {
+     "frame": 4,
+     "trajectory_frame": 3
+    }
+   },
+   "condition": "A",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "rms_decomposition"
+   },
+   "labels": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+   ],
+   "name": "rms_decomposition",
+   "parts": [
+    "rmsd_per_residue",
+    "rmsf",
+    "offset",
+    "ms_deviation",
+    "msf",
+    "ms_offset"
+   ],
+   "replicate": 3,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run3/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run3/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": "A",
+   "versions": "<masked>"
+  },
+  "rms_decomposition/A/replicate_3/values.npz": {
+   "values": [
+    [
+     3.48198,
+     3.16756,
+     3.47668,
+     2.84248,
+     3.32624,
+     3.49591,
+     2.8225,
+     3.50793,
+     2.92565,
+     3.55918,
+     2.43157,
+     5.27372
+    ],
+    [
+     3.21609,
+     2.63815,
+     2.80838,
+     2.69108,
+     2.85155,
+     2.9428,
+     2.43744,
+     2.49325,
+     2.44903,
+     2.49748,
+     2.31317,
+     3.56968
+    ],
+    [
+     1.33453,
+     1.75317,
+     2.04947,
+     0.915303,
+     1.71247,
+     1.88716,
+     1.42317,
+     2.46765,
+     1.60052,
+     2.53581,
+     0.749516,
+     3.88195
+    ],
+    [
+     12.1242,
+     10.0335,
+     12.0873,
+     8.07967,
+     11.0639,
+     12.2214,
+     7.96652,
+     12.3056,
+     8.55944,
+     12.6677,
+     5.91255,
+     27.8121
+    ],
+    [
+     10.3432,
+     6.95986,
+     7.88697,
+     7.24189,
+     8.13131,
+     8.66006,
+     5.94112,
+     6.21628,
+     5.99776,
+     6.23739,
+     5.35078,
+     12.7426
+    ],
+    [
+     1.78097,
+     3.0736,
+     4.20033,
+     0.83778,
+     2.93255,
+     3.56136,
+     2.0254,
+     6.0893,
+     2.56168,
+     6.43035,
+     0.561774,
+     15.0695
+    ]
+   ]
+  },
+  "rms_decomposition/B/replicate_1/parts.json": [
+   "rmsd_per_residue",
+   "rmsf",
+   "offset",
+   "ms_deviation",
+   "msf",
+   "ms_offset"
+  ],
+  "rms_decomposition/B/replicate_1/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and name CA"
+     },
+     {
+      "select": "protein and name CA"
+     },
+     {
+      "reference": {
+       "alignment": "protein and name CA",
+       "file": null,
+       "frame": null,
+       "mode": "centroid",
+       "selection": "(protein and name CA) or (protein and name CA)"
+      }
+     }
+    ],
+    "kwargs": {}
+   },
+   "chosen": {
+    "2": {
+     "frame": 19,
+     "trajectory_frame": 18
+    }
+   },
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "rms_decomposition"
+   },
+   "labels": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+   ],
+   "name": "rms_decomposition",
+   "parts": [
+    "rmsd_per_residue",
+    "rmsf",
+    "offset",
+    "ms_deviation",
+    "msf",
+    "ms_offset"
+   ],
+   "replicate": 1,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run1/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run1/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": "A",
+   "versions": "<masked>"
+  },
+  "rms_decomposition/B/replicate_1/values.npz": {
+   "values": [
+    [
+     5.75822,
+     3.61516,
+     3.40498,
+     4.29072,
+     3.43162,
+     2.96613,
+     4.45131,
+     3.54861,
+     4.45896,
+     4.23361,
+     3.96602,
+     5.13945
+    ],
+    [
+     5.05559,
+     3.31199,
+     3.30667,
+     2.97291,
+     3.05821,
+     2.67827,
+     3.08352,
+     3.17327,
+     3.337,
+     3.31255,
+     3.65868,
+     4.76296
+    ],
+    [
+     2.75646,
+     1.44918,
+     0.812315,
+     3.09388,
+     1.5567,
+     1.27469,
+     3.21031,
+     1.58839,
+     2.9575,
+     2.63638,
+     1.53082,
+     1.93083
+    ],
+    [
+     33.1571,
+     13.0694,
+     11.5939,
+     18.4103,
+     11.776,
+     8.79795,
+     19.8142,
+     12.5927,
+     19.8823,
+     17.9235,
+     15.7293,
+     26.4139
+    ],
+    [
+     25.559,
+     10.9693,
+     10.9341,
+     8.83822,
+     9.35267,
+     7.17312,
+     9.50809,
+     10.0697,
+     11.1356,
+     10.973,
+     13.3859,
+     22.6858
+    ],
+    [
+     7.59806,
+     2.10012,
+     0.659855,
+     9.57208,
+     2.42332,
+     1.62483,
+     10.3061,
+     2.52299,
+     8.74678,
+     6.95049,
+     2.34341,
+     3.72812
+    ]
+   ]
+  },
+  "rms_decomposition/B/replicate_2/parts.json": [
+   "rmsd_per_residue",
+   "rmsf",
+   "offset",
+   "ms_deviation",
+   "msf",
+   "ms_offset"
+  ],
+  "rms_decomposition/B/replicate_2/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and name CA"
+     },
+     {
+      "select": "protein and name CA"
+     },
+     {
+      "reference": {
+       "alignment": "protein and name CA",
+       "file": null,
+       "frame": null,
+       "mode": "centroid",
+       "selection": "(protein and name CA) or (protein and name CA)"
+      }
+     }
+    ],
+    "kwargs": {}
+   },
+   "chosen": {
+    "2": {
+     "frame": 24,
+     "trajectory_frame": 23
+    }
+   },
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "rms_decomposition"
+   },
+   "labels": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+   ],
+   "name": "rms_decomposition",
+   "parts": [
+    "rmsd_per_residue",
+    "rmsf",
+    "offset",
+    "ms_deviation",
+    "msf",
+    "ms_offset"
+   ],
+   "replicate": 2,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run2/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run2/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": "A",
+   "versions": "<masked>"
+  },
+  "rms_decomposition/B/replicate_2/values.npz": {
+   "values": [
+    [
+     5.7908,
+     3.58369,
+     3.17548,
+     3.14968,
+     2.87918,
+     3.22391,
+     4.35516,
+     3.9243,
+     3.29676,
+     3.08526,
+     3.64229,
+     4.41203
+    ],
+    [
+     4.40473,
+     3.00061,
+     2.95435,
+     2.88166,
+     2.77028,
+     2.93772,
+     2.68532,
+     2.94059,
+     3.26697,
+     2.77211,
+     2.96453,
+     4.0013
+    ],
+    [
+     3.75921,
+     1.95938,
+     1.16426,
+     1.27143,
+     0.78438,
+     1.32792,
+     3.42878,
+     2.59867,
+     0.44219,
+     1.35435,
+     2.11609,
+     1.85892
+    ],
+    [
+     33.5333,
+     12.8429,
+     10.0837,
+     9.92049,
+     8.28968,
+     10.3936,
+     18.9674,
+     15.4002,
+     10.8686,
+     9.51885,
+     13.2663,
+     19.466
+    ],
+    [
+     19.4017,
+     9.00368,
+     8.7282,
+     8.30396,
+     7.67443,
+     8.6302,
+     7.21093,
+     8.64707,
+     10.6731,
+     7.68458,
+     8.78844,
+     16.0104
+    ],
+    [
+     14.1317,
+     3.83917,
+     1.3555,
+     1.61653,
+     0.615251,
+     1.76338,
+     11.7565,
+     6.75308,
+     0.195532,
+     1.83428,
+     4.47782,
+     3.45559
+    ]
+   ]
+  },
+  "rms_decomposition/B/replicate_3/parts.json": [
+   "rmsd_per_residue",
+   "rmsf",
+   "offset",
+   "ms_deviation",
+   "msf",
+   "ms_offset"
+  ],
+  "rms_decomposition/B/replicate_3/record.json": {
+   "arguments": {
+    "args": [
+     {
+      "select": "protein and name CA"
+     },
+     {
+      "select": "protein and name CA"
+     },
+     {
+      "reference": {
+       "alignment": "protein and name CA",
+       "file": null,
+       "frame": null,
+       "mode": "centroid",
+       "selection": "(protein and name CA) or (protein and name CA)"
+      }
+     }
+    ],
+    "kwargs": {}
+   },
+   "chosen": {
+    "2": {
+     "frame": 15,
+     "trajectory_frame": 14
+    }
+   },
+   "condition": "B",
+   "config_hash": "c4429a507b8cea42",
+   "equilibration": "0ns",
+   "frames": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+   ],
+   "function": {
+    "hash": "<shipped code>",
+    "hash_of": "polyzymd_modules",
+    "module": "polyzymd.analyses.functions",
+    "qualname": "rms_decomposition"
+   },
+   "labels": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+   ],
+   "name": "rms_decomposition",
+   "parts": [
+    "rmsd_per_residue",
+    "rmsf",
+    "offset",
+    "ms_deviation",
+    "msf",
+    "ms_offset"
+   ],
+   "replicate": 3,
+   "stride": 1,
+   "times_ns": [
+    0.0,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.3,
+    1.4,
+    1.5,
+    1.6,
+    1.7,
+    1.8,
+    1.9,
+    2.0,
+    2.1,
+    2.2,
+    2.3
+   ],
+   "topology": {
+    "format": "pdb",
+    "path": "TestEnzyme_apo_none_1ns_300K_run3/solvated_system.pdb",
+    "sha256": "<masked>",
+    "size_bytes": 4420
+   },
+   "trajectories": [
+    {
+     "format": "dcd",
+     "path": "TestEnzyme_apo_none_1ns_300K_run3/production_0/production_0_trajectory.dcd",
+     "sha256": "<masked>",
+     "size_bytes": 16388
+    }
+   ],
+   "unit": "A",
+   "versions": "<masked>"
+  },
+  "rms_decomposition/B/replicate_3/values.npz": {
+   "values": [
+    [
+     5.90795,
+     3.83576,
+     4.5264,
+     4.17011,
+     3.18463,
+     2.93341,
+     4.61178,
+     3.96702,
+     2.96213,
+     2.85606,
+     4.05037,
+     4.97865
+    ],
+    [
+     5.27003,
+     3.74917,
+     3.1308,
+     3.12074,
+     3.08118,
+     2.70854,
+     2.88999,
+     3.16346,
+     2.76202,
+     2.78955,
+     3.65701,
+     4.68454
+    ],
+    [
+     2.67032,
+     0.81045,
+     3.269,
+     2.766,
+     0.805111,
+     1.12639,
+     3.59395,
+     2.3937,
+     1.07027,
+     0.612776,
+     1.74119,
+     1.68583
+    ],
+    [
+     34.9038,
+     14.7131,
+     20.4883,
+     17.3898,
+     10.1419,
+     8.60492,
+     21.2685,
+     15.7373,
+     8.77422,
+     8.1571,
+     16.4055,
+     24.787
+    ],
+    [
+     27.7732,
+     14.0563,
+     9.80194,
+     9.73902,
+     9.49367,
+     7.33617,
+     8.35206,
+     10.0075,
+     7.62873,
+     7.7816,
+     13.3737,
+     21.9449
+    ],
+    [
+     7.13062,
+     0.656829,
+     10.6863,
+     7.65077,
+     0.648204,
+     1.26875,
+     12.9164,
+     5.72981,
+     1.14549,
+     0.375495,
+     3.03173,
+     2.84202
+    ]
+   ]
+  }
+ },
+ "two conditions, run core_offset": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "core_rmsd_per_residue",
+    "core_rmsf",
+    "core_offset",
+    "mean_rmsd_per_residue",
+    "mean_rmsf",
+    "mean_offset",
+    "rmsd_per_residue",
+    "rmsf",
+    "offset"
+   ],
+   "analysis": "rmsd_per_residue",
+   "conditions": [
+    {
+     "ci95": [
+      1.18235,
+      2.40273
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 1.79254,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.81999,
+      1.53433,
+      2.02329
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.141816,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.97025,
+      2.30299
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 2.13662,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.20938,
+      2.07754,
+      2.12294
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0386666,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     24,
+     24,
+     24
+    ],
+    "B": [
+     24,
+     24,
+     24
+    ]
+   },
+   "metric": "core_offset",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.91124,
+     "correction": "BH",
+     "delta": 0.34408,
+     "delta_ci95": [
+      -0.21638,
+      0.904539
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": 1.529,
+     "p": 0.127705,
+     "p_adjusted": 0.127705,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/rms_decomposition"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "alignment_selection": "protein and name CA",
+     "core": null,
+     "highlight_residues": [
+      4
+     ],
+     "reference_file": null,
+     "reference_frame": 1,
+     "reference_mode": "centroid",
+     "regions": {},
+     "residues": {
+      "core": [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10,
+       11,
+       12
+      ]
+     },
+     "selection": "protein and name CA"
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "core_offset",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": "A",
+   "verdict": [
+    "no significant difference in core_offset between A and B (delta +0.3441 A, 95% CI -0.2164 to 0.9045, p_adj 0.1277, p 0.1277, n 3 vs 3)"
+   ],
+   "warnings": []
+  },
+  "text": "# polyzymd analyze rmsd_per_residue  metric core_offset  unit A  run core_offset  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA  n 3  mean 1.793  sem 0.1418  ci95 1.182 to 2.403  values 1.82, 1.534, 2.023\nB  n 3  mean 2.137  sem 0.03867  ci95 1.97 to 2.303  values 2.209, 2.078, 2.123\nA vs B  delta +0.3441  ci95 -0.2164 to 0.9045  p 0.1277  p_adj 0.1277  test welch_t  correction BH  family 1  d 1.911  not_significant\nverdict: no significant difference in core_offset between A and B (delta +0.3441 A, 95% CI -0.2164 to 0.9045, p_adj 0.1277, p 0.1277, n 3 vs 3)\n"
+ },
+ "two conditions, run core_rmsd_per_residue": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "core_rmsd_per_residue",
+    "core_rmsf",
+    "core_offset",
+    "mean_rmsd_per_residue",
+    "mean_rmsf",
+    "mean_offset",
+    "rmsd_per_residue",
+    "rmsf",
+    "offset"
+   ],
+   "analysis": "rmsd_per_residue",
+   "conditions": [
+    {
+     "ci95": [
+      3.27942,
+      3.60449
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.44196,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.38611,
+      3.51395,
+      3.42581
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.037776,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      3.51865,
+      4.52361
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 4.02113,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      4.17493,
+      3.792,
+      4.09645
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.116783,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     24,
+     24,
+     24
+    ],
+    "B": [
+     24,
+     24,
+     24
+    ]
+   },
+   "metric": "core_rmsd_per_residue",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 3.85275,
+     "correction": "BH",
+     "delta": 0.579171,
+     "delta_ci95": [
+      0.129026,
+      1.02932
+     ],
+     "direction": "increased",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": 3.0822,
+     "p": 0.0288522,
+     "p_adjusted": 0.0288522,
+     "significant": true,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/rms_decomposition"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "alignment_selection": "protein and name CA",
+     "core": null,
+     "highlight_residues": [
+      4
+     ],
+     "reference_file": null,
+     "reference_frame": 1,
+     "reference_mode": "centroid",
+     "regions": {},
+     "residues": {
+      "core": [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10,
+       11,
+       12
+      ]
+     },
+     "selection": "protein and name CA"
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "core_rmsd_per_residue",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": "A",
+   "verdict": [
+    "B larger core_rmsd_per_residue than A (delta +0.5792 A, 95% CI 0.129 to 1.029, p_adj 0.02885, p 0.02885, n 3 vs 3)"
+   ],
+   "warnings": []
+  },
+  "text": "# polyzymd analyze rmsd_per_residue  metric core_rmsd_per_residue  unit A  run core_rmsd_per_residue  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA  n 3  mean 3.442  sem 0.03778  ci95 3.279 to 3.604  values 3.386, 3.514, 3.426\nB  n 3  mean 4.021  sem 0.1168  ci95 3.519 to 4.524  values 4.175, 3.792, 4.096\nA vs B  delta +0.5792  ci95 0.129 to 1.029  p 0.02885  p_adj 0.02885  test welch_t  correction BH  family 1  d 3.853  significant\nverdict: B larger core_rmsd_per_residue than A (delta +0.5792 A, 95% CI 0.129 to 1.029, p_adj 0.02885, p 0.02885, n 3 vs 3)\n"
+ },
+ "two conditions, run core_rmsf": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "core_rmsd_per_residue",
+    "core_rmsf",
+    "core_offset",
+    "mean_rmsd_per_residue",
+    "mean_rmsf",
+    "mean_offset",
+    "rmsd_per_residue",
+    "rmsf",
+    "offset"
+   ],
+   "analysis": "rmsd_per_residue",
+   "conditions": [
+    {
+     "ci95": [
+      2.41069,
+      3.44343
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.92706,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.85541,
+      3.16127,
+      2.7645
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.120011,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.90073,
+      3.91132
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.40603,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.54241,
+      3.17223,
+      3.50344
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.117438,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     24,
+     24,
+     24
+    ],
+    "B": [
+     24,
+     24,
+     24
+    ]
+   },
+   "metric": "core_rmsf",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 2.32904,
+     "correction": "BH",
+     "delta": 0.478966,
+     "delta_ci95": [
+      0.0126813,
+      0.945251
+     ],
+     "direction": "increased",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": 1.86323,
+     "p": 0.046305,
+     "p_adjusted": 0.046305,
+     "significant": true,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/rms_decomposition"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "alignment_selection": "protein and name CA",
+     "core": null,
+     "highlight_residues": [
+      4
+     ],
+     "reference_file": null,
+     "reference_frame": 1,
+     "reference_mode": "centroid",
+     "regions": {},
+     "residues": {
+      "core": [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10,
+       11,
+       12
+      ]
+     },
+     "selection": "protein and name CA"
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "core_rmsf",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": "A",
+   "verdict": [
+    "B larger core_rmsf than A (delta +0.479 A, 95% CI 0.01268 to 0.9453, p_adj 0.04631, p 0.04631, n 3 vs 3)"
+   ],
+   "warnings": []
+  },
+  "text": "# polyzymd analyze rmsd_per_residue  metric core_rmsf  unit A  run core_rmsf  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA  n 3  mean 2.927  sem 0.12  ci95 2.411 to 3.443  values 2.855, 3.161, 2.764\nB  n 3  mean 3.406  sem 0.1174  ci95 2.901 to 3.911  values 3.542, 3.172, 3.503\nA vs B  delta +0.479  ci95 0.01268 to 0.9453  p 0.04631  p_adj 0.04631  test welch_t  correction BH  family 1  d 2.329  significant\nverdict: B larger core_rmsf than A (delta +0.479 A, 95% CI 0.01268 to 0.9453, p_adj 0.04631, p 0.04631, n 3 vs 3)\n"
+ },
+ "two conditions, run mean_offset": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "core_rmsd_per_residue",
+    "core_rmsf",
+    "core_offset",
+    "mean_rmsd_per_residue",
+    "mean_rmsf",
+    "mean_offset",
+    "rmsd_per_residue",
+    "rmsf",
+    "offset"
+   ],
+   "analysis": "rmsd_per_residue",
+   "conditions": [
+    {
+     "ci95": [
+      1.07849,
+      2.26208
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 1.67028,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.74896,
+      1.40267,
+      1.85923
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.137542,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.62604,
+      2.22997
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 1.928,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.06645,
+      1.8388,
+      1.87875
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0701812,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     24,
+     24,
+     24
+    ],
+    "B": [
+     24,
+     24,
+     24
+    ]
+   },
+   "metric": "mean_offset",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.36275,
+     "correction": "BH",
+     "delta": 0.257717,
+     "delta_ci95": [
+      -0.236005,
+      0.751439
+     ],
+     "direction": "no significant change",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": 1.0902,
+     "p": 0.19446,
+     "p_adjusted": 0.19446,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/rms_decomposition"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "alignment_selection": "protein and name CA",
+     "core": null,
+     "highlight_residues": [
+      4
+     ],
+     "reference_file": null,
+     "reference_frame": 1,
+     "reference_mode": "centroid",
+     "regions": {},
+     "residues": {
+      "core": [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10,
+       11,
+       12
+      ]
+     },
+     "selection": "protein and name CA"
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "mean_offset",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": "A",
+   "verdict": [
+    "no significant difference in mean_offset between A and B (delta +0.2577 A, 95% CI -0.236 to 0.7514, p_adj 0.1945, p 0.1945, n 3 vs 3)"
+   ],
+   "warnings": []
+  },
+  "text": "# polyzymd analyze rmsd_per_residue  metric mean_offset  unit A  run mean_offset  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA  n 3  mean 1.67  sem 0.1375  ci95 1.078 to 2.262  values 1.749, 1.403, 1.859\nB  n 3  mean 1.928  sem 0.07018  ci95 1.626 to 2.23  values 2.066, 1.839, 1.879\nA vs B  delta +0.2577  ci95 -0.236 to 0.7514  p 0.1945  p_adj 0.1945  test welch_t  correction BH  family 1  d 1.363  not_significant\nverdict: no significant difference in mean_offset between A and B (delta +0.2577 A, 95% CI -0.236 to 0.7514, p_adj 0.1945, p 0.1945, n 3 vs 3)\n"
+ },
+ "two conditions, run mean_rmsd_per_residue": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "core_rmsd_per_residue",
+    "core_rmsf",
+    "core_offset",
+    "mean_rmsd_per_residue",
+    "mean_rmsf",
+    "mean_offset",
+    "rmsd_per_residue",
+    "rmsf",
+    "offset"
+   ],
+   "analysis": "rmsd_per_residue",
+   "conditions": [
+    {
+     "ci95": [
+      3.25466,
+      3.50206
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.37836,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.34092,
+      3.43487,
+      3.35928
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0287507,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      3.42966,
+      4.44631
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.93799,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      4.1054,
+      3.70988,
+      3.99869
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.118142,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     24,
+     24,
+     24
+    ],
+    "B": [
+     24,
+     24,
+     24
+    ]
+   },
+   "metric": "mean_rmsd_per_residue",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 3.758,
+     "correction": "BH",
+     "delta": 0.55963,
+     "delta_ci95": [
+      0.0859899,
+      1.03327
+     ],
+     "direction": "increased",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": 3.0064,
+     "p": 0.0355512,
+     "p_adjusted": 0.0355512,
+     "significant": true,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/rms_decomposition"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "alignment_selection": "protein and name CA",
+     "core": null,
+     "highlight_residues": [
+      4
+     ],
+     "reference_file": null,
+     "reference_frame": 1,
+     "reference_mode": "centroid",
+     "regions": {},
+     "residues": {
+      "core": [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10,
+       11,
+       12
+      ]
+     },
+     "selection": "protein and name CA"
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "mean_rmsd_per_residue",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": "A",
+   "verdict": [
+    "B larger mean_rmsd_per_residue than A (delta +0.5596 A, 95% CI 0.08599 to 1.033, p_adj 0.03555, p 0.03555, n 3 vs 3)"
+   ],
+   "warnings": []
+  },
+  "text": "# polyzymd analyze rmsd_per_residue  metric mean_rmsd_per_residue  unit A  run mean_rmsd_per_residue  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA  n 3  mean 3.378  sem 0.02875  ci95 3.255 to 3.502  values 3.341, 3.435, 3.359\nB  n 3  mean 3.938  sem 0.1181  ci95 3.43 to 4.446  values 4.105, 3.71, 3.999\nA vs B  delta +0.5596  ci95 0.08599 to 1.033  p 0.03555  p_adj 0.03555  test welch_t  correction BH  family 1  d 3.758  significant\nverdict: B larger mean_rmsd_per_residue than A (delta +0.5596 A, 95% CI 0.08599 to 1.033, p_adj 0.03555, p 0.03555, n 3 vs 3)\n"
+ },
+ "two conditions, run mean_rmsf": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "core_rmsd_per_residue",
+    "core_rmsf",
+    "core_offset",
+    "mean_rmsd_per_residue",
+    "mean_rmsf",
+    "mean_offset",
+    "rmsd_per_residue",
+    "rmsf",
+    "offset"
+   ],
+   "analysis": "rmsd_per_residue",
+   "conditions": [
+    {
+     "ci95": [
+      2.41213,
+      3.37302
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.89258,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.82459,
+      3.11079,
+      2.74234
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.111662,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.88411,
+      3.79916
+     ],
+     "ci_method": "student_t",
+     "entry": null,
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.34163,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.47597,
+      3.13168,
+      3.41725
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.106336,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     24,
+     24,
+     24
+    ],
+    "B": [
+     24,
+     24,
+     24
+    ]
+   },
+   "metric": "mean_rmsf",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 2.37788,
+     "correction": "BH",
+     "delta": 0.449058,
+     "delta_ci95": [
+      0.0205447,
+      0.877572
+     ],
+     "direction": "increased",
+     "entry": null,
+     "family_size": 1,
+     "hedges_g": 1.9023,
+     "p": 0.0437042,
+     "p_adjusted": 0.0437042,
+     "significant": true,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/rms_decomposition"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "alignment_selection": "protein and name CA",
+     "core": null,
+     "highlight_residues": [
+      4
+     ],
+     "reference_file": null,
+     "reference_frame": 1,
+     "reference_mode": "centroid",
+     "regions": {},
+     "residues": {
+      "core": [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10,
+       11,
+       12
+      ]
+     },
+     "selection": "protein and name CA"
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "mean_rmsf",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": "A",
+   "verdict": [
+    "B larger mean_rmsf than A (delta +0.4491 A, 95% CI 0.02054 to 0.8776, p_adj 0.0437, p 0.0437, n 3 vs 3)"
+   ],
+   "warnings": []
+  },
+  "text": "# polyzymd analyze rmsd_per_residue  metric mean_rmsf  unit A  run mean_rmsf  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA  n 3  mean 2.893  sem 0.1117  ci95 2.412 to 3.373  values 2.825, 3.111, 2.742\nB  n 3  mean 3.342  sem 0.1063  ci95 2.884 to 3.799  values 3.476, 3.132, 3.417\nA vs B  delta +0.4491  ci95 0.02054 to 0.8776  p 0.0437  p_adj 0.0437  test welch_t  correction BH  family 1  d 2.378  significant\nverdict: B larger mean_rmsf than A (delta +0.4491 A, 95% CI 0.02054 to 0.8776, p_adj 0.0437, p 0.0437, n 3 vs 3)\n"
+ },
+ "two conditions, run offset": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "core_rmsd_per_residue",
+    "core_rmsf",
+    "core_offset",
+    "mean_rmsd_per_residue",
+    "mean_rmsf",
+    "mean_offset",
+    "rmsd_per_residue",
+    "rmsf",
+    "offset"
+   ],
+   "analysis": "rmsd_per_residue",
+   "conditions": [
+    {
+     "ci95": [
+      0.366784,
+      3.02008
+     ],
+     "ci_method": "student_t",
+     "entry": "1",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 1.69343,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.4386,
+      2.30716,
+      1.33453
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.308332,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.55825,
+      4.56574
+     ],
+     "ci_method": "student_t",
+     "entry": "1",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.062,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.75646,
+      3.75921,
+      2.67032
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.349492,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.706177,
+      2.38564
+     ],
+     "ci_method": "student_t",
+     "entry": "2",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 1.54591,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.15583,
+      1.72872,
+      1.75317
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.195166,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -0.0236867,
+      2.83636
+     ],
+     "ci_method": "student_t",
+     "entry": "2",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 1.40634,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.44918,
+      1.95938,
+      0.81045
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.332359,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.975396,
+      2.4771
+     ],
+     "ci_method": "student_t",
+     "entry": "3",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 1.72625,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.67867,
+      1.4506,
+      2.04947
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.174509,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -1.55159,
+      5.04864
+     ],
+     "ci_method": "student_t",
+     "entry": "3",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 1.74852,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      0.812315,
+      1.16426,
+      3.269
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.766995,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.519846,
+      1.6878
+     ],
+     "ci_method": "student_t",
+     "entry": "4",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 1.10382,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.02894,
+      1.36722,
+      0.915303
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.135725,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -0.0361735,
+      4.79038
+     ],
+     "ci_method": "student_t",
+     "entry": "4",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 2.3771,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.09388,
+      1.27143,
+      2.766
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.560881,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.274711,
+      2.62828
+     ],
+     "ci_method": "student_t",
+     "entry": "5",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 1.45149,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.73733,
+      0.904679,
+      1.71247
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.273502,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -0.0443852,
+      2.14185
+     ],
+     "ci_method": "student_t",
+     "entry": "5",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 1.04873,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.5567,
+      0.78438,
+      0.805111
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.254056,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -0.129466,
+      3.19488
+     ],
+     "ci_method": "student_t",
+     "entry": "6",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 1.53271,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.95003,
+      0.760932,
+      1.88716
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.386313,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.983563,
+      1.50244
+     ],
+     "ci_method": "student_t",
+     "entry": "6",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 1.243,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.27469,
+      1.32792,
+      1.12639
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0602971,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.0373436,
+      2.14683
+     ],
+     "ci_method": "student_t",
+     "entry": "7",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 1.09209,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.2397,
+      0.613389,
+      1.42317
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.245138,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.93298,
+      3.88904
+     ],
+     "ci_method": "student_t",
+     "entry": "7",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.41101,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.21031,
+      3.42878,
+      3.59395
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.111102,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -0.357072,
+      3.92284
+     ],
+     "ci_method": "student_t",
+     "entry": "8",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 1.78288,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.06533,
+      0.81567,
+      2.46765
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.497357,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.866959,
+      3.52022
+     ],
+     "ci_method": "student_t",
+     "entry": "8",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 2.19359,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.58839,
+      2.59867,
+      2.3937
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.308328,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.446317,
+      2.22852
+     ],
+     "ci_method": "student_t",
+     "entry": "9",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 1.33742,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.48292,
+      0.928811,
+      1.60052
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.207105,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -1.76206,
+      4.74203
+     ],
+     "ci_method": "student_t",
+     "entry": "9",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 1.48999,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.9575,
+      0.44219,
+      1.07027
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.755824,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      0.424113,
+      3.71027
+     ],
+     "ci_method": "student_t",
+     "entry": "10",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.06719,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.35517,
+      1.31059,
+      2.53581
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.381876,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -1.00865,
+      4.07766
+     ],
+     "ci_method": "student_t",
+     "entry": "10",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 1.5345,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.63638,
+      1.35435,
+      0.612776
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.591067,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      -0.237445,
+      3.45093
+     ],
+     "ci_method": "student_t",
+     "entry": "11",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 1.60674,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.03256,
+      2.03815,
+      0.749516
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.428617,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.05958,
+      2.53249
+     ],
+     "ci_method": "student_t",
+     "entry": "11",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 1.79603,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.53082,
+      2.11609,
+      1.74119
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.171163,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.40731,
+      4.79964
+     ],
+     "ci_method": "student_t",
+     "entry": "12",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.10347,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.82238,
+      2.60609,
+      3.88195
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.394213,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.51235,
+      2.13804
+     ],
+     "ci_method": "student_t",
+     "entry": "12",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 1.82519,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      1.93083,
+      1.85892,
+      1.68583
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0727093,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     24,
+     24,
+     24
+    ],
+    "B": [
+     24,
+     24,
+     24
+    ]
+   },
+   "metric": "offset",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 2.3976,
+     "correction": "BH",
+     "delta": 1.36857,
+     "delta_ci95": [
+      0.0666024,
+      2.67053
+     ],
+     "direction": "no significant change",
+     "entry": "1",
+     "family_size": 12,
+     "hedges_g": 1.91808,
+     "p": 0.0433556,
+     "p_adjusted": 0.260133,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -0.295673,
+     "correction": "BH",
+     "delta": -0.139572,
+     "delta_ci95": [
+      -1.31769,
+      1.03855
+     ],
+     "direction": "no significant change",
+     "entry": "2",
+     "family_size": 12,
+     "hedges_g": -0.236539,
+     "p": 0.739651,
+     "p_adjusted": 0.887581,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.0231233,
+     "correction": "BH",
+     "delta": 0.0222765,
+     "delta_ci95": [
+      -3.07604,
+      3.12059
+     ],
+     "direction": "no significant change",
+     "entry": "3",
+     "family_size": 12,
+     "hedges_g": 0.0184986,
+     "p": 0.979763,
+     "p_adjusted": 0.979763,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.80157,
+     "correction": "BH",
+     "delta": 1.27328,
+     "delta_ci95": [
+      -0.976821,
+      3.52338
+     ],
+     "direction": "no significant change",
+     "entry": "4",
+     "family_size": 12,
+     "hedges_g": 1.44125,
+     "p": 0.144682,
+     "p_adjusted": 0.434047,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -0.880953,
+     "correction": "BH",
+     "delta": -0.402762,
+     "delta_ci95": [
+      -1.44141,
+      0.635885
+     ],
+     "direction": "no significant change",
+     "entry": "5",
+     "family_size": 12,
+     "hedges_g": -0.704763,
+     "p": 0.341637,
+     "p_adjusted": 0.799161,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -0.604985,
+     "correction": "BH",
+     "delta": -0.289705,
+     "delta_ci95": [
+      -1.89932,
+      1.31991
+     ],
+     "direction": "no significant change",
+     "entry": "6",
+     "family_size": 12,
+     "hedges_g": -0.483988,
+     "p": 0.532774,
+     "p_adjusted": 0.799161,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 7.035,
+     "correction": "BH",
+     "delta": 2.31893,
+     "delta_ci95": [
+      1.42443,
+      3.21342
+     ],
+     "direction": "no significant change",
+     "entry": "7",
+     "family_size": 12,
+     "hedges_g": 5.628,
+     "p": 0.00432804,
+     "p_adjusted": 0.0519365,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.573055,
+     "correction": "BH",
+     "delta": 0.410704,
+     "delta_ci95": [
+      -1.34895,
+      2.17036
+     ],
+     "direction": "no significant change",
+     "entry": "8",
+     "family_size": 12,
+     "hedges_g": 0.458444,
+     "p": 0.528567,
+     "p_adjusted": 0.799161,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.158956,
+     "correction": "BH",
+     "delta": 0.152569,
+     "delta_ci95": [
+      -2.83245,
+      3.13759
+     ],
+     "direction": "no significant change",
+     "entry": "9",
+     "family_size": 12,
+     "hedges_g": 0.127165,
+     "p": 0.861521,
+     "p_adjusted": 0.939841,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -0.618075,
+     "correction": "BH",
+     "delta": -0.532688,
+     "delta_ci95": [
+      -2.62378,
+      1.5584
+     ],
+     "direction": "no significant change",
+     "entry": "10",
+     "family_size": 12,
+     "hedges_g": -0.49446,
+     "p": 0.497804,
+     "p_adjusted": 0.799161,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.334872,
+     "correction": "BH",
+     "delta": 0.189288,
+     "delta_ci95": [
+      -1.40685,
+      1.78542
+     ],
+     "direction": "no significant change",
+     "entry": "11",
+     "family_size": 12,
+     "hedges_g": 0.267897,
+     "p": 0.712874,
+     "p_adjusted": 0.887581,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -2.60366,
+     "correction": "BH",
+     "delta": -1.27828,
+     "delta_ci95": [
+      -2.90203,
+      0.345471
+     ],
+     "direction": "no significant change",
+     "entry": "12",
+     "family_size": 12,
+     "hedges_g": -2.08293,
+     "p": 0.0788074,
+     "p_adjusted": 0.31523,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/rms_decomposition"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "alignment_selection": "protein and name CA",
+     "core": null,
+     "highlight_residues": [
+      4
+     ],
+     "reference_file": null,
+     "reference_frame": 1,
+     "reference_mode": "centroid",
+     "regions": {},
+     "residues": {
+      "core": [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10,
+       11,
+       12
+      ]
+     },
+     "selection": "protein and name CA"
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "offset",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": "A",
+   "verdict": [
+    "B vs A: 0 of 12 tested labels differ in offset after BH over a family of 12; larger at none; smaller at none"
+   ],
+   "warnings": [
+    "the 95 percent interval of condition B at 2 extends past the bounds 0 to inf of offset, where a t interval is not reliable",
+    "the 95 percent interval of condition B at 3 extends past the bounds 0 to inf of offset, where a t interval is not reliable",
+    "the 95 percent interval of condition B at 4 extends past the bounds 0 to inf of offset, where a t interval is not reliable",
+    "the 95 percent interval of condition B at 5 extends past the bounds 0 to inf of offset, where a t interval is not reliable",
+    "the 95 percent interval of condition A at 6 extends past the bounds 0 to inf of offset, where a t interval is not reliable",
+    "the 95 percent interval of condition A at 8 extends past the bounds 0 to inf of offset, where a t interval is not reliable",
+    "the 95 percent interval of condition B at 9 extends past the bounds 0 to inf of offset, where a t interval is not reliable",
+    "the 95 percent interval of condition B at 10 extends past the bounds 0 to inf of offset, where a t interval is not reliable",
+    "the 95 percent interval of condition A at 11 extends past the bounds 0 to inf of offset, where a t interval is not reliable"
+   ]
+  },
+  "text": "# polyzymd analyze rmsd_per_residue  metric offset  unit A  run offset  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA vs B  labels 12  tested 12  family 12  test welch_t  correction BH  lower 0  higher 0\nnote: the 24 per-label condition rows and 12 per-label comparison rows are in the JSON report\nwarning: the 95 percent interval of condition B at 2 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition B at 3 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition B at 4 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition B at 5 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition A at 6 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition A at 8 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition B at 9 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition B at 10 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nwarning: the 95 percent interval of condition A at 11 extends past the bounds 0 to inf of offset, where a t interval is not reliable\nverdict: B vs A: 0 of 12 tested labels differ in offset after BH over a family of 12; larger at none; smaller at none\n"
+ },
+ "two conditions, run rmsd_per_residue": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "core_rmsd_per_residue",
+    "core_rmsf",
+    "core_offset",
+    "mean_rmsd_per_residue",
+    "mean_rmsf",
+    "mean_offset",
+    "rmsd_per_residue",
+    "rmsf",
+    "offset"
+   ],
+   "analysis": "rmsd_per_residue",
+   "conditions": [
+    {
+     "ci95": [
+      2.16467,
+      5.65718
+     ],
+     "ci_method": "student_t",
+     "entry": "1",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.91092,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.5286,
+      4.72219,
+      3.48198
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.405856,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      5.62338,
+      6.0146
+     ],
+     "ci_method": "student_t",
+     "entry": "1",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 5.81899,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      5.75822,
+      5.7908,
+      5.90795
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0454629,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.20341,
+      4.1428
+     ],
+     "ci_method": "student_t",
+     "entry": "2",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.1731,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.78555,
+      3.5662,
+      3.16756
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.225372,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      3.337,
+      4.01941
+     ],
+     "ci_method": "student_t",
+     "entry": "2",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.67821,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.61516,
+      3.58369,
+      3.83576
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0793013,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.92346,
+      3.7258
+     ],
+     "ci_method": "student_t",
+     "entry": "3",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.32463,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.34211,
+      3.15511,
+      3.47668
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0932383,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.90659,
+      5.49799
+     ],
+     "ci_method": "student_t",
+     "entry": "3",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.70229,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.40498,
+      3.17548,
+      4.5264
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.417347,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.27393,
+      3.47644
+     ],
+     "ci_method": "student_t",
+     "entry": "4",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.87518,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.65116,
+      3.13191,
+      2.84248
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.13974,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.31294,
+      5.4274
+     ],
+     "ci_method": "student_t",
+     "entry": "4",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.87017,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      4.29072,
+      3.14968,
+      4.17011
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.361923,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.50759,
+      3.84309
+     ],
+     "ci_method": "student_t",
+     "entry": "5",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.17534,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.3348,
+      2.86499,
+      3.32624
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.155195,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.4777,
+      3.85259
+     ],
+     "ci_method": "student_t",
+     "entry": "5",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.16514,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.43162,
+      2.87918,
+      3.18463
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.159772,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.65335,
+      4.17661
+     ],
+     "ci_method": "student_t",
+     "entry": "6",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.41498,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.67299,
+      3.07604,
+      3.49591
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.177014,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.64589,
+      3.43641
+     ],
+     "ci_method": "student_t",
+     "entry": "6",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.04115,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.96613,
+      3.22391,
+      2.93341
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0918644,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.49356,
+      3.14437
+     ],
+     "ci_method": "student_t",
+     "entry": "7",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.81897,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.68624,
+      2.94816,
+      2.8225
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0756292,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      4.1507,
+      4.79481
+     ],
+     "ci_method": "student_t",
+     "entry": "7",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 4.47275,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      4.45131,
+      4.35516,
+      4.61178
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0748501,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.45012,
+      3.91007
+     ],
+     "ci_method": "student_t",
+     "entry": "8",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.1801,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.94039,
+      3.09196,
+      3.50793
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.169657,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      3.24139,
+      4.38523
+     ],
+     "ci_method": "student_t",
+     "entry": "8",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.81331,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.54861,
+      3.9243,
+      3.96702
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.132923,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.47356,
+      3.25096
+     ],
+     "ci_method": "student_t",
+     "entry": "9",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.86226,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.97709,
+      2.68404,
+      2.92565
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0903389,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.62103,
+      5.52421
+     ],
+     "ci_method": "student_t",
+     "entry": "9",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.57262,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      4.45896,
+      3.29676,
+      2.96213
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.453578,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.27073,
+      4.53222
+     ],
+     "ci_method": "student_t",
+     "entry": "10",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.40147,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.75684,
+      2.88841,
+      3.55918
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.262802,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.55807,
+      5.22523
+     ],
+     "ci_method": "student_t",
+     "entry": "10",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.39165,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      4.23361,
+      3.08526,
+      2.85606
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.426151,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.29342,
+      5.52544
+     ],
+     "ci_method": "student_t",
+     "entry": "11",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.40943,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.80656,
+      3.99015,
+      2.43157
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.491792,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      3.35108,
+      4.42137
+     ],
+     "ci_method": "student_t",
+     "entry": "11",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.88622,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.96602,
+      3.64229,
+      4.05037
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.124375,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      4.13736,
+      5.85049
+     ],
+     "ci_method": "student_t",
+     "entry": "12",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 4.99392,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      4.60871,
+      5.09934,
+      5.27372
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.199078,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      3.89416,
+      5.79259
+     ],
+     "ci_method": "student_t",
+     "entry": "12",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 4.84338,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      5.13945,
+      4.41203,
+      4.97865
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.220613,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     24,
+     24,
+     24
+    ],
+    "B": [
+     24,
+     24,
+     24
+    ]
+   },
+   "metric": "rmsd_per_residue",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 3.81477,
+     "correction": "BH",
+     "delta": 1.90807,
+     "delta_ci95": [
+      0.191469,
+      3.62466
+     ],
+     "direction": "no significant change",
+     "entry": "1",
+     "family_size": 12,
+     "hedges_g": 3.05182,
+     "p": 0.0408867,
+     "p_adjusted": 0.181985,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.72618,
+     "correction": "BH",
+     "delta": 0.505102,
+     "delta_ci95": [
+      -0.351955,
+      1.36216
+     ],
+     "direction": "no significant change",
+     "entry": "2",
+     "family_size": 12,
+     "hedges_g": 1.38095,
+     "p": 0.143311,
+     "p_adjusted": 0.314836,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.721068,
+     "correction": "BH",
+     "delta": 0.377655,
+     "delta_ci95": [
+      -1.31151,
+      2.06682
+     ],
+     "direction": "no significant change",
+     "entry": "3",
+     "family_size": 12,
+     "hedges_g": 0.576855,
+     "p": 0.462968,
+     "p_adjusted": 0.617291,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 2.09402,
+     "correction": "BH",
+     "delta": 0.994987,
+     "delta_ci95": [
+      -0.360356,
+      2.35033
+     ],
+     "direction": "no significant change",
+     "entry": "4",
+     "family_size": 12,
+     "hedges_g": 1.67521,
+     "p": 0.0962913,
+     "p_adjusted": 0.288874,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -0.0373916,
+     "correction": "BH",
+     "delta": -0.0102003,
+     "delta_ci95": [
+      -0.628828,
+      0.608427
+     ],
+     "direction": "no significant change",
+     "entry": "5",
+     "family_size": 12,
+     "hedges_g": -0.0299132,
+     "p": 0.96567,
+     "p_adjusted": 0.985458,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -1.5305,
+     "correction": "BH",
+     "delta": -0.37383,
+     "delta_ci95": [
+      -1.00798,
+      0.260321
+     ],
+     "direction": "no significant change",
+     "entry": "6",
+     "family_size": 12,
+     "hedges_g": -1.2244,
+     "p": 0.157418,
+     "p_adjusted": 0.314836,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 12.6901,
+     "correction": "BH",
+     "delta": 1.65378,
+     "delta_ci95": [
+      1.35834,
+      1.94923
+     ],
+     "direction": "increased",
+     "entry": "7",
+     "family_size": 12,
+     "hedges_g": 10.1521,
+     "p": 0.000100121,
+     "p_adjusted": 0.00120145,
+     "significant": true,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 2.39885,
+     "correction": "BH",
+     "delta": 0.633216,
+     "delta_ci95": [
+      0.0210596,
+      1.24537
+     ],
+     "direction": "no significant change",
+     "entry": "8",
+     "family_size": 12,
+     "hedges_g": 1.91908,
+     "p": 0.0454964,
+     "p_adjusted": 0.181985,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.2541,
+     "correction": "BH",
+     "delta": 0.710357,
+     "delta_ci95": [
+      -1.14595,
+      2.56666
+     ],
+     "direction": "no significant change",
+     "entry": "9",
+     "family_size": 12,
+     "hedges_g": 1.00328,
+     "p": 0.255421,
+     "p_adjusted": 0.437864,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -0.0160262,
+     "correction": "BH",
+     "delta": -0.00982717,
+     "delta_ci95": [
+      -1.5177,
+      1.49804
+     ],
+     "direction": "no significant change",
+     "entry": "10",
+     "family_size": 12,
+     "hedges_g": -0.012821,
+     "p": 0.985458,
+     "p_adjusted": 0.985458,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.767437,
+     "correction": "BH",
+     "delta": 0.476796,
+     "delta_ci95": [
+      -1.48571,
+      2.4393
+     ],
+     "direction": "no significant change",
+     "entry": "11",
+     "family_size": 12,
+     "hedges_g": 0.61395,
+     "p": 0.436695,
+     "p_adjusted": 0.617291,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -0.413656,
+     "correction": "BH",
+     "delta": -0.150546,
+     "delta_ci95": [
+      -0.979005,
+      0.677912
+     ],
+     "direction": "no significant change",
+     "entry": "12",
+     "family_size": 12,
+     "hedges_g": -0.330924,
+     "p": 0.639334,
+     "p_adjusted": 0.767201,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/rms_decomposition"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "alignment_selection": "protein and name CA",
+     "core": null,
+     "highlight_residues": [
+      4
+     ],
+     "reference_file": null,
+     "reference_frame": 1,
+     "reference_mode": "centroid",
+     "regions": {},
+     "residues": {
+      "core": [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10,
+       11,
+       12
+      ]
+     },
+     "selection": "protein and name CA"
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "rmsd_per_residue",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": "A",
+   "verdict": [
+    "B vs A: 1 of 12 tested labels differ in rmsd_per_residue after BH over a family of 12; larger at 7; smaller at none"
+   ],
+   "warnings": []
+  },
+  "text": "# polyzymd analyze rmsd_per_residue  metric rmsd_per_residue  unit A  run rmsd_per_residue  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA vs B  labels 12  tested 12  family 12  test welch_t  correction BH  lower 0  higher 1\nA vs B  higher: 7 delta +1.654 p_adj 0.001201\nnote: the 24 per-label condition rows and 12 per-label comparison rows are in the JSON report\nverdict: B vs A: 1 of 12 tested labels differ in rmsd_per_residue after BH over a family of 12; larger at 7; smaller at none\n"
+ },
+ "two conditions, run rmsf": {
+  "report": {
+   "all_metrics": [],
+   "all_runs": [
+    "core_rmsd_per_residue",
+    "core_rmsf",
+    "core_offset",
+    "mean_rmsd_per_residue",
+    "mean_rmsf",
+    "mean_offset",
+    "rmsd_per_residue",
+    "rmsf",
+    "offset"
+   ],
+   "analysis": "rmsd_per_residue",
+   "conditions": [
+    {
+     "ci95": [
+      2.22698,
+      4.8119
+     ],
+     "ci_method": "student_t",
+     "entry": "1",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.51944,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.22202,
+      4.1202,
+      3.21609
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.300387,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      3.79072,
+      6.02952
+     ],
+     "ci_method": "student_t",
+     "entry": "1",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 4.91012,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      5.05559,
+      4.40473,
+      5.27003
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.260164,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.98886,
+      3.53898
+     ],
+     "ci_method": "student_t",
+     "entry": "2",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.76392,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.53443,
+      3.11918,
+      2.63815
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.180136,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.4198,
+      4.28804
+     ],
+     "ci_method": "student_t",
+     "entry": "2",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.35392,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.31199,
+      3.00061,
+      3.74917
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.217104,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.71149,
+      2.9553
+     ],
+     "ci_method": "student_t",
+     "entry": "3",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.8334,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.88994,
+      2.80188,
+      2.80838
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0283326,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.69301,
+      3.56821
+     ],
+     "ci_method": "student_t",
+     "entry": "3",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.13061,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.30667,
+      2.95435,
+      3.1308
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.101705,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.17768,
+      3.12375
+     ],
+     "ci_method": "student_t",
+     "entry": "4",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.65072,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.44335,
+      2.81772,
+      2.69108
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.109941,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.69206,
+      3.29148
+     ],
+     "ci_method": "student_t",
+     "entry": "4",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 2.99177,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.97291,
+      2.88166,
+      3.12074
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0696579,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.61805,
+      2.99292
+     ],
+     "ci_method": "student_t",
+     "entry": "5",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.80548,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.8465,
+      2.71841,
+      2.85155
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0435627,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.53951,
+      3.40027
+     ],
+     "ci_method": "student_t",
+     "entry": "5",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 2.96989,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.05821,
+      2.77028,
+      3.08118
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.100027,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.79041,
+      3.23348
+     ],
+     "ci_method": "student_t",
+     "entry": "6",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.01194,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.1126,
+      2.98043,
+      2.9428
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0514874,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.42243,
+      3.12726
+     ],
+     "ci_method": "student_t",
+     "entry": "6",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 2.77484,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.67827,
+      2.93772,
+      2.70854
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0819067,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.88576,
+      3.25034
+     ],
+     "ci_method": "student_t",
+     "entry": "7",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.56805,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.38307,
+      2.88364,
+      2.43744
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.158573,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.39162,
+      3.38093
+     ],
+     "ci_method": "student_t",
+     "entry": "7",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 2.88628,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.08352,
+      2.68532,
+      2.88999
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.114966,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.4162,
+      3.62954
+     ],
+     "ci_method": "student_t",
+     "entry": "8",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.52287,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.09292,
+      2.98244,
+      2.49325
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.257207,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.76553,
+      3.41934
+     ],
+     "ci_method": "student_t",
+     "entry": "8",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.09244,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.17327,
+      2.94059,
+      3.16346
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0759776,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.35168,
+      2.68079
+     ],
+     "ci_method": "student_t",
+     "entry": "9",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.51624,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.58147,
+      2.51821,
+      2.44903
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.0382451,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.34269,
+      3.90129
+     ],
+     "ci_method": "student_t",
+     "entry": "9",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.12199,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.337,
+      3.26697,
+      2.76202
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.181121,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.09703,
+      3.23522
+     ],
+     "ci_method": "student_t",
+     "entry": "10",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.66613,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      2.92695,
+      2.57395,
+      2.49748
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.132266,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.19516,
+      3.72098
+     ],
+     "ci_method": "student_t",
+     "entry": "10",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 2.95807,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.31255,
+      2.77211,
+      2.78955
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.177312,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      1.51332,
+      4.46134
+     ],
+     "ci_method": "student_t",
+     "entry": "11",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 2.98733,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.21848,
+      3.43034,
+      2.31317
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.342582,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.43237,
+      4.4211
+     ],
+     "ci_method": "student_t",
+     "entry": "11",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 3.42674,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.65868,
+      2.96453,
+      3.65701
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.231105,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      2.74788,
+      4.9829
+     ],
+     "ci_method": "student_t",
+     "entry": "12",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "A",
+     "mean": 3.86539,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      3.64339,
+      4.3831,
+      3.56968
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.259726,
+     "statistical_inefficiency": []
+    },
+    {
+     "ci95": [
+      3.44221,
+      5.52366
+     ],
+     "ci_method": "student_t",
+     "entry": "12",
+     "eq_detected_frame": [],
+     "eq_detected_ns": [],
+     "label": "B",
+     "mean": 4.48293,
+     "n_effective": [],
+     "n_replicates": 3,
+     "replicate_values": [
+      4.76296,
+      4.0013,
+      4.68454
+     ],
+     "replicates": [
+      1,
+      2,
+      3
+     ],
+     "sem": 0.241879,
+     "statistical_inefficiency": []
+    }
+   ],
+   "equilibration": "0ns",
+   "frames_per_replicate": {
+    "A": [
+     24,
+     24,
+     24
+    ],
+    "B": [
+     24,
+     24,
+     24
+    ]
+   },
+   "metric": "rmsf",
+   "pairwise": [
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 2.85737,
+     "correction": "BH",
+     "delta": 1.39068,
+     "delta_ci95": [
+      0.278427,
+      2.50294
+     ],
+     "direction": "no significant change",
+     "entry": "1",
+     "family_size": 12,
+     "hedges_g": 2.2859,
+     "p": 0.0257366,
+     "p_adjusted": 0.214049,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.70764,
+     "correction": "BH",
+     "delta": 0.590001,
+     "delta_ci95": [
+      -0.203878,
+      1.38388
+     ],
+     "direction": "no significant change",
+     "entry": "2",
+     "family_size": 12,
+     "hedges_g": 1.36611,
+     "p": 0.107025,
+     "p_adjusted": 0.214049,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 2.29852,
+     "correction": "BH",
+     "delta": 0.297212,
+     "delta_ci95": [
+      -0.103553,
+      0.697978
+     ],
+     "direction": "no significant change",
+     "entry": "3",
+     "family_size": 12,
+     "hedges_g": 1.83882,
+     "p": 0.0905425,
+     "p_adjusted": 0.214049,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 2.1396,
+     "correction": "BH",
+     "delta": 0.341056,
+     "delta_ci95": [
+      -0.0478437,
+      0.729955
+     ],
+     "direction": "no significant change",
+     "entry": "4",
+     "family_size": 12,
+     "hedges_g": 1.71168,
+     "p": 0.0697506,
+     "p_adjusted": 0.214049,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.23039,
+     "correction": "BH",
+     "delta": 0.164406,
+     "delta_ci95": [
+      -0.202861,
+      0.531672
+     ],
+     "direction": "no significant change",
+     "entry": "5",
+     "family_size": 12,
+     "hedges_g": 0.984312,
+     "p": 0.237487,
+     "p_adjusted": 0.284984,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": -2.00106,
+     "correction": "BH",
+     "delta": -0.237102,
+     "delta_ci95": [
+      -0.526842,
+      0.0526376
+     ],
+     "direction": "no significant change",
+     "entry": "6",
+     "family_size": 12,
+     "hedges_g": -1.60085,
+     "p": 0.0823254,
+     "p_adjusted": 0.214049,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.32659,
+     "correction": "BH",
+     "delta": 0.318226,
+     "delta_ci95": [
+      -0.246956,
+      0.883407
+     ],
+     "direction": "no significant change",
+     "entry": "7",
+     "family_size": 12,
+     "hedges_g": 1.06127,
+     "p": 0.186368,
+     "p_adjusted": 0.248491,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.73402,
+     "correction": "BH",
+     "delta": 0.569571,
+     "delta_ci95": [
+      -0.435559,
+      1.5747
+     ],
+     "direction": "no significant change",
+     "entry": "8",
+     "family_size": 12,
+     "hedges_g": 1.38721,
+     "p": 0.148557,
+     "p_adjusted": 0.235803,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 2.67184,
+     "correction": "BH",
+     "delta": 0.605756,
+     "delta_ci95": [
+      -0.13149,
+      1.343
+     ],
+     "direction": "no significant change",
+     "entry": "9",
+     "family_size": 12,
+     "hedges_g": 2.13747,
+     "p": 0.073151,
+     "p_adjusted": 0.214049,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.07758,
+     "correction": "BH",
+     "delta": 0.291943,
+     "delta_ci95": [
+      -0.342413,
+      0.9263
+     ],
+     "direction": "no significant change",
+     "entry": "10",
+     "family_size": 12,
+     "hedges_g": 0.862064,
+     "p": 0.262651,
+     "p_adjusted": 0.286529,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 0.868187,
+     "correction": "BH",
+     "delta": 0.439407,
+     "delta_ci95": [
+      -0.77428,
+      1.65309
+     ],
+     "direction": "no significant change",
+     "entry": "11",
+     "family_size": 12,
+     "hedges_g": 0.694549,
+     "p": 0.355292,
+     "p_adjusted": 0.355292,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    },
+    {
+     "a": "A",
+     "b": "B",
+     "cohens_d": 1.4207,
+     "correction": "BH",
+     "delta": 0.617544,
+     "delta_ci95": [
+      -0.369817,
+      1.60491
+     ],
+     "direction": "no significant change",
+     "entry": "12",
+     "family_size": 12,
+     "hedges_g": 1.13656,
+     "p": 0.157202,
+     "p_adjusted": 0.235803,
+     "significant": false,
+     "test": "welch_t",
+     "testable": true
+    }
+   ],
+   "problems": [],
+   "protocol_version": "2",
+   "provenance": {
+    "config_hashes": {
+     "A": "c4429a507b8cea42",
+     "B": "c4429a507b8cea42"
+    },
+    "mdanalysis_version": "<masked>",
+    "output_paths": {
+     "results": "<tmp>/out/polyzymd_results/rms_decomposition"
+    },
+    "polyzymd_version": "<masked>",
+    "settings": {
+     "alignment_selection": "protein and name CA",
+     "core": null,
+     "highlight_residues": [
+      4
+     ],
+     "reference_file": null,
+     "reference_frame": 1,
+     "reference_mode": "centroid",
+     "regions": {},
+     "residues": {
+      "core": [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10,
+       11,
+       12
+      ]
+     },
+     "selection": "protein and name CA"
+    },
+    "settings_fingerprint": null,
+    "study": null
+   },
+   "run": "rmsf",
+   "status": "complete",
+   "stride": 1,
+   "trends": [],
+   "unit": "A",
+   "verdict": [
+    "B vs A: 0 of 12 tested labels differ in rmsf after BH over a family of 12; larger at none; smaller at none"
+   ],
+   "warnings": []
+  },
+  "text": "# polyzymd analyze rmsd_per_residue  metric rmsf  unit A  run rmsf  eq 0ns  conditions 2  replicates 3,3  protocol rmsd_per_residue/2\nA vs B  labels 12  tested 12  family 12  test welch_t  correction BH  lower 0  higher 0\nnote: the 24 per-label condition rows and 12 per-label comparison rows are in the JSON report\nverdict: B vs A: 0 of 12 tested labels differ in rmsf after BH over a family of 12; larger at none; smaller at none\n"
+ },
+ "unknown run": {
+  "hint": "Use --run with one of ['core_rmsd_per_residue', 'core_rmsf', 'core_offset', 'mean_rmsd_per_residue', 'mean_rmsf', 'mean_offset', 'rmsd_per_residue', 'rmsf', 'offset'].",
+  "message": "rmsd_per_residue: no result named 'bogus'."
+ },
+ "unknown setting": {
+  "hint": "Run polyzymd analyze rmsd_per_residue -c A/config.yaml --set selection=..., one of the settings above.",
+  "message": "rmsd_per_residue takes no setting other than selection, alignment_selection, reference_mode, reference_frame, reference_file, highlight_residues, core, regions."
+ }
+}

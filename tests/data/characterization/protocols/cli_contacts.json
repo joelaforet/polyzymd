@@ -1,0 +1,165 @@
+{
+ "agent": "# polyzymd analyze contacts  metric coverage  unit none  run coverage  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\nA  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nA vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition A has the same coverage in every replicate, so its interval is not estimable\nwarning: condition B has the same coverage in every replicate, so its interval is not estimable\nwarning: A vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nverdict: not testable: coverage for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n\n",
+ "json": {
+  "all_metrics": [],
+  "all_runs": [
+   "coverage",
+   "mean_contact_fraction",
+   "EGM_contact_fraction",
+   "SBM_contact_fraction",
+   "polar_contact_fraction",
+   "occluded_area",
+   "occlusion_fraction",
+   "contact_fraction_residues",
+   "EGM_contact_fraction_residues",
+   "SBM_contact_fraction_residues",
+   "occluded_area_residues",
+   "mean_lifetime",
+   "EGM_mean_lifetime",
+   "SBM_mean_lifetime",
+   "lifetime_events",
+   "censored_fraction"
+  ],
+  "analysis": "contacts",
+  "conditions": [
+   {
+    "ci95": null,
+    "ci_method": "not_estimable",
+    "entry": null,
+    "eq_detected_frame": [],
+    "eq_detected_ns": [],
+    "label": "A",
+    "mean": 0.0,
+    "n_effective": [],
+    "n_replicates": 3,
+    "replicate_values": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "replicates": [
+     1,
+     2,
+     3
+    ],
+    "sem": 0.0,
+    "statistical_inefficiency": []
+   },
+   {
+    "ci95": null,
+    "ci_method": "not_estimable",
+    "entry": null,
+    "eq_detected_frame": [],
+    "eq_detected_ns": [],
+    "label": "B",
+    "mean": 0.0,
+    "n_effective": [],
+    "n_replicates": 3,
+    "replicate_values": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "replicates": [
+     1,
+     2,
+     3
+    ],
+    "sem": 0.0,
+    "statistical_inefficiency": []
+   }
+  ],
+  "equilibration": "0ns",
+  "frames_per_replicate": {
+   "A": [
+    12,
+    12,
+    12
+   ],
+   "B": [
+    12,
+    12,
+    12
+   ]
+  },
+  "metric": "coverage",
+  "pairwise": [
+   {
+    "a": "A",
+    "b": "B",
+    "cohens_d": 0.0,
+    "correction": "BH",
+    "delta": 0.0,
+    "delta_ci95": null,
+    "direction": "no significant change",
+    "entry": null,
+    "family_size": null,
+    "hedges_g": 0.0,
+    "p": null,
+    "p_adjusted": null,
+    "significant": false,
+    "test": "welch_t",
+    "testable": false
+   }
+  ],
+  "problems": [],
+  "protocol_version": "2",
+  "provenance": {
+   "config_hashes": {
+    "A": "c4429a507b8cea42",
+    "B": "c4429a507b8cea42"
+   },
+   "mdanalysis_version": "<masked>",
+   "output_paths": {
+    "results": "<out>/polyzymd_results/residue_occlusion"
+   },
+   "polyzymd_version": "<masked>",
+   "settings": {
+    "buried_threshold": 0.2,
+    "exposed_threshold": 0.2,
+    "max_asa": "theoretical",
+    "method": "occlusion",
+    "n_sphere_points": 960,
+    "polymer_selection": "chainid C",
+    "polymer_types": [
+     "EGM",
+     "SBM"
+    ],
+    "polymer_types_found": [
+     "EGM",
+     "SBM"
+    ],
+    "probe_radius_nm": 0.14,
+    "protein_selection": "chainid A",
+    "regions": {},
+    "residues": {
+     "classes": {
+      "polar": [
+       12,
+       30,
+       45
+      ]
+     }
+    },
+    "tolerance_ps": 0.0,
+    "unmeasured_residues": [],
+    "use_pbc": true
+   },
+   "settings_fingerprint": null,
+   "study": null
+  },
+  "run": "coverage",
+  "status": "complete",
+  "stride": 1,
+  "trends": [],
+  "unit": null,
+  "verdict": [
+   "not testable: coverage for A vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)"
+  ],
+  "warnings": [
+   "condition A has the same coverage in every replicate, so its interval is not estimable",
+   "condition B has the same coverage in every replicate, so its interval is not estimable",
+   "A vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate"
+  ]
+ }
+}
