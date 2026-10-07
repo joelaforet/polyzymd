@@ -1,6 +1,6 @@
 # Run OpenMM on Other Hardware
 
-PolyzyMD does not require a Blanca cluster. The molecular build files and the
+PolyzyMD does not require a particular cluster. The molecular build files and the
 OpenMM simulation code are portable. The automatic SLURM routing in version
 1.3 has a smaller scope: it supports NVIDIA GPUs whose drivers can use one of
 the checked-in CUDA 12.0, 12.4, or 12.6 environments.
@@ -27,7 +27,7 @@ driver probe and the explicit CUDA Context preflight.
 | Hardware and launch path | Status in version 1.3 |
 |--------------------------|-----------------------|
 | NVIDIA GPU with `polyzymd submit` | Supported when the driver is compatible with a checked-in CUDA environment |
-| NVIDIA GPU on a non-Blanca SLURM cluster | Supported with a suitable preset or CLI resource overrides |
+| NVIDIA GPU on a SLURM cluster without a preset | Supported with a suitable preset or CLI resource overrides |
 | Bridges-2 NVIDIA GPU | The scheduler preset is included; test the selected GPU type and current driver before a campaign |
 | CPU with `polyzymd run` | Supported when `openmm.platform` is `CPU` |
 | AMD GPU with `polyzymd run` | Possible through OpenMM `OpenCL` when the site supplies a working OpenCL runtime; not tested by PolyzyMD CI |
@@ -40,7 +40,7 @@ GPU job from running slowly on CPU without the user's knowledge.
 
 This OpenMM rule does not apply to the GROMACS backend. GROMACS uses its own
 site module or container and its own self-restarting SLURM template. See
-{doc}`gromacs_export` for portable CPU and GPU recipes.
+{doc}`run_gromacs` for portable CPU and GPU recipes.
 
 ## Use another NVIDIA SLURM cluster
 

@@ -58,7 +58,8 @@ troubleshoot_openff_pdb_ingestion
 hpc_slurm
 monitor_simulations
 hardware_platforms
-gromacs_export
+run_gromacs
+site_cu_boulder
 ```
 
 ## Organize and publish studies
