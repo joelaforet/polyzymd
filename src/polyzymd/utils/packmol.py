@@ -753,7 +753,6 @@ def pack_polymers(
     _require_packmol()
     import numpy as np
     from openff.packmol._packmol import (
-        _center_topology_at,
         _compute_brick_from_box_vectors,
         _create_molecule_pdbs,
         _create_solute_pdb,
@@ -789,7 +788,7 @@ def pack_polymers(
     box_size_angstrom = np.asarray(brick_size.m_as("angstrom"), dtype=float)
 
     # --- center solute in the brick ---
-    centered_solute = _center_topology_at("BRICK", solute, box_vectors, brick_size)
+    centered_solute = center_in_brick(solute, box_size_angstrom)
 
     logger.info(
         "Polymers pack throughout the box; the %.1f A Packmol tolerance against the "
@@ -972,7 +971,6 @@ def solvate_with_packmol(
     _require_packmol()
     import numpy as np
     from openff.packmol._packmol import (
-        _center_topology_at,
         _compute_brick_from_box_vectors,
         _create_molecule_pdbs,
         _create_solute_pdb,
@@ -999,7 +997,7 @@ def solvate_with_packmol(
     # (polymer packing does), because a centre-of-geometry shift of an
     # already-framed system pushes atoms back out through the brick faces.
     if center_solute:
-        centered_solute = _center_topology_at("BRICK", solute, box_vectors, brick_size)
+        centered_solute = center_in_brick(solute, box_size_angstrom)
     else:
         logger.info("Solute is already framed in the periodic brick; skipping re-centring.")
         centered_solute = solute
@@ -1096,6 +1094,25 @@ def solvate_with_packmol(
 # ---------------------------------------------------------------------------
 
 
+def center_in_brick(topology, brick_angstrom: "NDArray"):
+    """Return a copy of *topology* with its bounding box centred in the brick.
+
+    Centring the bounding box, not the centre of geometry, gives the solute
+    the same clearance to opposite brick faces. The box is sized for that
+    clearance (see :func:`polyzymd.utils.boxvectors.plan_box`).
+    """
+    import numpy as np
+    from openff.toolkit import Topology
+    from openff.units import Quantity
+
+    centered = Topology(topology)
+    positions = np.asarray(centered.get_positions().m_as("angstrom"), dtype=float)
+    middle = 0.5 * (positions.min(axis=0) + positions.max(axis=0))
+    shift = 0.5 * np.asarray(brick_angstrom, dtype=float) - middle
+    centered.set_positions(Quantity(positions + shift, "angstrom"))
+    return centered
+
+
 def solute_sphere_constraint(
     solute,
     *,
@@ -1103,9 +1120,9 @@ def solute_sphere_constraint(
 ) -> "NDArray":
     """Spherical confinement region around a solute, in Angstrom.
 
-    The sphere is centred on the solute's centre of geometry — which is where
-    :func:`openff.packmol._packmol._center_topology_at` puts it in the brick —
-    and its radius is the circumradius of the solute's bounding box plus
+    The sphere is centred on the solute's bounding box — which is where
+    :func:`center_in_brick` puts it in the brick — and its radius is the
+    circumradius of that bounding box plus
     *padding_angstrom*.  The radius therefore depends only on the solute's
     shape, never on where the chains happen to land, so replicates of one
     condition share it.
@@ -1127,7 +1144,7 @@ def solute_sphere_constraint(
     import numpy as np
 
     positions = np.asarray(solute.get_positions().m_as("angstrom"), dtype=float).reshape(-1, 3)
-    center = positions.mean(axis=0)
+    center = 0.5 * (positions.min(axis=0) + positions.max(axis=0))
     extent = positions.max(axis=0) - positions.min(axis=0)
     radius = 0.5 * float(np.linalg.norm(extent)) + float(padding_angstrom)
     return np.array([center[0], center[1], center[2], radius], dtype=float)
