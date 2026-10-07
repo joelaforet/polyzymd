@@ -743,14 +743,16 @@ class SolventConfig(_ConfigModel):
 class AtomSelectionConfig(_ConfigModel):
     """Configuration for selecting atoms for restraints.
 
-    Uses MDAnalysis-compatible selection syntax for flexibility.
+    The selection is an MDTraj selection in which ``resid``, ``chain`` and
+    ``pdbindex`` keep their MDAnalysis meaning (PDB residue number, chain
+    letter, PDB atom serial).
 
     Attributes:
-        selection: MDAnalysis selection string (e.g., "resid 77 and name OG")
+        selection: Selection string (e.g., "protein and resid 77 and name OG")
         description: Optional human-readable description
     """
 
-    selection: str = Field(..., description="MDAnalysis selection string")
+    selection: str = Field(..., description="Atom selection, e.g. 'resid 77 and name OG'")
     description: str | None = Field(None, description="Human-readable description")
 
 
@@ -1703,16 +1705,6 @@ class SimulationConfig(_ConfigModel):
 
         return load_config(path)
 
-    def to_yaml(self, path: str | Path) -> None:
-        """Save configuration to a YAML file.
-
-        Args:
-            path: Path to save the configuration file
-        """
-        from polyzymd.config.loader import save_config
-
-        save_config(self, path)
-
     def _primary_solvent_token(self) -> str:
         """Format the primary solvent naming token.
 
@@ -1842,16 +1834,6 @@ class SimulationConfig(_ConfigModel):
         values["duration"] = 0
         return self.output.effective_scratch_directory / self.output.format_directory_name(**values)
 
-    def get_projects_directory(self) -> Path:
-        """Get the projects directory path.
-
-        This is where scripts, configs, and logs are stored.
-
-        Returns:
-            Path to the projects directory
-        """
-        return self.output.projects_directory
-
     def discover_replicate_dirs(self) -> list[tuple[int, Path]]:
         """Auto-detect all replicate directories on disk.
 
@@ -1903,41 +1885,3 @@ class SimulationConfig(_ConfigModel):
             Formatted directory name
         """
         return self.format_run_directory_name(replicate)
-
-    def to_signac_statepoint(self, replicate: int = 1) -> dict[str, Any]:
-        """Convert configuration to a Signac-compatible state point dictionary.
-
-        Args:
-            replicate: Replicate number
-
-        Returns:
-            Dictionary suitable for use as a Signac state point
-        """
-        statepoint = {
-            "enzyme": self.enzyme.name,
-            "temperature": self.thermodynamics.temperature,
-            "replicate": replicate,
-        }
-
-        if self.substrate:
-            statepoint["substrate"] = self.substrate.name
-            statepoint["substrate_conformer"] = self.substrate.conformer_index
-
-        if self.polymers and self.polymers.enabled:
-            statepoint["polymer_type"] = self.polymers.type_prefix
-            statepoint["polymer_length"] = self.polymers.length
-            statepoint["polymer_count"] = self.polymers.count
-            # Include monomer probabilities
-            for monomer in self.polymers.monomers:
-                statepoint[f"monomer_{monomer.label}_prob"] = monomer.probability
-        else:
-            statepoint["polymer_type"] = "none"
-
-        # Include co-solvent info
-        for cosolvent in self.solvent.co_solvents:
-            if cosolvent.mole_fraction is not None:
-                statepoint[f"cosolvent_{cosolvent.name}_mole_fraction"] = cosolvent.mole_fraction
-            elif cosolvent.concentration is not None:
-                statepoint[f"cosolvent_{cosolvent.name}_molarity"] = cosolvent.concentration
-
-        return statepoint

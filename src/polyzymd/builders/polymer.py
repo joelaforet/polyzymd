@@ -631,27 +631,6 @@ class PolymerBuilder:
 
         LOGGER.info("Dynamic polymer generation pipeline initialized")
 
-    def get_packing_info(self) -> Tuple[List[Molecule], List[int]]:
-        """Get molecules and counts for PACKMOL packing.
-
-        Returns:
-            Tuple of (list of unique molecules, list of counts).
-
-        Raises:
-            RuntimeError: If build() has not been called.
-        """
-        if self._sequence_counts is None:
-            raise RuntimeError("No polymers generated. Call build() first.")
-
-        molecules = []
-        counts = []
-
-        for sequence, count in self._sequence_counts.items():
-            molecules.append(self._loaded_molecules[sequence])
-            counts.append(count)
-
-        return molecules, counts
-
     def validate(self) -> bool:
         """Validate the loaded polymers.
 

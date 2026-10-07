@@ -154,7 +154,7 @@ close contacts.
 
 ```
 SolvationClashError: 1182 solvent atom(s) lie within 1.00 A of the solute ...
-solute/solvent frame mismatch, see d96b1fcd
+solute/solvent frame mismatch: the packed coordinates are shifted against the solute
 ```
 
 The packed molecules sit inside the protein. The solute and the packed
@@ -191,7 +191,7 @@ close, so the build stops.
 A contact between half the tolerance and the full tolerance gives only a
 warning. Minimization removes it.
 
-### `ValueError: No atoms match selection: 'resid 77 and name OG'`
+### `ValueError: No atoms match selection: 'resid 76 and name OG'`
 
 A restraint selection matches no atom.
 
@@ -284,16 +284,16 @@ scancel 1234567
 squeue -u $USER   # the same replicate is queued again
 ```
 
-`scancel` sends `SIGTERM`. The OpenMM job reads it as an interruption with
-work left, and submits a successor. Stop the chain, not the job:
+`scancel` sends `SIGTERM`. The job reads it as an interruption with work
+left, and submits a successor. Stop the chain, not the job:
 
 ```bash
 polyzymd cancel -c config.yaml -r 1-3            # write STOP and cancel the jobs
 polyzymd cancel -c config.yaml -r 1-3 --resume   # let the chain run again
 ```
 
-Job scripts written by PolyzyMD 1.2 and earlier, and GROMACS job scripts, do
-not check for `STOP`. Stop those chains with
+OpenMM and GROMACS job scripts check for `STOP`. Job scripts written by
+PolyzyMD 1.2 and earlier do not. Stop those chains with
 `scancel --batch --signal=KILL <job_id>`. See
 {ref}`Stop a chain <hpc-slurm-stop-a-chain>`.
 
@@ -317,11 +317,11 @@ The message names each node that it tried.
 
    ```bash
    polyzymd submit -c config.yaml -r 1 --preset blanca-shirts \
-       --exclude bgpu-bortz1,bgpu-g4-u20,bgpu-g4-u24,bgpu-g4-u30
+       --exclude <preset nodes>,<node 1>,<node 2>,<node 3>
    ```
 
    `--exclude` replaces the list of the preset, so include the nodes of the
-   preset too.
+   preset too. For the Blanca list, see {ref}`excluded-blanca-gpu-nodes`.
 
 2. If the same nodes come back often, ask the maintainers to add them to the
    list of the preset.

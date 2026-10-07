@@ -210,7 +210,7 @@ polyzymd project check .
 ```
 
 Each condition line names its runs, such as
-`control Water: runs [1, 2, 3] under /home/me/my_paper/runs/trpcage/water (from config)`.
+`control Water: replicates [1, 2, 3] under /home/me/my_paper/trpcage/conditions/water/../../../runs/trpcage/water (from config)`.
 
 ## Step 7: Analyze
 

@@ -1,8 +1,7 @@
 """Engine-agnostic export dispatch for PolyzyMD systems.
 
 Routes export requests to engine-specific exporters based on format string.
-Implemented formats: gromacs.
-Planned formats: lammps, amber (stubs raise NotImplementedError).
+The only format is gromacs.
 """
 
 from __future__ import annotations
@@ -17,52 +16,19 @@ if TYPE_CHECKING:
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.core.atom_groups import SystemComponentInfo
 
-# Formats with working exporters
-IMPLEMENTED_FORMATS = ("gromacs",)
-
-# Formats with stub exporters (raise NotImplementedError)
-PLANNED_FORMATS = ("lammps", "amber")
-
-# All recognized formats (implemented + planned)
-SUPPORTED_FORMATS = IMPLEMENTED_FORMATS + PLANNED_FORMATS
+SUPPORTED_FORMATS = ("gromacs",)
 
 
 class ExportFormat(str, Enum):
     """Supported MD engine export formats."""
 
     GROMACS = "gromacs"
-    LAMMPS = "lammps"
-    AMBER = "amber"
 
 
 def get_supported_formats() -> tuple[str, ...]:
-    """Return all recognized export format names, including planned.
-
-    Returns
-    -------
-    tuple[str, ...]
-        All recognized format names in canonical lowercase form.
-        Includes both implemented formats (with working exporters) and
-        planned formats (that raise ``NotImplementedError``).
-        Use :func:`get_implemented_formats` to get only working formats.
-    """
+    """Return the export format names in canonical lowercase form."""
 
     return SUPPORTED_FORMATS
-
-
-def get_implemented_formats() -> tuple[str, ...]:
-    """Return formats that have working exporters.
-
-    Returns
-    -------
-    tuple[str, ...]
-        Format names with fully implemented export pipelines.
-        Calling :func:`export_system` with these formats will produce
-        output files. Contrast with :func:`get_supported_formats` which
-        also includes planned formats that raise ``NotImplementedError``.
-    """
-
-    return IMPLEMENTED_FORMATS
 
 
 def export_system(
@@ -86,7 +52,7 @@ def export_system(
     output_dir : str or Path
         Directory where exported files will be written
     fmt : str or ExportFormat
-        Target MD engine format (``"gromacs"``, ``"lammps"``, ``"amber"``)
+        Target MD engine format (``"gromacs"``)
     component_info : SystemComponentInfo or None, optional
         Component metadata used for position restraints (GROMACS-only for now)
     prefix : str or None, optional
@@ -105,8 +71,6 @@ def export_system(
     ------
     ValueError
         If ``fmt`` is not one of the supported export formats
-    NotImplementedError
-        If the requested format is recognized but not yet implemented
     """
 
     fmt_str = fmt.value if isinstance(fmt, ExportFormat) else fmt.lower().strip()
@@ -117,17 +81,9 @@ def export_system(
             f"Supported formats: {', '.join(SUPPORTED_FORMATS)}"
         )
 
-    if fmt_str == "gromacs":
-        return _export_gromacs(
-            interchange, config, output_dir, component_info, prefix, gmx_command, replicate
-        )
-    if fmt_str == "lammps":
-        return _export_lammps(interchange, config, output_dir, prefix)
-    if fmt_str == "amber":
-        return _export_amber(interchange, config, output_dir, prefix)
-
-    # Defensive fallback for future format handling changes
-    raise ValueError(f"Unhandled export format: {fmt_str!r}")
+    return _export_gromacs(
+        interchange, config, output_dir, component_info, prefix, gmx_command, replicate
+    )
 
 
 def _export_gromacs(
@@ -174,78 +130,4 @@ def _export_gromacs(
         output_dir=output_dir,
         prefix=prefix,
         gmx_command=gmx_command,
-    )
-
-
-def _export_lammps(
-    interchange: "Interchange",
-    config: "SimulationConfig",
-    output_dir: str | Path,
-    prefix: str | None,
-) -> dict[str, Any]:
-    """Export to LAMMPS format.
-
-    Parameters
-    ----------
-    interchange : Interchange
-        Parameterized system to export
-    config : SimulationConfig
-        Simulation configuration
-    output_dir : str or Path
-        Destination directory for output files
-    prefix : str or None
-        Optional filename prefix
-
-    Returns
-    -------
-    dict[str, Any]
-        Placeholder return type for future implementation
-
-    Raises
-    ------
-    NotImplementedError
-        LAMMPS export is not yet implemented
-    """
-
-    _ = (interchange, config, output_dir, prefix)
-    raise NotImplementedError(
-        "LAMMPS export is not yet implemented. "
-        "See https://github.com/joelaforet/polyzymd/issues for updates."
-    )
-
-
-def _export_amber(
-    interchange: "Interchange",
-    config: "SimulationConfig",
-    output_dir: str | Path,
-    prefix: str | None,
-) -> dict[str, Any]:
-    """Export to AMBER format.
-
-    Parameters
-    ----------
-    interchange : Interchange
-        Parameterized system to export
-    config : SimulationConfig
-        Simulation configuration
-    output_dir : str or Path
-        Destination directory for output files
-    prefix : str or None
-        Optional filename prefix
-
-    Returns
-    -------
-    dict[str, Any]
-        Placeholder return type for future implementation
-
-    Raises
-    ------
-    NotImplementedError
-        AMBER export is not yet implemented
-    """
-
-    _ = (interchange, config, output_dir, prefix)
-    raise NotImplementedError(
-        "AMBER export is not yet implemented. "
-        "See https://github.com/joelaforet/polyzymd/issues for updates."
     )

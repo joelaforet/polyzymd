@@ -48,6 +48,7 @@ def test_a_new_condition_of_a_project_runs_into_the_project_runs_folder(tmp_path
     text = config.read_text()
     assert "scratch_directory" in text and "a lot of disk space" in text
     assert "runs/" in (project / ".gitignore").read_text().splitlines()
+    assert ".polymer_cache/" in (project / ".gitignore").read_text().splitlines()
     assert not (config.parent / "job_scripts").exists()
 
 
@@ -60,6 +61,7 @@ def test_a_condition_of_a_lone_study_runs_into_the_study_runs_folder(tmp_path: P
         None,
     )
     assert "runs/" in (created.root / ".gitignore").read_text().splitlines()
+    assert ".polymer_cache/" in (created.root / ".gitignore").read_text().splitlines()
 
 
 def test_from_copies_a_sibling_condition_with_its_inputs(tmp_path: Path) -> None:

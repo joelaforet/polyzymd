@@ -148,7 +148,7 @@ fatal; PolyzyMD uses CPU only when `openmm.platform: CPU` is explicitly
 configured.
 The standard OpenMM SLURM template is NVIDIA-only in version 1.3. CPU and AMD
 OpenCL use need a site-managed environment and batch wrapper. See
-{doc}`../how_to/hardware_platforms` for examples and the extension checklist.
+{doc}`../how_to/hardware_platforms` for examples.
 
 ## 4. Verify the Commands You Can Use
 
@@ -166,8 +166,9 @@ In the `build` environment, these commands should work directly:
 | `polyzymd run` | Yes | Builds and runs a simulation on this machine, on the OpenMM platform of the config, such as `CPU` |
 | `polyzymd run-segment` | No | Runs one segment of a SLURM chain. The job scripts run it in a `sim-cuda-*` environment |
 
-The `analysis` environment is the supported environment for `polyzymd analyze`
-commands. It contains MDAnalysis, MDTraj, pandas, SciPy, scikit-learn,
+`polyzymd analyze` runs in the `build` environment, which includes the
+analysis tools, and in the smaller `analysis` environment. The `analysis`
+environment contains MDAnalysis, MDTraj, pandas, SciPy, scikit-learn,
 matplotlib, seaborn, Python 3.12, and NumPy 2 without the CUDA runtime pins.
 
 PolyzyMD also prints advisory CLI warnings when pixi reports an active

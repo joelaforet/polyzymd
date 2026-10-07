@@ -152,7 +152,7 @@ fig.savefig(output_dir / "hbond_occupancy_selected_residues.png", dpi=300, bbox_
 - For one number per replicate, such as the `mean_hbonds` row of
   `functions.hydrogen_bonds` in {doc}`hydrogen_bonds`, each summary row has
   `entry` set to `None`: plot one bar per condition.
-- `occupancy.over_labels("mean", labels=[77, 133, 156])` averages the chosen
+- `occupancy.over_labels("mean", labels=[76, 132, 155])` averages the chosen
   residues into one value per replicate, which `compare()` then tests as one
   quantity.
 

@@ -59,7 +59,8 @@ The Alpine presets (`aa100`, `al40` and `testing`) set a CU Boulder
 allocation as the account. On another allocation, give your own with
 `--account <account>`. To use another cluster, override the preset's fields
 with `--partition`, `--account`, `--qos` and `--gpu-type`. See
-{doc}`hardware_platforms`.
+{doc}`hardware_platforms`. For the CU Boulder clusters, see
+{doc}`site_cu_boulder`.
 
 Use `testing` first when you try a new system or a new workflow.
 
@@ -185,7 +186,7 @@ To start again, remove the marker and submit again:
 
 ```bash
 pixi run -e build polyzymd cancel -c config.yaml -r 1-3 --resume
-pixi run -e build polyzymd submit -c config.yaml -r 1-3 --preset blanca-shirts
+pixi run -e build polyzymd submit -c config.yaml -r 1-3 --preset aa100
 ```
 
 `STOP` is a text file at `<replicate folder>/STOP`. It names who stopped the
@@ -252,7 +253,7 @@ compiler before the molecular setup. PolyzyMD does not fall back to the CPU.
 If the node is not compatible, the job submits a replacement job that
 excludes the node. After three failed attempts, the chain stops. The preset
 excludes nodes that are known to be incompatible, so these nodes never use an
-attempt. See [Excluded Blanca GPU nodes](#excluded-blanca-gpu-nodes).
+attempt. See {ref}`excluded-blanca-gpu-nodes`.
 
 PolyzyMD records the runtime of each replicate. A replicate cannot change its
 pixi environment, OpenMM version, platform or precision when it is submitted
@@ -279,97 +280,6 @@ pixi run -e build polyzymd submit \
 
 The allocated node must make a CUDA Context with this environment. The job
 does not select another environment.
-
-(cu-boulder-site-notes)=
-## CU Boulder Alpine and Blanca
-
-CU Boulder runs two SLURM clusters. Load the module of the cluster before you
-submit:
-
-```bash
-ml slurm/alpine   # shared campus cluster
-ml slurm/blanca   # condo nodes owned by research groups
-```
-
-:::{important}
-Run `ml slurm/blanca` before `sbatch` or `polyzymd submit` to use Blanca. If
-you do not, SLURM does not show the Blanca partitions.
-:::
-
-Both clusters need a partition, an account and a QoS. The presets set all
-three. Alpine example, with your own allocation:
-
-```bash
-pixi run -e build polyzymd submit \
-    -c config.yaml \
-    --preset aa100 \
-    --account <account> \
-    --pixi-env auto \
-    --replicates 1-5
-```
-
-On Blanca, the partition, the account and the QoS usually have the same name:
-
-```bash
-pixi run -e build polyzymd submit \
-    -c config.yaml \
-    --preset blanca-shirts \
-    --pixi-env auto \
-    --replicates 1-5
-```
-
-For GROMACS on Blanca, request compatible hardware with `--constraint`. See
-{doc}`gromacs_export`.
-
-(excluded-blanca-gpu-nodes)=
-### Excluded Blanca GPU nodes
-
-The `blanca-shirts` and `blanca-chbe-rdi` presets give SLURM an `--exclude`
-list. Jobs do not start on these nodes:
-
-| Node | Reason |
-|------|--------|
-| `bgpu-bortz1` | Unreliable node |
-| `bgpu-g4-u20` | NVIDIA driver 525.147. The pinned `sim-cuda-12-4` builds need driver 550 or newer. |
-| `bgpu-g4-u24` | The same old driver as `bgpu-g4-u20` |
-
-Without the list, a job on `bgpu-g4-u20` or `bgpu-g4-u24` logs
-`ROUTING: sim-cuda-12-4 is incompatible with driver 525.147`. It then uses one
-of its three routing attempts and submits again. A chain that gets both nodes
-in a row uses all its attempts and stops with
-`FATAL: CUDA routing failed after 3 retries`.
-
-A running chain keeps the exclude list of its current script until its next
-submission.
-
-To use a different list, give `--exclude`. For example, test a node again after
-CURC upgrades its driver:
-
-```bash
-pixi run -e build polyzymd submit \
-    -c config.yaml \
-    --preset blanca-shirts \
-    --exclude bgpu-bortz1 \
-    --replicates 1
-```
-
-`--exclude` replaces the preset's list. It does not add to it. Give
-`--exclude ""` to exclude no node. Leave out the option to keep the preset's
-list.
-
-### GROMACS on Blanca
-
-A GROMACS acceptance test ran on 14 August 2026 with the `blanca-shirts`
-account and QoS. Both short jobs used GROMACS 2024.2 from the site module.
-
-| Mode | Node | Hardware | Result |
-|------|------|----------|--------|
-| CPU | `bgpu-shirts3` | 2 CPU threads | 20-step test completed |
-| GPU | `bgpu-shirts1` | NVIDIA A40, driver 550.90.07 | 20-step GPU nonbonded test completed |
-
-The site module reported CUDA GPU support. These results apply only to the
-tested module and nodes. Run the short test again after a module or driver
-update.
 
 :::{tip}
 To run analyses on the cluster, with one job per condition and replicate, see
@@ -452,7 +362,7 @@ pixi run -e build polyzymd submit \
 
 GROMACS uses the site module or container that the config's `gromacs:` block
 names. For CPU and GPU settings, MPI, constraints and recovery, see
-{doc}`gromacs_export`.
+{doc}`run_gromacs`.
 
 ## Common fixes
 
@@ -481,6 +391,7 @@ because the chain submits itself again within seconds.
 
 - Command options: {doc}`../reference/cli_reference`
 - Configuration keys: {doc}`../reference/configuration`
-- GROMACS on a cluster: {doc}`gromacs_export`
+- GROMACS: {doc}`run_gromacs`
+- CU Boulder Alpine and Blanca: {doc}`site_cu_boulder`
 - Other hardware: {doc}`hardware_platforms`
 - First simulation: {doc}`../get_started/quickstart`

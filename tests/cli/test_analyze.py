@@ -90,13 +90,17 @@ def _report() -> ProtocolReport:
 
 
 @pytest.fixture()
-def stub_analyze(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+def stub_analyze(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, object]:
     """Replace the protocol entry point with a recorder returning a report.
+
+    The test runs in ``tmp_path``, so an analysis log goes there.
 
     Parameters
     ----------
     monkeypatch : pytest.MonkeyPatch
         Patching fixture.
+    tmp_path : Path
+        Temporary directory, made the working directory.
 
     Returns
     -------
@@ -112,6 +116,7 @@ def stub_analyze(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         return _report()
 
     monkeypatch.setattr("polyzymd.analyses.protocols.analyze", _fake_analyze)
+    monkeypatch.chdir(tmp_path)
     return captured
 
 

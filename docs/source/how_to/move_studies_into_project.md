@@ -1,7 +1,7 @@
 # Move existing studies into a project
 
-This tutorial starts from a blank `polyzymd project init` and moves studies
-you already have, each with its own `study.yaml`, into it. You end with one
+Move studies that you already have, each with its own `study.yaml`, into a
+blank project made with `polyzymd project init`. You end with one
 project folder for the paper, whose analyses are written once and run in every
 study, and whose stored results are kept.
 

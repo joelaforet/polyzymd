@@ -365,11 +365,14 @@ one row per replicate with `replicate_table`:
 
 ```python
 # Paper_1/stats/tiers.py
+from pathlib import Path
+
 import polyzymd as pz
 
-table = pz.Project("Paper_1").replicate_table("core_rmsf")
+root = Path(__file__).parents[1]   # the project folder, from any working directory
+table = pz.Project(root).replicate_table("core_rmsf")
 ...
-tier1.to_csv("stats/tier1.csv", index=False)
+tier1.to_csv(root / "stats" / "tier1.csv", index=False)
 ```
 
 A different model, such as a dose response that is not a straight line,

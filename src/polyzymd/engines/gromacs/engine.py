@@ -76,21 +76,6 @@ class GromacsEngine(SimulationEngine):
             gmx_binary = resolve_gromacs_binary(config=config, gpu=gpu)
         return cls(config=config, gmx_binary=gmx_binary)
 
-    def _generate_prefix(self) -> str:
-        """Generate filename prefix from simulation config.
-
-        Replicates the prefix logic from ``GromacsExporter._generate_prefix``
-        so that file paths are consistent between build and submit flows.
-
-        Returns
-        -------
-        str
-            System prefix (e.g. ``"CALB_SBMA-EGMA"``).
-        """
-        from polyzymd.analyses.shared.gromacs import system_prefix
-
-        return system_prefix(self._config)
-
     def run_local(self, replicate: int, working_dir: Path, skip_build: bool = False) -> None:
         """Run local GROMACS workflow with exported files.
 
@@ -108,7 +93,9 @@ class GromacsEngine(SimulationEngine):
         _ = replicate
         _ = skip_build
 
-        prefix = self._generate_prefix()
+        from polyzymd.analyses.shared.gromacs import system_prefix
+
+        prefix = system_prefix(self._config)
         eq_mdps = sorted(path.name for path in working_dir.glob("eq_*.mdp"))
 
         runner = GromacsRunner(
@@ -141,7 +128,9 @@ class GromacsEngine(SimulationEngine):
         request.working_dir.mkdir(parents=True, exist_ok=True)
 
         # Build and export GROMACS inputs when not already present
-        prefix = self._generate_prefix()
+        from polyzymd.analyses.shared.gromacs import system_prefix
+
+        prefix = system_prefix(self._config)
         top_path = request.working_dir / f"{prefix}.top"
         gro_path = request.working_dir / f"{prefix}.gro"
         em_path = request.working_dir / "em.mdp"
@@ -529,7 +518,9 @@ class GromacsEngine(SimulationEngine):
         topology_path: Path | None = None
         topology_format = "pdb"
 
-        prefix = self._generate_prefix()
+        from polyzymd.analyses.shared.gromacs import system_prefix
+
+        prefix = system_prefix(self._config)
         production_tpr = working_dir / "prod.tpr"
         if production_tpr.exists():
             topology_path = production_tpr

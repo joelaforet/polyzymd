@@ -34,6 +34,25 @@ disk I/O. On a shared cluster, run it in a batch job or an interactive job,
 not on a login node. For a batch script, see {doc}`hpc_execution`.
 :::
 
+## Study or configs
+
+This guide gives the configs with `-c`. In a {term}`study`, give the study
+instead:
+
+```bash
+polyzymd analyze hydrogen_bonds --study my_study
+```
+
+The study names the conditions, the control, the replicates and the
+equilibration window. The results go to `<study>/results/<name>/`, and
+`polyzymd project freeze` can publish them. Use `--study` or `--project` for
+the results that you keep.
+
+Use `-c` for a quick look without a study: to check a simulation while it
+runs, to try a setting, or to compare configs that belong to no study. The
+results then go to the current folder, or to `--output-dir`. For a lesson
+with both, see {doc}`../tutorials/first_analysis`.
+
 ## Before you start
 
 Make sure that each condition has:

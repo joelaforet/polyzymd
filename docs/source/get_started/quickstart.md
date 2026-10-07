@@ -209,7 +209,7 @@ verdict: Water mean_rg 7.138 A (no interval, n 1)
 
 Read the lines in this order:
 
-1. `verdict:` gives the result: a mean radius of gyration of about 7.2 Å.
+1. `verdict:` gives the result: a mean radius of gyration of about 7.1 Å.
    Your value differs a little. The replicate number fixes the starting
    structure and the random seeds, but the CPU threads add up forces in a
    different order on each run, so runs agree statistically, not exactly.
@@ -243,7 +243,7 @@ and the hardware change.
 - **Your own protein.** Follow {doc}`../tutorials/own_system`. It starts
   from `polyzymd study add-condition --new`, which writes a template config.
 - **GROMACS.** If `gmx` is installed, add `config_gromacs.yaml` as a
-  condition and run it. See {doc}`../how_to/gromacs_export`.
+  condition and run it. See {doc}`../how_to/run_gromacs`.
 - **A cluster.** Run long simulations on GPUs with `polyzymd submit`. See
   {doc}`../how_to/hpc_slurm` and {doc}`../how_to/monitor_simulations`.
 - **More conditions.** Copy a condition with
@@ -252,5 +252,6 @@ and the hardware change.
   {doc}`../how_to/polymers`.
 - **More studies.** Add a study for another protein with
   `polyzymd project add-study LABEL`. See {doc}`../how_to/project`.
-- **More analyses.** See {doc}`../how_to/analysis_chooser` and
-  {doc}`../tutorials/first_analysis`.
+- **More analyses.** The next lesson, {doc}`../tutorials/first_analysis`,
+  runs more replicates and measures their RMSF. See also
+  {doc}`../how_to/analysis_chooser`.

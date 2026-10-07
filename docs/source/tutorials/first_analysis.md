@@ -1,142 +1,191 @@
-# Tutorial: Run Your First Analysis
+# Analyze the replicates of a study
 
-This tutorial walks you from finished trajectory files to your first analysis
-result. You will run the RMSF analysis on a single simulation condition with
-`polyzymd analyze`, read the report, and see where the results and figures end
-up on disk.
+In this tutorial you run two more replicates of the quickstart simulation and
+measure how much each residue of Trp-cage fluctuates (RMSF). You run the
+analysis on the {term}`study`, read the report, and find the stored results
+and figures. At the end you see when a quick look with `-c` is enough.
 
-## What You Will Learn
+You learn these steps:
 
-- How to run the RMSF analysis with `polyzymd analyze rmsf`
-- How to read the report
-- Where the stored results and figures are, and how they are reused
+1. Run more replicates of a condition with `polyzymd run -r`.
+2. List an analysis in `project.yaml`.
+3. Run it on the study with `polyzymd analyze NAME --study`.
+4. Report another result of the same analysis with `--run`.
+5. Find the stored results and the figures.
 
-## Prerequisites
+## Before you start
 
-Before starting, make sure you have:
+Do {doc}`../get_started/quickstart` first. This tutorial continues in its
+project folder, `~/pz_quickstart`.
 
-- A completed production simulation with at least 1 replicate
-- The `config.yaml` file from that simulation
-- Trajectory files in the expected directory layout (see
-  {doc}`../reference/data_requirements`)
-- PolyzyMD installed in a pixi environment (see {doc}`../get_started/installation`)
+:::{admonition} Environment Setup
+:class: tip
 
-If you have not run a simulation yet, complete
-{doc}`../get_started/quickstart` first.
-
-```{important}
-**Resource requirements:** `polyzymd analyze` loads trajectories, which can
-require substantial RAM, CPU time and scratch I/O. On shared HPC systems, run it
-inside an allocated job or interactive compute session, not on a login node.
-```
-
-## Step 1: Run the RMSF Analysis
-
-From the directory where you want the results, run:
+Run every command of this tutorial in the `build` environment. It includes
+the analysis tools. From the repository root, activate it once:
 
 ```bash
-pixi run -e analysis polyzymd analyze rmsf \
-  -c /path/to/my_simulation/config.yaml --label "My Simulation" --eq 10ns
+pixi shell -e build
 ```
+:::
 
-- **`-c`** points to the simulation's `config.yaml`. This is how PolyzyMD finds
-  the topology and the production trajectory of every replicate on disk.
-- **`--label`** names the condition in the report. Without it, the condition is
-  named after the folder holding the config.
-- **`--eq`** is the equilibration window: the time at the start of each
-  replicate's production trajectory that is left out. Adjust it to your system.
+## Step 1: Run two more replicates
 
-By default the analysis measures the Cα atoms of the protein
-(`protein and name CA`), superposes every production frame on the replicate's
-most representative frame, and gives each residue's RMSF: how much it
-fluctuates about its mean position.
-
-## Step 2: Read the Report
-
-You should see output similar to:
-
-```text
-# polyzymd analyze rmsf  metric core_rmsf  unit A  run core_rmsf  eq 10ns  conditions 1  replicates 1  protocol rmsf/2
-My Simulation  n 1  mean 0.8214  sem na  ci95 na  values 0.8214
-warning: condition My Simulation has one replicate, so it has no interval
-verdict: My Simulation core_rmsf 0.8214 A (no interval, n 1)
-```
-
-- The header names the analysis, the reported result (`core_rmsf`), its unit,
-  the equilibration window and the number of replicates.
-- The condition line gives the number of replicates `n`, the mean, the standard
-  error, the 95 percent interval and every replicate value.
-- `core_rmsf` combines the residues into one number per replicate: the root of
-  their mean square fluctuation.
-
-With one replicate there is no standard error or interval, so `sem` and `ci95`
-read `na`. This tutorial uses one replicate so you can complete the workflow
-quickly, but uncertainty and comparisons need at least 2 replicates per
-condition.
-
-To see the value of every residue instead, ask for the profile:
+A mean needs more than one replicate to have an interval. Run replicates 2
+and 3 of the `Water` condition:
 
 ```bash
-pixi run -e analysis polyzymd analyze rmsf \
-  -c /path/to/my_simulation/config.yaml --label "My Simulation" --eq 10ns --run rmsf
+cd ~/pz_quickstart
+polyzymd run -c trpcage/conditions/water/config.yaml -r 2-3
 ```
 
-This prints one line per residue, starting with the residue ID. Add
-`--format json` to any run for the full report, with every field documented in
-{doc}`../reference/analysis_protocol_report`.
+The replicate number seeds the starting structure, so each replicate is a
+different simulation. The two runs take about three minutes. The last line
+is:
 
-```{tip}
-If you see an error about a missing working directory or trajectory, check the
-`config` path and that your trajectory files exist on disk. See
-{doc}`../how_to/troubleshooting` for common fixes.
+```
+All 2 replicate(s) completed successfully.
 ```
 
-## Step 3: Find Your Results
+`runs/trpcage/water/` now holds `trpcage_300K_run1/`, `trpcage_300K_run2/`
+and `trpcage_300K_run3/`.
 
-After the run, the directory holds:
+## Step 2: List the analysis
+
+Open `project.yaml` and add `rmsf: {}` under `analyses:`:
+
+```yaml
+analyses:
+  rg: {}
+  rmsf: {}
+```
+
+`rmsf: {}` runs RMSF with its default settings in every study of the
+project. Commit the change:
+
+```bash
+git add -A
+git commit -m "Add the rmsf analysis"
+```
+
+## Step 3: Run RMSF on the study
+
+```bash
+polyzymd analyze rmsf --study trpcage
+```
+
+`--study` names the study folder. The study gives the conditions, the
+control, the replicates and the equilibration window. The project gives the
+settings of `rmsf`. The analysis superposes every production frame on a
+reference frame of its replicate. Then it measures how far each C-alpha atom
+moves about its mean position. The output is:
+
+```
+log: /home/me/pz_quickstart/trpcage/logs/polyzymd-analyze-20261006-205942-pid12810.log
+# polyzymd analyze rmsf  metric core_rmsf  unit A  run core_rmsf  eq 0ns  conditions 1  replicates 3  protocol rmsf/2
+Water  n 3  mean 0.3463  sem 0.01661  ci95 0.2748 to 0.4178  values 0.3669, 0.3585, 0.3134
+verdict: Water core_rmsf 0.3463 A (95% CI 0.2748 to 0.4178, n 3)
+```
+
+Your values differ a little, because the CPU threads add up the forces in a
+different order on each run.
+
+Read the report in this order:
+
+1. The header line starts with `#`. It names the analysis, the result
+   (`core_rmsf`), its unit, the equilibration window (`eq 0ns`) and the
+   number of replicates.
+2. The `Water` line gives the number of replicates (`n 3`), their mean, the
+   standard error (`sem`), the 95 % confidence interval (`ci95`) and the
+   value of each replicate.
+3. `verdict:` gives the result in one line.
+
+`core_rmsf` is one number for each replicate: the root of the mean square
+fluctuation of the residues. The simulations are only picoseconds long, so
+the values are small. They show the steps, not the physics of Trp-cage.
+
+## Step 4: Report another result
+
+RMSF has several results. To see the value of each residue, report the
+`rmsf` result:
+
+```bash
+polyzymd analyze rmsf --study trpcage --run rmsf
+```
+
+The output has one line for each residue, starting with the residue number.
+These are the first lines and the end:
+
+```
+# polyzymd analyze rmsf  metric rmsf  unit A  run rmsf  eq 0ns  conditions 1  replicates 3  protocol rmsf/2
+1  Water  n 3  mean 0.4587  sem 0.0461  ci95 0.2604 to 0.6571  values 0.4763, 0.3716, 0.5283
+2  Water  n 3  mean 0.3254  sem 0.05403  ci95 0.0929 to 0.5578  values 0.4322, 0.2581, 0.2858
+...
+20  Water  n 3  mean 0.5097  sem 0.05915  ci95 0.2552 to 0.7643  values 0.5066, 0.6137, 0.4089
+warning: the 95 percent interval of condition Water at 8 extends past the bounds 0 to inf of rmsf, where a t interval is not reliable
+warning: the 95 percent interval of condition Water at 16 extends past the bounds 0 to inf of rmsf, where a t interval is not reliable
+verdict: Water rmsf over 20 labels, label means from 0.2236 to 0.5097 A
+```
+
+The `warning:` lines are part of the result. With three replicates, the
+interval of some residues, here 8 and 16, reaches below 0, which an RMSF
+cannot be.
+
+This command takes a few seconds. It does not read the trajectories again. It
+reuses the values that step 3 stored, because the inputs and the settings are
+the same.
+
+## Step 5: Find the results
+
+The results of the study are in `trpcage/results/rmsf/`:
 
 ```text
-.
-├── polyzymd_results/
-│   └── rms_decomposition/
-│       └── My_Simulation/
-│           └── replicate_1/
-│               ├── record.json    # what was measured, with which inputs and settings
-│               └── values.npz     # the per-residue values of this replicate
-└── figures/
-    └── rmsf/
-        ├── rmsf_profile.png
-        ├── offset_profile.png
-        ├── rmsd_per_residue_profile.png
-        ├── rms_decomposition.png
-        └── rmsf_comparison.png
+trpcage/results/rmsf/
+├── report.json                    # the full report of the last command
+├── figures/
+│   └── rmsf/
+│       ├── rmsf_profile.png       # the RMSF of each residue
+│       ├── offset_profile.png
+│       ├── rmsd_per_residue_profile.png
+│       ├── rms_decomposition.png
+│       └── rmsf_comparison.png
+└── polyzymd_results/
+    └── rms_decomposition/
+        └── Water/
+            ├── replicate_1/
+            │   ├── record.json    # what was measured, on which inputs, with which settings
+            │   ├── parts.json
+            │   └── values.npz     # the values of this replicate
+            ├── replicate_2/
+            └── replicate_3/
 ```
 
-- **`record.json`** records what produced the values:
-  - the function and the hash of its code;
-  - the arguments;
-  - the config hash;
-  - the relative path, size and SHA-256 of the topology and of each
-    trajectory file;
-  - the frames and times used, and the residue labels;
-  - the software versions.
-- **`values.npz`** holds the replicate's per-residue values.
-- The **figures** show each residue's RMSF, its offset from the reference and
-  its RMS deviation from the reference (`rmsd_per_residue`), and the three core values.
+`record.json` holds the function and the hash of its code, the settings, the
+hash of the config, the size and SHA-256 of the topology and of each
+trajectory file, the frames used and the software versions. For every field
+of the report, see {doc}`../reference/analysis_protocol_report`.
 
-The second run above, with `--run rmsf`, did not read the trajectory again: a
-stored result is reused when the inputs and settings match. Pass `--recompute`
-to measure again anyway, and `--no-plots` to skip the figures.
+## When a quick look with `-c` is enough
 
-## What's Next
+You can also give a config instead of a study:
 
-Now that you have run one analysis on one condition, here are some natural next
-steps:
+```bash
+mkdir ~/quick_look
+cd ~/quick_look
+polyzymd analyze rmsf -c ~/pz_quickstart/trpcage/conditions/water/config.yaml --label Water --eq 0ns
+```
 
-- {doc}`../how_to/analysis_rmsf_quickstart` --- compare conditions, choose the
-  reference, and define the core and regions
-- {doc}`../how_to/analysis_compare_conditions` --- compare several conditions
-- {doc}`../how_to/study_api` --- run your own function on every
-  replicate from Python
-- {doc}`../reference/data_requirements` --- directory layout reference and
-  path resolution rules
+It prints the same report. The results go into the current folder, in
+`polyzymd_results/` and `figures/`. No study records them.
+
+Use `-c` for a quick look: to check one simulation while it runs, or to try a
+setting before you add it to a study. Use `--study` or `--project` for the
+results that you keep. The study then holds the conditions, the control, the
+window, the settings and the results together, and `polyzymd project freeze`
+can publish them.
+
+## What you did
+
+You ran three replicates of one condition, measured their RMSF on the study,
+read the report and found the stored results. Next, compare two conditions in
+{doc}`analysis_complete_workflow`.

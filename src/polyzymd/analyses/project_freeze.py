@@ -10,13 +10,13 @@ project, in the same form as a study's deposit.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from polyzymd.analyses.shared.file_hashes import file_sha256
 from polyzymd.analyses.study_freeze import (
     CHECKLIST,
     CITATION,
@@ -45,11 +45,6 @@ PROJECT_MANIFEST_SCHEMA = "polyzymd-project-manifest/1"
 PROJECT_GENERATED = (MANIFEST, CITATION, ZENODO)
 #: Files freeze writes in each study folder of a project.
 STUDY_GENERATED = (MANIFEST, CHECKLIST, SUMMARY)
-
-
-def _sha256(path: Path) -> str:
-    """Return the SHA-256 hex digest of the bytes of ``path``."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
@@ -126,7 +121,7 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         folder = study.root.relative_to(root)
         studies[label] = {
             "folder": str(folder),
-            "manifest": {"path": f"{folder}/{MANIFEST}", "sha256": _sha256(study.root / MANIFEST)},
+            "manifest": {"path": f"{folder}/{MANIFEST}", "sha256": file_sha256(study.root / MANIFEST)},
             "description": study.protocol.description,
         }
         for name, condition in result.manifest["conditions"].items():
@@ -148,7 +143,7 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         },
         "project_file": {
             "path": project.protocol.path.name,
-            "sha256": _sha256(project.protocol.path),
+            "sha256": file_sha256(project.protocol.path),
         },
         "versions": _versions(root),
         "metadata": meta,
@@ -229,7 +224,7 @@ def _project_files(project: Any, state: dict | None) -> dict[str, dict[str, Any]
     root = project.root
     studies = {project[label].root.relative_to(root).parts[0] for label in project.labels}
     return {
-        name: {"size": (root / name).stat().st_size, "sha256": _sha256(root / name)}
+        name: {"size": (root / name).stat().st_size, "sha256": file_sha256(root / name)}
         for name in _listed_files(root, state)
         if Path(name).parts[0] not in studies and name not in PROJECT_GENERATED
     }

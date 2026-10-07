@@ -14,7 +14,7 @@ in {doc}`../api/analyses`.
 |---|---|
 | `pz.Study.from_configs(configs, *, equilibration, replicates=None, stride=1, data=None, until=None)` | A `Study` from a mapping of condition label to `config.yaml`, control first. A list of paths labels each condition by the folder of its config |
 | `pz.Study("study.yaml")` | A `Study` from a study file, or the folder that holds it |
-| `pz.Project("Paper_1")` | A `Project`: every study of `project.yaml` |
+| `pz.Project("Paper_1")` | A `Project`: every study of `project.yaml`. Give the project folder or its `project.yaml` |
 
 | `from_configs` argument | Meaning |
 |---|---|
@@ -46,6 +46,20 @@ A frame that you name yourself, such as the `frame` of `pz.reference` or
 `--set reference_frame=N`, is a production frame counted from 1 after the
 window. So `1` is the first production frame. The record stores the
 trajectory frame that PolyzyMD used.
+
+## Project
+
+| Attribute or method | Gives |
+|---|---|
+| `project.root` | The project folder |
+| `project.labels` | The study labels, in the order of `project.yaml` |
+| `project[label]`, `for study in project`, `len(project)` | The studies, each a `Study` |
+| `project.runs_in(run)` | The labels of the studies that run the analysis `run` |
+| `project.results(run)` | The stored results of `run` in every study that runs it, read without trajectories: `.table` with a `study` column first, `.reports` and `.folders` by study label |
+| `project.replicate_table(run)` | One row per replicate of `run` in every study that runs it, with a `study` column |
+
+`project.results` and `project.replicate_table` stop with an error that names
+each study that runs `run` but has no stored results.
 
 ## Arguments that stand for each replicate
 
