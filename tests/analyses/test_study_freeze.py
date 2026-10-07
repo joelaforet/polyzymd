@@ -590,6 +590,15 @@ def gromacs_study(tmp_path: Path) -> Path:
 
 
 class TestGromacsFreeze:
+    def test_a_gromacs_run_is_analysed_without_gromacs(
+        self, gromacs_study: Path, monkeypatch
+    ) -> None:
+        """Freeze reads a GROMACS run on a machine with no gmx on PATH and no GMX_BIN."""
+        monkeypatch.delenv("GMX_BIN", raising=False)
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+        result = freeze(gromacs_study)
+        assert result.manifest["conditions"]["Water"]["replicates"]
+
     def test_manifest_records_the_gromacs_version(self, gromacs_study: Path) -> None:
         """The version comes from each replicate's production log."""
         result = freeze(gromacs_study)
