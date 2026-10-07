@@ -63,3 +63,41 @@ def test_restraint_selections_take_protein_not_and_ranges(selection, indices):
 def test_a_selection_that_matches_nothing_is_refused():
     with pytest.raises(ValueError, match="No atoms match selection"):
         AtomSelection("resname XYZ").resolve(_topology())
+
+
+@pytest.mark.parametrize(
+    ("selection", "indices"),
+    [
+        ("resid 77 AND name OG", [6]),
+        ("resid 77 And name OG", [6]),
+        ("resname RBY and name C1 OR resname LIG and name C1", [12, 15]),
+        ("resname LIG AND NOT element H", [12, 13]),
+        ("chain A and resid 76 TO 78 and name CA", [1, 5, 9]),
+    ],
+)
+def test_upper_and_mixed_case_operators_act_as_operators(selection, indices):
+    assert AtomSelection(selection).resolve(_topology()) == indices
+
+
+def test_an_uppercase_and_after_index_does_not_pick_the_index_atom():
+    # Atom 4 is the N of SER 77, so this selection matches no atom.
+    with pytest.raises(ValueError, match="No atoms match selection"):
+        AtomSelection("index 4 AND name CA").resolve(_topology())
+
+
+@pytest.mark.parametrize(
+    "selection",
+    ["index 4 x", "resid 77 OG", "pdbindex 7 or index CA", "residue 77 name"],
+)
+def test_a_numeric_keyword_with_a_word_value_is_refused(selection):
+    with pytest.raises(ValueError, match="take numbers") as error:
+        AtomSelection(selection).resolve(_topology())
+    assert repr(selection) in str(error.value)
+
+
+def test_a_missing_mdtraj_names_the_environment_and_extra(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "mdtraj", None)
+    with pytest.raises(ImportError, match=r"polyzymd\[analysis\]"):
+        AtomSelection("index 6").resolve(_topology())

@@ -7,6 +7,7 @@ of restraints (flat-bottom, harmonic, etc.) to OpenMM simulations.
 
 from __future__ import annotations
 
+import ast
 import logging
 import re
 from dataclasses import dataclass, field
@@ -145,11 +146,21 @@ def _parse_selection(selection: str, topology: OpenMMTopology) -> List[int]:
     and ``pdbindex N`` is the PDB atom serial, counted from 1 (``index
     N-1``). ``index N`` counts from 0, as OpenMM does. ``protein``, ``not``,
     ``element``, ranges (``resid 70 to 80``) and parentheses work as in MDTraj.
+    The words ``and``, ``or``, ``not`` and ``to`` may be written in any case.
 
     Raises:
-        ValueError: If the selection cannot be parsed or matches no atom.
+        ValueError: If the selection cannot be parsed, gives a word to a
+            numeric keyword such as ``index`` or ``resid``, or matches no atom.
+        ImportError: If MDTraj is not installed.
     """
-    import mdtraj
+    try:
+        import mdtraj
+        from mdtraj.core.selection import parse_selection
+    except ImportError as error:
+        raise ImportError(
+            "Restraint selections need MDTraj. Use the pixi 'build' environment "
+            "or install the 'analysis' extra: pip install 'polyzymd[analysis]'."
+        ) from error
 
     md_topology = mdtraj.Topology.from_openmm(topology)
 
@@ -160,10 +171,30 @@ def _parse_selection(selection: str, topology: OpenMMTopology) -> List[int]:
     translated = re.sub(r"\bpdbindex\s+(\d+)", lambda m: f"index {int(m.group(1)) - 1}", selection)
     translated = re.sub(r"\bchain(?:id)?\s+([^\s()]+)", chain, translated)
     translated = re.sub(r"\bresid\b", "resSeq", translated)
+    translated = re.sub(
+        r"\b(and|or|not|to)\b", lambda m: m.group(1).lower(), translated, flags=re.IGNORECASE
+    )
     try:
+        astnode = parse_selection(translated).astnode
         indices = md_topology.select(translated)
     except Exception as error:  # MDTraj raises several types for a bad selection
         raise ValueError(f"Cannot parse selection {selection!r}: {error}") from error
+    # MDTraj reads any word after a keyword as one more value, so a misspelled
+    # operator such as "index 4 x" would otherwise still select atom 4.
+    for node in ast.walk(astnode):
+        if isinstance(node, ast.Compare) and any(
+            isinstance(n, ast.Attribute) and n.attr in ("index", "resSeq") for n in ast.walk(node)
+        ):
+            words = [
+                n.value
+                for n in ast.walk(node)
+                if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            ]
+            if words:
+                raise ValueError(
+                    f"Cannot parse selection {selection!r}: index, resid, residue, "
+                    f"pdbindex and chainid take numbers, not {', '.join(map(repr, words))}"
+                )
     if len(indices) == 0:
         raise ValueError(f"No atoms match selection: '{selection}'")
     return sorted(int(i) for i in indices)
