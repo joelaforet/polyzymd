@@ -214,7 +214,13 @@ verdict: no significant difference in protein_polymer_mean_hbonds between Water 
 ```
 
 Your values differ, because each run adds up the forces in a different
-order.
+order. The outputs on these pages come from separate runs, so `Water`
+replicate 1 here does not match the quickstart output exactly.
+
+These runs are three replicates of four frames. A difference must be large to
+be significant with so few samples, and a result that is not significant does
+not show that the conditions are the same. The numbers show the steps, not a
+result about SBMA.
 
 ## Step 5: Read the comparisons
 
@@ -224,13 +230,15 @@ with its 95 % interval, the p value of Welch's t test, the p value after the
 {term}`Benjamini-Hochberg` correction (`p_adj`) and the effect size `d`. The
 last word says whether the difference is significant.
 
-- **rg and rmsf.** The radius of gyration and the fluctuation of Trp-cage do
-  not differ between the conditions.
+- **rg and rmsf.** The radius of gyration and the fluctuation of Trp-cage
+  show no significant difference here.
 - **contacts.** `coverage` is the fraction of protein residues that the
-  polymer touches on at least one frame. In `SBMA`, the chains touch 5 % to
-  15 % of the residues. `Water` has no polymer, so its coverage is 0.
-- **hydrogen_bonds.** In `SBMA`, the chains form about one hydrogen bond with
-  the protein per frame.
+  polymer touches on at least one frame. In this run, the chains in `SBMA`
+  touch a few percent of the residues in each replicate. `Water` has no
+  polymer, so its coverage is 0.
+- **hydrogen_bonds.** In this run, the chains in `SBMA` form about one
+  hydrogen bond with the protein per frame. In a run this short, one
+  replicate can show 0.
 
 Read every `warning:` line. Each says what limits the result:
 
@@ -243,9 +251,6 @@ Read every `warning:` line. Each says what limits the result:
   such as a fraction close to 0.
 - `fewer than 20 effective samples` comes from the four frames of each
   replicate. A real study has many more.
-
-With three replicates of four frames, no difference here is significant. The
-numbers show the steps, not a result about SBMA.
 
 ## Step 6: Find the results
 
