@@ -44,9 +44,14 @@ from polyzymd.simulation.report_state import (
 # ---------------------------------------------------------------------------
 
 
-def _write_dcd_header(path: Path, frames: int, first_step: int, interval: int) -> None:
-    """Write the 100-byte header OpenMM's DCDFile starts every trajectory with."""
+def _write_dcd_header(path: Path, frames: int, interval: int) -> None:
+    """Write the 100-byte header OpenMM's DCDReporter starts every trajectory with.
+
+    DCDReporter always passes ``firstStep=reportInterval``, whatever step the
+    simulation starts at, so the header steps are relative to the segment start.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    first_step = interval
     last_step = first_step + (frames - 1) * interval
     header = struct.pack(
         "<i4c9if",
@@ -78,11 +83,16 @@ def _write_state(path: Path, step: int | None) -> None:
 
 
 def _prev_segment(tmp_path: Path, index: int, *, frames: int, first: int, interval: int) -> Path:
-    """Create ``production_<index>`` with a system XML and a DCD header."""
+    """Create ``production_<index>`` with a system XML, a DCD header and a state-data CSV.
+
+    *first* is the step of the first frame; the CSV holds one row per frame.
+    """
     seg_dir = tmp_path / f"production_{index}"
     seg_dir.mkdir(parents=True, exist_ok=True)
     (seg_dir / f"production_{index}_system.xml").write_text("<System/>")
-    _write_dcd_header(seg_dir / f"production_{index}_trajectory.dcd", frames, first, interval)
+    _write_dcd_header(seg_dir / f"production_{index}_trajectory.dcd", frames, interval)
+    rows = "".join(f"{first + i * interval},0.0\n" for i in range(frames))
+    (seg_dir / f"production_{index}_state_data.csv").write_text('#"Step","Time (ps)"\n' + rows)
     return seg_dir
 
 
@@ -113,12 +123,20 @@ class TestHeaderReaders:
         assert read_state_step(tmp_path / "old.xml") is None
         assert read_state_step(tmp_path / "missing.xml") is None
 
-    def test_segment_frames_reads_dcd_header(self, tmp_path):
+    def test_segment_frames_uses_absolute_steps_of_a_later_segment(self, tmp_path):
+        """The DCD header counts steps from the segment start; the CSV holds the real steps."""
         _prev_segment(tmp_path, 9, frames=154, first=220000000, interval=200000)
         frame = segment_frames(tmp_path, 9)
         assert frame.last_step == 250600000
         assert frame.report_interval == 200000
         assert frame.frames == 154
+
+    def test_segment_frames_counts_a_frame_missing_from_the_csv(self, tmp_path):
+        """A kill between the DCD write and the CSV row of one step leaves one more frame."""
+        seg_dir = _prev_segment(tmp_path, 1, frames=3, first=1200, interval=200)
+        _write_dcd_header(seg_dir / "production_1_trajectory.dcd", 4, 200)
+        frame = segment_frames(tmp_path, 1)
+        assert (frame.last_step, frame.frames) == (1800, 4)
 
     def test_segment_frames_falls_back_to_csv(self, tmp_path):
         seg_dir = tmp_path / "production_0"
@@ -302,10 +320,10 @@ def _run_segment_zero(tmp_path: Path, total_steps: int = 20) -> None:
     )
 
 
-def _run_segment_one(tmp_path: Path, total_steps: int = 10):
+def _run_segment_one(tmp_path: Path, total_steps: int = 10, *, index: int = 1):
     from polyzymd.simulation.continuation import ContinuationManager
 
-    manager = ContinuationManager(working_dir=tmp_path, segment_index=1, platform="Reference")
+    manager = ContinuationManager(working_dir=tmp_path, segment_index=index, platform="Reference")
     manager.load_previous_state()
     manager.run_segment(
         duration_ns=total_steps * 1e-6,
@@ -414,3 +432,50 @@ class TestRestartEndToEnd:
         )
         reporter = params["__values__"]["reporter_params"]["__values__"]
         assert reporter["report_interval"] == REPORT_INTERVAL
+
+    def test_segment_after_a_resumed_segment_continues_its_frames(self, tmp_path, caplog):
+        """Frames of a segment that began at a non-zero step are read at their real steps."""
+        _run_segment_zero(tmp_path)
+        _run_segment_one(tmp_path)
+        assert segment_frames(tmp_path, 1).last_step == 30
+
+        _run_segment_one(tmp_path, index=2)
+        assert _csv_steps(tmp_path / "production_2" / "production_2_state_data.csv") == [35, 40]
+        seg2 = next(s for s in load_progress(tmp_path).segments if s.index == 2)
+        assert (seg2.start_step, seg2.overlap_frames, seg2.gap_frames) == (30, 0, 0)
+        assert "never written" not in caplog.text
+        assert "have no frame" not in caplog.text
+
+    def test_hard_killed_segment_is_followed_by_one_that_ends_at_the_total(self, tmp_path):
+        """The next segment stops at the requested total, whatever the killed one was estimated at."""
+        _run_segment_zero(tmp_path)
+        _hard_kill(tmp_path / "production_0")
+        # What the filesystem scan records for a hard-killed segment: an
+        # estimated step count and no frame bookkeeping.
+        progress = load_progress(tmp_path)
+        seg0 = progress.segments[0]
+        seg0.status = SegmentStatus.INTERRUPTED
+        seg0.steps_completed = 15
+        seg0.last_reported_step = None
+        seg0.samples_written = 0
+        save_progress(tmp_path, progress)
+
+        _run_segment_one(tmp_path, total_steps=progress.total_steps_requested - 15)
+        steps = _csv_steps(tmp_path / "production_1" / "production_1_state_data.csv")
+        assert steps[-1] == 100
+        assert load_progress(tmp_path).total_steps_completed == 100
+
+    def test_hard_killed_segment_frames_are_read_from_its_files(self, tmp_path):
+        """The next segment fills in the frame fields a hard-killed segment never wrote."""
+        _run_segment_zero(tmp_path)
+        _hard_kill(tmp_path / "production_0")
+        progress = load_progress(tmp_path)
+        seg0 = progress.segments[0]
+        seg0.status = SegmentStatus.INTERRUPTED
+        seg0.last_reported_step = None
+        seg0.samples_written = 0
+        save_progress(tmp_path, progress)
+
+        _run_segment_one(tmp_path)
+        seg0 = load_progress(tmp_path).segments[0]
+        assert (seg0.last_reported_step, seg0.samples_written) == (20, 4)

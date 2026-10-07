@@ -994,9 +994,12 @@ class ContinuationManager:
         segment resumed from.  When the previous record knows its own
         ``start_step``, its ``steps_completed`` is set to
         ``start_step_of_this_segment - start_step_of_previous`` so the chain's
-        step total counts each integrated step once.
+        step total counts each integrated step once.  When the previous record
+        has no ``last_reported_step``, it and ``samples_written`` are read
+        from the segment's trajectory files.
         """
         from polyzymd.simulation.progress import load_progress, save_progress
+        from polyzymd.simulation.report_state import segment_frames
 
         progress = load_progress(self._working_dir)
         if progress is None:
@@ -1004,6 +1007,7 @@ class ContinuationManager:
         for seg in progress.segments:
             if seg.index != self._prev_segment or seg.start_step is None:
                 continue
+            changed = False
             actual = start_step - seg.start_step
             if actual >= 0 and actual != seg.steps_completed:
                 LOGGER.warning(
@@ -1014,8 +1018,31 @@ class ContinuationManager:
                 seg.steps_completed = actual
                 if progress.timestep_fs:
                     seg.duration_ns = actual * progress.timestep_fs / 1e6
+                changed = True
+            # A hard-killed segment never recorded its frames; read them from its files.
+            if seg.last_reported_step is None:
+                frame = segment_frames(self._working_dir, seg.index)
+                if frame is not None:
+                    seg.last_reported_step = frame.last_step
+                    seg.samples_written = frame.frames
+                    changed = True
+            if changed:
                 save_progress(self._working_dir, progress)
             return
+
+    def _chain_end_step(self) -> Optional[int]:
+        """Return the integrator step at which the whole production chain ends.
+
+        That is segment 0's start step plus ``total_steps_requested`` from
+        ``progress.json``, or ``None`` when no total is recorded.
+        """
+        from polyzymd.simulation.progress import load_progress
+
+        progress = load_progress(self._working_dir)
+        if progress is None or not progress.total_steps_requested:
+            return None
+        origin = next((s.start_step for s in progress.segments if s.index == 0), None)
+        return (origin or 0) + progress.total_steps_requested
 
     def run_segment(
         self,
@@ -1141,8 +1168,15 @@ class ContinuationManager:
             f.write(XmlSerializer.serialize(self._system))
         LOGGER.info(f"Saved initial system to {system_xml_path}")
 
-        # Calculate total steps
+        # Calculate total steps.  The caller sizes the segment from the steps
+        # recorded for earlier segments; for a hard-killed one that count is
+        # an estimate made before its state is loaded, so stop at the chain
+        # total counted from the step actually loaded.
         total_steps = int(duration_ns * 1e6 / timestep_fs)
+        chain_end = self._chain_end_step()
+        if chain_end is not None and start_step + total_steps > chain_end:
+            total_steps = max(0, chain_end - start_step)
+            duration_ns = total_steps * timestep_fs / 1e6
 
         if report_interval <= 0:
             raise ValueError("report_interval must be a positive integer")
