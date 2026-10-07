@@ -34,6 +34,7 @@ from polyzymd.analyses.study_freeze import (
     _write_citation,
     freeze,
     group_warnings,
+    left_out_files,
 )
 
 #: Value of the ``schema`` key of a project's ``manifest.json``.
@@ -189,6 +190,9 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         for config in project[label].protocol.conditions.values()
         if config.is_relative_to(root)
     ]
+    left_out = left_out_files(root, None)
+    if left_out:
+        warnings.append(left_out)
     _copy_frozen_folder(root, deposit, tag, commit, _listed_files(root, None), configs)
     for label in project.labels:
         for part in ("engine_inputs", "final_frames"):

@@ -269,25 +269,28 @@ keeps the time axis for you.
 
 ### When stored results are recomputed
 
-The stored results of a function depend on every file in the folder of the
-function, not only on the function. A change to any of these recomputes the
-results at the next analysis:
+The stored results of a function depend on the function and on these files
+in the folder of the function, in subfolders too. A change to any of them
+recomputes the results at the next analysis:
 
-- a helper in the same file;
-- a helper module or package that the file imports from that folder;
-- a data file that the function reads in that folder.
+- every Python file: the file of the function, and a helper module or
+  package that the file imports from that folder;
+- every file in a `data/` folder beside the function file, such as
+  `analyses/data/reference_distances.csv`. Put each data file that a
+  function reads there.
 
-These files do not count:
-
-- hidden files and folders (`.git`, `.pixi`, `.venv`);
-- `results/`, `logs/`, `deposit/`, `conditions/`, `figures/` and job folders;
-- the folders of other studies;
-- `data.local.yaml` and the files that freeze writes.
+No other file counts. Notes, figures, PDFs or a copied trajectory in
+`analyses/` change no result, and PolyzyMD reads none of them. The analysis
+log names the files that it leaves out, so a data file outside `data/` is
+easy to find. Hidden folders (`.git`, `.pixi`, `.venv`), `results/`,
+`logs/`, `deposit/`, `conditions/`, `figures/`, job folders and the folders
+of other studies never count.
 
 A function file beside `study.yaml` or `project.yaml` depends only on the
-Python files in that folder. So keep the data files that a function reads in
-`analyses/`, or pass them as arguments. PolyzyMD compiles the files from
-their current text each time, never from a cached `.pyc`.
+Python files of that folder, because a `data/` folder there can hold
+trajectories. Keep the data files of such a function in `analyses/data/`, or
+pass them as arguments. PolyzyMD compiles the files from their current text
+each time, never from a cached `.pyc`.
 
 `polyzymd study check` imports each listed function. So it reports a broken
 file before it reads any trajectory.
