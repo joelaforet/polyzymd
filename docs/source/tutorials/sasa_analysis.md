@@ -85,9 +85,16 @@ warning: condition Water, condition SBMA: replicates 1, 2, 3 have fewer than 20 
 verdict: no significant difference in mean_sasa between Water and SBMA (delta -3.236 A^2, 95% CI -86.08 to 79.6, p_adj 0.9067, p 0.9067, n 3 vs 3)
 ```
 
-The protein alone has the same SASA in both conditions, about 1930 Å². So
-the polymer does not change the shape of the protein in a way that changes
-its surface.
+Your values differ a little, because each run adds up the forces in a
+different order.
+
+These runs are three replicates of a few picoseconds. The chains start within
+0.5 nm of the protein, so they cover it from the start. The numbers show the
+method, not a property of SBMA.
+
+The protein alone has about 1930 Å² of SASA in both conditions. At this
+sample size no difference shows between them. That does not prove that the
+polymer leaves the surface of the protein unchanged.
 
 ## Step 3: Measure the protein with the polymer
 
@@ -110,13 +117,10 @@ verdict: SBMA smaller mean_sasa than Water (delta -317.1 A^2, 95% CI -489.1 to -
 With the polymer in the context, the protein in `SBMA` has about 320 Å² less
 accessible surface. `Water` gives the same value as in step 2.
 
-The two steps together are the evidence for shielding:
+The two steps together show the pattern that shielding gives:
 
-1. `isolated` is the same in both conditions.
+1. `isolated` shows no difference between the conditions.
 2. `with_polymer` is smaller in the polymer condition.
-
-The chains start within 0.5 nm of the protein, so in these short runs they
-cover it from the start. The numbers show the method, not a property of SBMA.
 
 ## Step 4: Compute the covered area
 
@@ -136,10 +140,10 @@ with_polymer = pz.select("protein or resname SBM")
 isolated = study.timeseries(
     sasa, protein, protein, unit="A^2", name="isolated", output_dir=folder
 )
-covered_by_polymer = study.timeseries(
+sasa_with_polymer = study.timeseries(
     sasa, protein, with_polymer, unit="A^2", name="with_polymer", output_dir=folder
 )
-covered = isolated.transform(np.subtract, covered_by_polymer, unit="A^2", name="covered")
+covered = isolated.transform(np.subtract, sasa_with_polymer, unit="A^2", name="covered")
 print(covered.reduce("mean").compare(control="Water").to_agent_text())
 ```
 

@@ -162,7 +162,7 @@ Use this checklist when a site has a new NVIDIA driver or GPU cohort:
 5. Add the validated driver threshold and environment name in the OpenMM
    Slurm template, `src/polyzymd/workflow/templates/openmm_self_resubmitting.sh.jinja`.
 6. Add script tests in `tests/workflow/test_slurm.py`.
-7. Create an explicit CUDA Context on each hardware cohort. Then run a short,
+7. Create an explicit CUDA Context on each hardware cohort. Then run a short
    benchmark without CPU fallback.
 8. Compare particle identity and energy behavior with an existing supported
    environment. Record the test tolerance and result.

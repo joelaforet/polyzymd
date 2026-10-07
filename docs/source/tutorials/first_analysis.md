@@ -128,7 +128,8 @@ verdict: Water rmsf over 20 labels, label means from 0.2236 to 0.5097 A
 ```
 
 The `warning:` lines are part of the result. With three replicates, the
-interval of residues 8 and 16 reaches below 0, which an RMSF cannot be.
+interval of some residues, here 8 and 16, reaches below 0, which an RMSF
+cannot be.
 
 This command takes a few seconds. It does not read the trajectories again. It
 reuses the values that step 3 stored, because the inputs and the settings are
