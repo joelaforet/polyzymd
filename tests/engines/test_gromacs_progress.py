@@ -102,3 +102,43 @@ def test_scan_equilibration_gromacs_finds_ordered_eq_files(tmp_path: Path) -> No
 
     assert [r.name for r in records] == ["eq_01", "eq_02", "eq_10"]
     assert all(r.status.value == "completed" for r in records)
+
+
+def _logged(stamp: str) -> str:
+    """Return the UTC ISO time of a time stamp mdrun writes in local time."""
+    from datetime import datetime, timezone
+
+    when = datetime.strptime(" ".join(stamp.split()), "%a %b %d %H:%M:%S %Y")
+    return when.astimezone(timezone.utc).isoformat()
+
+
+def test_gromacs_records_take_times_and_seeds_from_mdrun(tmp_path: Path) -> None:
+    """Stage and segment records hold when mdrun ran and the seeds it used."""
+    (tmp_path / "eq_01.gro").write_text("eq1")
+    (tmp_path / "eq_01_heating.mdp").write_text(
+        "ld_seed = -1\ngen_vel = yes ; draw velocities\ngen_seed = 2122911565\n"
+    )
+    (tmp_path / "eq_01.log").write_text(
+        "   ld-seed                        = 504874113\n"
+        "Started mdrun on rank 0 Wed Oct  7 00:16:48 2026\n"
+        "Finished mdrun on rank 0 Wed Oct  7 00:17:17 2026\n"
+    )
+    (tmp_path / "prod.mdp").write_text("ld_seed = 1482133866\ngen_vel = no\ngen_seed = 5\n")
+    (tmp_path / "prod.log").write_text(
+        "nsteps = 100\n"
+        "   ld-seed                        = 1482133866\n"
+        "Started mdrun on rank 0 Wed Oct  7 00:18:20 2026\n"
+        " Step Time\n 100 0.2\n"
+        "Finished mdrun on rank 0 Wed Oct  7 00:18:43 2026\n"
+    )
+
+    progress = scan_gromacs_progress(tmp_path, total_steps=100)
+
+    (stage,) = progress.equilibration_stages
+    assert stage.started_at == _logged("Wed Oct  7 00:16:48 2026")
+    assert stage.finished_at == _logged("Wed Oct  7 00:17:17 2026")
+    assert stage.seeds == {"ld_seed": 504874113, "gen_seed": 2122911565}
+    (segment,) = progress.segments
+    assert segment.started_at == _logged("Wed Oct  7 00:18:20 2026")
+    assert segment.finished_at == _logged("Wed Oct  7 00:18:43 2026")
+    assert segment.seeds == {"ld_seed": 1482133866}

@@ -654,6 +654,15 @@ def build(
                     component_info=builder.get_component_info(),
                     replicate=rep,
                 )
+                from polyzymd.simulation.artifact_integrity import write_gromacs_build_manifest
+
+                write_gromacs_build_manifest(
+                    working_dir,
+                    export_dir,
+                    sim_config,
+                    interchange.topology.n_atoms,
+                    builder.build_provenance,
+                )
 
                 colored_echo(f"{export_format.upper()} export successful!", phase="export")
                 colored_echo(f"Output directory: {_shown(export_dir)}", phase="export")
@@ -1019,6 +1028,7 @@ def run(
                     sim_config=sim_config,
                     replicate=rep,
                     gmx_path=resolved_gmx_path,
+                    config_path=str(Path(config).resolve()),
                 )
             else:
                 _run_openmm_impl(
@@ -1067,6 +1077,7 @@ def _run_gromacs_impl(
     sim_config: "SimulationConfig",
     replicate: int,
     gmx_path: str,
+    config_path: str = "",
 ) -> None:
     """Run simulation using GROMACS.
 
@@ -1078,6 +1089,8 @@ def _run_gromacs_impl(
         Replicate number.
     gmx_path : str
         Path to GROMACS executable.
+    config_path : str
+        The config file, recorded in ``gromacs/progress.json``.
     """
     from polyzymd.analyses.shared.gromacs import system_prefix
     from polyzymd.builders.system_builder import SystemBuilder
@@ -1117,6 +1130,15 @@ def _run_gromacs_impl(
             output_dir=gromacs_dir,
             gmx_command=gmx_path,
         )
+        from polyzymd.simulation.artifact_integrity import write_gromacs_build_manifest
+
+        write_gromacs_build_manifest(
+            working_dir,
+            gromacs_dir,
+            sim_config,
+            interchange.topology.n_atoms,
+            builder.build_provenance,
+        )
 
         colored_echo(f"\nGROMACS files exported to: {gromacs_dir}", phase="export")
         colored_echo("Files generated:", phase="export")
@@ -1147,6 +1169,14 @@ def _run_gromacs_impl(
             gmx_command=gmx_path,
         )
         runner.run_full_workflow()
+
+        from polyzymd.engines import create_engine
+        from polyzymd.simulation.progress import save_progress
+
+        engine = create_engine(sim_config, override="gromacs", defer_binary=True)
+        progress = engine.load_or_scan_progress(gromacs_dir, replicate)
+        progress.config_path = config_path
+        save_progress(gromacs_dir, progress)
 
         colored_echo("\nGROMACS simulation completed successfully!", phase="export")
         colored_echo(f"Output directory: {_shown(gromacs_dir)}", phase="export")

@@ -80,14 +80,14 @@ def scan_gromacs_progress(
         segment_status = SegmentStatus.COMPLETED if is_finished else SegmentStatus.INTERRUPTED
         duration_ns = max(time_completed_ps / 1000.0, (steps_completed * timestep_fs) / 1e6)
         segments.append(
-            SegmentRecord(
+            _segment_record(
+                working_dir,
                 index=0,
                 steps_completed=steps_completed,
                 steps_requested=requested_steps,
-                samples_written=0,
                 status=segment_status,
                 duration_ns=duration_ns,
-                finished_at=datetime.now(timezone.utc).isoformat() if is_finished else None,
+                first_start=True,
             )
         )
 
@@ -178,14 +178,13 @@ def update_gromacs_progress(
                 else SegmentStatus.INTERRUPTED
             )
             progress.segments.append(
-                SegmentRecord(
+                _segment_record(
+                    working_dir,
                     index=progress.next_segment_index,
                     steps_completed=delta_steps,
                     steps_requested=max(delta_steps, scanned.total_steps_requested),
-                    samples_written=0,
                     status=status,
                     duration_ns=(delta_steps * progress.timestep_fs) / 1e6,
-                    finished_at=datetime.now(timezone.utc).isoformat(),
                 )
             )
         elif not progress.segments and new_steps > 0 and scanned.segments:
@@ -197,7 +196,9 @@ def update_gromacs_progress(
         progress.status = SimulationStatus.COMPLETED
         if progress.segments and progress.segments[-1].status != SegmentStatus.COMPLETED:
             progress.segments[-1].status = SegmentStatus.COMPLETED
-            progress.segments[-1].finished_at = datetime.now(timezone.utc).isoformat()
+            progress.segments[-1].finished_at = (
+                progress.segments[-1].finished_at or datetime.now(timezone.utc).isoformat()
+            )
 
     save_progress(working_dir, progress)
     return progress
@@ -279,18 +280,115 @@ def _scan_equilibration_gromacs(working_dir: Path) -> list[EquilibrationStageRec
         if match is None:
             continue
         idx = int(match.group(1))
-        finished_at = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
-        records.append(
-            EquilibrationStageRecord(
-                index=idx - 1,
-                name=f"eq_{idx:02d}",
-                status=SegmentStatus.COMPLETED,
-                finished_at=finished_at,
-            )
+        log = working_dir / f"eq_{idx:02d}.log"
+        mdp = next(iter(sorted(working_dir.glob(f"eq_{idx:02d}_*.mdp"))), None)
+        started_at, finished_at = _mdrun_times(log, first_start=True)
+        record = EquilibrationStageRecord(
+            index=idx - 1,
+            name=f"eq_{idx:02d}",
+            status=SegmentStatus.COMPLETED,
+            finished_at=finished_at or _mtime_iso(path),
+            seeds=_seeds(mdp, log),
         )
+        if started_at is not None:
+            record.started_at = started_at
+        records.append(record)
 
     records.sort(key=lambda item: item.index)
     return records
+
+
+#: ``Started mdrun on rank 0 Wed Oct  7 00:16:48 2026`` and its ``Finished`` twin.
+_MDRUN_TIME = re.compile(r"^(Started|Finished) mdrun on rank 0 (.+?)\s*$", re.MULTILINE)
+
+
+def _mdrun_times(log_path: Path, first_start: bool = False) -> tuple[str | None, str | None]:
+    """Return when mdrun started and finished, from the lines it writes to ``log_path``.
+
+    A restarted run appends to its log, so the start is the last one, or the
+    first with ``first_start``. The finish is the last one after that start.
+    Times are the local time of the reading machine, written as UTC ISO
+    timestamps; ``None`` when the log has no such line.
+    """
+    try:
+        text = log_path.read_text(errors="ignore")
+    except OSError:
+        return None, None
+    started: str | None = None
+    finished: str | None = None
+    for kind, stamp in _MDRUN_TIME.findall(text):
+        try:
+            when = datetime.strptime(" ".join(stamp.split()), "%a %b %d %H:%M:%S %Y")
+        except ValueError:
+            continue
+        iso = when.astimezone(timezone.utc).isoformat()
+        if kind == "Started":
+            if started is None or not first_start:
+                started, finished = iso, None
+        else:
+            finished = iso
+    return started, finished
+
+
+def _mdp_values(mdp_path: Path | None) -> dict[str, str]:
+    """Return the ``key = value`` settings of an MDP file, keys with ``-`` written as ``_``."""
+    values: dict[str, str] = {}
+    if mdp_path is None or not mdp_path.is_file():
+        return values
+    for line in mdp_path.read_text(errors="ignore").splitlines():
+        key, sep, value = line.split(";", 1)[0].partition("=")
+        if sep:
+            values[key.strip().lower().replace("-", "_")] = value.strip()
+    return values
+
+
+def _seeds(mdp_path: Path | None, log_path: Path) -> dict[str, int] | None:
+    """Return the ``ld_seed`` mdrun used and the ``gen_seed`` of a stage that drew velocities.
+
+    ``ld_seed`` comes from the parameters mdrun writes to the log, which hold
+    the seed GROMACS chose when the MDP said -1; ``gen_seed`` comes from the
+    MDP file when it sets ``gen_vel = yes``.
+    """
+    mdp = _mdp_values(mdp_path)
+    seeds: dict[str, int] = {}
+    try:
+        logged = re.findall(r"^\s*ld-seed\s*=\s*(-?\d+)", log_path.read_text(errors="ignore"), re.M)
+    except OSError:
+        logged = []
+    if logged:
+        seeds["ld_seed"] = int(logged[-1])
+    elif "ld_seed" in mdp:
+        seeds["ld_seed"] = int(mdp["ld_seed"])
+    if mdp.get("gen_vel", "no").lower() == "yes" and "gen_seed" in mdp:
+        seeds["gen_seed"] = int(mdp["gen_seed"])
+    return seeds or None
+
+
+def _mtime_iso(path: Path) -> str | None:
+    """Return the modification time of ``path`` as a UTC ISO timestamp, or None if it is missing."""
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+    except OSError:
+        return None
+
+
+def _segment_record(working_dir: Path, first_start: bool = False, **fields) -> SegmentRecord:
+    """Return a production ``SegmentRecord`` with the times and seeds of ``prod.log``.
+
+    ``first_start`` takes the start of the first mdrun of the log, for a
+    record that covers every run of it.
+    """
+    log = working_dir / "prod.log"
+    started_at, finished_at = _mdrun_times(log, first_start=first_start)
+    record = SegmentRecord(
+        samples_written=0,
+        finished_at=finished_at,
+        seeds=_seeds(working_dir / "prod.mdp", log),
+        **fields,
+    )
+    if started_at is not None:
+        record.started_at = started_at
+    return record
 
 
 def load_or_scan_gromacs_progress(
@@ -345,14 +443,13 @@ def load_or_scan_gromacs_progress(
                 else SegmentStatus.INTERRUPTED
             )
             progress.segments.append(
-                SegmentRecord(
+                _segment_record(
+                    working_dir,
                     index=progress.next_segment_index,
                     steps_completed=delta_steps,
                     steps_requested=max(delta_steps, scanned.total_steps_requested),
-                    samples_written=0,
                     status=segment_status,
                     duration_ns=(delta_steps * progress.timestep_fs) / 1e6,
-                    finished_at=datetime.now(timezone.utc).isoformat(),
                 )
             )
 
