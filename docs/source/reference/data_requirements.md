@@ -132,7 +132,7 @@ how per-replicate directories are named.
 | `{polymer_type}` | Derived from polymer config, or `none` if disabled | `SBMA-EGPMA_A70_B30` |
 | `{temperature}` | `thermodynamics.temperature` (integer) | `300` |
 | `{replicate}` | Replicate number (1-indexed) | `1` |
-| `{duration}` | `simulation_phases.production.duration` (integer ns) | `100` |
+| `{duration}` | `simulation_phases.production.duration` in ns: whole ns from 1 ns up, in full below 1 ns | `100`, `0.005` |
 | `{primary_solvent}` | Primary solvent token | `water_tip3p` |
 | `{cosolvent_composition}` | Co-solvents sorted by normalized name, or `none` | `dmso_30molpct_urea_2p5M` |
 | `{solvent_composition}` | Primary solvent plus co-solvents when present | `water_tip3p_dmso_30molpct` |
@@ -201,12 +201,16 @@ and production trajectories as indexed daisy-chain segments:
 - `system.prmtop` is the analysis topology. It is built from the OpenMM
   topology and System together, so it carries every atom, residue, element,
   mass, charge and bond, including constrained bonds, with no column widths
-  and no atom limit. Analyses load it when it is present.
+  and no atom limit. Analyses load it when it is present. It has no chain
+  IDs, so the loader takes them from `solvated_system.pdb` beside it, and
+  `chainid A` selects the protein. For this it reads only the residue name and
+  chain ID columns of the PDB's `ATOM` and `HETATM` lines, so it works at any
+  system size.
 - `solvated_system.pdb` is the viewer topology, for PyMOL or VMD with the DCD
   segments. Above 99,999 atoms OpenMM writes its serials in hex and MDAnalysis
   cannot read its CONECT records, and OpenMM writes CONECT records only for
-  non-standard residues in any case, so it is a fallback for analysis, not the
-  intended input.
+  non-standard residues in any case, so as a topology it is a fallback for
+  analysis, not the intended input.
 
 Runs built before `system.prmtop` existed get one from their PDB and
 `system.xml` with `polyzymd analysis-topology RUN_DIR...`. OpenMM's own PDB

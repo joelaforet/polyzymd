@@ -196,17 +196,13 @@ class TestConfigValidation:
         assert config.neutralize is True
         assert config.nacl_concentration == 0.0
 
-    def test_ion_config_nacl_description_documents_target_concentration(self):
-        """IonConfig should document NaCl-equivalent target concentration."""
+    def test_ion_config_nacl_description_says_salt_comes_before_neutralizing_ions(self):
+        """IonConfig should say the NaCl concentration is salt added before neutralizing ions."""
         from polyzymd.config.schema import IonConfig
 
         description = IonConfig.model_fields["nacl_concentration"].description
 
-        assert description is not None
-        assert "NaCl-equivalent" in description
-        assert "target concentration" in description
-        assert "pool" not in description
-        assert "Additional" not in description
+        assert description == "NaCl salt concentration (mol/L), before neutralizing ions"
 
 
 class TestCoSolventCompositionValidation:
@@ -383,6 +379,38 @@ class TestRunDirectoryNaming:
 
         assert config.format_run_directory_name() == "acn_meoh"
 
+    def test_duration_below_one_ns_is_not_rounded_to_zero(self, minimal_config_data):
+        """A 5 ps run is named 0.005ns, not 0ns; whole-ns durations are unchanged."""
+        from polyzymd.config.schema import SimulationConfig
+
+        minimal_config_data["simulation_phases"]["production"]["duration"] = 0.005
+        assert (
+            SimulationConfig(**minimal_config_data).format_run_directory_name(1)
+            == "TestEnzyme_apo_none_0.005ns_300K_run1"
+        )
+        minimal_config_data["simulation_phases"]["production"]["duration"] = 100.0
+        assert "_100ns_" in SimulationConfig(**minimal_config_data).format_run_directory_name(1)
+
+    def test_existing_run_folder_named_0ns_is_reused_for_a_short_run(
+        self, minimal_config_data, tmp_path
+    ):
+        """Folders named with 0ns by earlier versions are found; a 0.005ns folder wins."""
+        from polyzymd.config.schema import SimulationConfig
+
+        minimal_config_data["output"] = {"scratch_directory": str(tmp_path)}
+        minimal_config_data["simulation_phases"]["production"]["duration"] = 0.005
+        config = SimulationConfig(**minimal_config_data)
+        old = tmp_path / "TestEnzyme_apo_none_0ns_300K_run1"
+        new = tmp_path / "TestEnzyme_apo_none_0.005ns_300K_run1"
+
+        assert config.get_working_directory(1) == new
+        old.mkdir()
+        assert config.get_working_directory(1) == old
+        assert config.discover_replicate_dirs() == [(1, old)]
+        new.mkdir()
+        assert config.get_working_directory(1) == new
+        assert config.discover_replicate_dirs() == [(1, new)]
+
     def test_format_run_directory_name_and_working_directory_match(
         self, minimal_config_data, tmp_path
     ):
@@ -460,7 +488,7 @@ class TestSimulationPhasesConfig:
             time_step=2.0,
         )
 
-        with pytest.raises(ValidationError, match="requires 'equilibration_stages'"):
+        with pytest.raises(ValidationError, match="equilibration_stages is missing: list at least one stage"):
             SimulationPhasesConfig(production=production)
 
     def test_rejects_empty_equilibration_stages(self):
@@ -1131,3 +1159,18 @@ class TestCustomSubstructures:
         """A templates file that does not map residue names to SMARTS and atom names is refused."""
         with pytest.raises(ValidationError, match="must map each residue name"):
             _config_with_templates(tmp_path, json.dumps({"NCYX": ["N", "CA"]}))
+
+
+def test_openmm_runs_refuse_the_anisotropic_barostat_whatever_the_engine_key(tmp_path: Path) -> None:
+    """A GROMACS config with barostat MCA loads, but running it on OpenMM is refused."""
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    data["engine"] = "gromacs"
+    data["simulation_phases"]["production"].update(ensemble="NPT", barostat="MCA")
+    path.write_text(yaml.safe_dump(data))
+    config = SimulationConfig.from_yaml(path)
+    config.require_engine_barostats("gromacs")
+    with pytest.raises(ValueError, match="set engine: gromacs"):
+        config.require_engine_barostats("openmm")
+

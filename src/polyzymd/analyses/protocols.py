@@ -68,6 +68,8 @@ VERDICT_CHANGED = "changed"
 VERDICT_NO_DIFFERENCE = "no significant difference"
 VERDICT_NO_TEST = "no test recorded"
 VERDICT_NOT_TESTABLE = "not testable"
+#: The reason of a trend whose condition means are equal, printed as "no trend".
+FLAT_TREND = "every condition mean is the same"
 VERDICT_VOCABULARY = (
     VERDICT_LARGER,
     VERDICT_SMALLER,
@@ -89,7 +91,9 @@ ANALYSIS_SUMMARIES = {
     "secondary_structure": "DSSP secondary structure, fractions overall and per residue",
     "hydrogen_bonds": "hydrogen bonds between groups: counts, lifetimes, per-residue and per-pair occupancy",
     "native_contacts": "fraction of native contacts Q against a reference structure",
-    "contacts": "protein-polymer contacts per residue: method occlusion (buried surface) or distance",
+    "contacts": "contacts per protein residue with a partner group, the polymer (chainid C) by "
+    "default or any polymer_selection such as resname SDS: method occlusion (buried surface) "
+    "or distance",
     "distances": "distances between atom pairs, and the fraction of frames below a threshold (A)",
 }
 
@@ -261,9 +265,9 @@ class TrendReport(BaseModel):
     percent t interval on ``k - 2`` degrees of freedom for ``k`` conditions;
     ``p`` tests zero slope and ``p_adjusted`` corrects it over the study's
     numeric factors (Benjamini-Hochberg). ``testable`` is ``False``, with the
-    ``reason``, when a replicate value is not finite, there are fewer than
-    three factor levels (two levels make the trend a pairwise comparison),
-    or the condition means all agree.
+    ``reason``, when a level is text such as ``"1e-3"``, a replicate value is not
+    finite, there are fewer than three factor levels (two levels make the
+    trend a pairwise comparison), or the condition means all agree.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -768,16 +772,28 @@ def _analyze_rmsf(
 
 
 def _empty_selections(study: Any, selections: dict[str, str]) -> dict[tuple[str, int], list[str]]:
-    """Return, for each replicate where a named selection matches no atoms, those selections."""
+    """Return, for each replicate where a named selection matches no atoms, those selections.
+
+    A selection on an attribute the topology lacks, such as ``chainid`` when
+    it has no chain IDs, raises a :class:`ProtocolError` that names it.
+    """
     empty: dict[tuple[str, int], list[str]] = {}
     for condition in study:
         for replicate in condition.replicates:
             universe = replicate.universe()
-            missing = [
-                f"{name} {selection!r}"
-                for name, selection in selections.items()
-                if len(universe.select_atoms(selection)) == 0
-            ]
+            missing = []
+            for name, selection in selections.items():
+                try:
+                    atoms = universe.select_atoms(selection)
+                except AttributeError as exc:
+                    raise ProtocolError(
+                        f"Cannot select {name} {selection!r} in {condition.label} replicate "
+                        f"{replicate.index}: {exc}.",
+                        hint="Select by an attribute the topology has, such as resname "
+                        "or resid.",
+                    ) from exc
+                if len(atoms) == 0:
+                    missing.append(f"{name} {selection!r}")
             if missing:
                 empty[(condition.label, replicate.index)] = missing
     return empty
@@ -2087,8 +2103,9 @@ def _difference_ci(
 def _trend_line(trend: TrendReport) -> str:
     """One report line per trend test."""
     if not trend.testable:
+        head = "no trend" if trend.reason == FLAT_TREND else VERDICT_NOT_TESTABLE
         return (
-            f"trend {trend.factor}  not testable: {trend.reason}"
+            f"trend {trend.factor}  {head}: {trend.reason}"
             f"  condition_means {len(trend.conditions)}  replicates {trend.n_replicates}"
         )
     return (
@@ -2118,6 +2135,7 @@ def _verdict(
         ]
 
     counts = {item.label: item.n_replicates for item in conditions}
+    values = {item.label: item.replicate_values for item in conditions}
     sentences = []
     for pair in pairwise:
         n_text = f"n {counts.get(pair.a, 0)} vs {counts.get(pair.b, 0)}"
@@ -2125,6 +2143,18 @@ def _verdict(
             f"delta {_signed(pair.delta)}{unit_text}, 95% CI {_interval(pair.delta_ci95)}, "
             f"p_adj {_num(pair.p_adjusted)}, p {_num(pair.p)}, {n_text}"
         )
+        # Fewer than 3 replicates or no variance leave a test with about one degree of freedom.
+        few = [label for label in (pair.a, pair.b) if counts.get(label, 0) < 3]
+        weak = [
+            f"{label} has the same value in every replicate"
+            for label in (pair.a, pair.b)
+            if counts.get(label, 0) >= 2 and len(set(values.get(label, []))) == 1
+        ]
+        if few:
+            verb = "has" if len(few) == 1 else "have"
+            weak.insert(0, f"{' and '.join(few)} {verb} fewer than 3 replicates")
+        if weak:
+            evidence += f"; little power: {', '.join(weak)}"
         if not pair.testable:
             few = min(counts.get(pair.a, 0), counts.get(pair.b, 0)) < 2
             why = (

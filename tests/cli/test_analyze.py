@@ -381,6 +381,16 @@ class TestRegistration:
         assert "--format" in result.output
         assert "agent" in result.output
 
+    def test_analysis_help_lists_its_settings(self) -> None:
+        """'polyzymd analyze rmsd --help' adds the settings of rmsd and their defaults."""
+        result = CliRunner().invoke(cli, ["analyze", "rmsd", "--help"])
+
+        assert result.exit_code == 0
+        assert "--format" in result.output
+        assert "rmsd: RMSD of a selection" in result.output
+        assert "reference_mode: null" in result.output
+        assert "polymer_selection" not in result.output
+
 
 def test_set_values_round_trip() -> None:
     """A float such as 1e-05 stays a float through --set."""
@@ -430,3 +440,145 @@ def test_a_project_logs_once_in_its_own_folder(tmp_path: Path) -> None:
     assert result.output.count("log: ") == 1
     assert list((paper / "logs").glob("polyzymd-analyze-*.log"))
     assert not (paper / "lipa" / "logs").exists() or not list((paper / "lipa" / "logs").iterdir())
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_a_partial_report_names_no_machine_path(tmp_path: Path) -> None:
+    """A partial report keeps each error's message, with no absolute path; the log has the traceback."""
+    import json
+    import shutil
+
+    pytest.importorskip("MDAnalysis")
+    from polyzymd.analyses.study_freeze import freeze
+
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    shutil.rmtree(tmp_path / "scratch" / "polymer")
+    result = _analyze_cli("rg", "--study", str(root), "--no-plots", "--no-eq-check")
+    report = json.loads((root / "results" / "rg" / "report.json").read_text())
+    assert report["status"] == "partial", result.output
+    assert any("no run directory under polymer" in p for p in report["problems"])
+    (log,) = (root / "logs").glob("polyzymd-analyze-*.log")
+    assert "Traceback" in log.read_text() and str(tmp_path / "scratch") in log.read_text()
+    deposit = freeze(root).deposit
+    for path in (
+        root / "results" / "rg" / "report.json",
+        root / "manifest.json",
+        deposit / "README.md",
+    ):
+        assert str(tmp_path) not in path.read_text(), path
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_records_of_replicates_the_study_drops_are_removed(tmp_path: Path) -> None:
+    """After replicates: [1, 2], no record of replicate 3 is read, kept or flagged stale."""
+    import json
+    import subprocess
+
+    pytest.importorskip("MDAnalysis")
+    import polyzymd as pz
+    from polyzymd.analyses.study_file import load_study_file
+    from polyzymd.analyses.study_freeze import stale_runs
+
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    options = ["rg", "--study", str(root), "--no-plots", "--no-eq-check"]
+    assert _analyze_cli(*options).exit_code == 0
+    study_yaml = root / "study.yaml"
+    study_yaml.write_text(study_yaml.read_text() + "replicates: [1, 2]\n")
+    subprocess.run(["git", "-C", str(root), "commit", "-qam", "two"], check=True)
+    assert _analyze_cli(*options).exit_code == 0
+    assert not list((root / "results").rglob("replicate_3"))
+    report = json.loads((root / "results" / "rg" / "report.json").read_text())
+    table = pz.Study(root).replicate_table("rg")
+    means = table.groupby("condition", sort=False)["value"].mean()
+    assert means.to_dict() == pytest.approx({c["label"]: c["mean"] for c in report["conditions"]})
+    assert "rg" not in stale_runs(load_study_file(root))
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_records_of_replicates_the_run_used_are_kept(tmp_path: Path) -> None:
+    """--replicates 1-3 with replicates: [1, 2] keeps the record of replicate 3 it just made."""
+    import subprocess
+
+    pytest.importorskip("MDAnalysis")
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    study_yaml = root / "study.yaml"
+    study_yaml.write_text(study_yaml.read_text() + "replicates: [1, 2]\n")
+    subprocess.run(["git", "-C", str(root), "commit", "-qam", "two"], check=True)
+    options = ["rg", "--study", str(root), "--no-plots", "--no-eq-check"]
+    result = _analyze_cli(*options, "--replicates", "1-3")
+    assert result.exit_code == 0, result.output
+    assert list((root / "results").rglob("replicate_3"))
+    record = next((root / "results").rglob("replicate_3"))
+    (record.parent / "replicate_1.bak").mkdir()
+    assert _analyze_cli(*options).exit_code == 0
+    assert not list((root / "results").rglob("replicate_3"))
+    assert (record.parent / "replicate_1.bak").is_dir()
+
+
+def test_project_refuses_one_output_dir_for_every_study(tmp_path: Path) -> None:
+    """Studies with the same labels would overwrite each other's records in one folder."""
+    result = CliRunner().invoke(
+        cli, ["analyze", "rg", "--project", str(tmp_path), "--output-dir", str(tmp_path / "out")]
+    )
+    assert result.exit_code == EXIT_ANALYSIS_ERROR
+    assert "--output-dir" in result.output and "fix:" in result.output
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_a_label_run_keeps_the_study_wide_contact_settings(tmp_path: Path) -> None:
+    """polymer_types come from every condition, so --label rewrites no stored record."""
+    import subprocess
+
+    pytest.importorskip("openmm")
+    from polyzymd.analyses.study_scaffold import create_study
+    from tests._support.analysis_testkit import write_simulation_config
+    from tests.analyses import test_empty_selections as es
+
+    schedules = es._schedules(es._contact_schedule)
+    configs = {}
+    for label, drop in (("S", ("EGM",)), ("E", ("SBM",))):
+        config = write_simulation_config(tmp_path / label, scratch=tmp_path / "scratch" / label)
+        for replicate in (1, 2):
+            es._write_contacts(config, replicate, schedules[("A", replicate)], drop=drop)
+        configs[label] = config
+    root = tmp_path / "my_study"
+    create_study(root, conditions=configs, equilibration="0ns")
+    study_yaml = root / "study.yaml"
+    study_yaml.write_text(
+        study_yaml.read_text().replace(
+            "analyses: {}", "analyses:\n  contacts: {method: distance}\n"
+        )
+    )
+    subprocess.run(["git", "-C", str(root), "commit", "-qam", "contacts"], check=True)
+    options = ["contacts", "--study", str(root), "--no-plots", "--no-eq-check"]
+    assert _analyze_cli(*options).exit_code == 0
+
+    def records() -> dict:
+        return {p: p.read_text() for p in sorted(root.glob("results/**/record.json"))}
+
+    before = records()
+    assert before
+    assert _analyze_cli(*options, "--label", "S").exit_code == 0
+    assert records() == before
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_a_rerun_on_committed_inputs_changes_no_file(tmp_path: Path) -> None:
+    """The report of a rerun differs only in the commit, so the one on disk is kept."""
+    import subprocess
+
+    pytest.importorskip("MDAnalysis")
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    assert _analyze_cli("rg", "--study", str(root)).exit_code == 0
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "results"], check=True)
+    assert _analyze_cli("rg", "--study", str(root)).exit_code == 0
+    status = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True
+    )
+    assert status.stdout == ""

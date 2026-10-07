@@ -89,9 +89,13 @@ def describe(state: dict[str, Any] | None) -> str:
     """Return one line describing ``state`` for ``polyzymd study check``."""
     if state is None:
         return "git: not a repository (polyzymd study init makes one)"
-    commit = (state["commit"] or "no commit yet")[:12]
-    if state["inputs_uncommitted"]:
-        return f"git: commit {commit}; uncommitted inputs: {', '.join(state['inputs_uncommitted'])}"
+    commit = (state["commit"][:12] if state["commit"] else "no commit yet")
+    paths = state["inputs_uncommitted"]
+    if paths:
+        more = f" and {len(paths) - 5} more" if len(paths) > 5 else ""
+        return (
+            f"git: commit {commit}; {len(paths)} uncommitted inputs: {', '.join(paths[:5])}{more}"
+        )
     return f"git: commit {commit}; inputs committed"
 
 

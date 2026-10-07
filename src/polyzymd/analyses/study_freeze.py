@@ -72,6 +72,8 @@ class FreezeResult:
     warnings: list[str] = field(default_factory=list)
     guide: Path | None = None
     upload: Path | None = None
+    #: True when git could not commit or tag; the deposit then names no tag.
+    git_failed: bool = False
 
 
 class _Hashes:
@@ -97,7 +99,15 @@ def _git(root: Path, *arguments: str) -> str | None:
     return result.stdout if result.returncode == 0 else None
 
 
-def _versions() -> dict[str, str | None]:
+def _versions(root: Path) -> dict[str, str | None]:
+    """Return the versions of PolyzyMD, Python and the main packages, and the lock file's hash.
+
+    A package that reports version ``0.0.0`` (a conda build without its
+    version in the metadata) is recorded as ``None``. ``pixi.lock`` is the
+    SHA-256 of ``environment/pixi.lock`` under ``root``, which pins every
+    package, or ``None`` when there is no such file.
+    """
+    import hashlib
     import platform
 
     import polyzymd
@@ -118,11 +128,16 @@ def _versions() -> dict[str, str | None]:
     ):
         try:
             imported = __import__(module, fromlist=["__version__"])
-            versions[module] = str(
+            version = str(
                 getattr(imported, "__version__", None) or getattr(imported, "version", None)
             )
+            versions[module] = None if version == "0.0.0" else version
         except Exception:  # noqa: BLE001 - an absent or broken package is recorded as absent
             versions[module] = None
+    lock = root / "environment" / "pixi.lock"
+    versions["pixi.lock"] = (
+        hashlib.sha256(lock.read_bytes()).hexdigest() if lock.is_file() else None
+    )
     return versions
 
 
@@ -146,7 +161,7 @@ def _function_hash(record: dict[str, Any], entry: Any) -> str | None:
         return None
 
 
-def stale_runs(protocol: Any) -> dict[str, list[str]]:
+def stale_runs(protocol: Any, conditions: dict[str, Any] | None = None) -> dict[str, list[str]]:
     """Return, for each analysis run, why its stored results may not match the study now.
 
     A run has one reason per difference between what produced its stored
@@ -156,7 +171,9 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
     folder's helper modules), or the content of a file it was given; the
     replicates found on disk; or the report's settings, selections, condition
     factors (which its trend tests used) or PolyzyMD version. Trajectories are
-    read only to work out ``until: common``.
+    read only to work out ``until: common``. ``conditions`` are the manifest's
+    conditions (from :func:`_replicates`); with them, a replicate whose
+    trajectory hashes differ from those its record names is a reason too.
     """
     import polyzymd
     from polyzymd.analyses.identity import compute_config_hash
@@ -191,6 +208,20 @@ def stale_runs(protocol: Any) -> dict[str, list[str]]:
             record = json.loads(path.read_text())
             label = record.get("condition")
             recorded_replicates.setdefault(label, set()).add(int(record.get("replicate", 0)))
+            here = (conditions or {}).get(label, {}).get("replicates", {})
+            on_disk = here.get(str(record.get("replicate")))
+            if on_disk is not None:
+                # The first file is the topology, the others the trajectories.
+                now = sorted(item["sha256"] for item in on_disk["files"][1:])
+                then = [item.get("sha256") for item in record.get("trajectories", [])]
+                if None in then:
+                    found.append(
+                        f"no trajectory hash recorded for {label} replicate {record['replicate']}"
+                    )
+                elif now != sorted(then):
+                    found.append(
+                        f"the trajectories of {label} replicate {record['replicate']} changed"
+                    )
             for name, sha in _recorded_files(record.get("arguments")).items():
                 if name in current_files and current_files[name] != sha:
                     found.append(f"the content of {name} changed")
@@ -525,33 +556,43 @@ def _condition_configs(protocol: Any) -> list[str]:
     ]
 
 
-def without_machine_paths(text: str) -> str:
+def without_machine_paths(text: str, folder: Path | None = None, root: Path | None = None) -> str:
     """Return a config's text with the directories of one machine taken out, for the deposit.
 
     ``projects_directory`` and ``scratch_directory`` say where one machine
     keeps job files and runs; they become ``.`` and ``data``, with a comment
     saying how a reproducer points the study at their copy. The config hash
     leaves both out, so stored results still match. A ``Copied by polyzymd
-    study init from <path>`` header keeps only the file name.
+    study init from <path>`` header keeps only the file name. With
+    ``folder`` (the folder that holds the config) and ``root`` (the study or
+    project folder), an absolute input path (``config.loader.PATH_KEYS``)
+    inside ``root`` becomes a path relative to ``folder``.
 
-    The lines are rewritten in place, so comments stay. When that leaves
-    either key with another value, or the text no longer reads as YAML (a
-    flow-style ``output: {...}`` or a block scalar), the config is read and
-    written back with the two keys set, without its comments.
+    The lines are rewritten in place, so comments stay. When an input path
+    changes, either output key keeps another value, or the text no longer
+    reads as YAML (a flow-style ``output: {...}`` or a block scalar), the
+    config is read and written back with the changes, without its comments.
     """
-    import re
-
     import yaml
 
     rewritten = _rewrite_machine_lines(text)
-    try:
-        output = (yaml.safe_load(rewritten) or {}).get("output") or {}
-        wanted = {"projects_directory": ".", "scratch_directory": "data"}
-        if all(output.get(key, value) in (value, None) for key, value in wanted.items()):
-            return rewritten
-    except (yaml.YAMLError, AttributeError):
-        pass
-    data = yaml.safe_load(text) or {}
+    data = (yaml.safe_load(text) or {}) if folder is not None and root is not None else {}
+    moved = [
+        (container, key, Path(value).resolve())
+        for container, key, value in _input_paths(data)
+        if Path(value).is_absolute() and Path(value).resolve().is_relative_to(root.resolve())
+    ]
+    for container, key, path in moved:
+        container[key] = os.path.relpath(path, folder.resolve())
+    if not moved:
+        try:
+            output = (yaml.safe_load(rewritten) or {}).get("output") or {}
+            wanted = {"projects_directory": ".", "scratch_directory": "data"}
+            if all(output.get(key, value) in (value, None) for key, value in wanted.items()):
+                return rewritten
+        except (yaml.YAMLError, AttributeError):
+            pass
+        data = yaml.safe_load(text) or {}
     output = data.get("output")
     if isinstance(output, dict):
         output["projects_directory"] = "."
@@ -559,6 +600,49 @@ def without_machine_paths(text: str) -> str:
             output["scratch_directory"] = "data"
     header = [line for line in rewritten.splitlines()[:1] if line.startswith("# Copied by")]
     return "\n".join([*header, f"# {_PLACEHOLDER}", yaml.safe_dump(data, sort_keys=False)])
+
+
+def _input_paths(value: Any, key: str | None = None) -> list[tuple[Any, Any, str]]:
+    """Return ``(container, key, path)`` for every input path (``PATH_KEYS``) in a config's data."""
+    from polyzymd.config.loader import PATH_KEYS
+
+    pairs = (
+        value.items()
+        if isinstance(value, dict)
+        else enumerate(value) if isinstance(value, list) else ()
+    )
+    found = []
+    for index, item in list(pairs):
+        name = index if isinstance(value, dict) else key
+        if name in PATH_KEYS and isinstance(item, str):
+            found.append((value, index, item))
+        else:
+            found += _input_paths(item, name)
+    return found
+
+
+def _outside_inputs(protocol: Any) -> list[str]:
+    """Warn for each absolute input path of a condition config outside the study and its project."""
+    import yaml
+
+    inside = [protocol.root] + ([protocol.project.root] if protocol.project is not None else [])
+    warnings = []
+    for label, config in protocol.conditions.items():
+        try:
+            data = yaml.safe_load(config.read_text()) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        for _, _, value in _input_paths(data):
+            path = Path(value)
+            if path.is_absolute() and not any(
+                path.resolve().is_relative_to(folder.resolve()) for folder in inside
+            ):
+                # Only the file name: the warning is published, the path names a machine.
+                warnings.append(
+                    f"{label}: the config names {path.name} outside the study, so the deposit "
+                    "does not hold it; copy it into the study with polyzymd study add-condition"
+                )
+    return warnings
 
 
 def _rewrite_machine_lines(text: str) -> str:
@@ -688,7 +772,8 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
     ``segments`` lists each distinct (PolyzyMD, OpenMM, pixi environment)
     combination that ``progress.json`` records for its production segments,
     so a reproducer knows which engine produced the trajectories, not only
-    which PolyzyMD analysed them.
+    which PolyzyMD analysed them. For a GROMACS run, ``gromacs_version`` is
+    the version that ``gmx mdrun`` wrote into ``gromacs/prod.log``.
     """
     from polyzymd.simulation.progress import load_progress
 
@@ -711,6 +796,17 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
             {"polyzymd_version": a, "openmm_version": b, "pixi_environment": c}
             for a, b, c in sorted(combos, key=lambda t: tuple(str(x) for x in t))
         ]
+    from polyzymd.engines.gromacs.engine import GromacsEngine
+
+    try:
+        with open(working_dir / GromacsEngine.engine_subdir / "prod.log", errors="ignore") as log:
+            versions = {
+                line.split(":", 1)[1].strip() for line in log if line.startswith("GROMACS version:")
+            }
+    except OSError:
+        versions = set()
+    if versions:
+        found["gromacs_version"] = ", ".join(sorted(versions))
     return found
 
 
@@ -853,7 +949,6 @@ def _replicates(
                 universe.atoms.write(str(final_pdb))
             final = _gzip_copy(final_pdb, final_pdb.with_suffix(".pdb.gz"))
             final_pdb.unlink()
-            dt = float(universe.trajectory.dt)
             replicates[str(replicate.index)] = {
                 "files": files,
                 "engine_inputs": inputs,
@@ -863,7 +958,7 @@ def _replicates(
                     **hashes(final),
                 },
                 "production_frames": int(universe.trajectory.n_frames),
-                "production_ns": round((universe.trajectory.n_frames - 1) * dt / 1000.0, 6),
+                "production_ns": round(replicate.production_ns, 6),
                 "trajectory_variant": provenance.trajectory_variant,
                 "bond_source": provenance.bond_source,
                 "warnings": list(provenance.warnings),
@@ -909,10 +1004,15 @@ def _replicates(
                 "build_manifest.json, and progress.json predates version recording); state the "
                 "engine version in the methods"
             )
-        if engine != "openmm" and replicates:
+        no_gromacs = [
+            index
+            for index, r in replicates.items()
+            if engine == "gromacs" and not r["simulated_with"].get("gromacs_version")
+        ]
+        if no_gromacs:
             warnings.append(
-                f"{label}: PolyzyMD does not record the {engine} version that ran the "
-                "replicates; state it in the methods"
+                f"{label}: replicates {', '.join(no_gromacs)} record no GROMACS version (no "
+                "gromacs/prod.log in the run directory); state the engine version in the methods"
             )
         for index, replicate_record in replicates.items():
             for name in replicate_record.get("missing_build_files", []):
@@ -981,6 +1081,7 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
         c["resolved_config"] for c in manifest["conditions"].values() if "resolved_config" in c
     ]
     first = resolved[0] if resolved else {}
+    polymers = _has_polymers(protocol)
 
     def item(answer: Any, evidence: Any = None) -> dict[str, Any]:
         return {"answer": answer, **({"evidence": evidence} if evidence is not None else {})}
@@ -1011,8 +1112,8 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
         ),
         "1d_independent_starting_configurations": item(
             "each replicate's starting structure is built with its replicate number as the "
-            "seed of Packmol and of polymer draws; the replicate number also seeds the initial "
-            "velocities and the thermostat noise of each stage",
+            "seed of Packmol" + (" and of polymer draws" if polymers else "") + "; the replicate "
+            "number also seeds the initial velocities and the thermostat noise of each stage",
             None,
         ),
         "2a_connection_to_experiment": item(
@@ -1034,6 +1135,12 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
                         for k in ("thermodynamics", "simulation_phases")
                     },
                     "restraints": restraints.get(label, []),
+                    # The config names OpenMM's algorithms; GROMACS runs these instead.
+                    **(
+                        {"gromacs_production": _gromacs_production(c["resolved_config"])}
+                        if c.get("engine") == "gromacs"
+                        else {}
+                    ),
                 }
                 for label, c in manifest["conditions"].items()
                 if "resolved_config" in c
@@ -1046,10 +1153,21 @@ def _checklist(protocol: Any, manifest: dict[str, Any], meta: dict[str, Any]) ->
         ),
         "4e_custom_code_and_parameters": item(
             "analyses/ and figures/ hold the custom code; the parameters of every molecule"
-            + (", generated polymers included," if _has_polymers(protocol) else "")
+            + (", generated polymers included," if polymers else "")
             + " are in the serialized engine inputs in deposit/engine_inputs/"
         ),
     }
+
+
+def _gromacs_production(config: dict[str, Any]) -> dict[str, str]:
+    """Return the integrator and coupling settings GROMACS runs for the production phase."""
+    from polyzymd.exporters.gromacs import BAROSTAT_MAP, THERMOSTAT_MAP
+
+    production = config["simulation_phases"]["production"]
+    integrator, tcoupl = THERMOSTAT_MAP[production["thermostat"]]
+    barostat = production.get("barostat") if production["ensemble"] == "NPT" else None
+    pcoupl, pcoupltype = BAROSTAT_MAP.get(barostat, ("no", "isotropic"))
+    return {"integrator": integrator, "tcoupl": tcoupl, "pcoupl": pcoupl, "pcoupltype": pcoupltype}
 
 
 def _has_polymers(protocol: Any) -> bool:
@@ -1180,7 +1298,7 @@ def deposited_folders() -> tuple[str, ...]:
     return tuple(dict.fromkeys([*FOLDERS, *PROJECT_FOLDERS]))
 
 #: Files at the top of a study or project that freeze deposits, besides those it writes.
-DEPOSITED_FILES = ("study.yaml", "project.yaml", ".gitignore")
+DEPOSITED_FILES = ("study.yaml", "project.yaml", "data.example.yaml", ".gitignore")
 #: Prefixes of other top-level files that freeze deposits (README.md, LICENSE, ...).
 DEPOSITED_PREFIXES = ("README", "LICENSE")
 
@@ -1189,9 +1307,9 @@ def is_deposited_name(root: Path, path: str) -> bool:
     """Return whether freeze deposits ``path``, relative to the study or project ``root``.
 
     Freeze deposits only names that PolyzyMD chooses: ``study.yaml``,
-    ``project.yaml``, ``README*``, ``LICENSE*``, ``.gitignore``, the files
-    freeze writes, and the files under the folders ``study init`` and
-    ``project init`` make (:func:`deposited_folders`: ``conditions/``,
+    ``project.yaml``, ``data.example.yaml``, ``README*``, ``LICENSE*``,
+    ``.gitignore``, the files freeze writes, and the files under the folders
+    ``study init`` and ``project init`` make (:func:`deposited_folders`: ``conditions/``,
     ``structures/``, ``analyses/``, ``figures/``, ``results/``,
     ``environment/``, ``stats/`` ...). In a project, the same
     rule applies inside each study folder (a folder that holds ``study.yaml``).
@@ -1209,18 +1327,25 @@ def is_deposited_name(root: Path, path: str) -> bool:
     )
 
 
+#: Untracked paths that freeze lists in a git repository; it commits them.
+_UNTRACKED = ("results", ".gitignore")
+
+
 def _candidate_files(root: Path, state: dict[str, Any] | None) -> list[str]:
     """Return the files under ``root`` that freeze may publish, before the name rule.
 
-    In a git repository (``state`` given), the tracked files and the untracked
-    files under ``results/``; otherwise every file. Job, log and hidden files
+    In a git repository (``state`` given), the tracked files, the untracked
+    files under ``results/`` and an untracked ``.gitignore`` (freeze writes
+    one and commits it); otherwise every file. Job, log and hidden files
     (:func:`is_machine_file`), anything under a ``deposit/`` folder and
     ``data.local.yaml`` are left out.
     """
     if state is not None:
-        listed = (_git(root, "ls-files") or "").splitlines() + (
-            _git(root, "ls-files", "--others", "--exclude-standard", "--", "results") or ""
-        ).splitlines()
+        # -z: names separated by NUL and not quoted, as git quotes non-ASCII names.
+        listed = (_git(root, "ls-files", "-z") or "").split("\0") + (
+            _git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", *_UNTRACKED)
+            or ""
+        ).split("\0")
     else:
         listed = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
     return sorted(
@@ -1265,7 +1390,8 @@ def left_out_files(root: Path, state: dict[str, Any] | None) -> str | None:
         return None
     return (
         f"not deposited: {', '.join(entries)}. Freeze deposits only study.yaml, project.yaml, "
-        f"README*, LICENSE*, the files it writes, and {', '.join(f'{f}/' for f in deposited_folders())}"
+        "data.example.yaml, README*, LICENSE*, the files it writes, and "
+        f"{', '.join(f'{f}/' for f in deposited_folders())}"
         "; move a file there to publish it"
     )
 
@@ -1287,7 +1413,7 @@ def _write_citation(
     commit: str | None,
     method: str,
 ) -> None:
-    """Write ``CITATION.cff`` and ``.zenodo.json`` from ``meta``, and ignore freeze's outputs in git."""
+    """Write ``CITATION.cff`` and ``.zenodo.json`` from ``meta``."""
     from polyzymd.analyses.study_metadata import citation_cff, dump_cff, zenodo_json
 
     (root / CITATION).write_text(
@@ -1297,6 +1423,10 @@ def _write_citation(
         json.dumps(zenodo_json(meta, version=version, released=released, method=method), indent=2)
         + "\n"
     )
+
+
+def _write_gitignore(root: Path) -> None:
+    """Add the entries of :data:`_IGNORED` that ``root/.gitignore`` lacks, creating it if needed."""
     gitignore = root / ".gitignore"
     lines = gitignore.read_text().splitlines() if gitignore.exists() else []
     missing = [(entry, why) for entry, why in _IGNORED if entry not in lines]
@@ -1330,6 +1460,17 @@ def _commit_and_tag(
     return (_git(root, "rev-parse", "HEAD") or "").strip() or None
 
 
+def _drop_tag(
+    root: Path, manifest: dict[str, Any], meta: dict[str, Any], released: str, method: str
+) -> None:
+    """Write the manifest and citation files again without a tag, after git could not make it."""
+    manifest["tag"] = None
+    (root / MANIFEST).write_text(json.dumps(manifest, indent=1) + "\n")
+    _write_citation(
+        root, meta, version="unversioned", released=released, commit=None, method=method
+    )
+
+
 def _copy_frozen_folder(
     root: Path,
     deposit: Path,
@@ -1338,10 +1479,10 @@ def _copy_frozen_folder(
     files: list[str],
     configs: list[str],
 ) -> None:
-    """Write ``deposit/study``: the frozen folder, without job, log or hidden folders.
+    """Write ``deposit/study``: the files ``files`` of the frozen folder.
 
-    It is the tagged commit (from ``git archive``) or, without a commit, a
-    copy of ``files``. The condition configs ``configs`` (relative to
+    They come from the tagged commit (``git archive``) or, without a commit,
+    from the folder. The condition configs ``configs`` (relative to
     ``root``) are written there without machine paths
     (:func:`without_machine_paths`).
     """
@@ -1350,10 +1491,20 @@ def _copy_frozen_folder(
         shutil.rmtree(copy)
     copy.mkdir(parents=True)
     if commit:
-        archive = subprocess.run(
-            ["git", "-C", str(root), "archive", "--format=tar", tag], capture_output=True
-        )
-        subprocess.run(["tar", "-x", "-C", str(copy)], input=archive.stdout, check=False)
+        tracked = set((_git(root, "ls-tree", "-r", "-z", "--name-only", tag) or "").split("\0"))
+        names = [name for name in files if name in tracked]
+        # Literal pathspecs, so a[1].csv is a name and not a pattern; in chunks,
+        # to keep each command line short. Without paths, git archive would
+        # write every tracked file.
+        for start in range(0, len(names), 500):
+            archive = subprocess.run(
+                [
+                    *("git", "-C", str(root), "--literal-pathspecs", "archive", "--format=tar"),
+                    *(tag, "--", *names[start : start + 500]),
+                ],
+                capture_output=True,
+            )
+            subprocess.run(["tar", "-x", "-C", str(copy)], input=archive.stdout, check=False)
     else:
         for name in files:
             target = copy / name
@@ -1363,7 +1514,9 @@ def _copy_frozen_folder(
     for config in configs:
         copied = copy / config
         if copied.is_file():
-            copied.write_text(without_machine_paths(copied.read_text()))
+            copied.write_text(
+                without_machine_paths(copied.read_text(), (root / config).parent, root)
+            )
 
 
 def _finish_deposit(
@@ -1427,13 +1580,14 @@ def freeze(
     Raises
     ------
     ProtocolError
-        Only when the study file or its metadata cannot be read, or the tag
+        Only when the study file or its metadata cannot be read, a condition
+        config is outside the study folder and its project folder, or the tag
         already exists. Everything else is a warning in the result.
     """
     import yaml
 
     import polyzymd
-    from polyzymd.analyses.study_file import load_study_file, portable
+    from polyzymd.analyses.study_file import load_study_file, outside_configs, portable
     from polyzymd.analyses.study_metadata import check_metadata
 
     protocol = load_study_file(root)
@@ -1443,6 +1597,14 @@ def freeze(
             f"{root.name} is a study of the project {protocol.project.root}, whose "
             "project.yaml and shared analyses/ its results depend on.",
             hint=f"Freeze the whole project: polyzymd project freeze {protocol.project.root}",
+        )
+    for label, config in outside_configs(protocol).items():
+        raise ProtocolError(
+            f"The config of condition {label} is {config}, outside the study folder, "
+            "so the deposit would not hold it.",
+            hint=f"Remove {label} from conditions: in study.yaml, then copy it in with: "
+            f'polyzymd study add-condition "{label}" --config {config}. Or move its folder '
+            "under conditions/ and give the new path in study.yaml.",
         )
     meta, warnings = check_metadata(protocol.metadata)
     if publish:
@@ -1456,14 +1618,17 @@ def freeze(
         from polyzymd.analyses.study_git import git_state
 
         state = git_state(root)
-    for run, why in stale_runs(protocol).items():
-        warnings.append(f"run {run} may be stale: {'; '.join(why)}")
-    warnings.extend(report_problems(protocol))
-
     deposit = root / DEPOSIT
+    for part in ("engine_inputs", "final_frames"):
+        # A replicate no longer in the study must not stay in the deposit.
+        shutil.rmtree(deposit / part, ignore_errors=True)
     deposit.mkdir(exist_ok=True)
     hashes = _Hashes()
     conditions, rows = _replicates(protocol, deposit, hashes, warnings)
+    for run, why in stale_runs(protocol, conditions).items():
+        warnings.append(f"run {run} may be stale: {'; '.join(why)}")
+    warnings.extend(report_problems(protocol))
+    warnings.extend(_outside_inputs(protocol))
     for label, items in condition_restraints(protocol).items():
         conditions[label]["restraints"] = items
     warnings.extend(_production_length_warnings(conditions))
@@ -1484,8 +1649,11 @@ def freeze(
 
     from polyzymd.analyses.study_file import STUDY_FILE
 
+    if publish:
+        _write_gitignore(root)
     study_files = [p for p in _listed_files(root, state) if p not in GENERATED]
-    left_out = left_out_files(root, state)
+    # A project names the files it leaves out once, for all its studies.
+    left_out = left_out_files(root, state) if publish else None
     if left_out:
         warnings.append(left_out)
     # The same warning for several conditions is one line naming them.
@@ -1495,12 +1663,14 @@ def freeze(
         "schema": MANIFEST_SCHEMA,
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "tag": tag,
+        # The tag names the frozen commit, which holds this file and so
+        # cannot be named in it; this is the commit before it.
         "git": {
-            "commit": state["commit"] if state else None,
+            "parent_commit": state["commit"] if state else None,
             "inputs_uncommitted": state["inputs_uncommitted"] if state else None,
         },
         "study_file": {"path": STUDY_FILE, **hashes(protocol.path)},
-        "versions": _versions(),
+        "versions": _versions(root),
         "equilibration": protocol.equilibration,
         "stride": protocol.stride,
         "metadata": meta,
@@ -1556,10 +1726,11 @@ def freeze(
     if state and tag:
         paths = [p for p in (*GENERATED, ".gitignore", "results") if (root / p).exists()]
         commit = _commit_and_tag(root, paths, tag, "study", warnings)
+        if commit is None:
+            _drop_tag(root, manifest, meta, released, _method(protocol))
     generated = [p for p in GENERATED if (root / p).exists()]
-    _copy_frozen_folder(
-        root, deposit, tag, commit, [*study_files, *generated], _condition_configs(protocol)
-    )
+    files = sorted({*study_files, *generated})
+    _copy_frozen_folder(root, deposit, tag, commit, files, _condition_configs(protocol))
     from polyzymd.analyses.study_upload_guide import deposit_readme
 
     # The deposit's README describes the study from its metadata; the study's
@@ -1571,4 +1742,6 @@ def freeze(
         analyses=protocol.analyses,
         root=root,
     )
-    return _finish_deposit(root, deposit, tag, commit, manifest, readme, warnings)
+    result = _finish_deposit(root, deposit, tag, commit, manifest, readme, warnings)
+    result.git_failed = bool(state and tag and commit is None)
+    return result

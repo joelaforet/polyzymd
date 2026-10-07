@@ -3,8 +3,9 @@
 # ============================================================================
 #
 # INSTRUCTIONS:
-# 1. Uncomment the sections you need by removing the leading "# " characters
-# 2. Replace placeholder values (protein_X, ligand_Y, etc.) with your data
+# 1. Set enzyme.pdb_path to your protein structure. The required sections
+#    below are filled in with working defaults.
+# 2. Uncomment the optional sections you need by removing the leading "# "
 # 3. Validate your configuration: polyzymd validate -c config.yaml
 # 4. Build your system: polyzymd build -c config.yaml -r 1
 #
@@ -18,6 +19,7 @@
 #   - thermodynamics (temperature, pressure)
 #   - simulation_phases (equilibration, production)
 #   - output (directory settings)
+#   - openmm (compute platform; OpenMM engine only)
 #
 # OPTIONAL SECTIONS:
 #   - substrate (docked ligand)
@@ -46,10 +48,10 @@ description: "Description of your simulation system"
 # TIP: Run `polyzymd clean-pdb -i your_protein.pdb` or use another PDB
 #      preparation tool before building your system.
 #
-# enzyme:
-#   name: "protein_X"
-#   pdb_path: "structures/protein_X.pdb"
-#   description: "My enzyme description"
+enzyme:
+  name: "protein_X"
+  pdb_path: "structures/protein_X.pdb"
+  description: "My enzyme description"
 
 # ============================================================================
 # Substrate Configuration (OPTIONAL)
@@ -72,79 +74,19 @@ description: "Description of your simulation system"
 # ============================================================================
 # Polymer Configuration (OPTIONAL)
 # ============================================================================
-# Random co-polymer chains to add around the enzyme.
-# Set to null or comment out if not using polymers.
-#
-# Two modes are available:
-#   MODE A - Pre-built: Supply SDF files of already-parameterized polymers
-#   MODE B - Dynamic:   Generate polymers on-the-fly from monomer SMILES
-#
-# polymers: null
-#
-# ----------------------------------------------------------------------------
-# MODE A: Pre-built polymer SDFs
-# ----------------------------------------------------------------------------
-# Use this when you already have polymer structure files (e.g., from a
-# previous run or external tool). Place SDF files in a directory and
-# point sdf_directory to it.
+# Random co-polymer chains around the enzyme, from pre-built SDF files or
+# generated from monomer SMILES. For both modes and every key, see
+# https://polyzymd.readthedocs.io/en/latest/how_to/polymers.html
 #
 # polymers:
 #   enabled: true
-#   type_prefix: "polymer_A"              # Identifier for polymer type
-#   
-#   # Monomer composition - probabilities must sum to 1.0
-#   monomers:
-#     - label: "A"
-#       probability: 0.80
-#       name: "monomer_1"
-#     - label: "B"
-#       probability: 0.20
-#       name: "monomer_2"
-#   
-#   length: 10                            # Number of monomers per chain
-#   count: 4                              # Number of polymer chains
-#   
-#   # Directory containing pre-built polymer SDF files
-#   sdf_directory: "polymer_sdfs/my_polymer"
-#   
-#   # Cache directory for generated polymers
-#   cache_directory: ".polymer_cache"
-#   
-#   # Random seed for reproducible polymer sequences (OPTIONAL)
-#   # If not set, uses the replicate number as the seed.
-#   # Set this to get identical polymer sequences across different replicates.
-#   # random_seed: 42
-#   
-#   # Packing settings for polymers around the protein
-#   packing:
-#     padding: 2.0                        # nm padding around solute for polymer box
-#     tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
-#     movebadrandom: false                # set true for dense/heterogeneous polymer systems
-#
-# ----------------------------------------------------------------------------
-# MODE B: Dynamic polymer generation from monomer SMILES (RECOMMENDED)
-# ----------------------------------------------------------------------------
-# PolyzyMD generates random co-polymers on-the-fly using ATRP methacrylate
-# reaction templates that ship with the package. You supply monomer SMILES
-# and feed ratios; PolyzyMD handles fragment generation, polymerization,
-# charge assignment, and 3D embedding.
-#
-# polymers:
-#   enabled: true
-#   generation_mode: "dynamic"            # Key setting: generate from SMILES
-#   type_prefix: "<monomer1>-<monomer2>"   # Used in output directory names
-#   
-#   # Bundled ATRP methacrylate reaction templates
-#   # "default" uses the templates that ship with PolyzyMD
-#   reactions:
+#   generation_mode: "dynamic"            # Generate chains from monomer SMILES
+#   type_prefix: "<monomer1>-<monomer2>"  # Used in output directory names
+#   reactions:                            # Bundled ATRP methacrylate templates
 #     initiation: "default"
 #     polymerization: "default"
 #     termination: "default"
-#   
-#   # Monomer composition with SMILES strings
-#   # Probabilities must sum to 1.0
-#   # SMILES must be fully explicit-hydrogen methacrylate monomers
-#   monomers:
+#   monomers:                             # Probabilities must sum to 1.0
 #     - label: "A"
 #       probability: 0.75
 #       name: "<monomer_1_name>"
@@ -153,20 +95,8 @@ description: "Description of your simulation system"
 #       probability: 0.25
 #       name: "<monomer_2_name>"
 #       smiles: "<monomer_2_SMILES>"
-#   
-#   # Charge assignment for generated polymers
-#   charger: "nagl"                       # Options: nagl, espaloma, am1bcc
-#   max_retries: 10                       # Retries if ring-piercing occurs
-#   
-#   length: 10                            # Number of monomers per chain
-#   count: 4                              # Number of polymer chains
-#   
-#   cache_directory: ".polymer_cache"
-#   
-#   packing:
-#     padding: 2.0                        # nm padding around solute
-#     tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
-#     movebadrandom: false                # set true for dense/heterogeneous systems
+#   length: 10                            # Monomers per chain
+#   count: 4                              # Number of chains
 
 # ============================================================================
 # Solvent Configuration (REQUIRED)
@@ -176,48 +106,48 @@ description: "Description of your simulation system"
 # water model options: tip3p, spce, tip4pew, opc
 # box shape options: cube, rhombic_dodecahedron, truncated_octahedron
 #
-# solvent:
-#   primary:
-#     type: "water"
-#     model: "tip3p"
-#   
-#   # Co-solvents (optional) - leave empty [] if not using
-#   co_solvents: []
-#   
-#   # Co-solvent specification options:
-#   #   - mole_fraction: Specify as solvent mole fraction (e.g., 0.10 for 10 mol%)
-#   #   - concentration:  Specify as molar (e.g., 2.0 for 2 M)
-#   #   NOTE: Use ONE method per co-solvent, not both.
-#   #
-#   # Built-in co-solvents (auto-populated smiles & density):
-#   #   dmso, dmf, acetonitrile, urea, ethanol, methanol, glycerol,
-#   #   isopropanol, acetone, thf, dioxane, ethylene_glycol
-#   
-#   # Example: 10 mol% DMSO (replaces water in neutral solvent mixture)
-#   # co_solvents:
-#   #   - name: "dmso"
-#   #     mole_fraction: 0.10              # Mole fraction
-#   
-#   # Example: 2 M urea (additive, doesn't reduce water)
-#   # co_solvents:
-#   #   - name: "urea"
-#   #     concentration: 2.0                # Molar
-#   
-#   # Example: Custom co-solvent (not in library)
-#   # co_solvents:
-#   #   - name: "my_solvent"
-#   #     smiles: "CCOC(=O)C"               # SMILES required for custom
-#   #     mole_fraction: 0.05              # Mole fraction
-#   
-#   ions:
-#     neutralize: true                    # Add counter-ions to neutralize
-#     nacl_concentration: 0.15            # NaCl-equivalent final ion concentration (M)
-#   
-#   box:
-#     padding: 1.2                        # nm from solute to box edge
-#     shape: "rhombic_dodecahedron"       # Efficient packing
-#     target_density: 1.0                 # g/mL
-#     tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
+solvent:
+  primary:
+    type: "water"
+    model: "tip3p"
+  
+  # Co-solvents (optional) - leave empty [] if not using
+  co_solvents: []
+  
+  # Co-solvent specification options:
+  #   - mole_fraction: Specify as solvent mole fraction (e.g., 0.10 for 10 mol%)
+  #   - concentration:  Specify as molar (e.g., 2.0 for 2 M)
+  #   NOTE: Use ONE method per co-solvent, not both.
+  #
+  # Built-in co-solvents (auto-populated smiles & density):
+  #   dmso, dmf, acetonitrile, urea, ethanol, methanol, glycerol,
+  #   isopropanol, acetone, thf, dioxane, ethylene_glycol
+  
+  # Example: 10 mol% DMSO (replaces water in neutral solvent mixture)
+  # co_solvents:
+  #   - name: "dmso"
+  #     mole_fraction: 0.10              # Mole fraction
+  
+  # Example: 2 M urea (additive, doesn't reduce water)
+  # co_solvents:
+  #   - name: "urea"
+  #     concentration: 2.0                # Molar
+  
+  # Example: Custom co-solvent (not in library)
+  # co_solvents:
+  #   - name: "my_solvent"
+  #     smiles: "CCOC(=O)C"               # SMILES required for custom
+  #     mole_fraction: 0.05              # Mole fraction
+  
+  ions:
+    neutralize: true                    # Add counter-ions to neutralize
+    nacl_concentration: 0.15            # NaCl pairs (M); neutralizing ions are added on top
+  
+  box:
+    padding: 1.2                        # nm from solute to box edge
+    shape: "rhombic_dodecahedron"       # Efficient packing
+    target_density: 1.0                 # g/mL
+    tolerance: 2.0                      # PACKMOL tolerance (Angstrom)
 
 # ============================================================================
 # Restraints (OPTIONAL)
@@ -261,9 +191,9 @@ description: "Description of your simulation system"
 # ============================================================================
 # Temperature and pressure settings for the simulation.
 #
-# thermodynamics:
-#   temperature: 300.0                    # Kelvin
-#   pressure: 1.0                         # atmospheres
+thermodynamics:
+  temperature: 300.0                    # Kelvin
+  pressure: 1.0                         # atmospheres
 
 # ============================================================================
 # Simulation Phases (REQUIRED)
@@ -273,7 +203,7 @@ description: "Description of your simulation system"
 # ensemble options: NVT, NPT, NVE
 # thermostat options: LangevinMiddle (recommended), Langevin. NoseHoover and
 #   Andersen run only on GROMACS; see "GROMACS and OpenMM" in the reference.
-# barostat options: MC (Monte Carlo), MCA (anisotropic)
+# barostat options: MC (Monte Carlo), MCA (anisotropic, GROMACS only)
 #
 # Equilibration is a list of stages. Each stage sets its ensemble, its
 # temperature (or a temperature ramp) and its position restraints.
@@ -300,51 +230,52 @@ description: "Description of your simulation system"
 #     temperature_increment (K), and temperature_interval_steps;
 #     PolyzyMD derives the duration
 #
-# simulation_phases:
-#   equilibration_stages:
-#     # Stage 1: Heat from 60K to 300K with everything restrained
-#     - name: "heating"
-#       samples: 50                       # trajectory frames
-#       ensemble: "NVT"
-#       temperature_start: 60.0           # Start temperature (K)
-#       temperature_end: 300.0            # End temperature (K)
-#       temperature_increment: 1.0         # Increase per update (K)
-#       temperature_interval_steps: 600    # MD steps between updates
-#       position_restraints:
-#         - group: "protein_heavy"
-#           force_constant: 4184.0        # kJ/mol/nm^2 (= 1 kcal/mol/A^2)
-#         - group: "polymer_heavy"         # only when polymers are enabled
-#           force_constant: 4184.0
-#     # Add a constant-temperature stage after heating to equilibrate at the endpoint.
-#
-#     # Stage 2: Relax the solvent (and any polymers) with the protein restrained
-#     - name: "restrained_relaxation"
-#       duration: 1.0                     # nanoseconds
-#       samples: 100
-#       ensemble: "NVT"
-#       temperature: 300.0                # Constant temperature
-#       position_restraints:
-#         - group: "protein_heavy"
-#           force_constant: 4184.0
-#     
-#     # Stage 3: Free equilibration (no restraints)
-#     - name: "free_equilibration"
-#       duration: 0.5                     # nanoseconds
-#       samples: 100
-#       ensemble: "NPT"
-#       temperature: 300.0
-#       # No position_restraints = unrestrained
-#   
-#   production:
-#     ensemble: "NPT"
-#     duration: 100.0
-#     samples: 2500
-#     checkpoint_interval: 60.0
-#     time_step: 2.0
-#     thermostat: "LangevinMiddle"
-#     thermostat_timescale: 1.0
-#     barostat: "MC"
-#     barostat_frequency: 25
+simulation_phases:
+  equilibration_stages:
+    # Stage 1: Heat from 60K to 300K with everything restrained
+    - name: "heating"
+      samples: 50                       # trajectory frames
+      ensemble: "NVT"
+      temperature_start: 60.0           # Start temperature (K)
+      temperature_end: 300.0            # End temperature (K)
+      temperature_increment: 1.0         # Increase per update (K)
+      temperature_interval_steps: 600    # MD steps between updates
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0        # kJ/mol/nm^2 (= 1 kcal/mol/A^2)
+        # With polymers, also restrain them:
+        # - group: "polymer_heavy"
+        #   force_constant: 4184.0
+    # Add a constant-temperature stage after heating to equilibrate at the endpoint.
+
+    # Stage 2: Relax the solvent (and any polymers) with the protein restrained
+    - name: "restrained_relaxation"
+      duration: 1.0                     # nanoseconds
+      samples: 100
+      ensemble: "NVT"
+      temperature: 300.0                # Constant temperature
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+    
+    # Stage 3: Free equilibration (no restraints)
+    - name: "free_equilibration"
+      duration: 0.5                     # nanoseconds
+      samples: 100
+      ensemble: "NPT"
+      temperature: 300.0
+      # No position_restraints = unrestrained
+  
+  production:
+    ensemble: "NPT"
+    duration: 100.0
+    samples: 2500
+    checkpoint_interval: 60.0
+    time_step: 2.0
+    thermostat: "LangevinMiddle"
+    thermostat_timescale: 1.0
+    barostat: "MC"
+    barostat_frequency: 25
 
 # ============================================================================
 # Output Configuration (REQUIRED)
@@ -357,23 +288,35 @@ description: "Description of your simulation system"
 #
 # For local development, set both to "." or just projects_directory.
 #
-# output:
-#   projects_directory: "."               # Where to put scripts and logs
-#   scratch_directory: null               # Where to put trajectories (null = same as projects)
-#   
-#   # Subdirectories within projects_directory
-#   job_scripts_subdir: "job_scripts"
-#   slurm_logs_subdir: "slurm_logs"
-#   
-#   # Naming template for run directories
-#   # Available variables: {enzyme}, {substrate}, {polymer_type}, {duration}, {temperature}, {replicate}
-#   # polymer_type format: {type_prefix}_{label1}{pct1}_{label2}{pct2} (e.g., SBMA-EGMA_A75_B25)
-#   naming_template: "{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}"
-#   
-#   # Output options
-#   save_checkpoint: true
-#   save_state_data: true
-#   trajectory_format: "dcd"              # Options: dcd, xtc
+output:
+  projects_directory: "."               # Where to put scripts and logs
+  scratch_directory: null               # Where to put trajectories (null = same as projects)
+  
+  # Subdirectories within projects_directory
+  job_scripts_subdir: "job_scripts"
+  slurm_logs_subdir: "slurm_logs"
+  
+  # Naming template for run directories
+  # Available variables: {enzyme}, {substrate}, {polymer_type}, {duration},
+  #   {temperature}, {replicate}, {primary_solvent}, {cosolvent_composition},
+  #   {solvent_composition}. See the configuration reference.
+  # polymer_type format: {type_prefix}_{label1}{pct1}_{label2}{pct2} (e.g., SBMA-EGMA_A75_B25),
+  #   or "none" without polymers
+  naming_template: "{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}"
+  
+  # Output options
+  save_checkpoint: true
+  save_state_data: true
+  trajectory_format: "dcd"              # Options: dcd, xtc
+
+# ============================================================================
+# OpenMM Platform (REQUIRED for the OpenMM engine)
+# ============================================================================
+# CUDA runs on NVIDIA GPUs; job scripts made by `polyzymd submit` need it.
+# To run on a CPU with `polyzymd run`, set platform: "CPU".
+#
+openmm:
+  platform: "CUDA"
 
 # ============================================================================
 # Force Field Selection (OPTIONAL)

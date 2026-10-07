@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Iterator, Sequence
 
 import click
 
@@ -108,16 +108,81 @@ def _common_until(
     return next(iter(study)).until
 
 
-def _list_analyses(ctx: click.Context) -> None:
-    """Print every shipped analysis with what it measures and its settings, then exit."""
+def _whole_study(
+    study_path: Path,
+    equilibration: str | None,
+    replicate_spec: str | None,
+    stride: int,
+    data: dict | None,
+) -> Iterator[Any]:
+    """Yield each condition of the study file whose runs are on this machine.
+
+    A ``--label`` run, a ``--submit`` task and a partial report each see some
+    conditions; :func:`~polyzymd.analyses.protocols.study_wide_settings`
+    reads these instead, so their stored records match a full run.
+    """
+    from polyzymd.analyses.exceptions import ProtocolError
+    from polyzymd.analyses.protocols import _study
+    from polyzymd.analyses.study_file import load_study_file
+
+    for label, config in load_study_file(study_path).conditions.items():
+        try:
+            yield from _study(
+                [config], [label], equilibration, _replicates(replicate_spec), stride, data
+            )
+        except ProtocolError:
+            continue
+
+
+def _without_commit(report_text: str) -> dict:
+    """Return a saved report without the git commit its study record names."""
+    import json
+
+    report = json.loads(report_text)
+    git = ((report.get("provenance") or {}).get("study") or {}).get("git") or {}
+    git.pop("commit", None)
+    return report
+
+
+def _analysis_lines(name: str) -> list[str]:
+    """Return what the shipped analysis ``name`` measures, then each setting with its default."""
     import json
 
     from polyzymd.analyses.protocols import ANALYSIS_SUMMARIES, FUNCTION_ANALYSES
 
-    for name, settings in FUNCTION_ANALYSES.items():
-        click.echo(f"{name}: {ANALYSIS_SUMMARIES.get(name, '')}")
-        for key, default in settings.items():
-            click.echo(f"  {key}: {json.dumps(default)}")
+    return [f"{name}: {ANALYSIS_SUMMARIES.get(name, '')}"] + [
+        f"  {key}: {json.dumps(default)}" for key, default in FUNCTION_ANALYSES[name].items()
+    ]
+
+
+class _AnalyzeCommand(click.Command):
+    """``polyzymd analyze``, whose ``NAME --help`` also prints the settings of analysis NAME."""
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+
+        # --help runs before NAME is parsed, so take the name from the raw arguments.
+        ctx.meta["analysis_name"] = next((arg for arg in args if arg in FUNCTION_ANALYSES), None)
+        return super().parse_args(ctx, args)
+
+    def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        super().format_help(ctx, formatter)
+        name = ctx.meta.get("analysis_name")
+        if name:
+            formatter.write_paragraph()
+            formatter.write_text(
+                "Settings of this analysis, with their defaults (--set key=value):"
+            )
+            for line in _analysis_lines(name):
+                formatter.write(f"{line}\n")
+
+
+def _list_analyses(ctx: click.Context) -> None:
+    """Print every shipped analysis with what it measures and its settings, then exit."""
+    from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+
+    for name in FUNCTION_ANALYSES:
+        click.echo("\n".join(_analysis_lines(name)))
     click.echo(
         "Use a name as a study.yaml entry ({name: {setting: value}}) or with "
         "polyzymd analyze NAME --set setting=value; definitions: "
@@ -130,7 +195,10 @@ def _partial_report(options: dict[str, Any], error: Exception) -> "ProtocolRepor
     """Build a report from the conditions that can be reported, after the whole run failed.
 
     Each condition is run alone, which reuses its stored results, and the
-    conditions that fail are named in ``problems`` with their error. The
+    conditions that fail are named in ``problems`` with their error on one
+    line; each absolute path in it is written relative to the study folder,
+    or as its file name when outside it (:func:`_portable_text`). The log
+    file gets each error with its traceback. The
     comparison is then run over the conditions that worked, control first;
     without the control, or when that comparison fails too, the report holds
     each condition's summary. Returns ``None`` when there is no second
@@ -151,11 +219,19 @@ def _partial_report(options: dict[str, Any], error: Exception) -> "ProtocolRepor
             }
         )
 
+    import logging
+
+    study = options.get("study_path")
+    root = Path(study).resolve() if study is not None else Path.cwd()
+    root = root.parent if root.is_file() else root
+
     def reason(exc: Exception) -> str:
+        logging.getLogger(__name__).info("analysis failed", exc_info=exc)
         hint = getattr(exc, "hint", None)
-        return f"{type(exc).__name__}: {_one_line(str(exc))}" + (
+        text = f"{type(exc).__name__}: {_one_line(str(exc))}" + (
             f" (fix: {_one_line(hint)})" if hint else ""
         )
+        return _portable_text(text, root)
 
     alone: dict[int, "ProtocolReport"] = {}
     problems = []
@@ -201,12 +277,29 @@ def _render(report: "ProtocolReport", output_format: str) -> str:
     return report.to_agent_text()
 
 
+def _portable_text(text: str, root: Path) -> str:
+    """Return ``text`` with each absolute path rewritten by :func:`~polyzymd.analyses.study_file.portable`.
+
+    A path inside ``root`` becomes relative to it, any other its file name,
+    so a published report names no place on this machine.
+    """
+    import re
+
+    from polyzymd.analyses.study_file import portable
+
+    return re.sub(
+        r"(?<![\w.~:/])/[^\s'\"`,;:()\[\]]*[^\s'\"`,;:()\[\].]",
+        lambda match: portable(match.group(), root),
+        text,
+    )
+
+
 def _one_line(text: str) -> str:
     """Collapse a message to one line."""
     return " ".join(text.split())
 
 
-@click.command("analyze")
+@click.command("analyze", cls=_AnalyzeCommand)
 @click.argument("name", type=str, required=False, default=None)
 @click.option(
     "-c",
@@ -524,6 +617,15 @@ def analyze_command(
     )
     if data_dir is not None:
         data = {"*": Path(data_dir).expanduser().resolve()}
+    wide: dict[str, Any] | None = None
+    if study_path is not None and name is not None and not is_task:
+        from polyzymd.analyses.protocols import study_wide_settings
+
+        wide = study_wide_settings(
+            name,
+            _whole_study(study_path, equilibration, replicate_spec, stride, data),
+            _settings(setting_overrides),
+        )
 
     if submit or dry_run:
         try:
@@ -544,6 +646,7 @@ def analyze_command(
                 no_eq_check=no_eq_check,
                 no_plots=no_plots,
                 study_path=study_path,
+                study_wide=wide,
                 run_name=run_name,
                 data=data,
                 data_dir=data_dir,
@@ -575,7 +678,10 @@ def analyze_command(
         "equilibration": equilibration,
         "labels": labels,
         "run": run,
-        "setting_overrides": setting_overrides,
+        "setting_overrides": (
+            *setting_overrides,
+            *(f"{key}={_set_value(value)}" for key, value in (wide or {}).items()),
+        ),
         "output_dir": output_dir,
         "recompute": recompute,
         "eq_check": not no_eq_check,
@@ -661,7 +767,22 @@ def analyze_command(
         if not is_task and not subset:
             saved = Path(output_dir) / REPORT_FILE
             saved.parent.mkdir(parents=True, exist_ok=True)
-            saved.write_text(report.model_dump_json(indent=2) + "\n")
+            text = report.model_dump_json(indent=2) + "\n"
+            # A rerun on unchanged inputs keeps the report it made before, so
+            # committing between the runs leaves nothing new to commit.
+            if not saved.is_file() or _without_commit(saved.read_text()) != _without_commit(text):
+                saved.write_text(text)
+            # Records of replicates the study no longer lists would be read and
+            # deposited; the replicates this report used stay.
+            listed = load_study_file(study_root).replicates
+            if listed is not None:
+                import shutil
+
+                keep = set(listed) | {r for c in report.conditions for r in c.replicates}
+                for folder in Path(output_dir).glob("polyzymd_results/*/*/replicate_*"):
+                    number = folder.name.removeprefix("replicate_")
+                    if number.isdigit() and int(number) not in keep:
+                        shutil.rmtree(folder)
     rendered = _render(report, output_format)
     click.echo(rendered)
     if output_path is not None:
@@ -717,6 +838,13 @@ def _analyze_project(
     if study_path is not None or configs:
         click.echo("error: --project runs every study; give it without --study or -c.", err=True)
         click.echo("fix: Use --study to run one study of the project.", err=True)
+        sys.exit(EXIT_ANALYSIS_ERROR)
+    if ctx.params.get("output_dir") is not None:
+        # Studies with the same condition labels would overwrite each other's results.
+        click.echo("error: --output-dir cannot be given with --project.", err=True)
+        click.echo(
+            "fix: Leave out --output-dir; each study keeps its results in its own folder.", err=True
+        )
         sys.exit(EXIT_ANALYSIS_ERROR)
     try:
         project = Project(project_path)
@@ -925,7 +1053,8 @@ def _from_study(
                 f"or add '{run_name}:' under analyses: in the study file.",
             )
         click.echo(
-            f"note: {protocol.path} does not list {run_name}; running it with its defaults.",
+            f"note: {protocol.path} does not list {run_name}; running it with "
+            + ("the settings given." if setting_overrides else "its defaults."),
             err=True,
         )
         analysis, settings = run_name, {}
@@ -973,12 +1102,17 @@ def _submit(
     preset: str | None,
     overrides: dict,
     study_path: Path | None = None,
+    study_wide: dict | None = None,
     run_name: str | None = None,
     data: dict | None = None,
     data_dir: Path | None = None,
     until: str | None = None,
 ) -> None:
-    """Write, and unless ``dry_run`` submit, the SLURM jobs of one ``polyzymd analyze`` command."""
+    """Write, and unless ``dry_run`` submit, the SLURM jobs of one ``polyzymd analyze`` command.
+
+    ``study_wide`` holds the settings worked out over the whole study file;
+    without it they are worked out over ``configs``.
+    """
     import json
     import shlex
 
@@ -1034,7 +1168,9 @@ def _submit(
     # are resolved here; the report job runs the whole study and resolves the
     # same ones itself, so its record keeps only the settings given.
     if name is not None:
-        for key, value in study_wide_settings(name, study, _settings(setting_overrides)).items():
+        if study_wide is None:
+            study_wide = study_wide_settings(name, study, _settings(setting_overrides))
+        for key, value in study_wide.items():
             task_options += ["--set", f"{key}={_set_value(value)}"]
     report_arguments = []
     if study_path is not None:

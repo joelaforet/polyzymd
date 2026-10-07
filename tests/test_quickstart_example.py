@@ -2,10 +2,11 @@
 
 ``examples/quickstart/`` holds Trp-cage (PDB 1L2Y) and one config per
 engine. Each test copies the folder, runs the commands the quickstart
-tutorial gives, and checks that ``polyzymd analyze rg`` reports a radius of
-gyration. A protein in water with ions is the system every new user starts
+tutorial gives, and checks that every shipped analysis runs with its
+defaults. A protein in water with ions is the system every new user starts
 from, so a fault in any step of that path (an invalid quickstart config, an
-analysis topology MDAnalysis cannot read) fails here.
+analysis topology MDAnalysis cannot read, a topology without chain IDs)
+fails here.
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from polyzymd.analyses.protocols import FUNCTION_ANALYSES
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "quickstart"
 
@@ -63,6 +66,19 @@ def test_the_quickstart_runs_and_analyzes(tmp_path: Path, config: str) -> None:
         (progress,) = folder.rglob("progress.json")
         segment = json.loads(progress.read_text())["segments"][0]
         assert segment["status"] == "completed" and segment["trajectory_sha256"]
-    result = _polyzymd(folder, "analyze", "rg", "--study", "study", "--no-plots")
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "verdict: Water mean_rg" in result.stdout
+        # system.prmtop has no chain IDs; the loader takes them from the build's PDB.
+        from polyzymd.analyses.shared.loader import open_universe
+
+        (prmtop,) = folder.rglob("system.prmtop")
+        universe = open_universe(prmtop, sorted(prmtop.parent.rglob("*_trajectory.dcd")))
+        assert len(universe.select_atoms("chainid A")) == len(universe.select_atoms("protein"))
+    # Every shipped analysis runs with its defaults. Contacts and hydrogen bonds
+    # select chainid A and chainid C; the quickstart has no polymer, so they report 0.
+    (folder / "pairs.yaml").write_text(
+        "- {label: termini, selection_a: resid 1 and name CA, selection_b: resid 20 and name CA}\n"
+    )
+    for name in FUNCTION_ANALYSES:
+        settings = ("--set", "pairs=pairs.yaml") if name == "distances" else ()
+        result = _polyzymd(folder, "analyze", name, "--study", "study", "--no-plots", *settings)
+        assert result.returncode == 0, f"{name}\n{result.stdout}\n{result.stderr}"
+        assert "verdict: Water" in result.stdout, name

@@ -111,6 +111,16 @@ class TestSchema:
         if hint:
             assert hint in caught.value.hint
 
+    def test_reads_a_condition_config_outside_the_study(self, tmp_path: Path) -> None:
+        """Analysis reads a config outside the study; only freeze refuses it."""
+        (tmp_path / "study").mkdir()
+        path = _write(
+            tmp_path / "study" / "study.yaml",
+            "equilibration: 1ns\nconditions: {Ext: ../external/cfg/config.yaml}\n",
+        )
+        config = load_study_file(path).conditions["Ext"]
+        assert config == (tmp_path / "external" / "cfg" / "config.yaml").resolve()
+
     def test_replicate_range(self, tmp_path: Path) -> None:
         path = _write(
             tmp_path / "study.yaml",
@@ -212,7 +222,9 @@ class TestAnalyzeStudy:
         protocol = load_study_file(study_dir)
         assert "rmsd" not in protocol.analyses
         result = _analyze("rmsd", "--study", str(study_dir), "--set", "selection=all")
-        assert "does not list rmsd" in result.output
+        assert "does not list rmsd; running it with the settings given." in result.output
+        result = _analyze("rmsd", "--study", str(study_dir))
+        assert "does not list rmsd; running it with its defaults." in result.output
 
     def test_submit_dry_run_reports_with_the_study(self, study_dir: Path) -> None:
         result = CliRunner().invoke(
@@ -400,7 +412,7 @@ class TestUserFunctions:
             ).read_text()
         )
         assert record["function"]["hash_of"] == "module_folder"
-        assert record["function"]["module"] == "polyzymd_study.metrics"
+        assert record["function"]["module"] == f"polyzymd_study.{user_study.name}.metrics"
 
     def test_check_imports_the_function(self, user_study: Path) -> None:
         result = CliRunner().invoke(cli, ["study", "check", str(user_study)])
@@ -556,3 +568,15 @@ def test_relative_files_of_shipped_analyses_follow_the_study(tmp_path: Path) -> 
     (root / "structures" / "ref.pdb").write_text("END\n")
     entry = load_study_file(root).analyses["rmsd"]
     assert Path(entry.settings["reference_file"]) == (root / "structures" / "ref.pdb").resolve()
+
+
+def test_labels_that_share_a_folder_name_are_refused(tmp_path: Path) -> None:
+    """Two labels that give one results folder name raise an error naming both."""
+    for name in ("a", "b"):
+        write_simulation_config(tmp_path / name, scratch=tmp_path / "scratch" / name)
+    _write(
+        tmp_path / "study.yaml",
+        "equilibration: 0ns\nconditions:\n  SBMA 50: a\n  'SBMA 50%': b\n",
+    )
+    with pytest.raises(ProtocolError, match="SBMA 50.*SBMA 50%"):
+        load_study_file(tmp_path)

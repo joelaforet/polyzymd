@@ -17,6 +17,7 @@ from click.testing import CliRunner
 from jinja2 import UndefinedError
 
 from polyzymd.cli.main import _resolve_replicates_option, _run_openmm_impl, cli
+from polyzymd.config.schema import Ensemble, WaterModel
 from polyzymd.utils.templates import render_package_template
 
 BRANDING_LINE = "PolyzyMD: Created by Joseph R. Laforet Jr."
@@ -42,7 +43,7 @@ def _make_dry_run_config() -> SimpleNamespace:
         substrate=None,
         polymers=None,
         solvent=SimpleNamespace(
-            primary=SimpleNamespace(model="tip3p"),
+            primary=SimpleNamespace(model=WaterModel.TIP3P),
             box=SimpleNamespace(padding=1.2),
             ions=SimpleNamespace(nacl_concentration=0.15, neutralize=True),
             co_solvents=[],
@@ -54,13 +55,13 @@ def _make_dry_run_config() -> SimpleNamespace:
                 SimpleNamespace(
                     name="heating",
                     resolved_duration=0.2,
-                    ensemble="NVT",
+                    ensemble=Ensemble.NVT,
                     is_temperature_ramping=False,
                 ),
                 SimpleNamespace(
                     name="free_equilibration",
                     resolved_duration=0.8,
-                    ensemble="NPT",
+                    ensemble=Ensemble.NPT,
                     is_temperature_ramping=False,
                 ),
             ],
@@ -329,6 +330,51 @@ class TestValidateCommandReferenceWarnings:
         assert result.exit_code == 0
         assert "60 -> 300 K, +1 K every 600 steps" in result.output
         assert "derived duration 0.288000 ns" in result.output
+
+    @pytest.mark.parametrize("where", ["production", "equilibration"])
+    def test_validate_refuses_anisotropic_barostat_on_openmm(self, tmp_path: Path, where) -> None:
+        """OpenMM runs no anisotropic barostat, so MCA with engine openmm is an error."""
+        data = _minimal_cli_config_data("missing.pdb")
+        phases = data["simulation_phases"]
+        phase = phases["production"] if where == "production" else phases["equilibration_stages"][0]
+        phase.update(ensemble="NPT", barostat="MCA")
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+
+        assert result.exit_code != 0
+        assert "MCA" in result.output and "anisotropic" in result.output
+
+    def test_missing_equilibration_stages_names_the_key_without_a_pydantic_url(
+        self, tmp_path: Path
+    ) -> None:
+        data = _minimal_cli_config_data("missing.pdb")
+        del data["simulation_phases"]["equilibration_stages"]
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+
+        assert result.exit_code == 1
+        assert "equilibration_stages is missing: list at least one stage" in result.output
+        assert "legacy" not in result.output
+        assert "errors.pydantic.dev" not in result.output
+
+    def test_validate_prints_engine_and_cosolvents(self, tmp_path: Path) -> None:
+        data = _minimal_cli_config_data("missing.pdb")
+        data["solvent"] = {
+            "primary": {"type": "water", "model": "tip3p"},
+            "co_solvents": [{"name": "dmso", "mole_fraction": 0.1}],
+        }
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+
+        assert result.exit_code == 0, result.output
+        assert "Engine: openmm" in result.output
+        assert "Co-solvents: dmso" in result.output
 
 
 class TestBuildCommandReplicateFlags:
@@ -601,6 +647,23 @@ class TestInitCommand:
             assert result.exit_code != 0
             assert "already exists" in result.output
 
+    def test_init_config_sets_the_openmm_platform_and_validates(self, tmp_path: Path) -> None:
+        """Once the PDB path is set, the init config validates as written."""
+        runner = CliRunner()
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            assert runner.invoke(cli, ["init", "-n", "proj"]).exit_code == 0
+            config = Path("proj/config.yaml")
+            text = config.read_text(encoding="utf-8")
+            assert "\nopenmm:\n  platform:" in text
+            pdb = Path(__file__).resolve().parents[2] / "examples" / "quickstart" / "trpcage.pdb"
+            config.write_text(text.replace("structures/protein_X.pdb", str(pdb)), encoding="utf-8")
+
+            result = runner.invoke(cli, ["validate", "-c", str(config)])
+
+        assert result.exit_code == 0, result.output
+        assert "Configuration is valid!" in result.output
+        assert "Referenced file warnings" not in result.output
+
     def test_shared_renderer_uses_strict_undefined(self) -> None:
         """Missing template context values should fail fast."""
         with pytest.raises(UndefinedError):
@@ -695,6 +758,7 @@ class TestOpenMMRunImplementation:
         )
         config = SimpleNamespace(
             simulation_phases=SimpleNamespace(production=production),
+            require_engine_barostats=lambda engine: None,
             get_working_directory=lambda replicate: tmp_path / f"run_{replicate}",
         )
 
@@ -711,6 +775,66 @@ class TestOpenMMRunImplementation:
             report_interval=200000,
             checkpoint_interval_s=60.0,
         )
+
+
+class TestRunReusesBuild:
+    """`polyzymd run` reuses the build of an earlier `polyzymd build`."""
+
+    @staticmethod
+    def _config(tmp_path: Path) -> SimpleNamespace:
+        production = SimpleNamespace(
+            duration=0.004, samples=4, time_step=2.0, checkpoint_interval=60.0
+        )
+        return SimpleNamespace(
+            simulation_phases=SimpleNamespace(production=production),
+            require_engine_barostats=lambda engine: None,
+            get_working_directory=lambda replicate: tmp_path / f"run_{replicate}",
+        )
+
+    @patch("polyzymd.cli.main._run_initial_segment")
+    @patch("polyzymd.simulation.artifact_integrity.validate_build_bundle")
+    def test_openmm_run_reuses_a_valid_build(
+        self, validate, run_initial_segment, tmp_path: Path, capsys
+    ) -> None:
+        config = self._config(tmp_path)
+        _run_openmm_impl(config, replicate=1)
+
+        validate.assert_called_once_with(tmp_path / "run_1", config, allow_legacy=False)
+        assert run_initial_segment.call_args.kwargs["skip_build"] is True
+        assert f"Reusing the build in {tmp_path / 'run_1'}" in capsys.readouterr().out
+
+    @patch("polyzymd.cli.main._run_initial_segment")
+    def test_openmm_run_builds_without_a_build(
+        self, run_initial_segment, tmp_path: Path, capsys
+    ) -> None:
+        _run_openmm_impl(self._config(tmp_path), replicate=1)
+
+        assert run_initial_segment.call_args.kwargs["skip_build"] is False
+        assert "Building the system in" in capsys.readouterr().out
+
+    @patch("polyzymd.exporters.gromacs.GromacsRunner")
+    @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
+    @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
+    def test_gromacs_run_reuses_exported_files(
+        self, _prefix, from_config, gromacs_runner, tmp_path: Path, capsys
+    ) -> None:
+        from polyzymd.cli.main import _run_gromacs_impl
+
+        gromacs_dir = tmp_path / "run_1" / "gromacs"
+        gromacs_dir.mkdir(parents=True)
+        for name in ("sys.top", "sys.gro", "em.mdp", "eq_00_nvt.mdp", "prod.mdp"):
+            (gromacs_dir / name).write_text("")
+
+        _run_gromacs_impl(self._config(tmp_path), replicate=1, gmx_path="gmx")
+
+        from_config.assert_not_called()
+        gromacs_runner.assert_called_once_with(
+            working_dir=gromacs_dir,
+            prefix="sys",
+            equilibration_mdps=["eq_00_nvt.mdp"],
+            gmx_command="gmx",
+        )
+        assert f"Reusing the GROMACS files in {gromacs_dir}" in capsys.readouterr().out
 
 
 class TestCliExceptionHandlingNarrowing:
@@ -1020,6 +1144,7 @@ class TestSubmitEngineAware:
             slurm_ntasks=None,
             ntomp=4,
             module_load=None,
+            command_prefix=None,
         )
         mock_from_yaml.return_value = mock_config
         config_path = tmp_path / "fake.yaml"
@@ -1147,6 +1272,7 @@ class TestSubmitEngineAware:
             slurm_ntasks=None,
             ntomp=4,
             module_load=None,
+            command_prefix=None,
         )
         mock_from_yaml.return_value = mock_config
 
@@ -1313,6 +1439,7 @@ class TestSubmitEngineAware:
             grompp_flags="",
             mdrun_flags="",
             module_load=None,
+            command_prefix=None,
             gmx_binary=None,
             ntmpi=1,
             slurm_ntasks=None,
@@ -1769,6 +1896,7 @@ class TestSubmitConstraintOption:
             slurm_ntasks=None,
             ntomp=4,
             module_load=None,
+            command_prefix=None,
         )
         mock_from_yaml.return_value = mock_config
 
@@ -1939,3 +2067,52 @@ def test_clean_pdb_runs_on_the_cpu(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert (tmp_path / "clean.pdb").is_file()
     assert os.environ["OPENMM_DEFAULT_PLATFORM"] == "CPU"
+
+
+class TestSubmitDryRunHardwareWarnings:
+    """The submit dry run warns when the job's hardware does not fit the config."""
+
+    QUICKSTART = Path(__file__).resolve().parents[2] / "examples" / "quickstart"
+
+    def _dry_run(self, config_name: str) -> str:
+        result = CliRunner().invoke(
+            cli, ["submit", "-c", str(self.QUICKSTART / config_name), "--dry-run"]
+        )
+        assert result.exit_code == 0, result.output
+        return result.output
+
+    def test_cpu_openmm_config_is_told_job_scripts_need_cuda(self) -> None:
+        output = self._dry_run("config.yaml")
+        assert "generated OpenMM job scripts need CUDA" in output
+        assert "run on a CPU with `polyzymd run`" in output
+        assert "choose a CPU partition" not in output
+
+    def test_cpu_gromacs_config_is_warned_about_gpu_partition_and_gmx(self) -> None:
+        output = self._dry_run("config_gromacs.yaml")
+        assert "the job asks for no GPU, but preset aa100 is set up for GPU jobs" in output
+        assert "pass --partition with a partition that has CPU nodes" in output
+        assert "choose a CPU partition" not in output
+        assert "neither gromacs.module_load nor gromacs.command_prefix is set" in output
+
+
+class TestNoPolymerWording:
+    """Runs without polymers do not mention polymers; console text shows plain values."""
+
+    QUICKSTART = Path(__file__).resolve().parents[2] / "examples" / "quickstart"
+
+    def test_build_dry_run_shows_plain_values_and_no_polymer(self) -> None:
+        result = CliRunner().invoke(
+            cli, ["build", "-c", str(self.QUICKSTART / "config.yaml"), "--dry-run"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "TIP3P" in result.output
+        assert "WaterModel." not in result.output
+        assert "Ensemble." not in result.output
+        assert "Polymer" not in result.output
+
+    def test_info_reports_packmol_and_gmx(self) -> None:
+        result = CliRunner().invoke(cli, ["info"])
+        assert result.exit_code == 0, result.output
+        assert "packmol:" in result.output
+        assert "gmx:" in result.output
+        assert "Enzyme-Polymer" not in result.output

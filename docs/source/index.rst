@@ -7,7 +7,7 @@ PolyzyMD Documentation
 ======================
 
 PolyzyMD is a molecular dynamics toolkit for building, running, and analyzing
-enzyme-polymer simulations.
+simulations of proteins, alone or with polymers, ligands and co-solvents.
 
 Use this site by *need*:
 

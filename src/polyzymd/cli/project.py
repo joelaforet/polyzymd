@@ -37,7 +37,8 @@ def check_command(ctx: click.Context, path: Path, production: bool = False) -> N
     """
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.project import Project
-    from polyzymd.cli.study import _study_logging
+    from polyzymd.analyses.study_git import describe, git_state
+    from polyzymd.cli.study import PROJECT_CHECK, _echo_metadata, _study_logging
     from polyzymd.cli.study import check_command as study_check
 
     _study_logging(path, "project-check")
@@ -52,6 +53,7 @@ def check_command(ctx: click.Context, path: Path, production: bool = False) -> N
             click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
         sys.exit(EXIT_PROJECT_ERROR)
     failed = []
+    ctx.meta[PROJECT_CHECK] = True
     for label, folder in project.protocol.studies.items():
         click.echo(f"== study {label}")
         try:
@@ -59,8 +61,12 @@ def check_command(ctx: click.Context, path: Path, production: bool = False) -> N
         except SystemExit as exit_:
             if exit_.code:
                 failed.append(label)
+    click.echo("== project")
+    click.echo(describe(git_state(project.root)))
+    metadata_read = _echo_metadata(project.protocol.metadata, "project.yaml")
     if failed:
         click.echo(f"error: studies {', '.join(failed)} did not check", err=True)
+    if failed or not metadata_read:
         sys.exit(EXIT_PROJECT_ERROR)
 
 
@@ -148,3 +154,8 @@ def freeze_command(path: Path, tag: str | None) -> None:
     for warning in result.warnings:
         click.echo(f"warning: {warning}")
     click.echo(f"next: follow {result.guide}; PolyzyMD uploads nothing")
+    if result.git_failed:
+        click.echo(
+            "error: git could not commit and tag the project; fix that and freeze again", err=True
+        )
+        sys.exit(EXIT_PROJECT_ERROR)

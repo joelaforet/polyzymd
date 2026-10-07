@@ -1741,6 +1741,23 @@ class TestGlobalTermHandling:
         end_idx = script.index('CURRENT_PHASE="idle"', trjconv_idx)
         assert start_idx < trjconv_idx < end_idx
 
+    def test_trjconv_failure_is_reported_not_hidden(self, monkeypatch) -> None:
+        """A failed trjconv prints a warning; the uncentred prod.xtc stays for analysis."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        lines = [line for line in script.splitlines() if "trjconv" in line and "$GMX" in line]
+        assert len(lines) == 2 and not any("|| true" in line for line in lines)
+        assert "WARNING: trjconv could not center prod.xtc" in script
+
     def test_progress_update_uses_foreground_phase(self, monkeypatch) -> None:
         """Progress update calls should run inside foreground phase tracking."""
         monkeypatch.setattr(
@@ -1791,8 +1808,17 @@ def test_a_stop_file_stops_the_chain(tmp_path, monkeypatch) -> None:
         stub.write_text(f'#!/bin/sh\necho {tool} >> "{tmp_path}/calls"\n')
         stub.chmod(0o755)
     result = subprocess.run(
-        ["bash", str(script)],
-        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+        ["bash", "--noprofile", "--norc", str(script)],
+        # A cluster's Lmod `module` (an exported function, or one BASH_ENV
+        # defines) would shadow the stubs.
+        env={
+            **{
+                k: v
+                for k, v in os.environ.items()
+                if not k.startswith("BASH_FUNC_") and k != "BASH_ENV"
+            },
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        },
         capture_output=True,
         text=True,
         timeout=60,

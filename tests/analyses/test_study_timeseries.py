@@ -436,13 +436,12 @@ class TestDetectedEquilibration:
         assert self._lines(report) == []
         assert all(frame < 200 for row in report.conditions for frame in row.eq_detected_frame)
 
-    def test_few_effective_samples_give_one_line_per_condition(self) -> None:
+    def test_few_effective_samples_give_one_line_for_the_conditions_they_share(self) -> None:
         report = self._values(1.0, n_frames=15).summary()
         assert self._lines(report) == [
-            f"condition {label}: replicates 1, 2, 3 have fewer than 20 effective samples, so "
-            "the start of an equilibrated region cannot be detected reliably; values and "
+            "condition A, condition B: replicates 1, 2, 3 have fewer than 20 effective samples, "
+            "so the start of an equilibrated region cannot be detected reliably; values and "
             "statistics are unaffected"
-            for label in ("A", "B")
         ]
         assert [len(row.eq_detected_ns) for row in report.conditions] == [3, 3]
 

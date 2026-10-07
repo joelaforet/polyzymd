@@ -110,7 +110,7 @@ Settings, passed with `--set`:
 |---|---|---|
 | `method` | `occlusion` | `occlusion` or `distance`, as above |
 | `protein_selection` | `chainid A` | Protein atoms whose residues are measured |
-| `polymer_selection` | `chainid C` | Polymer atoms |
+| `polymer_selection` | `chainid C` | Atoms of the partner group: the polymer, or any other group, such as a co-solvent (`resname SDS`) |
 | `polymer_types` | every residue name of the polymer in any condition | The monomers to report one by one, such as `[SBM]`. A replicate without a listed monomer reports 0 for it. This setting does not narrow the polymer. To narrow the polymer, use `polymer_selection` |
 | `use_pbc` | `true` | Use the frame's box: the minimum image for `distance`, and for `occlusion` each polymer molecule moved to its image nearest the protein |
 | `regions` | none | Mapping of region names to selections, each reported as `<region>_contact_fraction`; a region cannot be named `coverage`, `mean`, `contact`, `classes`, `occluded`, `occlusion`, a monomer type or an amino-acid class |
@@ -137,6 +137,14 @@ This command counts contacts by distance:
 ```bash
 polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml --eq 200ns \
   --set method=distance --set cutoff=4.5
+```
+
+This command measures contacts with a co-solvent, SDS, instead of the polymer.
+`polymer_selection` takes any group of atoms:
+
+```bash
+polyzymd analyze contacts -c Water/config.yaml -c SDS/config.yaml --eq 200ns \
+  --set "polymer_selection=resname SDS" --set method=distance
 ```
 
 The JSON report records these items under `provenance.settings`: the

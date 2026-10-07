@@ -137,18 +137,17 @@ def _function_record(function: Callable) -> dict[str, Any]:
     imports from there, or a data file it reads from ``data/``, is part of
     what produced the result. Editing any of those files changes the record.
 
-    A function shipped with PolyzyMD is hashed with its module's file and the
-    files of the PolyzyMD modules that file imports (:func:`_shipped_code_hash`),
-    so a fix to a helper it calls, such as ``_occlusion_frames``, recomputes
-    the results it made.
+    A function shipped with PolyzyMD is hashed with every Python file of
+    ``polyzymd/analyses`` (:func:`_shipped_code_hash`), so a fix to any helper
+    it calls, such as ``shared/centroid.py``, recomputes the results it made.
     """
     module_file = getattr(function, "__polyzymd_module_file__", None)
     module = getattr(function, "__module__", None) or ""
     try:
         if module_file:
             digest, basis = folder_hash(Path(module_file)), "module_folder"
-        elif module.startswith("polyzymd.") and _shipped_code_hash(module):
-            digest, basis = _shipped_code_hash(module), "polyzymd_modules"
+        elif module.startswith("polyzymd."):
+            digest, basis = _shipped_code_hash(), "polyzymd_modules"
         else:
             source = inspect.getsource(function).encode()
             digest, basis = hashlib.sha256(source).hexdigest(), "source"
@@ -179,39 +178,18 @@ def _json_number(value: float) -> float | str:
 
 
 @functools.lru_cache(maxsize=None)
-def _shipped_code_hash(module: str) -> str | None:
-    """Return the SHA-256 of a PolyzyMD module's file and the PolyzyMD modules it imports.
+def _shipped_code_hash(package: Path = Path(__file__).parent) -> str:
+    """Return the SHA-256 of every Python file of ``polyzymd/analyses``.
 
-    The imports are read from the module's source (``import polyzymd.x`` and
-    ``from polyzymd.x import y``, at any depth of the file, as PolyzyMD
-    imports inside functions), one level deep. Each file is hashed by module
-    name and content. :data:`_NOT_RESULT_MODULES` are left out. Returns
-    ``None`` when the module has no source file.
+    Each file is hashed by its path inside the package and its content, in
+    path order. :data:`_NOT_RESULT_MODULES` are left out. A change to any
+    other analysis file changes the hash of every shipped analysis.
     """
-    import ast
-    import importlib.util
-
-    def located(name: str) -> Path | None:
-        try:
-            spec = importlib.util.find_spec(name)
-        except (ImportError, ValueError):
-            return None
-        origin = getattr(spec, "origin", None) if spec else None
-        return Path(origin) if origin and origin.endswith(".py") else None
-
-    own = located(module)
-    if own is None:
-        return None
-    names = {module}
-    for node in ast.walk(ast.parse(own.read_text())):
-        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            names.add(node.module)
-        elif isinstance(node, ast.Import):
-            names.update(alias.name for alias in node.names)
+    left_out = {name.rsplit(".", 1)[1] + ".py" for name in _NOT_RESULT_MODULES}
     digest = hashlib.sha256()
-    for name in sorted(n for n in names if n.split(".")[0] == "polyzymd"):
-        path = located(name)
-        if path is not None and name not in _NOT_RESULT_MODULES:
+    for path in sorted(package.rglob("*.py")):
+        name = path.relative_to(package).as_posix()
+        if name not in left_out:
             digest.update(name.encode() + b"\0" + path.read_bytes() + b"\0")
     return digest.hexdigest()
 
@@ -1441,6 +1419,7 @@ class ReplicateValues:
             _condition,
             _verdict,
         )
+        from polyzymd.analyses.study_freeze import group_warnings
 
         conditions, notes = [], list(self.filled)
         for position, entry in self._entries():
@@ -1535,6 +1514,8 @@ class ReplicateValues:
             from polyzymd.analyses.study import production_length_warnings
 
             notes.extend(production_length_warnings(study, chosen))
+        # One line for a warning that several conditions share, as freeze writes it.
+        notes = group_warnings(notes, [f"condition {label}" for label in chosen])
         if self.labels is None:
             verdict = _verdict(self.metric, self.unit, conditions, pairwise)
         else:

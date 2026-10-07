@@ -86,8 +86,8 @@ the freeze. So you can freeze early, and freeze again when you fill the gaps.
 3. Put every file that you want to publish in a folder that freeze
    deposits. Freeze deposits only these names:
 
-   - `study.yaml` (or `project.yaml`), `README*`, `LICENSE*` and the files
-     that freeze writes;
+   - `study.yaml` (or `project.yaml`), `data.example.yaml`, `README*`,
+     `LICENSE*` and the files that freeze writes;
    - the files under the folders that `study init` and `project init`
      make: `conditions/`, `structures/`, `analyses/`, `stats/`, `figures/`,
      `results/` and `environment/`. Reference structures go in
@@ -122,7 +122,7 @@ polyzymd study freeze lipase_363K
 froze /home/me/lipase_363K as study-v1 (dc94243466cf)
 manifest: 21 study files, 2 conditions, 10 replicates hashed
 deposit: /home/me/lipase_363K/deposit; files to upload in /home/me/lipase_363K/deposit/upload
-warning: metadata.doi is not set: reserve a DOI for the study in Zenodo, add it here and refreeze (deposit/UPLOAD.md says how)
+warning: metadata.doi is not set: reserve a DOI for the study in Zenodo, add it here and refreeze
 next: follow /home/me/lipase_363K/deposit/UPLOAD.md, which says how to reserve the DOI, upload and publish on Zenodo; PolyzyMD uploads nothing
 ```
 
@@ -132,6 +132,10 @@ Freeze stops before it writes anything in these cases:
   and freeze again. The tag and the deposit hold only committed files, and
   the manifest must describe exactly those files.
 - Git has no user name and email.
+
+When git cannot commit or tag for another reason, such as a failing
+pre-commit hook, freeze still lays out `deposit/`, with no tag in its files,
+and exits with an error. Fix the cause and freeze again.
 
 Otherwise, freeze does these steps:
 
@@ -149,8 +153,8 @@ Otherwise, freeze does these steps:
    - The config of a condition does not agree with its topology. Examples: a
      substrate residue that is missing from the topology, or polymer residues
      in a condition whose config has no polymers, or the reverse.
-   - An OpenMM replicate records no OpenMM version. For a GROMACS study,
-     freeze always asks you to state the GROMACS version in the methods.
+   - An OpenMM replicate records no OpenMM version, or a GROMACS replicate
+     has no `GROMACS version:` line in `gromacs/prod.log`.
    - A file that `build_manifest.json` lists is missing from the replicate
      folder.
 3. It hashes every trajectory and topology file on this machine (SHA-256,
@@ -163,7 +167,7 @@ Otherwise, freeze does these steps:
 
    | File | Holds |
    |---|---|
-   | `manifest.json` | Each study file, trajectory, engine input and final frame, by size and SHA-256. The package versions. The full config of each condition. The production length of each replicate. The git commit. The warnings |
+   | `manifest.json` | Each study file, trajectory, engine input and final frame, by size and SHA-256. The package versions (`null` when a package reports none) and the SHA-256 of `environment/pixi.lock`. The full config of each condition. The production length of each replicate. The parent of the tagged commit (`git.parent_commit`; the tag names the frozen commit). The warnings |
    | `CITATION.cff` | Citation File Format 1.2.0: the paper as `preferred-citation`, and PolyzyMD and the trajectory deposits under `references` |
    | `.zenodo.json` | Zenodo deposit metadata: `isSupplementTo` the paper, `requires` PolyzyMD, `references` the trajectories |
    | `md_checklist.yaml` | The reliability and reproducibility checklist of Communications Biology (2023), filled in from the manifest. Review each answer |

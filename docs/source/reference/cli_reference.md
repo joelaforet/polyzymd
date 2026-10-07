@@ -317,7 +317,9 @@ polyzymd run -c config.yaml -r 1-3 --engine gromacs --dry-run
 ### Workflow
 
 1. Load and validate configuration
-2. Build system (enzyme + substrate + polymers + solvent)
+2. Build system (enzyme + substrate + polymers + solvent). If an earlier
+   `polyzymd build` wrote a build for this config, reuse it. The log says which
+   build is used.
 3. Run selected engine workflow:
    - GROMACS: export `.gro/.top/.mdp` then run EM/equilibration/production/post-processing
    - OpenMM: run minimization/equilibration/production locally
@@ -482,7 +484,7 @@ remains" and queues a successor within seconds. `polyzymd cancel` writes a
 `STOP` marker into each replicate working directory first — the wrapper
 refuses to submit a successor while it exists, and a successor that is
 already queued exits before starting a segment — and then cancels the
-matching queued and running jobs by job name.
+queued and running jobs that work in that directory.
 
 ### Options
 
@@ -675,9 +677,9 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | Verdict | Meaning |
 |---------|---------|
 | `COMPLETED` | `progress.json` reports all production steps done |
-| `RUNNING` | A SLURM job with this replicate's job name is in state `R` (or completing/configuring) |
+| `RUNNING` | A SLURM job that works in this replicate's run directory is in state `R` (or completing/configuring) |
 | `QUEUED` | A matching job exists but is pending; the reason is shown in parentheses |
-| `DEAD` | Work remains and no matching job is queued or running. Nothing will restart it. The `last:` field is the most informative error line near the end of the newest SLURM log, with the log filename in brackets. |
+| `DEAD` | Work remains and no matching job is queued or running. Nothing will restart it. The `last:` field is the most informative error line near the end of the newest SLURM log whose `Work dir:` line names this run directory, with the log filename in brackets. |
 | `NOT_STARTED` | Directory exists but production never began (typically a failed build; the build log is consulted). |
 | `NOT_FOUND` | Expected replicate directory is missing from scratch |
 
@@ -904,7 +906,7 @@ distances --set pairs=...` for the triad distances.
 | `NAME` | Yes, without `--study` | Canonical analysis name, for example `rg`; with `--study`, a run of the study file, and every run when left out. |
 | `-c, --config PATH` | Yes, without `--study` | Simulation `config.yaml`. Repeatable; the first one is the control. Refused with `--study`. |
 | `--data DIR` | No | Directory holding the run directories of every condition, for this command only, in place of each config's `scratch_directory` and of a study's `data.local.yaml`. The config hash is that of the config as written. |
-| `--project PATH` | No | `project.yaml`, or the project folder. Runs `RUN` (or every analysis) in each study of the project that runs it, as `--study` would, one study after another; a study that fails is reported and the next runs, then the command exits 2. Refused with `--study` or `-c`. |
+| `--project PATH` | No | `project.yaml`, or the project folder. Runs `RUN` (or every analysis) in each study of the project that runs it, as `--study` would, one study after another; a study that fails is reported and the next runs, then the command exits 2. Refused with `--study`, `-c` or `--output-dir`. |
 | `--study PATH` | No | `study.yaml`, or the folder holding it. Gives the conditions, `--eq`, `--stride`, `--replicates` and the run's settings, and stores the run in `<study>/results/<run>/` with its `report.json`. Options given on the command line override the file; `--label` then picks conditions of the study, and that report is printed but not saved as the run's `report.json`. |
 | `-f, --file PATH` | No | Retired. With a `comparison.yaml`, the command runs nothing and exits 2: the `error:` line says that `comparison.yaml` is no longer read by `polyzymd analyze`, and the `fix:` line gives the equivalent `polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq ...` command built from the file's conditions, replicates and equilibration (or `--eq`), followed by the address of {doc}`../how_to/analysis_agent_protocol` and `.claude/skills/polyzymd-analyze/SKILL.md`, the skill to point an agent at. A file that cannot be read gives the command with placeholders. |
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
@@ -1066,7 +1068,9 @@ Reads `project.yaml` (`PATH` is the file or its folder, by default the
 current directory) and each study's `study.yaml` without loading any
 trajectory. Prints `analysis <run>: studies <labels>` for each project
 analysis, `stats <function>: up to date|stale: ...|not run` when it names a
-plan, then `== study <label>` and the `polyzymd study check` of each study.
+plan, then `== study <label>` and the `polyzymd study check` of each study,
+then `== project` with the git line and the project's metadata line, once.
+A study's metadata line is printed only when the study has its own metadata.
 Exits 2 when the project file or a study cannot be read.
 
 ### polyzymd project init
@@ -1123,7 +1127,7 @@ directory) without loading any trajectory, and prints:
 | names | `structure <name>: <path>` and `region <name>: <selection>`, one line each |
 | condition | `control\|condition <label>: runs <numbers> under <directory> (from data.local.yaml\|config)`, with `; production <ns>` (a range when the replicates differ) under `--production`, or `no runs found under <directory> ...` |
 | analysis | `analysis <run>: <settings>; stored results in <folder>[ with its report]`, or `no stored results`; for the study's own function, `analysis <run> (<file>:<function>, <kind>)`, after importing it |
-| git | `git: commit <sha>; inputs committed`, `git: commit <sha>; uncommitted inputs: <paths>`, or `git: not a repository` |
+| git | `git: commit <sha>; inputs committed`, `git: commit <sha>; <n> uncommitted inputs: <first five paths> and <m> more`, or `git: not a repository` |
 | metadata | `metadata: complete`, or `metadata: <n> gaps for publishing; ...` |
 | publish | `publish: follow <study>/deposit/UPLOAD.md` after a freeze, or `publish: when the analyses are final, run polyzymd study freeze` |
 | reproduce | In a downloaded frozen study (a `manifest.json` but no `deposit/`): how to point it at the trajectories and rerun or redraw |
@@ -1171,7 +1175,10 @@ Adds a condition to an existing study: `--config` copies `CONFIG` and the
 input files it names into `conditions/<label>/`, as `study init --condition`
 does; `--new` creates `conditions/<label>/` with `polyzymd init`. The condition
 is added as one line under `conditions:` in `study.yaml`, keeping the rest of
-the file. Exits 2 when neither or both options are given, or the label or its
+the file. With `--config`, the config's `scratch_directory` is written to
+`data.local.yaml` and printed as `data <label>: <path> (from the config's
+scratch_directory)`, with a warning when that folder holds no run directories.
+Exits 2 when neither or both options are given, or the label or its
 folder is taken.
 
 ### polyzymd study locate
@@ -1185,9 +1192,15 @@ named by its config's `naming_template`, and writes the folder holding the
 most of them to `data.local.yaml` beside `study.yaml`, keeping entries of
 conditions it does not find. With a `manifest.json` from `study freeze`, it
 prefers a folder whose files have the recorded sizes (and with `--verify`,
-SHA-256), and prints `<label>: <n> files match manifest.json`. Prints
-`<label>: runs <numbers> under <folder>` per condition found. Exits 2 when a
-condition is not found or a file is missing or different. See
+SHA-256), and prints `<label>: <n> files match manifest.json`. When two
+conditions name their runs alike, a folder named for the condition
+(`no_polymer/`) is chosen before file sizes, and one folder is never written
+for two such conditions. Conditions whose runs are named apart can share one
+folder. Prints `<label>: runs <numbers> under <folder>` per
+condition found. Writes nothing when no condition is found. Exits 2 when a
+condition is not found, two conditions with alike run names are found in one
+folder, or a file is
+missing or different. See
 {doc}`../how_to/study_folder` and {doc}`../how_to/study_freeze`.
 
 ### polyzymd study freeze

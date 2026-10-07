@@ -339,3 +339,58 @@ def test_the_untestable_reason_is_the_real_one() -> None:
     pair = PairwiseReport(a="A", b="B", delta=0.0, testable=False)
     text = " ".join(_verdict("m", None, conditions, [pair]))
     assert "same value in every replicate" in text and "at least two" not in text
+
+
+def test_a_selection_on_a_missing_topology_attribute_is_a_protocol_error() -> None:
+    """'chainid A' on a topology without chain IDs names the selection, not a bare AttributeError."""
+    mda = pytest.importorskip("MDAnalysis")
+    from polyzymd.analyses.protocols import _empty_selections
+
+    universe = mda.Universe.empty(3, trajectory=True)
+    replicate = SimpleNamespace(index=1, universe=lambda: universe)
+    study = [SimpleNamespace(label="Water", replicates=[replicate])]
+    with pytest.raises(ProtocolError, match="'chainid A'.*chainIDs") as info:
+        _empty_selections(study, {"protein_selection": "chainid A"})
+    assert "resname" in (info.value.hint or "")
+
+
+def test_a_test_with_two_replicates_and_a_constant_control_warns_of_low_power() -> None:
+    """A significant verdict at n 2 vs 2 against a control with no variance says it has little power."""
+    from polyzymd.analyses.protocols import _verdict
+
+    conditions = [
+        ConditionReport(label="Water", n_replicates=2, mean=0.0, replicate_values=[0.0, 0.0]),
+        ConditionReport(label="SDS", n_replicates=2, mean=0.4, replicate_values=[0.39, 0.41]),
+    ]
+    pair = PairwiseReport(
+        a="Water", b="SDS", delta=0.4, p=0.03, p_adjusted=0.03, significant=True, testable=True
+    )
+    (text,) = _verdict("coverage", None, conditions, [pair])
+    assert text.startswith("SDS larger coverage than Water")
+    assert "little power: Water and SDS have fewer than 3 replicates" in text
+    assert "Water has the same value in every replicate" in text
+
+
+def test_a_test_with_three_varying_replicates_has_no_power_warning() -> None:
+    from polyzymd.analyses.protocols import _verdict
+
+    conditions = [
+        ConditionReport(label=label, n_replicates=3, mean=1.0, replicate_values=[0.9, 1.0, 1.1])
+        for label in ("A", "B")
+    ]
+    pair = PairwiseReport(a="A", b="B", delta=0.0, p=0.9, p_adjusted=0.9, testable=True)
+    assert "power" not in " ".join(_verdict("m", None, conditions, [pair]))
+
+
+def test_a_single_replicate_is_not_said_to_have_the_same_value_in_every_replicate() -> None:
+    """At n 1 the power note names only the replicate count."""
+    from polyzymd.analyses.protocols import _verdict
+
+    conditions = [
+        ConditionReport(label="Water", n_replicates=1, mean=0.0, replicate_values=[0.0]),
+        ConditionReport(label="SDS", n_replicates=3, mean=0.4, replicate_values=[0.3, 0.4, 0.5]),
+    ]
+    pair = PairwiseReport(a="Water", b="SDS", delta=0.4, p=0.03, p_adjusted=0.03, testable=True)
+    (text,) = _verdict("coverage", None, conditions, [pair])
+    assert "little power: Water has fewer than 3 replicates" in text
+    assert "same value in every replicate" not in text
