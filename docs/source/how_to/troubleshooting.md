@@ -154,7 +154,7 @@ close contacts.
 
 ```
 SolvationClashError: 1182 solvent atom(s) lie within 1.00 A of the solute ...
-solute/solvent frame mismatch, see d96b1fcd
+solute/solvent frame mismatch: the packed coordinates are shifted against the solute
 ```
 
 The packed molecules sit inside the protein. The solute and the packed
