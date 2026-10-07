@@ -146,7 +146,8 @@ per replicate, the test unit) and a slope test per numeric condition factor
 in every `--study` report (`TrendReport`). A paper's own statistics are
 scripts in the project's `stats/` folder; freeze hashes and publishes them.
 `polyzymd project init` (`analyses/project_scaffold.py`) writes a project
-with empty studies (existing studies are moved in by hand, following
+with empty studies and `polyzymd project add-study` adds one (existing
+studies are moved in by hand, following
 `docs/source/how_to/move_studies_into_project.md`), and `polyzymd project freeze`
 (`analyses/project_freeze.py`) freezes every study with
 `freeze(..., publish=False)` and publishes the project once. File arguments
@@ -160,7 +161,12 @@ study folder and commits it (`analyses/study_scaffold.py`); a gitignored
 `data.local.yaml`, written by `polyzymd study locate DIR`, or `--data DIR` says
 where this machine keeps each condition's runs without changing its config
 hash; reports record the study's git state (`analyses/study_git.py`).
-`polyzymd study add-condition` adds a condition to an existing study. Reports
+`polyzymd study add-condition` adds a condition to an existing study: a
+template config (`--new`; `polyzymd init` is retired), a copy of a sibling
+(`--from`) or of a config (`--config`). Every new config writes its runs into
+the git-ignored `runs/` of the project (`runs/<study>/<condition>`), or of
+a lone study, unless it sets `scratch_directory` (`runs_folder`); freeze and
+code hashes skip `runs/`. Reports
 warn when conditions were analysed up to different times (`until`/`--until`
 gives a common window) and name segments `progress.json` records but the disk
 lacks; `analyze` and the `study` commands print only reports and warnings and

@@ -156,7 +156,7 @@ In the `build` environment, these commands should work directly:
 
 | Command | Works in `build`? | Notes |
 |---------|-------------------|-------|
-| `polyzymd init` | Yes | Project scaffolding |
+| `polyzymd project init` | Yes | Project scaffolding |
 | `polyzymd build` | Yes | System building |
 | `polyzymd validate` | Yes | Config validation |
 | `polyzymd clean-pdb` | Yes | Convenience PDB cleanup, not biological-system selection |

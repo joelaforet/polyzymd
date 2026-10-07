@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 from pathlib import Path
+
+
+def make_log_folder(script_path: Path | str) -> None:
+    """Create the folder of the script's absolute ``#SBATCH --output`` log, which sbatch does not."""
+    try:
+        text = Path(script_path).read_text()
+    except OSError:
+        return  # sbatch says that the script is missing
+    for line in text.splitlines():
+        match = re.match(r"^#SBATCH\s+--output[=\s]\s*\"?([^\"]+?)\"?\s*$", line)
+        if match and Path(match.group(1)).is_absolute():
+            Path(match.group(1)).parent.mkdir(parents=True, exist_ok=True)
 
 
 def run_sbatch(
@@ -19,7 +32,8 @@ def run_sbatch(
     ``module load slurm/blanca``), the feature database is only available
     after the module is sourced. When *module_load* is provided the
     command is wrapped in ``bash -lc`` so that ``sbatch`` sees the full
-    feature set.
+    feature set. The folder of the job's log is created first
+    (:func:`make_log_folder`).
 
     Parameters
     ----------
@@ -36,6 +50,7 @@ def run_sbatch(
     subprocess.CompletedProcess[str]
         Result of the ``sbatch`` invocation.
     """
+    make_log_folder(script_path)
     sbatch_parts = ["sbatch", *extra_args, str(script_path)]
 
     if module_load:

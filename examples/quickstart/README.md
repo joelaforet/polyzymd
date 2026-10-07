@@ -10,12 +10,19 @@ laptop CPU in about two minutes.
 | `config.yaml` | OpenMM, CPU platform |
 | `config_gromacs.yaml` | The same system on GROMACS |
 
+The quickstart tutorial adds this config to a new project as a condition,
+then runs and analyzes it. From the folder that holds this one:
+
 ```bash
-polyzymd validate -c config.yaml
-polyzymd run -c config.yaml -r 1
-polyzymd study init study --condition "Water=config.yaml" --equilibration 0ns
-polyzymd analyze rg --study study
+polyzymd project init paper --study trpcage
+polyzymd study add-condition Water --config quickstart/config.yaml --study paper/trpcage
+polyzymd validate -c paper/trpcage/conditions/water/config.yaml
+polyzymd run -c paper/trpcage/conditions/water/config.yaml -r 1
+# list rg under analyses: in paper/project.yaml, then:
+polyzymd analyze --project paper
 ```
+
+The run goes into `paper/runs/trpcage/water/`, which git ignores.
 
 For a real study, lengthen `duration` (in ns) and run on a GPU. The test
 `tests/test_quickstart_example.py` runs these commands for both engines.

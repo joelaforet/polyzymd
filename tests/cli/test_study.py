@@ -1,4 +1,4 @@
-"""polyzymd study locate: mapping downloaded runs to a study's conditions."""
+"""polyzymd study locate and add-condition: where a study's runs are and go."""
 
 from __future__ import annotations
 
@@ -115,19 +115,53 @@ def test_locate_keeps_the_data_file_when_nothing_is_located(tmp_path: Path) -> N
 
 
 def test_add_condition_names_where_its_runs_are(tmp_path: Path) -> None:
-    """add-condition prints the data folder it records and warns when it holds no runs."""
-    from tests._support.analysis_testkit import write_simulation_config
+    """add-condition records and prints the folder holding the config's runs, if it has any."""
+    from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
 
     root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
-    config = write_simulation_config(tmp_path / "runs" / "new", scratch=tmp_path / "nothing")
+    config = write_simulation_config(tmp_path / "sims" / "new", scratch=tmp_path / "old_runs")
     (config.parent / "test.pdb").write_text("REMARK input\nEND\n")
-    (tmp_path / "nothing").mkdir()
+    write_openmm_replicate(config, 1, [1.0, 1.1, 1.2])
     result = CliRunner().invoke(
         cli, ["study", "add-condition", "New", "--config", str(config), "--study", str(root)]
     )
     assert result.exit_code == 0, result.output
-    where = (tmp_path / "nothing").resolve()
+    where = (tmp_path / "old_runs").resolve()
     assert f"data New: {where} (from the config's scratch_directory)" in result.output
-    assert "warning" in result.output and "no run" in result.output
     help_text = CliRunner().invoke(cli, ["study", "add-condition", "--help"]).output
     assert "data.local.yaml" in help_text
+
+
+def test_add_condition_warns_where_new_runs_go_and_their_disk_space(tmp_path: Path) -> None:
+    """Each way of adding a condition prints where the runs go and how to send them to scratch."""
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    for label, how in (("Draft", ["--new"]), ("Draft 2", ["--from", "Draft"])):
+        result = CliRunner().invoke(
+            cli, ["study", "add-condition", label, *how, "--study", str(root)]
+        )
+        assert result.exit_code == 0, result.output
+        warning = next(line for line in result.output.splitlines() if line.startswith("warning:"))
+        assert "runs" in warning and "a lot of disk space" in warning
+        assert "scratch_directory" in warning and "cluster" in warning
+
+
+def test_the_new_condition_template_validates_once_its_pdb_is_set(tmp_path: Path) -> None:
+    """The config add-condition --new writes sets the OpenMM platform and validates as written."""
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    result = CliRunner().invoke(
+        cli, ["study", "add-condition", "Draft", "--new", "--study", str(root)]
+    )
+    assert result.exit_code == 0, result.output
+    config = root / "conditions" / "draft" / "config.yaml"
+    text = config.read_text(encoding="utf-8")
+    assert "\nopenmm:\n  platform:" in text
+    assert "{{" not in text and "{%" not in text
+    assert text.count("PolyzyMD: Created by Joseph R. Laforet Jr.") == 1
+    pdb = Path(__file__).resolve().parents[2] / "examples" / "quickstart" / "trpcage.pdb"
+    config.write_text(text.replace("structures/protein_X.pdb", str(pdb)), encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["validate", "-c", str(config)])
+
+    assert result.exit_code == 0, result.output
+    assert "Configuration is valid!" in result.output
+    assert "Referenced file warnings" not in result.output

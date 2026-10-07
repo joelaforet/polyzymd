@@ -386,7 +386,7 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
     "new_conditions",
     multiple=True,
     metavar="LABEL",
-    help="Create conditions/<label>/ with polyzymd init, to fill in. Repeatable.",
+    help="Create conditions/<label>/ with a template config.yaml to fill in. Repeatable.",
 )
 @click.option("--equilibration", default=None, help="The study's equilibration window, e.g. 100ns.")
 @click.option(
@@ -412,8 +412,8 @@ def init_command(
 
     \b
     Examples:
-        polyzymd study init lipase_363K --condition "No polymer=runs/noPoly/config.yaml" \\
-            --condition "SBMA 50%=runs/SBMA50/config.yaml" --equilibration 100ns
+        polyzymd study init lipase_363K --condition "No polymer=sims/noPoly/config.yaml" \\
+            --condition "SBMA 50%=sims/SBMA50/config.yaml" --equilibration 100ns
         polyzymd study init new_study --new-condition "No polymer" --new-condition "SBMA 50%"
     """
     import subprocess
@@ -666,7 +666,14 @@ def freeze_command(path: Path, tag: str | None) -> None:
     help="Copy this config.yaml, with the input files it names, into conditions/<label>/.",
 )
 @click.option(
-    "--new", is_flag=True, help="Create conditions/<label>/ with polyzymd init, to fill in."
+    "--from",
+    "source",
+    default=None,
+    metavar="OTHER_LABEL",
+    help="Copy the config of this condition of the study, with the input files it names.",
+)
+@click.option(
+    "--new", is_flag=True, help="Create conditions/<label>/ with a template config.yaml to fill in."
 )
 @click.option(
     "--study",
@@ -676,46 +683,48 @@ def freeze_command(path: Path, tag: str | None) -> None:
     show_default=True,
     help="study.yaml, or the folder holding it.",
 )
-def add_condition_command(label: str, config: Path | None, new: bool, study_path: Path) -> None:
+def add_condition_command(
+    label: str, config: Path | None, source: str | None, new: bool, study_path: Path
+) -> None:
     """Add the condition LABEL to an existing study and list it in study.yaml.
 
-    With --config, the config's scratch_directory, where its runs are, is
-    written to data.local.yaml.
+    Give one of --config, --from and --new. The new config.yaml writes its
+    runs into the git-ignored runs/ folder of the project (of the study, for
+    a study in no project) unless you set its scratch_directory. With
+    --config, when the config's scratch_directory holds its runs, that
+    folder is written to data.local.yaml.
 
     \b
     Examples:
-        polyzymd study add-condition "SBMA 100%" --config runs/SBMA100/config.yaml
-        polyzymd study add-condition "SBMA 100%" --new
+        polyzymd study add-condition "No polymer" --new
+        polyzymd study add-condition "SBMA 100%" --from "No polymer"
+        polyzymd study add-condition "SBMA 100%" --config sims/SBMA100/config.yaml
     """
+    import os
+
+    import yaml
+
     from polyzymd.analyses.exceptions import ProtocolError
-    from polyzymd.analyses.study_scaffold import add_condition
+    from polyzymd.analyses.study_file import DATA_FILE, find_study_file
+    from polyzymd.analyses.study_scaffold import RUNS_WARNING, add_condition, runs_folder
 
     try:
-        path = add_condition(study_path, label, config=config, new=new)
+        path = add_condition(study_path, label, config=config, new=new, source=source)
     except ProtocolError as exc:
         click.echo(f"error: {' '.join(str(exc).split())}", err=True)
         if exc.hint:
             click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
         sys.exit(EXIT_STUDY_ERROR)
     click.echo(f"condition {label}: {path}, listed in study.yaml")
-    if config is not None:
-        import yaml
-
-        from polyzymd.analyses.study_file import DATA_FILE, find_study_file
-        from polyzymd.config.schema import SimulationConfig
-
-        data = find_study_file(study_path).parent / DATA_FILE
-        where = (yaml.safe_load(data.read_text()) or {}).get(label) if data.is_file() else None
-        if where is not None:
-            click.echo(f"data {label}: {where} (from the config's scratch_directory)")
-            runs = find_run_parents(SimulationConfig.from_yaml(config), Path(where), max_depth=1)
-            if Path(where).resolve() not in runs:
-                click.echo(
-                    f"warning: {where} holds no run directories of {label}; if its runs are "
-                    "elsewhere, run polyzymd study locate DIR"
-                )
+    root = find_study_file(study_path).parent
+    data = root / DATA_FILE
+    where = (yaml.safe_load(data.read_text()) or {}).get(label) if data.is_file() else None
+    if config is not None and where is not None:
+        click.echo(f"data {label}: {where} (from the config's scratch_directory)")
+    runs = os.path.relpath(runs_folder(root, label))
+    click.echo(f"warning: {RUNS_WARNING.format(runs=runs)}")
     click.echo(
         "next: "
-        + ("fill in the config, then build and run it with polyzymd; " if new else "")
+        + ("fill in the config, check it with polyzymd validate, " if new else "")
         + "commit, and run polyzymd study check"
     )

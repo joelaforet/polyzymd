@@ -315,6 +315,32 @@ class TestSubmissionResultStateSemantics:
         assert result.is_generated_only is True
         assert result.is_dry_run is False
 
+    def test_submit_makes_the_log_folder(self, tmp_path, monkeypatch):
+        """The folder of the #SBATCH --output log exists before sbatch runs."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow.daisy_chain import DaisyChainConfig, DaisyChainSubmitter
+
+        sim_config = MagicMock()
+        sim_config.get_working_directory.return_value = tmp_path / "run1"
+        dc_config = MagicMock(spec=DaisyChainConfig)
+        dc_config.generate_only = False
+        dc_config.dry_run = False
+        dc_config.slurm_config = MagicMock()
+        dc_config.slurm_config.exclude = ""
+        logs = tmp_path / "slurm_logs"
+        script_path = tmp_path / "run_rep1.sh"
+        script_path.write_text(f"#!/bin/bash\n#SBATCH --output={logs}/r1.%j.out\n")
+        made = []
+        monkeypatch.setattr(
+            "polyzymd.workflow.daisy_chain.subprocess.run",
+            lambda *a, **kw: made.append(logs.is_dir()) or MagicMock(stdout="Submitted 7\n"),
+        )
+
+        submitter = DaisyChainSubmitter(sim_config=sim_config, dc_config=dc_config)
+        assert submitter._submit_job(script_path=script_path, replicate=1).job_id == "7"
+        assert made == [True]
+
 
 class TestCheckExistingSlurmJobs:
     """Tests for the best-effort squeue duplicate-job guard."""
