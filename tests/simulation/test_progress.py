@@ -948,6 +948,10 @@ class TestScanFilesystemProvenance:
         "pixi_environment": "sim-cuda-12-4",
         "hostname": "bgpu-g4-u21",
         "slurm_job_id": "12345",
+        "openmm_platform": {
+            "name": "CPU",
+            "properties": {"Threads": "1", "DeterministicForces": "true"},
+        },
     }
 
     def test_scan_recovers_provenance_from_parameters_json(self, tmp_path):
@@ -957,6 +961,7 @@ class TestScanFilesystemProvenance:
         assert record.polyzymd_version == "1.3.0rc5"
         assert record.openmm_version == "8.1.2"
         assert record.pixi_environment == "sim-cuda-12-4"
+        assert record.openmm_platform == self.PROVENANCE["openmm_platform"]
 
     def test_scan_without_provenance_block_leaves_fields_none(self, tmp_path):
         _write_completed_segment_on_disk(tmp_path, 0)

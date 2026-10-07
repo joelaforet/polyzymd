@@ -156,18 +156,19 @@ production frame, and takes the mean of each replicate. The output is:
 log: /home/me/pz_quickstart/study/logs/polyzymd-analyze-20261006-124657-pid19176.log
 note: /home/me/pz_quickstart/study/study.yaml does not list rg; running it with its defaults.
 # polyzymd analyze rg  metric mean_rg  unit A  eq 0ns  conditions 1  replicates 1  protocol rg/2
-Water  n 1  mean 7.302  sem na  ci95 na  values 7.302  replicates 1  g 1  n_eff 4  eq_detected 0.001 ns
+Water  n 1  mean 7.359  sem na  ci95 na  values 7.359  replicates 1  g 1  n_eff 4  eq_detected 0.001 ns
 warning: condition Water: replicates 1 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected
 warning: condition Water has one replicate, so it has no interval
-verdict: Water mean_rg 7.302 A (no interval, n 1)
+verdict: Water mean_rg 7.359 A (no interval, n 1)
 ```
 
 Read the lines in this order:
 
-1. `verdict:` gives the result: a mean radius of gyration of about 7.3 Å.
-   The replicate number seeds the run, so on the same platform and software
-   versions you get the same value. Other versions or hardware give a
-   slightly different value.
+1. `verdict:` gives the result: a mean radius of gyration of 7.359 Å.
+   The replicate number seeds the run, and `config.yaml` sets
+   `openmm.deterministic: true`, so a rerun on the same platform, precision
+   and software versions gives the same value. Other versions or hardware
+   give a slightly different value.
 2. The `Water` line gives `n 1`, one replicate. With one replicate there is
    no confidence interval, so `sem` and `ci95` are `na`.
 3. The two `warning:` lines come from the short test: one replicate of 4

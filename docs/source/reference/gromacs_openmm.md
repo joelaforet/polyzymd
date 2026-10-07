@@ -28,20 +28,26 @@ the same way on both engines, and PolyzyMD writes a warning.
 | Starting structure | Packmol and polymer draws seeded with the replicate number | the same, built by PolyzyMD before export | 1:1 |
 | Initial velocities | `setVelocitiesToTemperature(T, seed)`, seed from the replicate number | `gen_seed`, seed from the replicate number | 1:1 |
 | Thermostat noise | `integrator.setRandomNumberSeed(seed)`, one seed for each stage and segment | `ld_seed`, one seed for each stage | 1:1 |
+| Barostat moves | `MonteCarloBarostat.setRandomNumberSeed(seed)`, one seed for each NPT stage and segment | the c-rescale noise uses `ld_seed` | 1:1 |
 
-The replicate number seeds the starting structure, the initial velocities
-and the thermostat noise. Each equilibration stage and production segment
+The replicate number seeds the starting structure, the initial velocities,
+the thermostat noise and the barostat moves. Each equilibration stage and production segment
 gets its own seed, derived from the replicate number and the stage name
 (`polyzymd.simulation.seeds.dynamics_seed`). A single `ld_seed` for all
 stages would repeat the same noise in every stage, because GROMACS starts
 the step count again at each stage.
 
 The two engines use different random number generators, so one seed does
-not give the same trajectory on OpenMM and on GROMACS. On one engine, a
-replicate run again gives the same trajectory only on the same platform,
-precision and software versions. On a GPU, the order of floating-point
-sums can change between runs, so trajectories can diverge after some
-picoseconds. Results then agree within MD noise, not frame by frame.
+not give the same trajectory on OpenMM and on GROMACS. On OpenMM, a
+replicate run again gives the same trajectory only with
+`openmm.deterministic: true` and the same platform, precision and software
+versions. This setting sets `DeterministicForces=true` and, on CPU, runs one
+thread, which is slower. Without it, CPU threads and PME add up forces in a
+different order on each run, so two runs of a replicate differ from the
+first minimization on. They agree statistically, not frame by frame.
+GROMACS has its own settings for reproducible runs (`gmx mdrun -reprod`);
+PolyzyMD does not set them, so add them to `gromacs.mdrun_flags` if you need
+them.
 
 ## Nonbonded interactions and constraints
 

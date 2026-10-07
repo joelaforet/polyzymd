@@ -769,8 +769,9 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
     """Return the software versions that built and ran a replicate, as the run recorded them.
 
     ``build`` comes from the replicate's ``build_manifest.json``, and
-    ``segments`` lists each distinct (PolyzyMD, OpenMM, pixi environment)
-    combination that ``progress.json`` records for its production segments,
+    ``segments`` lists each distinct (PolyzyMD, OpenMM, pixi environment,
+    OpenMM platform and properties) combination that ``progress.json``
+    records for its production segments,
     so a reproducer knows which engine produced the trajectories, not only
     which PolyzyMD analysed them. For a GROMACS run, ``gromacs_version`` is
     the version that ``gmx mdrun`` wrote into ``gromacs/prod.log``.
@@ -790,11 +791,22 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
         progress = None
     if progress is not None:
         combos = {
-            (s.polyzymd_version, s.openmm_version, s.pixi_environment) for s in progress.segments
+            (
+                s.polyzymd_version,
+                s.openmm_version,
+                s.pixi_environment,
+                json.dumps(s.openmm_platform, sort_keys=True),
+            )
+            for s in progress.segments
         }
         found["segments"] = [
-            {"polyzymd_version": a, "openmm_version": b, "pixi_environment": c}
-            for a, b, c in sorted(combos, key=lambda t: tuple(str(x) for x in t))
+            {
+                "polyzymd_version": a,
+                "openmm_version": b,
+                "pixi_environment": c,
+                "openmm_platform": json.loads(d),
+            }
+            for a, b, c, d in sorted(combos, key=lambda t: tuple(str(x) for x in t))
         ]
     from polyzymd.engines.gromacs.engine import GromacsEngine
 

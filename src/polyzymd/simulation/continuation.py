@@ -149,6 +149,7 @@ class ContinuationManager:
         platform: str = "CUDA",
         precision: str = "mixed",
         device_index: str | None = None,
+        deterministic: bool = False,
         replicate: int | None = None,
     ) -> None:
         """Initialize the ContinuationManager.
@@ -160,6 +161,9 @@ class ContinuationManager:
         segment_index : int
             Current segment index (0-based for first continuation after
             initial production, incrementing from there).
+        deterministic : bool
+            Request deterministic forces
+            (:func:`polyzymd.simulation.platform.resolve_platform`).
         replicate : int, optional
             The replicate number, which seeds this segment's thermostat
             noise (:func:`polyzymd.simulation.seeds.dynamics_seed`). A
@@ -172,6 +176,7 @@ class ContinuationManager:
         self._platform_name = platform
         self._platform_precision = precision
         self._platform_device_index = device_index
+        self._platform_deterministic = deterministic
         self._replicate = replicate
 
         # State
@@ -540,7 +545,7 @@ class ContinuationManager:
         return integrator
 
     def _add_barostat_if_needed(self) -> None:
-        """Add barostat to the system if parameters specify NPT."""
+        """Add barostat to the system if parameters specify NPT, and seed it from the replicate."""
         if self._system is None or self._param_dict is None:
             raise RuntimeError("System/parameters not loaded")
 
@@ -559,16 +564,23 @@ class ContinuationManager:
 
         if has_barostat:
             LOGGER.debug("Barostat already present")
-            return
+        else:
+            barostat_raw = thermo_raw["barostat_params"]["__values__"]
+            temperature = quantity_from_dict(barostat_raw["temperature"])
+            pressure = quantity_from_dict(barostat_raw["pressure"])
+            frequency = barostat_raw.get("update_frequency", 25)
 
-        barostat_raw = thermo_raw["barostat_params"]["__values__"]
-        temperature = quantity_from_dict(barostat_raw["temperature"])
-        pressure = quantity_from_dict(barostat_raw["pressure"])
-        frequency = barostat_raw.get("update_frequency", 25)
+            barostat = openmm.MonteCarloBarostat(pressure, temperature, frequency)
+            self._system.addForce(barostat)
+            LOGGER.info(f"Added barostat: {pressure} at {temperature}")
 
-        barostat = openmm.MonteCarloBarostat(pressure, temperature, frequency)
-        self._system.addForce(barostat)
-        LOGGER.info(f"Added barostat: {pressure} at {temperature}")
+        if self._replicate is not None:
+            from polyzymd.simulation.seeds import dynamics_seed
+
+            seed = dynamics_seed(self._replicate, f"barostat:production:{self._segment_index}")
+            for force in self._system.getForces():
+                if isinstance(force, openmm.MonteCarloBarostat):
+                    force.setRandomNumberSeed(seed)
 
     def _setup_reporters(
         self,
@@ -781,7 +793,7 @@ class ContinuationManager:
             samples_written=num_samples,
             status=SegmentStatus.COMPLETED,
             duration_ns=duration_ns,
-            **record_provenance(),
+            **record_provenance(self._simulation.context),
             **trajectory_digest(segment_dir / f"production_{self._segment_index}_trajectory.dcd"),
         )
         from polyzymd.simulation.progress import _now_iso
@@ -925,6 +937,7 @@ class ContinuationManager:
             self._platform_name,
             precision=self._platform_precision,
             device_index=self._platform_device_index,
+            deterministic=self._platform_deterministic,
         )
         self._simulation = Simulation(
             self._topology,
@@ -992,6 +1005,9 @@ class ContinuationManager:
 
         # Save parameters for this segment
         if self._param_dict:
+            from polyzymd.utils.version import runtime_provenance
+
+            self._param_dict["provenance"] = runtime_provenance(self._simulation.context)
             param_path = output_dir / f"production_{self._segment_index}_parameters.json"
             with open(param_path, "w") as f:
                 json.dump(self._param_dict, f, indent=2)

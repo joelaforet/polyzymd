@@ -31,8 +31,8 @@ condition
 replicate
   One independent simulation of a condition. The replicate number seeds the
   starting structure (the PACKMOL placement of molecules and, with polymers,
-  the random draw of each chain's monomer sequence), the initial velocities
-  and the thermostat noise, on both engines.
+  the random draw of each chain's monomer sequence), the initial velocities,
+  the thermostat noise and the barostat moves, on both engines.
 
 simulation folder
   The folder that `polyzymd init` makes: a template `config.yaml` and a

@@ -41,6 +41,8 @@ simulation_phases:
 
 openmm:
   platform: "CPU"
+  # Same forces on every run, so a rerun gives the same trajectory (one CPU thread).
+  deterministic: true
 
 output:
   projects_directory: "."

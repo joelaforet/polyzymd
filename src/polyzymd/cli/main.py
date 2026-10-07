@@ -2346,7 +2346,14 @@ def _run_initial_segment(
 
         from polyzymd.simulation.artifact_integrity import publish_build_bundle
 
-        publish_build_bundle(working_dir, omm_topology, omm_system, omm_positions, sim_config)
+        publish_build_bundle(
+            working_dir,
+            omm_topology,
+            omm_system,
+            omm_positions,
+            sim_config,
+            provenance=builder.build_provenance,
+        )
     else:
         from openmm import XmlSerializer
         from openmm.app import PDBFile
@@ -2386,6 +2393,7 @@ def _run_initial_segment(
         platform=sim_config.openmm.platform,
         precision=sim_config.openmm.precision,
         device_index=sim_config.openmm.device_index,
+        deterministic=sim_config.openmm.deterministic,
         replicate=replicate,
     )
 
@@ -2545,6 +2553,7 @@ def _run_continuation_segment(
         platform=sim_config.openmm.platform,
         precision=sim_config.openmm.precision,
         device_index=sim_config.openmm.device_index,
+        deterministic=sim_config.openmm.deterministic,
         replicate=replicate,
     )
     manager.load_previous_state()

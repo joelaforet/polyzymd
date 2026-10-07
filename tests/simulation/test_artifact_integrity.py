@@ -11,6 +11,8 @@ import pytest
 from polyzymd.simulation.artifact_integrity import (
     MANIFEST_NAME,
     ArtifactIntegrityError,
+    _absolute_path_config_hash,
+    config_hash,
     publish_build_bundle,
     replicate_lock,
     validate_build_bundle,
@@ -160,3 +162,53 @@ def test_manifest_provenance_defaults_to_empty(tmp_path):
     topology, system, positions = _tiny_openmm_bundle()
     manifest = publish_build_bundle(tmp_path, topology, system, positions, _Config())
     assert manifest["provenance"] == {}
+
+
+QUICKSTART = Path(__file__).resolve().parents[2] / "examples" / "quickstart"
+
+
+def _copied_quickstart_config(folder: Path):
+    import shutil
+
+    from polyzymd.config.loader import load_config
+
+    folder.mkdir()
+    for name in ("config.yaml", "trpcage.pdb"):
+        shutil.copy(QUICKSTART / name, folder / name)
+    return load_config(folder / "config.yaml")
+
+
+def test_config_hash_is_the_same_for_copies_in_different_folders(tmp_path):
+    first = _copied_quickstart_config(tmp_path / "a")
+    second = _copied_quickstart_config(tmp_path / "b")
+    assert config_hash(first) == config_hash(second)
+    assert _absolute_path_config_hash(first) != _absolute_path_config_hash(second)
+
+    (tmp_path / "b" / "trpcage.pdb").write_text("REMARK changed\n")
+    assert config_hash(first) != config_hash(second)
+
+
+def test_build_validates_with_a_copied_config_and_with_the_absolute_path_hash(tmp_path):
+    first = _copied_quickstart_config(tmp_path / "a")
+    second = _copied_quickstart_config(tmp_path / "b")
+    run = tmp_path / "run"
+    topology, system, positions = _tiny_openmm_bundle()
+    publish_build_bundle(run, topology, system, positions, first)
+    validate_build_bundle(run, second)
+
+    # A build written before the portable hash recorded the absolute-path hash.
+    manifest = json.loads((run / MANIFEST_NAME).read_text())
+    manifest["config_hash"] = _absolute_path_config_hash(first)
+    (run / MANIFEST_NAME).write_text(json.dumps(manifest))
+    validate_build_bundle(run, first)
+    with pytest.raises(ArtifactIntegrityError, match="Configuration does not match"):
+        validate_build_bundle(run, second)
+
+
+def test_deterministic_setting_keeps_a_build_valid(tmp_path):
+    config = _copied_quickstart_config(tmp_path / "a")
+    run = tmp_path / "run"
+    topology, system, positions = _tiny_openmm_bundle()
+    publish_build_bundle(run, topology, system, positions, config)
+    config.openmm.deterministic = not config.openmm.deterministic
+    validate_build_bundle(run, config)
