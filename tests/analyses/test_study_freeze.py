@@ -848,6 +848,21 @@ def test_a_study_whose_gitignore_lacks_runs_freezes_with_a_run_in_it(study: Path
     assert "runs/water/w_run1/traj.dcd" not in _git(study, "ls-tree", "-r", "--name-only", "HEAD")
 
 
+def test_freeze_ignores_the_polymer_cache_of_a_build(study: Path) -> None:
+    """A dynamic polymer build writes .polymer_cache/ into the folder it runs in."""
+    gitignore = study / ".gitignore"
+    gitignore.write_text(
+        "".join(line for line in gitignore.read_text().splitlines(True) if "polymer" not in line)
+    )
+    _git(study, "commit", "-qam", "Old .gitignore")
+    (study / ".polymer_cache").mkdir()
+    (study / ".polymer_cache" / "chain.sdf").write_text("x")
+
+    assert freeze(study).tag == "study-v1"
+    assert ".polymer_cache/" in gitignore.read_text().splitlines()
+    assert ".polymer_cache/chain.sdf" not in _git(study, "ls-tree", "-r", "--name-only", "HEAD")
+
+
 def test_the_deposited_copied_config_names_no_runs_path() -> None:
     """The header of a copied config, which says where the runs go, leaves the deposit."""
     text = (

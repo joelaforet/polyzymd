@@ -114,10 +114,9 @@ Summary:
 ```
 
 The build writes the polymer fragments into `.polymer_cache/` in the current
-folder. Keep it out of git, and commit the new condition:
+folder. The project `.gitignore` keeps it out of git. Commit the new condition:
 
 ```bash
-echo ".polymer_cache/" >> .gitignore
 git add -A
 git commit -m "Add the SBMA condition"
 ```
