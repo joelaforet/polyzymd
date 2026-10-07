@@ -26,7 +26,7 @@ To make a study folder, see {doc}`../how_to/study_folder`.
 | Level | The reader has | The reader runs |
 |---|---|---|
 | 1. Figures | The study folder only | The scripts in `figures/`. They read stored results with `pz.Study("study.yaml").results(name)` and need no trajectories |
-| 2. Analyses | The folder and the trajectories | `polyzymd study locate DIR`, then `polyzymd analyze --study study.yaml` |
+| 2. Analyses | The folder and the trajectories | `polyzymd study locate DIR --verify`, then `polyzymd analyze --study study.yaml --recompute`. Without `--recompute`, analyze reads the stored results |
 | 3. Simulations | The folder and compute time | Each `conditions/<label>/config.yaml`. The replicate number seeds the starting structure and the dynamics |
 
 Level 3 gives the same results within the statistical noise of MD, not bit

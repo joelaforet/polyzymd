@@ -397,13 +397,16 @@ class TestReproduce:
         download = shutil.copytree(tmp_path / "scratch", tmp_path / "download")
         command = ["study", "locate", str(download), "--study", str(copy), "--verify"]
         assert CliRunner().invoke(cli, command).exit_code == 0
-        dcd = next(download.rglob("*.dcd"))
+        dcd = next((download / condition_folder("Polymer")).rglob("*.dcd"))
         stat = dcd.stat()
         dcd.write_bytes(dcd.read_bytes()[:-8] + b"\0" * 8)
         os.utime(dcd, ns=(stat.st_atime_ns, stat.st_mtime_ns))
         located = CliRunner().invoke(cli, command)
         assert located.exit_code == 2
         assert "has another SHA-256" in located.output
+        # The entry the first locate wrote for the changed runs is removed.
+        written = yaml.safe_load((copy / "data.local.yaml").read_text())
+        assert list(written) == ["No polymer"]
 
     def test_check_reports_metadata_gaps_and_the_next_step(self, study: Path) -> None:
         result = CliRunner().invoke(cli, ["study", "check", str(study)])
