@@ -182,11 +182,13 @@ they overlap their own periodic images. PACKMOL cannot see this, because it
 runs without periodic boundaries. Minimization cannot remove an overlap this
 close, so the build stops.
 
-1. If the solute is long along `z`, it may not fit in the brick of a rhombic
-   dodecahedron at the configured padding. The `z` clearance is
-   `0.707 * padding - 0.146 * bbox_z`. Raise `solvent.box.padding`, or set
-   `solvent.box.shape: cube`.
-2. A system built by PolyzyMD 1.2 must be built again. Do not edit it.
+1. A system built by PolyzyMD 1.2 or by an earlier 1.3 release candidate must
+   be built again. Do not edit it. Those versions could make a box whose brick
+   was too short for the solute.
+2. PolyzyMD sizes the box so that the solute fits inside the brick. The build
+   log line `Box: edge ...` gives the clearance to each brick face. If all
+   three clearances are at least the tolerance and the error still appears,
+   report it with that line.
 
 A contact between half the tolerance and the full tolerance gives only a
 warning. Minimization removes it.

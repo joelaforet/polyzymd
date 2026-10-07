@@ -2116,3 +2116,178 @@ def test_removed_commands_are_unknown(command: str) -> None:
 
     assert result.exit_code == 2
     assert f"No such command '{command}'" in result.output
+
+
+def _write_elongated_pdb(path: Path) -> None:
+    """Six atoms spanning 37.5 x 41.8 x 50 Angstrom, long along z."""
+    coords = [
+        (-18.75, 0.0, 0.0),
+        (18.75, 0.0, 0.0),
+        (0.0, -20.9, 0.0),
+        (0.0, 20.9, 0.0),
+        (0.0, 0.0, -25.0),
+        (0.0, 0.0, 25.0),
+    ]
+    lines = [
+        f"ATOM  {i + 1:5d}  CA  ALA A{i + 1:4d}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00           C"
+        for i, (x, y, z) in enumerate(coords)
+    ]
+    path.write_text("\n".join(lines) + "\nEND\n")
+
+
+@pytest.mark.parametrize("command", ["build", "run"])
+def test_dry_run_reports_the_box_and_its_clearances(tmp_path: Path, command: str) -> None:
+    """Dry runs print the box the build will make, so a box that is too small shows before Packmol."""
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+
+    result = CliRunner().invoke(cli, [command, "-c", str(path), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    # diameter 5.00 nm + 2 x 1.2 nm, grown so the 5 nm z extent fits the 0.707-edge brick
+    assert "Box (rhombic_dodecahedron): edge 7.64 nm" in result.output, result.output
+    assert "clearance to the brick faces 1.94 / 1.73 / 0.20 nm" in result.output
+
+
+def test_dry_run_box_report_never_blocks(tmp_path: Path) -> None:
+    """A box that cannot be estimated gives a note, not a failed dry run."""
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+
+    with patch(
+        "polyzymd.builders.solvent.SolventBuilder._get_box_shape_matrix",
+        side_effect=AttributeError("no such shape"),
+    ):
+        result = CliRunner().invoke(cli, ["build", "-c", str(path), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "Box: not estimated (no such shape)" in result.output
+
+
+def test_dry_run_box_report_says_a_substrate_is_left_out(tmp_path: Path) -> None:
+    """The dry-run box comes from the enzyme PDB only; the line says so when a substrate is set."""
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+    (tmp_path / "c" / "lig.sdf").write_text("\n")
+    data = yaml.safe_load(path.read_text())
+    data["substrate"] = {"name": "lig", "sdf_path": "lig.sdf"}
+    path.write_text(yaml.safe_dump(data))
+
+    result = CliRunner().invoke(cli, ["build", "-c", str(path), "--dry-run"])
+
+    assert "from the enzyme PDB only; the substrate is not included" in result.output, result.output
+
+
+def test_failed_build_keeps_a_run_folder_with_files(tmp_path: Path) -> None:
+    """A failed build keeps the folder it made when files such as packmol_error.log are in it."""
+    from polyzymd.config.loader import load_config
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+    working_dir = load_config(path).get_working_directory(1)
+
+    def write_log_and_fail(self, config, working_dir, polymer_seed, publish_topology=True):
+        (Path(working_dir) / "packmol_error.log").write_text("Packmol failed\n")
+        raise ValueError("Packmol failed; see packmol_error.log")
+
+    with patch(
+        "polyzymd.builders.system_builder.SystemBuilder.build_from_config", write_log_and_fail
+    ):
+        result = CliRunner().invoke(cli, ["build", "-c", str(path), "-r", "1"])
+
+    assert result.exit_code == 1, result.output
+    assert (working_dir / "packmol_error.log").is_file()
+
+
+def test_build_that_cannot_take_the_lock_removes_nothing(tmp_path: Path) -> None:
+    """A second build of a replicate that is being built leaves the first one's folder alone."""
+    from polyzymd.config.loader import load_config
+    from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+    working_dir = load_config(path).get_working_directory(1)
+
+    def first_build_makes_the_folder(working_dir):
+        working_dir.mkdir(parents=True)
+        raise ArtifactIntegrityError("Another PolyzyMD build or run holds the replicate lock")
+
+    with patch(
+        "polyzymd.simulation.artifact_integrity.replicate_lock", first_build_makes_the_folder
+    ):
+        result = CliRunner().invoke(cli, ["build", "-c", str(path), "-r", "1"])
+
+    assert result.exit_code == 1, result.output
+    assert working_dir.is_dir()
+
+
+def test_failed_build_leaves_no_run_folder(tmp_path: Path) -> None:
+    """A build that fails removes the run folder it made."""
+    from polyzymd.config.loader import load_config
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+    working_dir = load_config(path).get_working_directory(1)
+
+    with patch(
+        "polyzymd.builders.system_builder.SystemBuilder.build_from_config",
+        side_effect=ValueError("atoms lie within 1.00 A of a periodic image"),
+    ):
+        result = CliRunner().invoke(cli, ["build", "-c", str(path), "-r", "1"])
+
+    assert result.exit_code == 1, result.output
+    assert "periodic image" in result.output
+    assert not working_dir.exists()
+
+
+def test_failed_gromacs_run_build_leaves_no_run_folder(tmp_path: Path) -> None:
+    """`run --engine gromacs` removes the run folder its failed build made, and keeps an old one."""
+    from polyzymd.cli.main import _run_gromacs_impl
+    from polyzymd.config.loader import load_config
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    _write_elongated_pdb(tmp_path / "c" / "test.pdb")
+    config = load_config(path)
+
+    def make_folder_and_fail(self, config, working_dir, polymer_seed):
+        Path(working_dir).mkdir(parents=True)
+        raise ValueError("atoms lie within 1.00 A of a periodic image")
+
+    with patch(
+        "polyzymd.builders.system_builder.SystemBuilder.build_from_config", make_folder_and_fail
+    ):
+        with pytest.raises(ValueError):
+            _run_gromacs_impl(config, replicate=1, gmx_path="gmx")
+    assert not config.get_working_directory(1).exists()
+
+    kept = config.get_working_directory(2)
+    kept.mkdir(parents=True)
+    with patch(
+        "polyzymd.builders.system_builder.SystemBuilder.build_from_config",
+        side_effect=ValueError("failed"),
+    ):
+        with pytest.raises(ValueError):
+            _run_gromacs_impl(config, replicate=2, gmx_path="gmx")
+    assert kept.is_dir()
+
+    def write_log_and_fail(self, config, working_dir, polymer_seed):
+        Path(working_dir).mkdir(parents=True)
+        (Path(working_dir) / "packmol_error.log").write_text("Packmol failed\n")
+        raise ValueError("Packmol failed; see packmol_error.log")
+
+    with patch(
+        "polyzymd.builders.system_builder.SystemBuilder.build_from_config", write_log_and_fail
+    ):
+        with pytest.raises(ValueError):
+            _run_gromacs_impl(config, replicate=3, gmx_path="gmx")
+    assert (config.get_working_directory(3) / "packmol_error.log").is_file()

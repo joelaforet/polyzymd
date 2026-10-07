@@ -1119,3 +1119,11 @@ def test_openmm_runs_refuse_the_anisotropic_barostat_whatever_the_engine_key(tmp
     with pytest.raises(ValueError, match="set engine: gromacs"):
         config.require_engine_barostats("openmm")
 
+
+
+def test_box_shape_refuses_truncated_octahedron():
+    """Only the box shapes the build can make are accepted."""
+    from polyzymd.config.schema import BoxConfig
+
+    with pytest.raises(ValidationError, match="'cube' or 'rhombic_dodecahedron'"):
+        BoxConfig(shape="truncated_octahedron")

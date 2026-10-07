@@ -104,7 +104,7 @@ enzyme:
 # Water model, ions, and box settings.
 #
 # water model options: tip3p, spce, tip4pew, opc
-# box shape options: cube, rhombic_dodecahedron, truncated_octahedron
+# box shape options: cube, rhombic_dodecahedron
 #
 solvent:
   primary:
