@@ -34,6 +34,17 @@ of the calculation and the checks, see
 
 ## From the command line
 
+In a {term}`study`, give the study folder. The study names the conditions,
+the control and the equilibration window. The results go to
+`<study>/results/sasa/`:
+
+```bash
+polyzymd analyze sasa --study my_study
+```
+
+For a quick look without a study, give the `config.yaml` of each condition
+instead. The results then go to the current folder:
+
 ```bash
 polyzymd analyze sasa -c noPoly/config.yaml -c SBMA50/config.yaml \
   --label "No polymer" --label "SBMA 50%" --eq 200ns
@@ -85,7 +96,7 @@ site:
 
 ```bash
 polyzymd analyze sasa -c noPoly/config.yaml -c SBMA50/config.yaml --eq 200ns \
-  --set "target=protein and (resid 77 or resid 156 or resid 262)" \
+  --set "target=protein and (resid 76 or resid 132 or resid 155)" \
   --set "contexts={site_isolated: protein, site_with_polymer: protein or resname SBM EGM}" \
   --run site_with_polymer
 ```
@@ -150,7 +161,7 @@ study = pz.Study.from_configs(
 protein, with_polymer = "protein", "protein or resname SBM EGM"
 
 total = study.timeseries(
-    sasa, pz.select(protein), pz.select(with_polymer), unit="Å²", bounds=(0.0, None)
+    sasa, pz.select(protein), pz.select(with_polymer), unit="A^2", bounds=(0.0, None)
 )
 print(total.reduce("mean").compare(control="No polymer").to_agent_text())
 
@@ -158,7 +169,7 @@ per_residue = study.per_replicate(
     residue_sasa,
     pz.select(protein),
     pz.select(with_polymer),
-    unit="Å²",
+    unit="A^2",
     labels=lambda u: u.select_atoms(protein).residues.resids,
 )
 print(per_residue.compare(control="No polymer").to_agent_text())

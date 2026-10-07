@@ -24,7 +24,7 @@ protein.
 Each part of the frame is something that an analysis must know:
 
 - **Residue numbering.** The catalytic serine of lipase A is residue 76 in the
-  trajectory. The numbering of RML is offset from its crystal structure. A
+  trajectory and Ser77 in its crystal structure 1ISP. The numbering of RML is offset from its crystal structure. A
   selection written for one protein selects the wrong atoms in another.
 - **Reference structures.** Native contacts and RMSF use one crystal
   structure for every condition of the study. Some proteins need two, such as

@@ -9,6 +9,7 @@ with offset o has a radius of gyration of o + 0.1 r + 0.01 k, so after the
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -262,7 +263,7 @@ class TestCheck:
         assert _analyze("rg", "--study", str(study_dir)).exit_code == 0
         result = CliRunner().invoke(cli, ["study", "check", str(study_dir)])
         assert result.exit_code == 0, result.output
-        assert "control No polymer: runs [1, 2]" in result.output
+        assert "control No polymer: replicates [1, 2]" in result.output
         assert "analysis rg: selection=all; window eq 0.25ns; stored results" in result.output
         assert (
             "analysis rg as rg_first: selection=index 0; window eq 0.25ns; no stored results"
@@ -270,11 +271,29 @@ class TestCheck:
         )
         assert "cite: " in result.output and "PolyzyMD" in result.output
 
+    def test_condition_lines_in_the_docs_match_the_output(self, study_dir: Path) -> None:
+        result = CliRunner().invoke(cli, ["study", "check", str(study_dir)])
+        line = next(x for x in result.output.splitlines() if x.startswith("control No polymer:"))
+        shape = re.fullmatch(r"control No polymer: (\w+) \[1, 2\] under \S+ \(from config\)", line)
+        assert shape, line
+        docs = Path(__file__).resolve().parents[2] / "docs" / "source"
+        documented = [
+            (page.name, match.group(1))
+            for page in sorted(docs.rglob("*.md"))
+            for match in re.finditer(
+                r"\b(?:control|condition) [^:`\n]+: (\w+) \[\d[\d, ]*\] under \S+ \(from ",
+                page.read_text(encoding="utf-8"),
+            )
+        ]
+        assert documented
+        for page, word in documented:
+            assert word == shape.group(1), page
+
     def test_missing_trajectories_are_not_errors(self, study_dir: Path, tmp_path: Path) -> None:
         shutil.rmtree(tmp_path / "data")
         result = CliRunner().invoke(cli, ["study", "check", str(study_dir)])
         assert result.exit_code == 0, result.output
-        assert "no runs found" in result.output
+        assert "no replicates found" in result.output
 
     def test_bad_file_exits_2(self, tmp_path: Path) -> None:
         _write(

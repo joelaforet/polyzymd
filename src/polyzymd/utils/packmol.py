@@ -49,7 +49,7 @@ _PACKMOL_MOLECULE_PREFIX = "_PACKING_MOLECULE"
 #: Packmol exit code 173 ("imperfect packing") legitimately leaves a handful of
 #: residual contacts (observed: 1 atom at 0.6 A and 3-5 atoms below the tolerance in
 #: dense 30-chain polymer shells); energy minimisation resolves those.  A solute/solvent
-#: frame mismatch (d96b1fcd) instead puts hundreds to thousands of solvent atoms inside
+#: frame mismatch instead puts hundreds to thousands of solvent atoms inside
 #: the solute (observed: 1182 atoms below 1 A in a defective CALB control build).  The
 #: limit sits two orders of magnitude from both observations.
 SOLVATION_CLASH_ATOM_LIMIT = 20
@@ -61,7 +61,7 @@ class SolvationClashError(ValueError):
     Packmol guarantees that every placed atom is at least ``tolerance`` away
     from the fixed solute *in the Packmol frame*.  If the assembled topology
     combines solute and solvent coordinates expressed in different frames
-    (the solute/solvent frame offset fixed in d96b1fcd), hundreds of solvent
+    (a solute/solvent frame offset), hundreds of solvent
     molecules end up inside the solute while Packmol reports success.  This
     error turns that silent defect into a hard build failure.
     """
@@ -369,7 +369,8 @@ def _assert_solute_solvent_separation(
             f"{stats['n_other']} {label} atoms checked; limit {SOLVATION_CLASH_ATOM_LIMIT}). "
             "Imperfect Packmol runs leave at most a handful of such contacts, so the "
             "assembled solute and packed coordinates are almost certainly expressed in "
-            "different frames (solute/solvent frame mismatch, see d96b1fcd). Refusing to "
+            "different frames (solute/solvent frame mismatch: the packed coordinates are "
+            "shifted against the solute). Refusing to "
             "continue the build."
         )
 

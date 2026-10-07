@@ -68,7 +68,7 @@ current frame. Pass it to `study.timeseries`:
 def radius_of_gyration(atoms):
     return float(atoms.radius_of_gyration())
 
-rg = study.timeseries(radius_of_gyration, pz.select("protein"), unit="Å", bounds=(0.0, None))
+rg = study.timeseries(radius_of_gyration, pz.select("protein"), unit="A", bounds=(0.0, None))
 ```
 
 - `pz.select("protein")` stands for the `AtomGroup` of that selection in each
@@ -92,9 +92,9 @@ from polyzymd.analyses.functions import pair_distance
 
 distance = study.timeseries(
     pair_distance,
-    pz.select("protein and resid 77 and name OG"),
-    pz.select("protein and resid 156 and name NE2"),
-    unit="Å",
+    pz.select("protein and resid 76 and name OG"),
+    pz.select("protein and resid 155 and name NE2"),
+    unit="A",
     bounds=(0.0, None),
 )
 ```
@@ -110,7 +110,7 @@ from polyzymd.analyses.functions import rmsd
 ca = "protein and name CA"
 deviation = study.timeseries(
     rmsd, pz.select(ca), pz.reference("external", ca, file="structures/1ISP.pdb"),
-    unit="Å", bounds=(0.0, None),
+    unit="A", bounds=(0.0, None),
 )
 ```
 
@@ -140,7 +140,7 @@ that returns one number:
 def final_quarter_mean(values, times):
     return float(values[len(values) * 3 // 4:].mean())
 
-late_rg = rg.reduce(final_quarter_mean, unit="Å")
+late_rg = rg.reduce(final_quarter_mean, unit="A")
 ```
 
 To compute a new series from stored series, use `transform`. It reads no
@@ -191,7 +191,7 @@ from polyzymd.analyses.functions import MS_PARTS, RMS_PARTS, rms_decomposition
 ca = "protein and name CA"
 rows = study.per_replicate(
     rms_decomposition, pz.select(ca), pz.select(ca), pz.reference("average", ca),
-    unit="Å", labels=lambda u: u.select_atoms(ca).residues.resids, parts=RMS_PARTS + MS_PARTS,
+    unit="A", labels=lambda u: u.select_atoms(ca).residues.resids, parts=RMS_PARTS + MS_PARTS,
 )
 rmsf = rows["rmsf"]                                                 # one value per residue
 mean_rmsf = rmsf.over_labels("mean")                                # one value per replicate

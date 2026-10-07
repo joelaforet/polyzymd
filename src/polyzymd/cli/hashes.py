@@ -97,7 +97,7 @@ def hash_trajectories_command(
         ]
         if not runs:
             scratch = config.output.effective_scratch_directory
-            click.echo(f"{label}: no runs found in {scratch}")
+            click.echo(f"{label}: no replicates found under {scratch}")
         for index, root in runs:
             report = engine.record_trajectory_hashes(
                 engine.resolve_engine_working_directory(root),

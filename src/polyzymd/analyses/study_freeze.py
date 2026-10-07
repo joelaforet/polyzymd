@@ -1422,6 +1422,7 @@ _IGNORED = (
     ("logs/", "Full logs of polyzymd commands; the console shows only warnings."),
     ("data.local.yaml", "Where this machine keeps the trajectories."),
     ("runs/", "Simulation runs: trajectories never go into git or the deposit."),
+    (".polymer_cache/", "Fragments and chains that dynamic polymer builds write."),
 )
 
 

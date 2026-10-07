@@ -457,7 +457,7 @@ class TestSolvateAssemblyCoordinates:
 
         message = str(excinfo.value)
         assert "2 solvent atom(s)" in message
-        assert "d96b1fcd" in message
+        assert "packed coordinates are shifted against the solute" in message
         assert "0.100" in message  # minimum separation
 
     def test_pack_polymers_raises_on_overlapping_polymer(self, monkeypatch, tmp_path):

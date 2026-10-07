@@ -154,7 +154,7 @@ close contacts.
 
 ```
 SolvationClashError: 1182 solvent atom(s) lie within 1.00 A of the solute ...
-solute/solvent frame mismatch, see d96b1fcd
+solute/solvent frame mismatch: the packed coordinates are shifted against the solute
 ```
 
 The packed molecules sit inside the protein. The solute and the packed
@@ -191,7 +191,7 @@ close, so the build stops.
 A contact between half the tolerance and the full tolerance gives only a
 warning. Minimization removes it.
 
-### `ValueError: No atoms match selection: 'resid 77 and name OG'`
+### `ValueError: No atoms match selection: 'resid 76 and name OG'`
 
 A restraint selection matches no atom.
 

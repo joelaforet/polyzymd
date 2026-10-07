@@ -76,8 +76,8 @@ polyzymd study check my_study --production
 
 ```
 study my_study/study.yaml  equilibration 100ns  stride 1
-control No polymer: runs [1, 2, 3, 4, 5] under /data/me/LipA_363K (from data.local.yaml); production 1000 ns
-condition SBMA 50%: runs [1, 2, 3, 4, 5] under /data/me/LipA_363K (from data.local.yaml); production 1000 ns
+control No polymer: replicates [1, 2, 3, 4, 5] under /data/me/LipA_363K (from data.local.yaml); production 1000 ns
+condition SBMA 50%: replicates [1, 2, 3, 4, 5] under /data/me/LipA_363K (from data.local.yaml); production 1000 ns
 analysis rg: defaults; no stored results
 analysis contacts as contacts_4A: method=distance, cutoff=4.0; no stored results
 git: commit 53cd9f37d690; inputs committed

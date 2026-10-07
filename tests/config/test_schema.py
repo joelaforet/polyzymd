@@ -505,6 +505,14 @@ class TestSimulationPhasesConfig:
         with pytest.raises(ValidationError, match="must contain at least one stage"):
             SimulationPhasesConfig(equilibration_stages=[], production=production)
 
+    def test_rejects_a_zero_ns_equilibration_stage(self):
+        from pydantic import ValidationError
+
+        from polyzymd.config.schema import EquilibrationStageConfig
+
+        with pytest.raises(ValidationError, match="greater than 0"):
+            EquilibrationStageConfig(name="nvt", duration=0.0, temperature=300.0)
+
     def test_rejects_legacy_segments_field(self):
         """Legacy simulation_phases.segments should be rejected."""
         from pydantic import ValidationError
