@@ -34,6 +34,7 @@ from polyzymd.analyses.study_freeze import (
     _versions,
     _write_citation,
     _write_gitignore,
+    deposited_entry,
     freeze,
     group_warnings,
     left_out_files,
@@ -133,6 +134,12 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
     released = date.today().isoformat()
     version = tag or "unversioned"
     _write_gitignore(root)
+    method = (
+        f"Analysed with PolyzyMD {polyzymd.__version__}: {len(studies)} studies "
+        f"({', '.join(studies)}), each against its own control; the replicate is "
+        "the sampling unit."
+    )
+    _write_citation(root, meta, version=version, released=released, commit=None, method=method)
     manifest: dict[str, Any] = {
         "schema": PROJECT_MANIFEST_SCHEMA,
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -151,21 +158,14 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
         "conditions": conditions,
         "analyses": {run: project.runs_in(run) for run in project.protocol.analyses},
         # The project's own files (project.yaml, shared analyses/ and stats/
-        # code, figures and what they wrote); each study's are in its manifest.
+        # code, figures and what they wrote) and its citation files; each
+        # study's are in its manifest.
         "files": _project_files(project, state),
         "trajectory_deposits": meta["related"]["trajectories"],
         "cite": {"polyzymd": citation_line()},
         "warnings": warnings,
     }
     (root / MANIFEST).write_text(json.dumps(manifest, indent=1) + "\n")
-    method = (
-        f"Analysed with PolyzyMD {polyzymd.__version__}: {len(studies)} studies "
-        f"({', '.join(studies)}), each against its own control; the replicate is "
-        "the sampling unit."
-    )
-    _write_citation(
-        root, meta, version=version, released=released, commit=None, method=method
-    )
 
     commit = None
     if state and tag:
@@ -215,18 +215,26 @@ def freeze_project(root: str | Path, *, tag: str | None = None) -> FreezeResult:
 
 
 def _project_files(project: Any, state: dict | None) -> dict[str, dict[str, Any]]:
-    """Return the size and SHA-256 of every project file outside the study folders.
+    """Return the size and SHA-256 of every project file outside the study folders, as deposited.
 
     Tracked files and untracked ``results/`` files in a git repository,
-    otherwise every file; ``deposit/``, ``logs/``, ``data.local.yaml`` and the
-    files freeze writes are left out.
+    otherwise every file, and the citation files freeze writes;
+    ``deposit/``, ``logs/``, ``data.local.yaml`` and ``manifest.json`` are
+    left out. A condition config is described without its machine paths
+    (:func:`~polyzymd.analyses.study_freeze.deposited_entry`).
     """
     root = project.root
     studies = {project[label].root.relative_to(root).parts[0] for label in project.labels}
+    configs = {
+        config.resolve()
+        for label in project.labels
+        for config in project[label].protocol.conditions.values()
+    }
+    names = [*_listed_files(root, state), CITATION, ZENODO]
     return {
-        name: {"size": (root / name).stat().st_size, "sha256": file_sha256(root / name)}
-        for name in _listed_files(root, state)
-        if Path(name).parts[0] not in studies and name not in PROJECT_GENERATED
+        name: deposited_entry(root / name, root, configs)
+        for name in dict.fromkeys(names)
+        if Path(name).parts[0] not in studies and name != MANIFEST and (root / name).is_file()
     }
 
 

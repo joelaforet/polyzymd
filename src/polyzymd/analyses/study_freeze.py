@@ -102,15 +102,21 @@ def _git(root: Path, *arguments: str) -> str | None:
 def _versions(root: Path) -> dict[str, str | None]:
     """Return the versions of PolyzyMD, Python and the main packages, and the lock file's hash.
 
-    A package that reports version ``0.0.0`` (a conda build without its
-    version in the metadata) is recorded as ``None``. ``pixi.lock`` is the
-    SHA-256 of ``environment/pixi.lock`` under ``root``, which pins every
-    package, or ``None`` when there is no such file.
+    OpenMM's is its full version, as replicate records give it. A package
+    that reports version ``0.0.0`` (a conda build without its version in the
+    metadata) has the version of its conda package record
+    (``conda-meta/<name>-<version>-<build>.json`` of the environment), or
+    ``None``. ``pixi.lock`` is the SHA-256 of ``environment/pixi.lock`` under
+    ``root``, or else of the ``pixi.lock`` of the pixi workspace that runs
+    freeze, which pins every package; ``None`` when neither exists.
+    ``pixi.lock_file`` says which file it is, and whether it is deposited.
     """
     import hashlib
     import platform
+    import sys
 
     import polyzymd
+    from polyzymd.utils.version import get_openmm_version, pixi_workspace
 
     versions: dict[str, str | None] = {
         "polyzymd": polyzymd.__version__,
@@ -134,10 +140,27 @@ def _versions(root: Path) -> dict[str, str | None]:
             versions[module] = None if version == "0.0.0" else version
         except Exception:  # noqa: BLE001 - an absent or broken package is recorded as absent
             versions[module] = None
+        if versions[module] is None:
+            name = module.lower().replace(".", "-")
+            for record in Path(sys.prefix, "conda-meta").glob(f"{name}-*.json"):
+                try:
+                    found = json.loads(record.read_text())
+                except (OSError, ValueError):
+                    continue
+                if isinstance(found, dict) and found.get("name") == name:
+                    versions[module] = found.get("version")
+    versions["openmm"] = get_openmm_version()
     lock = root / "environment" / "pixi.lock"
-    versions["pixi.lock"] = (
-        hashlib.sha256(lock.read_bytes()).hexdigest() if lock.is_file() else None
-    )
+    versions["pixi.lock_file"] = "environment/pixi.lock (deposited)"
+    workspace = pixi_workspace()
+    if not lock.is_file() and workspace:
+        lock = workspace / "pixi.lock"
+        versions["pixi.lock_file"] = (
+            "pixi.lock of the pixi workspace that ran freeze (not deposited)"
+        )
+    if not lock.is_file():
+        lock, versions["pixi.lock_file"] = None, None
+    versions["pixi.lock"] = hashlib.sha256(lock.read_bytes()).hexdigest() if lock else None
     return versions
 
 
@@ -552,6 +575,24 @@ def _engine_inputs(provenance: Any, config: Any = None) -> list[Path]:
 _PLACEHOLDER = "machine path removed by polyzymd: say where the runs are with data.local.yaml (polyzymd study locate)"
 
 
+def deposited_entry(file: Path, root: Path, configs: set[Path]) -> dict[str, Any]:
+    """Return the size and SHA-256 of ``file`` as freeze deposits it from the folder ``root``.
+
+    A condition config (one of ``configs``, resolved) is deposited without
+    machine paths (:func:`without_machine_paths`), so its entry describes
+    that text; any other file is deposited as it is.
+    """
+    import hashlib
+
+    if file.resolve() in configs:
+        text = file.read_bytes().decode()
+        deposited = without_machine_paths(text, file.parent, root)
+        if deposited != text:
+            data = deposited.encode()
+            return {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+    return _Hashes()(file)
+
+
 def _condition_configs(protocol: Any) -> list[str]:
     """Return the condition configs inside the study folder, relative to it."""
     return [
@@ -564,20 +605,21 @@ def _condition_configs(protocol: Any) -> list[str]:
 def without_machine_paths(text: str, folder: Path | None = None, root: Path | None = None) -> str:
     """Return a config's text with the directories of one machine taken out, for the deposit.
 
-    ``projects_directory`` and ``scratch_directory`` say where one machine
-    keeps job files and runs; they become ``.`` and ``data``, with a comment
-    saying how a reproducer points the study at their copy. The config hash
-    leaves both out, so stored results still match. A ``Copied by polyzymd
-    study init from <path>`` header keeps only the file name, and the lines
-    under it that say where the runs go are dropped. With
-    ``folder`` (the folder that holds the config) and ``root`` (the study or
-    project folder), an absolute input path (``config.loader.PATH_KEYS``)
-    inside ``root`` becomes a path relative to ``folder``.
+    An absolute ``projects_directory`` or ``scratch_directory`` says where one
+    machine keeps job files and runs; it becomes ``.`` or ``data``, with a
+    comment saying how a reproducer points the study at their copy. Relative
+    values stay. The config hash leaves both out, so stored results still
+    match. A ``Copied by polyzymd study init from <path>`` header keeps only
+    the file name. With ``folder`` (the folder that holds the config) and
+    ``root`` (the study or project folder), an absolute input path
+    (``config.loader.PATH_KEYS``) inside ``root`` becomes a path relative to
+    ``folder``.
 
     The lines are rewritten in place, so comments stay. When an input path
-    changes, either output key keeps another value, or the text no longer
-    reads as YAML (a flow-style ``output: {...}`` or a block scalar), the
-    config is read and written back with the changes, without its comments.
+    changes, either output key keeps an absolute value, or the text no
+    longer reads as YAML (a flow-style ``output: {...}`` or a block scalar),
+    the config is read and written back with the changes, without its
+    comments. A config with no machine path is returned unchanged.
     """
     import yaml
 
@@ -593,17 +635,16 @@ def without_machine_paths(text: str, folder: Path | None = None, root: Path | No
     if not moved:
         try:
             output = (yaml.safe_load(rewritten) or {}).get("output") or {}
-            wanted = {"projects_directory": ".", "scratch_directory": "data"}
-            if all(output.get(key, value) in (value, None) for key, value in wanted.items()):
+            if not any(_is_machine_path(output.get(key)) for key in _MACHINE_KEYS):
                 return rewritten
         except (yaml.YAMLError, AttributeError):
             pass
         data = yaml.safe_load(text) or {}
     output = data.get("output")
     if isinstance(output, dict):
-        output["projects_directory"] = "."
-        if "scratch_directory" in output:
-            output["scratch_directory"] = "data"
+        for key, value in _MACHINE_KEYS.items():
+            if _is_machine_path(output.get(key)):
+                output[key] = value
     header = [line for line in rewritten.splitlines()[:1] if line.startswith("# Copied by")]
     return "\n".join([*header, f"# {_PLACEHOLDER}", yaml.safe_dump(data, sort_keys=False)])
 
@@ -651,26 +692,39 @@ def _outside_inputs(protocol: Any) -> list[str]:
     return warnings
 
 
-def _rewrite_machine_lines(text: str) -> str:
-    """Rewrite the ``projects_directory``/``scratch_directory`` lines and the copy header.
+#: What an absolute output directory becomes in a deposited config.
+_MACHINE_KEYS = {"projects_directory": ".", "scratch_directory": "data"}
 
-    The ``#   `` lines under the header, which say where the runs go, are dropped.
-    """
+
+def _is_machine_path(value: Any) -> bool:
+    """Return whether a config value is an absolute path, starts with ``~`` or names a ``$VAR``."""
+    return isinstance(value, str) and (
+        value.startswith("~") or "$" in value or Path(value).is_absolute()
+    )
+
+
+def _rewrite_machine_lines(text: str) -> str:
+    """Rewrite the absolute ``projects_directory``/``scratch_directory`` lines and the copy header."""
     import re
 
+    import yaml
+
     lines = []
-    for line in text.splitlines():
-        if line.startswith("#   ") and lines and lines[-1].startswith("# Copied by polyzymd"):
-            continue
-        match = re.match(r"^(\s*)(projects_directory|scratch_directory):\s*.*$", line)
-        if match:
-            value = "." if match.group(2) == "projects_directory" else "data"
-            line = f"{match.group(1)}{match.group(2)}: {value}  # {_PLACEHOLDER}"
+    for full in text.splitlines(keepends=True):
+        line = full.rstrip("\r\n")
+        end = full[len(line) :]
+        match = re.match(r"^(\s*)(projects_directory|scratch_directory):(.*)$", line)
+        try:
+            value = yaml.safe_load(match.group(3)) if match else None
+        except yaml.YAMLError:
+            value = match.group(3).strip()
+        if _is_machine_path(value):
+            line = f"{match.group(1)}{match.group(2)}: {_MACHINE_KEYS[match.group(2)]}  # {_PLACEHOLDER}"
         header = re.match(r"^# Copied by polyzymd(?: study init)? from (.+)$", line)
         if header:
             line = f"# Copied by polyzymd from {Path(header.group(1).strip()).name}"
-        lines.append(line)
-    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+        lines.append(line + end)
+    return "".join(lines)
 
 
 def _production_length_warnings(conditions: dict[str, Any]) -> list[str]:
@@ -1490,10 +1544,13 @@ def _drop_tag(
 ) -> None:
     """Write the manifest and citation files again without a tag, after git could not make it."""
     manifest["tag"] = None
-    (root / MANIFEST).write_text(json.dumps(manifest, indent=1) + "\n")
     _write_citation(
         root, meta, version="unversioned", released=released, commit=None, method=method
     )
+    for name in (CITATION, ZENODO):
+        if name in manifest["files"]:
+            manifest["files"][name] = _Hashes()(root / name)
+    (root / MANIFEST).write_text(json.dumps(manifest, indent=1) + "\n")
 
 
 def _copy_frozen_folder(
@@ -1539,9 +1596,11 @@ def _copy_frozen_folder(
     for config in configs:
         copied = copy / config
         if copied.is_file():
-            copied.write_text(
-                without_machine_paths(copied.read_text(), (root / config).parent, root)
-            )
+            # Bytes, so that CRLF line ends stay as the manifest hashed them.
+            text = copied.read_bytes().decode()
+            deposited = without_machine_paths(text, (root / config).parent, root)
+            if deposited != text:
+                copied.write_bytes(deposited.encode())
 
 
 def _finish_deposit(
@@ -1677,6 +1736,8 @@ def freeze(
     if publish:
         _write_gitignore(root)
     study_files = [p for p in _listed_files(root, state) if p not in GENERATED]
+    deposit_root = protocol.project.root if protocol.project is not None else root
+    configs = {path.resolve() for path in protocol.conditions.values()}
     # A project names the files it leaves out once, for all its studies.
     left_out = left_out_files(root, state) if publish else None
     if left_out:
@@ -1721,32 +1782,39 @@ def freeze(
             for run, entry in protocol.analyses.items()
         },
         "trajectory_deposits": meta["related"]["trajectories"],
-        "files": {p: hashes(root / p) for p in study_files},
+        # As deposited: a condition config without the machine paths it names.
+        "files": {p: deposited_entry(root / p, deposit_root, configs) for p in study_files},
         "cite": {
             "polyzymd": __import__("polyzymd.citation", fromlist=["citation_line"]).citation_line()
         },
         "deposit_without_machine_paths": [
-            f"{config}: output.projects_directory and output.scratch_directory replaced, "
-            "'Copied from' header reduced to a file name"
+            f"{config}: machine paths removed; its entry in files is the deposited copy"
             for config in _condition_configs(protocol)
+            if (root / config).is_file()
+            and deposited_entry(root / config, deposit_root, configs) != hashes(root / config)
         ],
         "warnings": warnings,
     }
-    (root / MANIFEST).write_text(json.dumps(manifest, indent=1) + "\n")
     (root / CHECKLIST).write_text(
         "# The Communications Biology MD checklist, filled by polyzymd study freeze. Informational.\n"
         + yaml.safe_dump(_checklist(protocol, manifest, meta), sort_keys=False)
     )
+    if publish:
+        _write_citation(
+            root,
+            meta,
+            version=version,
+            released=released,
+            commit=None,
+            method=_method(protocol),
+        )
+    # The files freeze writes are deposited too; the manifest cannot list itself.
+    for name in (CHECKLIST, SUMMARY, *((CITATION, ZENODO) if publish else ())):
+        if (root / name).is_file():
+            manifest["files"][name] = hashes(root / name)
+    (root / MANIFEST).write_text(json.dumps(manifest, indent=1) + "\n")
     if not publish:
         return FreezeResult(root, None, None, deposit, manifest, warnings)
-    _write_citation(
-        root,
-        meta,
-        version=version,
-        released=released,
-        commit=None,
-        method=_method(protocol),
-    )
     commit = None
     if state and tag:
         paths = [p for p in (*GENERATED, ".gitignore", "results") if (root / p).exists()]
