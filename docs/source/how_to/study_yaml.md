@@ -82,6 +82,16 @@ comparison:
 - Every condition must give each `within` factor.
 - Each stratum must have exactly one control. PolyzyMD refuses the file
   otherwise and names the stratum.
+- Without `control:`, PolyzyMD takes the control's factor values from the
+  first condition when it reads the file, and stores them in each report.
+  A different first condition can change the control, and then makes the
+  stored reports stale for `polyzymd study freeze`.
+- When the control of a stratum has no values, for example no polymer atoms
+  for a polymer analysis, the conditions of that stratum are summarised and
+  not compared, with a warning. The other strata are compared.
+- `--label` with conditions of several strata must include the control of
+  each; PolyzyMD names the controls to add.
+- `polyzymd study check` prints the control of each stratum as `control`.
 - Each comparison line of the report names its control and its stratum, for
   example `none 360 K vs SBMA 360 K  temperature_K 360  delta ...`. In the
   JSON report, `a` is the control and `stratum` holds the `within` values.

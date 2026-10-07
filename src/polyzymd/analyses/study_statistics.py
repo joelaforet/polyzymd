@@ -102,6 +102,20 @@ def replicate_table(study: Any, run: str) -> Any:
     return result
 
 
+def stratum_control(
+    reference: str, factors: Mapping[str, Mapping[str, Any]], within: Sequence[str]
+) -> dict[str, Any]:
+    """Return the factor values of the control of each stratum, taken from condition ``reference``.
+
+    The values are those of every factor that is not a ``within`` factor,
+    with ``None`` for a factor that ``reference`` does not declare. So the
+    control of a stratum is its condition whose other factors equal those of
+    ``reference``.
+    """
+    names = dict.fromkeys(name for values in factors.values() for name in values)
+    return {name: factors.get(reference, {}).get(name) for name in names if name not in within}
+
+
 def comparison_pairs(
     chosen: Sequence[str],
     labels: Sequence[str],
@@ -118,10 +132,10 @@ def comparison_pairs(
     that share their values of those factors form one stratum, and each
     condition is compared with the control of its stratum; ``stratum`` maps
     each ``within`` factor to its value there. The control of a stratum is
-    its one condition whose other factors equal those of ``control`` (a
-    condition label, by default the first of ``labels``), or, when
-    ``control`` maps factor names to values, whose factors have those
-    values. A control is never compared with itself.
+    its one condition whose factors have the values of ``control``, a
+    mapping of factor names to values. A condition label as ``control``
+    (by default the first of ``labels``) stands for its other factors
+    (:func:`stratum_control`). A control is never compared with itself.
 
     Raises
     ------
@@ -153,35 +167,38 @@ def comparison_pairs(
         if set(control) & set(within):
             raise ProtocolError(
                 f"The control {dict(control)} names a within factor.",
-                hint="The control's values are of the factors that vary inside a stratum.",
+                hint="The control's values are of the factors that vary inside a stratum; "
+                "give control= with those factors only.",
             )
         wanted = dict(control)
-
-        def is_control(label: str) -> bool:
-            return all(factors[label].get(key) == value for key, value in wanted.items())
-
     else:
-        reference = control or labels[0]
-        wanted = {k: v for k, v in factors.get(reference, {}).items() if k not in within}
-
-        def is_control(label: str) -> bool:
-            return {k: v for k, v in factors[label].items() if k not in within} == wanted
+        wanted = stratum_control(control or labels[0], factors, within)
 
     def stratum(label: str) -> tuple:
         return tuple(factors[label][name] for name in within)
 
     controls: dict[tuple, str] = {}
+    problems = []
     for level in dict.fromkeys(stratum(label) for label in chosen):
-        found = [label for label in labels if stratum(label) == level and is_control(label)]
-        if len(found) != 1:
-            where = ", ".join(f"{name} {value}" for name, value in zip(within, level, strict=True))
-            count = "no control" if not found else f"{len(found)} controls ({', '.join(found)})"
-            raise ProtocolError(
-                f"The stratum {where} has {count}: a condition whose other factors are {wanted}.",
-                hint="Give each stratum one control condition with replicate values, or set "
-                "the control's factor values with control.",
-            )
-        controls[level] = found[0]
+        found = [
+            label
+            for label in labels
+            if stratum(label) == level
+            and all(factors[label].get(key) == value for key, value in wanted.items())
+        ]
+        if len(found) == 1:
+            controls[level] = found[0]
+            continue
+        where = ", ".join(f"{name} {value}" for name, value in zip(within, level, strict=True))
+        count = "no control" if not found else f"{len(found)} controls ({', '.join(found)})"
+        problems.append(f"the stratum {where} has {count}")
+    if problems:
+        raise ProtocolError(
+            f"Each stratum needs one control, the condition whose factors are {wanted}, but "
+            f"{'; '.join(problems)}.",
+            hint="Give each stratum one control condition, or set the control's factor values "
+            "with control.",
+        )
     return [
         (controls[stratum(label)], label, dict(zip(within, stratum(label), strict=True)))
         for label in chosen

@@ -128,8 +128,13 @@ recorded.
   factors. The control of a stratum is the condition whose other factors
   equal those of `control`, or, for `control={"polymer": "none"}`, whose
   factors have those values. The factors come from `study.yaml`. `within`
-  and `control` default to its `comparison:` block; `within=[]` turns it off.
-  A stratum with no control or two is refused.
+  and `control` default to its `comparison:` block, and `within=` given
+  without `control=` takes the block's control too; `within=[]` turns it
+  off. Without a block, `control` defaults to the first condition of the
+  study, also when that condition has no values.
+- A stratum with no control or two is refused. So is a control or a compared
+  condition with no replicate values, and a control that is not among the
+  conditions. A condition is never compared with another stratum's control.
 - Each row gives `mean(b) - mean(a)` with its 95 % interval, the p value, the
   {term}`Benjamini-Hochberg` adjusted p value, and Cohen's d and Hedges' g.
 - The correction family is every tested row of the call, over every stratum

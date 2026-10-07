@@ -586,13 +586,23 @@ def test_a_study_comparison_within_compares_each_temperature_with_its_control(
     assert [row["delta"] for row in report["pairwise"]] == pytest.approx([0.5] * 3)
     assert report["provenance"]["study"]["comparison"] == {
         "within": ["temperature_K"],
-        "control": None,
+        "control": {"polymer": "none"},
     }
     from polyzymd.analyses.study_file import load_study_file
     from polyzymd.analyses.study_freeze import stale_runs
 
     assert stale_runs(load_study_file(root)) == {}
     study_yaml = root / "study.yaml"
+    text = study_yaml.read_text()
+    lines = text.splitlines(keepends=True)
+    first = next(i for i, line in enumerate(lines) if line.startswith("  none_300:"))
+    moved = next(i for i, line in enumerate(lines) if line.startswith("  SBMA_300:"))
+    lines.insert(first, lines.pop(moved))
+    study_yaml.write_text("".join(lines))
+    assert stale_runs(load_study_file(root))["rg"] == [
+        "the comparison block changed since the report"
+    ]
+    study_yaml.write_text(text)
     study_yaml.write_text(study_yaml.read_text().replace("comparison: {within: temperature_K}", ""))
     assert stale_runs(load_study_file(root))["rg"] == [
         "the comparison block changed since the report"
@@ -620,3 +630,18 @@ def test_without_a_study_comparison_every_condition_is_compared_with_the_first(
     }  # fmt: skip
     assert all(set(row) == fields for row in report["pairwise"])
     assert "comparison" not in report["provenance"]["study"]
+
+
+@pytest.mark.filterwarnings("ignore")
+def test_labels_without_their_stratum_control_name_the_control_once(tmp_path: Path) -> None:
+    """--label conditions whose controls are left out are refused with the control to add."""
+    pytest.importorskip("MDAnalysis")
+    root = _temperature_polymer_study(tmp_path, "comparison: {within: temperature_K}")
+    result = _analyze_cli(
+        "rg", "--study", str(root), "--label", "SBMA_300", "--label", "SBMA_330",
+        "--label", "none_330", "--no-plots", "--no-eq-check",
+    )  # fmt: skip
+    assert result.exit_code != 0
+    assert result.output.count("leaves out the stratum control none_300 that") == 1
+    assert "fix: Add --label none_300, or give one --label" in result.output
+    assert "none_330" not in result.output

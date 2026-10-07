@@ -462,6 +462,55 @@ class TestCompareWithinStrata:
         with pytest.raises(ProtocolError, match="temperature_K 330 has no control"):
             values.compare(within="temperature_K")
 
+    def test_the_default_control_is_the_first_study_condition_not_the_first_measured(
+        self,
+    ) -> None:
+        """A first condition with no values is never replaced by a measured one."""
+        values = temperature_polymer_values()
+        values.source.study.comparison = {"within": ["temperature_K"], "control": None}
+        values.rows["none 300 K"] = []
+        kept = [label for label in values.rows if values.rows[label]]
+        with pytest.raises(ProtocolError, match="temperature_K 300 has no control values"):
+            values.compare(conditions=kept)
+        with pytest.raises(ProtocolError, match="temperature_K 300 has no control values"):
+            values.compare(within="temperature_K", conditions=kept)
+        report = values.compare(conditions=[label for label in kept if "300" not in label])
+        assert [row.a for row in report.pairwise] == ["none 330 K", "none 360 K"]
+        assert [row.delta for row in report.pairwise] == pytest.approx([POLYMER_EFFECT] * 2)
+
+    def test_a_condition_without_replicate_values_is_refused_by_name(self) -> None:
+        values = temperature_polymer_values()
+        values.rows["SBMA 330 K"] = []
+        with pytest.raises(ProtocolError, match="condition SBMA 330 K has no replicate values"):
+            values.compare()
+        with pytest.raises(ProtocolError, match="SBMA 330 K has no replicate values"):
+            values.compare(within="temperature_K")
+
+    def test_within_without_control_takes_the_study_control(self) -> None:
+        values = temperature_polymer_values()
+        values.source.study.comparison = {
+            "within": ["temperature_K"],
+            "control": {"polymer": "SBMA"},
+        }
+        report = values.compare(within="temperature_K")
+        assert [row.a for row in report.pairwise] == ["SBMA 300 K", "SBMA 330 K", "SBMA 360 K"]
+
+    def test_a_control_left_out_of_the_conditions_is_named(self) -> None:
+        """Values of some conditions, as --label gives, name the control a stratum needs."""
+        values = temperature_polymer_values()
+        values.source.study.comparison = {
+            "within": ["temperature_K"],
+            "control": {"polymer": "none"},
+        }
+        del values.rows["none 330 K"]
+        with pytest.raises(ProtocolError) as caught:
+            values.compare()
+        assert str(caught.value) == (
+            "Cannot compare: the stratum temperature_K 330 has no control values: its control "
+            "none 330 K is not among the conditions."
+        )
+        assert "--label" in caught.value.hint
+
     def test_a_stratum_with_two_controls_is_refused(self) -> None:
         values = temperature_polymer_values()
         values.source.study.factors["SBMA 330 K"]["polymer"] = "none"

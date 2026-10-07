@@ -846,9 +846,10 @@ def _report_skipping(
     """Summarise or compare ``values`` without the replicates where a selection matched no atoms.
 
     Those replicates are left out of every statistic, and a condition left
-    without replicates is left out of the report, each with a warning. When
-    the control is left out, or a stratum's control with ``within``, the
-    other conditions are summarised and not compared.
+    without replicates is left out of the report, each with a warning. A
+    condition whose control is left out, the first condition or with
+    ``within`` the control of its stratum, is summarised and not compared;
+    the others are compared.
     """
     if empty:
         values.rows = {
@@ -857,14 +858,12 @@ def _report_skipping(
         }
     labels = [condition.label for condition in study]
     kept = [label for label in labels if values.rows.get(label)]
-    control = labels[0]
-    report, lost = None, None
-    if len(kept) > 1 and control in kept:
-        try:
-            report = values.compare(conditions=kept)
-        except ProtocolError as exc:  # a stratum's control is left out
-            lost = f"{analysis}: {exc} The conditions are summarised and not compared."
-    if report is None:
+    pairs = values._pairs(kept) if len(labels) > 1 and kept else []
+    # A condition whose control matched no atoms is summarised, not compared.
+    lost = [pair for pair in pairs if pair[0] in values.rows and not values.rows[pair[0]]]
+    if len(lost) < len(pairs):
+        report = values._compare(kept, [pair for pair in pairs if pair not in lost])
+    else:
         report = values.summary(conditions=kept)
     by_condition: dict[str, list[str]] = {}
     for (label, index), missing in sorted(empty.items()):
@@ -876,14 +875,19 @@ def _report_skipping(
             f"{analysis}: in condition {label}, replicate {', '.join(entries)} matched no "
             f"atoms, so {what} {left} of the statistics."
         )
-    if len(labels) > 1 and control not in kept:
+    if lost and lost[0][2] is None:
         report.warnings.append(
-            f"{analysis}: the control {control} has no replicate where every selection matches "
-            "atoms, so the other conditions are summarised and not compared. Give a condition "
-            "with those atoms first to compare against it."
+            f"{analysis}: the control {lost[0][0]} has no replicate where every selection "
+            "matches atoms, so the other conditions are summarised and not compared. Give a "
+            "condition with those atoms first to compare against it."
         )
-    if lost:
-        report.warnings.append(lost)
+    elif lost:
+        report.warnings.append(
+            f"{analysis}: the control of their stratum has no replicate where every selection "
+            "matches atoms, so these conditions are summarised and not compared: "
+            + ", ".join(f"{label} (control {control})" for control, label, _ in lost)
+            + "."
+        )
     return report
 
 

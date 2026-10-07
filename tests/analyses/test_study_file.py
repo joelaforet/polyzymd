@@ -149,6 +149,19 @@ class TestComparison:
         assert protocol.comparison == {"within": ["temperature_K"], "control": {"polymer": "none"}}
         assert load_study_file(_write(path, STRATA)).comparison is None
 
+    def test_without_control_the_first_conditions_factor_values_are_stored(
+        self, tmp_path: Path
+    ) -> None:
+        path = _write(tmp_path / "study.yaml", STRATA + "comparison: {within: temperature_K}\n")
+        assert load_study_file(path).comparison == {
+            "within": ["temperature_K"],
+            "control": {"polymer": "none"},
+        }
+        lines = STRATA.splitlines(keepends=True)
+        reordered = "".join([*lines[:2], lines[3], lines[2], *lines[4:]])
+        _write(path, reordered + "comparison: {within: temperature_K}\n")
+        assert load_study_file(path).comparison["control"] == {"polymer": "SBMA"}
+
     def test_the_schema_takes_a_comparison(self) -> None:
         import yaml
 

@@ -594,10 +594,13 @@ def _comparison(
 ) -> dict[str, Any] | None:
     """Read ``comparison:``: the ``within`` factors and the ``control`` of each stratum.
 
-    Every stratum must have exactly one control
+    Without ``control``, the control's factor values are those of the first
+    condition (:func:`~polyzymd.analyses.study_statistics.stratum_control`),
+    so the result always holds the factor values. Every stratum must have
+    exactly one control
     (:func:`~polyzymd.analyses.study_statistics.comparison_pairs`).
     """
-    from polyzymd.analyses.study_statistics import comparison_pairs
+    from polyzymd.analyses.study_statistics import comparison_pairs, stratum_control
 
     if value is None:
         return None
@@ -621,8 +624,10 @@ def _comparison(
             "as factor values.",
             hint="For example 'comparison: {within: temperature_K, control: {polymer: none}}'.",
         )
-    control = None if control is None else {str(k): v for k, v in control.items()}
     try:
+        if control is None:
+            control = stratum_control(conditions[0], factors, within)
+        control = {str(k): v for k, v in control.items()}
         comparison_pairs(conditions, conditions, factors, within, control)
     except ProtocolError as exc:
         raise ProtocolError(f"{file}: comparison: {exc}", hint=exc.hint) from exc
