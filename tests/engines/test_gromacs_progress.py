@@ -254,3 +254,28 @@ def test_unreadable_stage_log_does_not_stop_a_scan(tmp_path: Path) -> None:
 
     (stage,) = _scan_equilibration_gromacs(tmp_path)
     assert stage.duration_ns == 0.0
+
+
+def test_update_records_its_version_on_what_status_saved_during_the_job(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Records that status saved during the job get its version; records of earlier jobs do not."""
+    from polyzymd.engines.gromacs.progress import load_or_scan_gromacs_progress
+    from polyzymd.simulation.progress import save_progress
+
+    for idx, hour in ((1, "01"), (2, "03")):
+        (tmp_path / f"eq_{idx:02d}.gro").write_text("eq")
+        (tmp_path / f"eq_{idx:02d}.log").write_text(
+            f"Started mdrun on rank 0 Wed Oct  7 {hour}:00:00 2026\n"
+            f"Finished mdrun on rank 0 Wed Oct  7 {hour}:30:00 2026\n"
+        )
+    (tmp_path / "prod.log").write_text(
+        "nsteps = 200\nStarted mdrun on rank 0 Wed Oct  7 04:00:00 2026\n Step Time\n 200 0.4\n"
+    )
+    save_progress(tmp_path, load_or_scan_gromacs_progress(tmp_path))
+    monkeypatch.setattr("polyzymd.utils.version.get_polyzymd_version", lambda: "1.3.0")
+
+    progress = update_gromacs_progress(tmp_path, since=_logged("Wed Oct  7 02:00:00 2026"))
+
+    assert [r.polyzymd_version for r in progress.equilibration_stages] == [None, "1.3.0"]
+    assert [r.polyzymd_version for r in progress.segments] == ["1.3.0"]

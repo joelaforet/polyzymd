@@ -120,6 +120,7 @@ def update_gromacs_progress(
     config_path: str = "",
     replicate: int = 1,
     mark_complete: bool = False,
+    since: str = "",
 ) -> SimulationProgress:
     """Update ``progress.json`` for a GROMACS simulation.
 
@@ -137,6 +138,10 @@ def update_gromacs_progress(
         Replicate index.
     mark_complete : bool, optional
         Force completion status after post-processing.
+    since : str, optional
+        ISO time when this job started. Records without a version that
+        started at or after it ran in this job, also when ``polyzymd status``
+        saved them first.
 
     Returns
     -------
@@ -215,6 +220,15 @@ def update_gromacs_progress(
                 progress.segments[-1].finished_at or datetime.now(timezone.utc).isoformat()
             )
 
+    if since:
+        ran.extend(
+            record
+            for record in started_since(
+                [*progress.equilibration_stages, *progress.segments],
+                datetime.fromisoformat(since),
+            )
+            if record.polyzymd_version is None
+        )
     record_run_provenance(ran)
     save_progress(working_dir, progress)
     return progress
@@ -384,6 +398,13 @@ def _keep_provenance(
             record.polyzymd_version = by_index[record.index].polyzymd_version
             record.pixi_environment = by_index[record.index].pixi_environment
     return scanned
+
+
+def started_since(
+    records: list[EquilibrationStageRecord | SegmentRecord], since: datetime
+) -> list[EquilibrationStageRecord | SegmentRecord]:
+    """Return the records that started at or after ``since``."""
+    return [record for record in records if datetime.fromisoformat(record.started_at) >= since]
 
 
 def record_run_provenance(records: list[EquilibrationStageRecord | SegmentRecord]) -> None:
