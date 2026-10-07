@@ -55,7 +55,7 @@ substrate:
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `name` | string | Yes | - | Substrate identifier |
-| `sdf_path` | path | Yes | - | Path to SDF with docked conformers |
+| `sdf_path` | path | Yes | - | Path to SDF with docked conformers. To make it from a crystal ligand, see {ref}`ligand-sdf-from-crystal` |
 | `conformer_index` | int | No | 0 | Index of conformer to use (0-indexed) |
 | `charge_method` | string | No | "nagl" | Options: `nagl`, `espaloma`, `am1bcc` |
 | `residue_name` | string | No | "LIG" | 3-letter code for topology |
@@ -310,8 +310,8 @@ PolyzyMD supports adding co-solvents to a water primary solvent. Give the amount
 | Method | Field | Description | Effect on Water |
 |--------|-------|-------------|-----------------|
 | Mole Fraction | `mole_fraction` | Fraction of neutral solvent molecules (0-1) | Replaces water in the neutral solvent mixture |
-| Concentration | `concentration` | Molar concentration (mol/L) | Additive (water unchanged) |
-| Count | `count` | Number of molecules in the box | Additive (water unchanged) |
+| Concentration | `concentration` | Molar concentration (mol/L) | Added on top of the water; only the ions of a charged co-solvent reduce the water (see below) |
+| Count | `count` | Number of molecules in the box | Added on top of the water; only the ions of a charged co-solvent reduce the water (see below) |
 
 **Important:** Use exactly ONE method per co-solvent. The previous `volume_fraction` key has been removed and is rejected instead of converted automatically. Existing configs that used `volume_fraction` must be updated explicitly to either `mole_fraction` or `concentration`; PolyzyMD does not infer mole fractions from volume fractions.
 
@@ -367,7 +367,7 @@ Where:
 
 **Source:** [`src/polyzymd/builders/solvent.py`](https://github.com/joelaforet/polyzymd/blob/main/src/polyzymd/builders/solvent.py)
 
-The water count is NOT reduced when using concentration. The co-solvent molecules are added to the existing water, which may slightly increase the effective density.
+With `concentration` or `count`, the co-solvent molecules are added on top of the water, which slightly increases the density. Their mass does not reduce the water count. Ions do: the water fills the solvent mass that is left after all Na+ and Cl- ions. So a charged co-solvent, whose counter-ions or neutralizing ions are added as Na+ or Cl-, also reduces the water. For example, 8 dodecyl sulfate anions by `count` add 8 Na+ and give about 10 fewer waters than the same box without them.
 
 #### Built-in Co-solvent Library
 
@@ -971,11 +971,19 @@ jobs, see {doc}`../how_to/run_gromacs`.
 
 ## Complete Example
 
-See the example configurations in `src/polyzymd/templates/examples/`:
+Start from one of these complete configs:
 
-- `enzyme_only.yaml` - Enzyme + substrate, no polymers
-- `enzyme_polymer.yaml` - Full enzyme + polymer simulation
-- `enzyme_cosolvent.yaml` - Enzyme with DMSO co-solvent
+- `polyzymd study add-condition "<label>" --new`, run in a study folder,
+  writes `conditions/<label>/config.yaml`. This template has every section.
+  The substrate, co-solvent, polymer and restraint sections are commented
+  out, with a comment on each key.
+- `examples/quickstart/config.yaml` (OpenMM) and
+  `examples/quickstart/config_gromacs.yaml` (GROMACS), in the PolyzyMD
+  repository, are a protein in water with NaCl. See
+  {doc}`../get_started/quickstart`.
+
+To add a substrate, co-solvents or polymers, copy the blocks of this page
+into one of these configs.
 
 ---
 
