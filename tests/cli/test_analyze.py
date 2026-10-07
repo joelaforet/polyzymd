@@ -650,3 +650,37 @@ def test_labels_without_their_stratum_control_name_the_control_once(tmp_path: Pa
     assert result.output.count("leaves out the stratum control none_300 that") == 1
     assert "fix: Add --label none_300, or give one --label" in result.output
     assert "none_330" not in result.output
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_recompute_says_it_recomputed(tmp_path: Path) -> None:
+    """--recompute says the values came from the trajectories; a cached read does not."""
+    pytest.importorskip("MDAnalysis")
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    options = ["rg", "--study", str(root), "--no-plots", "--no-eq-check"]
+    assert "recomputed" not in _analyze_cli(*options).output
+    again = _analyze_cli(*options, "--recompute")
+    assert again.exit_code == 0, again.output
+    assert "values recomputed from the trajectories" in again.output
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_a_run_that_changes_the_stored_report_names_it(tmp_path: Path) -> None:
+    """Replacing a stored report with a different result prints its path; a rerun does not."""
+    import subprocess
+
+    pytest.importorskip("MDAnalysis")
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    options = ["rg", "--study", str(root), "--no-plots", "--no-eq-check"]
+    assert _analyze_cli(*options).exit_code == 0
+    assert "note: replaced" not in _analyze_cli(*options).output
+    study_yaml = root / "study.yaml"
+    study_yaml.write_text(study_yaml.read_text().replace("selection: all", "selection: name C1"))
+    subprocess.run(["git", "-C", str(root), "commit", "-qam", "C1"], check=True)
+    changed = _analyze_cli(*options)
+    assert changed.exit_code == 0, changed.output
+    assert (
+        "note: replaced the stored results/rg/report.json, which reported mean_rg" in changed.output
+    )
