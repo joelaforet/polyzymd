@@ -23,10 +23,10 @@ def _content(path: object) -> str | None:
     A missing file is not hashed by its name, which changes when the file is
     moved, so a config that names it hashes the same on every machine.
     """
-    from pathlib import Path
+    from polyzymd.analyses.shared.file_hashes import file_sha256
 
     try:
-        return hashlib.sha256(Path(str(path)).read_bytes()).hexdigest()
+        return file_sha256(str(path))
     except OSError:
         return None
 

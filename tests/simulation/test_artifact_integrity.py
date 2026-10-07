@@ -76,9 +76,11 @@ def test_failed_publication_restores_previous_bundle(tmp_path, monkeypatch):
 
     def fail_between_artifact_replacements(source, destination):
         nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise OSError("injected publication failure")
+        # Only the bundle's own files count, not entries of the file-hash cache.
+        if Path(destination).parent == tmp_path:
+            calls += 1
+            if calls == 2:
+                raise OSError("injected publication failure")
         return real_replace(source, destination)
 
     monkeypatch.setattr(integrity.os, "replace", fail_between_artifact_replacements)
