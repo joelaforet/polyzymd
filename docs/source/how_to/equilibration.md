@@ -118,7 +118,8 @@ Available groups include:
 - `protein_heavy`
 - `protein_backbone`
 - `protein_calpha`
-- `ligand_heavy`
+- `ligand_heavy` (the substrate heavy atoms: list it in one stage to hold the
+  substrate in that stage only)
 - `polymer_heavy`
 - `solute` (protein + substrate, hydrogens included), `solute_heavy` (the same
   without hydrogens: the set frozen during minimization)

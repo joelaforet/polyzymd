@@ -267,10 +267,12 @@ Each replicate stays in one batch. The file names any single file over the
 
 ## Reproduce a published study
 
-A reader downloads `study/` and the trajectories, and runs:
+A reader downloads the study zip and the trajectories. In the unzipped
+`study/` folder, which holds `study.yaml`, the reader runs `study locate`.
+Its argument is the folder that holds the downloaded condition folders:
 
 ```bash
-polyzymd study locate ~/Downloads/zenodo_1234567 --study lipase_363K --verify
+polyzymd study locate ~/Downloads/zenodo_1234567 --verify
 ```
 
 ```
@@ -284,6 +286,12 @@ named, and the command exits with code 2.
 
 The reader can make the figures without the trajectories, from
 `pz.Study("study.yaml").results(run)`. See {doc}`study_yaml`.
+
+In a frozen project, `study/` holds `project.yaml` and one folder per study.
+The reader runs `polyzymd study locate DOWNLOAD_DIR --verify --study <study>`
+for each study whose trajectories they downloaded. `polyzymd analyze --project .`
+needs the trajectories of every study. With the trajectories of one study only,
+run `polyzymd analyze --study <study>`.
 
 ## Cite PolyzyMD
 

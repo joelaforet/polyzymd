@@ -602,3 +602,49 @@ def test_continuation_seeds_the_barostat_of_the_previous_segment():
     mgr._add_barostat_if_needed()
     (barostat,) = mgr._system.getForces()
     assert barostat.getRandomNumberSeed() == dynamics_seed(3, "barostat:production:2")
+
+
+def test_interrupted_continuation_segment_records_finish_time_and_seeds(tmp_path):
+    """An interrupted segment records when it stopped and the seeds its dynamics ran with."""
+    openmm = pytest.importorskip("openmm")
+    from types import SimpleNamespace
+
+    from polyzymd.simulation.continuation import ContinuationManager
+    from polyzymd.simulation.progress import (
+        SegmentRecord,
+        SimulationProgress,
+        load_progress,
+        save_progress,
+    )
+
+    start = "2026-10-07T07:00:00+00:00"
+    save_progress(
+        tmp_path,
+        SimulationProgress(
+            config_path="c",
+            total_steps_requested=100,
+            total_samples_requested=1,
+            segments=[SegmentRecord(index=1, started_at=start)],
+        ),
+    )
+    integrator = openmm.LangevinMiddleIntegrator(300.0, 1.0, 0.002)
+    integrator.setRandomNumberSeed(41)
+    system = openmm.System()
+    barostat = openmm.MonteCarloBarostat(1.0, 300.0)
+    barostat.setRandomNumberSeed(42)
+    system.addForce(barostat)
+
+    mgr = ContinuationManager.__new__(ContinuationManager)
+    mgr._working_dir = tmp_path
+    mgr._segment_index = 1
+    mgr._simulation = SimpleNamespace(integrator=integrator, system=system)
+    mgr._frame_record = {}
+    mgr._tracker = None
+    mgr._update_progress_interrupted(
+        steps_done=10, total_steps=100, duration_ns=0.2, timestep_fs=2.0
+    )
+
+    (segment,) = load_progress(tmp_path).segments
+    assert segment.started_at == start
+    assert segment.finished_at > start
+    assert segment.seeds == {"integrator": 41, "barostat": 42}

@@ -468,17 +468,23 @@ def deposit_readme(
         "",
         "Install the PolyzyMD version recorded in `manifest.json` (`versions`), unzip the "
         + ("project" if project else "study")
-        + ", then:",
+        + ", then run these commands in the unzipped `study/` folder, which holds "
+        + ("`project.yaml`:" if project else "`study.yaml`:"),
         "",
         "1. **Figures, without trajectories:** run the scripts in `figures/`, which read",
         '   `pz.Project(".").results(run)`.'
         if project
         else '   `pz.Study("study.yaml").results(run)`.',
-        "2. **Analyses, from the trajectories:** download them, run",
-        "   `polyzymd study locate DOWNLOAD_DIR --verify --study <study>` for each study, then",
-        "   `polyzymd analyze --project .`."
-        if project
-        else "   `polyzymd study locate DOWNLOAD_DIR --verify`, then `polyzymd analyze --study study.yaml`.",
+        "2. **Analyses, from the trajectories:** download them. DOWNLOAD_DIR is the folder that holds",
+        (
+            "   the condition folders of one study. For each study, run\n"
+            "   `polyzymd study locate DOWNLOAD_DIR --verify --study <study>`, then\n"
+            "   `polyzymd analyze --project .`. If you downloaded the trajectories of one study\n"
+            "   only, run `polyzymd analyze --study <study>` instead."
+            if project
+            else "   the condition folders. Run `polyzymd study locate DOWNLOAD_DIR --verify`, then\n"
+            "   `polyzymd analyze --study study.yaml`."
+        ),
         "3. **Simulations:** build and run each `conditions/<name>/config.yaml` with PolyzyMD;",
         "   the replicate number seeds each replicate's starting structure (Packmol and",
         "   polymer draws), initial velocities and thermostat noise. On other hardware",

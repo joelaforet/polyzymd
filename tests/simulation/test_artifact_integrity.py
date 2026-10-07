@@ -242,3 +242,38 @@ def test_validation_reads_an_artifact_replaced_with_the_same_size_and_time(tmp_p
     # Staging files are deleted after the build, so their hashes are not cached.
     cached = [json.loads(p.read_text())["path"] for p in cache_dir().glob("*.json")]
     assert not any(".build-bundle-" in path for path in cached)
+
+
+def test_gromacs_build_manifest_records_the_exported_inputs(tmp_path):
+    """A GROMACS build writes build_manifest.json beside the replicate, as an OpenMM build does."""
+    from polyzymd.analyses.shared.file_hashes import file_sha256
+    from polyzymd.simulation.artifact_integrity import write_gromacs_build_manifest
+
+    gromacs = tmp_path / "gromacs"
+    gromacs.mkdir()
+    (tmp_path / "solvated_system.pdb").write_text("pdb")
+    (gromacs / "system.gro").write_text("gro")
+    (gromacs / "system.top").write_text('#include "system_MOL0.itp"\n')
+    (gromacs / "system_MOL0.itp").write_text("itp")
+    (gromacs / "prod.mdp").write_text("ld_seed = 7\n")
+    (gromacs / "backup.top").write_text("not an input")
+
+    write_gromacs_build_manifest(tmp_path, gromacs, _Config(), 3, {"packmol_seed": 1})
+
+    manifest = json.loads((tmp_path / MANIFEST_NAME).read_text())
+    assert manifest["config_hash"] == config_hash(_Config())
+    assert manifest["particle_count"] == 3
+    assert manifest["openmm_version"] is None
+    assert manifest["polyzymd_version"]
+    assert manifest["provenance"] == {"packmol_seed": 1}
+    assert sorted(manifest["artifacts"]) == [
+        "gromacs/prod.mdp",
+        "gromacs/system.gro",
+        "gromacs/system.top",
+        "gromacs/system_MOL0.itp",
+        "solvated_system.pdb",
+    ]
+    assert manifest["artifacts"]["gromacs/system.gro"] == {
+        "path": "gromacs/system.gro",
+        "sha256": file_sha256(gromacs / "system.gro", use_cache=False),
+    }

@@ -1053,3 +1053,89 @@ def test_openmm_barostat_moves_are_seeded() -> None:
     runner._add_barostat(phase="production:2")
     (barostat,) = runner._system.getForces()
     assert barostat.getRandomNumberSeed() == dynamics_seed(4, "barostat:production:2")
+
+
+def _one_atom_runner(working_dir, replicate):
+    """Return a Reference-platform runner of one atom in a periodic box."""
+    from openmm import NonbondedForce, System, Vec3, unit
+    from openmm.app import Element, Topology
+
+    from polyzymd.simulation.runner import SimulationRunner
+
+    topology = Topology()
+    residue = topology.addResidue("MOL", topology.addChain("A"))
+    topology.addAtom("C", Element.getBySymbol("C"), residue)
+    system = System()
+    system.addParticle(12.0 * unit.dalton)
+    system.setDefaultPeriodicBoxVectors(
+        Vec3(2.0, 0.0, 0.0), Vec3(0.0, 2.0, 0.0), Vec3(0.0, 0.0, 2.0)
+    )
+    nonbonded = NonbondedForce()
+    nonbonded.setNonbondedMethod(NonbondedForce.CutoffPeriodic)
+    nonbonded.setCutoffDistance(0.9 * unit.nanometer)
+    nonbonded.addParticle(0.0, 0.3, 0.1)
+    system.addForce(nonbonded)
+    return SimulationRunner(
+        topology=topology,
+        system=system,
+        positions=[Vec3(0.0, 0.0, 0.0)] * unit.nanometer,
+        working_dir=working_dir,
+        platform="Reference",
+        replicate=replicate,
+    )
+
+
+def test_equilibration_stage_result_records_its_times_and_seeds(tmp_path):
+    """A stage reports when it started and finished and the seeds it drew."""
+    pytest.importorskip("openmm")
+    from polyzymd.config.schema import EquilibrationStageConfig
+    from polyzymd.simulation.seeds import dynamics_seed
+
+    class EmptyResolver:
+        @staticmethod
+        def resolve(_group):
+            return []
+
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    stage = EquilibrationStageConfig(
+        name="npt", ensemble="NPT", temperature=300.0, duration=0.00001, samples=2
+    )
+    result = runner.run_equilibration_stage(
+        stage=stage,
+        reference_positions=runner._current_positions,
+        atom_group_resolver=EmptyResolver(),
+        stage_index=0,
+    )
+    assert result["started_at"] <= result["finished_at"]
+    assert result["seeds"] == {
+        "integrator": dynamics_seed(3, "equilibration:0:0"),
+        "barostat": dynamics_seed(3, "barostat:equilibration:0:0"),
+        "velocities": dynamics_seed(3, "velocities:equilibration:0"),
+    }
+
+
+def test_production_segment_records_its_seeds(tmp_path):
+    """progress.json holds the integrator, barostat and velocity seeds of a production segment."""
+    pytest.importorskip("openmm")
+    from polyzymd.simulation.progress import load_or_scan_progress, load_progress, save_progress
+    from polyzymd.simulation.seeds import dynamics_seed
+
+    save_progress(
+        tmp_path, load_or_scan_progress(tmp_path, total_steps=10, total_samples=2, timestep_fs=1.0)
+    )
+    _one_atom_runner(tmp_path, replicate=3).run_production(
+        temperature=300.0,
+        duration_ns=1e-5,
+        num_samples=2,
+        timestep_fs=1.0,
+        segment_index=0,
+        report_interval=5,
+        checkpoint_interval_s=3600.0,
+    )
+    (segment,) = load_progress(tmp_path).segments
+    assert segment.seeds == {
+        "integrator": dynamics_seed(3, "production:0"),
+        "barostat": dynamics_seed(3, "barostat:production:0"),
+        "velocities": dynamics_seed(3, "velocities:production"),
+    }
+    assert segment.started_at <= segment.finished_at

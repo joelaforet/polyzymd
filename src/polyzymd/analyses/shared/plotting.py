@@ -199,9 +199,9 @@ def _matplotlib_colormap_colors(colormap_name: str, n: int) -> list:
     list
         RGBA colors sampled across the colormap range.
     """
-    import matplotlib.pyplot as plt
+    import matplotlib
 
-    cmap = plt.colormaps[colormap_name]
+    cmap = matplotlib.colormaps[colormap_name]
     return [cmap(i / max(1, n - 1)) for i in range(n)]
 
 
@@ -420,10 +420,10 @@ def _resolve_explicit_value_color(
 
 def _get_colormap(colormap_name: str, label: str) -> Any | None:
     """Return a matplotlib colormap or warn and return ``None``."""
-    import matplotlib.pyplot as plt
+    import matplotlib
 
     try:
-        return plt.colormaps[colormap_name]
+        return matplotlib.colormaps[colormap_name]
     except (KeyError, ValueError):
         logger.warning(
             "Semantic color colormap %r for condition %r is invalid. Falling back.",

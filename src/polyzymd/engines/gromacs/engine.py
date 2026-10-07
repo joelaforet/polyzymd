@@ -169,6 +169,15 @@ class GromacsEngine(SimulationEngine):
                 prefix=prefix,
                 gmx_command=self._gmx_binary,
             )
+            from polyzymd.simulation.artifact_integrity import write_gromacs_build_manifest
+
+            write_gromacs_build_manifest(
+                request.working_dir.parent,
+                request.working_dir,
+                self._config,
+                interchange.topology.n_atoms,
+                builder.build_provenance,
+            )
 
         eq_mdps = sorted(path.name for path in request.working_dir.glob("eq_*.mdp"))
         if inputs_exist and not eq_mdps:

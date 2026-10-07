@@ -86,7 +86,8 @@ pixi shell -e sim-cuda-12-6
 After `pixi shell`, the `polyzymd` command is on PATH and works normally.
 
 PolyzyMD v1.3 intentionally splits environments by workflow. Use `build` to
-prepare systems, use `sim-cuda-*` only on GPU nodes to execute simulations, and
+prepare systems, use `sim-cuda-*` only to run simulations on an NVIDIA GPU (a
+cluster node or this machine, after `polyzymd build` in `build`), and
 use `analysis` to compare trajectories and make plots. The same project files,
 prepared systems, checkpoints, and trajectories move between these environments.
 This split preserves CUDA 12.4 cluster support while keeping package and
