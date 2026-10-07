@@ -1,4 +1,4 @@
-"""``polyzymd project``: the studies of one paper, one per protein."""
+"""``polyzymd project``: the studies of one paper."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ EXIT_PROJECT_ERROR = 2
 
 @click.group("project")
 def project_group() -> None:
-    """Work with a project folder: one paper's studies, one study per protein.
+    """Work with a project folder: the studies of one paper.
 
     See https://polyzymd.readthedocs.io/en/latest/explanation/projects.html.
     """
@@ -79,12 +79,12 @@ def _fail(exc: Exception) -> None:
     "studies",
     multiple=True,
     required=True,
-    help="Label of a study of the project, one per protein; also its folder name. Repeatable.",
+    help="Label of a study of the project; also its folder name. Repeatable.",
 )
 @click.option("--holder", default=None, help="Copyright holder for the licence files.")
 @click.option("--no-git", is_flag=True, help="Do not make the project a git repository.")
 def init_command(path: Path, studies: tuple[str, ...], holder: str | None, no_git: bool) -> None:
-    """Create a project folder at PATH: project.yaml and one empty study per protein.
+    """Create a project folder at PATH: project.yaml and one empty study per --study.
 
     Writes project.yaml listing the studies, analyses/, stats/, figures/,
     licences and a README, and one study folder per --study with a

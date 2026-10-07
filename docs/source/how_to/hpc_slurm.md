@@ -194,21 +194,16 @@ as `--resume`. The job script also stops when the job environment sets
 `POLYZYMD_STOP_CHAIN=1`. `POLYZYMD_STOP_FILE=<path>` moves the marker to
 another path.
 
-A chain uses the job script that `submit` wrote. A script written by a
-PolyzyMD version without `polyzymd cancel` does not check for `STOP`. Stop
-such a chain with `scancel --batch --signal=KILL <job_id>`.
-
-:::{important}
-GROMACS chains do not check for `STOP`. On `SIGTERM` the GROMACS script
-submits a successor, so `polyzymd cancel` does not stop a GROMACS chain. To
-stop one, send `SIGKILL`, which the script cannot trap:
+A chain uses the job script that `submit` wrote, and OpenMM and GROMACS job
+scripts both check for `STOP`. A GROMACS script written by PolyzyMD 1.2 or
+older, and an OpenMM script written before `polyzymd cancel` existed, do
+not. Stop such a chain with `SIGKILL`, which the script cannot trap:
 
 ```bash
 scancel --batch --signal=KILL <job_id>
 ```
 
 Then cancel any successor that is already queued (`squeue -u $USER`).
-:::
 
 ## Build integrity and recovery
 

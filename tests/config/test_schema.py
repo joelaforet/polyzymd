@@ -1,5 +1,6 @@
 """Test that all public modules can be imported."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -1088,3 +1089,45 @@ def test_checkpoint_interval_has_a_default_and_unknown_keys_are_refused(tmp_path
     path.write_text(yaml.safe_dump(data))
     with pytest.raises(ValidationError, match="bananas"):
         SimulationConfig.from_yaml(path)
+
+
+_CYSTINE_TEMPLATES = (
+    Path(__file__).resolve().parents[2]
+    / "examples"
+    / "pdb_preparation"
+    / "4cha"
+    / "nterminal_cystine_substructure.json"
+)
+
+
+def _config_with_templates(tmp_path: Path, templates):
+    """Load a config whose enzyme.custom_substructures_path is templates.json beside it."""
+    import shutil
+
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    if isinstance(templates, Path):
+        shutil.copy(templates, tmp_path / "c" / "templates.json")
+    else:
+        (tmp_path / "c" / "templates.json").write_text(templates)
+    data = yaml.safe_load(path.read_text())
+    data["enzyme"]["custom_substructures_path"] = "templates.json"
+    path.write_text(yaml.safe_dump(data))
+    return SimulationConfig.from_yaml(path)
+
+
+class TestCustomSubstructures:
+    def test_the_config_takes_the_file_relative_to_itself(self, tmp_path: Path) -> None:
+        """enzyme.custom_substructures_path resolves against the config's folder, like pdb_path."""
+        config = _config_with_templates(tmp_path, _CYSTINE_TEMPLATES)
+        assert config.enzyme.custom_substructures_path == (tmp_path / "c" / "templates.json").resolve()
+
+    def test_a_file_of_another_shape_is_refused(self, tmp_path: Path) -> None:
+        """A templates file that does not map residue names to SMARTS and atom names is refused."""
+        with pytest.raises(ValidationError, match="must map each residue name"):
+            _config_with_templates(tmp_path, json.dumps({"NCYX": ["N", "CA"]}))

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/joelaforet/polyzymd/schemas/study-1.schema.json",
   "title": "PolyzyMD study.yaml",
-  "description": "The analysis protocol of one PolyzyMD study: one protein (or other system) under its conditions, with its window, structures, regions and analyses. See docs/source/how_to/study_yaml.md and docs/source/explanation/projects.md.",
+  "description": "The analysis protocol of one PolyzyMD study: a set of conditions compared with each other in one analysis frame (one residue numbering, its structures and regions, one equilibration window and the control, the first condition), with its analyses. See docs/source/how_to/study_yaml.md and docs/source/explanation/projects.md.",
   "type": "object",
   "required": [
     "equilibration",
@@ -12,7 +12,7 @@
   "properties": {
     "description": {
       "type": "string",
-      "description": "What the study simulates, such as the protein and temperature."
+      "description": "What the study simulates, such as the protein and what its conditions vary."
     },
     "equilibration": {
       "type": "string",

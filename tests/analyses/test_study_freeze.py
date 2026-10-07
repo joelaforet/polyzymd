@@ -471,3 +471,49 @@ def test_identical_warnings_for_several_conditions_are_one_line() -> None:
         "metadata.doi is not set",
         "A replicate 1: odd",
     ]
+
+
+def test_freeze_deposits_only_names_polyzymd_chooses(tmp_path: Path) -> None:
+    """Stray files in a study are neither hashed nor published, and freeze says so."""
+    from polyzymd.analyses.study_freeze import _listed_files, left_out_files
+
+    root = tmp_path / "study"
+    for name in (
+        "study.yaml",
+        "README.md",
+        "analyses/f.py",
+        "analyses/data/t.csv",
+        "conditions/A/config.yaml",
+        "conditions/A/enzyme.pdb",
+        "structures/crystal.pdb",
+        "results/rg/A/replicate_1/record.json",
+        "notes.txt",
+        "scratch/copy.xtc",
+        "scratch/more.xtc",
+    ):
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text("x")
+    assert _listed_files(root, None) == [
+        "README.md",
+        "analyses/data/t.csv",
+        "analyses/f.py",
+        "conditions/A/config.yaml",
+        "conditions/A/enzyme.pdb",
+        "results/rg/A/replicate_1/record.json",
+        "structures/crystal.pdb",
+        "study.yaml",
+    ]
+    message = left_out_files(root, None)
+    assert message.startswith("not deposited: notes.txt, scratch/.")
+
+
+def test_a_project_applies_the_deposit_rule_inside_each_study(tmp_path: Path) -> None:
+    """In a project, each study's stray files are left out as in a lone study."""
+    from polyzymd.analyses.study_freeze import _listed_files, left_out_files
+
+    root = tmp_path / "paper"
+    for name in ("project.yaml", "stats/plan.py", "lipa/study.yaml", "lipa/notes.docx", "todo.md"):
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text("x")
+    assert _listed_files(root, None) == ["lipa/study.yaml", "project.yaml", "stats/plan.py"]
+    assert left_out_files(root, None).startswith("not deposited: lipa/notes.docx, todo.md.")

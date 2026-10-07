@@ -36,6 +36,7 @@ enzyme:
 |-------|------|----------|-------------|
 | `name` | string | Yes | Short identifier for the enzyme |
 | `pdb_path` | path | Yes | Path to prepared PDB file |
+| `custom_substructures_path` | path | No | JSON file of residue templates for residues that OpenFF does not know, such as an N-terminal cystine. See {doc}`openff_pdb_ingestion` |
 | `description` | string | No | Human-readable description |
 
 ---
@@ -847,6 +848,7 @@ gromacs:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `gmx_binary` | `str \| null` | `null` | GROMACS binary path or name. When null, resolved via `$GMX_BIN` environment variable or PATH discovery. |
+| `analysis_topology` | `str \| null` | `null` | File name of the run's `.top` in the run folder. Analyses read it when MDAnalysis cannot read `prod.tpr`, and freeze deposits it with the files it includes. When null, PolyzyMD uses `<prefix>.top`, the file it writes, so another `.top` in the folder does not matter. |
 | `mdrun_flags` | `str` | `""` | Extra flags passed to `gmx mdrun` for all stages. |
 | `mdrun_flags_equilibration` | `str \| null` | `null` | Override `mdrun_flags` for equilibration stages only. Falls back to `mdrun_flags` when null. |
 | `mdrun_flags_production` | `str \| null` | `null` | Override `mdrun_flags` for production only. Falls back to `mdrun_flags` when null. |

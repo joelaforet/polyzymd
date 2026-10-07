@@ -4,7 +4,8 @@ A study folder can be a git repository (``polyzymd study init`` makes one).
 :func:`git_state` reads its commit and the files that differ from it, so a
 report says which version of the study produced it. Stored results are
 reused by content, never by commit, so committing changes nothing that is
-stored, and uncommitted changes give a warning, never a refusal.
+stored, and uncommitted changes give an analysis run a warning, never a
+refusal. ``freeze`` refuses them (:mod:`polyzymd.analyses.study_freeze`).
 """
 
 from __future__ import annotations

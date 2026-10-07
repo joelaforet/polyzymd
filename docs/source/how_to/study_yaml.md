@@ -1,14 +1,17 @@
 # Run a study from `study.yaml`
 
-A {term}`study` is one protein (or other system) under its conditions.
+A {term}`study` is a set of conditions that you compare with each other.
+All its conditions share one analysis frame: the same residue numbering,
+reference structures, named regions, equilibration window and control.
 `study.yaml` holds the analysis protocol of the study: the conditions, the
 equilibration window and the settings of each analysis. The simulation of
 each condition stays in its own `config.yaml`.
 
 Use `study.yaml` when you analyze a study again and again, or when someone
-else must reproduce it. To analyze several proteins the same way, put one
-study per protein in a {doc}`project <project>`. For the design of study
-folders and how they are published, see {doc}`../explanation/study_folders`.
+else must reproduce it. To analyze several studies the same way, such as one
+study for each protein, put them in a {doc}`project <project>`. For the
+design of study folders and how they are published, see
+{doc}`../explanation/study_folders`.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -266,25 +269,28 @@ keeps the time axis for you.
 
 ### When stored results are recomputed
 
-The stored results of a function depend on every file in the folder of the
-function, not only on the function. A change to any of these recomputes the
-results at the next analysis:
+The stored results of a function depend on the function and on these files
+in the folder of the function, in subfolders too. A change to any of them
+recomputes the results at the next analysis:
 
-- a helper in the same file;
-- a helper module or package that the file imports from that folder;
-- a data file that the function reads in that folder.
+- every Python file: the file of the function, and a helper module or
+  package that the file imports from that folder;
+- every file in a `data/` folder beside the function file, such as
+  `analyses/data/reference_distances.csv`. Put each data file that a
+  function reads there.
 
-These files do not count:
-
-- hidden files and folders (`.git`, `.pixi`, `.venv`);
-- `results/`, `logs/`, `deposit/`, `conditions/`, `figures/` and job folders;
-- the folders of other studies;
-- `data.local.yaml` and the files that freeze writes.
+No other file counts. Notes, figures, PDFs or a copied trajectory in
+`analyses/` change no result, and PolyzyMD reads none of them. The analysis
+log names the files that it leaves out, so a data file outside `data/` is
+easy to find. Hidden folders (`.git`, `.pixi`, `.venv`), `results/`,
+`logs/`, `deposit/`, `conditions/`, `figures/`, job folders and the folders
+of other studies never count.
 
 A function file beside `study.yaml` or `project.yaml` depends only on the
-Python files in that folder. So keep the data files that a function reads in
-`analyses/`, or pass them as arguments. PolyzyMD compiles the files from
-their current text each time, never from a cached `.pyc`.
+Python files of that folder, because a `data/` folder there can hold
+trajectories. Keep the data files of such a function in `analyses/data/`, or
+pass them as arguments. PolyzyMD compiles the files from their current text
+each time, never from a cached `.pyc`.
 
 `polyzymd study check` imports each listed function. So it reports a broken
 file before it reads any trajectory.
@@ -341,4 +347,4 @@ trajectories are present, the conditions load as usual
 | The settings of a run | `study.settings("rg")` |
 | A file of the study, from a relative path in its settings | `study.path(study.settings("rmsf")["reference_file"])`. `study.root` is the folder |
 | The Python code of the study, as the analyses import it | `study.module("interface")` for `analyses/interface.py` (also looked up in the project folder) |
-| Several proteins | `pz.Project("Paper_1")`, with the same `results` and `replicate_table`, and a `study` column |
+| Several studies | `pz.Project("Paper_1")`, with the same `results` and `replicate_table`, and a `study` column |

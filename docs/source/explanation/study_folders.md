@@ -1,7 +1,9 @@
 # Study folders: publishing a reproducible MD study
 
-A {term}`study` folder holds one MD study: one protein (or other system)
-under its conditions. It contains these items:
+A {term}`study` folder holds one MD study: a set of conditions that you
+compare with each other, in one analysis frame. For what the frame is and
+which conditions share it, see {doc}`projects`. The folder contains these
+items:
 
 - the simulation config of each condition;
 - the analysis protocol, `study.yaml`;

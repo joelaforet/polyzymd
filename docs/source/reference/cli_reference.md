@@ -830,8 +830,8 @@ polyzymd clean-pdb -i <input.pdb> [-o <output.pdb>] [--ph 7.4]
 - The command does not remove waters or other molecules, does not select one
   copy of a protein, does not set chain IDs, and does not add missing residues
   or heavy atoms. See {doc}`../tutorials/prepare_pdb_for_openff`.
-- PDBFixer places the hydrogens with OpenMM, on the fastest platform. If the
-  command stops with a CUDA error, run it with `OPENMM_DEFAULT_PLATFORM=CPU`.
+- PDBFixer places the hydrogens with OpenMM on the CPU platform. To use
+  another platform, set `OPENMM_DEFAULT_PLATFORM`, for example to `CUDA`.
 - Run it in the `build` environment, which holds PDBFixer.
 
 ---
@@ -1053,7 +1053,7 @@ polyzymd analyze rg -c A/config.yaml -c B/config.yaml --set selection='protein a
 
 ## polyzymd project
 
-Commands on a project folder: one paper's studies, one per protein; see
+Commands on a project folder: the studies of one paper; see
 {doc}`../how_to/project` and {doc}`../explanation/projects`.
 
 ### polyzymd project check
@@ -1273,7 +1273,7 @@ stderr and exit 2:
   and `.claude/skills/polyzymd-analyze/SKILL.md`, the skill to point an agent at.
 - `polyzymd new-analysis ...` says to write a function of an MDAnalysis
   `Universe` and run it with `Study.per_replicate` or `Study.timeseries`, and
-  prints the address of {doc}`../explanation/analysis_api` and the same skill.
+  prints the address of {doc}`../how_to/study_api` and the same skill.
 
 ---
 

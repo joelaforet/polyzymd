@@ -42,10 +42,63 @@ def tpr_unsupported(error: BaseException) -> bool:
     return isinstance(error, ValueError) and isinstance(error.__context__, NotImplementedError)
 
 
-def gromacs_topology_file(directory: str | Path) -> Path:
+def system_prefix(config: Any) -> str:
+    """Return the prefix of the files PolyzyMD writes for ``config``'s GROMACS run.
+
+    The enzyme name, then the polymer type prefix when polymers are enabled,
+    joined with ``_``; ``"system"`` when there is neither.
+    """
+    parts: list[str] = []
+    enzyme_name = getattr(getattr(config, "enzyme", None), "name", None)
+    if isinstance(enzyme_name, str) and enzyme_name:
+        parts.append(enzyme_name)
+    polymers = getattr(config, "polymers", None)
+    polymer_prefix = getattr(polymers, "type_prefix", None)
+    if getattr(polymers, "enabled", False) is True and isinstance(polymer_prefix, str):
+        parts.append(polymer_prefix)
+    return "_".join(parts) if parts else "system"
+
+
+def topology_name(config: Any) -> str:
+    """Return the file name of the run's ``.top``: ``gromacs.analysis_topology``, or ``<prefix>.top``."""
+    chosen = getattr(getattr(config, "gromacs", None), "analysis_topology", None)
+    return chosen if isinstance(chosen, str) and chosen else f"{system_prefix(config)}.top"
+
+
+def run_input_files(working_dir: str | Path, config: Any) -> list[Path]:
+    """Return the GROMACS input files of a run that exist, by the names PolyzyMD writes.
+
+    ``prod.tpr``, ``em.mdp``, each ``eq_NN_<stage>.mdp``, ``prod.mdp``, the
+    topology of :func:`topology_name` and every file it includes with
+    ``#include "..."`` that resolves in ``working_dir``. Other files in the
+    folder, such as a backup ``.top``, are never returned.
+    """
+    folder = Path(working_dir)
+    stages = getattr(getattr(config, "simulation_phases", None), "equilibration_stages", None)
+    names = ["prod.tpr", "em.mdp"]
+    names += [f"eq_{i:02d}_{stage.name}.mdp" for i, stage in enumerate(stages or [], start=1)]
+    names.append("prod.mdp")
+    files = [folder / name for name in names if (folder / name).is_file()]
+    pending = [folder / topology_name(config)]
+    while pending:
+        path = pending.pop(0)
+        if path in files or not path.is_file():
+            continue
+        files.append(path)
+        for line in path.read_text(errors="replace").splitlines():
+            include = _INCLUDE.match(line)
+            if include:
+                pending.append(path.parent / include.group(1))
+    return files
+
+
+def gromacs_topology_file(directory: str | Path, name: str | None = None) -> Path:
     """Return the GROMACS topology (``.top``) in ``directory``.
 
-    PolyzyMD writes one, ``<system prefix>.top``, beside ``prod.tpr``.
+    PolyzyMD writes one, ``<system prefix>.top``, beside ``prod.tpr``. With
+    ``name`` (from :func:`topology_name`), that file is used when it exists,
+    so another ``.top`` in the folder does not matter. Without it, or when it
+    is missing, the folder must hold exactly one ``.top``.
 
     Raises
     ------
@@ -54,6 +107,8 @@ def gromacs_topology_file(directory: str | Path) -> Path:
     """
     from polyzymd.analyses.exceptions import ProtocolError
 
+    if name and (Path(directory) / name).is_file():
+        return Path(directory) / name
     candidates = sorted(Path(directory).glob("*.top"))
     if len(candidates) == 1:
         return candidates[0]
@@ -63,6 +118,7 @@ def gromacs_topology_file(directory: str | Path) -> Path:
         f"the run's GROMACS topology instead, but {Path(directory)} needs exactly one "
         f".top file (found: {found}).",
         hint="Keep the <prefix>.top and its .itp files that PolyzyMD wrote beside prod.tpr, "
+        "set gromacs.analysis_topology in the config to the .top to use, "
         "or compile prod.tpr with a GROMACS version this MDAnalysis reads.",
     )
 

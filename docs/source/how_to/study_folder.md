@@ -1,8 +1,10 @@
 # Create a study folder
 
-A {term}`study` folder holds one protein (or other system) under its
-conditions. It holds the config of each condition, the analysis protocol,
-your analysis and figure code, and the stored results. You can version it,
+A {term}`study` folder holds a set of conditions that you compare with each
+other. All its conditions share one residue numbering, one set of reference
+structures and regions, one equilibration window and one control. The folder
+holds the config of each condition, the analysis protocol, your analysis and
+figure code, and the stored results. You can version it,
 share it and publish it. To write `study.yaml` and run the analyses, see
 {doc}`study_yaml`. For the reasons behind the layout, see
 {doc}`../explanation/study_folders`.

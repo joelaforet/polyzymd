@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -801,7 +802,7 @@ def build(
                     phase="build",
                 )
                 colored_echo(
-                    "or 'polyzymd run-segment' to run a single segment locally.",
+                    "or 'polyzymd run' to run it on this machine.",
                     phase="build",
                 )
             build_lock.__exit__(None, None, None)
@@ -1053,6 +1054,7 @@ def run(
                 _run_openmm_impl(
                     sim_config=sim_config,
                     replicate=rep,
+                    config_path=str(Path(config).resolve()),
                 )
 
             succeeded += 1
@@ -1193,6 +1195,7 @@ def _run_gromacs_impl(
 def _run_openmm_impl(
     sim_config: "SimulationConfig",
     replicate: int,
+    config_path: str = "",
 ) -> None:
     """Build and run a full local OpenMM simulation.
 
@@ -1202,13 +1205,34 @@ def _run_openmm_impl(
         Validated simulation configuration.
     replicate : int
         Replicate number.
+    config_path : str
+        The config file, recorded in ``progress.json``.
     """
-    from polyzymd.simulation.progress import calculate_report_interval
+    from polyzymd.simulation.progress import (
+        calculate_report_interval,
+        load_or_scan_progress,
+        save_progress,
+    )
 
     production = sim_config.simulation_phases.production
     working_dir = sim_config.get_working_directory(replicate)
     total_steps = int(production.duration * 1e6 / production.time_step)
     report_interval = calculate_report_interval(total_steps, production.samples)
+
+    # progress.json records each stage and segment, and the trajectory hash of
+    # each finished segment, as a run under SLURM does.
+    working_dir.mkdir(parents=True, exist_ok=True)
+    save_progress(
+        working_dir,
+        load_or_scan_progress(
+            working_dir=working_dir,
+            config_path=config_path,
+            total_steps=total_steps,
+            total_samples=production.samples,
+            timestep_fs=production.time_step,
+            replicate=replicate,
+        ),
+    )
 
     colored_echo(f"Building and running OpenMM in {working_dir}", phase="simulation")
     _run_initial_segment(
@@ -3330,6 +3354,11 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
         polyzymd clean-pdb -i raw.pdb -o cleaned.pdb --ph 7.0
     """
     warn_if_wrong_pixi_env("clean-pdb", "build")
+
+    # PDBFixer places hydrogens with an OpenMM context on the fastest platform.
+    # A GPU whose driver is older than the CUDA toolkit then fails
+    # (CUDA_ERROR_UNSUPPORTED_PTX_VERSION); the CPU is fast enough for this.
+    os.environ.setdefault("OPENMM_DEFAULT_PLATFORM", "CPU")
 
     from openmm.app import PDBFile
     from pdbfixer import PDBFixer

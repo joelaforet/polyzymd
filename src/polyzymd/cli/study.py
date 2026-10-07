@@ -570,8 +570,9 @@ def freeze_command(path: Path, tag: str | None) -> None:
     md_checklist.yaml, system_summary.csv, CITATION.cff and .zenodo.json;
     commits those and results/, tags the commit, and lays out deposit/ for
     upload, with deposit/UPLOAD.md saying how to publish it on Zenodo; PolyzyMD
-    uploads and publishes nothing. Every gap is a warning, never a refusal.
-    Refreeze after filling a gap, such as the study's or paper's DOI.
+    uploads and publishes nothing. Freeze refuses while the study's input files
+    have uncommitted changes, so the deposit matches a commit; every other gap,
+    such as a missing DOI, is a warning. Refreeze after filling a gap.
     """
     _study_logging(path, "study-freeze")
     from polyzymd.analyses.exceptions import ProtocolError

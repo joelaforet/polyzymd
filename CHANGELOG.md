@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`enzyme.custom_substructures_path`.**  A JSON file of residue templates for residues OpenFF's template matcher does not know, such as the N-terminal cystine of 4CHA. The path is relative to the config, checked for shape on load, passed to `Topology.from_pdb(_custom_substructures=...)`, and part of the config hash. The docs described this key before any code read it.
+
 - **Seeded dynamics.**  The replicate number now seeds the initial velocities and the thermostat noise, on both engines. Each equilibration stage and production segment gets its own seed from `polyzymd.simulation.seeds.dynamics_seed(replicate, phase)`, so no stage repeats another's noise. OpenMM sets `integrator.setRandomNumberSeed` and `setVelocitiesToTemperature(T, seed)`; GROMACS MDP files get `gen_seed` and `ld_seed`. A replicate run again gives the same trajectory only on the same platform, precision and software versions.
 
 - **Systems without polymers.**
@@ -133,6 +135,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `--resume` removes the marker.
 
 ### Fixed
+
+- **Stray files in study and project folders.** PolyzyMD reads, hashes and deposits only files whose names it chooses in advance:
+  - A function's stored results depend on the Python files of its folder and the files of `data/` beside it. Notes, figures or a copied trajectory in `analyses/` recompute nothing; the analysis log names the files it leaves out.
+  - `freeze` deposits only `study.yaml`, `project.yaml`, `README*`, `LICENSE*`, the files it writes, and the folders `study init` and `project init` make (`conditions/`, `structures/`, `analyses/`, `stats/`, `figures/`, `results/`, `environment/`), with or without git, and prints one `not deposited:` warning for the rest.
+  - GROMACS runs use `<prefix>.top`, the files it includes, `prod.tpr` and PolyzyMD's `.mdp` names, so a `backup.top` neither stops an analysis nor is deposited. `gromacs.analysis_topology` names another `.top`.
+
+- **Hydrogen placement, local runs, GROMACS cancellation and help text.**
+  - `polyzymd clean-pdb` places hydrogens on the CPU platform, so a GPU with an older driver no longer stops it with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`. Set `OPENMM_DEFAULT_PLATFORM` to choose another platform.
+  - A local `polyzymd run` with OpenMM writes `progress.json`, so it records each segment and its trajectory hash, as a SLURM run does.
+  - `polyzymd cancel` stops GROMACS chains: the GROMACS job script checks the `STOP` file at start and before each resubmission.
+  - The `study freeze` help says that freeze refuses uncommitted inputs. The build message names `polyzymd run`, and the "write a function" hint links to the study API how-to.
 
 - **Console and messages.**
   - The uncommitted-inputs warning prints once per command, with a count and the first five files.

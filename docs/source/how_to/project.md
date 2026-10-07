@@ -1,9 +1,9 @@
-# Analyze several proteins as one project
+# Analyze several studies as one project
 
-A {term}`project` is one paper. It holds one {term}`study` for each protein or
-system in the paper, and it runs the same analyses with the same settings in
-every study. Use a project when a paper compares two or more proteins, such
-as three lipases under the same polymer conditions. For the reasons behind
+A {term}`project` holds the studies of one paper. It runs the same analyses
+with the same settings in every {term}`study`. Use a project when a paper has
+two or more studies, such as three lipases under the same polymer conditions,
+one study for each lipase. For the reasons behind
 this design, see {doc}`../explanation/projects`.
 
 :::{admonition} Environment Setup
@@ -40,19 +40,26 @@ is not committed, and it names the files.
 
 ## Make the project
 
-A study is tied to its protein. Each protein gets its own study folder and its
-own `study.yaml`. These things depend on the protein:
+A study is a set of conditions that you compare with each other. All its
+conditions share one analysis frame:
 
 - the residue numbering, and so the selections of the core, the active site
   or the lid;
 - the reference structure;
-- the time that the protein needs to equilibrate;
+- the equilibration window;
 - the control. PolyzyMD compares the conditions of a study with the first
   condition of that study. It never compares them with the control of a
-  different protein.
+  different study.
 
-The project holds what the paper asks of every protein: the analyses and
-their settings, written once.
+Conditions that cannot share one frame go in separate studies, each with its
+own folder and `study.yaml`. A different protein is the most common case. A
+study can vary several variables together, such as the temperature and the
+polymer composition.
+
+The project holds what the paper asks of every study: the analyses and their
+settings, written once.
+
+In this example paper, each study is one enzyme at one temperature:
 
 ```
 Paper_1/
@@ -61,11 +68,11 @@ Paper_1/
 ├── stats/              # your statistics scripts
 ├── figures/            # your figure scripts and notebooks
 ├── lipa363/study.yaml  # lipase A at 363 K
-├── calb343/study.yaml
-└── rml333/study.yaml
+├── calb343/study.yaml  # CALB at 343 K
+└── rml333/study.yaml   # RML at 333 K
 ```
 
-Make the project with one `--study` for each protein:
+Make the project with one `--study` for each study:
 
 ```bash
 polyzymd project init Paper_1 --study lipa363 --study calb343 --study rml333
@@ -104,9 +111,9 @@ For each condition, `add-condition` does these steps:
    study's `data.local.yaml`. Git ignores this file.
 4. It adds one line under `conditions:` in `study.yaml`.
 
-## Write the `study.yaml` of each protein
+## Write the `study.yaml` of each study
 
-Name the structures and the residue regions of the protein. The analyses of
+Name the structures and the residue regions of the study. The analyses of
 the project use these names.
 
 ```yaml
@@ -114,13 +121,13 @@ description: Bacillus subtilis lipase A (1ISP) at 363 K
 equilibration: 200ns
 structures:
   reference: structures/1ISP_clean.pdb
-regions:                       # this protein's numbering
+regions:                       # this study's numbering
   core: resid 5-8 15-27 32-37
   catalytic_triad: resid 76 132 155
 conditions:                    # control first
   No polymer: conditions/no_polymer
   SBMA 50%: {config: conditions/sbma_50, factors: {sbma_fraction: 0.5}}
-analyses: {}                   # analyses that only this protein runs
+analyses: {}                   # analyses that only this study runs
 ```
 
 A condition is one of these:
@@ -153,6 +160,26 @@ conditions:
   Urea 4 M: {config: conditions/urea_4m, factors: {urea_M: 4}}
 ```
 
+### Factors of two variables
+
+A study can vary two variables together. This study varies the temperature
+and the polymer. Each condition names both of its coordinates:
+
+```yaml
+conditions:                    # control first
+  No polymer 300 K: {config: conditions/none_300, factors: {temperature_K: 300}}
+  No polymer 330 K: {config: conditions/none_330, factors: {temperature_K: 330}}
+  No polymer 360 K: {config: conditions/none_360, factors: {temperature_K: 360}}
+  SBMA 300 K: {config: conditions/sbma_300, factors: {temperature_K: 300, polymer: SBMA}}
+  SBMA 330 K: {config: conditions/sbma_330, factors: {temperature_K: 330, polymer: SBMA}}
+  SBMA 360 K: {config: conditions/sbma_360, factors: {temperature_K: 360, polymer: SBMA}}
+```
+
+The report compares each condition with the control, `No polymer 300 K`. The
+trend test of `temperature_K` goes through all six condition means. `polymer`
+is text, so it gets no trend test; it is a column of the results table. To
+fit both factors in one model, write a script in `stats/`.
+
 ### Give the control a factor value only when it is on the same axis
 
 - For polymer loading (grams of polymer, or chains per protein), the
@@ -174,7 +201,7 @@ analyses:
     selection: protein and name CA
     alignment_selection: protein and name CA and region core
     reference_file: structure reference
-  lid_opening:                 # only the proteins that have a lid
+  lid_opening:                 # only the studies whose protein has a lid
     function: analyses/lid.py:lid_distance
     kind: timeseries
     studies: [calb343, rml333]
@@ -200,15 +227,15 @@ def lid_distance(lid, core):
 These rules apply to the names in `project.yaml`:
 
 - In a selection, `region <name>` becomes the region of that name in each
-  study. So `rmsf` aligns on the core of each protein.
+  study. So `rmsf` aligns on the core of each study.
 - As a value, `structure <name>` becomes the path of that structure in each
   study.
 - A `function:` path is relative to the file that lists it. In
   `project.yaml`, `analyses/lid.py` is `Paper_1/analyses/lid.py`.
 - If a study does not define a name, the command stops. The message names the
   study.
-- To run an analysis on some proteins only, list them in `studies: [...]`.
-  Put an analysis of one protein only in the `study.yaml` of that protein.
+- To run an analysis in some studies only, list them in `studies: [...]`.
+  Put an analysis of one study only in the `study.yaml` of that study.
 - Records and reports keep the resolved selections. Each result says which
   residues it measured.
 
@@ -219,7 +246,7 @@ polyzymd project check Paper_1                    # which studies run each analy
 polyzymd study check Paper_1/lipa363 --production # the production length of each condition of one study
 polyzymd analyze rmsf --project Paper_1           # every study that runs rmsf, one after another
 polyzymd analyze --project Paper_1                # every analysis of every study
-polyzymd analyze rmsf --study Paper_1/lipa363     # one protein
+polyzymd analyze rmsf --study Paper_1/lipa363     # one study
 ```
 
 `project check` reads no trajectory. `study check --production` reads the
@@ -230,7 +257,7 @@ choose the equilibration window.
 study go to `results/<run>/` in the folder of that study. You can analyze and
 read a study of a project on its own.
 
-## Read the results of every protein
+## Read the results of every study
 
 ```python
 import polyzymd as pz
@@ -238,7 +265,7 @@ import polyzymd as pz
 paper = pz.Project("Paper_1")
 rmsf = paper.results("rmsf")
 rmsf.table          # every study's stored values, with a study column and a column per factor
-rmsf.reports        # each study's report; comparisons stay within one protein
+rmsf.reports        # each study's report; comparisons stay within one study
 ```
 
 `results(run).table` has one row for each stored value. For a `timeseries`
@@ -271,7 +298,7 @@ for study, report in rmsf.reports.items():
 ```
 
 If a study runs the analysis but has no stored results, the call stops and
-names the study. A figure therefore never leaves out a protein without a
+names the study. A figure therefore never leaves out a study without a
 message.
 
 ## Trend tests

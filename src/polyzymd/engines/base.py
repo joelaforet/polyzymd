@@ -47,6 +47,8 @@ class TrajectoryLayout(BaseModel):
     """
 
     topology_path: Path | None = None
+    #: The GROMACS ``.top`` that replaces an unreadable ``prod.tpr``, by the name the run uses.
+    gromacs_topology_path: Path | None = None
     trajectory_paths: list[Path] = Field(default_factory=list)
     trajectory_format: str
     topology_format: str

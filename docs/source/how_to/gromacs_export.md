@@ -685,15 +685,12 @@ SLURM wall-time limit.
 
 ```{note}
 **Stop a GROMACS chain.**
-`scancel <job_id>` sends `SIGTERM`. The GROMACS job script reads it as a
-preemption and submits a successor. GROMACS job scripts do not check the
-`STOP` marker of `polyzymd cancel`, so `polyzymd cancel` does not stop them.
-Send `SIGKILL` to the batch shell, which the script cannot trap:
-
-    scancel --batch --signal=KILL <job_id>
-
-Then cancel any successor that is already queued (`squeue -u $USER`). See
-{ref}`Stop a chain <hpc-slurm-stop-a-chain>` in the SLURM guide.
+Use `polyzymd cancel`, as for OpenMM. `scancel <job_id>` alone sends
+`SIGTERM`, which the job script reads as a preemption: it submits a
+successor. `polyzymd cancel` first writes a `STOP` file in the run folder.
+The job script checks for it at start and before each successor, so the
+chain ends. See {ref}`Stop a chain <hpc-slurm-stop-a-chain>` in the SLURM
+guide.
 ```
 
 ---

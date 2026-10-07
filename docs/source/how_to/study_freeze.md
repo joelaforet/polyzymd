@@ -83,7 +83,21 @@ the freeze. So you can freeze early, and freeze again when you fill the gaps.
    polyzymd hash-trajectories --study lipase_363K
    ```
 
-3. Commit your inputs: `study.yaml`, `conditions/`, `analyses/` and
+3. Put every file that you want to publish in a folder that freeze
+   deposits. Freeze deposits only these names:
+
+   - `study.yaml` (or `project.yaml`), `README*`, `LICENSE*` and the files
+     that freeze writes;
+   - the files under the folders that `study init` and `project init`
+     make: `conditions/`, `structures/`, `analyses/`, `stats/`, `figures/`,
+     `results/` and `environment/`. Reference structures go in
+     `structures/`, and data files that a function reads go in
+     `analyses/data/`.
+
+   Freeze does not deposit other files, such as notes or a copied
+   trajectory, and prints one `not deposited:` warning that names them.
+
+4. Commit your inputs: `study.yaml`, `conditions/`, `analyses/` and
    `figures/`.
 
    ```bash
@@ -91,7 +105,7 @@ the freeze. So you can freeze early, and freeze again when you fill the gaps.
    git -C lipase_363K commit -m "Analyses for the paper"
    ```
 
-4. Set a git user name and email, if git has none:
+5. Set a git user name and email, if git has none:
 
    ```bash
    git config --global user.name "Jane Doe"
