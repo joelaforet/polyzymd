@@ -267,8 +267,8 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
     (named by its config's naming_template), preferring one whose files have the sizes
     manifest.json records, is written to data.local.yaml
     beside study.yaml, which is never committed or published; entries for
-    conditions not found are kept as they were, and those of conditions whose
-    files differ from manifest.json are removed. Runs named alike go to the
+    conditions not found are kept as they were, and an entry naming a folder
+    whose files differ from manifest.json is removed. Runs named alike go to the
     folder named for the condition (no_polymer/), and one folder is never
     written for two conditions. Moving data never changes the study or its
     stored results' config hashes.
@@ -291,7 +291,7 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
 
     located: dict[str, Path] = {}
     missing = []
-    changed = []
+    changed: dict[str, Path] = {}
     configs = {}
     for label, config_path in protocol.conditions.items():
         try:
@@ -347,7 +347,7 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
         # the stored results came from.
         if any(line.startswith("error") for line in checks):
             missing.append(label)
-            changed.append(label)
+            changed[label] = best
         else:
             located[label] = best
     # One folder may hold the runs of several conditions when their runs are
@@ -374,13 +374,22 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
             for label in shared:
                 del located[label]
     target = protocol.root / DATA_FILE
-    written = (yaml.safe_load(target.read_text()) if target.is_file() else None) or {}
-    if located or any(label in written for label in changed):
+    # load_study_file has checked data.local.yaml. An entry is removed only
+    # when it names the folder whose runs differ.
+    stale = [
+        label for label, folder in changed.items() if protocol.data.get(label) == folder.resolve()
+    ]
+    if located or stale:
+        written = (yaml.safe_load(target.read_text()) if target.is_file() else None) or {}
         # Entries this run did not locate are kept as written, hand-written ones
         # included, except those of runs that differ from manifest.json.
         written.update({label: str(folder) for label, folder in located.items()})
-        for label in changed:
+        for label in stale:
             written.pop(label, None)
+            click.echo(
+                f"removed {label} from {target}: its runs under {changed[label]} differ "
+                "from manifest.json"
+            )
         target.write_text(
             "# Where this machine keeps each condition's runs. Written by polyzymd study locate;\n"
             "# never commit or publish it.\n" + yaml.safe_dump(written, sort_keys=False)

@@ -407,6 +407,39 @@ class TestReproduce:
         # The entry the first locate wrote for the changed runs is removed.
         written = yaml.safe_load((copy / "data.local.yaml").read_text())
         assert list(written) == ["No polymer"]
+        assert "removed Polymer from" in located.output
+
+    def test_locate_keeps_an_entry_for_another_folder_when_its_runs_differ(
+        self, study: Path, tmp_path: Path
+    ) -> None:
+        result = freeze(study)
+        copy = shutil.copytree(result.deposit / "study", tmp_path / "reproducer" / "my_study")
+        good = shutil.copytree(tmp_path / "scratch", tmp_path / "good")
+        download = shutil.copytree(tmp_path / "scratch", tmp_path / "download")
+        data = copy / "data.local.yaml"
+        data.write_text(yaml.safe_dump({"Polymer": str(good / condition_folder("Polymer"))}))
+        dcd = next((download / condition_folder("Polymer")).rglob("*.dcd"))
+        dcd.write_bytes(dcd.read_bytes()[:-8] + b"\0" * 8)
+        command = ["study", "locate", str(download), "--study", str(copy), "--verify"]
+        located = CliRunner().invoke(cli, command)
+        assert located.exit_code == 2
+        written = yaml.safe_load(data.read_text())
+        assert written["Polymer"] == str(good / condition_folder("Polymer"))
+        assert "removed" not in located.output
+
+    @pytest.mark.parametrize("text", ["Polymer: [unclosed\n", "- a list\n"])
+    def test_locate_reports_a_malformed_data_file(
+        self, study: Path, tmp_path: Path, text: str
+    ) -> None:
+        result = freeze(study)
+        copy = shutil.copytree(result.deposit / "study", tmp_path / "reproducer" / "my_study")
+        (copy / "data.local.yaml").write_text(text)
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        located = CliRunner().invoke(cli, ["study", "locate", str(empty), "--study", str(copy)])
+        assert located.exit_code == 2
+        assert isinstance(located.exception, SystemExit)
+        assert "error: " in located.output and "data.local.yaml" in located.output
 
     def test_check_reports_metadata_gaps_and_the_next_step(self, study: Path) -> None:
         result = CliRunner().invoke(cli, ["study", "check", str(study)])
