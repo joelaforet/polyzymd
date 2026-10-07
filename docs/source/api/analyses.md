@@ -90,7 +90,7 @@ listed in {doc}`../reference/analysis_functions`, and
 
 ```{eval-rst}
 .. automodule:: polyzymd.analyses.protocols
-   :members: analyze, ProtocolReport, ConditionReport, PairwiseReport, ProtocolProvenance, FUNCTION_ANALYSES
+   :members: analyze, ProtocolReport, ConditionReport, PairwiseReport, ProtocolProvenance, ANALYSES, ShippedAnalysis
    :show-inheritance:
    :no-index:
 ```

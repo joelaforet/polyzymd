@@ -15,7 +15,7 @@ import pytest
 
 from polyzymd.analyses.exceptions import ProtocolError
 from polyzymd.analyses.protocols import (
-    FUNCTION_ANALYSES,
+    ANALYSES,
     VERDICT_LARGER,
     VERDICT_NO_DIFFERENCE,
     VERDICT_NOT_TESTABLE,
@@ -253,7 +253,7 @@ class TestErrors:
 
         assert str(excinfo.value) == "No analysis named 'not_an_analysis'."
         hint = excinfo.value.hint or ""
-        assert hint.startswith(f"Use one of {', '.join(FUNCTION_ANALYSES)}.")
+        assert hint.startswith(f"Use one of {', '.join(ANALYSES)}.")
         assert "Study.timeseries or Study.per_replicate" in hint
         assert "how_to/study_api.html" in hint
 
@@ -261,7 +261,7 @@ class TestErrors:
     def test_names_outside_the_analyses_are_refused_before_any_config_is_read(
         self, name: str, tmp_path: Path
     ) -> None:
-        """No name outside FUNCTION_ANALYSES reaches a config, even a missing one."""
+        """No name outside ANALYSES reaches a config, even a missing one."""
         with pytest.raises(ProtocolError, match="No analysis named"):
             analyze(name, [tmp_path / "missing" / "config.yaml"], stride=5)
 
@@ -294,20 +294,12 @@ class TestErrors:
 
 def test_repeated_pair_labels_are_refused() -> None:
     """Two distance pairs with one label would overwrite each other's values."""
-    from polyzymd.analyses.protocols import _analyze_pairs
+    from polyzymd.analyses.protocols import Request, _measure_distances
 
     pair = {"label": "d", "selection_a": "name C1", "selection_b": "name C2"}
+    settings = {**ANALYSES["distances"].defaults, "pairs": [pair, pair]}
     with pytest.raises(ProtocolError, match="repeat"):
-        _analyze_pairs(
-            "distances",
-            None,
-            {"pairs": [pair, pair]},
-            None,
-            recompute=False,
-            output_dir=None,
-            eq_check=False,
-            plots=False,
-        )
+        _measure_distances(None, settings, Request("distances", None, settings, False, None, False))
 
 
 @pytest.mark.parametrize(

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+from polyzymd.analyses.protocols import ANALYSES
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "quickstart"
 
@@ -89,7 +89,7 @@ def test_the_quickstart_runs_and_analyzes(tmp_path: Path, config: str) -> None:
     (folder / "pairs.yaml").write_text(
         "- {label: termini, selection_a: resid 1 and name CA, selection_b: resid 20 and name CA}\n"
     )
-    for name in FUNCTION_ANALYSES:
+    for name in ANALYSES:
         settings = ("--set", "pairs=pairs.yaml") if name == "distances" else ()
         result = _polyzymd(
             folder, "analyze", name, "--study", "paper/trpcage", "--no-plots", *settings

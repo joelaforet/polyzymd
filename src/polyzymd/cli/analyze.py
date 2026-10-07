@@ -148,10 +148,10 @@ def _analysis_lines(name: str) -> list[str]:
     """Return what the shipped analysis ``name`` measures, then each setting with its default."""
     import json
 
-    from polyzymd.analyses.protocols import ANALYSIS_SUMMARIES, FUNCTION_ANALYSES
+    from polyzymd.analyses.protocols import ANALYSES
 
-    return [f"{name}: {ANALYSIS_SUMMARIES.get(name, '')}"] + [
-        f"  {key}: {json.dumps(default)}" for key, default in FUNCTION_ANALYSES[name].items()
+    return [f"{name}: {ANALYSES[name].summary}"] + [
+        f"  {key}: {json.dumps(default)}" for key, default in ANALYSES[name].defaults.items()
     ]
 
 
@@ -159,10 +159,10 @@ class _AnalyzeCommand(click.Command):
     """``polyzymd analyze``, whose ``NAME --help`` also prints the settings of analysis NAME."""
 
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
-        from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+        from polyzymd.analyses.protocols import ANALYSES
 
         # --help runs before NAME is parsed, so take the name from the raw arguments.
-        ctx.meta["analysis_name"] = next((arg for arg in args if arg in FUNCTION_ANALYSES), None)
+        ctx.meta["analysis_name"] = next((arg for arg in args if arg in ANALYSES), None)
         return super().parse_args(ctx, args)
 
     def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
@@ -179,9 +179,9 @@ class _AnalyzeCommand(click.Command):
 
 def _list_analyses(ctx: click.Context) -> None:
     """Print every shipped analysis with what it measures and its settings, then exit."""
-    from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+    from polyzymd.analyses.protocols import ANALYSES
 
-    for name in FUNCTION_ANALYSES:
+    for name in ANALYSES:
         click.echo("\n".join(_analysis_lines(name)))
     click.echo(
         "Use a name as a study.yaml entry ({name: {setting: value}}) or with "
@@ -1013,7 +1013,7 @@ def _from_study(
     import json
 
     from polyzymd.analyses.exceptions import ProtocolError
-    from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+    from polyzymd.analyses.protocols import ANALYSES
     from polyzymd.analyses.study_file import load_study_file
 
     if configs:
@@ -1034,7 +1034,7 @@ def _from_study(
         conditions = {label: conditions[label] for label in conditions if label in labels}
     entry = protocol.analyses.get(run_name)
     if entry is None:
-        if run_name not in FUNCTION_ANALYSES:
+        if run_name not in ANALYSES:
             raise ProtocolError(
                 f"{protocol.path} lists no analysis run {run_name!r}, and PolyzyMD ships no "
                 "analysis of that name.",
