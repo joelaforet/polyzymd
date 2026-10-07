@@ -827,6 +827,25 @@ class TestRunReusesBuild:
         )
         assert f"Reusing the GROMACS files in {gromacs_dir}" in capsys.readouterr().out
 
+    @patch("polyzymd.exporters.gromacs.GromacsRunner")
+    @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
+    def test_gromacs_run_records_the_polyzymd_version(
+        self, _prefix, gromacs_runner, tmp_path: Path
+    ) -> None:
+        from polyzymd import __version__
+        from polyzymd.cli.main import _run_gromacs_impl
+        from polyzymd.simulation.progress import load_progress
+
+        gromacs_dir = tmp_path / "run_1" / "gromacs"
+        gromacs_dir.mkdir(parents=True)
+        for name in ("sys.top", "sys.gro", "em.mdp", "eq_01_nvt.mdp", "eq_01.gro", "prod.mdp"):
+            (gromacs_dir / name).write_text("")
+
+        _run_gromacs_impl(self._config(tmp_path), replicate=1, gmx_path="gmx")
+
+        (stage,) = load_progress(gromacs_dir).equilibration_stages
+        assert stage.polyzymd_version == __version__
+
 
 class TestCliExceptionHandlingNarrowing:
     """Regression tests for narrowed run/submit exception handling."""

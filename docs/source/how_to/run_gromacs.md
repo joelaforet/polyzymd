@@ -31,6 +31,11 @@ The run calls `gmx` from `PATH`. To use another GROMACS binary, give
 `--gmx-path /path/to/gmx`. To run GROMACS for a config whose `engine` is
 `openmm`, give `--engine gromacs`.
 
+The run calls `gmx mdrun -deffnm <stage> -v` for each stage. It does not read
+the `gromacs:` block of `config.yaml` (`mdrun_flags`, `ntmpi`, `ntomp` and the
+other fields); only [SLURM jobs](#submit-to-a-slurm-cluster) use it. GROMACS
+then chooses its own thread counts and GPU use.
+
 PolyzyMD builds the system, writes the GROMACS files to
 `<replicate folder>/gromacs/` and runs each stage in order. It prints the
 GROMACS output while it runs. If a stage fails, the run stops and keeps the

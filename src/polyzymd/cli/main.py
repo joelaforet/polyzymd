@@ -1234,11 +1234,13 @@ def _run_gromacs_impl(
         runner.run_full_workflow()
 
         from polyzymd.engines import create_engine
+        from polyzymd.engines.gromacs.progress import record_run_provenance
         from polyzymd.simulation.progress import save_progress
 
         engine = create_engine(sim_config, override="gromacs", defer_binary=True)
         progress = engine.load_or_scan_progress(gromacs_dir, replicate)
         progress.config_path = config_path
+        record_run_provenance(progress)
         save_progress(gromacs_dir, progress)
 
         colored_echo("\nGROMACS simulation completed successfully!", phase="export")

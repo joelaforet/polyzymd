@@ -89,6 +89,7 @@ def scan_gromacs_progress(
                 status=segment_status,
                 duration_ns=duration_ns,
                 first_start=True,
+                start_step=0,
             )
         )
 
@@ -158,7 +159,9 @@ def update_gromacs_progress(
         progress = scanned
     else:
         progress = existing
-        progress.equilibration_stages = scanned.equilibration_stages
+        progress.equilibration_stages = _keep_provenance(
+            scanned.equilibration_stages, existing.equilibration_stages
+        )
         if config_path:
             progress.config_path = config_path
         progress.replicate = replicate
@@ -186,6 +189,7 @@ def update_gromacs_progress(
                     steps_requested=max(delta_steps, scanned.total_steps_requested),
                     status=status,
                     duration_ns=(delta_steps * progress.timestep_fs) / 1e6,
+                    start_step=old_steps,
                 )
             )
         elif not progress.segments and new_steps > 0 and scanned.segments:
@@ -201,6 +205,7 @@ def update_gromacs_progress(
                 progress.segments[-1].finished_at or datetime.now(timezone.utc).isoformat()
             )
 
+    record_run_provenance(progress)
     save_progress(working_dir, progress)
     return progress
 
@@ -284,10 +289,14 @@ def _scan_equilibration_gromacs(working_dir: Path) -> list[EquilibrationStageRec
         log = working_dir / f"eq_{idx:02d}.log"
         mdp = next(iter(sorted(working_dir.glob(f"eq_{idx:02d}_*.mdp"))), None)
         started_at, finished_at = _mdrun_times(log, first_start=True)
+        mdp_values = _mdp_values(mdp)
+        steps = int(_parse_gromacs_log(log)["steps_completed"])
         record = EquilibrationStageRecord(
             index=idx - 1,
             name=f"eq_{idx:02d}",
             status=SegmentStatus.COMPLETED,
+            duration_ns=steps * _dt_ps(mdp_values) / 1000.0,
+            ensemble="NVT" if mdp_values.get("pcoupl", "no").lower() == "no" else "NPT",
             finished_at=finished_at or _mtime_iso(path),
             seeds=_seeds(mdp, log),
         )
@@ -347,6 +356,41 @@ def _mdp_values(mdp_path: Path | None) -> dict[str, str]:
     return values
 
 
+def _dt_ps(mdp: dict[str, str]) -> float:
+    """Return the MDP time step in ps; GROMACS uses 0.001 when ``dt`` is not set."""
+    try:
+        return float(mdp.get("dt", "0.001"))
+    except ValueError:
+        return 0.001
+
+
+def _keep_provenance(
+    scanned: list[EquilibrationStageRecord], earlier: list[EquilibrationStageRecord]
+) -> list[EquilibrationStageRecord]:
+    """Give the rescanned stage records the provenance that ``earlier`` recorded for them."""
+    by_index = {record.index: record for record in earlier}
+    for record in scanned:
+        if record.index in by_index:
+            record.polyzymd_version = by_index[record.index].polyzymd_version
+            record.pixi_environment = by_index[record.index].pixi_environment
+    return scanned
+
+
+def record_run_provenance(progress: SimulationProgress) -> None:
+    """Record this process's PolyzyMD version and pixi environment on records without one.
+
+    Only the process that ran mdrun calls this, so a later scan by another
+    version never records itself. ``openmm_version`` stays None.
+    """
+    from polyzymd.utils.version import record_provenance
+
+    found = record_provenance()
+    for record in (*progress.equilibration_stages, *progress.segments):
+        if record.polyzymd_version is None:
+            record.polyzymd_version = found["polyzymd_version"]
+            record.pixi_environment = found["pixi_environment"]
+
+
 def _seeds(mdp_path: Path | None, log_path: Path) -> dict[str, int | None] | None:
     """Return the ``ld_seed`` mdrun used and the ``gen_seed`` of a stage that drew velocities.
 
@@ -370,19 +414,31 @@ def _seeds(mdp_path: Path | None, log_path: Path) -> dict[str, int | None] | Non
     return {name: (None if seed == -1 else seed) for name, seed in seeds.items()} or None
 
 
-def _segment_record(working_dir: Path, first_start: bool = False, **fields) -> SegmentRecord:
+def _segment_record(
+    working_dir: Path, start_step: int, first_start: bool = False, **fields
+) -> SegmentRecord:
     """Return a production ``SegmentRecord`` with the times and seeds of ``prod.log``.
 
+    The segment runs ``fields["steps_completed"]`` steps after ``start_step``.
+    ``samples_written`` counts the ``prod.xtc`` frames of those steps, from
+    ``nstxout-compressed`` in ``prod.mdp``; mdrun also writes step 0.
     ``first_start`` takes the start of the first mdrun of the log, for a
     record that covers every run of it.
     """
     log = working_dir / "prod.log"
+    mdp = working_dir / "prod.mdp"
     started_at, finished_at = _mdrun_times(log, first_start=first_start)
+    interval = _mdp_values(mdp).get("nstxout_compressed", "0")
+    interval = int(interval) if interval.isdigit() else 0
+    end_step = start_step + fields["steps_completed"]
+    samples = 0
+    if interval > 0:
+        samples = end_step // interval - start_step // interval + int(start_step == 0)
     # A run that was killed, or is still going, ends at its last log write.
     record = SegmentRecord(
-        samples_written=0,
+        samples_written=samples,
         finished_at=finished_at or _mtime_iso(log),
-        seeds=_seeds(working_dir / "prod.mdp", log),
+        seeds=_seeds(mdp, log),
         **fields,
     )
     if started_at is not None:
@@ -433,7 +489,9 @@ def load_or_scan_gromacs_progress(
             timestep_fs=timestep_fs or progress.timestep_fs,
         )
 
-        progress.equilibration_stages = scanned.equilibration_stages
+        progress.equilibration_stages = _keep_provenance(
+            scanned.equilibration_stages, progress.equilibration_stages
+        )
         if scanned.total_steps_completed > progress.total_steps_completed:
             delta_steps = scanned.total_steps_completed - progress.total_steps_completed
             segment_status = (
@@ -449,6 +507,7 @@ def load_or_scan_gromacs_progress(
                     steps_requested=max(delta_steps, scanned.total_steps_requested),
                     status=segment_status,
                     duration_ns=(delta_steps * progress.timestep_fs) / 1e6,
+                    start_step=progress.total_steps_completed,
                 )
             )
 
