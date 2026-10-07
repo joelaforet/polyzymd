@@ -2158,3 +2158,69 @@ def test_upsert_keeps_original_started_at():
     assert seg.started_at == start
     assert seg.status == SegmentStatus.INTERRUPTED
     assert seg.finished_at == "2026-09-30T19:52:00+00:00"
+
+
+def test_equilibration_stages_keep_their_own_start_and_finish(tmp_path):
+    """Each stage records when it ran; a stage an earlier run finished keeps that run's record."""
+    from polyzymd.simulation.progress import (
+        EquilibrationStageRecord,
+        SimulationProgress,
+        load_progress,
+        record_equilibration_stages,
+        save_progress,
+    )
+
+    earlier = EquilibrationStageRecord(
+        index=0,
+        name="heating",
+        started_at="2026-10-07T07:00:00+00:00",
+        finished_at="2026-10-07T07:05:00+00:00",
+        seeds={"integrator": 11, "velocities": 12},
+    )
+    save_progress(
+        tmp_path,
+        SimulationProgress(
+            config_path="c",
+            total_steps_requested=10,
+            total_samples_requested=1,
+            equilibration_stages=[earlier],
+        ),
+    )
+    ran = {
+        "stage_index": 1,
+        "stage_name": "npt",
+        "ensemble": "NPT",
+        "duration_ns": 0.01,
+        "started_at": "2026-10-07T07:10:02+00:00",
+        "finished_at": "2026-10-07T07:10:04+00:00",
+        "seeds": {"integrator": 21, "barostat": 22},
+    }
+    skipped = {"stage_index": 0, "stage_name": "heating", "skipped": True, "duration_ns": 0.01}
+
+    assert record_equilibration_stages(tmp_path, [skipped, ran]) == 2
+
+    first, second = load_progress(tmp_path).equilibration_stages
+    assert first == earlier
+    assert (second.started_at, second.finished_at) == (ran["started_at"], ran["finished_at"])
+    assert second.seeds == {"integrator": 21, "barostat": 22}
+    assert second.ensemble == "NPT"
+
+
+def test_scanned_equilibration_stage_starts_before_it_finishes(tmp_path):
+    """Without progress.json, a stage's start is its topology PDB and its finish its checkpoint."""
+    import os
+
+    from polyzymd.simulation.progress import scan_equilibration_stages
+
+    stage = tmp_path / "equilibration_0_heating"
+    stage.mkdir()
+    pdb = stage / "equilibration_0_heating_topology.pdb"
+    chk = stage / "equilibration_0_heating_checkpoint.chk"
+    pdb.write_text("")
+    chk.write_bytes(b"")
+    os.utime(pdb, (1_790_000_000, 1_790_000_000))
+    os.utime(chk, (1_790_000_060, 1_790_000_060))
+
+    (record,) = scan_equilibration_stages(tmp_path)
+    assert record.started_at == "2026-09-21T14:13:20+00:00"
+    assert record.finished_at == "2026-09-21T14:14:20+00:00"

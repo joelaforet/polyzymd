@@ -92,6 +92,8 @@ class EquilibrationStageRecord(BaseModel):
     polyzymd_version, openmm_version, pixi_environment : str | None
         Software provenance of the process that ran the stage. ``None`` for
         records written by PolyzyMD versions that predate these fields.
+    seeds : dict | None
+        Random seeds the stage ran with (see ``SegmentRecord.seeds``).
     """
 
     index: int
@@ -104,6 +106,7 @@ class EquilibrationStageRecord(BaseModel):
     polyzymd_version: str | None = None
     openmm_version: str | None = None
     pixi_environment: str | None = None
+    seeds: dict[str, int] | None = None
 
 
 class SegmentRecord(BaseModel):
@@ -159,6 +162,12 @@ class SegmentRecord(BaseModel):
     gap_frames : int
         Report steps between the previous segment's last frame and this
         segment's first frame that no segment wrote.
+    seeds : dict | None
+        Random seeds the segment ran with. OpenMM records ``integrator``
+        (thermostat noise), ``barostat`` (volume moves) and, when the
+        segment drew new velocities, ``velocities``; 0 means OpenMM chose
+        a random seed. GROMACS records ``ld_seed`` and, when the stage drew
+        new velocities, ``gen_seed``. ``None`` for older records.
     """
 
     index: int
@@ -181,6 +190,7 @@ class SegmentRecord(BaseModel):
     resumed_from: str | None = None
     overlap_frames: int = 0
     gap_frames: int = 0
+    seeds: dict[str, int] | None = None
 
 
 def flush_reporters(simulation: Any) -> None:
@@ -404,6 +414,14 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _mtime_iso(path: Path) -> str | None:
+    """Return the modification time of ``path`` as an ISO timestamp, or None if it is missing."""
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+    except OSError:
+        return None
+
+
 def _progress_path(working_dir: Path) -> Path:
     """Return the path to the progress file."""
     return working_dir / PROGRESS_FILENAME
@@ -506,6 +524,54 @@ def _update_or_append_segment(
     progress.segments.append(record)
 
 
+def record_equilibration_stages(working_dir: str | Path, stages: List[Dict[str, Any]]) -> int:
+    """Record the equilibration stages of a run in ``progress.json``.
+
+    ``stages`` is the ``"stages"`` list that
+    :meth:`~polyzymd.simulation.runner.SimulationRunner.run_staged_equilibration`
+    returns. A stage the run skipped because an earlier run finished it keeps
+    the record of that run, or else the record read from its files on disk.
+    Does nothing without a ``progress.json``.
+
+    Returns
+    -------
+    int
+        Number of stage records written.
+    """
+    from polyzymd.utils.version import record_provenance
+
+    progress = load_progress(working_dir)
+    if progress is None:
+        return 0
+    earlier = {record.index: record for record in progress.equilibration_stages}
+    on_disk = {record.index: record for record in scan_equilibration_stages(working_dir)}
+    provenance = record_provenance()
+    records: List[EquilibrationStageRecord] = []
+    for stage in stages:
+        index = stage["stage_index"]
+        if stage.get("skipped"):
+            record = earlier.get(index) or on_disk.get(index)
+            if record is not None:
+                records.append(record)
+            continue
+        records.append(
+            EquilibrationStageRecord(
+                index=index,
+                name=stage["stage_name"],
+                status=SegmentStatus.COMPLETED,
+                duration_ns=stage["duration_ns"],
+                ensemble=stage.get("ensemble", "NVT"),
+                started_at=stage["started_at"],
+                finished_at=stage["finished_at"],
+                seeds=stage.get("seeds"),
+                **provenance,
+            )
+        )
+    progress.equilibration_stages = records
+    save_progress(working_dir, progress)
+    return len(records)
+
+
 # ---------------------------------------------------------------------------
 # Filesystem scanning
 # ---------------------------------------------------------------------------
@@ -547,19 +613,18 @@ def scan_equilibration_stages(working_dir: str | Path) -> List[EquilibrationStag
         chk = entry / f"equilibration_{stage_idx}_{stage_name}_checkpoint.chk"
         chk_exists = chk.exists()
         status = SegmentStatus.COMPLETED if chk_exists else SegmentStatus.FAILED
-        # Use checkpoint mtime as an approximate finished_at for completed stages
-        finished_at: str | None = None
-        if chk_exists:
-            mtime = chk.stat().st_mtime
-            finished_at = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
-        records.append(
-            EquilibrationStageRecord(
-                index=stage_idx,
-                name=stage_name,
-                status=status,
-                finished_at=finished_at,
-            )
+        # The stage writes its topology PDB when it starts and its checkpoint
+        # when it finishes, so their mtimes approximate both times.
+        record = EquilibrationStageRecord(
+            index=stage_idx,
+            name=stage_name,
+            status=status,
+            finished_at=_mtime_iso(chk) if chk_exists else None,
         )
+        started_at = _mtime_iso(entry / f"equilibration_{stage_idx}_{stage_name}_topology.pdb")
+        if started_at is not None:
+            record.started_at = started_at
+        records.append(record)
 
     records.sort(key=lambda r: r.index)
     LOGGER.debug(
@@ -1281,6 +1346,7 @@ def validate_progress(
                 # Only the runner records a segment's hash, so a scan never has one.
                 trajectory_sha256=file_rec.trajectory_sha256,
                 trajectory_bytes=file_rec.trajectory_bytes,
+                seeds=file_rec.seeds,
                 **{name: getattr(file_rec, name) for name in SEGMENT_FRAME_FIELDS},
             )
             reconciled.append(merged)

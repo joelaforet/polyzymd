@@ -2454,40 +2454,12 @@ def _run_initial_segment(
     eq_result = runner.run_equilibration(temperature=temperature, config=phases)
 
     # Save equilibration progress so a resubmitted job knows eq is done
-    from datetime import datetime, timezone
+    from polyzymd.simulation.progress import load_progress as _load_progress
+    from polyzymd.simulation.progress import record_equilibration_stages
 
-    from polyzymd.simulation.progress import (
-        EquilibrationStageRecord,
-        SegmentStatus,
-        save_progress,
-    )
-    from polyzymd.simulation.progress import (
-        load_progress as _load_progress,
-    )
-
-    progress = _load_progress(working_dir)
-    if progress is not None:
-        eq_stages = []
-        if eq_result.get("type") == "staged_equilibration":
-            from polyzymd.utils.version import record_provenance
-
-            now_iso = datetime.now(timezone.utc).isoformat()
-            provenance = record_provenance()
-            for stage_info in eq_result.get("stages", []):
-                eq_stages.append(
-                    EquilibrationStageRecord(
-                        index=stage_info["stage_index"],
-                        name=stage_info["stage_name"],
-                        status=SegmentStatus.COMPLETED,
-                        duration_ns=stage_info["duration_ns"],
-                        ensemble=stage_info.get("ensemble", "NVT"),
-                        finished_at=now_iso,
-                        **provenance,
-                    )
-                )
-        progress.equilibration_stages = eq_stages
-        save_progress(working_dir, progress)
-        colored_echo(f"Saved equilibration progress ({len(eq_stages)} stages)", phase="simulation")
+    if _load_progress(working_dir) is not None:
+        count = record_equilibration_stages(working_dir, eq_result.get("stages", []))
+        colored_echo(f"Saved equilibration progress ({count} stages)", phase="simulation")
 
     # Run first production segment
     colored_echo(
