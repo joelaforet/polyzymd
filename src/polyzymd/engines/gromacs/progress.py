@@ -18,6 +18,7 @@ from polyzymd.simulation.progress import (
     SegmentStatus,
     SimulationProgress,
     SimulationStatus,
+    _mtime_iso,
     load_progress,
     save_progress,
 )
@@ -357,19 +358,11 @@ def _seeds(mdp_path: Path | None, log_path: Path) -> dict[str, int] | None:
         logged = []
     if logged:
         seeds["ld_seed"] = int(logged[-1])
-    elif "ld_seed" in mdp:
+    elif mdp.get("ld_seed", "").lstrip("-").isdigit():
         seeds["ld_seed"] = int(mdp["ld_seed"])
-    if mdp.get("gen_vel", "no").lower() == "yes" and "gen_seed" in mdp:
+    if mdp.get("gen_vel", "no").lower() == "yes" and mdp.get("gen_seed", "").lstrip("-").isdigit():
         seeds["gen_seed"] = int(mdp["gen_seed"])
     return seeds or None
-
-
-def _mtime_iso(path: Path) -> str | None:
-    """Return the modification time of ``path`` as a UTC ISO timestamp, or None if it is missing."""
-    try:
-        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
-    except OSError:
-        return None
 
 
 def _segment_record(working_dir: Path, first_start: bool = False, **fields) -> SegmentRecord:
