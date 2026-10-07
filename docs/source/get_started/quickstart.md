@@ -155,6 +155,7 @@ The {term}`replicate folder` `trpcage_300K_run1/` now holds the simulation:
 ```text
 runs/trpcage/water/trpcage_300K_run1/
 ├── build_manifest.json
+├── progress.json                # the stages and segments that have run
 ├── solvated_system.pdb          # the built system, for viewers
 ├── system.prmtop                # the topology that the analyses read
 ├── system.xml                   # the OpenMM System

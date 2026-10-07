@@ -39,9 +39,11 @@ my_paper/
 └── runs/                    # Git-ignored; made by the first build or submit
     └── lipa/no_polymer/     # projects_directory of the config
         ├── job_scripts/     # Generated SLURM submission scripts
-        ├── slurm_logs/      # SLURM stdout/stderr logs
         └── ...              # One directory per replicate
 ```
+
+`polyzymd submit` writes the SLURM logs into `slurm_logs/` of the folder you
+run it from, and creates that folder when it submits.
 
 The runs go into `runs/` unless you set `scratch_directory` in the config.
 Trajectories can use a lot of disk space. On a cluster, set

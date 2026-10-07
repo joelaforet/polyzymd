@@ -141,7 +141,8 @@ Per-Replicate Output:
     Working dir: /home/me/my_paper/runs/trpcage/water/trpcage_apo_none_100ns_300K_run1
 ```
 
-The last line of the report is `Validation passed. Ready to build.`
+The report ends with `Validation passed. Ready to build.` between two lines
+of `=`.
 
 ## Step 5: Add a second condition
 
