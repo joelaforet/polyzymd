@@ -1176,7 +1176,9 @@ conditions name their runs alike, a folder named for the condition
 (`no_polymer/`) is chosen before file sizes, and one folder is never written
 for two such conditions. Conditions whose runs are named apart can share one
 folder. Prints `<label>: runs <numbers> under <folder>` per
-condition found. Writes nothing when no condition is found. Exits 2 when a
+condition found. Writes nothing when no condition is found. A condition
+with a missing or different file is not written, and its earlier entry in
+`data.local.yaml` is removed. Exits 2 when a
 condition is not found, two conditions with alike run names are found in one
 folder, or a file is
 missing or different. See

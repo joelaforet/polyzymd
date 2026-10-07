@@ -205,7 +205,7 @@ def check_command(path: Path, production: bool = False) -> None:
         click.echo(
             "reproduce: this study was frozen (manifest.json); point it at downloaded "
             "trajectories with polyzymd study locate DIR --verify, then rerun polyzymd analyze "
-            "--study, or redraw figures from results/ without trajectories"
+            "--study --recompute, or redraw figures from results/ without trajectories"
         )
     elif protocol.analyses:
         command = "project freeze" if protocol.project is not None else "study freeze"
@@ -267,8 +267,8 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
     (named by its config's naming_template), preferring one whose files have the sizes
     manifest.json records, is written to data.local.yaml
     beside study.yaml, which is never committed or published; entries for
-    conditions not found, or whose files differ from manifest.json, are kept
-    as they were. Runs named alike go to the
+    conditions not found are kept as they were, and those of conditions whose
+    files differ from manifest.json are removed. Runs named alike go to the
     folder named for the condition (no_polymer/), and one folder is never
     written for two conditions. Moving data never changes the study or its
     stored results' config hashes.
@@ -291,6 +291,7 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
 
     located: dict[str, Path] = {}
     missing = []
+    changed = []
     configs = {}
     for label, config_path in protocol.conditions.items():
         try:
@@ -341,10 +342,12 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
         checks = _check_against_manifest(protocol.root, label, best, verify)
         for line in checks:
             click.echo(line)
-        # Runs that differ from manifest.json are not written, so analyze never
-        # reads them as the runs the stored results came from.
+        # Runs that differ from manifest.json are not written, and an earlier
+        # entry for them is removed, so analyze does not read them as the runs
+        # the stored results came from.
         if any(line.startswith("error") for line in checks):
             missing.append(label)
+            changed.append(label)
         else:
             located[label] = best
     # One folder may hold the runs of several conditions when their runs are
@@ -370,11 +373,14 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
             missing.extend(shared)
             for label in shared:
                 del located[label]
-    if located:
-        # Entries this run did not locate are kept as written, hand-written ones included.
-        target = protocol.root / DATA_FILE
-        written = (yaml.safe_load(target.read_text()) if target.is_file() else None) or {}
+    target = protocol.root / DATA_FILE
+    written = (yaml.safe_load(target.read_text()) if target.is_file() else None) or {}
+    if located or any(label in written for label in changed):
+        # Entries this run did not locate are kept as written, hand-written ones
+        # included, except those of runs that differ from manifest.json.
         written.update({label: str(folder) for label, folder in located.items()})
+        for label in changed:
+            written.pop(label, None)
         target.write_text(
             "# Where this machine keeps each condition's runs. Written by polyzymd study locate;\n"
             "# never commit or publish it.\n" + yaml.safe_dump(written, sort_keys=False)
