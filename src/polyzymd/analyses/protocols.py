@@ -1,7 +1,7 @@
 """One-call, self-describing analysis protocol for scripts and coding agents.
 
 :func:`analyze` takes the name of one of the analyses in
-:data:`FUNCTION_ANALYSES` and one or more simulation config paths, builds a
+:data:`ANALYSES` and one or more simulation config paths, builds a
 :class:`~polyzymd.analyses.study.Study` of them, measures the analysis with
 :meth:`~polyzymd.analyses.study.Study.timeseries` or
 :meth:`~polyzymd.analyses.study.Study.per_replicate`, and returns a
@@ -30,7 +30,8 @@ References
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -60,110 +61,15 @@ VERDICT_VOCABULARY = (
     VERDICT_NOT_TESTABLE,
 )
 
-#: The analyses polyzymd analyze runs, each through Study.timeseries or
-#: Study.per_replicate, with the settings each one takes and their defaults.
-#: One line on what each shipped analysis measures, for ``polyzymd analyze --list``.
-ANALYSIS_SUMMARIES = {
-    "rg": "radius of gyration of a selection per frame (A)",
-    "rmsd": "RMSD of a selection superposed on a reference, per frame (A)",
-    "rmsf": "per-residue RMS fluctuation about the mean structure, with core and region means (A)",
-    "rmsd_per_residue": "per-residue RMS deviation from a reference structure (A)",
-    "sasa": "solvent-accessible surface area of a target in each context, total and per residue (A^2)",
-    "secondary_structure": "DSSP secondary structure, fractions overall and per residue",
-    "hydrogen_bonds": "hydrogen bonds between groups: counts, lifetimes, per-residue and per-pair occupancy",
-    "native_contacts": "fraction of native contacts Q against a reference structure",
-    "contacts": "contacts per protein residue with a partner group, the polymer (chainid C) by "
-    "default or any polymer_selection such as resname SDS: method occlusion (buried surface) "
-    "or distance",
-    "distances": "distances between atom pairs, and the fraction of frames below a threshold (A)",
-}
-
-FUNCTION_ANALYSES = {
-    "rg": {"selection": "protein"},
-    "rmsd": {
-        "selection": "protein and name CA",
-        "alignment_selection": "protein and name CA",
-        "reference_mode": None,
-        "reference_frame": 1,
-        "reference_file": None,
-    },
-    "rmsf": {
-        "selection": "protein and name CA",
-        "alignment_selection": "protein and name CA",
-        "reference_mode": None,
-        "reference_frame": 1,
-        "reference_file": None,
-        "highlight_residues": [],
-        "core": None,
-        "regions": {},
-    },
-    "rmsd_per_residue": {
-        "selection": "protein and name CA",
-        "alignment_selection": "protein and name CA",
-        "reference_mode": None,
-        "reference_frame": 1,
-        "reference_file": None,
-        "highlight_residues": [],
-        "core": None,
-        "regions": {},
-    },
-    "sasa": {
-        "target": "protein",
-        "contexts": {},
-        "probe_radius_nm": 0.14,
-        "n_sphere_points": 960,
-    },
-    "secondary_structure": {"selection": "protein", "scheme": "simplified"},
-    "hydrogen_bonds": {
-        "groups": {"protein": "chainid A", "polymer": "chainid C"},
-        "summaries": {"protein_polymer": {"between": ["protein", "polymer"]}},
-        "d_a_cutoff": 3.5,
-        "d_h_a_angle_cutoff": 150.0,
-        "donors": None,
-        "hydrogens": None,
-        "acceptors": None,
-        "lifetime_key": "residue",
-        "tolerance_ps": 0.0,
-    },
-    "native_contacts": {
-        "selection": "protein and not element H",
-        "reference_mode": None,
-        "reference_frame": 1,
-        "reference_file": None,
-        "radius": 4.5,
-        "min_separation": 3,
-        "beta": 5.0,
-        "lambda_constant": 1.8,
-        "use_pbc": True,
-        "regions": {},
-    },
-    "contacts": {
-        "method": "occlusion",
-        "polymer_selection": "chainid C",
-        "protein_selection": "chainid A",
-        "polymer_types": None,
-        "use_pbc": True,
-        "regions": {},
-        "cutoff": 4.0,
-        "heavy_atoms": True,
-        "exposed_threshold": 0.2,
-        "buried_threshold": 0.2,
-        "max_asa": "theoretical",
-        "probe_radius_nm": 0.14,
-        "n_sphere_points": 960,
-        "tolerance_ps": 0.0,
-    },
-    "distances": {"pairs": None, "threshold": 3.5, "use_pbc": True},
-}
-
 
 __all__ = [
-    "FUNCTION_ANALYSES",
+    "ANALYSES",
     "VERDICT_VOCABULARY",
     "ConditionReport",
     "PairwiseReport",
     "ProtocolProvenance",
     "ProtocolReport",
+    "ShippedAnalysis",
     "analyze",
 ]
 
@@ -404,7 +310,7 @@ def analyze(
         uniformly; defaults to the package default.
     settings : dict, optional
         Settings of the analysis; the keys it takes and their defaults are in
-        :data:`FUNCTION_ANALYSES`.
+        :data:`ANALYSES`.
     labels : sequence of str, optional
         One label per config. Defaults to each config's directory name.
     output_dir : Path, optional
@@ -439,298 +345,146 @@ def analyze(
     Raises
     ------
     ProtocolError
-        If the name is not in :data:`FUNCTION_ANALYSES`, a config is missing,
-        the labels do not match the configs, the settings are invalid, or no
+        If the name is not in :data:`ANALYSES`, a config is missing, the
+        labels do not match the configs, a setting is not one the analysis
+        takes or is invalid, ``run`` is given to ``rg`` or ``rmsd``, or no
         replicates are found.
     """
     _require_known(name)
-    return _analyze_function(
-        name,
-        configs,
-        replicates=replicates,
-        equilibration=equilibration,
-        settings=settings,
-        labels=labels,
-        output_dir=output_dir,
-        recompute=recompute,
-        run=run,
-        eq_check=eq_check,
-        plots=plots,
-        stride=stride,
-        data=data,
-        until=until,
+    spec = ANALYSES[name]
+    if set(settings or {}) - set(spec.defaults) or (run is not None and not spec.takes_run):
+        raise ProtocolError(
+            f"{name} takes {'' if spec.takes_run else 'no run and '}no setting other than "
+            f"{', '.join(spec.defaults)}.",
+            hint=f"Run polyzymd analyze {name} -c A/config.yaml "
+            + (
+                "--set pairs=pairs.yaml."
+                if name == "distances"
+                else f"--set {next(iter(spec.defaults))}=..., one of the settings above."
+            ),
+        )
+    study = _study(configs, labels, equilibration, replicates, stride, data, until)
+    request = Request(name, run, dict(settings or {}), recompute, output_dir, eq_check)
+    measured = spec.measure(study, {**spec.defaults, **(settings or {})}, request)
+    if measured.skipped is None:
+        report = measured.values.compare() if len(study) > 1 else measured.values.summary()
+    else:
+        report = _report_skipping(measured.values, study, measured.skipped, name)
+    report.warnings += measured.warnings
+    if measured.settings is not None:
+        report.provenance.settings = measured.settings
+    if plots:
+        folder = _figures_dir(output_dir, name)
+        measured.figures(folder, report)
+        report.provenance.output_paths["figures"] = str(folder)
+    if not spec.takes_run:
+        return report
+    return report.model_copy(
+        update={"analysis": name, "run": measured.run, "all_runs": measured.runs}
     )
 
 
 def _require_known(name: str) -> None:
-    """Raise ``ProtocolError`` unless ``name`` is in :data:`FUNCTION_ANALYSES`.
+    """Raise ``ProtocolError`` unless ``name`` is in :data:`ANALYSES`.
 
     The hint lists the analyses and the page on writing a function instead.
     """
-    if name not in FUNCTION_ANALYSES:
+    if name not in ANALYSES:
         raise ProtocolError(
             f"No analysis named {name!r}.",
             hint=(
-                f"Use one of {', '.join(FUNCTION_ANALYSES)}. For another measurement, "
+                f"Use one of {', '.join(ANALYSES)}. For another measurement, "
                 f"write a function and run it with Study.timeseries or Study.per_replicate: "
                 f"{ANALYSIS_API_URL}."
             ),
         )
 
 
-def _analyze_function(
-    name: str,
-    configs: Sequence[Path | str],
-    *,
-    replicates: Sequence[int] | None,
-    equilibration: str | None,
-    settings: dict | None,
-    labels: Sequence[str] | None,
-    output_dir: Path | None,
-    recompute: bool,
-    run: str | None,
-    eq_check: bool = True,
-    plots: bool = True,
-    stride: int = 1,
-    data: dict[str, Path] | None = None,
-    until: str | None = None,
-) -> ProtocolReport:
-    """Measure ``name`` on every production frame and report its per-replicate mean.
+# Shipped analyses
 
-    ``rg`` measures :func:`~polyzymd.analyses.functions.radius_of_gyration`
-    of ``selection``. ``rmsd`` measures :func:`~polyzymd.analyses.functions.rmsd`
-    of ``selection`` from the reference that ``reference_mode``,
-    ``reference_frame``, ``reference_file`` and ``alignment_selection`` give
-    to :func:`~polyzymd.analyses.reference.reference`; a missing
-    ``reference_mode`` is ``"external"`` when a ``reference_file`` is given and
-    ``"centroid"`` otherwise. Settings left out take
-    the defaults in :data:`FUNCTION_ANALYSES`. With one config the report
-    summarises it; with several it compares each one with the first by
-    Welch's t test. With ``plots``, ``rg`` and ``rmsd`` draw
-    ``<name>_timeseries`` and ``<name>_comparison``, and ``rg`` also
-    ``rg_distribution``, into ``<output_dir>/figures/<name>/``. ``rmsf`` and ``rmsd_per_residue`` go to :func:`_analyze_rmsf`, and ``distances``
-    to :func:`_analyze_pairs`. Raises
-    ``ProtocolError`` for a setting the analysis does not take, or a ``run``
-    for ``rg`` or ``rmsd``.
+
+@dataclass(frozen=True)
+class Request:
+    """The options of one :func:`analyze` call that a shipped analysis reads.
+
+    ``given`` holds the settings the caller gave, before the defaults fill
+    in the rest.
     """
-    from polyzymd.analyses import functions
-    from polyzymd.analyses.reference import reference
-    from polyzymd.analyses.timeseries import select
 
-    unknown = set(settings or {}) - set(FUNCTION_ANALYSES[name])
-    pairs = name in (
-        "distances",
-        "rmsf",
-        "rmsd_per_residue",
-        "sasa",
-        "secondary_structure",
-        "contacts",
-        "native_contacts",
-        "hydrogen_bonds",
-    )
-    if unknown or (run is not None and not pairs):
-        raise ProtocolError(
-            f"{name} takes {'' if pairs else 'no run and '}no setting other than "
-            f"{', '.join(FUNCTION_ANALYSES[name])}.",
-            hint=f"Run polyzymd analyze {name} -c A/config.yaml "
-            + (
-                "--set pairs=pairs.yaml."
-                if name == "distances"
-                else f"--set {next(iter(FUNCTION_ANALYSES[name]))}=..., one of the settings above."
-            ),
-        )
-    study = _study(configs, labels, equilibration, replicates, stride, data, until)
-    if name in ("rmsf", "rmsd_per_residue"):
-        return _analyze_rmsf(name, study, settings, run, recompute, output_dir, plots)
-    if name == "sasa":
-        return _analyze_sasa(study, settings, run, recompute, output_dir, eq_check, plots)
-    if name == "secondary_structure":
-        return _analyze_secondary_structure(study, settings, run, recompute, output_dir, plots)
-    if name == "contacts":
-        return _analyze_contacts(study, settings, run, recompute, output_dir, plots)
-    if name == "hydrogen_bonds":
-        return _analyze_hydrogen_bonds(study, settings, run, recompute, output_dir, plots)
-    if name == "native_contacts":
-        return _analyze_native_contacts(
-            study, settings, run, recompute, output_dir, eq_check, plots
-        )
-    if pairs:
-        return _analyze_pairs(
-            name,
-            study,
-            settings,
-            run,
-            recompute=recompute,
-            output_dir=output_dir,
-            eq_check=eq_check,
-            plots=plots,
-        )
-    settings = {**FUNCTION_ANALYSES[name], **(settings or {})}
-    arguments = [select(str(settings["selection"]))]
-    if name == "rmsd":
-        # A reference file given without a mode is the reference.
-        settings["reference_mode"] = settings["reference_mode"] or (
-            "external" if settings["reference_file"] else "centroid"
-        )
-        arguments.append(
-            reference(
-                str(settings["reference_mode"]),
-                str(settings["selection"]),
-                frame=settings["reference_frame"],
-                file=settings["reference_file"],
-                alignment=str(settings["alignment_selection"]),
-            )
-        )
-    function = functions.rmsd if name == "rmsd" else functions.radius_of_gyration
-    series = study.timeseries(
-        function,
-        *arguments,
-        unit="A",
-        name=name,
-        recompute=recompute,
-        output_dir=output_dir,
-        bounds=(0.0, None),
-    )
-    values = series.reduce("mean", detect_equilibration=eq_check)
-    report = values.compare() if len(study) > 1 else values.summary()
-    if plots:
-        folder = _figures_dir(output_dir, name)
-        series.plot(folder, f"{name}_timeseries")
-        values.plot(folder, f"{name}_comparison")
-        if name == "rg":
-            series.plot_distribution(output_dir=folder, name="rg_distribution")
-        report.provenance.output_paths["figures"] = str(folder)
-    return report
+    name: str
+    run: str | None
+    given: dict[str, Any]
+    recompute: bool
+    output_dir: Path | None
+    eq_check: bool
 
 
-def _analyze_rmsf(
-    name: str,
-    study: Any,
-    settings: dict | None,
-    run: str | None,
-    recompute: bool,
-    output_dir: Path | None,
-    plots: bool,
-) -> ProtocolReport:
-    """Measure the per-residue RMS deviation, RMSF and offset of every replicate in one pass.
+@dataclass
+class Measured:
+    """What a shipped analysis measured, for :func:`analyze` to report.
 
-    :func:`~polyzymd.analyses.functions.rms_decomposition` superposes
-    ``alignment_selection`` on the reference of ``reference_mode``,
-    ``reference_frame`` and ``reference_file``, built by
-    :func:`~polyzymd.analyses.reference.reference` for both selections
-    together, and gives for each residue of ``selection`` its RMS deviation
-    from the reference, its RMSF about the mean position and the offset of
-    the mean position from the reference, labelled by residue ID, with
-    their mean squares. A missing ``reference_mode`` is ``"external"`` when a
-    ``reference_file`` is given and ``"centroid"`` otherwise.
-
-    Each replicate's headline value of a quantity is the root of its mean
-    square over the core residues, ``core_rmsd_per_residue``, ``core_rmsf`` and
-    ``core_offset``, so ``core_rmsd_per_residue`` squared equals ``core_rmsf``
-    squared plus ``core_offset`` squared, because for every atom the mean
-    square deviation is the variance about the mean position plus the squared
-    distance of the mean from the reference. The core is the residues of
-    ``selection`` that the MDAnalysis selection ``core`` also selects, by
-    default all of them, and must be the same in every replicate. Each entry
-    ``region: selection`` of ``regions`` gives ``<region>_rmsd_per_residue``,
-    ``<region>_rmsf`` and ``<region>_offset`` the same way. The frames are
-    superposed by ``alignment_selection`` whatever the core, so fit on the
-    same core atoms to measure motion within that core. ``mean_rmsf`` and
-    the other plain means over every residue are kept for reference, and
-    ``rmsd_per_residue``, ``rmsf`` and ``offset`` are the profiles, compared
-    residue by residue. ``run`` picks the reported result and defaults to
-    ``core_<name>``. The settings, the resolved reference mode and the
-    residues of the core and of each region are stored in
-    ``provenance.settings``. With ``plots``, ``<part>_profile`` draws each
-    profile with ``highlight_residues`` marked, ``rms_decomposition`` the
-    three profiles of each condition together, ``rmsf_comparison`` the three
-    core values, and with several conditions ``<part>_difference`` each
-    condition's per-residue difference from the control with its interval
-    and significant residues, into ``<output_dir>/figures/<name>/``.
+    ``values`` are the replicate values the report summarises (one
+    condition) or compares with the first condition (several). ``run`` is the
+    chosen result and ``runs`` every result; both stay empty for ``rg`` and
+    ``rmsd``. ``settings``, when given, becomes ``provenance.settings``.
+    ``skipped``, when given, holds the replicates where a selection matched
+    no atoms, which :func:`_report_skipping` leaves out of the statistics.
+    ``warnings`` are added to the report, and ``figures(folder, report)``
+    draws the figures.
     """
-    import numpy as np
 
-    from polyzymd.analyses import functions
-    from polyzymd.analyses.figures import plot_decomposition, plot_differences, plot_values
-    from polyzymd.analyses.reference import reference
-    from polyzymd.analyses.timeseries import select
+    values: Any
+    figures: Callable[[Path, ProtocolReport], None]
+    run: str | None = None
+    runs: list[str] = field(default_factory=list)
+    settings: dict[str, Any] | None = None
+    skipped: dict[tuple[str, int], list[str]] | None = None
+    warnings: list[str] = field(default_factory=list)
 
-    settings = {**FUNCTION_ANALYSES[name], **(settings or {})}
-    atoms, fit = str(settings["selection"]), str(settings["alignment_selection"])
-    mode = settings["reference_mode"] or ("external" if settings["reference_file"] else "centroid")
-    regions = settings["regions"] or {}
-    if not isinstance(regions, dict) or {"core", "mean"} & set(regions):
-        raise ProtocolError(
-            f"{name}: regions must map names other than core and mean to selections, "
-            f"got {regions!r}.",
-            hint="Pass --set regions='{lid: resid 70-90}'.",
-        )
-    sets = {"core": settings["core"] or "all", **{str(k): str(v) for k, v in regions.items()}}
-    runs = [f"{kind}_{part}" for kind in ("core", *regions, "mean") for part in functions.RMS_PARTS]
-    runs += list(functions.RMS_PARTS)
-    run = run or f"core_{name}"
+
+@dataclass(frozen=True)
+class ShippedAnalysis:
+    """One analysis ``polyzymd analyze`` runs.
+
+    ``summary`` says what it measures (``polyzymd analyze --list``) and
+    ``defaults`` holds every setting it takes with its default.
+    ``measure(study, settings, request)`` measures it, with the given
+    settings over the defaults, and returns :class:`Measured`.
+    ``takes_run`` is ``False`` for an analysis with a single result.
+    """
+
+    summary: str
+    defaults: dict[str, Any]
+    measure: Callable[[Any, dict[str, Any], Request], Measured]
+    takes_run: bool = True
+
+
+def _chosen(analysis: str, run: str | None, runs: list[str]) -> str:
+    """Return ``run``, by default the first of ``runs``; raise ``ProtocolError`` for another name."""
+    run = run or runs[0]
     if run not in runs:
         raise ProtocolError(
-            f"{name}: no result named {run!r}.", hint=f"Use --run with one of {runs}."
+            f"{analysis}: no result named {run!r}.", hint=f"Use --run with one of {runs}."
         )
-    residues = {key: _residue_ids(study, f"({atoms}) and ({value})") for key, value in sets.items()}
-    rows = study.per_replicate(
-        functions.rms_decomposition,
-        select(atoms),
-        select(fit),
-        reference(
-            str(mode),
-            f"({atoms}) or ({fit})",
-            frame=settings["reference_frame"],
-            file=settings["reference_file"],
-            alignment=fit,
-        ),
-        unit="A",
-        labels=lambda u: u.select_atoms(atoms).residues.resids,
-        name="rms_decomposition",
-        recompute=recompute,
-        output_dir=output_dir,
-        bounds=(0.0, None),
-        parts=functions.RMS_PARTS + functions.MS_PARTS,
-    )
-    profiles = {part: rows[part] for part in functions.RMS_PARTS}
-    results = {}
-    for key, labels in residues.items():
-        for part, square in zip(functions.RMS_PARTS, functions.MS_PARTS, strict=True):
-            results[f"{key}_{part}"] = rows[square].over_labels(
-                lambda values: float(np.sqrt(np.mean(values))), f"{key}_{part}", labels
-            )
-            results[f"{key}_{part}"].unit = "A"
-            results[f"{key}_{part}"].bounds = (0.0, None)
-    results.update(
-        {f"mean_{part}": values.over_labels("mean") for part, values in profiles.items()}
-    )
-    results.update(profiles)
-    values = results[run]
-    report = values.compare() if len(study) > 1 else values.summary()
-    report.provenance.settings = {
-        **settings,
-        "reference_mode": mode,
-        "residues": {key: [int(r) for r in value] for key, value in residues.items()},
-    }
-    if plots:
-        folder = _figures_dir(output_dir, name)
-        highlight = settings["highlight_residues"] or []
-        names = {"rmsd_per_residue": "RMS deviation", "rmsf": "RMSF", "offset": "offset"}
-        for part, profile in profiles.items():
-            title = f"Per-residue {names[part]}"
-            profile.plot(folder, f"{part}_profile", title, None, highlight, "Residue")
-            if len(study) > 1:
-                compared = report if run == part else profile.compare()
-                figure = f"{part}_difference"
-                plot_differences(profile, compared, folder, figure, None, None, "Residue")
-        shown = {names[part]: profile for part, profile in profiles.items()}
-        plot_decomposition(shown, folder, "rms_decomposition", None, None, "Residue")
-        core = [results[f"core_{part}"] for part in functions.RMS_PARTS]
-        labels = [names[part] for part in functions.RMS_PARTS]
-        plot_values(core, labels, folder, "rmsf_comparison", "Root mean square over the core")
-        report.provenance.output_paths["figures"] = str(folder)
-    return report.model_copy(update={"analysis": name, "run": run, "all_runs": runs})
+    return run
+
+
+#: Chain of each role in a PolyzyMD build: the protein in chain A, the ligand
+#: (substrate) in chain B and the polymer in chain C.
+ROLE_CHAINS = {"protein": "A", "ligand": "B", "polymer": "C"}
+
+
+def _selection(value: Any, setting: str, role: str) -> str:
+    """Return the selection ``value``, or for ``None`` the atoms of ``role``, ``chainid <its chain>``."""
+    if value is not None:
+        return str(value)
+    if role not in ROLE_CHAINS:
+        raise ProtocolError(
+            f"{setting} is null, which selects the atoms of the role {role!r}, but the roles are "
+            f"{', '.join(ROLE_CHAINS)}.",
+            hint=f"Give {setting} a selection, such as resname SDS, or name the group after a role.",
+        )
+    return f"chainid {ROLE_CHAINS[role]}"
 
 
 def _empty_selections(study: Any, selections: dict[str, str]) -> dict[tuple[str, int], list[str]]:
@@ -770,8 +524,8 @@ def _first_universe(study: Any, empty: dict[tuple[str, int], list[str]], analysi
     missing = sorted({name for names in empty.values() for name in names})
     raise NoMatchingAtomsError(
         f"{analysis}: the selections {', '.join(missing)} match no atoms in any replicate.",
-        hint="Choose selections that pick atoms, such as 'chainid A' for the protein and "
-        "'chainid C' for the polymer.",
+        hint="Choose selections that pick atoms, or leave one null for the atoms of its role: "
+        "the protein in chain A, the ligand in chain B, the polymer in chain C.",
     )
 
 
@@ -810,14 +564,15 @@ def study_wide_settings(analysis: str, study: Any, settings: Mapping[str, Any]) 
     """
     if analysis != "contacts":
         return {}
-    merged = {**FUNCTION_ANALYSES["contacts"], **settings}
+    merged = {**ANALYSES["contacts"].defaults, **settings}
     if merged["polymer_types"]:
         return {}
     names: set[str] = set()
     for condition in study:
         if condition.replicates:
             universe = condition.replicates[0].universe()
-            polymer = universe.select_atoms(str(merged["polymer_selection"]))
+            selection = _selection(merged["polymer_selection"], "polymer_selection", "polymer")
+            polymer = universe.select_atoms(selection)
             names |= {str(name) for name in polymer.resnames}
     return {"polymer_types": sorted(names)} if names else {}
 
@@ -878,8 +633,9 @@ def _hbond_summaries(settings: dict) -> dict[str, tuple[str, str | None]]:
         raise ProtocolError(
             "hydrogen_bonds: groups must map names to selections and summaries must map names "
             "to {between: [group, group]} or {within: group}.",
-            hint="Pass --set groups='{protein: chainid A, polymer: chainid C}' --set "
-            "summaries='{protein_polymer: {between: [protein, polymer]}}'.",
+            hint="Pass --set groups='{protein: null, polymer: null}' --set "
+            "summaries='{protein_polymer: {between: [protein, polymer]}}'; null selects the "
+            "atoms of the role the group is named after.",
         )
     resolved: dict[str, tuple[str, str | None]] = {}
     for name, spec in summaries.items():
@@ -916,23 +672,187 @@ def _hbond_residue_labels(universe: Any, selection: str) -> list:
             f"hydrogen_bonds: the residues of {selection!r} repeat residue IDs even within a "
             "chain, so they cannot be told apart for the per-residue result.",
             hint="Make the summary's first group a selection of distinct residues, such as "
-            "'chainid A'.",
+            "the protein (null).",
         )
     return labels
 
 
-def _analyze_hydrogen_bonds(
-    study: Any,
-    settings: dict | None,
-    run: str | None,
-    recompute: bool,
-    output_dir: Path | None,
-    plots: bool,
-) -> ProtocolReport:
+def _measure_rg_rmsd(study: Any, settings: dict, request: Request) -> Measured:
+    """Measure ``rg`` or ``rmsd`` of ``selection`` on every production frame.
+
+    ``rg`` measures :func:`~polyzymd.analyses.functions.radius_of_gyration`.
+    ``rmsd`` measures :func:`~polyzymd.analyses.functions.rmsd` from the
+    reference that ``reference_mode``, ``reference_frame``,
+    ``reference_file`` and ``alignment_selection`` give to
+    :func:`~polyzymd.analyses.reference.reference`; a missing
+    ``reference_mode`` is ``"external"`` when a ``reference_file`` is given
+    and ``"centroid"`` otherwise. Each replicate's value is its mean. The
+    figures are ``<name>_timeseries`` and ``<name>_comparison``, and for
+    ``rg`` also ``rg_distribution``.
+    """
+    from polyzymd.analyses import functions
+    from polyzymd.analyses.reference import reference
+    from polyzymd.analyses.timeseries import select
+
+    name = request.name
+    arguments = [select(str(settings["selection"]))]
+    if name == "rmsd":
+        # A reference file given without a mode is the reference.
+        mode = settings["reference_mode"] or (
+            "external" if settings["reference_file"] else "centroid"
+        )
+        arguments.append(
+            reference(
+                str(mode),
+                str(settings["selection"]),
+                frame=settings["reference_frame"],
+                file=settings["reference_file"],
+                alignment=str(settings["alignment_selection"]),
+            )
+        )
+    series = study.timeseries(
+        functions.rmsd if name == "rmsd" else functions.radius_of_gyration,
+        *arguments,
+        unit="A",
+        name=name,
+        recompute=request.recompute,
+        output_dir=request.output_dir,
+        bounds=(0.0, None),
+    )
+    values = series.reduce("mean", detect_equilibration=request.eq_check)
+
+    def figures(folder: Path, report: ProtocolReport) -> None:
+        series.plot(folder, f"{name}_timeseries")
+        values.plot(folder, f"{name}_comparison")
+        if name == "rg":
+            series.plot_distribution(output_dir=folder, name="rg_distribution")
+
+    return Measured(values, figures)
+
+
+def _measure_rmsf(study: Any, settings: dict, request: Request) -> Measured:
+    """Measure the per-residue RMS deviation, RMSF and offset of every replicate in one pass.
+
+    :func:`~polyzymd.analyses.functions.rms_decomposition` superposes
+    ``alignment_selection`` on the reference of ``reference_mode``,
+    ``reference_frame`` and ``reference_file``, built by
+    :func:`~polyzymd.analyses.reference.reference` for both selections
+    together, and gives for each residue of ``selection`` its RMS deviation
+    from the reference, its RMSF about the mean position and the offset of
+    the mean position from the reference, labelled by residue ID, with
+    their mean squares. A missing ``reference_mode`` is ``"external"`` when a
+    ``reference_file`` is given and ``"centroid"`` otherwise.
+
+    Each replicate's headline value of a quantity is the root of its mean
+    square over the core residues, ``core_rmsd_per_residue``, ``core_rmsf`` and
+    ``core_offset``, so ``core_rmsd_per_residue`` squared equals ``core_rmsf``
+    squared plus ``core_offset`` squared, because for every atom the mean
+    square deviation is the variance about the mean position plus the squared
+    distance of the mean from the reference. The core is the residues of
+    ``selection`` that the MDAnalysis selection ``core`` also selects, by
+    default all of them, and must be the same in every replicate. Each entry
+    ``region: selection`` of ``regions`` gives ``<region>_rmsd_per_residue``,
+    ``<region>_rmsf`` and ``<region>_offset`` the same way. The frames are
+    superposed by ``alignment_selection`` whatever the core, so fit on the
+    same core atoms to measure motion within that core. ``mean_rmsf`` and
+    the other plain means over every residue are kept for reference, and
+    ``rmsd_per_residue``, ``rmsf`` and ``offset`` are the profiles, compared
+    residue by residue. ``run`` picks the reported result and defaults to
+    ``core_<name>``. The settings, the resolved reference mode and the
+    residues of the core and of each region are stored in
+    ``provenance.settings``. The figures: ``<part>_profile`` draws each
+    profile with ``highlight_residues`` marked, ``rms_decomposition`` the
+    three profiles of each condition together, ``rmsf_comparison`` the three
+    core values, and with several conditions ``<part>_difference`` each
+    condition's per-residue difference from the control with its interval
+    and significant residues.
+    """
+    import numpy as np
+
+    from polyzymd.analyses import functions
+    from polyzymd.analyses.figures import plot_decomposition, plot_differences, plot_values
+    from polyzymd.analyses.reference import reference
+    from polyzymd.analyses.timeseries import select
+
+    name = request.name
+    atoms, fit = str(settings["selection"]), str(settings["alignment_selection"])
+    mode = settings["reference_mode"] or ("external" if settings["reference_file"] else "centroid")
+    regions = settings["regions"] or {}
+    if not isinstance(regions, dict) or {"core", "mean"} & set(regions):
+        raise ProtocolError(
+            f"{name}: regions must map names other than core and mean to selections, "
+            f"got {regions!r}.",
+            hint="Pass --set regions='{lid: resid 70-90}'.",
+        )
+    sets = {"core": settings["core"] or "all", **{str(k): str(v) for k, v in regions.items()}}
+    runs = [f"{kind}_{part}" for kind in ("core", *regions, "mean") for part in functions.RMS_PARTS]
+    runs += list(functions.RMS_PARTS)
+    run = _chosen(name, request.run or f"core_{name}", runs)
+    residues = {key: _residue_ids(study, f"({atoms}) and ({value})") for key, value in sets.items()}
+    rows = study.per_replicate(
+        functions.rms_decomposition,
+        select(atoms),
+        select(fit),
+        reference(
+            str(mode),
+            f"({atoms}) or ({fit})",
+            frame=settings["reference_frame"],
+            file=settings["reference_file"],
+            alignment=fit,
+        ),
+        unit="A",
+        labels=lambda u: u.select_atoms(atoms).residues.resids,
+        name="rms_decomposition",
+        recompute=request.recompute,
+        output_dir=request.output_dir,
+        bounds=(0.0, None),
+        parts=functions.RMS_PARTS + functions.MS_PARTS,
+    )
+    profiles = {part: rows[part] for part in functions.RMS_PARTS}
+    results = {}
+    for key, labels in residues.items():
+        for part, square in zip(functions.RMS_PARTS, functions.MS_PARTS, strict=True):
+            results[f"{key}_{part}"] = rows[square].over_labels(
+                lambda values: float(np.sqrt(np.mean(values))), f"{key}_{part}", labels
+            )
+            results[f"{key}_{part}"].unit = "A"
+            results[f"{key}_{part}"].bounds = (0.0, None)
+    results.update(
+        {f"mean_{part}": values.over_labels("mean") for part, values in profiles.items()}
+    )
+    results.update(profiles)
+
+    def figures(folder: Path, report: ProtocolReport) -> None:
+        highlight = settings["highlight_residues"] or []
+        names = {"rmsd_per_residue": "RMS deviation", "rmsf": "RMSF", "offset": "offset"}
+        for part, profile in profiles.items():
+            title = f"Per-residue {names[part]}"
+            profile.plot(folder, f"{part}_profile", title, None, highlight, "Residue")
+            if len(study) > 1:
+                compared = report if run == part else profile.compare()
+                figure = f"{part}_difference"
+                plot_differences(profile, compared, folder, figure, None, None, "Residue")
+        shown = {names[part]: profile for part, profile in profiles.items()}
+        plot_decomposition(shown, folder, "rms_decomposition", None, None, "Residue")
+        core = [results[f"core_{part}"] for part in functions.RMS_PARTS]
+        labels = [names[part] for part in functions.RMS_PARTS]
+        plot_values(core, labels, folder, "rmsf_comparison", "Root mean square over the core")
+
+    recorded = {
+        **settings,
+        "reference_mode": mode,
+        "residues": {key: [int(r) for r in value] for key, value in residues.items()},
+    }
+    return Measured(results[run], figures, run, runs, recorded)
+
+
+def _measure_hydrogen_bonds(study: Any, settings: dict, request: Request) -> Measured:
     """Count hydrogen bonds between or within named groups and report one result.
 
-    ``groups`` maps names to MDAnalysis selections, and each entry of
-    ``summaries`` is ``{between: [a, b]}``, hydrogen bonds with one partner in
+    ``groups`` maps names to MDAnalysis selections; a group whose selection
+    is null selects the atoms of the role it is named after
+    (:data:`ROLE_CHAINS`), so the default groups are the protein and the
+    polymer. Each entry of ``summaries`` is ``{between: [a, b]}``, hydrogen bonds with one partner in
     each group, or ``{within: a}``. :func:`~polyzymd.analyses.functions.hydrogen_bonds`
     runs MDAnalysis ``HydrogenBondAnalysis`` once per replicate for the chosen
     summary, with ``d_a_cutoff`` Å and ``d_h_a_angle_cutoff`` degrees, and
@@ -942,8 +862,8 @@ def _analyze_hydrogen_bonds(
     gives ``s_mean_hbonds`` (the default for the first summary),
     ``s_mean_residue_pairs`` and ``s_any_fraction``. The atoms counted as
     hydrogens and acceptors are recorded under ``provenance.settings``, as
-    counts per residue name and atom name. With ``plots``,
-    ``hbonds_<run>_comparison`` goes to ``<output_dir>/figures/hydrogen_bonds/``.
+    counts per residue name and atom name. The figure of a one-value result
+    is ``hbonds_<run>_comparison``.
     """
     from collections import Counter
 
@@ -951,17 +871,16 @@ def _analyze_hydrogen_bonds(
     from polyzymd.analyses.figures import plot_differences
     from polyzymd.analyses.timeseries import select
 
-    settings = {**FUNCTION_ANALYSES["hydrogen_bonds"], **(settings or {})}
+    groups = settings["groups"]
+    if isinstance(groups, dict):
+        groups = {name: _selection(value, f"groups.{name}", name) for name, value in groups.items()}
+        settings = {**settings, "groups": groups}
     summaries = _hbond_summaries(settings)
     parts = list(functions.HBOND_PARTS)
     life = {"mean_lifetime": 0, "lifetime_events": 1, "censored_fraction": 2}
     kinds = [*parts, *life, "residues", "pairs"]
     runs = [f"{name}_{kind}" for name in summaries for kind in kinds]
-    run = run or runs[0]
-    if run not in runs:
-        raise ProtocolError(
-            f"hydrogen_bonds: no result named {run!r}.", hint=f"Use --run with one of {runs}."
-        )
+    run = _chosen("hydrogen_bonds", request.run, runs)
     summary = next(
         name for name in summaries if run.startswith(f"{name}_") and run[len(name) + 1 :] in kinds
     )
@@ -1017,15 +936,15 @@ def _analyze_hydrogen_bonds(
     arguments = [select(first, allow_empty=True)] + (
         [] if second is None else [select(second, allow_empty=True)]
     )
+    stored = {"recompute": request.recompute, "output_dir": request.output_dir}
     if part in parts:
         rows = study.per_replicate(
             functions.hydrogen_bonds,
             *arguments,
             unit=None,
             name=f"hydrogen_bonds_{summary}",
-            recompute=recompute,
-            output_dir=output_dir,
             parts=parts,
+            **stored,
             **options,
         )
         values = rows[part]
@@ -1041,9 +960,8 @@ def _analyze_hydrogen_bonds(
             *arguments,
             unit=None,
             name=f"hbond_lifetimes_{summary}",
-            recompute=recompute,
-            output_dir=output_dir,
             parts=list(functions.LIFETIME_PARTS),
+            **stored,
             **lifetime_options,
         )
         values = rows[functions.LIFETIME_PARTS[life[part]]]
@@ -1060,9 +978,8 @@ def _analyze_hydrogen_bonds(
             labels="returned",
             missing=0.0,
             name=f"residue_pair_hbond_occupancy_{summary}",
-            recompute=recompute,
-            output_dir=output_dir,
             bounds=(0.0, 1.0),
+            **stored,
             **options,
         )
     else:
@@ -1072,29 +989,31 @@ def _analyze_hydrogen_bonds(
             unit=None,
             labels=lambda u: _hbond_residue_labels(u, first),
             name=f"residue_hbond_occupancy_{summary}",
-            recompute=recompute,
-            output_dir=output_dir,
             bounds=(0.0, 1.0),
+            **stored,
             **options,
         )
     values.metric = run
-    report = _report_skipping(values, study, skipped, "hydrogen_bonds")
-    report.warnings += _zero_partner_warning(
-        no_partner, "hydrogen_bonds", "the hydrogen-bond count"
-    )
+    warnings = _zero_partner_warning(no_partner, "hydrogen_bonds", "the hydrogen-bond count")
     if part in life:
-        empty = [
-            f"{label} replicate {row[0]}"
-            for label, table in values.rows.items()
-            for row in table
-            if row[1] != row[1]
-        ]
+        empty = _undefined(values, skipped)
         if empty:
-            report.warnings.append(
+            warnings.append(
                 f"hydrogen_bonds: {', '.join(empty)} have no hydrogen bond in summary "
                 f"{summary!r}, so {run} is undefined (nan) there."
             )
-    report.provenance.settings = {
+
+    def figures(folder: Path, report: ProtocolReport) -> None:
+        if part not in ("residues", "pairs"):
+            values.plot(folder, f"hbonds_{run}_comparison", title=run.replace("_", " "))
+            return
+        axis = "Residue" if part == "residues" else "Residue pair"
+        title = f"H-bond occupancy, {summary}"
+        values.plot(folder, f"hbonds_{run}_profile", title, None, [], axis)
+        if report.pairwise:
+            plot_differences(values, report, folder, f"hbonds_{run}_difference", None, None, axis)
+
+    recorded = {
         **settings,
         "summary": {"name": summary, "groups": [first] if second is None else [first, second]},
         "hbond_atoms": {
@@ -1103,42 +1022,22 @@ def _analyze_hydrogen_bonds(
             "acceptors": counts(acceptors),
         },
     }
-    if plots:
-        folder = _figures_dir(output_dir, "hydrogen_bonds")
-        if part in ("residues", "pairs"):
-            values.plot(
-                folder,
-                f"hbonds_{run}_profile",
-                f"H-bond occupancy, {summary}",
-                None,
-                [],
-                "Residue" if part == "residues" else "Residue pair",
-            )
-            if report.pairwise:
-                plot_differences(
-                    values,
-                    report,
-                    folder,
-                    f"hbonds_{run}_difference",
-                    None,
-                    None,
-                    "Residue" if part == "residues" else "Residue pair",
-                )
-        else:
-            values.plot(folder, f"hbonds_{run}_comparison", title=run.replace("_", " "))
-        report.provenance.output_paths["figures"] = str(folder)
-    return report.model_copy(update={"analysis": "hydrogen_bonds", "run": run, "all_runs": runs})
+    return Measured(values, figures, run, runs, recorded, skipped, warnings)
 
 
-def _analyze_native_contacts(
-    study: Any,
-    settings: dict | None,
-    run: str | None,
-    recompute: bool,
-    output_dir: Path | None,
-    eq_check: bool,
-    plots: bool,
-) -> ProtocolReport:
+def _undefined(values: Any, skipped: dict[tuple[str, int], list[str]]) -> list[str]:
+    """Name the replicates whose value is not finite, leaving out the ``skipped`` ones."""
+    import numpy as np
+
+    return [
+        f"{label} replicate {row[0]}"
+        for label, table in values.rows.items()
+        for row in table
+        if (label, row[0]) not in skipped and not np.isfinite(row[1])
+    ]
+
+
+def _measure_native_contacts(study: Any, settings: dict, request: Request) -> Measured:
     """Measure the fraction of native contacts Q on every production frame and report its mean.
 
     :func:`~polyzymd.analyses.functions.native_contacts` measures ``selection``
@@ -1152,15 +1051,13 @@ def _analyze_native_contacts(
     default result, counts every native pair; ``<region>_q`` for each entry
     ``region: selection`` of ``regions`` counts the pairs with at least one
     atom in the region. Only the chosen result is measured. Each replicate's
-    value is its mean Q over production frames. With ``plots``,
-    ``native_contacts_timeseries_<run>`` and ``native_contacts_comparison_<run>``
-    go to ``<output_dir>/figures/native_contacts/``.
+    value is its mean Q over production frames. The figures are
+    ``native_contacts_timeseries_<run>`` and ``native_contacts_comparison_<run>``.
     """
     from polyzymd.analyses import functions
     from polyzymd.analyses.reference import reference
     from polyzymd.analyses.timeseries import select
 
-    settings = {**FUNCTION_ANALYSES["native_contacts"], **(settings or {})}
     selection = str(settings["selection"])
     mode = settings["reference_mode"] or ("external" if settings["reference_file"] else "frame")
     regions = settings["regions"] or {}
@@ -1170,11 +1067,7 @@ def _analyze_native_contacts(
             hint="Pass --set regions='{active_site: resid 70-90}'.",
         )
     runs = ["q", *(f"{name}_q" for name in regions)]
-    run = run or "q"
-    if run not in runs:
-        raise ProtocolError(
-            f"native_contacts: no result named {run!r}.", hint=f"Use --run with one of {runs}."
-        )
+    run = _chosen("native_contacts", request.run, runs)
     arguments = [
         select(selection),
         reference(
@@ -1204,32 +1097,22 @@ def _analyze_native_contacts(
         *arguments,
         unit=None,
         name=f"native_contacts_{run}",
-        recompute=recompute,
-        output_dir=output_dir,
+        recompute=request.recompute,
+        output_dir=request.output_dir,
         bounds=(0.0, 1.0),
         **options,
     )
-    values = series.reduce("mean", detect_equilibration=eq_check)
+    values = series.reduce("mean", detect_equilibration=request.eq_check)
     values.metric = f"mean_{run}"
-    report = values.compare() if len(study) > 1 else values.summary()
-    report.provenance.settings = {**settings, "reference_mode": mode}
-    if plots:
-        folder = _figures_dir(output_dir, "native_contacts")
+
+    def figures(folder: Path, report: ProtocolReport) -> None:
         series.plot(folder, f"native_contacts_timeseries_{run}")
         values.plot(folder, f"native_contacts_comparison_{run}", title=f"Native contacts, {run}")
-        report.provenance.output_paths["figures"] = str(folder)
-    return report.model_copy(update={"analysis": "native_contacts", "run": run, "all_runs": runs})
+
+    return Measured(values, figures, run, runs, {**settings, "reference_mode": mode})
 
 
-def _analyze_sasa(
-    study: Any,
-    settings: dict | None,
-    run: str | None,
-    recompute: bool,
-    output_dir: Path | None,
-    eq_check: bool,
-    plots: bool,
-) -> ProtocolReport:
+def _measure_sasa(study: Any, settings: dict, request: Request) -> Measured:
     """Measure the SASA of ``target`` in one context and report its total or its residues.
 
     ``contexts`` maps a name to the MDAnalysis selection of the atoms present
@@ -1243,17 +1126,16 @@ def _analyze_sasa(
     :func:`~polyzymd.analyses.functions.residue_sasa`, compared residue by
     residue. Only the result that ``run`` picks is measured, by default the
     first context's total, because every context is a separate Shrake-Rupley
-    pass over every frame. With ``plots``, a total draws
+    pass over every frame. The figures of a total are
     ``sasa_timeseries_<name>``, ``sasa_comparison_<name>`` and
-    ``sasa_distribution_<name>``, and a residue result ``sasa_profile_<name>``
-    and, with several conditions, ``sasa_difference_<name>``, into
-    ``<output_dir>/figures/sasa/``.
+    ``sasa_distribution_<name>``, and of a residue result
+    ``sasa_profile_<name>`` and, with several conditions,
+    ``sasa_difference_<name>``.
     """
     from polyzymd.analyses import functions
     from polyzymd.analyses.figures import plot_differences
     from polyzymd.analyses.timeseries import select
 
-    settings = {**FUNCTION_ANALYSES["sasa"], **(settings or {})}
     target = str(settings["target"])
     contexts = settings["contexts"] or {"isolated": target}
     if not isinstance(contexts, dict) or not all(
@@ -1266,13 +1148,9 @@ def _analyze_sasa(
             hint="Pass --set contexts='{isolated: protein, with_polymer: protein or resname SBM EGM}'.",
         )
     runs = [key for name in contexts for key in (name, f"{name}_residues")]
-    run = run or runs[0]
-    if run not in runs:
-        raise ProtocolError(
-            f"sasa: no result named {run!r}.", hint=f"Use --run with one of {runs}."
-        )
+    run = _chosen("sasa", request.run, runs)
     residues = run.endswith("_residues") and run[: -len("_residues")] in contexts
-    context = contexts[run[: -len("_residues")] if residues else run]
+    name = run[: -len("_residues")] if residues else run
     # Pass only non-default options, so the stored record equals that of a
     # study.timeseries(functions.sasa, ...) call left at the defaults.
     defaults = {
@@ -1284,63 +1162,39 @@ def _analyze_sasa(
         for key, kind in (("probe_radius_nm", float), ("n_sphere_points", int))
         if kind(settings[key]) != defaults[key]
     }
-    folder = _figures_dir(output_dir, "sasa") if plots else None
+    arguments = (select(target), select(contexts[name]))
+    stored = {"unit": "A^2", "name": f"sasa_{run}", "bounds": (0.0, None)}
+    stored |= {"recompute": request.recompute, "output_dir": request.output_dir}
     if residues:
         values = study.per_replicate(
             functions.residue_sasa,
-            select(target),
-            select(context),
-            unit="A^2",
+            *arguments,
             labels=lambda u: u.select_atoms(target).residues.resids,
-            name=f"sasa_{run}",
-            recompute=recompute,
-            output_dir=output_dir,
-            bounds=(0.0, None),
+            **stored,
             **options,
         )
-        report = values.compare() if len(study) > 1 else values.summary()
-        if plots:
-            name = run[: -len("_residues")]
-            values.plot(
-                folder, f"sasa_profile_{name}", f"Per-residue SASA, {name}", None, [], "Residue"
-            )
+
+        def figures(folder: Path, report: ProtocolReport) -> None:
+            title = f"Per-residue SASA, {name}"
+            values.plot(folder, f"sasa_profile_{name}", title, None, [], "Residue")
             if len(study) > 1:
-                plot_differences(
-                    values, report, folder, f"sasa_difference_{name}", None, None, "Residue"
-                )
+                figure = f"sasa_difference_{name}"
+                plot_differences(values, report, folder, figure, None, None, "Residue")
+
     else:
-        series = study.timeseries(
-            functions.sasa,
-            select(target),
-            select(context),
-            unit="A^2",
-            name=f"sasa_{run}",
-            recompute=recompute,
-            output_dir=output_dir,
-            bounds=(0.0, None),
-            **options,
-        )
-        values = series.reduce("mean", detect_equilibration=eq_check)
+        series = study.timeseries(functions.sasa, *arguments, **stored, **options)
+        values = series.reduce("mean", detect_equilibration=request.eq_check)
         values.metric = "mean_sasa"
-        report = values.compare() if len(study) > 1 else values.summary()
-        if plots:
+
+        def figures(folder: Path, report: ProtocolReport) -> None:
             series.plot(folder, f"sasa_timeseries_{run}")
             values.plot(folder, f"sasa_comparison_{run}", title=f"SASA, {run}")
             series.plot_distribution(output_dir=folder, name=f"sasa_distribution_{run}")
-    report.provenance.settings = {**settings, "contexts": dict(contexts)}
-    if plots:
-        report.provenance.output_paths["figures"] = str(folder)
-    return report.model_copy(update={"analysis": "sasa", "run": run, "all_runs": runs})
+
+    return Measured(values, figures, run, runs, {**settings, "contexts": dict(contexts)})
 
 
-def _analyze_secondary_structure(
-    study: Any,
-    settings: dict | None,
-    run: str | None,
-    recompute: bool,
-    output_dir: Path | None,
-    plots: bool,
-) -> ProtocolReport:
+def _measure_secondary_structure(study: Any, settings: dict, request: Request) -> Measured:
     """Assign DSSP classes to every residue of ``selection`` and report one class.
 
     ``scheme`` picks MDTraj's DSSP: ``simplified`` (the default) gives helix,
@@ -1354,18 +1208,16 @@ def _analyze_secondary_structure(
     residue-frames in it, and ``<name>_residues`` its per-residue profile,
     compared residue by residue. ``run`` defaults to the first class, helix or
     alpha_helix. A warning names the replicates with unassigned residues,
-    which MDTraj gives ``"NA"`` when it cannot assign them. With ``plots``,
+    which MDTraj gives ``"NA"`` when it cannot assign them. The figures:
     ``ss_content_bars`` groups every class's fraction except unassigned, a
     total draws ``ss_<name>_comparison``, and a residue result
     ``ss_<name>_profile``, ``ss_classes_<name>`` (every class of each residue
-    per condition) and, with several conditions, ``ss_<name>_difference``,
-    into ``<output_dir>/figures/secondary_structure/``.
+    per condition) and, with several conditions, ``ss_<name>_difference``.
     """
     from polyzymd.analyses import functions
     from polyzymd.analyses.figures import plot_decomposition, plot_differences, plot_values
     from polyzymd.analyses.timeseries import select
 
-    settings = {**FUNCTION_ANALYSES["secondary_structure"], **(settings or {})}
     atoms, scheme = str(settings["selection"]), settings["scheme"]
     if scheme not in ("simplified", "full"):
         raise ProtocolError(
@@ -1374,7 +1226,7 @@ def _analyze_secondary_structure(
         )
     classes = list(functions.DSSP_SIMPLIFIED if scheme == "simplified" else functions.DSSP_CLASSES)
     runs = [key for name in classes for key in (name, f"{name}_residues")]
-    run = run or classes[0]
+    run = request.run or classes[0]
     if run not in runs:
         raise ProtocolError(
             f"secondary_structure: no result named {run!r} in the {scheme} scheme.",
@@ -1388,55 +1240,46 @@ def _analyze_secondary_structure(
         unit=None,
         labels=lambda u: u.select_atoms(atoms).residues.resids,
         name=f"dssp_occupancy_{scheme}",
-        recompute=recompute,
-        output_dir=output_dir,
+        recompute=request.recompute,
+        output_dir=request.output_dir,
         bounds=(0.0, 1.0),
         parts=classes,
         simplified=scheme == "simplified",
     )
     totals = {name: rows[name].over_labels("mean", f"{name}_fraction") for name in classes}
     residues = run.endswith("_residues")
-    values = rows[run[: -len("_residues")]] if residues else totals[run]
-    report = values.compare() if len(study) > 1 else values.summary()
+    name = run[: -len("_residues")] if residues else run
+    values = rows[name] if residues else totals[run]
     unassigned = [
         f"{label} replicate {row[0]}"
         for label, table in totals["unassigned"].rows.items()
         for row in table
         if row[1] > 0
     ]
+    warnings = []
     if unassigned:
-        report.warnings.append(
+        warnings.append(
             "MDTraj could not assign a DSSP class to some residues (code NA) in "
             + ", ".join(unassigned)
             + "; they count in unassigned. Check for missing backbone atoms or "
             "non-standard residue names."
         )
-    report.provenance.settings = dict(settings)
-    if plots:
-        folder = _figures_dir(output_dir, "secondary_structure")
+
+    def figures(folder: Path, report: ProtocolReport) -> None:
         shown = [name for name in classes if name != "unassigned"]
-        plot_values(
-            [totals[name] for name in shown],
-            shown,
-            folder,
-            "ss_content_bars",
-            "Secondary structure",
-        )
-        if residues:
-            name = run[: -len("_residues")]
-            values.plot(folder, f"ss_{name}_profile", f"Per-residue {name}", None, [], "Residue")
-            profiles = {part: rows[part] for part in shown}
-            plot_decomposition(profiles, folder, f"ss_classes_{name}", None, None, "Residue")
-            if len(study) > 1:
-                plot_differences(
-                    values, report, folder, f"ss_{name}_difference", None, None, "Residue"
-                )
-        else:
+        bars = [totals[name] for name in shown]
+        plot_values(bars, shown, folder, "ss_content_bars", "Secondary structure")
+        if not residues:
             values.plot(folder, f"ss_{run}_comparison", title=f"{run} fraction")
-        report.provenance.output_paths["figures"] = str(folder)
-    return report.model_copy(
-        update={"analysis": "secondary_structure", "run": run, "all_runs": runs}
-    )
+            return
+        values.plot(folder, f"ss_{name}_profile", f"Per-residue {name}", None, [], "Residue")
+        profiles = {part: rows[part] for part in shown}
+        plot_decomposition(profiles, folder, f"ss_classes_{name}", None, None, "Residue")
+        if len(study) > 1:
+            figure = f"ss_{name}_difference"
+            plot_differences(values, report, folder, figure, None, None, "Residue")
+
+    return Measured(values, figures, run, runs, dict(settings), warnings=warnings)
 
 
 #: Settings of polyzymd analyze contacts that only one method reads.
@@ -1452,14 +1295,7 @@ CONTACT_METHOD_SETTINGS = {
 }
 
 
-def _analyze_contacts(
-    study: Any,
-    settings: dict | None,
-    run: str | None,
-    recompute: bool,
-    output_dir: Path | None,
-    plots: bool,
-) -> ProtocolReport:
+def _measure_contacts(study: Any, settings: dict, request: Request) -> Measured:
     """Measure each protein residue's contact with the polymer and report one result.
 
     ``method`` picks what contact means on one frame:
@@ -1476,6 +1312,9 @@ def _analyze_contacts(
       counts a contact when any polymer atom is within ``cutoff`` Å of the
       residue, comparing heavy atoms only when ``heavy_atoms`` is true.
 
+    ``protein_selection`` and ``polymer_selection`` left null select the
+    atoms of the protein and polymer roles (:data:`ROLE_CHAINS`), and the
+    resolved selections are recorded in ``provenance.settings``.
     ``polymer_types`` names the polymer residue names (monomers) reported one
     by one; by default every residue name of ``polymer_selection`` in any
     condition (:func:`study_wide_settings`), so a replicate without one
@@ -1502,12 +1341,16 @@ def _analyze_contacts(
     - for ``occlusion`` only, ``occluded_area``: the SASA in Å² the polymer
       removes from the measured residues per frame, ``occlusion_fraction``:
       that area over their SASA with the protein alone, and
-      ``occluded_area_residues``: each residue's mean occluded area.
+      ``occluded_area_residues``: each residue's mean occluded area;
+    - ``mean_lifetime``, ``<type>_mean_lifetime``, ``lifetime_events`` and
+      ``censored_fraction``: the contact events of
+      :func:`~polyzymd.analyses.functions.contact_lifetimes`, joined over gaps
+      up to ``tolerance_ps``.
 
-    With ``plots``, ``contacts_class_bars`` groups the classes, a one-value
-    result draws ``contacts_<run>_comparison``, and a residue result
-    ``contacts_<name>_profile`` and, with several conditions,
-    ``contacts_<name>_difference``, into ``<output_dir>/figures/contacts/``.
+    The figures: ``contacts_class_bars`` groups the classes (not for a
+    lifetime), a one-value result draws ``contacts_<run>_comparison``, and a
+    residue result ``contacts_<name>_profile`` and, with several conditions,
+    ``contacts_<name>_difference``.
     """
     import numpy as np
 
@@ -1517,8 +1360,6 @@ def _analyze_contacts(
     from polyzymd.analyses.shared.groupings.base import ProteinAAClassification
     from polyzymd.analyses.timeseries import ReplicateValues, select
 
-    given = dict(settings or {})
-    settings = {**FUNCTION_ANALYSES["contacts"], **given}
     method = settings["method"]
     if method not in CONTACT_METHOD_SETTINGS:
         raise ProtocolError(
@@ -1526,7 +1367,7 @@ def _analyze_contacts(
             hint="Pass --set method=occlusion or --set method=distance.",
         )
     other = next(name for name in CONTACT_METHOD_SETTINGS if name != method)
-    misplaced = sorted(set(given) & set(CONTACT_METHOD_SETTINGS[other]))
+    misplaced = sorted(set(request.given) & set(CONTACT_METHOD_SETTINGS[other]))
     if misplaced:
         raise ProtocolError(
             f"contacts: {', '.join(misplaced)} only apply to method={other}, and method is "
@@ -1544,9 +1385,9 @@ def _analyze_contacts(
             f"contacts: tolerance_ps must be at least 0, got {tolerance}.",
             hint="Pass --set tolerance_ps=0 for events that end at the first absent frame.",
         )
-    settings.update(study_wide_settings("contacts", study, settings))
-    protein = str(settings["protein_selection"])
-    polymer = str(settings["polymer_selection"])
+    settings = {**settings, **study_wide_settings("contacts", study, settings)}
+    protein = _selection(settings["protein_selection"], "protein_selection", "protein")
+    polymer = _selection(settings["polymer_selection"], "polymer_selection", "polymer")
     names = settings["polymer_types"] or []
     types = sorted({str(name) for name in ([names] if isinstance(names, str) else names)})
     if method == "distance" and settings["heavy_atoms"]:
@@ -1630,12 +1471,20 @@ def _analyze_contacts(
         "lifetime_events": ("n_events", "polymer"),
         "censored_fraction": ("censored_fraction", "polymer"),
     }
-    all_runs = [*fraction_runs, *lifetime_runs]
-    run = run or "coverage"
-    if run not in all_runs:
-        raise ProtocolError(
-            f"contacts: no result named {run!r}.", hint=f"Use --run with one of {all_runs}."
-        )
+    runs = [*fraction_runs, *lifetime_runs]
+    run = _chosen("contacts", request.run, runs)
+    recorded = {
+        **{
+            key: value
+            for key, value in settings.items()
+            if key not in CONTACT_METHOD_SETTINGS[other]
+        },
+        "protein_selection": protein,
+        "polymer_selection": polymer,
+        "polymer_types_found": types,
+        "unmeasured_residues": unmeasured,
+    }
+    stored = {"recompute": request.recompute, "output_dir": request.output_dir}
     if run in lifetime_runs:
         life = {key: value for key, value in options.items() if key != "types"}
         if not occlusion:
@@ -1649,10 +1498,9 @@ def _analyze_contacts(
             unit=None,
             labels=["polymer", *types],
             name="contact_lifetimes",
-            recompute=recompute,
-            output_dir=output_dir,
             parts=list(functions.LIFETIME_PARTS),
             types=types,
+            **stored,
             **life,
         )
         part, group = lifetime_runs[run]
@@ -1662,35 +1510,18 @@ def _analyze_contacts(
             "n_events": (None, (0.0, None)),
             "censored_fraction": (None, (0.0, 1.0)),
         }[part]
-        report = _report_skipping(values, study, skipped, "contacts")
-        report.warnings += _zero_partner_warning(no_polymer, "contacts", "the event count")
-        no_events = [
-            f"{label} replicate {row[0]}"
-            for label, table_rows in values.rows.items()
-            for row in table_rows
-            if not np.isfinite(row[1])
-        ]
+        warnings = _zero_partner_warning(no_polymer, "contacts", "the event count")
+        no_events = _undefined(values, skipped)
         if no_events:
-            report.warnings.append(
+            warnings.append(
                 f"contacts: {', '.join(no_events)} have no contact event for {group}, so {run} "
                 "is undefined (nan) there."
             )
-        report.provenance.settings = {
-            **{
-                key: value
-                for key, value in settings.items()
-                if key not in CONTACT_METHOD_SETTINGS[other]
-            },
-            "protein_selection": protein,
-            "polymer_selection": polymer,
-            "polymer_types_found": types,
-            "unmeasured_residues": unmeasured,
-        }
-        if plots:
-            folder = _figures_dir(output_dir, "contacts")
+
+        def figures(folder: Path, report: ProtocolReport) -> None:
             values.plot(folder, f"contacts_{run}_comparison", title=run.replace("_", " "))
-            report.provenance.output_paths["figures"] = str(folder)
-        return report.model_copy(update={"analysis": "contacts", "run": run, "all_runs": all_runs})
+
+        return Measured(values, figures, run, runs, recorded, skipped, warnings)
     rows = study.per_replicate(
         function,
         select(protein, allow_empty=True),
@@ -1698,10 +1529,9 @@ def _analyze_contacts(
         unit=None,
         labels=lambda u: [int(r.resid) for r in measured(u.select_atoms(protein).residues)],
         name=name,
-        recompute=recompute,
-        output_dir=output_dir,
         bounds=(0.0, 1.0),
         parts=[*parts, *type_parts],
+        **stored,
         **options,
     )
     profile = rows["contact_fraction"]
@@ -1755,108 +1585,33 @@ def _analyze_contacts(
         residue_runs["occluded_area_residues"] = area
     if [*totals, *residue_runs] != fraction_runs:
         raise RuntimeError("contacts: the planned results differ from the computed ones.")
-    runs = all_runs
     values = residue_runs[run] if run in residue_runs else totals[run]
-    report = _report_skipping(values, study, skipped, "contacts")
-    report.warnings += _zero_partner_warning(no_polymer, "contacts", "contact")
+    warnings = _zero_partner_warning(no_polymer, "contacts", "contact")
     if unmeasured:
-        report.warnings.append(
+        warnings.append(
             f"contacts: {len(unmeasured)} residues of the protein selection have no maximum "
             f"ASA and are not measured by method=occlusion: {', '.join(unmeasured)}. They "
             "still cover their neighbours."
         )
-    report.provenance.settings = {
-        **{
-            key: value
-            for key, value in settings.items()
-            if key not in CONTACT_METHOD_SETTINGS[other]
-        },
-        "protein_selection": protein,
-        "polymer_selection": polymer,
-        "polymer_types_found": types,
-        "unmeasured_residues": unmeasured,
-        "residues": {"classes": by_class, **region_ids},
-    }
-    if plots:
-        folder = _figures_dir(output_dir, "contacts")
-        plot_values(
-            [totals[f"{name}_contact_fraction"] for name in classes],
-            classes,
-            folder,
-            "contacts_class_bars",
-            "Contact fraction by amino-acid class",
-        )
-        if run in residue_runs:
-            name = run[: -len("_residues")]
-            values.plot(
-                folder, f"contacts_{name}_profile", f"Per-residue {name}", None, [], "Residue"
-            )
-            if report.pairwise:
-                plot_differences(
-                    values, report, folder, f"contacts_{name}_difference", None, None, "Residue"
-                )
-        else:
+
+    def figures(folder: Path, report: ProtocolReport) -> None:
+        bars = [totals[f"{name}_contact_fraction"] for name in classes]
+        title = "Contact fraction by amino-acid class"
+        plot_values(bars, classes, folder, "contacts_class_bars", title)
+        if run not in residue_runs:
             values.plot(folder, f"contacts_{run}_comparison", title=run.replace("_", " "))
-        report.provenance.output_paths["figures"] = str(folder)
-    return report.model_copy(update={"analysis": "contacts", "run": run, "all_runs": runs})
+            return
+        name = run[: -len("_residues")]
+        values.plot(folder, f"contacts_{name}_profile", f"Per-residue {name}", None, [], "Residue")
+        if report.pairwise:
+            figure = f"contacts_{name}_difference"
+            plot_differences(values, report, folder, figure, None, None, "Residue")
+
+    recorded["residues"] = {"classes": by_class, **region_ids}
+    return Measured(values, figures, run, runs, recorded, skipped, warnings)
 
 
-def _residue_ids(study: Any, selection: str) -> list[int]:
-    """Return the residue IDs ``selection`` picks, the same in every replicate of ``study``."""
-    found = {
-        tuple(int(r) for r in replicate.universe().select_atoms(selection).residues.resids)
-        for condition in study
-        for replicate in condition.replicates
-    }
-    if len(found) != 1 or not next(iter(found)):
-        raise ProtocolError(
-            f"The selection {selection!r} picks {'no' if found == {()} else 'different'} "
-            "residues in the replicates.",
-            hint="Choose core and region selections that pick the same residues in every replicate.",
-        )
-    return list(found.pop())
-
-
-def _figures_dir(output_dir: Path | None, name: str) -> Path:
-    """Return ``<output_dir>/figures/<name>``, with the current directory by default."""
-    return Path(output_dir or Path.cwd()).expanduser().resolve() / "figures" / name
-
-
-def _study(
-    configs: Sequence[Path | str],
-    labels: Sequence[str] | None,
-    equilibration: str | None,
-    replicates: Sequence[int] | None,
-    stride: int = 1,
-    data: dict[str, Path] | None = None,
-    until: str | None = None,
-) -> Any:
-    """Build the Study of ``configs``, with the package default equilibration window."""
-    from polyzymd.analyses.study import Study
-    from polyzymd.config.analysis_settings import AnalysisDefaults
-
-    paths = [Path(item).expanduser().resolve() for item in configs]
-    return Study.from_configs(
-        dict(zip(_labels(paths, labels), paths, strict=True)),
-        equilibration=equilibration or AnalysisDefaults().equilibration_time,
-        replicates=replicates,
-        stride=stride,
-        data=data,
-        until=until,
-    )
-
-
-def _analyze_pairs(
-    name: str,
-    study: Any,
-    settings: dict | None,
-    run: str | None,
-    *,
-    recompute: bool,
-    output_dir: Path | None,
-    eq_check: bool,
-    plots: bool = True,
-) -> ProtocolReport:
+def _measure_distances(study: Any, settings: dict, request: Request) -> Measured:
     """Measure every pair of ``distances`` and report one result.
 
     ``pairs`` is a list of mappings with ``label``, ``selection_a``,
@@ -1869,20 +1624,20 @@ def _analyze_pairs(
     pair's threshold, which defaults to ``threshold``, computed from the
     stored distance with :func:`~polyzymd.analyses.functions.all_below`.
     ``run`` picks the result to report, by default the first, and
-    ``all_runs`` lists them all. With ``plots``, every pair's distance
+    ``all_runs`` lists them all. The figures: every pair's distance
     distribution with its threshold is drawn as ``distance_kde_<label>`` and
-    every fraction as ``distance_fraction_<result>`` into
-    ``<output_dir>/figures/<name>/``. ``distance_kde_panel`` stacks every
-    pair's distribution in one figure and ``distance_threshold_bars`` groups
-    every fraction.
+    every fraction as ``distance_fraction_<result>``.
+    ``distance_kde_panel`` stacks every pair's distribution in one figure and
+    ``distance_threshold_bars`` groups every fraction.
     """
     import yaml
 
     from polyzymd.analyses import functions
+    from polyzymd.analyses.figures import plot_distributions, plot_values
     from polyzymd.analyses.shared.selections import parse_selection_string
     from polyzymd.analyses.timeseries import select
 
-    settings = {**FUNCTION_ANALYSES[name], **(settings or {})}
+    name = request.name
     pairs = settings["pairs"]
     if isinstance(pairs, (str, Path)):
         try:
@@ -1930,8 +1685,8 @@ def _analyze_pairs(
             pbc=bool(settings["use_pbc"]),
             unit="A",
             name=f"{name}_{pair['label']}",
-            recompute=recompute,
-            output_dir=output_dir,
+            recompute=request.recompute,
+            output_dir=request.output_dir,
             bounds=(0.0, None),
         )
         below = pair.get("below_label") or f"below {threshold:g} A"
@@ -1946,38 +1701,193 @@ def _analyze_pairs(
         results[f"{pair['label']} {below}"] = (fraction, "fraction", "fraction_below_threshold")
         distances.append(distance)
         thresholds.append(threshold)
-    run = next(iter(results)) if run is None else run
-    if run not in results:
-        raise ProtocolError(
-            f"{name}: no result named {run!r}.", hint=f"Use --run with one of {list(results)}."
-        )
+    run = _chosen(name, request.run, list(results))
     series, how, metric = results[run]
-    values = series.reduce(how, detect_equilibration=eq_check)
+    values = series.reduce(how, detect_equilibration=request.eq_check)
     values.metric = metric
-    report = values.compare() if len(study) > 1 else values.summary()
-    if plots:
-        folder, prefix = _figures_dir(output_dir, name), "distance"
-        from polyzymd.analyses.figures import plot_distributions, plot_values
 
+    def figures(folder: Path, report: ProtocolReport) -> None:
         titles = [f"{pair['label']} distance" for pair in pairs]
         for pair, distance, threshold, title in zip(pairs, distances, thresholds, titles):
-            distance.plot_distribution(threshold, folder, f"{prefix}_kde_{pair['label']}", title)
-        plot_distributions(distances, thresholds, titles, folder, f"{prefix}_kde_panel", "distance")
+            distance.plot_distribution(threshold, folder, f"distance_kde_{pair['label']}", title)
+        plot_distributions(distances, thresholds, titles, folder, "distance_kde_panel", "distance")
         fractions = {}
         for key, (series, how, metric) in results.items():
             if how == "fraction":
                 fractions[key] = series.reduce(how, detect_equilibration=False)
                 fractions[key].metric = metric
-                fractions[key].plot(folder, f"{prefix}_fraction_{key}", title=key)
+                fractions[key].plot(folder, f"distance_fraction_{key}", title=key)
+        title = "Distance contact fractions"
         plot_values(
-            list(fractions.values()),
-            list(fractions),
-            folder,
-            f"{prefix}_threshold_bars",
-            "Distance contact fractions",
+            list(fractions.values()), list(fractions), folder, "distance_threshold_bars", title
         )
-        report.provenance.output_paths["figures"] = str(folder)
-    return report.model_copy(update={"analysis": name, "run": run, "all_runs": list(results)})
+
+    return Measured(values, figures, run, list(results))
+
+
+def _residue_ids(study: Any, selection: str) -> list[int]:
+    """Return the residue IDs ``selection`` picks, the same in every replicate of ``study``."""
+    found = {
+        tuple(int(r) for r in replicate.universe().select_atoms(selection).residues.resids)
+        for condition in study
+        for replicate in condition.replicates
+    }
+    if len(found) != 1 or not next(iter(found)):
+        raise ProtocolError(
+            f"The selection {selection!r} picks {'no' if found == {()} else 'different'} "
+            "residues in the replicates.",
+            hint="Choose core and region selections that pick the same residues in every replicate.",
+        )
+    return list(found.pop())
+
+
+def _figures_dir(output_dir: Path | None, name: str) -> Path:
+    """Return ``<output_dir>/figures/<name>``, with the current directory by default."""
+    return Path(output_dir or Path.cwd()).expanduser().resolve() / "figures" / name
+
+
+def _study(
+    configs: Sequence[Path | str],
+    labels: Sequence[str] | None,
+    equilibration: str | None,
+    replicates: Sequence[int] | None,
+    stride: int = 1,
+    data: dict[str, Path] | None = None,
+    until: str | None = None,
+) -> Any:
+    """Build the Study of ``configs``, with the package default equilibration window."""
+    from polyzymd.analyses.study import Study
+    from polyzymd.config.analysis_settings import AnalysisDefaults
+
+    paths = [Path(item).expanduser().resolve() for item in configs]
+    return Study.from_configs(
+        dict(zip(_labels(paths, labels), paths, strict=True)),
+        equilibration=equilibration or AnalysisDefaults().equilibration_time,
+        replicates=replicates,
+        stride=stride,
+        data=data,
+        until=until,
+    )
+
+
+#: The analyses ``polyzymd analyze`` runs, by name: what each measures, every
+#: setting it takes with its default, and the function that measures it.
+ANALYSES = {
+    "rg": ShippedAnalysis(
+        "radius of gyration of a selection per frame (A)",
+        {"selection": "protein"},
+        _measure_rg_rmsd,
+        takes_run=False,
+    ),
+    "rmsd": ShippedAnalysis(
+        "RMSD of a selection superposed on a reference, per frame (A)",
+        {
+            "selection": "protein and name CA",
+            "alignment_selection": "protein and name CA",
+            "reference_mode": None,
+            "reference_frame": 1,
+            "reference_file": None,
+        },
+        _measure_rg_rmsd,
+        takes_run=False,
+    ),
+    "rmsf": ShippedAnalysis(
+        "per-residue RMS fluctuation about the mean structure, with core and region means (A)",
+        {
+            "selection": "protein and name CA",
+            "alignment_selection": "protein and name CA",
+            "reference_mode": None,
+            "reference_frame": 1,
+            "reference_file": None,
+            "highlight_residues": [],
+            "core": None,
+            "regions": {},
+        },
+        _measure_rmsf,
+    ),
+    "rmsd_per_residue": ShippedAnalysis(
+        "per-residue RMS deviation from a reference structure (A)",
+        {
+            "selection": "protein and name CA",
+            "alignment_selection": "protein and name CA",
+            "reference_mode": None,
+            "reference_frame": 1,
+            "reference_file": None,
+            "highlight_residues": [],
+            "core": None,
+            "regions": {},
+        },
+        _measure_rmsf,
+    ),
+    "sasa": ShippedAnalysis(
+        "solvent-accessible surface area of a target in each context, total and per residue (A^2)",
+        {"target": "protein", "contexts": {}, "probe_radius_nm": 0.14, "n_sphere_points": 960},
+        _measure_sasa,
+    ),
+    "secondary_structure": ShippedAnalysis(
+        "DSSP secondary structure, fractions overall and per residue",
+        {"selection": "protein", "scheme": "simplified"},
+        _measure_secondary_structure,
+    ),
+    "hydrogen_bonds": ShippedAnalysis(
+        "hydrogen bonds between groups: counts, lifetimes, per-residue and per-pair occupancy",
+        {
+            "groups": {"protein": None, "polymer": None},
+            "summaries": {"protein_polymer": {"between": ["protein", "polymer"]}},
+            "d_a_cutoff": 3.5,
+            "d_h_a_angle_cutoff": 150.0,
+            "donors": None,
+            "hydrogens": None,
+            "acceptors": None,
+            "lifetime_key": "residue",
+            "tolerance_ps": 0.0,
+        },
+        _measure_hydrogen_bonds,
+    ),
+    "native_contacts": ShippedAnalysis(
+        "fraction of native contacts Q against a reference structure",
+        {
+            "selection": "protein and not element H",
+            "reference_mode": None,
+            "reference_frame": 1,
+            "reference_file": None,
+            "radius": 4.5,
+            "min_separation": 3,
+            "beta": 5.0,
+            "lambda_constant": 1.8,
+            "use_pbc": True,
+            "regions": {},
+        },
+        _measure_native_contacts,
+    ),
+    "contacts": ShippedAnalysis(
+        "contacts per protein residue with a partner group, the polymer by "
+        "default or any polymer_selection such as resname SDS: method occlusion (buried surface) "
+        "or distance",
+        {
+            "method": "occlusion",
+            "polymer_selection": None,
+            "protein_selection": None,
+            "polymer_types": None,
+            "use_pbc": True,
+            "regions": {},
+            "cutoff": 4.0,
+            "heavy_atoms": True,
+            "exposed_threshold": 0.2,
+            "buried_threshold": 0.2,
+            "max_asa": "theoretical",
+            "probe_radius_nm": 0.14,
+            "n_sphere_points": 960,
+            "tolerance_ps": 0.0,
+        },
+        _measure_contacts,
+    ),
+    "distances": ShippedAnalysis(
+        "distances between atom pairs, and the fraction of frames below a threshold (A)",
+        {"pairs": None, "threshold": 3.5, "use_pbc": True},
+        _measure_distances,
+    ),
+}
 
 
 # Condition labels

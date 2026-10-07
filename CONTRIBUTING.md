@@ -98,9 +98,9 @@ adding one needs **one function** and **no changes to the study code**.
    universe with placed atoms, then a run through the study on the synthetic
    OpenMM run directories of `tests/_support/analysis_testkit.py`.
 
-4. **To ship it in `polyzymd analyze`**, add its settings to
-   `FUNCTION_ANALYSES` and an `_analyze_<name>` in
-   `src/polyzymd/analyses/protocols.py`, with its figures, and document it in
+4. **To ship it in `polyzymd analyze`**, add a `ShippedAnalysis` entry to
+   `ANALYSES` in `src/polyzymd/analyses/protocols.py`, with its settings and a
+   `_measure_<name>` function that also draws its figures, and document it in
    `docs/source/reference/analysis_functions.md` and a how-to page.
 
 5. **Run the test suite**: `pixi run -e build pytest tests/ -v`
@@ -127,8 +127,8 @@ steps.
 - [ ] Function in `src/polyzymd/analyses/functions.py` with a docstring that
   says what it measures and in which unit
 - [ ] Known-answer test and a study test in `tests/analyses/test_<name>.py`
-- [ ] For a shipped analysis: `FUNCTION_ANALYSES` entry, `_analyze_<name>`,
-  figures and docs
+- [ ] For a shipped analysis: `ANALYSES` entry, `_measure_<name>`, figures
+  and docs
 - [ ] `ruff check src/polyzymd/` passes
 - [ ] `black src/ --check` passes
 - [ ] `pixi run -e build pytest tests/ -v` passes

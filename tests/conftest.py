@@ -7,6 +7,14 @@ import logging
 import pytest
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--update-characterization",
+        action="store_true",
+        help="Rewrite the stored outputs in tests/data/characterization instead of comparing.",
+    )
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _isolated_hash_cache(tmp_path_factory: pytest.TempPathFactory) -> None:
     """Keep the file-hash cache of stored results out of the user's home during tests."""

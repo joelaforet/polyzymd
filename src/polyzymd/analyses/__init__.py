@@ -12,7 +12,7 @@ Quick Start
 To get a number, start with :func:`~polyzymd.analyses.protocols.analyze`. It
 loads each simulation config as a condition of a
 :class:`~polyzymd.analyses.study.Study`, measures one of the analyses in
-:data:`~polyzymd.analyses.protocols.FUNCTION_ANALYSES` in every replicate and
+:data:`~polyzymd.analyses.protocols.ANALYSES` in every replicate and
 returns a report in which every number states its unit, its uncertainty and
 its sample size::
 

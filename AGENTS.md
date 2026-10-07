@@ -117,13 +117,13 @@ src/polyzymd/
 
 | Layer | Files | Role |
 |-------|-------|------|
-| **Function analyses** (the extension point) | `functions.py`, `study.py`, `timeseries.py`, `protocols.py`, `figures.py` | rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds: functions of a replicate `Universe`, measured by `Study.timeseries` or `Study.per_replicate` and run by `polyzymd analyze NAME -c config.yaml` (`protocols.FUNCTION_ANALYSES`). Before choosing among `rmsd`, `rmsf`, `offset` and `rmsd_per_residue`, read the "Fluctuation, offset and deviation" section of `docs/source/explanation/analysis_rmsf_best_practices.md`: `rmsd` is per frame, the others per residue, and `rmsd_per_residue² = rmsf² + offset²` |
+| **Function analyses** (the extension point) | `functions.py`, `study.py`, `timeseries.py`, `protocols.py`, `figures.py` | rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds: functions of a replicate `Universe`, measured by `Study.timeseries` or `Study.per_replicate` and run by `polyzymd analyze NAME -c config.yaml` (`protocols.ANALYSES`). Before choosing among `rmsd`, `rmsf`, `offset` and `rmsd_per_residue`, read the "Fluctuation, offset and deviation" section of `docs/source/explanation/analysis_rmsf_best_practices.md`: `rmsd` is per frame, the others per residue, and `rmsd_per_residue² = rmsf² + offset²` |
 | **Shared utilities** | `shared/loader.py`, `shared/window.py`, etc. | `TrajectoryLoader`, frame windows, statistics, autocorrelation |
 | **Loading and identity** | `universe.py`, `identity.py` | `UniverseProvider` loads each replicate's `Universe` and records its input files; `compute_config_hash` is recorded by every stored result and must not change |
 
 The catalytic triad is not an analysis: it is a routine on the study API
 (`docs/source/how_to/analysis_triad_quickstart.md`). An unknown analysis
-name, `catalytic_triad` included, exits 2 listing `FUNCTION_ANALYSES`.
+name, `catalytic_triad` included, exits 2 listing `ANALYSES`.
 `polyzymd analyze NAME -c ... --submit --preset <cluster>` runs one SLURM
 array task per condition and replicate and a report job
 (`workflow/analysis_submit.py`).
@@ -230,15 +230,15 @@ PolyzyMD never uploads or publishes: that is the author's step. The design of st
 To add a measurement, write a function of an MDAnalysis `Universe` (per frame,
 or per replicate with a `frames` argument) and run it with `Study.timeseries`
 or `Study.per_replicate`. Add it to `polyzymd analyze` only when it is a
-shipped analysis, as a `FUNCTION_ANALYSES` entry and an `_analyze_<name>` in
-`protocols.py`.
+shipped analysis, as a `ShippedAnalysis` entry in `ANALYSES` and a
+`_measure_<name>` in `protocols.py`.
 
 | Resource | Location | What It Documents |
 |----------|----------|-------------------|
 | Shipped functions | `analyses/functions.py`, `docs/source/reference/analysis_functions.md` | What each function measures, its arguments and units |
 | Study API | `analyses/study.py`, `analyses/timeseries.py`, `docs/source/how_to/study_api.md`, `docs/source/reference/study_api.md` | `Study.from_configs`, `timeseries`, `per_replicate`, `transform`, `reduce`, `compare`, records under `polyzymd_results/` |
 | API explanation | `docs/source/explanation/analysis_api.md` | How the study API supplies universes, records and statistics |
-| `polyzymd analyze` | `analyses/protocols.py`, `docs/source/how_to/analysis_agent_protocol.md` | `FUNCTION_ANALYSES`, the `_analyze_<name>` functions, `ProtocolReport` |
+| `polyzymd analyze` | `analyses/protocols.py`, `docs/source/how_to/analysis_agent_protocol.md` | `ANALYSES`, `ShippedAnalysis`, the `_measure_<name>` functions, `ProtocolReport` |
 | Study folders | `analyses/study_file.py`, `analyses/results.py`, `analyses/study_scaffold.py`, `analyses/study_git.py`, `docs/source/how_to/study_yaml.md`, `docs/source/how_to/study_folder.md` | `study.yaml`, `--study`, `polyzymd study check/init/locate/freeze`, `data.local.yaml`, `--data`, `Study.results`, `docs/source/how_to/study_freeze.md` |
 | Figures | `analyses/figures.py` | `ReplicateValues.plot`, profiles, differences, uncertainty footnotes |
 | Worked routine | `docs/source/how_to/analysis_triad_quickstart.md` | Combining shipped functions for a question of your own |
@@ -263,7 +263,7 @@ already computes: wrap it in a function.
 When writing a new analysis, **study existing implementations first**:
 
 1. **Read `analyses/functions.py`**: `radius_of_gyration` is a per-frame function, `hydrogen_bonds` a per-replicate one that takes `frames`
-2. **Read the matching `_analyze_<name>` in `analyses/protocols.py`** to see how a function becomes a `polyzymd analyze` result, with its `--run` names and figures
+2. **Read the matching `_measure_<name>` in `analyses/protocols.py`** to see how a function becomes a `polyzymd analyze` result, with its `--run` names and figures
 3. **Read `docs/source/how_to/analysis_triad_quickstart.md`** for a routine that combines shipped functions with `Timeseries.transform`
 
 **Anti-pattern to avoid:**
@@ -286,7 +286,7 @@ print(series.reduce("mean").compare().to_agent_text())
 1. **Read** `docs/source/reference/study_api.md`, `docs/source/explanation/analysis_api.md` and `docs/source/reference/analysis_functions.md`
 2. **Write the function** in `analyses/functions.py`, with a docstring that says concretely what it measures and in which unit
 3. **Test it on placed geometry** with a known answer, then on the synthetic OpenMM run directories of `tests/_support/analysis_testkit.py` (`write_simulation_config`, `write_openmm_replicate`)
-4. **For a shipped analysis**, add the `FUNCTION_ANALYSES` entry and `_analyze_<name>` in `protocols.py`, and document it in `analysis_functions.md` and a how-to page
+4. **For a shipped analysis**, add the `ShippedAnalysis` entry to `ANALYSES` and a `_measure_<name>` in `protocols.py`, and document it in `analysis_functions.md` and a how-to page
 5. **Test**: `pixi run -e test pytest tests/analyses -v -k <name>`
 
 ## Frame counting in analyses

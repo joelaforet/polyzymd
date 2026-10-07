@@ -26,7 +26,7 @@ already runs (`polyzymd --version`), call it directly.
 `pixi run -e analysis polyzymd analyze --help` lists the analysis names: rg,
 rmsd, rmsf, rmsd_per_residue, sasa, secondary_structure, contacts, native_contacts,
 hydrogen_bonds and distances, the keys of
-`polyzymd.analyses.protocols.FUNCTION_ANALYSES`. Every one reads `-c config.yaml`.
+`polyzymd.analyses.protocols.ANALYSES`. Every one reads `-c config.yaml`.
 For contacts, `--run mean_lifetime` reports how long contacts last; for
 hydrogen_bonds, `--run protein_polymer_mean_lifetime`, `protein_polymer_residues`
 and `protein_polymer_pairs` report how long the bonds last and how often each

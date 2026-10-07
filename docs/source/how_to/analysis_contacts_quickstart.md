@@ -47,9 +47,10 @@ Before you run the analysis, check these points:
 - A residue with no maximum ASA, such as a terminal cap or a non-standard
   residue, still covers its neighbors. PolyzyMD does not measure it, and a
   warning names it.
-- The default selections follow the PolyzyMD chain convention: the protein is
-  chain A (`chainid A`) and the polymer is chain C (`chainid C`). Water and
-  ions are never part of the calculation.
+- The default selections are null: they select the protein and the polymer by
+  the PolyzyMD chain convention, the protein in chain A (`chainid A`) and the
+  polymer in chain C (`chainid C`). The report records the selections used.
+  Water and ions are never part of the calculation.
 
 ## From the command line
 
@@ -120,8 +121,8 @@ Settings, passed with `--set`:
 | Setting | Default | Meaning |
 |---|---|---|
 | `method` | `occlusion` | `occlusion` or `distance`, as above |
-| `protein_selection` | `chainid A` | Protein atoms whose residues are measured |
-| `polymer_selection` | `chainid C` | Atoms of the partner group: the polymer, or any other group, such as a co-solvent (`resname SDS`) |
+| `protein_selection` | null, the protein (`chainid A`) | Protein atoms whose residues are measured |
+| `polymer_selection` | null, the polymer (`chainid C`) | Atoms of the partner group: the polymer, or any other group, such as a co-solvent (`resname SDS`) |
 | `polymer_types` | every residue name of the polymer in any condition | The monomers to report one by one, such as `[SBM]`. A replicate without a listed monomer reports 0 for it. This setting does not narrow the polymer. To narrow the polymer, use `polymer_selection` |
 | `use_pbc` | `true` | Use the frame's box: the minimum image for `distance`, and for `occlusion` each polymer molecule moved to its image nearest the protein |
 | `regions` | none | Mapping of region names to selections, each reported as `<region>_contact_fraction`; a region cannot be named `coverage`, `mean`, `contact`, `classes`, `occluded`, `occlusion`, a monomer type or an amino-acid class |

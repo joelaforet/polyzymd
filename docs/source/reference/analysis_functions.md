@@ -141,8 +141,8 @@ in Python.
 | `unassigned` | NA | `unassigned` |
 
 `polyzymd analyze contacts` runs, once per replicate between `--set
-protein_selection=...` (default `chainid A`) and `polymer_selection` (default
-`chainid C`; a replicate where it matches no atoms, such as a control without
+protein_selection=...` (default null, the protein: `chainid A`) and
+`polymer_selection` (default null, the polymer: `chainid C`; a replicate where it matches no atoms, such as a control without
 polymer, has no contact: 0),
 `residue_occlusion` with `exposed_threshold`, `buried_threshold`, `max_asa`, `probe_radius_nm` and
 `n_sphere_points` for `method=occlusion` (default), or `residue_contacts` with
@@ -166,8 +166,9 @@ residues of each class and region are recorded under `provenance.settings`.
 
 `polyzymd analyze hydrogen_bonds` counts hydrogen bonds for the summaries of
 `--set summaries=...`, each `{between: [a, b]}` or `{within: a}` over the named
-selections of `--set groups=...`; the defaults are `groups` `{protein: chainid
-A, polymer: chainid C}` and `summaries` `{protein_polymer: {between: [protein,
+selections of `--set groups=...`; the defaults are `groups` `{protein: null,
+polymer: null}`, where null selects the atoms of the role the group is named
+after (`protein` chain A, `ligand` chain B, `polymer` chain C), and `summaries` `{protein_polymer: {between: [protein,
 polymer]}}`. Only the chosen summary is measured. Each summary `<s>` gives
 `<s>_mean_hbonds` (the default for the first summary), `<s>_mean_residue_pairs`
 and `<s>_any_fraction` from `hydrogen_bonds`; `<s>_mean_lifetime`,

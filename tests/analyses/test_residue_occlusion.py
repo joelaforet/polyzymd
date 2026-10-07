@@ -33,7 +33,7 @@ from polyzymd.analyses.functions import (
     residue_occlusion,
     residue_sasa,
 )
-from polyzymd.analyses.protocols import CONTACT_METHOD_SETTINGS, FUNCTION_ANALYSES
+from polyzymd.analyses.protocols import ANALYSES, CONTACT_METHOD_SETTINGS
 from polyzymd.analyses.shared.aa_classification import (
     MAX_ASA_TABLE,
     PROTONATION_VARIANTS,
@@ -667,7 +667,7 @@ def _options(tmp_path: Path, settings: dict | None = None, **extra):
 
 
 def test_contacts_defaults_and_method_settings_agree() -> None:
-    defaults = FUNCTION_ANALYSES["contacts"]
+    defaults = ANALYSES["contacts"].defaults
     assert defaults["method"] == "occlusion"
     assert (defaults["cutoff"], defaults["heavy_atoms"]) == (functions.CONTACT_CUTOFF, True)
     assert defaults["exposed_threshold"] == EXPOSED_THRESHOLD == 0.2

@@ -201,10 +201,10 @@ def test_centroid_rmsd_is_per_atom() -> None:
 
 def test_a_reference_file_is_the_reference() -> None:
     """rmsd and rmsf with a reference_file and no mode measure from that file."""
-    from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+    from polyzymd.analyses.protocols import ANALYSES
     from polyzymd.analyses.reference import reference
 
     for name in ("rmsd", "rmsf", "rmsd_per_residue"):
-        assert FUNCTION_ANALYSES[name]["reference_mode"] is None, name
+        assert ANALYSES[name].defaults["reference_mode"] is None, name
     with pytest.raises(ProtocolError, match="does not use the file"):
         reference("centroid", "all", file=__file__)

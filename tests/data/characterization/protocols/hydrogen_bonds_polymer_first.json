@@ -1,0 +1,438 @@
+{
+ "one condition": {
+  "error": "NoMatchingAtomsError",
+  "hint": "Choose selections that pick atoms, or leave one null for the atoms of its role: the protein in chain A, the ligand in chain B, the polymer in chain C.",
+  "message": "hydrogen_bonds: the selections first group 'chainid C' match no atoms in any replicate."
+ },
+ "records": {
+  "hbond_lifetimes_polymer_protein": {
+   "B/replicate_1": {},
+   "B/replicate_2": {},
+   "B/replicate_3": {},
+   "control/replicate_1": {},
+   "control/replicate_2": {},
+   "control/replicate_3": {},
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_lifetime","n_events","censored_fraction"],"record.json:arguments":{"args":[{"select":"chainid C"},{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hbond_lifetimes"},"record.json:labels":null,"record.json:name":"hbond_lifetimes_polymer_protein","record.json:parts":["mean_lifetime","n_events","censored_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+  },
+  "hydrogen_bonds_polymer_protein": {
+   "B/replicate_1": {},
+   "B/replicate_2": {},
+   "B/replicate_3": {},
+   "control/replicate_1": {},
+   "control/replicate_2": {},
+   "control/replicate_3": {},
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:arguments":{"args":[{"select":"chainid C"},{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hydrogen_bonds"},"record.json:labels":null,"record.json:name":"hydrogen_bonds_polymer_protein","record.json:parts":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+  },
+  "residue_hbond_occupancy_polymer_protein": {
+   "B/replicate_1": {"record.json:labels":[1,2]},
+   "B/replicate_2": {"record.json:labels":[1,2]},
+   "B/replicate_3": {"record.json:labels":[1,2]},
+   "control/replicate_1": {"record.json:labels":[]},
+   "control/replicate_2": {"record.json:labels":[]},
+   "control/replicate_3": {"record.json:labels":[]},
+   "shared": {"files":["record.json","values.npz"],"record.json:arguments":{"args":[{"select":"chainid C"},{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_hbond_occupancy"},"record.json:name":"residue_hbond_occupancy_polymer_protein","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+  },
+  "residue_pair_hbond_occupancy_polymer_protein": {
+   "B/replicate_1": {"labels.json:":["EGM-45","SBM-12"]},
+   "B/replicate_2": {"labels.json:":["EGM-45","SBM-12"]},
+   "B/replicate_3": {"labels.json:":["EGM-45","SBM-12"]},
+   "control/replicate_1": {"labels.json:":[]},
+   "control/replicate_2": {"labels.json:":[]},
+   "control/replicate_3": {"labels.json:":[]},
+   "shared": {"files":["labels.json","record.json","values.npz"],"record.json:arguments":{"args":[{"select":"chainid C"},{"select":"chainid A"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_pair_hbond_occupancy"},"record.json:labels":"returned","record.json:missing":0.0,"record.json:name":"residue_pair_hbond_occupancy_polymer_protein","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+  }
+ },
+ "shared": {},
+ "two conditions, run polymer_protein_any_fraction": {
+  "all_metrics": [],
+  "all_runs": ["polymer_protein_mean_hbonds","polymer_protein_mean_residue_pairs","polymer_protein_any_fraction","polymer_protein_mean_lifetime","polymer_protein_lifetime_events","polymer_protein_censored_fraction","polymer_protein_residues","polymer_protein_pairs"],
+  "analysis": "hydrogen_bonds",
+  "conditions": [{"ci95":[0.291293,1.15315],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":0.722222,"n_effective":[],"n_replicates":3,"replicate_values":[0.666667,0.916667,0.583333],"replicates":[1,2,3],"sem":0.100154,"statistical_inefficiency":[]}],
+  "equilibration": "0ns",
+  "figures": ["hydrogen_bonds/hbonds_polymer_protein_any_fraction_comparison.png"],
+  "frames_per_replicate": {
+   "B": [12,12,12]
+  },
+  "metric": "polymer_protein_any_fraction",
+  "pairwise": [],
+  "problems": [],
+  "protocol_version": "2",
+  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.mdanalysis_version": "<masked>",
+  "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hydrogen_bonds_polymer_protein",
+  "provenance.polyzymd_version": "<masked>",
+  "provenance.settings.acceptors": null,
+  "provenance.settings.d_a_cutoff": 3.5,
+  "provenance.settings.d_h_a_angle_cutoff": 150.0,
+  "provenance.settings.donors": null,
+  "provenance.settings.groups": {
+   "polymer": "chainid C",
+   "protein": "chainid A"
+  },
+  "provenance.settings.hbond_atoms": {
+   "acceptors": {"EGM O2":1,"GLN O":1,"SBM O1":1,"SER OG":1,"THR OG1":1},
+   "donors": {"EGM O2":1,"SER OG":1,"THR OG1":1},
+   "hydrogens": 3
+  },
+  "provenance.settings.hydrogens": null,
+  "provenance.settings.lifetime_key": "residue",
+  "provenance.settings.summaries": {
+   "polymer_protein": {"between":["polymer","protein"]}
+  },
+  "provenance.settings.summary": {
+   "groups": ["chainid C","chainid A"],
+   "name": "polymer_protein"
+  },
+  "provenance.settings.tolerance_ps": 0.0,
+  "provenance.settings_fingerprint": null,
+  "provenance.study": null,
+  "run": "polymer_protein_any_fraction",
+  "status": "complete",
+  "stride": 1,
+  "text": "# polyzymd analyze hydrogen_bonds  metric polymer_protein_any_fraction  unit none  run polymer_protein_any_fraction  eq 0ns  conditions 1  replicates 3  protocol hydrogen_bonds/2\nB  n 3  mean 0.7222  sem 0.1002  ci95 0.2913 to 1.153  values 0.6667, 0.9167, 0.5833\nwarning: the 95 percent interval of condition B extends past the bounds 0 to 1 of polymer_protein_any_fraction, where a t interval is not reliable\nwarning: hydrogen_bonds: in condition control, replicate 1 (first group 'chainid C'), 2 (first group 'chainid C'), 3 (first group 'chainid C') matched no atoms, so the condition is left out of the statistics.\nwarning: hydrogen_bonds: the control control has no replicate where every selection matches atoms, so the other conditions are summarised and not compared. Give a condition with those atoms first to compare against it.\nverdict: B polymer_protein_any_fraction 0.7222 (95% CI 0.2913 to 1.153, n 3)\n",
+  "trends": [],
+  "unit": null,
+  "verdict": "<text>",
+  "warnings": "<text>"
+ },
+ "two conditions, run polymer_protein_censored_fraction": {
+  "all_metrics": [],
+  "all_runs": ["polymer_protein_mean_hbonds","polymer_protein_mean_residue_pairs","polymer_protein_any_fraction","polymer_protein_mean_lifetime","polymer_protein_lifetime_events","polymer_protein_censored_fraction","polymer_protein_residues","polymer_protein_pairs"],
+  "analysis": "hydrogen_bonds",
+  "conditions": [{"ci95":[-0.0057092,0.573963],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":0.284127,"n_effective":[],"n_replicates":3,"replicate_values":[0.285714,0.4,0.166667],"replicates":[1,2,3],"sem":0.0673622,"statistical_inefficiency":[]}],
+  "equilibration": "0ns",
+  "figures": ["hydrogen_bonds/hbonds_polymer_protein_censored_fraction_comparison.png"],
+  "frames_per_replicate": {
+   "B": [12,12,12]
+  },
+  "metric": "polymer_protein_censored_fraction",
+  "pairwise": [],
+  "problems": [],
+  "protocol_version": "2",
+  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.mdanalysis_version": "<masked>",
+  "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hbond_lifetimes_polymer_protein",
+  "provenance.polyzymd_version": "<masked>",
+  "provenance.settings.acceptors": null,
+  "provenance.settings.d_a_cutoff": 3.5,
+  "provenance.settings.d_h_a_angle_cutoff": 150.0,
+  "provenance.settings.donors": null,
+  "provenance.settings.groups": {
+   "polymer": "chainid C",
+   "protein": "chainid A"
+  },
+  "provenance.settings.hbond_atoms": {
+   "acceptors": {"EGM O2":1,"GLN O":1,"SBM O1":1,"SER OG":1,"THR OG1":1},
+   "donors": {"EGM O2":1,"SER OG":1,"THR OG1":1},
+   "hydrogens": 3
+  },
+  "provenance.settings.hydrogens": null,
+  "provenance.settings.lifetime_key": "residue",
+  "provenance.settings.summaries": {
+   "polymer_protein": {"between":["polymer","protein"]}
+  },
+  "provenance.settings.summary": {
+   "groups": ["chainid C","chainid A"],
+   "name": "polymer_protein"
+  },
+  "provenance.settings.tolerance_ps": 0.0,
+  "provenance.settings_fingerprint": null,
+  "provenance.study": null,
+  "run": "polymer_protein_censored_fraction",
+  "status": "complete",
+  "stride": 1,
+  "text": "# polyzymd analyze hydrogen_bonds  metric polymer_protein_censored_fraction  unit none  run polymer_protein_censored_fraction  eq 0ns  conditions 1  replicates 3  protocol hydrogen_bonds/2\nB  n 3  mean 0.2841  sem 0.06736  ci95 -0.005709 to 0.574  values 0.2857, 0.4, 0.1667\nwarning: the 95 percent interval of condition B extends past the bounds 0 to 1 of polymer_protein_censored_fraction, where a t interval is not reliable\nwarning: hydrogen_bonds: in condition control, replicate 1 (first group 'chainid C'), 2 (first group 'chainid C'), 3 (first group 'chainid C') matched no atoms, so the condition is left out of the statistics.\nwarning: hydrogen_bonds: the control control has no replicate where every selection matches atoms, so the other conditions are summarised and not compared. Give a condition with those atoms first to compare against it.\nverdict: B polymer_protein_censored_fraction 0.2841 (95% CI -0.005709 to 0.574, n 3)\n",
+  "trends": [],
+  "unit": null,
+  "verdict": "<text>",
+  "warnings": "<text>"
+ },
+ "two conditions, run polymer_protein_lifetime_events": {
+  "all_metrics": [],
+  "all_runs": ["polymer_protein_mean_hbonds","polymer_protein_mean_residue_pairs","polymer_protein_any_fraction","polymer_protein_mean_lifetime","polymer_protein_lifetime_events","polymer_protein_censored_fraction","polymer_protein_residues","polymer_protein_pairs"],
+  "analysis": "hydrogen_bonds",
+  "conditions": [{"ci95":[3.51586,8.48414],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":6.0,"n_effective":[],"n_replicates":3,"replicate_values":[7.0,5.0,6.0],"replicates":[1,2,3],"sem":0.57735,"statistical_inefficiency":[]}],
+  "equilibration": "0ns",
+  "figures": ["hydrogen_bonds/hbonds_polymer_protein_lifetime_events_comparison.png"],
+  "frames_per_replicate": {
+   "B": [12,12,12]
+  },
+  "metric": "polymer_protein_lifetime_events",
+  "pairwise": [],
+  "problems": [],
+  "protocol_version": "2",
+  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.mdanalysis_version": "<masked>",
+  "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hbond_lifetimes_polymer_protein",
+  "provenance.polyzymd_version": "<masked>",
+  "provenance.settings.acceptors": null,
+  "provenance.settings.d_a_cutoff": 3.5,
+  "provenance.settings.d_h_a_angle_cutoff": 150.0,
+  "provenance.settings.donors": null,
+  "provenance.settings.groups": {
+   "polymer": "chainid C",
+   "protein": "chainid A"
+  },
+  "provenance.settings.hbond_atoms": {
+   "acceptors": {"EGM O2":1,"GLN O":1,"SBM O1":1,"SER OG":1,"THR OG1":1},
+   "donors": {"EGM O2":1,"SER OG":1,"THR OG1":1},
+   "hydrogens": 3
+  },
+  "provenance.settings.hydrogens": null,
+  "provenance.settings.lifetime_key": "residue",
+  "provenance.settings.summaries": {
+   "polymer_protein": {"between":["polymer","protein"]}
+  },
+  "provenance.settings.summary": {
+   "groups": ["chainid C","chainid A"],
+   "name": "polymer_protein"
+  },
+  "provenance.settings.tolerance_ps": 0.0,
+  "provenance.settings_fingerprint": null,
+  "provenance.study": null,
+  "run": "polymer_protein_lifetime_events",
+  "status": "complete",
+  "stride": 1,
+  "text": "# polyzymd analyze hydrogen_bonds  metric polymer_protein_lifetime_events  unit none  run polymer_protein_lifetime_events  eq 0ns  conditions 1  replicates 3  protocol hydrogen_bonds/2\nB  n 3  mean 6  sem 0.5774  ci95 3.516 to 8.484  values 7, 5, 6\nwarning: hydrogen_bonds: in condition control, replicate 1 (first group 'chainid C'), 2 (first group 'chainid C'), 3 (first group 'chainid C') matched no atoms, so the condition is left out of the statistics.\nwarning: hydrogen_bonds: the control control has no replicate where every selection matches atoms, so the other conditions are summarised and not compared. Give a condition with those atoms first to compare against it.\nverdict: B polymer_protein_lifetime_events 6 (95% CI 3.516 to 8.484, n 3)\n",
+  "trends": [],
+  "unit": null,
+  "verdict": "<text>",
+  "warnings": "<text>"
+ },
+ "two conditions, run polymer_protein_mean_hbonds": {
+  "all_metrics": [],
+  "all_runs": ["polymer_protein_mean_hbonds","polymer_protein_mean_residue_pairs","polymer_protein_any_fraction","polymer_protein_mean_lifetime","polymer_protein_lifetime_events","polymer_protein_censored_fraction","polymer_protein_residues","polymer_protein_pairs"],
+  "analysis": "hydrogen_bonds",
+  "conditions": [{"ci95":[0.572674,1.2051],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":0.888889,"n_effective":[],"n_replicates":3,"replicate_values":[1.0,0.916667,0.75],"replicates":[1,2,3],"sem":0.0734931,"statistical_inefficiency":[]}],
+  "equilibration": "0ns",
+  "figures": ["hydrogen_bonds/hbonds_polymer_protein_mean_hbonds_comparison.png"],
+  "frames_per_replicate": {
+   "B": [12,12,12]
+  },
+  "metric": "polymer_protein_mean_hbonds",
+  "pairwise": [],
+  "problems": [],
+  "protocol_version": "2",
+  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.mdanalysis_version": "<masked>",
+  "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hydrogen_bonds_polymer_protein",
+  "provenance.polyzymd_version": "<masked>",
+  "provenance.settings.acceptors": null,
+  "provenance.settings.d_a_cutoff": 3.5,
+  "provenance.settings.d_h_a_angle_cutoff": 150.0,
+  "provenance.settings.donors": null,
+  "provenance.settings.groups": {
+   "polymer": "chainid C",
+   "protein": "chainid A"
+  },
+  "provenance.settings.hbond_atoms": {
+   "acceptors": {"EGM O2":1,"GLN O":1,"SBM O1":1,"SER OG":1,"THR OG1":1},
+   "donors": {"EGM O2":1,"SER OG":1,"THR OG1":1},
+   "hydrogens": 3
+  },
+  "provenance.settings.hydrogens": null,
+  "provenance.settings.lifetime_key": "residue",
+  "provenance.settings.summaries": {
+   "polymer_protein": {"between":["polymer","protein"]}
+  },
+  "provenance.settings.summary": {
+   "groups": ["chainid C","chainid A"],
+   "name": "polymer_protein"
+  },
+  "provenance.settings.tolerance_ps": 0.0,
+  "provenance.settings_fingerprint": null,
+  "provenance.study": null,
+  "run": "polymer_protein_mean_hbonds",
+  "status": "complete",
+  "stride": 1,
+  "text": "# polyzymd analyze hydrogen_bonds  metric polymer_protein_mean_hbonds  unit none  run polymer_protein_mean_hbonds  eq 0ns  conditions 1  replicates 3  protocol hydrogen_bonds/2\nB  n 3  mean 0.8889  sem 0.07349  ci95 0.5727 to 1.205  values 1, 0.9167, 0.75\nwarning: hydrogen_bonds: in condition control, replicate 1 (first group 'chainid C'), 2 (first group 'chainid C'), 3 (first group 'chainid C') matched no atoms, so the condition is left out of the statistics.\nwarning: hydrogen_bonds: the control control has no replicate where every selection matches atoms, so the other conditions are summarised and not compared. Give a condition with those atoms first to compare against it.\nverdict: B polymer_protein_mean_hbonds 0.8889 (95% CI 0.5727 to 1.205, n 3)\n",
+  "trends": [],
+  "unit": null,
+  "verdict": "<text>",
+  "warnings": "<text>"
+ },
+ "two conditions, run polymer_protein_mean_lifetime": {
+  "all_metrics": [],
+  "all_runs": ["polymer_protein_mean_hbonds","polymer_protein_mean_residue_pairs","polymer_protein_any_fraction","polymer_protein_mean_lifetime","polymer_protein_lifetime_events","polymer_protein_censored_fraction","polymer_protein_residues","polymer_protein_pairs"],
+  "analysis": "hydrogen_bonds",
+  "conditions": [{"ci95":[-0.216589,0.876271],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":0.329841,"n_effective":[],"n_replicates":3,"replicate_values":[0.242857,0.58,0.166667],"replicates":[1,2,3],"sem":0.126998,"statistical_inefficiency":[]}],
+  "equilibration": "0ns",
+  "figures": ["hydrogen_bonds/hbonds_polymer_protein_mean_lifetime_comparison.png"],
+  "frames_per_replicate": {
+   "B": [12,12,12]
+  },
+  "metric": "polymer_protein_mean_lifetime",
+  "pairwise": [],
+  "problems": [],
+  "protocol_version": "2",
+  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.mdanalysis_version": "<masked>",
+  "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hbond_lifetimes_polymer_protein",
+  "provenance.polyzymd_version": "<masked>",
+  "provenance.settings.acceptors": null,
+  "provenance.settings.d_a_cutoff": 3.5,
+  "provenance.settings.d_h_a_angle_cutoff": 150.0,
+  "provenance.settings.donors": null,
+  "provenance.settings.groups": {
+   "polymer": "chainid C",
+   "protein": "chainid A"
+  },
+  "provenance.settings.hbond_atoms": {
+   "acceptors": {"EGM O2":1,"GLN O":1,"SBM O1":1,"SER OG":1,"THR OG1":1},
+   "donors": {"EGM O2":1,"SER OG":1,"THR OG1":1},
+   "hydrogens": 3
+  },
+  "provenance.settings.hydrogens": null,
+  "provenance.settings.lifetime_key": "residue",
+  "provenance.settings.summaries": {
+   "polymer_protein": {"between":["polymer","protein"]}
+  },
+  "provenance.settings.summary": {
+   "groups": ["chainid C","chainid A"],
+   "name": "polymer_protein"
+  },
+  "provenance.settings.tolerance_ps": 0.0,
+  "provenance.settings_fingerprint": null,
+  "provenance.study": null,
+  "run": "polymer_protein_mean_lifetime",
+  "status": "complete",
+  "stride": 1,
+  "text": "# polyzymd analyze hydrogen_bonds  metric polymer_protein_mean_lifetime  unit ns  run polymer_protein_mean_lifetime  eq 0ns  conditions 1  replicates 3  protocol hydrogen_bonds/2\nB  n 3  mean 0.3298  sem 0.127  ci95 -0.2166 to 0.8763  values 0.2429, 0.58, 0.1667\nwarning: the 95 percent interval of condition B extends past the bounds 0 to inf of polymer_protein_mean_lifetime, where a t interval is not reliable\nwarning: hydrogen_bonds: in condition control, replicate 1 (first group 'chainid C'), 2 (first group 'chainid C'), 3 (first group 'chainid C') matched no atoms, so the condition is left out of the statistics.\nwarning: hydrogen_bonds: the control control has no replicate where every selection matches atoms, so the other conditions are summarised and not compared. Give a condition with those atoms first to compare against it.\nverdict: B polymer_protein_mean_lifetime 0.3298 ns (95% CI -0.2166 to 0.8763, n 3)\n",
+  "trends": [],
+  "unit": "ns",
+  "verdict": "<text>",
+  "warnings": "<text>"
+ },
+ "two conditions, run polymer_protein_mean_residue_pairs": {
+  "all_metrics": [],
+  "all_runs": ["polymer_protein_mean_hbonds","polymer_protein_mean_residue_pairs","polymer_protein_any_fraction","polymer_protein_mean_lifetime","polymer_protein_lifetime_events","polymer_protein_censored_fraction","polymer_protein_residues","polymer_protein_pairs"],
+  "analysis": "hydrogen_bonds",
+  "conditions": [{"ci95":[0.572674,1.2051],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":0.888889,"n_effective":[],"n_replicates":3,"replicate_values":[1.0,0.916667,0.75],"replicates":[1,2,3],"sem":0.0734931,"statistical_inefficiency":[]}],
+  "equilibration": "0ns",
+  "figures": ["hydrogen_bonds/hbonds_polymer_protein_mean_residue_pairs_comparison.png"],
+  "frames_per_replicate": {
+   "B": [12,12,12]
+  },
+  "metric": "polymer_protein_mean_residue_pairs",
+  "pairwise": [],
+  "problems": [],
+  "protocol_version": "2",
+  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.mdanalysis_version": "<masked>",
+  "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hydrogen_bonds_polymer_protein",
+  "provenance.polyzymd_version": "<masked>",
+  "provenance.settings.acceptors": null,
+  "provenance.settings.d_a_cutoff": 3.5,
+  "provenance.settings.d_h_a_angle_cutoff": 150.0,
+  "provenance.settings.donors": null,
+  "provenance.settings.groups": {
+   "polymer": "chainid C",
+   "protein": "chainid A"
+  },
+  "provenance.settings.hbond_atoms": {
+   "acceptors": {"EGM O2":1,"GLN O":1,"SBM O1":1,"SER OG":1,"THR OG1":1},
+   "donors": {"EGM O2":1,"SER OG":1,"THR OG1":1},
+   "hydrogens": 3
+  },
+  "provenance.settings.hydrogens": null,
+  "provenance.settings.lifetime_key": "residue",
+  "provenance.settings.summaries": {
+   "polymer_protein": {"between":["polymer","protein"]}
+  },
+  "provenance.settings.summary": {
+   "groups": ["chainid C","chainid A"],
+   "name": "polymer_protein"
+  },
+  "provenance.settings.tolerance_ps": 0.0,
+  "provenance.settings_fingerprint": null,
+  "provenance.study": null,
+  "run": "polymer_protein_mean_residue_pairs",
+  "status": "complete",
+  "stride": 1,
+  "text": "# polyzymd analyze hydrogen_bonds  metric polymer_protein_mean_residue_pairs  unit none  run polymer_protein_mean_residue_pairs  eq 0ns  conditions 1  replicates 3  protocol hydrogen_bonds/2\nB  n 3  mean 0.8889  sem 0.07349  ci95 0.5727 to 1.205  values 1, 0.9167, 0.75\nwarning: hydrogen_bonds: in condition control, replicate 1 (first group 'chainid C'), 2 (first group 'chainid C'), 3 (first group 'chainid C') matched no atoms, so the condition is left out of the statistics.\nwarning: hydrogen_bonds: the control control has no replicate where every selection matches atoms, so the other conditions are summarised and not compared. Give a condition with those atoms first to compare against it.\nverdict: B polymer_protein_mean_residue_pairs 0.8889 (95% CI 0.5727 to 1.205, n 3)\n",
+  "trends": [],
+  "unit": null,
+  "verdict": "<text>",
+  "warnings": "<text>"
+ },
+ "two conditions, run polymer_protein_pairs": {
+  "all_metrics": [],
+  "all_runs": ["polymer_protein_mean_hbonds","polymer_protein_mean_residue_pairs","polymer_protein_any_fraction","polymer_protein_mean_lifetime","polymer_protein_lifetime_events","polymer_protein_censored_fraction","polymer_protein_residues","polymer_protein_pairs"],
+  "analysis": "hydrogen_bonds",
+  "conditions": {
+   "ci95": [[-0.0252211,0.691888],[0.316519,0.794592]],
+   "entry": ["EGM-45","SBM-12"],
+   "every row": {"ci_method":"student_t","eq_detected_frame":[],"eq_detected_ns":[],"label":"B","n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "mean": [0.333333,0.555556],
+   "replicate_values": [[0.5,0.25,0.25],[0.5,0.666667,0.5]],
+   "sem": [0.0833333,0.0555556]
+  },
+  "equilibration": "0ns",
+  "figures": ["hydrogen_bonds/hbonds_polymer_protein_pairs_profile.png"],
+  "frames_per_replicate": {
+   "B": [12,12,12]
+  },
+  "metric": "polymer_protein_pairs",
+  "pairwise": [],
+  "problems": [],
+  "protocol_version": "2",
+  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.mdanalysis_version": "<masked>",
+  "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_pair_hbond_occupancy_polymer_protein",
+  "provenance.polyzymd_version": "<masked>",
+  "provenance.settings.acceptors": null,
+  "provenance.settings.d_a_cutoff": 3.5,
+  "provenance.settings.d_h_a_angle_cutoff": 150.0,
+  "provenance.settings.donors": null,
+  "provenance.settings.groups": {
+   "polymer": "chainid C",
+   "protein": "chainid A"
+  },
+  "provenance.settings.hbond_atoms": {
+   "acceptors": {"EGM O2":1,"GLN O":1,"SBM O1":1,"SER OG":1,"THR OG1":1},
+   "donors": {"EGM O2":1,"SER OG":1,"THR OG1":1},
+   "hydrogens": 3
+  },
+  "provenance.settings.hydrogens": null,
+  "provenance.settings.lifetime_key": "residue",
+  "provenance.settings.summaries": {
+   "polymer_protein": {"between":["polymer","protein"]}
+  },
+  "provenance.settings.summary": {
+   "groups": ["chainid C","chainid A"],
+   "name": "polymer_protein"
+  },
+  "provenance.settings.tolerance_ps": 0.0,
+  "provenance.settings_fingerprint": null,
+  "provenance.study": null,
+  "run": "polymer_protein_pairs",
+  "status": "complete",
+  "stride": 1,
+  "text": "# polyzymd analyze hydrogen_bonds  metric polymer_protein_pairs  unit none  run polymer_protein_pairs  eq 0ns  conditions 1  replicates 3  protocol hydrogen_bonds/2\nEGM-45  B  n 3  mean 0.3333  sem 0.08333  ci95 -0.02522 to 0.6919  values 0.5, 0.25, 0.25\nSBM-12  B  n 3  mean 0.5556  sem 0.05556  ci95 0.3165 to 0.7946  values 0.5, 0.6667, 0.5\nwarning: the 95 percent interval of condition B at EGM-45 extends past the bounds 0 to 1 of polymer_protein_pairs, where a t interval is not reliable\nwarning: hydrogen_bonds: in condition control, replicate 1 (first group 'chainid C'), 2 (first group 'chainid C'), 3 (first group 'chainid C') matched no atoms, so the condition is left out of the statistics.\nwarning: hydrogen_bonds: the control control has no replicate where every selection matches atoms, so the other conditions are summarised and not compared. Give a condition with those atoms first to compare against it.\nverdict: B polymer_protein_pairs over 2 labels, label means from 0.3333 to 0.5556\n",
+  "trends": [],
+  "unit": null,
+  "verdict": "<text>",
+  "warnings": "<text>"
+ },
+ "two conditions, run polymer_protein_residues": {
+  "error": "ProtocolError",
+  "figures": [],
+  "hint": "Measure the same labels in every replicate, or give the value a replicate gets for a label it lacks: missing: .nan in the study.yaml entry (missing=<value> in Python).",
+  "message": "residue_hbond_occupancy_polymer_protein: condition control replicate 1 has no value for labels [1, 2], which other replicates have."
+ },
+ "unknown run": {
+  "hint": "Use --run with one of ['polymer_protein_mean_hbonds', 'polymer_protein_mean_residue_pairs', 'polymer_protein_any_fraction', 'polymer_protein_mean_lifetime', 'polymer_protein_lifetime_events', 'polymer_protein_censored_fraction', 'polymer_protein_residues', 'polymer_protein_pairs'].",
+  "message": "hydrogen_bonds: no result named 'bogus'."
+ },
+ "unknown setting": {
+  "hint": "Run polyzymd analyze hydrogen_bonds -c A/config.yaml --set groups=..., one of the settings above.",
+  "message": "hydrogen_bonds takes no setting other than groups, summaries, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors, lifetime_key, tolerance_ps."
+ }
+}

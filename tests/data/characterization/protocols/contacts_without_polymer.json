@@ -1,0 +1,384 @@
+{
+ "one condition": {
+  "all_runs": ["coverage","mean_contact_fraction","polar_contact_fraction","occluded_area","occlusion_fraction","contact_fraction_residues","occluded_area_residues","mean_lifetime","lifetime_events","censored_fraction"],
+  "conditions": [{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]}],
+  "frames_per_replicate": {
+   "control": [12,12,12]
+  },
+  "metric": "coverage",
+  "pairwise": [],
+  "provenance.output_paths.results": "<tmp>/one/polyzymd_results/residue_occlusion",
+  "provenance.settings.polymer_types": null,
+  "provenance.settings.polymer_types_found": [],
+  "provenance.settings.residues": {
+   "classes": {"polar":[12,30,45]}
+  },
+  "run": "coverage",
+  "text": "# polyzymd analyze contacts  metric coverage  unit none  run coverage  eq 0ns  conditions 1  replicates 3  protocol contacts/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nwarning: condition control has the same coverage in every replicate, so its interval is not estimable\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: control coverage 0 (no interval, n 3)\n",
+  "unit": null
+ },
+ "records": {
+  "contact_lifetimes": {
+   "B/replicate_1": {},
+   "B/replicate_2": {},
+   "B/replicate_3": {},
+   "control/replicate_1": {},
+   "control/replicate_2": {},
+   "control/replicate_3": {},
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_lifetime","n_events","censored_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{"types":["EGM","SBM"]}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"contact_lifetimes"},"record.json:labels":["polymer","EGM","SBM"],"record.json:name":"contact_lifetimes","record.json:parts":["mean_lifetime","n_events","censored_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+  },
+  "residue_occlusion": {
+   "B/replicate_1": {},
+   "B/replicate_2": {},
+   "B/replicate_3": {},
+   "control/replicate_1": {},
+   "control/replicate_2": {},
+   "control/replicate_3": {},
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["contact_fraction","exposed_fraction","occluded_area","exposed_area","EGM_contact_fraction","SBM_contact_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{"types":["EGM","SBM"]}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_occlusion"},"record.json:labels":[12,30,45],"record.json:name":"residue_occlusion","record.json:parts":["contact_fraction","exposed_fraction","occluded_area","exposed_area","EGM_contact_fraction","SBM_contact_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+  }
+ },
+ "shared": {
+  "all_metrics": [],
+  "all_runs": ["coverage","mean_contact_fraction","EGM_contact_fraction","SBM_contact_fraction","polar_contact_fraction","occluded_area","occlusion_fraction","contact_fraction_residues","EGM_contact_fraction_residues","SBM_contact_fraction_residues","occluded_area_residues","mean_lifetime","EGM_mean_lifetime","SBM_mean_lifetime","lifetime_events","censored_fraction"],
+  "analysis": "contacts",
+  "equilibration": "0ns",
+  "frames_per_replicate": {
+   "B": [12,12,12],
+   "control": [12,12,12]
+  },
+  "problems": [],
+  "protocol_version": "2",
+  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.config_hashes.control": "c4429a507b8cea42",
+  "provenance.mdanalysis_version": "<masked>",
+  "provenance.output_paths.figures": "<tmp>/out/figures/contacts",
+  "provenance.polyzymd_version": "<masked>",
+  "provenance.settings.buried_threshold": 0.2,
+  "provenance.settings.exposed_threshold": 0.2,
+  "provenance.settings.max_asa": "theoretical",
+  "provenance.settings.method": "occlusion",
+  "provenance.settings.n_sphere_points": 960,
+  "provenance.settings.polymer_selection": "chainid C",
+  "provenance.settings.polymer_types": ["EGM","SBM"],
+  "provenance.settings.polymer_types_found": ["EGM","SBM"],
+  "provenance.settings.probe_radius_nm": 0.14,
+  "provenance.settings.protein_selection": "chainid A",
+  "provenance.settings.regions": {},
+  "provenance.settings.tolerance_ps": 0.0,
+  "provenance.settings.unmeasured_residues": [],
+  "provenance.settings.use_pbc": true,
+  "provenance.settings_fingerprint": null,
+  "provenance.study": null,
+  "status": "complete",
+  "stride": 1,
+  "trends": [],
+  "verdict": "<text>",
+  "warnings": "<text>"
+ },
+ "two conditions, run EGM_contact_fraction": {
+  "conditions": {
+   "every row": {"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},
+   "label": ["control","B"]
+  },
+  "figures": ["contacts/contacts_EGM_contact_fraction_comparison.png","contacts/contacts_class_bars.png"],
+  "metric": "EGM_contact_fraction",
+  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
+  "provenance.settings.residues": {
+   "classes": {"polar":[12,30,45]}
+  },
+  "run": "EGM_contact_fraction",
+  "text": "# polyzymd analyze contacts  metric EGM_contact_fraction  unit none  run EGM_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\ncontrol vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition control has the same EGM_contact_fraction in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction in every replicate, so its interval is not estimable\nwarning: control vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: not testable: EGM_contact_fraction for control vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
+  "unit": null
+ },
+ "two conditions, run EGM_contact_fraction_residues": {
+  "conditions": {
+   "entry": ["12","12","30","30","45","45"],
+   "every row": {"ci95":null,"ci_method":"not_estimable","eq_detected_frame":[],"eq_detected_ns":[],"mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},
+   "label": ["control","B","control","B","control","B"]
+  },
+  "figures": ["contacts/contacts_EGM_contact_fraction_difference.png","contacts/contacts_EGM_contact_fraction_profile.png","contacts/contacts_class_bars.png"],
+  "metric": "EGM_contact_fraction",
+  "pairwise": {
+   "entry": ["12","30","45"],
+   "every row": {"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}
+  },
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
+  "provenance.settings.residues": {
+   "classes": {"polar":[12,30,45]}
+  },
+  "run": "EGM_contact_fraction_residues",
+  "text": "# polyzymd analyze contacts  metric EGM_contact_fraction  unit none  run EGM_contact_fraction_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol vs B  labels 3  tested 0  family na  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition control has the same EGM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition control has the same EGM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition control has the same EGM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: condition B has the same EGM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: control vs B is not testable at any of its 3 labels: a condition has fewer than two replicates, or both have one value in every replicate\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: not testable: EGM_contact_fraction for control vs B needs at least two replicates per condition and values that vary (n 3 vs 3)\n",
+  "unit": null
+ },
+ "two conditions, run EGM_mean_lifetime": {
+  "conditions": {
+   "ci95": [[NaN,NaN],[NaN,NaN]],
+   "every row": {"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B"],
+   "mean": [NaN,NaN],
+   "replicate_values": [[NaN,NaN,NaN],[NaN,NaN,NaN]],
+   "sem": [NaN,NaN]
+  },
+  "figures": ["contacts/contacts_EGM_mean_lifetime_comparison.png"],
+  "metric": "EGM_mean_lifetime",
+  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":null,"p":NaN,"p_adjusted":null,"significant":false,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/contact_lifetimes",
+  "run": "EGM_mean_lifetime",
+  "text": "# polyzymd analyze contacts  metric EGM_mean_lifetime  unit ns  run EGM_mean_lifetime  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\nB  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\ncontrol vs B  delta nan  ci95 na  p nan  p_adj na  test welch_t  correction BH  d na  no_test\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so the event count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nwarning: contacts: control replicate 1, control replicate 2, control replicate 3, B replicate 1, B replicate 2, B replicate 3 have no contact event for EGM, so EGM_mean_lifetime is undefined (nan) there.\nverdict: no test recorded for EGM_mean_lifetime between control and B; no multiplicity-corrected p value was computed (delta nan ns, 95% CI na, p_adj na, p nan, n 3 vs 3)\n",
+  "unit": "ns"
+ },
+ "two conditions, run SBM_contact_fraction": {
+  "conditions": {
+   "every row": {"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},
+   "label": ["control","B"]
+  },
+  "figures": ["contacts/contacts_SBM_contact_fraction_comparison.png","contacts/contacts_class_bars.png"],
+  "metric": "SBM_contact_fraction",
+  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
+  "provenance.settings.residues": {
+   "classes": {"polar":[12,30,45]}
+  },
+  "run": "SBM_contact_fraction",
+  "text": "# polyzymd analyze contacts  metric SBM_contact_fraction  unit none  run SBM_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\ncontrol vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition control has the same SBM_contact_fraction in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction in every replicate, so its interval is not estimable\nwarning: control vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: not testable: SBM_contact_fraction for control vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
+  "unit": null
+ },
+ "two conditions, run SBM_contact_fraction_residues": {
+  "conditions": {
+   "entry": ["12","12","30","30","45","45"],
+   "every row": {"ci95":null,"ci_method":"not_estimable","eq_detected_frame":[],"eq_detected_ns":[],"mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},
+   "label": ["control","B","control","B","control","B"]
+  },
+  "figures": ["contacts/contacts_SBM_contact_fraction_difference.png","contacts/contacts_SBM_contact_fraction_profile.png","contacts/contacts_class_bars.png"],
+  "metric": "SBM_contact_fraction",
+  "pairwise": {
+   "entry": ["12","30","45"],
+   "every row": {"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}
+  },
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
+  "provenance.settings.residues": {
+   "classes": {"polar":[12,30,45]}
+  },
+  "run": "SBM_contact_fraction_residues",
+  "text": "# polyzymd analyze contacts  metric SBM_contact_fraction  unit none  run SBM_contact_fraction_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol vs B  labels 3  tested 0  family na  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition control has the same SBM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition control has the same SBM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition control has the same SBM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: condition B has the same SBM_contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: control vs B is not testable at any of its 3 labels: a condition has fewer than two replicates, or both have one value in every replicate\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: not testable: SBM_contact_fraction for control vs B needs at least two replicates per condition and values that vary (n 3 vs 3)\n",
+  "unit": null
+ },
+ "two conditions, run SBM_mean_lifetime": {
+  "conditions": {
+   "ci95": [[NaN,NaN],[NaN,NaN]],
+   "every row": {"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B"],
+   "mean": [NaN,NaN],
+   "replicate_values": [[NaN,NaN,NaN],[NaN,NaN,NaN]],
+   "sem": [NaN,NaN]
+  },
+  "figures": ["contacts/contacts_SBM_mean_lifetime_comparison.png"],
+  "metric": "SBM_mean_lifetime",
+  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":null,"p":NaN,"p_adjusted":null,"significant":false,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/contact_lifetimes",
+  "run": "SBM_mean_lifetime",
+  "text": "# polyzymd analyze contacts  metric SBM_mean_lifetime  unit ns  run SBM_mean_lifetime  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\nB  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\ncontrol vs B  delta nan  ci95 na  p nan  p_adj na  test welch_t  correction BH  d na  no_test\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so the event count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nwarning: contacts: control replicate 1, control replicate 2, control replicate 3, B replicate 1, B replicate 2, B replicate 3 have no contact event for SBM, so SBM_mean_lifetime is undefined (nan) there.\nverdict: no test recorded for SBM_mean_lifetime between control and B; no multiplicity-corrected p value was computed (delta nan ns, 95% CI na, p_adj na, p nan, n 3 vs 3)\n",
+  "unit": "ns"
+ },
+ "two conditions, run censored_fraction": {
+  "conditions": {
+   "ci95": [[NaN,NaN],[NaN,NaN]],
+   "every row": {"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B"],
+   "mean": [NaN,NaN],
+   "replicate_values": [[NaN,NaN,NaN],[NaN,NaN,NaN]],
+   "sem": [NaN,NaN]
+  },
+  "figures": ["contacts/contacts_censored_fraction_comparison.png"],
+  "metric": "censored_fraction",
+  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":null,"p":NaN,"p_adjusted":null,"significant":false,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/contact_lifetimes",
+  "run": "censored_fraction",
+  "text": "# polyzymd analyze contacts  metric censored_fraction  unit none  run censored_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\nB  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\ncontrol vs B  delta nan  ci95 na  p nan  p_adj na  test welch_t  correction BH  d na  no_test\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so the event count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nwarning: contacts: control replicate 1, control replicate 2, control replicate 3, B replicate 1, B replicate 2, B replicate 3 have no contact event for polymer, so censored_fraction is undefined (nan) there.\nverdict: no test recorded for censored_fraction between control and B; no multiplicity-corrected p value was computed (delta nan, 95% CI na, p_adj na, p nan, n 3 vs 3)\n",
+  "unit": null
+ },
+ "two conditions, run contact_fraction_residues": {
+  "conditions": {
+   "entry": ["12","12","30","30","45","45"],
+   "every row": {"ci95":null,"ci_method":"not_estimable","eq_detected_frame":[],"eq_detected_ns":[],"mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},
+   "label": ["control","B","control","B","control","B"]
+  },
+  "figures": ["contacts/contacts_class_bars.png","contacts/contacts_contact_fraction_difference.png","contacts/contacts_contact_fraction_profile.png"],
+  "metric": "contact_fraction",
+  "pairwise": {
+   "entry": ["12","30","45"],
+   "every row": {"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}
+  },
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
+  "provenance.settings.residues": {
+   "classes": {"polar":[12,30,45]}
+  },
+  "run": "contact_fraction_residues",
+  "text": "# polyzymd analyze contacts  metric contact_fraction  unit none  run contact_fraction_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol vs B  labels 3  tested 0  family na  test welch_t  correction BH  lower 0  higher 0\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition control has the same contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition B has the same contact_fraction at 12 in every replicate, so its interval is not estimable\nwarning: condition control has the same contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same contact_fraction at 30 in every replicate, so its interval is not estimable\nwarning: condition control has the same contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: condition B has the same contact_fraction at 45 in every replicate, so its interval is not estimable\nwarning: control vs B is not testable at any of its 3 labels: a condition has fewer than two replicates, or both have one value in every replicate\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: not testable: contact_fraction for control vs B needs at least two replicates per condition and values that vary (n 3 vs 3)\n",
+  "unit": null
+ },
+ "two conditions, run coverage": {
+  "conditions": {
+   "every row": {"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},
+   "label": ["control","B"]
+  },
+  "figures": ["contacts/contacts_class_bars.png","contacts/contacts_coverage_comparison.png"],
+  "metric": "coverage",
+  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
+  "provenance.settings.residues": {
+   "classes": {"polar":[12,30,45]}
+  },
+  "run": "coverage",
+  "text": "# polyzymd analyze contacts  metric coverage  unit none  run coverage  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\ncontrol vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition control has the same coverage in every replicate, so its interval is not estimable\nwarning: condition B has the same coverage in every replicate, so its interval is not estimable\nwarning: control vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: not testable: coverage for control vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
+  "unit": null
+ },
+ "two conditions, run lifetime_events": {
+  "conditions": {
+   "every row": {"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},
+   "label": ["control","B"]
+  },
+  "figures": ["contacts/contacts_lifetime_events_comparison.png"],
+  "metric": "lifetime_events",
+  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/contact_lifetimes",
+  "run": "lifetime_events",
+  "text": "# polyzymd analyze contacts  metric lifetime_events  unit none  run lifetime_events  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\ncontrol vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition control has the same lifetime_events in every replicate, so its interval is not estimable\nwarning: condition B has the same lifetime_events in every replicate, so its interval is not estimable\nwarning: control vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so the event count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: not testable: lifetime_events for control vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
+  "unit": null
+ },
+ "two conditions, run mean_contact_fraction": {
+  "conditions": {
+   "every row": {"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},
+   "label": ["control","B"]
+  },
+  "figures": ["contacts/contacts_class_bars.png","contacts/contacts_mean_contact_fraction_comparison.png"],
+  "metric": "mean_contact_fraction",
+  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
+  "provenance.settings.residues": {
+   "classes": {"polar":[12,30,45]}
+  },
+  "run": "mean_contact_fraction",
+  "text": "# polyzymd analyze contacts  metric mean_contact_fraction  unit none  run mean_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\ncontrol vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition control has the same mean_contact_fraction in every replicate, so its interval is not estimable\nwarning: condition B has the same mean_contact_fraction in every replicate, so its interval is not estimable\nwarning: control vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: not testable: mean_contact_fraction for control vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
+  "unit": null
+ },
+ "two conditions, run mean_lifetime": {
+  "conditions": {
+   "ci95": [[NaN,NaN],[NaN,NaN]],
+   "every row": {"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B"],
+   "mean": [NaN,NaN],
+   "replicate_values": [[NaN,NaN,NaN],[NaN,NaN,NaN]],
+   "sem": [NaN,NaN]
+  },
+  "figures": ["contacts/contacts_mean_lifetime_comparison.png"],
+  "metric": "mean_lifetime",
+  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":null,"p":NaN,"p_adjusted":null,"significant":false,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/contact_lifetimes",
+  "run": "mean_lifetime",
+  "text": "# polyzymd analyze contacts  metric mean_lifetime  unit ns  run mean_lifetime  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\nB  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\ncontrol vs B  delta nan  ci95 na  p nan  p_adj na  test welch_t  correction BH  d na  no_test\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so the event count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nwarning: contacts: control replicate 1, control replicate 2, control replicate 3, B replicate 1, B replicate 2, B replicate 3 have no contact event for polymer, so mean_lifetime is undefined (nan) there.\nverdict: no test recorded for mean_lifetime between control and B; no multiplicity-corrected p value was computed (delta nan ns, 95% CI na, p_adj na, p nan, n 3 vs 3)\n",
+  "unit": "ns"
+ },
+ "two conditions, run occluded_area": {
+  "conditions": {
+   "ci95": [null,[18.3969,36.2848]],
+   "ci_method": ["not_estimable","student_t"],
+   "every row": {"entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B"],
+   "mean": [0.0,27.3408],
+   "replicate_values": [[0.0,0.0,0.0],[30.031,28.7408,23.2507]],
+   "sem": [0.0,2.07871]
+  },
+  "figures": ["contacts/contacts_class_bars.png","contacts/contacts_occluded_area_comparison.png"],
+  "metric": "occluded_area",
+  "pairwise": [{"a":"control","b":"B","cohens_d":10.7392,"correction":"BH","delta":27.3408,"delta_ci95":[18.3969,36.2848],"direction":"increased","entry":null,"family_size":1,"hedges_g":8.59135,"p":0.00573086,"p_adjusted":0.00573086,"significant":true,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
+  "provenance.settings.residues": {
+   "classes": {"polar":[12,30,45]}
+  },
+  "run": "occluded_area",
+  "text": "# polyzymd analyze contacts  metric occluded_area  unit A^2  run occluded_area  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 27.34  sem 2.079  ci95 18.4 to 36.28  values 30.03, 28.74, 23.25\ncontrol vs B  delta +27.34  ci95 18.4 to 36.28  p 0.005731  p_adj 0.005731  test welch_t  correction BH  family 1  d 10.74  significant\nwarning: condition control has the same occluded_area in every replicate, so its interval is not estimable\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: B larger occluded_area than control (delta +27.34 A^2, 95% CI 18.4 to 36.28, p_adj 0.005731, p 0.005731, n 3 vs 3; little power: control has the same value in every replicate)\n",
+  "unit": "A^2"
+ },
+ "two conditions, run occluded_area_residues": {
+  "conditions": {
+   "ci95": [null,[10.4264,26.1744],null,null,null,[-0.684028,18.7649]],
+   "ci_method": ["not_estimable","student_t","not_estimable","not_estimable","not_estimable","student_t"],
+   "entry": ["12","12","30","30","45","45"],
+   "every row": {"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B","control","B","control","B"],
+   "mean": [0.0,18.3004,0.0,0.0,0.0,9.04044],
+   "replicate_values": [[0.0,0.0,0.0],[16.4704,21.9605,16.4704],[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],[13.5607,6.78033,6.78033]],
+   "sem": [0.0,1.83004,0.0,0.0,0.0,2.26011]
+  },
+  "figures": ["contacts/contacts_class_bars.png","contacts/contacts_occluded_area_difference.png","contacts/contacts_occluded_area_profile.png"],
+  "metric": "occluded_area",
+  "pairwise": {
+   "cohens_d": [8.16497,0.0,3.26599],
+   "delta": [18.3004,0.0,9.04044],
+   "delta_ci95": [[10.4264,26.1744],null,[-0.684028,18.7649]],
+   "direction": ["increased","no significant change","no significant change"],
+   "entry": ["12","30","45"],
+   "every row": {"a":"control","b":"B","correction":"BH","test":"welch_t"},
+   "family_size": [2,null,2],
+   "hedges_g": [6.53197,0.0,2.61279],
+   "p": [0.00985246,null,0.057191],
+   "p_adjusted": [0.0197049,null,0.057191],
+   "significant": [true,false,false],
+   "testable": [true,false,true]
+  },
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
+  "provenance.settings.residues": {
+   "classes": {"polar":[12,30,45]}
+  },
+  "run": "occluded_area_residues",
+  "text": "# polyzymd analyze contacts  metric occluded_area  unit A^2  run occluded_area_residues  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol vs B  labels 3  tested 2  family 2  test welch_t  correction BH  lower 0  higher 1\ncontrol vs B  higher: 12 delta +18.3 p_adj 0.0197\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition control has the same occluded_area at 12 in every replicate, so its interval is not estimable\nwarning: condition control has the same occluded_area at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same occluded_area at 30 in every replicate, so its interval is not estimable\nwarning: condition control has the same occluded_area at 45 in every replicate, so its interval is not estimable\nwarning: the 95 percent interval of condition B at 45 extends past the bounds 0 to inf of occluded_area, where a t interval is not reliable\nwarning: control vs B at 30 is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: B vs control: 1 of 2 tested labels differ in occluded_area after BH over a family of 2; larger at 12; smaller at none\n",
+  "unit": "A^2"
+ },
+ "two conditions, run occlusion_fraction": {
+  "conditions": {
+   "ci95": [null,[0.0602206,0.113441]],
+   "ci_method": ["not_estimable","student_t"],
+   "every row": {"entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B"],
+   "mean": [0.0,0.0868308],
+   "replicate_values": [[0.0,0.0,0.0],[0.0949418,0.0908628,0.0746879]],
+   "sem": [0.0,0.0061846]
+  },
+  "figures": ["contacts/contacts_class_bars.png","contacts/contacts_occlusion_fraction_comparison.png"],
+  "metric": "occlusion_fraction",
+  "pairwise": [{"a":"control","b":"B","cohens_d":11.4635,"correction":"BH","delta":0.0868308,"delta_ci95":[0.0602206,0.113441],"direction":"increased","entry":null,"family_size":1,"hedges_g":9.17079,"p":0.00503484,"p_adjusted":0.00503484,"significant":true,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
+  "provenance.settings.residues": {
+   "classes": {"polar":[12,30,45]}
+  },
+  "run": "occlusion_fraction",
+  "text": "# polyzymd analyze contacts  metric occlusion_fraction  unit none  run occlusion_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0.08683  sem 0.006185  ci95 0.06022 to 0.1134  values 0.09494, 0.09086, 0.07469\ncontrol vs B  delta +0.08683  ci95 0.06022 to 0.1134  p 0.005035  p_adj 0.005035  test welch_t  correction BH  family 1  d 11.46  significant\nwarning: condition control has the same occlusion_fraction in every replicate, so its interval is not estimable\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: B larger occlusion_fraction than control (delta +0.08683, 95% CI 0.06022 to 0.1134, p_adj 0.005035, p 0.005035, n 3 vs 3; little power: control has the same value in every replicate)\n",
+  "unit": null
+ },
+ "two conditions, run polar_contact_fraction": {
+  "conditions": {
+   "every row": {"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]},
+   "label": ["control","B"]
+  },
+  "figures": ["contacts/contacts_class_bars.png","contacts/contacts_polar_contact_fraction_comparison.png"],
+  "metric": "polar_contact_fraction",
+  "pairwise": [{"a":"control","b":"B","cohens_d":0.0,"correction":"BH","delta":0.0,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":0.0,"p":null,"p_adjusted":null,"significant":false,"test":"welch_t","testable":false}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_occlusion",
+  "provenance.settings.residues": {
+   "classes": {"polar":[12,30,45]}
+  },
+  "run": "polar_contact_fraction",
+  "text": "# polyzymd analyze contacts  metric polar_contact_fraction  unit none  run polar_contact_fraction  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\ncontrol vs B  delta +0  ci95 na  p na  p_adj na  test welch_t  correction BH  d 0  not_testable\nwarning: condition control has the same polar_contact_fraction in every replicate, so its interval is not estimable\nwarning: condition B has the same polar_contact_fraction in every replicate, so its interval is not estimable\nwarning: control vs B is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nwarning: contacts: polymer_selection 'chainid C' matched no atoms in control replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: not testable: polar_contact_fraction for control vs B has the same value in every replicate of both conditions, so no variance to test (n 3 vs 3)\n",
+  "unit": null
+ },
+ "unknown run": {
+  "hint": "Use --run with one of ['coverage', 'mean_contact_fraction', 'EGM_contact_fraction', 'SBM_contact_fraction', 'polar_contact_fraction', 'occluded_area', 'occlusion_fraction', 'contact_fraction_residues', 'EGM_contact_fraction_residues', 'SBM_contact_fraction_residues', 'occluded_area_residues', 'mean_lifetime', 'EGM_mean_lifetime', 'SBM_mean_lifetime', 'lifetime_events', 'censored_fraction'].",
+  "message": "contacts: no result named 'bogus'."
+ },
+ "unknown setting": {
+  "hint": "Run polyzymd analyze contacts -c A/config.yaml --set method=..., one of the settings above.",
+  "message": "contacts takes no setting other than method, polymer_selection, protein_selection, polymer_types, use_pbc, regions, cutoff, heavy_atoms, exposed_threshold, buried_threshold, max_asa, probe_radius_nm, n_sphere_points, tolerance_ps."
+ }
+}
