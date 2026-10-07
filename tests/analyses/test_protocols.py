@@ -379,3 +379,81 @@ def test_a_single_replicate_is_not_said_to_have_the_same_value_in_every_replicat
     (text,) = _verdict("coverage", None, conditions, [pair])
     assert "little power: Water has fewer than 3 replicates" in text
     assert "same value in every replicate" not in text
+
+
+# ---------------------------------------------------------------------------
+# Selections left null select the atoms of a role
+# ---------------------------------------------------------------------------
+
+
+def _protein_ligand(tmp_path: Path, partner_chain: str) -> Path:
+    """One condition of two replicates: SER, THR, GLN in chain A and SBM, EGM in ``partner_chain``."""
+    pytest.importorskip("MDAnalysis")
+    pytest.importorskip("openmm")
+    from tests._support.analysis_testkit import write_openmm_frames, write_simulation_config
+    from tests._support.openmm_system import write_openmm_system
+    from tests.analyses import test_hydrogen_bonds_analyze as system
+
+    resindex, resids, resnames = system._resindex_and_names()
+    config = write_simulation_config(tmp_path / "A", scratch=tmp_path / "scratch")
+    for replicate in (1, 2):
+        run_dir = write_openmm_frames(
+            config,
+            replicate,
+            system._frames(system._schedule(replicate)),
+            resindex,
+            resids=resids,
+            names=[atom[0] for atom in system.ATOMS],
+            resnames=resnames,
+            elements=[atom[1] for atom in system.ATOMS],
+            chain_ids=[partner_chain if atom[4] == "C" else atom[4] for atom in system.ATOMS],
+            dimensions=system.BOX,
+        )
+        write_openmm_system(run_dir, system.CHARGES, (), system.CONSTRAINTS)
+    return config
+
+
+def test_the_selection_defaults_are_null_for_the_roles() -> None:
+    assert ANALYSES["hydrogen_bonds"].defaults["groups"] == {"protein": None, "polymer": None}
+    assert ANALYSES["contacts"].defaults["protein_selection"] is None
+    assert ANALYSES["contacts"].defaults["polymer_selection"] is None
+
+
+def test_null_hydrogen_bond_groups_select_the_protein_and_the_ligand(tmp_path: Path) -> None:
+    """Groups named protein and ligand with null selections measure chains A and B, recorded."""
+    config = _protein_ligand(tmp_path, "B")
+    settings = {
+        "groups": {"protein": None, "ligand": None},
+        "summaries": {"protein_ligand": {"between": ["protein", "ligand"]}},
+    }
+    report = analyze(
+        "hydrogen_bonds",
+        [config],
+        equilibration="0ns",
+        settings=settings,
+        plots=False,
+        output_dir=tmp_path / "out",
+    )
+    recorded = report.provenance.settings
+    assert recorded["groups"] == {"protein": "chainid A", "ligand": "chainid B"}
+    assert recorded["summary"]["groups"] == ["chainid A", "chainid B"]
+    assert report.conditions[0].mean > 0
+
+
+def test_null_contact_selections_select_the_protein_and_the_polymer(tmp_path: Path) -> None:
+    """protein_selection and polymer_selection given as null give the default's result."""
+    config = _protein_ligand(tmp_path, "C")
+    options = {"equilibration": "0ns", "plots": False, "output_dir": tmp_path / "out"}
+    given = {"method": "distance", "protein_selection": None, "polymer_selection": None}
+    report = analyze("contacts", [config], settings=given, **options)
+    default = analyze("contacts", [config], settings={"method": "distance"}, **options)
+    assert report.provenance.settings["protein_selection"] == "(chainid A) and not element H"
+    assert report.provenance.settings["polymer_selection"] == "(chainid C) and not element H"
+    assert report.conditions == default.conditions
+
+
+def test_a_null_group_not_named_after_a_role_is_refused(tmp_path: Path) -> None:
+    config = _protein_ligand(tmp_path, "B")
+    settings = {"groups": {"sds": None}, "summaries": {"s": {"within": "sds"}}}
+    with pytest.raises(ProtocolError, match="groups.sds is null.*role 'sds'.*protein, ligand"):
+        analyze("hydrogen_bonds", [config], equilibration="0ns", settings=settings, plots=False)

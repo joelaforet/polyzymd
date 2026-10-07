@@ -287,7 +287,7 @@ class TestExitCodes:
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         assert "top-level settings" in result.stderr
-        assert "--set groups='{protein: chainid A, polymer: chainid C}'" in result.stderr
+        assert "--set groups='{protein: null, ligand: null}'" in result.stderr
 
     def test_bad_replicate_range_exits_two(self, config_paths: list[Path]) -> None:
         """An unparsable --replicates value is a typed error."""

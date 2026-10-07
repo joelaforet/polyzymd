@@ -92,7 +92,7 @@ The command does these steps:
    `--replicates`, or without it, every replicate it finds.
 2. It discards the first 10 ns of each replicate.
 3. On each production frame, it counts the hydrogen bonds between the protein
-   (`chainid A`) and the polymer (`chainid C`). These are the default groups.
+   (chain A) and the polymer (chain C). These are the default groups.
 4. It prints the mean of each condition with its 95 % confidence interval.
 5. It compares each condition with the control by Welch's t test. It corrects
    the p values with the {term}`Benjamini-Hochberg` method.

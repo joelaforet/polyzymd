@@ -469,6 +469,24 @@ def _chosen(analysis: str, run: str | None, runs: list[str]) -> str:
     return run
 
 
+#: Chain of each role in a PolyzyMD build: the protein in chain A, the ligand
+#: (substrate) in chain B and the polymer in chain C.
+ROLE_CHAINS = {"protein": "A", "ligand": "B", "polymer": "C"}
+
+
+def _selection(value: Any, setting: str, role: str) -> str:
+    """Return the selection ``value``, or for ``None`` the atoms of ``role``, ``chainid <its chain>``."""
+    if value is not None:
+        return str(value)
+    if role not in ROLE_CHAINS:
+        raise ProtocolError(
+            f"{setting} is null, which selects the atoms of the role {role!r}, but the roles are "
+            f"{', '.join(ROLE_CHAINS)}.",
+            hint=f"Give {setting} a selection, such as resname SDS, or name the group after a role.",
+        )
+    return f"chainid {ROLE_CHAINS[role]}"
+
+
 def _empty_selections(study: Any, selections: dict[str, str]) -> dict[tuple[str, int], list[str]]:
     """Return, for each replicate where a named selection matches no atoms, those selections.
 
@@ -506,8 +524,8 @@ def _first_universe(study: Any, empty: dict[tuple[str, int], list[str]], analysi
     missing = sorted({name for names in empty.values() for name in names})
     raise NoMatchingAtomsError(
         f"{analysis}: the selections {', '.join(missing)} match no atoms in any replicate.",
-        hint="Choose selections that pick atoms, such as 'chainid A' for the protein and "
-        "'chainid C' for the polymer.",
+        hint="Choose selections that pick atoms, or leave one null for the atoms of its role: "
+        "the protein in chain A, the ligand in chain B, the polymer in chain C.",
     )
 
 
@@ -553,7 +571,8 @@ def study_wide_settings(analysis: str, study: Any, settings: Mapping[str, Any]) 
     for condition in study:
         if condition.replicates:
             universe = condition.replicates[0].universe()
-            polymer = universe.select_atoms(str(merged["polymer_selection"]))
+            selection = _selection(merged["polymer_selection"], "polymer_selection", "polymer")
+            polymer = universe.select_atoms(selection)
             names |= {str(name) for name in polymer.resnames}
     return {"polymer_types": sorted(names)} if names else {}
 
@@ -614,8 +633,9 @@ def _hbond_summaries(settings: dict) -> dict[str, tuple[str, str | None]]:
         raise ProtocolError(
             "hydrogen_bonds: groups must map names to selections and summaries must map names "
             "to {between: [group, group]} or {within: group}.",
-            hint="Pass --set groups='{protein: chainid A, polymer: chainid C}' --set "
-            "summaries='{protein_polymer: {between: [protein, polymer]}}'.",
+            hint="Pass --set groups='{protein: null, polymer: null}' --set "
+            "summaries='{protein_polymer: {between: [protein, polymer]}}'; null selects the "
+            "atoms of the role the group is named after.",
         )
     resolved: dict[str, tuple[str, str | None]] = {}
     for name, spec in summaries.items():
@@ -652,7 +672,7 @@ def _hbond_residue_labels(universe: Any, selection: str) -> list:
             f"hydrogen_bonds: the residues of {selection!r} repeat residue IDs even within a "
             "chain, so they cannot be told apart for the per-residue result.",
             hint="Make the summary's first group a selection of distinct residues, such as "
-            "'chainid A'.",
+            "the protein (null).",
         )
     return labels
 
@@ -829,8 +849,10 @@ def _measure_rmsf(study: Any, settings: dict, request: Request) -> Measured:
 def _measure_hydrogen_bonds(study: Any, settings: dict, request: Request) -> Measured:
     """Count hydrogen bonds between or within named groups and report one result.
 
-    ``groups`` maps names to MDAnalysis selections, and each entry of
-    ``summaries`` is ``{between: [a, b]}``, hydrogen bonds with one partner in
+    ``groups`` maps names to MDAnalysis selections; a group whose selection
+    is null selects the atoms of the role it is named after
+    (:data:`ROLE_CHAINS`), so the default groups are the protein and the
+    polymer. Each entry of ``summaries`` is ``{between: [a, b]}``, hydrogen bonds with one partner in
     each group, or ``{within: a}``. :func:`~polyzymd.analyses.functions.hydrogen_bonds`
     runs MDAnalysis ``HydrogenBondAnalysis`` once per replicate for the chosen
     summary, with ``d_a_cutoff`` Å and ``d_h_a_angle_cutoff`` degrees, and
@@ -849,6 +871,10 @@ def _measure_hydrogen_bonds(study: Any, settings: dict, request: Request) -> Mea
     from polyzymd.analyses.figures import plot_differences
     from polyzymd.analyses.timeseries import select
 
+    groups = settings["groups"]
+    if isinstance(groups, dict):
+        groups = {name: _selection(value, f"groups.{name}", name) for name, value in groups.items()}
+        settings = {**settings, "groups": groups}
     summaries = _hbond_summaries(settings)
     parts = list(functions.HBOND_PARTS)
     life = {"mean_lifetime": 0, "lifetime_events": 1, "censored_fraction": 2}
@@ -1286,6 +1312,9 @@ def _measure_contacts(study: Any, settings: dict, request: Request) -> Measured:
       counts a contact when any polymer atom is within ``cutoff`` Å of the
       residue, comparing heavy atoms only when ``heavy_atoms`` is true.
 
+    ``protein_selection`` and ``polymer_selection`` left null select the
+    atoms of the protein and polymer roles (:data:`ROLE_CHAINS`), and the
+    resolved selections are recorded in ``provenance.settings``.
     ``polymer_types`` names the polymer residue names (monomers) reported one
     by one; by default every residue name of ``polymer_selection`` in any
     condition (:func:`study_wide_settings`), so a replicate without one
@@ -1357,8 +1386,8 @@ def _measure_contacts(study: Any, settings: dict, request: Request) -> Measured:
             hint="Pass --set tolerance_ps=0 for events that end at the first absent frame.",
         )
     settings = {**settings, **study_wide_settings("contacts", study, settings)}
-    protein = str(settings["protein_selection"])
-    polymer = str(settings["polymer_selection"])
+    protein = _selection(settings["protein_selection"], "protein_selection", "protein")
+    polymer = _selection(settings["polymer_selection"], "polymer_selection", "polymer")
     names = settings["polymer_types"] or []
     types = sorted({str(name) for name in ([names] if isinstance(names, str) else names)})
     if method == "distance" and settings["heavy_atoms"]:
@@ -1803,7 +1832,7 @@ ANALYSES = {
     "hydrogen_bonds": ShippedAnalysis(
         "hydrogen bonds between groups: counts, lifetimes, per-residue and per-pair occupancy",
         {
-            "groups": {"protein": "chainid A", "polymer": "chainid C"},
+            "groups": {"protein": None, "polymer": None},
             "summaries": {"protein_polymer": {"between": ["protein", "polymer"]}},
             "d_a_cutoff": 3.5,
             "d_h_a_angle_cutoff": 150.0,
@@ -1832,13 +1861,13 @@ ANALYSES = {
         _measure_native_contacts,
     ),
     "contacts": ShippedAnalysis(
-        "contacts per protein residue with a partner group, the polymer (chainid C) by "
+        "contacts per protein residue with a partner group, the polymer by "
         "default or any polymer_selection such as resname SDS: method occlusion (buried surface) "
         "or distance",
         {
             "method": "occlusion",
-            "polymer_selection": "chainid C",
-            "protein_selection": "chainid A",
+            "polymer_selection": None,
+            "protein_selection": None,
             "polymer_types": None,
             "use_pbc": True,
             "regions": {},

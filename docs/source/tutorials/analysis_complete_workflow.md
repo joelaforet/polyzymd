@@ -81,8 +81,8 @@ pixi run -e analysis polyzymd analyze hydrogen_bonds \
 ```
 
 The command discards the first 10 ns of every replicate and, on every
-production frame, counts the hydrogen bonds between the protein (`chainid A`)
-and the polymer (`chainid C`) with MDAnalysis `HydrogenBondAnalysis`, a donor
+production frame, counts the hydrogen bonds between the protein (chain A)
+and the polymer (chain C) with MDAnalysis `HydrogenBondAnalysis`, a donor
 within 3.5 Å of the acceptor and a donor-hydrogen-acceptor angle of at least
 150°. It prints one line per condition with the mean number of hydrogen bonds
 per frame over the replicates, its 95% interval and every replicate value,

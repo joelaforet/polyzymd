@@ -61,7 +61,7 @@ def _settings(raw: tuple[str, ...]) -> dict[str, Any]:
                 f"Setting {key!r} is nested, and --set takes only top-level settings.",
                 hint=(
                     "Give the whole top-level setting as a YAML mapping, for example "
-                    "--set groups='{protein: chainid A, polymer: chainid C}'."
+                    "--set groups='{protein: null, ligand: null}'."
                 ),
             )
         settings[key] = parsed

@@ -78,7 +78,7 @@ polyzymd analyze hydrogen_bonds -c SBMA50/config.yaml -c SBMA100/config.yaml \
 
 The first `-c` is the control. The analysis measures the summaries of
 `--set summaries=...`, by default `protein_polymer`, the hydrogen bonds
-between `chainid A` and `chainid C`. By default the report shows
+between the protein (chain A) and the polymer (chain C). By default the report shows
 `protein_polymer_mean_hbonds`: for each replicate, the mean number of hydrogen
 bonds per frame. The replicate values are summarised per condition, and every
 other condition is compared with the control by Welch's t test with the
@@ -138,7 +138,7 @@ Settings, passed with `--set`:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `groups` | `{protein: chainid A, polymer: chainid C}` | Names and MDAnalysis selections of the groups |
+| `groups` | `{protein: null, polymer: null}` | Names and MDAnalysis selections of the groups. A null selection selects the atoms of the role the group is named after: `protein` (chain A), `ligand` (chain B) or `polymer` (chain C). The report records the selection used |
 | `summaries` | `{protein_polymer: {between: [protein, polymer]}}` | Names of the summaries, each `between: [a, b]` or `within: a` |
 | `d_a_cutoff` | `3.5` | Largest donor-acceptor distance, in Å; 3.0 is also common |
 | `d_h_a_angle_cutoff` | `150` | Smallest donor-hydrogen-acceptor angle, in degrees |
