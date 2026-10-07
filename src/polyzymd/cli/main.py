@@ -1909,11 +1909,20 @@ def submit(
     is_flag=True,
     help="Skip system building (use existing) for initial segment",
 )
+@click.option(
+    "--allow-report-interval-change",
+    is_flag=True,
+    help=(
+        "Continue even if the configuration now gives a different number of "
+        "steps between trajectory frames than earlier segments used"
+    ),
+)
 def run_segment(
     config: str,
     replicate: int,
     scratch_dir: str | None,
     skip_build: bool,
+    allow_report_interval_change: bool,
 ) -> None:
     """Run the next simulation segment (self-resubmitting job entry point).
 
@@ -1991,6 +2000,7 @@ def run_segment(
             working_dir=working_dir,
             replicate=replicate,
             skip_build=skip_build,
+            allow_report_interval_change=allow_report_interval_change,
         )
     finally:
         run_lock.__exit__(None, None, None)
@@ -2002,6 +2012,7 @@ def _run_segment_locked(
     working_dir: Path,
     replicate: int,
     skip_build: bool,
+    allow_report_interval_change: bool = False,
 ) -> None:
     """Run the next production segment while the replicate lock is held.
 
@@ -2020,12 +2031,17 @@ def _run_segment_locked(
         Replicate number (1-based).
     skip_build : bool
         Whether to reuse a pre-built system for the initial segment.
+    allow_report_interval_change : bool, optional
+        Run the segment even if its frame interval differs from the interval
+        earlier segments used.
     """
     from polyzymd.simulation.progress import (
+        ReportIntervalChangeError,
         SegmentStatus,
         SimulationProgress,
         SimulationStatus,
         _derive_overall_status,
+        check_report_interval_unchanged,
         get_next_segment_info,
         load_or_scan_progress,
         save_progress,
@@ -2200,6 +2216,20 @@ def _run_segment_locked(
         f"({duration_ns:.3f} ns, {steps_to_run} steps, {samples_to_write} frames)",
         phase="simulation",
     )
+
+    # Every segment of a chain must write frames at the same interval, or
+    # the segments cannot be joined into one evenly spaced trajectory.
+    try:
+        check_report_interval_unchanged(
+            progress,
+            working_dir,
+            seg_idx,
+            report_interval,
+            allow_change=allow_report_interval_change,
+        )
+    except ReportIntervalChangeError as exc:
+        colored_echo(str(exc), err=True, level=logging.ERROR)
+        sys.exit(1)
 
     try:
         raise_if_interrupted()
@@ -2964,12 +2994,18 @@ def cancel(
     default=None,
     help="Preset name to print in the resubmit hint for dead chains (agent format)",
 )
+@click.option(
+    "--unfinished",
+    is_flag=True,
+    help="agent/json: omit completed replicates; fully completed systems collapse to one line",
+)
 def status(
     configs: tuple[str, ...],
     all_roots: tuple[str, ...],
     output_format: str,
     no_slurm: bool,
     preset_hint: str | None,
+    unfinished: bool,
 ) -> None:
     """Show progress and job state for all replicates.
 
@@ -2999,7 +3035,13 @@ def status(
         raise click.UsageError("Provide at least one -c/--config or --all directory.")
 
     if output_format != "table":
-        _status_report(config_paths, output_format, no_slurm=no_slurm, preset_hint=preset_hint)
+        _status_report(
+            config_paths,
+            output_format,
+            no_slurm=no_slurm,
+            preset_hint=preset_hint,
+            unfinished=unfinished,
+        )
         return
     if len(config_paths) > 1:
         raise click.UsageError(
@@ -3009,7 +3051,12 @@ def status(
 
 
 def _status_report(
-    config_paths: list[str], output_format: str, *, no_slurm: bool, preset_hint: str | None
+    config_paths: list[str],
+    output_format: str,
+    *,
+    no_slurm: bool,
+    preset_hint: str | None,
+    unfinished: bool = False,
 ) -> None:
     """Multi-config, SLURM-aware status (``--format agent|json``)."""
     from datetime import datetime, timezone
@@ -3017,6 +3064,7 @@ def _status_report(
     from polyzymd.cli.status_report import (
         SystemReport,
         build_system_report,
+        fill_end_states,
         query_user_jobs,
         render_agent,
         render_json,
@@ -3060,8 +3108,14 @@ def _status_report(
             )
         )
 
+    if slurm_available:
+        fill_end_states(reports)
+
     if output_format == "json":
-        click.echo(render_json(reports, now=now, slurm_available=slurm_available), nl=False)
+        click.echo(
+            render_json(reports, now=now, slurm_available=slurm_available, unfinished=unfinished),
+            nl=False,
+        )
     else:
         click.echo(
             render_agent(
@@ -3070,6 +3124,7 @@ def _status_report(
                 slurm_available=slurm_available,
                 preset_hint=preset_hint,
                 slurm_queried=not no_slurm,
+                unfinished=unfinished,
             ),
             nl=False,
         )
