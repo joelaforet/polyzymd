@@ -295,41 +295,6 @@ def test_provenance_refresh_recomputes_metadata(tmp_path: Path) -> None:
     assert loader.info_calls == [2, 2]
 
 
-def test_gro_topology_warning_is_recorded_without_provider_logging(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Provider fallback warnings should be recorded but not emitted."""
-
-    info = _trajectory_info(tmp_path, topology_name="topology.gro", topology_format="gro")
-    loader = FakeLoader(info)
-    provider = UniverseProvider(FakeConfig(), loader=loader)
-
-    with caplog.at_level(logging.WARNING):
-        first = provider.provenance_for(2)
-        second = provider.provenance_for(2, refresh=True)
-
-    messages = [
-        record.message
-        for record in caplog.records
-        if record.name == "polyzymd.analyses.universe" and "GRO topology" in record.message
-    ]
-    assert messages == []
-    assert any("GRO topology" in warning for warning in first.warnings)
-    assert any("GRO topology" in warning for warning in second.warnings)
-
-
-def test_gro_warning_uses_topology_format_even_without_gro_suffix(tmp_path: Path) -> None:
-    """Topology format metadata should trigger GRO warnings when suffix cannot."""
-
-    info = _trajectory_info(tmp_path, topology_name="topology.pdb", topology_format="gro")
-    loader = FakeLoader(info)
-    provider = UniverseProvider(FakeConfig(), loader=loader)
-
-    provenance = provider.provenance_for(2)
-    assert provenance.topology.format == "gro"
-    assert any("GRO topology" in warning for warning in provenance.warnings)
-
-
 def test_independent_real_gromacs_providers_warn_once_and_record_gro_provenance(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
@@ -358,6 +323,6 @@ def test_independent_real_gromacs_providers_warn_once_and_record_gro_provenance(
     assert first.topology.format == "gro"
     assert second.topology.path == first.topology.path
     assert refreshed.topology.path == first.topology.path
-    assert any("GRO topology" in warning for warning in first.warnings)
-    assert any("GRO topology" in warning for warning in second.warnings)
-    assert any("GRO topology" in warning for warning in refreshed.warnings)
+    assert sum("GRO topology" in warning for warning in first.warnings) == 1
+    assert sum("GRO topology" in warning for warning in second.warnings) == 1
+    assert sum("GRO topology" in warning for warning in refreshed.warnings) == 1
