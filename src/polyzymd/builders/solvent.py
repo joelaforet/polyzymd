@@ -228,16 +228,6 @@ class SolventBuilder:
         """Get the box vectors of the solvated system."""
         return self._box_vectors
 
-    @property
-    def solvation_counts(self) -> Optional[SolvationCounts]:
-        """Get the molecule counts from solvation.
-
-        Returns:
-            SolvationCounts with water, ion, and co-solvent molecule counts,
-            or None if solvate() has not been called.
-        """
-        return self._solvation_counts
-
     def compute_box_vectors(
         self,
         topology: Topology,

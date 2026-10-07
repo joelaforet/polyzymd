@@ -837,14 +837,16 @@ platform and the property values it used under `openmm_platform` in
 
 ---
 
+(config-gromacs)=
 ## GROMACS Engine Configuration
 
 :::{versionadded} 1.3.0
 :::
 
-The optional `gromacs:` block configures how PolyzyMD invokes GROMACS and
-allocates SLURM resources for GROMACS jobs. This block is only used when
-`--engine gromacs` is passed to `submit`, `run`, or `recover`.
+The optional `gromacs:` block sets how PolyzyMD calls GROMACS and which SLURM
+resources a GROMACS job asks for. PolyzyMD uses it when the engine is
+GROMACS: `engine: gromacs` in the config, or `--engine gromacs` for `run`,
+`submit` or `recover`.
 
 ### Minimal Example
 
@@ -895,11 +897,75 @@ gromacs:
 - Unsafe GPU flags (`-pme gpu`, `-bonded gpu`, `-update gpu`) are automatically
   stripped during energy minimization stages. Only `-nb gpu` is safe for EM.
 - When `gpu` is true and `ntmpi` > 1, a warning is emitted about GPU sharing.
+- Set `slurm_ntasks` above `ntmpi` when the scheduler must reserve more tasks
+  than GROMACS runs ranks, for example for a container or a multi-GPU allocation.
 - If `mdrun_flags` contains `-ntmpi` or `-ntomp`, a warning is emitted when
   those values conflict with the explicit `ntmpi`/`ntomp` fields.
 
-For practical usage examples and cluster-specific recipes, see
-{doc}`../how_to/gromacs_export`.
+### Stage-specific mdrun flags
+
+`mdrun_flags_equilibration` and `mdrun_flags_production` replace
+`mdrun_flags` in their stages. When null (the default), the stage uses
+`mdrun_flags`.
+
+```yaml
+gromacs:
+  mdrun_flags: "-pin on"                      # all stages
+  mdrun_flags_equilibration: "-pin on -dlb yes"
+  mdrun_flags_production: "-pin on -dlb auto -nb gpu -pme gpu -bonded gpu -update gpu"
+```
+
+### `command_prefix` and `mpi_launcher_flags`
+
+Use one of the two, not both.
+
+- `command_prefix` goes before every GROMACS command. Use it for a container
+  or a site launcher:
+  `command_prefix: "singularity exec --rocm --bind $PWD /path/to/gromacs.sif"`.
+- `mpi_launcher_flags` goes after the `mpirun` that PolyzyMD writes for a
+  real-MPI binary: `mpi_launcher_flags: "-genv I_MPI_FABRICS shm:tcp"` gives
+  `mpirun -genv I_MPI_FABRICS shm:tcp gmx_mpi mdrun ...`.
+
+With `command_prefix` and a real-MPI binary, PolyzyMD writes no `mpirun`,
+ignores `mpi_launcher_flags` and logs a warning.
+
+### `env_exports` and `setup_commands`
+
+The job script exports `env_exports`, then runs `setup_commands` in order,
+after `module_load` and before the first GROMACS command:
+
+```yaml
+gromacs:
+  env_exports:
+    GMX_GPU_DD_COMMS: "true"
+    OMP_PROC_BIND: "close"
+  setup_commands:
+    - "ulimit -s unlimited"
+    - "source /opt/gromacs-2024/bin/GMXRC"
+```
+
+### mdrun flags
+
+These `gmx mdrun` flags go in `mdrun_flags`, `mdrun_flags_equilibration` or
+`mdrun_flags_production`.
+
+| Flag | Description |
+|------|-------------|
+| `-ntmpi N` | Thread-MPI ranks (thread-MPI `gmx` builds). Set by `ntmpi`. |
+| `-ntomp N` | OpenMP threads per rank. Set by `ntomp`. |
+| `-npme N` | Dedicated PME ranks, for example `-npme 1` with 3 GPUs. |
+| `-nb gpu` | Nonbonded forces on the GPU. Allowed in minimization. |
+| `-pme gpu` | PME electrostatics on the GPU. Removed in minimization. |
+| `-bonded gpu` | Bonded forces on the GPU. Removed in minimization. |
+| `-update gpu` | Integration and constraints on the GPU. Removed in minimization. |
+| `-pin on` | Pin threads to CPU cores. |
+| `-pinstride N` | Stride between pinned threads. |
+| `-dlb yes\|auto` | Dynamic load balancing. |
+| `-gpu_id NNN` | GPU device IDs, for example `012` for 3 GPUs. |
+
+For thread-MPI, real MPI and OpenMP threads, see
+{doc}`../explanation/gromacs_parallelism`. For how to run and submit GROMACS
+jobs, see {doc}`../how_to/run_gromacs`.
 
 ---
 
@@ -916,7 +982,7 @@ See the example configurations in `src/polyzymd/templates/examples/`:
 ## See Also
 
 - {doc}`../how_to/dynamic_polymers` - Dynamic polymer generation from SMILES
-- {doc}`../how_to/gromacs_export` - Running GROMACS simulations on HPC clusters
+- {doc}`../how_to/run_gromacs` - Run GROMACS simulations
 - {doc}`../how_to/polymers` - Polymer setup guide
 - {doc}`../how_to/restraints` - Atom selection and restraints
 - {doc}`cli_reference` - CLI documentation

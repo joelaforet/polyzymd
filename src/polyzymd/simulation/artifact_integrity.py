@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from polyzymd.analyses.shared.file_hashes import file_sha256
 from polyzymd.simulation.analysis_topology import ANALYSIS_TOPOLOGY_NAME, write_analysis_topology
 
 MANIFEST_NAME = "build_manifest.json"
@@ -39,7 +40,7 @@ def _portable(value: Any, key: str | None = None) -> Any:
         return [_portable(v, key) for v in value]
     if key in PATH_KEYS and isinstance(value, str) and Path(value).is_absolute():
         path = Path(value)
-        return _file_hash(path) if path.is_file() else path.name
+        return file_sha256(path) if path.is_file() else path.name
     return value
 
 
@@ -57,14 +58,6 @@ def config_hash(config: Any) -> str:
 def _absolute_path_config_hash(config: Any) -> str:
     """Return the hash that earlier builds recorded, which includes absolute paths."""
     return _digest(config.model_dump(mode="json"))
-
-
-def _file_hash(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
@@ -121,8 +114,8 @@ def publish_build_bundle(
             "provenance": dict(provenance or {}),
             "artifacts": {
                 name: {
-                    "path": str((working_dir / name).resolve()),
-                    "sha256": _file_hash(staging / name),
+                    "path": name,
+                    "sha256": file_sha256(staging / name, use_cache=False),
                 }
                 for name in written
             },
@@ -188,14 +181,15 @@ def validate_build_bundle(working_dir: Path, config: Any) -> None:
                 f"Manifest lists {name} but {path} is missing; rerun the build or "
                 "polyzymd analysis-topology"
             )
+        # Paths are relative to the run folder, so a moved run folder validates.
+        # Earlier manifests recorded absolute paths, compared by file name.
         recorded_path = artifacts.get(name, {}).get("path")
-        if recorded_path != str(path.resolve()):
+        if recorded_path is None or Path(recorded_path).name != name:
             raise ArtifactIntegrityError(
-                f"Artifact path mismatch for {name}: manifest={recorded_path!r}, "
-                f"current={str(path.resolve())!r}"
+                f"Artifact path mismatch for {name}: manifest={recorded_path!r}, current={name!r}"
             )
         expected = artifacts.get(name, {}).get("sha256")
-        actual = _file_hash(path)
+        actual = file_sha256(path, use_cache=False)
         if expected != actual:
             raise ArtifactIntegrityError(
                 f"Artifact hash mismatch for {path}: manifest={expected!r}, actual={actual}"

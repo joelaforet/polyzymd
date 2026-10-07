@@ -193,8 +193,9 @@ def benjamini_hochberg(
 ) -> list[BHResult]:
     """Apply Benjamini-Hochberg FDR correction to a family of p-values.
 
-    Implements the Benjamini-Hochberg (1995) step-up procedure to control
-    the false discovery rate. The correction adjusts p-values such that
+    Adjusts the p-values with the Benjamini-Hochberg (1995) step-up procedure
+    of ``scipy.stats.false_discovery_control`` to control the false discovery
+    rate. The correction adjusts p-values such that
     declaring significance at ``adjusted_p <= alpha`` controls the expected
     proportion of false discoveries at level *alpha*.
 
@@ -232,40 +233,26 @@ def benjamini_hochberg(
         for _ in p_values
     ]
 
-    indexed_non_null: list[tuple[int, float]] = []
-    for idx, p in enumerate(p_values):
-        if p is None:
-            continue
-        raw_p = float(p)
-        if math.isnan(raw_p):
-            continue
-        indexed_non_null.append((idx, raw_p))
-
-    if not indexed_non_null:
+    present = [
+        (idx, float(p)) for idx, p in enumerate(p_values) if p is not None and not math.isnan(p)
+    ]
+    if not present:
         return results
 
-    indexed_non_null.sort(key=lambda item: item[1])
-    m = len(indexed_non_null)
+    from scipy import stats
 
-    sorted_p = np.asarray([item[1] for item in indexed_non_null], dtype=np.float64)
-    ranks = np.arange(1, m + 1, dtype=np.float64)
-
-    adjusted_sorted = sorted_p * m / ranks
-    adjusted_sorted = np.minimum.accumulate(adjusted_sorted[::-1])[::-1]
-    adjusted_sorted = np.clip(adjusted_sorted, 0.0, 1.0)
-
-    for rank_idx, ((original_idx, raw_p), adjusted_p) in enumerate(
-        zip(indexed_non_null, adjusted_sorted, strict=False),
-        start=1,
-    ):
-        adjusted = float(adjusted_p)
-        results[original_idx] = BHResult(
+    raw = np.asarray([p for _, p in present], dtype=np.float64)
+    # A p-value one rounding error outside [0, 1] would make scipy raise.
+    adjusted = stats.false_discovery_control(np.clip(raw, 0.0, 1.0), method="bh")
+    ranks = np.empty(len(raw), dtype=int)
+    ranks[np.argsort(raw, kind="stable")] = np.arange(1, len(raw) + 1)
+    for (idx, raw_p), adjusted_p, rank in zip(present, adjusted, ranks, strict=True):
+        results[idx] = BHResult(
             raw_p_value=raw_p,
-            adjusted_p_value=adjusted,
-            significant=adjusted <= alpha,
-            rank=rank_idx,
+            adjusted_p_value=float(adjusted_p),
+            significant=float(adjusted_p) <= alpha,
+            rank=int(rank),
         )
-
     return results
 
 

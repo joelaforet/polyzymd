@@ -76,9 +76,11 @@ def test_failed_publication_restores_previous_bundle(tmp_path, monkeypatch):
 
     def fail_between_artifact_replacements(source, destination):
         nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise OSError("injected publication failure")
+        # Only the bundle's own files count, not entries of the file-hash cache.
+        if Path(destination).parent == tmp_path:
+            calls += 1
+            if calls == 2:
+                raise OSError("injected publication failure")
         return real_replace(source, destination)
 
     monkeypatch.setattr(integrity.os, "replace", fail_between_artifact_replacements)
@@ -197,3 +199,46 @@ def test_build_validates_with_a_copied_config_and_with_the_absolute_path_hash(tm
     with pytest.raises(ArtifactIntegrityError, match="Configuration does not match"):
         validate_build_bundle(run, second)
 
+
+def test_a_moved_build_validates(tmp_path):
+    """Artifacts are recorded relative to the run folder, so a moved run folder still validates."""
+    import shutil
+
+    topology, system, positions = _tiny_openmm_bundle()
+    manifest = publish_build_bundle(tmp_path / "run", topology, system, positions, _Config())
+    assert manifest["artifacts"]["system.xml"]["path"] == "system.xml"
+    moved = Path(shutil.move(tmp_path / "run", tmp_path / "moved"))
+    validate_build_bundle(moved, _Config())
+
+    # A manifest written before records absolute paths, which a move leaves behind.
+    recorded = json.loads((moved / MANIFEST_NAME).read_text())
+    for name, artifact in recorded["artifacts"].items():
+        artifact["path"] = str(tmp_path / "run" / name)
+    (moved / MANIFEST_NAME).write_text(json.dumps(recorded))
+    validate_build_bundle(moved, _Config())
+
+    recorded["artifacts"]["system.xml"]["path"] = "other.xml"
+    (moved / MANIFEST_NAME).write_text(json.dumps(recorded))
+    with pytest.raises(ArtifactIntegrityError, match="path mismatch"):
+        validate_build_bundle(moved, _Config())
+
+
+def test_validation_reads_an_artifact_replaced_with_the_same_size_and_time(tmp_path, monkeypatch):
+    import os
+
+    from polyzymd.analyses.shared.file_hashes import cache_dir
+
+    monkeypatch.setenv("POLYZYMD_CACHE_DIR", str(tmp_path / "cache"))
+    topology, system, positions = _tiny_openmm_bundle()
+    publish_build_bundle(tmp_path, topology, system, positions, _Config())
+    validate_build_bundle(tmp_path, _Config())
+    system_xml = tmp_path / "system.xml"
+    stat = system_xml.stat()
+    text = system_xml.read_text()
+    system_xml.write_text(text.replace("<", "[", 1))
+    os.utime(system_xml, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    with pytest.raises(ArtifactIntegrityError, match="hash mismatch"):
+        validate_build_bundle(tmp_path, _Config())
+    # Staging files are deleted after the build, so their hashes are not cached.
+    cached = [json.loads(p.read_text())["path"] for p in cache_dir().glob("*.json")]
+    assert not any(".build-bundle-" in path for path in cached)

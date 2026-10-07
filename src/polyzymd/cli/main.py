@@ -265,38 +265,6 @@ def _warn_for_submission_pixi_env(
     )
 
 
-def _generate_system_prefix(sim_config: object) -> str:
-    """Generate a system filename prefix from simulation config.
-
-    Replicates ``GromacsExporter._generate_prefix`` so CLI checks use the
-    same naming convention as build and submit workflows.
-
-    Parameters
-    ----------
-    sim_config : object
-        Simulation configuration object.
-
-    Returns
-    -------
-    str
-        System prefix (e.g. ``"CALB_SBMA-EGMA"``).
-    """
-    parts: list[str] = []
-
-    enzyme = getattr(sim_config, "enzyme", None)
-    enzyme_name = getattr(enzyme, "name", None)
-    if isinstance(enzyme_name, str) and enzyme_name:
-        parts.append(enzyme_name)
-
-    polymers = getattr(sim_config, "polymers", None)
-    polymers_enabled = getattr(polymers, "enabled", False)
-    polymer_prefix = getattr(polymers, "type_prefix", None)
-    if isinstance(polymers_enabled, bool) and polymers_enabled and isinstance(polymer_prefix, str):
-        parts.append(polymer_prefix)
-
-    return "_".join(parts) if parts else "system"
-
-
 def _emit_reference_warnings(sim_config: object, *, phase: str = "cli") -> bool:
     """Print missing referenced-file warnings for a loaded config.
 
@@ -400,10 +368,10 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     "--format",
     "export_format",
     default=None,
-    type=click.Choice(["gromacs", "lammps", "amber"], case_sensitive=False),
+    type=click.Choice(["gromacs"], case_sensitive=False),
     help=(
-        "Build-only export format: gromacs, lammps (planned), amber (planned). "
-        "Default: OpenMM build artifacts."
+        "Build-only export format: gromacs. Default: the config's engine (GROMACS "
+        "inputs for engine: gromacs, OpenMM build artifacts otherwise)."
     ),
 )
 def build(
@@ -424,7 +392,7 @@ def build(
     ``--format gromacs`` to export core GROMACS handoff files (``.gro``,
     ``.top``, ``.itp``). MDP files and a run script may also be generated as
     convenience defaults, but they are not required to continue outside
-    PolyzyMD. AMBER and LAMMPS export are not yet supported.
+    PolyzyMD.
 
     Use ``run --engine gromacs`` if you want PolyzyMD to build and then
     execute the full local GROMACS workflow. Use ``run --engine openmm`` for
@@ -620,11 +588,6 @@ def build(
                     colored_echo(
                         "    - Optional run_*_gromacs.sh (convenience script)", phase="build"
                     )
-                elif export_format in ("lammps", "amber"):
-                    colored_echo(
-                        f"    ({export_format.upper()} export is not yet supported)",
-                        phase="build",
-                    )
             else:
                 colored_echo("Files to Generate (OpenMM):", phase="build")
                 colored_echo("  Per replicate:", phase="build")
@@ -646,12 +609,7 @@ def build(
             has_reference_warnings = _emit_reference_warnings(sim_config, phase="build")
 
             colored_echo("=" * 60, phase="build")
-            if export_format in ("lammps", "amber"):
-                colored_echo(
-                    f"Validation passed. {export_format.upper()} export is not yet implemented.",
-                    phase="build",
-                )
-            elif has_reference_warnings:
+            if has_reference_warnings:
                 colored_echo(
                     "Validation passed with referenced-file warnings. Ready to build after fixing references.",
                     phase="build",
@@ -1908,11 +1866,20 @@ def submit(
     is_flag=True,
     help="Skip system building (use existing) for initial segment",
 )
+@click.option(
+    "--allow-report-interval-change",
+    is_flag=True,
+    help=(
+        "Continue even if the configuration now gives a different number of "
+        "steps between trajectory frames than earlier segments used"
+    ),
+)
 def run_segment(
     config: str,
     replicate: int,
     scratch_dir: str | None,
     skip_build: bool,
+    allow_report_interval_change: bool,
 ) -> None:
     """Run the next simulation segment (self-resubmitting job entry point).
 
@@ -1990,6 +1957,7 @@ def run_segment(
             working_dir=working_dir,
             replicate=replicate,
             skip_build=skip_build,
+            allow_report_interval_change=allow_report_interval_change,
         )
     finally:
         run_lock.__exit__(None, None, None)
@@ -2001,6 +1969,7 @@ def _run_segment_locked(
     working_dir: Path,
     replicate: int,
     skip_build: bool,
+    allow_report_interval_change: bool = False,
 ) -> None:
     """Run the next production segment while the replicate lock is held.
 
@@ -2019,12 +1988,17 @@ def _run_segment_locked(
         Replicate number (1-based).
     skip_build : bool
         Whether to reuse a pre-built system for the initial segment.
+    allow_report_interval_change : bool, optional
+        Run the segment even if its frame interval differs from the interval
+        earlier segments used.
     """
     from polyzymd.simulation.progress import (
+        ReportIntervalChangeError,
         SegmentStatus,
         SimulationProgress,
         SimulationStatus,
         _derive_overall_status,
+        check_report_interval_unchanged,
         get_next_segment_info,
         load_or_scan_progress,
         save_progress,
@@ -2199,6 +2173,20 @@ def _run_segment_locked(
         f"({duration_ns:.3f} ns, {steps_to_run} steps, {samples_to_write} frames)",
         phase="simulation",
     )
+
+    # Every segment of a chain must write frames at the same interval, or
+    # the segments cannot be joined into one evenly spaced trajectory.
+    try:
+        check_report_interval_unchanged(
+            progress,
+            working_dir,
+            seg_idx,
+            report_interval,
+            allow_change=allow_report_interval_change,
+        )
+    except ReportIntervalChangeError as exc:
+        colored_echo(str(exc), err=True, level=logging.ERROR)
+        sys.exit(1)
 
     try:
         raise_if_interrupted()
@@ -2834,6 +2822,11 @@ def cancel(
         else:
             working_dir = Path(sim_config.get_working_directory(replicate))
         marker = stop_file_path(working_dir)
+        # A GROMACS job works in <replicate>/gromacs. Job scripts written
+        # before they also checked the replicate folder look only there.
+        gromacs_marker = (
+            stop_file_path(working_dir / "gromacs") if sim_config.engine == "gromacs" else None
+        )
 
         if resume:
             if dry_run:
@@ -2842,11 +2835,13 @@ def cancel(
                     phase="simulation",
                 )
                 continue
-            if marker.exists():
-                marker.unlink()
+            removed = [path for path in (marker, gromacs_marker) if path and path.exists()]
+            for path in removed:
+                path.unlink()
+            if removed:
                 colored_echo(
-                    f"Replicate {replicate}: removed {marker} — resubmit with "
-                    f"`polyzymd submit -c {config} -r {replicate}`",
+                    f"Replicate {replicate}: removed {', '.join(map(str, removed))} — "
+                    f"resubmit with `polyzymd submit -c {config} -r {replicate}`",
                     phase="simulation",
                 )
             else:
@@ -2876,6 +2871,9 @@ def cancel(
         # queued while scancel runs still sees it and exits without work.
         write_stop_file(working_dir, config_path, replicate)
         colored_echo(f"Replicate {replicate}: wrote {marker}", phase="simulation")
+        if gromacs_marker and gromacs_marker.parent.is_dir():
+            write_stop_file(gromacs_marker.parent, config_path, replicate)
+            colored_echo(f"Replicate {replicate}: wrote {gromacs_marker}", phase="simulation")
 
         if stop_only:
             colored_echo(
@@ -2953,12 +2951,18 @@ def cancel(
     default=None,
     help="Preset name to print in the resubmit hint for dead chains (agent format)",
 )
+@click.option(
+    "--unfinished",
+    is_flag=True,
+    help="agent/json: omit completed replicates; fully completed systems collapse to one line",
+)
 def status(
     configs: tuple[str, ...],
     all_roots: tuple[str, ...],
     output_format: str,
     no_slurm: bool,
     preset_hint: str | None,
+    unfinished: bool,
 ) -> None:
     """Show progress and job state for all replicates.
 
@@ -2988,7 +2992,13 @@ def status(
         raise click.UsageError("Provide at least one -c/--config or --all directory.")
 
     if output_format != "table":
-        _status_report(config_paths, output_format, no_slurm=no_slurm, preset_hint=preset_hint)
+        _status_report(
+            config_paths,
+            output_format,
+            no_slurm=no_slurm,
+            preset_hint=preset_hint,
+            unfinished=unfinished,
+        )
         return
     if len(config_paths) > 1:
         raise click.UsageError(
@@ -2998,7 +3008,12 @@ def status(
 
 
 def _status_report(
-    config_paths: list[str], output_format: str, *, no_slurm: bool, preset_hint: str | None
+    config_paths: list[str],
+    output_format: str,
+    *,
+    no_slurm: bool,
+    preset_hint: str | None,
+    unfinished: bool = False,
 ) -> None:
     """Multi-config, SLURM-aware status (``--format agent|json``)."""
     from datetime import datetime, timezone
@@ -3006,6 +3021,7 @@ def _status_report(
     from polyzymd.cli.status_report import (
         SystemReport,
         build_system_report,
+        fill_end_states,
         query_user_jobs,
         render_agent,
         render_json,
@@ -3049,8 +3065,14 @@ def _status_report(
             )
         )
 
+    if slurm_available:
+        fill_end_states(reports)
+
     if output_format == "json":
-        click.echo(render_json(reports, now=now, slurm_available=slurm_available), nl=False)
+        click.echo(
+            render_json(reports, now=now, slurm_available=slurm_available, unfinished=unfinished),
+            nl=False,
+        )
     else:
         click.echo(
             render_agent(
@@ -3059,6 +3081,7 @@ def _status_report(
                 slurm_available=slurm_available,
                 preset_hint=preset_hint,
                 slurm_queried=not no_slurm,
+                unfinished=unfinished,
             ),
             nl=False,
         )
@@ -3631,7 +3654,9 @@ def recover(
         if nodelist:
             slurm_config.nodelist = nodelist
 
-        prefix = _generate_system_prefix(sim_config)
+        from polyzymd.analyses.shared.gromacs import system_prefix
+
+        prefix = system_prefix(sim_config)
         gromacs_inputs_exist = all(
             (working_dir / f).exists()
             for f in [f"{prefix}.top", f"{prefix}.gro", "em.mdp", "prod.mdp"]

@@ -68,5 +68,6 @@ analysis_hydrogen_bonds_verification
 
 simulation_safeguards
 residue_assignment
-colored_logging
+gromacs_parallelism
+architecture
 ```

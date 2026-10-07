@@ -181,4 +181,4 @@ Set `length` to 3 or more.
 - {doc}`polymers`: the keys that both modes share, and how the chains are
   placed.
 - {doc}`../reference/configuration`: every key of the config.
-- {doc}`gromacs_export`: run the system with GROMACS.
+- {doc}`run_gromacs`: run the system with GROMACS.

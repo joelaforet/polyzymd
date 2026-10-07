@@ -925,8 +925,7 @@ def _study_record(study_path: Path, run: str, settings: dict) -> dict:
     are applied over its ``settings:``, so the record holds what the function
     was called with. The path is relative to the study folder.
     """
-    import hashlib
-
+    from polyzymd.analyses.shared.file_hashes import file_sha256
     from polyzymd.analyses.study_file import (
         entry_record,
         find_study_file,
@@ -962,7 +961,7 @@ def _study_record(study_path: Path, run: str, settings: dict) -> dict:
     project_root = project.root if project is not None else None
     record = {
         "path": file.name,
-        "sha256": hashlib.sha256(file.read_bytes()).hexdigest(),
+        "sha256": file_sha256(file),
         "run": run,
         "settings": portable(settings, root, project_root),
         "selections": selections,
@@ -975,7 +974,7 @@ def _study_record(study_path: Path, run: str, settings: dict) -> dict:
         record["project"] = {
             "path": portable(str(project.path), root, project_root),
             "label": protocol.project_label,
-            "sha256": hashlib.sha256(project.path.read_bytes()).hexdigest(),
+            "sha256": file_sha256(project.path),
         }
     return record
 
