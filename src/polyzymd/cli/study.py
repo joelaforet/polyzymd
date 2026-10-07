@@ -267,7 +267,8 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
     (named by its config's naming_template), preferring one whose files have the sizes
     manifest.json records, is written to data.local.yaml
     beside study.yaml, which is never committed or published; entries for
-    conditions not found are kept as they were. Runs named alike go to the
+    conditions not found, or whose files differ from manifest.json, are kept
+    as they were. Runs named alike go to the
     folder named for the condition (no_polymer/), and one folder is never
     written for two conditions. Moving data never changes the study or its
     stored results' config hashes.
@@ -335,13 +336,17 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
         best = max(
             matching or candidates, key=lambda parent: (len(parents[parent]), -len(parent.parts))
         )
-        located[label] = best
         others = f" ({len(parents) - 1} other folders also hold some)" if len(parents) > 1 else ""
         click.echo(f"{label}: replicates {parents[best]} under {best}{others}")
-        for line in _check_against_manifest(protocol.root, label, best, verify):
+        checks = _check_against_manifest(protocol.root, label, best, verify)
+        for line in checks:
             click.echo(line)
-            if line.startswith("error"):
-                missing.append(label)
+        # Runs that differ from manifest.json are not written, so analyze never
+        # reads them as the runs the stored results came from.
+        if any(line.startswith("error") for line in checks):
+            missing.append(label)
+        else:
+            located[label] = best
     # One folder may hold the runs of several conditions when their runs are
     # named apart. Conditions whose runs are named alike and land in one
     # folder would read the same runs, so neither is written.

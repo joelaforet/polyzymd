@@ -482,12 +482,15 @@ def deposit_readme(
         (
             "   the condition folders of one study. For each study, run\n"
             "   `polyzymd study locate DOWNLOAD_DIR --verify --study <study>`, then\n"
-            "   `polyzymd analyze --project .`. If you downloaded the trajectories of one study\n"
-            "   only, run `polyzymd analyze --study <study>` instead."
+            "   `polyzymd analyze --project . --recompute`. If you downloaded the trajectories of\n"
+            "   one study only, run `polyzymd analyze --study <study> --recompute` instead."
             if project
             else "   the condition folders. Run `polyzymd study locate DOWNLOAD_DIR --verify`, then\n"
-            "   `polyzymd analyze --study study.yaml`."
+            "   `polyzymd analyze --study study.yaml --recompute`."
         ),
+        "   Without `--recompute`, analyze reads the stored results and does not read the",
+        "   trajectories. Stop if `study locate` reports an error: the downloaded files differ",
+        "   from the ones `manifest.json` lists.",
         "3. **Simulations:** build and run each `conditions/<name>/config.yaml` with PolyzyMD;",
         "   the replicate number seeds each replicate's starting structure (Packmol and",
         "   polymer draws), initial velocities and thermostat noise. On other hardware",

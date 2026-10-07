@@ -203,6 +203,9 @@ def test_deposit_readme_says_where_to_locate_and_how_to_analyze_one_study(
     assert "DOWNLOAD_DIR is the folder that holds" in text
     if project:
         assert "`polyzymd study locate DOWNLOAD_DIR --verify --study <study>`" in text
-        assert "`polyzymd analyze --study <study>`" in text
+        assert "`polyzymd analyze --project . --recompute`" in text
+        assert "`polyzymd analyze --study <study> --recompute`" in text
     else:
         assert "`polyzymd study locate DOWNLOAD_DIR --verify`" in text
+        assert "`polyzymd analyze --study study.yaml --recompute`" in text
+    assert "Without `--recompute`, analyze reads the stored results" in text

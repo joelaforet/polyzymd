@@ -286,16 +286,26 @@ No polymer: 10 files match manifest.json (SHA-256)
 
 `--verify` checks the SHA-256 of each located file against `manifest.json`.
 Without it, `locate` checks only the sizes. A changed or missing file is
-named, and the command exits with code 2.
+named, that condition is not written to `data.local.yaml`, and the command
+exits with code 2.
+
+Then the reader recomputes each analysis from the trajectories:
+
+```bash
+polyzymd analyze --study study.yaml --recompute
+```
+
+Without `--recompute`, `analyze` reads the stored results in `results/` and
+does not read the trajectories.
 
 The reader can make the figures without the trajectories, from
 `pz.Study("study.yaml").results(run)`. See {doc}`study_yaml`.
 
 In a frozen project, `study/` holds `project.yaml` and one folder per study.
 The reader runs `polyzymd study locate DOWNLOAD_DIR --verify --study <study>`
-for each study whose trajectories they downloaded. `polyzymd analyze --project .`
+for each study whose trajectories they downloaded. `polyzymd analyze --project . --recompute`
 needs the trajectories of every study. With the trajectories of one study only,
-run `polyzymd analyze --study <study>`.
+run `polyzymd analyze --study <study> --recompute`.
 
 ## Cite PolyzyMD
 
