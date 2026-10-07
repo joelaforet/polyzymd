@@ -300,3 +300,13 @@ def test_bh_ranks_ties_in_input_order() -> None:
     results = benjamini_hochberg([0.2, 0.01, 0.2, None, 0.01])
     assert [r.rank for r in results] == [3, 1, 4, None, 2]
     assert [r.adjusted_p_value for r in results] == pytest.approx([0.2, 0.02, 0.2, None, 0.02])
+
+
+def test_bh_accepts_p_values_a_rounding_error_outside_zero_to_one() -> None:
+    """P-values one rounding error above 1 or below 0 are adjusted as 1 and 0."""
+    results = benjamini_hochberg([1.0000000000000002, -1e-17, None, 0.02], alpha=0.05)
+
+    assert results[0].adjusted_p_value == pytest.approx(1.0)
+    assert results[1].adjusted_p_value == pytest.approx(0.0)
+    assert results[2].adjusted_p_value is None
+    assert results[3].adjusted_p_value == pytest.approx(0.03)

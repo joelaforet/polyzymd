@@ -242,7 +242,8 @@ def benjamini_hochberg(
     from scipy import stats
 
     raw = np.asarray([p for _, p in present], dtype=np.float64)
-    adjusted = stats.false_discovery_control(raw, method="bh")
+    # A p-value one rounding error outside [0, 1] would make scipy raise.
+    adjusted = stats.false_discovery_control(np.clip(raw, 0.0, 1.0), method="bh")
     ranks = np.empty(len(raw), dtype=int)
     ranks[np.argsort(raw, kind="stable")] = np.arange(1, len(raw) + 1)
     for (idx, raw_p), adjusted_p, rank in zip(present, adjusted, ranks, strict=True):
