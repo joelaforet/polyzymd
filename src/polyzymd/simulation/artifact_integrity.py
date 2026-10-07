@@ -115,7 +115,7 @@ def publish_build_bundle(
             "artifacts": {
                 name: {
                     "path": name,
-                    "sha256": file_sha256(staging / name),
+                    "sha256": file_sha256(staging / name, use_cache=False),
                 }
                 for name in written
             },
@@ -189,7 +189,7 @@ def validate_build_bundle(working_dir: Path, config: Any) -> None:
                 f"Artifact path mismatch for {name}: manifest={recorded_path!r}, current={name!r}"
             )
         expected = artifacts.get(name, {}).get("sha256")
-        actual = file_sha256(path)
+        actual = file_sha256(path, use_cache=False)
         if expected != actual:
             raise ArtifactIntegrityError(
                 f"Artifact hash mismatch for {path}: manifest={expected!r}, actual={actual}"

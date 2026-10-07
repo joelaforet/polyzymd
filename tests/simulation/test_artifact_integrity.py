@@ -221,3 +221,24 @@ def test_a_moved_build_validates(tmp_path):
     (moved / MANIFEST_NAME).write_text(json.dumps(recorded))
     with pytest.raises(ArtifactIntegrityError, match="path mismatch"):
         validate_build_bundle(moved, _Config())
+
+
+def test_validation_reads_an_artifact_replaced_with_the_same_size_and_time(tmp_path, monkeypatch):
+    import os
+
+    from polyzymd.analyses.shared.file_hashes import cache_dir
+
+    monkeypatch.setenv("POLYZYMD_CACHE_DIR", str(tmp_path / "cache"))
+    topology, system, positions = _tiny_openmm_bundle()
+    publish_build_bundle(tmp_path, topology, system, positions, _Config())
+    validate_build_bundle(tmp_path, _Config())
+    system_xml = tmp_path / "system.xml"
+    stat = system_xml.stat()
+    text = system_xml.read_text()
+    system_xml.write_text(text.replace("<", "[", 1))
+    os.utime(system_xml, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    with pytest.raises(ArtifactIntegrityError, match="hash mismatch"):
+        validate_build_bundle(tmp_path, _Config())
+    # Staging files are deleted after the build, so their hashes are not cached.
+    cached = [json.loads(p.read_text())["path"] for p in cache_dir().glob("*.json")]
+    assert not any(".build-bundle-" in path for path in cached)
