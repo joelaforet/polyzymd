@@ -88,7 +88,7 @@ pixi run -e analysis polyzymd analyze hydrogen_bonds \
     -c SBMA_100_CALB_pNPB/config.yaml \
     --label "No Polymer" --label "SBMA-100" \
     --eq 10ns --output-dir analysis_results \
-    --submit --preset blanca-shirts
+    --submit --preset <preset>
 ```
 
 ```text

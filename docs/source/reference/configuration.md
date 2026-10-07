@@ -896,6 +896,8 @@ gromacs:
 - Unsafe GPU flags (`-pme gpu`, `-bonded gpu`, `-update gpu`) are automatically
   stripped during energy minimization stages. Only `-nb gpu` is safe for EM.
 - When `gpu` is true and `ntmpi` > 1, a warning is emitted about GPU sharing.
+- Set `slurm_ntasks` above `ntmpi` when the scheduler must reserve more tasks
+  than GROMACS runs ranks, for example for a container or a multi-GPU allocation.
 - If `mdrun_flags` contains `-ntmpi` or `-ntomp`, a warning is emitted when
   those values conflict with the explicit `ntmpi`/`ntomp` fields.
 

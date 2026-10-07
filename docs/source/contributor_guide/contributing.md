@@ -18,6 +18,7 @@ For most changes, your loop is:
 
 - one clear purpose per branch or PR
 - changes that follow existing patterns instead of introducing a parallel style
+- terminal colors from the shared helpers in `polyzymd/cli/colors.py`, never ad hoc ANSI escape codes
 - docs and tests updated when behavior changes
 - commands verified in a `pixi` environment
 

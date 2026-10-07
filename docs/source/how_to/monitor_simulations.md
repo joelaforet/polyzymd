@@ -119,7 +119,7 @@ or ETA, run this first and answer from its output:
 
     ml slurm/<cluster>
     cd /projects/$USER/sims
-    pixi run -e build polyzymd status --format agent --preset blanca-shirts \
+    pixi run -e build polyzymd status --format agent --preset <preset> \
         --all CALB --all RML
 
 Read the verdict column. COMPLETED and RUNNING/QUEUED need no action.

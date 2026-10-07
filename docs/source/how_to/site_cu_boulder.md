@@ -211,10 +211,9 @@ pixi run -e build polyzymd submit \
 gromacs:
   gmx_binary: "gmx_mpi"
   ntmpi: 8
-  ntomp: 1
+  ntomp: 8
   memory: "16G"
   module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
-  mdrun_flags: "-ntomp 8"
 ```
 
 ```bash
@@ -266,10 +265,9 @@ for seven days, a common limit for long runs on condo partitions.
 gromacs:
   gmx_binary: "gmx_mpi"
   ntmpi: 8
-  ntomp: 1
+  ntomp: 8
   memory: "16G"
   module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
-  mdrun_flags: "-ntomp 8"
 ```
 
 ```bash
