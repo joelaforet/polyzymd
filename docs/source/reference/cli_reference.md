@@ -147,7 +147,7 @@ polyzymd build -c <path> --format gromacs    # Export for GROMACS
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--dry-run` | - | No | false | Validate only, don't build |
-| `--format` | - | No | the config's `engine` | Export format (`gromacs`, `lammps` (planned), or `amber` (planned)). Without it, PolyzyMD writes OpenMM files, or GROMACS files when the config's `engine` is `gromacs` |
+| `--format` | - | No | the config's `engine` | Export format (`gromacs`). Without it, PolyzyMD writes OpenMM files, or GROMACS files when the config's `engine` is `gromacs` |
 
 ### Example
 

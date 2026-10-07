@@ -21,6 +21,7 @@ from polyzymd.workflow.slurm import (
     BRIDGES2_GPU_TYPES,
     SlurmConfig,
     SlurmScriptGenerator,
+    sbatch_lines,
 )
 
 # ---------------------------------------------------------------------------
@@ -143,8 +144,8 @@ class TestBlancaExcludedNodes:
         cfg = SlurmConfig.from_preset("blanca-shirts")
         cfg.exclude = "some-other-node"
         gen = _make_generator(cfg)
-        assert gen._exclude_line() == "#SBATCH --exclude=some-other-node"
-        assert "bgpu-bortz1" not in gen._exclude_line()
+        assert sbatch_lines(gen.config)["exclude_line"] == "#SBATCH --exclude=some-other-node"
+        assert "bgpu-bortz1" not in sbatch_lines(gen.config)["exclude_line"]
 
     def test_preset_without_exclude_renders_no_directive(self, monkeypatch):
         """bridges2 has no excluded nodes, so no --exclude line is emitted."""
@@ -197,35 +198,35 @@ class TestConditionalDirectives:
         """Default (Alpine) style emits --gres=gpu:N."""
         cfg = SlurmConfig.from_preset("aa100")
         gen = _make_generator(cfg)
-        assert gen._gpu_line() == "#SBATCH --gres=gpu:1"
+        assert sbatch_lines(gen.config)["gpu_line"] == "#SBATCH --gres=gpu:1"
 
     def test_gpu_line_gres_style_multi_gpu(self):
         cfg = SlurmConfig(gpu_directive_style="gres", gpus=4)
         gen = _make_generator(cfg)
-        assert gen._gpu_line() == "#SBATCH --gres=gpu:4"
+        assert sbatch_lines(gen.config)["gpu_line"] == "#SBATCH --gres=gpu:4"
 
     def test_gpu_line_gpus_style_bridges2_default(self):
         """Bridges2 preset emits --gpus=v100-32:1."""
         cfg = SlurmConfig.from_preset("bridges2")
         gen = _make_generator(cfg)
-        assert gen._gpu_line() == "#SBATCH --gpus=v100-32:1"
+        assert sbatch_lines(gen.config)["gpu_line"] == "#SBATCH --gpus=v100-32:1"
 
     def test_gpu_line_gpus_style_custom_type(self):
         cfg = SlurmConfig(gpu_directive_style="gpus", gpu_type="h100-80", gpus=2)
         gen = _make_generator(cfg)
-        assert gen._gpu_line() == "#SBATCH --gpus=h100-80:2"
+        assert sbatch_lines(gen.config)["gpu_line"] == "#SBATCH --gpus=h100-80:2"
 
     def test_gpu_line_gpus_style_without_gpu_type_falls_back_to_gres(self):
         """If gpu_directive_style=='gpus' but gpu_type is None, fall back to gres."""
         cfg = SlurmConfig(gpu_directive_style="gpus", gpu_type=None, gpus=1)
         gen = _make_generator(cfg)
-        assert gen._gpu_line() == "#SBATCH --gres=gpu:1"
+        assert sbatch_lines(gen.config)["gpu_line"] == "#SBATCH --gres=gpu:1"
 
     def test_gpu_line_gres_style_with_gpu_type_emits_typed_gres(self):
         """gres style with gpu_type should emit typed --gres directive."""
         cfg = SlurmConfig(gpu_directive_style="gres", gpu_type="a100", gpus=2)
         gen = _make_generator(cfg)
-        assert gen._gpu_line() == "#SBATCH --gres=gpu:a100:2"
+        assert sbatch_lines(gen.config)["gpu_line"] == "#SBATCH --gres=gpu:a100:2"
 
     # --- Nodes line ---
 
@@ -233,7 +234,7 @@ class TestConditionalDirectives:
         """Alpine (gres) style emits --nodes and --ntasks on separate lines."""
         cfg = SlurmConfig.from_preset("aa100")
         gen = _make_generator(cfg)
-        line = gen._nodes_line()
+        line = sbatch_lines(gen.config)["nodes_line"]
         assert "#SBATCH --nodes=1" in line
         assert "#SBATCH --ntasks=1" in line
 
@@ -241,7 +242,7 @@ class TestConditionalDirectives:
         """Bridges2 (gpus) style emits only '#SBATCH -N N'."""
         cfg = SlurmConfig.from_preset("bridges2")
         gen = _make_generator(cfg)
-        line = gen._nodes_line()
+        line = sbatch_lines(gen.config)["nodes_line"]
         assert line == "#SBATCH -N 1"
         assert "--nodes" not in line
         assert "--ntasks" not in line
@@ -251,68 +252,68 @@ class TestConditionalDirectives:
     def test_qos_line_present_when_non_empty(self):
         cfg = SlurmConfig(qos="normal")
         gen = _make_generator(cfg)
-        assert gen._qos_line() == "#SBATCH --qos=normal"
+        assert sbatch_lines(gen.config)["qos_line"] == "#SBATCH --qos=normal"
 
     def test_qos_line_omitted_when_empty(self):
         """Bridges2 sets qos='' so the directive must be absent."""
         cfg = SlurmConfig(qos="")
         gen = _make_generator(cfg)
-        assert gen._qos_line() == ""
+        assert sbatch_lines(gen.config)["qos_line"] == ""
 
     def test_qos_line_bridges2_preset(self):
         cfg = SlurmConfig.from_preset("bridges2")
         gen = _make_generator(cfg)
-        assert gen._qos_line() == ""
+        assert sbatch_lines(gen.config)["qos_line"] == ""
 
     # --- Memory line ---
 
     def test_mem_line_present_when_set(self):
         cfg = SlurmConfig(memory="4G")
         gen = _make_generator(cfg)
-        assert gen._mem_line() == "#SBATCH --mem=4G"
+        assert sbatch_lines(gen.config)["mem_line"] == "#SBATCH --mem=4G"
 
     def test_mem_line_omitted_when_none(self):
         """Bridges2 sets memory=None so the directive must be absent."""
         cfg = SlurmConfig(memory=None)
         gen = _make_generator(cfg)
-        assert gen._mem_line() == ""
+        assert sbatch_lines(gen.config)["mem_line"] == ""
 
     def test_mem_line_bridges2_preset(self):
         cfg = SlurmConfig.from_preset("bridges2")
         gen = _make_generator(cfg)
-        assert gen._mem_line() == ""
+        assert sbatch_lines(gen.config)["mem_line"] == ""
 
     # --- Account line ---
 
     def test_account_line_present_when_non_empty(self):
         cfg = SlurmConfig(account="ucb625_asc1")
         gen = _make_generator(cfg)
-        assert gen._account_line() == "#SBATCH --account=ucb625_asc1"
+        assert sbatch_lines(gen.config)["account_line"] == "#SBATCH --account=ucb625_asc1"
 
     def test_account_line_omitted_when_empty(self):
         """Bridges2 infers allocation from login; account line must be absent."""
         cfg = SlurmConfig(account="")
         gen = _make_generator(cfg)
-        assert gen._account_line() == ""
+        assert sbatch_lines(gen.config)["account_line"] == ""
 
     def test_account_line_bridges2_preset_omitted(self):
         cfg = SlurmConfig.from_preset("bridges2")
         gen = _make_generator(cfg)
-        assert gen._account_line() == ""
+        assert sbatch_lines(gen.config)["account_line"] == ""
 
     def test_account_line_bridges2_with_user_account(self):
         """User-supplied account via --account flag appears in directive."""
         cfg = SlurmConfig.from_preset("bridges2")
         cfg.account = "chm250017p"
         gen = _make_generator(cfg)
-        assert gen._account_line() == "#SBATCH --account=chm250017p"
+        assert sbatch_lines(gen.config)["account_line"] == "#SBATCH --account=chm250017p"
 
     # --- Mail line ---
 
     def test_mail_line_present_when_email_set(self):
         cfg = SlurmConfig(email="user@pitt.edu")
         gen = _make_generator(cfg)
-        line = gen._mail_line()
+        line = sbatch_lines(gen.config)["mail_line"]
         assert "#SBATCH --mail-type=FAIL" in line
         assert "#SBATCH --mail-user=user@pitt.edu" in line
 
@@ -320,31 +321,34 @@ class TestConditionalDirectives:
         """Both --mail-type and --mail-user omitted when email is empty."""
         cfg = SlurmConfig(email="")
         gen = _make_generator(cfg)
-        assert gen._mail_line() == ""
+        assert sbatch_lines(gen.config)["mail_line"] == ""
 
     # --- Exclude line ---
 
     def test_exclude_line_present(self):
         cfg = SlurmConfig.from_preset("blanca-shirts")
         gen = _make_generator(cfg)
-        assert gen._exclude_line() == "#SBATCH --exclude=bgpu-bortz1,bgpu-g4-u20,bgpu-g4-u24"
+        assert (
+            sbatch_lines(gen.config)["exclude_line"]
+            == "#SBATCH --exclude=bgpu-bortz1,bgpu-g4-u20,bgpu-g4-u24"
+        )
 
     def test_exclude_line_absent(self):
         cfg = SlurmConfig.from_preset("aa100")
         gen = _make_generator(cfg)
-        assert gen._exclude_line() == ""
+        assert sbatch_lines(gen.config)["exclude_line"] == ""
 
     def test_nodelist_line_present(self):
         """Configured nodelist should render as SBATCH directive."""
         cfg = SlurmConfig(nodelist="node123")
         gen = _make_generator(cfg)
-        assert gen._nodelist_line() == "#SBATCH --nodelist=node123"
+        assert sbatch_lines(gen.config)["nodelist_line"] == "#SBATCH --nodelist=node123"
 
     def test_nodelist_line_absent(self):
         """nodelist SBATCH line should be omitted when unset."""
         cfg = SlurmConfig(nodelist=None)
         gen = _make_generator(cfg)
-        assert gen._nodelist_line() == ""
+        assert sbatch_lines(gen.config)["nodelist_line"] == ""
 
 
 class TestConstraintDirective:
@@ -354,31 +358,31 @@ class TestConstraintDirective:
         """When constraint is None, no --constraint line appears."""
         cfg = SlurmConfig(constraint=None)
         gen = _make_generator(cfg)
-        assert gen._constraint_line() == ""
+        assert sbatch_lines(gen.config)["constraint_line"] == ""
 
     def test_constraint_single_value(self):
         """A single constraint value renders correctly."""
         cfg = SlurmConfig(constraint="A40")
         gen = _make_generator(cfg)
-        assert gen._constraint_line() == "#SBATCH --constraint=A40"
+        assert sbatch_lines(gen.config)["constraint_line"] == "#SBATCH --constraint=A40"
 
     def test_constraint_or_expression(self):
         """SLURM OR expressions (pipe) are accepted."""
         cfg = SlurmConfig(constraint="A40|A100")
         gen = _make_generator(cfg)
-        assert gen._constraint_line() == "#SBATCH --constraint=A40|A100"
+        assert sbatch_lines(gen.config)["constraint_line"] == "#SBATCH --constraint=A40|A100"
 
     def test_constraint_and_expression(self):
         """SLURM AND expressions (ampersand) are accepted."""
         cfg = SlurmConfig(constraint="avx2&rh8")
         gen = _make_generator(cfg)
-        assert gen._constraint_line() == "#SBATCH --constraint=avx2&rh8"
+        assert sbatch_lines(gen.config)["constraint_line"] == "#SBATCH --constraint=avx2&rh8"
 
     def test_constraint_complex_expression(self):
         """Mixed constraint expressions are accepted."""
         cfg = SlurmConfig(constraint="A40|A100|H100")
         gen = _make_generator(cfg)
-        assert gen._constraint_line() == "#SBATCH --constraint=A40|A100|H100"
+        assert sbatch_lines(gen.config)["constraint_line"] == "#SBATCH --constraint=A40|A100|H100"
 
 
 # ---------------------------------------------------------------------------
@@ -1169,3 +1173,38 @@ class TestGpuTypeValidation:
 
         with pytest.raises(ValueError, match="unsafe characters"):
             _validate_gpu_type_value("$HOME")
+
+
+def test_openmm_and_gromacs_scripts_request_the_same_resources(monkeypatch):
+    """Both engines write every resource line of the config; GROMACS also mails at the end."""
+    from polyzymd.engines.gromacs.slurm import GromacsSlurmScriptGenerator
+
+    manifest = lambda: "/projects/user/polyzymd/pixi.toml"  # noqa: E731
+    monkeypatch.setattr(slurm_module, "_discover_manifest_path", manifest)
+    monkeypatch.setattr("polyzymd.engines.gromacs.slurm._discover_manifest_path", manifest)
+    cfg = SlurmConfig.from_preset("blanca-shirts", email="me@example.org")
+    cfg.constraint = "A40|A100"
+    cfg.nodelist = "node1"
+    cfg.cpus_per_task = 4
+
+    openmm = _make_generator(cfg).generate_job_script("/c.yaml", 1, "/run_1").splitlines()
+    gromacs = (
+        GromacsSlurmScriptGenerator(cfg)
+        .generate_job_script("/c.yaml", 1, "/run_1", "LipA", ["eq_01_nvt.mdp"])
+        .splitlines()
+    )
+    resources = [
+        "#SBATCH --qos=preemptable",
+        "#SBATCH --nodes=1",
+        "#SBATCH --ntasks=1",
+        "#SBATCH --cpus-per-task=4",
+        "#SBATCH --gres=gpu:1",
+        "#SBATCH --mail-user=me@example.org",
+        "#SBATCH --account=blanca-shirts",
+        "#SBATCH --nodelist=node1",
+        "#SBATCH --constraint=A40|A100",
+    ]
+
+    assert set(resources) <= set(openmm) and set(resources) <= set(gromacs)
+    assert "#SBATCH --mail-type=FAIL" in openmm
+    assert "#SBATCH --mail-type=FAIL,END" in gromacs

@@ -119,20 +119,6 @@ class EnzymeBuilder:
         LOGGER.info(f"Building enzyme: {config.name}")
         return self.build(config.pdb_path, config.custom_substructures_path)
 
-    def get_molecule(self) -> "Topology":
-        """Get the first (and typically only) molecule from the topology.
-
-        Returns:
-            The enzyme molecule.
-
-        Raises:
-            RuntimeError: If no topology has been loaded.
-        """
-        if self._topology is None:
-            raise RuntimeError("No enzyme topology loaded. Call build() first.")
-
-        return self._topology.molecule(0)
-
     def validate(self) -> bool:
         """Validate the loaded enzyme topology.
 

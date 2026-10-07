@@ -265,38 +265,6 @@ def _warn_for_submission_pixi_env(
     )
 
 
-def _generate_system_prefix(sim_config: object) -> str:
-    """Generate a system filename prefix from simulation config.
-
-    Replicates ``GromacsExporter._generate_prefix`` so CLI checks use the
-    same naming convention as build and submit workflows.
-
-    Parameters
-    ----------
-    sim_config : object
-        Simulation configuration object.
-
-    Returns
-    -------
-    str
-        System prefix (e.g. ``"CALB_SBMA-EGMA"``).
-    """
-    parts: list[str] = []
-
-    enzyme = getattr(sim_config, "enzyme", None)
-    enzyme_name = getattr(enzyme, "name", None)
-    if isinstance(enzyme_name, str) and enzyme_name:
-        parts.append(enzyme_name)
-
-    polymers = getattr(sim_config, "polymers", None)
-    polymers_enabled = getattr(polymers, "enabled", False)
-    polymer_prefix = getattr(polymers, "type_prefix", None)
-    if isinstance(polymers_enabled, bool) and polymers_enabled and isinstance(polymer_prefix, str):
-        parts.append(polymer_prefix)
-
-    return "_".join(parts) if parts else "system"
-
-
 def _emit_reference_warnings(sim_config: object, *, phase: str = "cli") -> bool:
     """Print missing referenced-file warnings for a loaded config.
 
@@ -400,11 +368,10 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     "--format",
     "export_format",
     default=None,
-    type=click.Choice(["gromacs", "lammps", "amber"], case_sensitive=False),
+    type=click.Choice(["gromacs"], case_sensitive=False),
     help=(
-        "Build-only export format: gromacs, lammps (planned), amber (planned). "
-        "Default: the config's engine (GROMACS inputs for engine: gromacs, "
-        "OpenMM build artifacts otherwise)."
+        "Build-only export format: gromacs. Default: the config's engine (GROMACS "
+        "inputs for engine: gromacs, OpenMM build artifacts otherwise)."
     ),
 )
 def build(
@@ -425,7 +392,7 @@ def build(
     ``--format gromacs`` to export core GROMACS handoff files (``.gro``,
     ``.top``, ``.itp``). MDP files and a run script may also be generated as
     convenience defaults, but they are not required to continue outside
-    PolyzyMD. AMBER and LAMMPS export are not yet supported.
+    PolyzyMD.
 
     Use ``run --engine gromacs`` if you want PolyzyMD to build and then
     execute the full local GROMACS workflow. Use ``run --engine openmm`` for
@@ -621,11 +588,6 @@ def build(
                     colored_echo(
                         "    - Optional run_*_gromacs.sh (convenience script)", phase="build"
                     )
-                elif export_format in ("lammps", "amber"):
-                    colored_echo(
-                        f"    ({export_format.upper()} export is not yet supported)",
-                        phase="build",
-                    )
             else:
                 colored_echo("Files to Generate (OpenMM):", phase="build")
                 colored_echo("  Per replicate:", phase="build")
@@ -647,12 +609,7 @@ def build(
             has_reference_warnings = _emit_reference_warnings(sim_config, phase="build")
 
             colored_echo("=" * 60, phase="build")
-            if export_format in ("lammps", "amber"):
-                colored_echo(
-                    f"Validation passed. {export_format.upper()} export is not yet implemented.",
-                    phase="build",
-                )
-            elif has_reference_warnings:
+            if has_reference_warnings:
                 colored_echo(
                     "Validation passed with referenced-file warnings. Ready to build after fixing references.",
                     phase="build",
@@ -3697,7 +3654,9 @@ def recover(
         if nodelist:
             slurm_config.nodelist = nodelist
 
-        prefix = _generate_system_prefix(sim_config)
+        from polyzymd.analyses.shared.gromacs import system_prefix
+
+        prefix = system_prefix(sim_config)
         gromacs_inputs_exist = all(
             (working_dir / f).exists()
             for f in [f"{prefix}.top", f"{prefix}.gro", "em.mdp", "prod.mdp"]

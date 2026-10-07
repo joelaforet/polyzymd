@@ -481,6 +481,7 @@ def _matches_manifest(root: Path, label: str, folder: Path, verify: bool = False
     """
     import json
 
+    from polyzymd.analyses.shared.file_hashes import file_sha256
     from polyzymd.analyses.study_freeze import MANIFEST
 
     try:
@@ -491,19 +492,9 @@ def _matches_manifest(root: Path, label: str, folder: Path, verify: bool = False
     return bool(files) and all(
         (folder / item["path"]).is_file()
         and (folder / item["path"]).stat().st_size == item["size"]
-        and (not verify or _sha256(folder / item["path"]) == item["sha256"])
+        and (not verify or file_sha256(folder / item["path"], use_cache=False) == item["sha256"])
         for item in files
     )
-
-
-def _sha256(path: Path) -> str:
-    import hashlib
-
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1 << 22), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _echo_metadata(metadata: dict, owner: str) -> bool:
@@ -569,9 +560,9 @@ def _study_logging(path: Path, command: str) -> None:
 
 def _check_against_manifest(root: Path, label: str, folder: Path, verify: bool) -> list[str]:
     """Compare located run files with the sizes (and with ``verify``, SHA-256) in manifest.json."""
-    import hashlib
     import json
 
+    from polyzymd.analyses.shared.file_hashes import file_sha256
     from polyzymd.analyses.study_freeze import MANIFEST
 
     try:
@@ -592,7 +583,7 @@ def _check_against_manifest(root: Path, label: str, folder: Path, verify: bool) 
                 problems.append(f"replicate {index}: {item['path']} has another size")
                 continue
             if verify:
-                if _sha256(path) != item["sha256"]:
+                if file_sha256(path, use_cache=False) != item["sha256"]:
                     problems.append(f"replicate {index}: {item['path']} has another SHA-256")
                     continue
             checked += 1

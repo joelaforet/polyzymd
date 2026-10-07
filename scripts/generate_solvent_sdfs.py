@@ -5,11 +5,8 @@ This script generates SDF files with embedded AM1BCC partial charges for
 all solvents in the cosolvent library. These files are shipped with the
 package to provide instant loading of common solvents.
 
-Usage:
-    python -m polyzymd.data.solvents._generator
-
-    Or from the package root:
-    python src/polyzymd/data/solvents/_generator.py
+Usage, from the repository root:
+    python scripts/generate_solvent_sdfs.py
 
 The script will:
 1. Generate 3D conformers for each solvent
@@ -27,6 +24,9 @@ import logging
 import sys
 from pathlib import Path
 
+# The SDF files live in the package's data/solvents folder.
+SOLVENTS_DIR = Path(__file__).resolve().parents[1] / "src" / "polyzymd" / "data" / "solvents"
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -42,8 +42,7 @@ def generate_all_solvents() -> None:
 
     from polyzymd.data.cosolvent_library import COSOLVENT_LIBRARY
 
-    # Output directory (same as this script's directory)
-    output_dir = Path(__file__).parent
+    output_dir = SOLVENTS_DIR
     LOGGER.info(f"Output directory: {output_dir}")
 
     # Track results
@@ -179,7 +178,7 @@ def verify_sdf_files() -> None:
     """Verify that generated SDF files can be loaded correctly."""
     from openff.toolkit import Molecule
 
-    solvents_dir = Path(__file__).parent
+    solvents_dir = SOLVENTS_DIR
 
     LOGGER.info("Verifying generated SDF files...")
 

@@ -267,3 +267,46 @@ def test_cohens_d_zero_variance_equal_means() -> None:
 
     result = cohens_d([5.0, 5.0], [5.0, 5.0])
     assert result.cohens_d == 0.0
+
+
+def test_bh_matches_the_step_up_definition_with_ties_and_missing_values() -> None:
+    """q_i = min over p_j >= p_i of p_j m / rank_j, capped at 1; None and NaN pass through."""
+    import numpy as np
+
+    rng = np.random.default_rng(7)
+    for _ in range(200):
+        size = int(rng.integers(1, 15))
+        values = np.round(rng.uniform(0, 1, size) ** 2, 2).tolist()  # rounding makes ties
+        for index in rng.choice(size, int(rng.integers(0, 3)), replace=True):
+            values[index] = None if rng.random() < 0.5 else math.nan
+        present = sorted(p for p in values if p is not None and not math.isnan(p))
+        m = len(present)
+
+        results = benjamini_hochberg(values)
+
+        for p, result in zip(values, results, strict=True):
+            if p is None or math.isnan(p):
+                assert result.adjusted_p_value is None and result.rank is None
+                continue
+            expected = min(min(1.0, q * m / (rank + 1)) for rank, q in enumerate(present) if q >= p)
+            assert result.adjusted_p_value == pytest.approx(expected, rel=1e-12, abs=0)
+            assert result.significant == (result.adjusted_p_value <= 0.05)
+        ranks = sorted(r.rank for r in results if r.rank is not None)
+        assert ranks == list(range(1, m + 1))
+
+
+def test_bh_ranks_ties_in_input_order() -> None:
+    """Equal p-values take consecutive ranks in the order they were given."""
+    results = benjamini_hochberg([0.2, 0.01, 0.2, None, 0.01])
+    assert [r.rank for r in results] == [3, 1, 4, None, 2]
+    assert [r.adjusted_p_value for r in results] == pytest.approx([0.2, 0.02, 0.2, None, 0.02])
+
+
+def test_bh_accepts_p_values_a_rounding_error_outside_zero_to_one() -> None:
+    """P-values one rounding error above 1 or below 0 are adjusted as 1 and 0."""
+    results = benjamini_hochberg([1.0000000000000002, -1e-17, None, 0.02], alpha=0.05)
+
+    assert results[0].adjusted_p_value == pytest.approx(1.0)
+    assert results[1].adjusted_p_value == pytest.approx(0.0)
+    assert results[2].adjusted_p_value is None
+    assert results[3].adjusted_p_value == pytest.approx(0.03)

@@ -128,3 +128,23 @@ def test_an_unreadable_build_pdb_gives_no_chain_ids(tmp_path: Path) -> None:
     universe = mda.Universe.empty(1)
     metadata = apply_build_chain_ids(universe, tmp_path / "missing.pdb")
     assert not metadata["applied"] and metadata["reason"]
+
+
+def test_gromacs_file_prefix_of_the_shipped_configs() -> None:
+    """The run files are named after the enzyme, then the polymer type when polymers are on."""
+    import yaml
+
+    from polyzymd.analyses.shared.gromacs import system_prefix
+    from polyzymd.config.schema import SimulationConfig
+
+    root = Path(__file__).parents[3]
+    quickstart = root / "examples" / "quickstart" / "config_gromacs.yaml"
+    polymer = root / "src" / "polyzymd" / "templates" / "examples" / "enzyme_polymer.yaml"
+    sds = yaml.safe_load(quickstart.read_text())
+    sds["solvent"]["co_solvents"] = [
+        {"name": "sds", "smiles": "CCCCCCCCCCCCOS(=O)(=O)[O-]", "count": 8}
+    ]
+
+    assert system_prefix(SimulationConfig.from_yaml(quickstart)) == "trpcage"
+    assert system_prefix(SimulationConfig.from_yaml(polymer)) == "LipA_SBMA-EGPMA"
+    assert system_prefix(SimulationConfig(**sds)) == "trpcage"

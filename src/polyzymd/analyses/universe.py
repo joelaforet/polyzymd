@@ -62,12 +62,6 @@ class _TrajectoryLoaderLike(Protocol):
 
 LoaderFactory = Callable[..., _TrajectoryLoaderLike]
 
-GRO_CHAIN_ID_WARNING_TEMPLATE = (
-    "Using GRO topology {path} — GRO files may not preserve chain identifiers. "
-    "Chain-based selections (chainid A/B/C) in analysis selections may be unreliable. "
-    "Prefer a PDB topology when available."
-)
-
 
 def trajectory_variant(paths: "Sequence[Path]") -> str | None:
     """Name which GROMACS trajectory variant the engine picked, if any.
@@ -456,10 +450,6 @@ class UniverseProvider:
         topology_format = self._metadata_format(info, "topology_format", info.topology_file)
         trajectory_format = self._metadata_format(info, "trajectory_format", None)
         warnings = list(getattr(info, "warnings", []))
-        gro_warning = self._gro_chain_id_warning(info, topology_format)
-        if gro_warning is not None:
-            if gro_warning not in warnings:
-                warnings.append(gro_warning)
         # The join is found when the universe is loaded, so a refresh keeps it.
         get_join = getattr(loader, "segment_join", None)
         join = get_join(info.replicate) if callable(get_join) else None
@@ -525,27 +515,3 @@ class UniverseProvider:
             if suffix:
                 return suffix
         return None
-
-    def _gro_chain_id_warning(
-        self, info: TrajectoryInfo, topology_format: str | None
-    ) -> str | None:
-        """Return an actionable GRO chain-ID warning when applicable.
-
-        Parameters
-        ----------
-        info : TrajectoryInfo
-            Resolved trajectory metadata.
-        topology_format : str or None
-            Resolved topology format.
-
-        Returns
-        -------
-        str or None
-            Warning text for GRO topology inputs, otherwise ``None``.
-        """
-        topology_path = Path(info.topology_file)
-        suffix_is_gro = topology_path.suffix.lower() == ".gro"
-        format_is_gro = topology_format == "gro"
-        if not suffix_is_gro and not format_is_gro:
-            return None
-        return GRO_CHAIN_ID_WARNING_TEMPLATE.format(path=topology_path)

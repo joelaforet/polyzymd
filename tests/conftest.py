@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 
@@ -12,6 +14,20 @@ def _isolated_hash_cache(tmp_path_factory: pytest.TempPathFactory) -> None:
     mp.setenv("POLYZYMD_CACHE_DIR", str(tmp_path_factory.mktemp("polyzymd_cache")))
     yield
     mp.undo()
+
+
+@pytest.fixture(autouse=True)
+def _restore_root_logging() -> None:
+    """Give back the root logger's handlers and level after each test.
+
+    The ``polyzymd`` command replaces the root handlers, which removes the
+    file handler pytest keeps for the whole session. Without it, a later
+    ``polyzymd analyze`` writes a log file into the current folder.
+    """
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    yield
+    root.handlers, root.level = handlers, level
 
 
 @pytest.fixture()

@@ -368,6 +368,18 @@ class TestValidateCommandReferenceWarnings:
         assert "Co-solvents: dmso" in result.output
 
 
+@pytest.mark.parametrize("export_format", ["lammps", "amber"])
+def test_build_refuses_unimplemented_export_formats(tmp_path: Path, export_format: str) -> None:
+    """Only implemented export formats are offered by build --format."""
+    config = tmp_path / "config.yaml"
+    config.write_text("{}\n")
+
+    result = CliRunner().invoke(cli, ["build", "-c", str(config), "--format", export_format])
+
+    assert result.exit_code == 2
+    assert "Invalid value for '--format'" in result.output
+
+
 class TestBuildCommandReplicateFlags:
     """Test that the build command accepts the new flags via Click invocation."""
 
