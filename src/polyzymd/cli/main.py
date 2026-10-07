@@ -400,11 +400,8 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     "--format",
     "export_format",
     default=None,
-    type=click.Choice(["gromacs", "lammps", "amber"], case_sensitive=False),
-    help=(
-        "Build-only export format: gromacs, lammps (planned), amber (planned). "
-        "Default: OpenMM build artifacts."
-    ),
+    type=click.Choice(["gromacs"], case_sensitive=False),
+    help="Build-only export format: gromacs. Default: OpenMM build artifacts.",
 )
 def build(
     config: str,
@@ -424,7 +421,7 @@ def build(
     ``--format gromacs`` to export core GROMACS handoff files (``.gro``,
     ``.top``, ``.itp``). MDP files and a run script may also be generated as
     convenience defaults, but they are not required to continue outside
-    PolyzyMD. AMBER and LAMMPS export are not yet supported.
+    PolyzyMD.
 
     Use ``run --engine gromacs`` if you want PolyzyMD to build and then
     execute the full local GROMACS workflow. Use ``run --engine openmm`` for
@@ -620,11 +617,6 @@ def build(
                     colored_echo(
                         "    - Optional run_*_gromacs.sh (convenience script)", phase="build"
                     )
-                elif export_format in ("lammps", "amber"):
-                    colored_echo(
-                        f"    ({export_format.upper()} export is not yet supported)",
-                        phase="build",
-                    )
             else:
                 colored_echo("Files to Generate (OpenMM):", phase="build")
                 colored_echo("  Per replicate:", phase="build")
@@ -646,12 +638,7 @@ def build(
             has_reference_warnings = _emit_reference_warnings(sim_config, phase="build")
 
             colored_echo("=" * 60, phase="build")
-            if export_format in ("lammps", "amber"):
-                colored_echo(
-                    f"Validation passed. {export_format.upper()} export is not yet implemented.",
-                    phase="build",
-                )
-            elif has_reference_warnings:
+            if has_reference_warnings:
                 colored_echo(
                     "Validation passed with referenced-file warnings. Ready to build after fixing references.",
                     phase="build",

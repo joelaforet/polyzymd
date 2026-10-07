@@ -120,7 +120,7 @@ polyzymd build -c <path> --format gromacs    # Export for GROMACS
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--dry-run` | - | No | false | Validate only, don't build |
-| `--format` | - | No | OpenMM | Export format (`gromacs`, `lammps` (planned), or `amber` (planned)) |
+| `--format` | - | No | OpenMM | Export format (`gromacs`) |
 
 ### Example
 
