@@ -384,6 +384,24 @@ class TestReproduce:
         assert located.exit_code == 2
         assert "has another SHA-256" in located.output
 
+    def test_locate_verify_reads_a_file_replaced_with_the_same_size_and_time(
+        self, study: Path, tmp_path: Path
+    ) -> None:
+        import os
+
+        result = freeze(study)
+        copy = shutil.copytree(result.deposit / "study", tmp_path / "reproducer" / "my_study")
+        download = shutil.copytree(tmp_path / "scratch", tmp_path / "download")
+        command = ["study", "locate", str(download), "--study", str(copy), "--verify"]
+        assert CliRunner().invoke(cli, command).exit_code == 0
+        dcd = next(download.rglob("*.dcd"))
+        stat = dcd.stat()
+        dcd.write_bytes(dcd.read_bytes()[:-8] + b"\0" * 8)
+        os.utime(dcd, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        located = CliRunner().invoke(cli, command)
+        assert located.exit_code == 2
+        assert "has another SHA-256" in located.output
+
     def test_check_reports_metadata_gaps_and_the_next_step(self, study: Path) -> None:
         result = CliRunner().invoke(cli, ["study", "check", str(study)])
         assert "metadata (study.yaml): 2 gaps" in result.output
@@ -846,6 +864,21 @@ def test_a_study_whose_gitignore_lacks_runs_freezes_with_a_run_in_it(study: Path
     assert freeze(study).tag == "study-v1"
     assert "runs/" in gitignore.read_text().splitlines()
     assert "runs/water/w_run1/traj.dcd" not in _git(study, "ls-tree", "-r", "--name-only", "HEAD")
+
+
+def test_freeze_ignores_the_polymer_cache_of_a_build(study: Path) -> None:
+    """A dynamic polymer build writes .polymer_cache/ into the folder it runs in."""
+    gitignore = study / ".gitignore"
+    gitignore.write_text(
+        "".join(line for line in gitignore.read_text().splitlines(True) if "polymer" not in line)
+    )
+    _git(study, "commit", "-qam", "Old .gitignore")
+    (study / ".polymer_cache").mkdir()
+    (study / ".polymer_cache" / "chain.sdf").write_text("x")
+
+    assert freeze(study).tag == "study-v1"
+    assert ".polymer_cache/" in gitignore.read_text().splitlines()
+    assert ".polymer_cache/chain.sdf" not in _git(study, "ls-tree", "-r", "--name-only", "HEAD")
 
 
 def test_the_deposited_copied_config_names_no_runs_path() -> None:

@@ -1,6 +1,6 @@
 # Run OpenMM on Other Hardware
 
-PolyzyMD does not require a Blanca cluster. The molecular build files and the
+PolyzyMD does not require a particular cluster. The molecular build files and the
 OpenMM simulation code are portable. The automatic SLURM routing in version
 1.3 has a smaller scope: it supports NVIDIA GPUs whose drivers can use one of
 the checked-in CUDA 12.0, 12.4, or 12.6 environments.
@@ -27,7 +27,7 @@ driver probe and the explicit CUDA Context preflight.
 | Hardware and launch path | Status in version 1.3 |
 |--------------------------|-----------------------|
 | NVIDIA GPU with `polyzymd submit` | Supported when the driver is compatible with a checked-in CUDA environment |
-| NVIDIA GPU on a non-Blanca SLURM cluster | Supported with a suitable preset or CLI resource overrides |
+| NVIDIA GPU on a SLURM cluster without a preset | Supported with a suitable preset or CLI resource overrides |
 | Bridges-2 NVIDIA GPU | The scheduler preset is included; test the selected GPU type and current driver before a campaign |
 | CPU with `polyzymd run` | Supported when `openmm.platform` is `CPU` |
 | AMD GPU with `polyzymd run` | Possible through OpenMM `OpenCL` when the site supplies a working OpenCL runtime; not tested by PolyzyMD CI |
@@ -40,7 +40,7 @@ GPU job from running slowly on CPU without the user's knowledge.
 
 This OpenMM rule does not apply to the GROMACS backend. GROMACS uses its own
 site module or container and its own self-restarting SLURM template. See
-{doc}`gromacs_export` for portable CPU and GPU recipes.
+{doc}`run_gromacs` for portable CPU and GPU recipes.
 
 ## Use another NVIDIA SLURM cluster
 
@@ -161,30 +161,8 @@ a stated tolerance, before a full campaign.
 
 ## Add a supported hardware environment
 
-Use this checklist when a site has a new NVIDIA driver or GPU cohort:
-
-1. Record the node, GPU model, driver, maximum CUDA version, and compute
-   capability from an allocated node.
-2. Add a named rich platform to the `workspace.platforms` list in `pixi.toml`.
-3. Add or update a simulation feature, environment, and solve group in
-   `pixi.toml`. Keep the OpenMM version fixed for an active campaign.
-4. Regenerate `pixi.lock` with Pixi 0.72.2 or newer. Install the environment on
-   an allocated node.
-5. Add the validated driver threshold and environment name in the OpenMM
-   Slurm template, `src/polyzymd/workflow/templates/openmm_self_resubmitting.sh.jinja`.
-6. Add script tests in `tests/workflow/test_slurm.py`.
-7. Create an explicit CUDA Context on each hardware cohort. Then run a short,
-   benchmark without CPU fallback.
-8. Compare particle identity and energy behavior with an existing supported
-   environment. Record the test tolerance and result.
-9. Add the verified hardware to this guide. Do not infer support from a node
-   name or a CUDA toolkit module.
-
-To add a reusable scheduler preset, edit `SlurmConfig.from_preset()` and
-`PRESET_DEFAULT_PIXI_ENV` in `src/polyzymd/workflow/slurm.py`. Assign the
-validated environment as the preset default. Add its CLI choice and tests. Use
-CLI overrides when the difference is only an account, partition, QoS,
-constraint, or node selection.
+To add a new NVIDIA driver or GPU cohort to PolyzyMD, follow the checklist in
+{ref}`add-hardware-environment` of the contributor guide.
 
 ## Respond to a driver update
 

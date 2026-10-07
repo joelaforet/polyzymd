@@ -1801,51 +1801,6 @@ class TrajectoryLoader:
         for rep in replicates:
             yield rep, self.load_universe(rep)
 
-    def get_frame_times(
-        self,
-        replicate: int,
-        unit: str = "ns",
-    ) -> NDArray[np.float64]:
-        """Get time values for each frame.
-
-        Parameters
-        ----------
-        replicate : int
-            Replicate number
-        unit : str, optional
-            Time unit for output. Options: "ps", "ns". Default is "ns".
-
-        Returns
-        -------
-        NDArray[np.float64]
-            Array of time values for each frame
-        """
-        u = self.load_universe(replicate)
-        trajectory = u.trajectory
-
-        previous_frame = _trajectory_frame_index(trajectory)
-        try:
-            times_ps = []
-            for frame_index in range(len(trajectory)):
-                trajectory[frame_index]
-                time_ps = _trajectory_time(trajectory)
-                if time_ps is None:
-                    raise ValueError(
-                        "Trajectory timestamps are unavailable for frame-time extraction"
-                    )
-                times_ps.append(time_ps)
-        finally:
-            _restore_trajectory_frame(trajectory, previous_frame)
-        times = np.array(times_ps, dtype=np.float64)
-
-        # Convert units (MDAnalysis uses ps internally)
-        if unit == "ns":
-            times = times / 1000.0
-        elif unit != "ps":
-            raise ValueError(f"Unknown time unit: {unit}. Use 'ps' or 'ns'.")
-
-        return times
-
     def get_timestep(self, replicate: int, unit: str = "ps") -> float:
         """Get the trajectory timestep (time between frames).
 
@@ -2199,34 +2154,3 @@ def convert_time(value: float, from_unit: str, to_unit: str) -> float:
 
     ps_value = value * to_ps[from_unit]
     return ps_value * from_ps[to_unit]
-
-
-def time_to_frame(
-    time: float,
-    time_unit: str,
-    timestep: float,
-    timestep_unit: str = "ps",
-) -> int:
-    """Convert time to frame index.
-
-    Parameters
-    ----------
-    time : float
-        Time value
-    time_unit : str
-        Unit of time value
-    timestep : float
-        Time between frames
-    timestep_unit : str
-        Unit of timestep (default: "ps")
-
-    Returns
-    -------
-    int
-        Frame index (0-indexed)
-    """
-    # Convert both to same units
-    time_ps = convert_time(time, time_unit, "ps")
-    dt_ps = convert_time(timestep, timestep_unit, "ps")
-
-    return int(time_ps / dt_ps)

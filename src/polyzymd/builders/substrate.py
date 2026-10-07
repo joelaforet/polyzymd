@@ -194,19 +194,6 @@ class SubstrateBuilder:
 
         LOGGER.debug(f"Set residue name to '{residue_name}' for all atoms")
 
-    def get_n_conformers(self) -> int:
-        """Get the number of conformers available in the loaded SDF.
-
-        Returns:
-            Number of conformers.
-
-        Raises:
-            RuntimeError: If no SDF has been loaded.
-        """
-        if self._all_conformers is None:
-            raise RuntimeError("No SDF file loaded. Call build() first.")
-        return len(self._all_conformers)
-
     def validate(self) -> bool:
         """Validate the loaded substrate molecule.
 

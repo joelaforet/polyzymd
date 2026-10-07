@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 from polyzymd.analyses.exceptions import ProtocolError
+from polyzymd.analyses.shared.file_hashes import file_sha256
 
 LOGGER = logging.getLogger(__name__)
 
@@ -326,7 +327,7 @@ def _file_record(path: str | Path) -> dict[str, str]:
     the record.
     """
     path = Path(path).expanduser().resolve()
-    return {"name": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    return {"name": path.name, "sha256": file_sha256(path)}
 
 
 def _argument_record(value: Any) -> Any:

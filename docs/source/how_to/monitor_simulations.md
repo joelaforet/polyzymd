@@ -11,8 +11,8 @@ also shows how to hand that command to an AI coding agent as a reusable skill.
   replicate has a `progress.json` in scratch and SLURM logs in
   `<projects_dir>/slurm_logs/`.
 - A shell on the cluster login node with `squeue` available. On clusters with
-  several schedulers, load the one your jobs run under first (on CU Boulder
-  Blanca this is `ml slurm/blanca`).
+  several schedulers, load the one your jobs run under first (for CU Boulder,
+  see {doc}`site_cu_boulder`).
 - A PolyzyMD pixi environment that has the CLI, for example `build` or
   `analysis`.
 
@@ -117,9 +117,9 @@ description: Answer "check the status of the running simulations", "did anything
 When the user asks about simulation progress, completion, deaths, restarts,
 or ETA, run this first and answer from its output:
 
-    ml slurm/blanca
+    ml slurm/<cluster>
     cd /projects/$USER/sims
-    pixi run -e build polyzymd status --format agent --preset blanca-shirts \
+    pixi run -e build polyzymd status --format agent --preset <preset> \
         --all CALB --all RML
 
 Read the verdict column. COMPLETED and RUNNING/QUEUED need no action.

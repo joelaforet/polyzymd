@@ -8,7 +8,7 @@ PolyzyMD, understand the codebase, or add new capabilities.
 - [Set Up a Contributor Environment](setup.md)
 - [Contributing to PolyzyMD](contributing.md)
 - [Packaging and Distribution Notes](packaging.md)
-- [Architecture](../explanation/architecture.md)
+- [Architecture](architecture.md)
 
 ## Add an analysis
 
@@ -35,5 +35,6 @@ config -> builders -> simulation -> workflow -> analyses. -->
 Contributing to PolyzyMD <contributing>
 Set Up a Contributor Environment <setup>
 Packaging and Distribution Notes <packaging>
+Architecture <architecture>
 Add an Analysis <adding_an_analysis>
 ```

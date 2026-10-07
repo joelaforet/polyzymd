@@ -272,7 +272,7 @@ polyzymd study locate ~/Downloads/zenodo_1234567 --study lipase_363K --verify
 ```
 
 ```
-No polymer: runs [1, 2, 3, 4, 5] under /home/me/Downloads/zenodo_1234567/no_polymer
+No polymer: replicates [1, 2, 3, 4, 5] under /home/me/Downloads/zenodo_1234567/no_polymer
 No polymer: 10 files match manifest.json (SHA-256)
 ```
 

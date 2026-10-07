@@ -66,12 +66,16 @@ interface, so the existing ones (`radius_of_gyration`, `rmsf`,
 `hydrogen_bonds`, `residue_occlusion`, ...) are working examples. List it in
 {doc}`../reference/analysis_functions`.
 
-To make it a `polyzymd analyze NAME` analysis as well, add `NAME` with its
-settings and their defaults to `FUNCTION_ANALYSES` in
-`src/polyzymd/analyses/protocols.py`, and have `_analyze_function` (or an
-`_analyze_<name>` function it calls) run it through the study and return the
-`ProtocolReport`. `polyzymd analyze` refuses any name that is not in
-`FUNCTION_ANALYSES`, and `--submit` runs any name that is.
+To make it a `polyzymd analyze NAME` analysis as well, add one entry to
+`ANALYSES` in `src/polyzymd/analyses/protocols.py`: a `ShippedAnalysis` with
+a one-line summary, the settings and their defaults, and a
+`_measure_<name>(study, settings, request)` function. That function runs the
+measurement through the study and returns a `Measured`: the replicate values
+to report, the chosen result and every result, the settings to record and a
+function that draws the figures. `analyze` then summarises or compares the
+values, draws the figures and records the settings, the same way for every
+analysis. `polyzymd analyze --list` reads `ANALYSES`, `polyzymd analyze`
+refuses any name that is not in it, and `--submit` runs any name that is.
 
 ## Test it
 

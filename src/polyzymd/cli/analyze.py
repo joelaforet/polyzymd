@@ -61,7 +61,7 @@ def _settings(raw: tuple[str, ...]) -> dict[str, Any]:
                 f"Setting {key!r} is nested, and --set takes only top-level settings.",
                 hint=(
                     "Give the whole top-level setting as a YAML mapping, for example "
-                    "--set groups='{protein: chainid A, polymer: chainid C}'."
+                    "--set groups='{protein: null, ligand: null}'."
                 ),
             )
         settings[key] = parsed
@@ -148,10 +148,10 @@ def _analysis_lines(name: str) -> list[str]:
     """Return what the shipped analysis ``name`` measures, then each setting with its default."""
     import json
 
-    from polyzymd.analyses.protocols import ANALYSIS_SUMMARIES, FUNCTION_ANALYSES
+    from polyzymd.analyses.protocols import ANALYSES
 
-    return [f"{name}: {ANALYSIS_SUMMARIES.get(name, '')}"] + [
-        f"  {key}: {json.dumps(default)}" for key, default in FUNCTION_ANALYSES[name].items()
+    return [f"{name}: {ANALYSES[name].summary}"] + [
+        f"  {key}: {json.dumps(default)}" for key, default in ANALYSES[name].defaults.items()
     ]
 
 
@@ -159,10 +159,10 @@ class _AnalyzeCommand(click.Command):
     """``polyzymd analyze``, whose ``NAME --help`` also prints the settings of analysis NAME."""
 
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
-        from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+        from polyzymd.analyses.protocols import ANALYSES
 
         # --help runs before NAME is parsed, so take the name from the raw arguments.
-        ctx.meta["analysis_name"] = next((arg for arg in args if arg in FUNCTION_ANALYSES), None)
+        ctx.meta["analysis_name"] = next((arg for arg in args if arg in ANALYSES), None)
         return super().parse_args(ctx, args)
 
     def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
@@ -179,9 +179,9 @@ class _AnalyzeCommand(click.Command):
 
 def _list_analyses(ctx: click.Context) -> None:
     """Print every shipped analysis with what it measures and its settings, then exit."""
-    from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+    from polyzymd.analyses.protocols import ANALYSES
 
-    for name in FUNCTION_ANALYSES:
+    for name in ANALYSES:
         click.echo("\n".join(_analysis_lines(name)))
     click.echo(
         "Use a name as a study.yaml entry ({name: {setting: value}}) or with "
@@ -925,8 +925,7 @@ def _study_record(study_path: Path, run: str, settings: dict) -> dict:
     are applied over its ``settings:``, so the record holds what the function
     was called with. The path is relative to the study folder.
     """
-    import hashlib
-
+    from polyzymd.analyses.shared.file_hashes import file_sha256
     from polyzymd.analyses.study_file import (
         entry_record,
         find_study_file,
@@ -962,7 +961,7 @@ def _study_record(study_path: Path, run: str, settings: dict) -> dict:
     project_root = project.root if project is not None else None
     record = {
         "path": file.name,
-        "sha256": hashlib.sha256(file.read_bytes()).hexdigest(),
+        "sha256": file_sha256(file),
         "run": run,
         "settings": portable(settings, root, project_root),
         "selections": selections,
@@ -976,7 +975,7 @@ def _study_record(study_path: Path, run: str, settings: dict) -> dict:
         record["project"] = {
             "path": portable(str(project.path), root, project_root),
             "label": protocol.project_label,
-            "sha256": hashlib.sha256(project.path.read_bytes()).hexdigest(),
+            "sha256": file_sha256(project.path),
         }
     return record
 
@@ -1014,7 +1013,7 @@ def _from_study(
     import json
 
     from polyzymd.analyses.exceptions import ProtocolError
-    from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+    from polyzymd.analyses.protocols import ANALYSES
     from polyzymd.analyses.study_file import load_study_file
 
     if configs:
@@ -1054,7 +1053,7 @@ def _from_study(
                 )
     entry = protocol.analyses.get(run_name)
     if entry is None:
-        if run_name not in FUNCTION_ANALYSES:
+        if run_name not in ANALYSES:
             raise ProtocolError(
                 f"{protocol.path} lists no analysis run {run_name!r}, and PolyzyMD ships no "
                 "analysis of that name.",

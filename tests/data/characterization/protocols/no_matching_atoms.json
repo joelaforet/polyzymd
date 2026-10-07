@@ -1,0 +1,5 @@
+{
+ "error": "NoMatchingAtomsError",
+ "hint": "Choose selections that pick atoms, or leave one null for the atoms of its role: the protein in chain A, the ligand in chain B, the polymer in chain C.",
+ "message": "contacts: the selections protein_selection 'chainid A' match no atoms in any replicate."
+}

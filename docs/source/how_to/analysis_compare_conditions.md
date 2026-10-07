@@ -34,6 +34,25 @@ disk I/O. On a shared cluster, run it in a batch job or an interactive job,
 not on a login node. For a batch script, see {doc}`hpc_execution`.
 :::
 
+## Study or configs
+
+This guide gives the configs with `-c`. In a {term}`study`, give the study
+instead:
+
+```bash
+polyzymd analyze hydrogen_bonds --study my_study
+```
+
+The study names the conditions, the control, the replicates and the
+equilibration window. The results go to `<study>/results/<name>/`, and
+`polyzymd project freeze` can publish them. Use `--study` or `--project` for
+the results that you keep.
+
+Use `-c` for a quick look without a study: to check a simulation while it
+runs, to try a setting, or to compare configs that belong to no study. The
+results then go to the current folder, or to `--output-dir`. For a lesson
+with both, see {doc}`../tutorials/first_analysis`.
+
 ## Before you start
 
 Make sure that each condition has:
@@ -92,7 +111,7 @@ The command does these steps:
    `--replicates`, or without it, every replicate it finds.
 2. It discards the first 10 ns of each replicate.
 3. On each production frame, it counts the hydrogen bonds between the protein
-   (`chainid A`) and the polymer (`chainid C`). These are the default groups.
+   (chain A) and the polymer (chain C). These are the default groups.
 4. It prints the mean of each condition with its 95 % confidence interval.
 5. It compares each condition with the control by Welch's t test. It corrects
    the p values with the {term}`Benjamini-Hochberg` method.

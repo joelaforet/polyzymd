@@ -26,6 +26,8 @@ PROJECT_GITIGNORE = """\
 data.local.yaml
 # The runs of the conditions' configs, unless they set scratch_directory.
 runs/
+# Fragments and chains that dynamic polymer builds write into the folder they run in.
+.polymer_cache/
 # Python and notebook caches.
 __pycache__/
 *.pyc

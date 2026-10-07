@@ -18,6 +18,7 @@ For most changes, your loop is:
 
 - one clear purpose per branch or PR
 - changes that follow existing patterns instead of introducing a parallel style
+- terminal colors from the shared helpers in `polyzymd/cli/colors.py`, never ad hoc ANSI escape codes
 - docs and tests updated when behavior changes
 - commands verified in a `pixi` environment
 
@@ -66,7 +67,7 @@ Use:
 Run the generator from the repository root:
 
 ```bash
-pixi run -e build python src/polyzymd/data/solvents/_generator.py
+pixi run -e build python scripts/generate_solvent_sdfs.py
 ```
 
 This creates a charged SDF in `src/polyzymd/data/solvents/`.
@@ -123,7 +124,7 @@ Check that your change:
 ## Related pages
 
 - contributor environment: {doc}`../contributor_guide/setup`
-- architecture overview: {doc}`../explanation/architecture`
+- architecture overview: {doc}`architecture`
 - packaging notes: {doc}`packaging`
 
 <!-- IMAGE OPPORTUNITY: Add a contributor workflow figure showing `branch ->

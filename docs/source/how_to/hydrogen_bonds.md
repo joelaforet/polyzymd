@@ -28,36 +28,11 @@ Alternatively, prefix each command with `pixi run -e analysis`.
 
 ## What is measured
 
-MDAnalysis `HydrogenBondAnalysis` finds, on every frame, each hydrogen of a
-donor whose donor is within `d_a_cutoff` (3.5 Å) of an acceptor, using the
-minimum image of the box, with a donor-hydrogen-acceptor angle of at least
-`d_h_a_angle_cutoff` (150°). Bonds between two atoms of one residue are left
-out.
-
-Donors and acceptors are chosen from the covalent bonds, by element and
-valency:
-
-| Role | Atoms |
-|---|---|
-| Donor hydrogen | A hydrogen bonded to N, O or S; its donor is that atom |
-| Acceptor | Every O, and every N or S bonded to at most two atoms, so it keeps a lone pair |
-
-So backbone and side-chain N-H, Lys NZ, His N-H, Trp NE1 and hydroxyl groups
-donate, and carbonyl, carboxylate, hydroxyl, ether, ester and sulfonate
-oxygens, unprotonated histidine nitrogens and thioether sulfur accept. Amide,
-guanidinium, protonated amine and quaternary nitrogens, such as the ammonium
-nitrogen of sulfobetaine methacrylate, do not accept. The bonds and partial
-charges come from the run's force field, because a PDB or GRO topology lacks
-most or all bonds:
-
-| Engine | Bonds and charges read from |
-|---|---|
-| OpenMM | `<segment>_system.xml`, the OpenMM system saved beside each segment's trajectory |
-| GROMACS | `prod.tpr`; when MDAnalysis cannot read its version (GROMACS 2026 with MDAnalysis 2.10), the run's `<prefix>.top` and its `.itp` files |
-
-Either way, bonds to hydrogen that the run constrained, and the O-H bonds of
-rigid water, count as bonds. The atoms chosen are recorded in the report; see
-[What is recorded](#what-is-recorded).
+On every frame, the analysis counts the hydrogen bonds with MDAnalysis
+`HydrogenBondAnalysis`: a donor within 3.5 Å of an acceptor and a
+donor-hydrogen-acceptor angle of at least 150°. It chooses the donors and
+acceptors from the covalent bonds of the force field. For the rule and the
+files it reads, see {doc}`../explanation/analysis_hydrogen_bonds_verification`.
 
 ```{important}
 Keep these files beside the trajectory in any copy of a run you analyse, such
@@ -71,6 +46,17 @@ donor within 1.2 Å instead of by bonds.
 
 ## From the command line
 
+In a {term}`study`, give the study folder. The study names the conditions,
+the control and the equilibration window. The results go to
+`<study>/results/hydrogen_bonds/`:
+
+```bash
+polyzymd analyze hydrogen_bonds --study my_study
+```
+
+For a quick look without a study, give the `config.yaml` of each condition
+instead. The results then go to the current folder:
+
 ```bash
 polyzymd analyze hydrogen_bonds -c SBMA50/config.yaml -c SBMA100/config.yaml \
   --label "SBMA 50%" --label "SBMA 100%" --eq 200ns
@@ -78,7 +64,7 @@ polyzymd analyze hydrogen_bonds -c SBMA50/config.yaml -c SBMA100/config.yaml \
 
 The first `-c` is the control. The analysis measures the summaries of
 `--set summaries=...`, by default `protein_polymer`, the hydrogen bonds
-between `chainid A` and `chainid C`. By default the report shows
+between the protein (chain A) and the polymer (chain C). By default the report shows
 `protein_polymer_mean_hbonds`: for each replicate, the mean number of hydrogen
 bonds per frame. The replicate values are summarised per condition, and every
 other condition is compared with the control by Welch's t test with the
@@ -122,23 +108,18 @@ event; with `lifetime_key=atom`, a pair is one donor atom and one acceptor
 atom. As for contacts, the lifetime depends on the frame spacing and on
 `tolerance_ps`; see {doc}`../explanation/analysis_contact_lifetimes`.
 
-In `<s>_pairs`, a pair is a protein residue and a monomer type: a standard
-amino acid is named by its residue ID and any other residue by its residue
-name, so `149-SBM` is residue 149 with any SBM monomer, whichever chain and
-monomer it is. The polymers are taken to sample the protein surface freely,
-and copolymer replicates hold different chains, so the protein residue and the
-monomer type are what line up between replicates and conditions. Each pair's
-value in a replicate is the fraction of its frames with at least one such
-bond; a pair that forms in one replicate but never in another has the value 0
-in the other, which is a measured fraction, not a missing one. A per-residue or per-pair
-comparison is corrected over every entry of every compared condition, and
-every row is kept in the JSON report.
+In `<s>_pairs`, a pair is a protein residue and a monomer type: `149-SBM` is
+residue 149 with any SBM monomer. A pair that never forms in a replicate has
+the value 0 there. A per-residue or per-pair comparison is corrected over
+every entry of every compared condition, and the JSON report keeps every row.
+For why pairs are named this way, see
+{doc}`../explanation/analysis_hydrogen_bonds_verification`.
 
 Settings, passed with `--set`:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `groups` | `{protein: chainid A, polymer: chainid C}` | Names and MDAnalysis selections of the groups |
+| `groups` | `{protein: null, polymer: null}` | Names and MDAnalysis selections of the groups. A null selection selects the atoms of the role the group is named after: `protein` (chain A), `ligand` (chain B) or `polymer` (chain C). The report records the selection used |
 | `summaries` | `{protein_polymer: {between: [protein, polymer]}}` | Names of the summaries, each `between: [a, b]` or `within: a` |
 | `d_a_cutoff` | `3.5` | Largest donor-acceptor distance, in Å; 3.0 is also common |
 | `d_h_a_angle_cutoff` | `150` | Smallest donor-hydrogen-acceptor angle, in degrees |
@@ -222,14 +203,8 @@ pairs = study.per_replicate(
 print(pairs.compare(control="SBMA 50%").to_agent_text())
 ```
 
-`hydrogen_bonds(group_a, group_b=None, frames, d_a_cutoff=3.5,
-d_h_a_angle_cutoff=150.0, donors=None, hydrogens=None, acceptors=None)`
-returns the rows of `HBOND_PARTS`; `hbond_lifetimes` takes the same arguments
-and `key` and `tolerance_ps`; `residue_hbond_occupancy` returns one value per
-residue of `group_a`; `residue_pair_hbond_occupancy` returns the pair labels
-and their values, run with `labels="returned"`. `hbond_atoms(atoms)` returns
-the donatable hydrogens and acceptors that the element and valency rule
-chooses, to inspect or edit before passing them explicitly.
+For the arguments and return values of each function, see
+{doc}`../reference/analysis_functions`.
 
 For a specific set of hydrogen bonds, such as the ones of a catalytic triad,
 pass explicit atoms: {doc}`analysis_triad_quickstart` shows how.

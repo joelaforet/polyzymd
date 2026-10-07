@@ -173,5 +173,5 @@ def test_check_names_the_control_of_each_stratum(tmp_path: Path) -> None:
     root = _temperature_polymer_study(tmp_path, "comparison: {within: temperature_K}")
     output = CliRunner().invoke(cli, ["study", "check", str(root)]).output
     for kelvin in (300, 330, 360):
-        assert f"control none_{kelvin}: runs" in output
-        assert f"condition SBMA_{kelvin}: runs" in output
+        assert f"control none_{kelvin}: replicates" in output
+        assert f"condition SBMA_{kelvin}: replicates" in output

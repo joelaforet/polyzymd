@@ -71,7 +71,7 @@ lists the others in `all_runs`. To report a different result, use `--run`:
 
 ```bash
 pixi run -e analysis polyzymd analyze distances -c A/config.yaml -c B/config.yaml \
-  --set pairs=pairs.yaml --run "Substrate-Ser77"
+  --set pairs=pairs.yaml --run "Substrate-Ser76"
 ```
 
 ## Get the full record
@@ -145,7 +145,7 @@ and the frames. To measure it again, add `--recompute`.
 |---|---|
 | `error: No analysis named 'rgyr'.` | Use one of the names that the `fix:` line lists. |
 | `error: Condition ...: replicates [...] have no run directory under ...` | Give replicates that exist with `--replicates`, or run the simulations first. If the replicate folders are in another place, name it with `data.local.yaml`, `polyzymd study locate DIR` or `--data`. |
-| `error: Config file(s) not found` | Point `-c` at a simulation `config.yaml`, not a `comparison.yaml`. |
+| `error: Config file(s) not found` | Point `-c` at a simulation `config.yaml`. For a study, use `--study` with its `study.yaml`. |
 | `error: No analysis named 'catalytic_triad'.` | The catalytic triad is a routine on the study API: follow {doc}`analysis_triad_quickstart`, or run `polyzymd analyze distances --set pairs=<pairs.yaml>` for the distances. |
 | `polyzymd: command not found` | Run through `pixi run -e analysis`. |
 

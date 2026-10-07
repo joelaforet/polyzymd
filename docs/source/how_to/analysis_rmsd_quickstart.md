@@ -24,6 +24,17 @@ Alternatively, prefix each command with `pixi run -e analysis`.
 
 ## From the command line
 
+In a {term}`study`, give the study folder. The study names the conditions,
+the control and the equilibration window. The results go to
+`<study>/results/rmsd/`:
+
+```bash
+polyzymd analyze rmsd --study my_study
+```
+
+For a quick look without a study, give the `config.yaml` of each condition
+instead. The results then go to the current folder:
+
 ```bash
 polyzymd analyze rmsd -c noPoly/config.yaml -c SBMA50/config.yaml \
   --label "No polymer" --label "SBMA 50%" --eq 200ns
@@ -108,7 +119,7 @@ study = pz.Study.from_configs(
 )
 ca = "protein and name CA"
 values = study.timeseries(
-    rmsd, pz.select(ca), pz.reference("centroid", ca, alignment=ca), unit="Å"
+    rmsd, pz.select(ca), pz.reference("centroid", ca, alignment=ca), unit="A"
 )
 print(values.reduce("mean").compare(control="No polymer").to_agent_text())
 ```

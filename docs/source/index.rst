@@ -59,7 +59,7 @@ Common Workflows
   :doc:`Run your first simulation <get_started/quickstart>`
 - Run a comparison study across multiple conditions:
   :doc:`Compare Simulation Conditions <how_to/analysis_compare_conditions>`
-- Analyze a study with several conditions and make its figures:
+- Add a polymer condition and compare it with water:
   :doc:`tutorials/analysis_complete_workflow`
 
 .. IMAGE OPPORTUNITY: Add a single workflow schematic showing Build -> Submit ->

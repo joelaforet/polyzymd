@@ -17,15 +17,16 @@ prints one line per condition and comparison, every one of them. Use
 `--format json` when you need every field of the report.
 An unknown analysis name exits 2 with the list of names.
 
-Environment: in the PolyzyMD checkout, only the `analysis` and `sim-cuda-12-4`
-pixi envs have the CLI, so go through `pixi run -e analysis` there; a bare
+Environment: in the PolyzyMD checkout, the `build` and `analysis` pixi envs
+have the CLI and the analysis tools (`build` includes the analysis feature),
+so go through `pixi run -e analysis` or `pixi run -e build` there; a bare
 `polyzymd` that fails to import click is a system Python. Where `polyzymd`
 already runs (`polyzymd --version`), call it directly.
 
 `pixi run -e analysis polyzymd analyze --help` lists the analysis names: rg,
 rmsd, rmsf, rmsd_per_residue, sasa, secondary_structure, contacts, native_contacts,
 hydrogen_bonds and distances, the keys of
-`polyzymd.analyses.protocols.FUNCTION_ANALYSES`. Every one reads `-c config.yaml`.
+`polyzymd.analyses.protocols.ANALYSES`. Every one reads `-c config.yaml`.
 For contacts, `--run mean_lifetime` reports how long contacts last; for
 hydrogen_bonds, `--run protein_polymer_mean_lifetime`, `protein_polymer_residues`
 and `protein_polymer_pairs` report how long the bonds last and how often each

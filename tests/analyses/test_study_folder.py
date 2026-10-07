@@ -236,7 +236,7 @@ class TestData:
             cli, ["study", "locate", str(tmp_path / "download"), "--study", str(root)]
         )
         assert result.exit_code == 0, result.output
-        assert "Polymer: runs [1, 2]" in result.output
+        assert "Polymer: replicates [1, 2]" in result.output
         assert load_study_file(root).data["Polymer"] == download / "polymer"
         check = CliRunner().invoke(cli, ["study", "check", str(root)])
         assert "(from data.local.yaml)" in check.output

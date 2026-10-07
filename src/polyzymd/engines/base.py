@@ -4,14 +4,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
 from polyzymd.simulation.progress import SimulationProgress
-
-if TYPE_CHECKING:
-    from polyzymd.engines.bias import EnhancedSamplingProtocol, ExternalBiasSpec
 
 
 class TrajectoryLayout(BaseModel):
@@ -371,123 +368,3 @@ class SimulationEngine(ABC):
         TrajectoryLayout
             Engine-specific file layout normalized for analysis.
         """
-
-    # ------------------------------------------------------------------
-    # Optional extension hooks — enhanced sampling & state persistence
-    # ------------------------------------------------------------------
-    # These hooks establish the contract for future PLUMED, metadynamics,
-    # and checkpoint integrations.  Each raises ``NotImplementedError``
-    # with an engine-specific message by default.  Engine subclasses
-    # override them when support is added — no abstract decorator needed.
-    # ------------------------------------------------------------------
-
-    def _raise_unsupported(self, feature: str) -> None:
-        """Raise a standardised ``NotImplementedError`` for unimplemented hooks.
-
-        Parameters
-        ----------
-        feature : str
-            Human-readable description of the unsupported feature.
-        """
-        raise NotImplementedError(
-            f"{feature} is not yet supported for {self.name}. "
-            "This extension point will be implemented in a future release."
-        )
-
-    def attach_external_bias(
-        self,
-        request: EngineSubmitRequest,
-        bias_spec: ExternalBiasSpec,
-    ) -> None:
-        """Attach external biasing inputs to the simulation workflow.
-
-        This hook is called during submission to inject bias scripts
-        (e.g. PLUMED input files) into the engine's working directory
-        and command-line arguments.
-
-        Parameters
-        ----------
-        request : EngineSubmitRequest
-            Submission request details.
-        bias_spec : ExternalBiasSpec
-            Engine-neutral bias definition.
-
-        Raises
-        ------
-        NotImplementedError
-            Always, until a concrete engine implements this hook.
-        """
-        self._raise_unsupported("External bias attachment")
-
-    def configure_enhanced_sampling(
-        self,
-        protocol: EnhancedSamplingProtocol,
-    ) -> None:
-        """Configure an enhanced-sampling protocol for the engine.
-
-        This hook is called before submission to apply protocol-level
-        settings (e.g. replica exchange temperature ladder, metadynamics
-        hill parameters) to the engine's simulation inputs.
-
-        Parameters
-        ----------
-        protocol : EnhancedSamplingProtocol
-            Engine-neutral enhanced-sampling protocol definition.
-
-        Raises
-        ------
-        NotImplementedError
-            Always, until a concrete engine implements this hook.
-        """
-        self._raise_unsupported("Enhanced sampling")
-
-    def save_engine_state(self, working_dir: Path, replicate: int) -> Path:
-        """Persist an engine-specific restart state artifact.
-
-        Used by the continuation framework to checkpoint the engine's
-        internal state (e.g. OpenMM ``state.xml``, GROMACS ``state.cpt``).
-
-        Parameters
-        ----------
-        working_dir : Path
-            Replicate working directory.
-        replicate : int
-            Replicate index.
-
-        Returns
-        -------
-        Path
-            Path to the saved state artifact.
-
-        Raises
-        ------
-        NotImplementedError
-            Always, until a concrete engine implements this hook.
-        """
-        self._raise_unsupported("Engine state persistence")
-
-    def save_bias_state(self, working_dir: Path, replicate: int) -> Path:
-        """Persist an external-bias restart state artifact.
-
-        Used by the continuation framework to checkpoint bias-specific
-        state (e.g. PLUMED HILLS file, metadynamics collective-variable
-        history).
-
-        Parameters
-        ----------
-        working_dir : Path
-            Replicate working directory.
-        replicate : int
-            Replicate index.
-
-        Returns
-        -------
-        Path
-            Path to the saved bias state artifact.
-
-        Raises
-        ------
-        NotImplementedError
-            Always, until a concrete engine implements this hook.
-        """
-        self._raise_unsupported("Bias state persistence")

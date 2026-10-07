@@ -32,6 +32,9 @@ MANIFEST
 *.manifest
 *.spec
 
+# Analysis logs that polyzymd analyze writes into the current folder
+logs/
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt

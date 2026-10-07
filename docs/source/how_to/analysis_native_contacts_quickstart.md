@@ -45,6 +45,17 @@ its mean Q over the production frames.
 
 ## From the command line
 
+In a {term}`study`, give the study folder. The study names the conditions,
+the control and the equilibration window. The results go to
+`<study>/results/native_contacts/`:
+
+```bash
+polyzymd analyze native_contacts --study my_study
+```
+
+For a quick look without a study, give the `config.yaml` of each condition
+instead. The results then go to the current folder:
+
 ```bash
 polyzymd analyze native_contacts -c noPoly/config.yaml -c SBMA50/config.yaml \
   --label "No polymer" --label "SBMA 50%" --eq 200ns

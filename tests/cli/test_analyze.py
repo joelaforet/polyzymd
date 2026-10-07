@@ -90,13 +90,17 @@ def _report() -> ProtocolReport:
 
 
 @pytest.fixture()
-def stub_analyze(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+def stub_analyze(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, object]:
     """Replace the protocol entry point with a recorder returning a report.
+
+    The test runs in ``tmp_path``, so an analysis log goes there.
 
     Parameters
     ----------
     monkeypatch : pytest.MonkeyPatch
         Patching fixture.
+    tmp_path : Path
+        Temporary directory, made the working directory.
 
     Returns
     -------
@@ -112,6 +116,7 @@ def stub_analyze(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         return _report()
 
     monkeypatch.setattr("polyzymd.analyses.protocols.analyze", _fake_analyze)
+    monkeypatch.chdir(tmp_path)
     return captured
 
 
@@ -287,7 +292,7 @@ class TestExitCodes:
 
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         assert "top-level settings" in result.stderr
-        assert "--set groups='{protein: chainid A, polymer: chainid C}'" in result.stderr
+        assert "--set groups='{protein: null, ligand: null}'" in result.stderr
 
     def test_bad_replicate_range_exits_two(self, config_paths: list[Path]) -> None:
         """An unparsable --replicates value is a typed error."""

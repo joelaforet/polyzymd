@@ -33,12 +33,12 @@ Use the analysis that fits the question:
 Write the pairs to a YAML (or JSON) file, for example `pairs.yaml`:
 
 ```yaml
-- label: "Ser77(OG)-Substrate(carbonyl C)"
+- label: "Ser76(OG)-Substrate(carbonyl C)"
   selection_a: "protein and resid 76 and name OG"
   selection_b: "resname RBY and name C13x"
   threshold: 10.0
   below_label: "Within 10 Angstrom"
-- label: "Met78(N)-Substrate(carbonyl C)"
+- label: "Met77(N)-Substrate(carbonyl C)"
   selection_a: "protein and resid 77 and name N"
   selection_b: "resname RBY and name C13x"
 ```
@@ -52,6 +52,17 @@ be unique. The optional keys are:
 - `below_label`: the name of that fraction in the report.
 
 ## Run it
+
+In a {term}`study`, give the study folder. The study names the conditions,
+the control and the equilibration window. The results go to
+`<study>/results/distances/`:
+
+```bash
+polyzymd analyze distances --study my_study --set pairs=pairs.yaml
+```
+
+For a quick look without a study, give the `config.yaml` of each condition
+instead. The results then go to the current folder:
 
 ```bash
 polyzymd analyze distances -c noPoly/config.yaml -c SBMA50/config.yaml \
@@ -68,7 +79,7 @@ frame of each replicate. It reports two results for each pair:
 
 The report shows the mean distance of the first pair. To report a different
 result, use `--run`, for example
-`--run "Ser77(OG)-Substrate(carbonyl C) Within 10 Angstrom"`. PolyzyMD stores
+`--run "Ser76(OG)-Substrate(carbonyl C) Within 10 Angstrom"`. PolyzyMD stores
 the measured distances, so a second `--run` does not read the trajectory again.
 PolyzyMD compares the conditions by Welch's t test. It corrects the p values
 over the compared conditions with the {term}`Benjamini-Hochberg` method.
@@ -99,13 +110,13 @@ Common patterns:
 
 ```yaml
 # Midpoint of Asp carboxylate oxygens
-selection_a: "midpoint(protein and resid 133 and name OD1 OD2)"
+selection_a: "midpoint(protein and resid 132 and name OD1 OD2)"
 
 # Center of mass of ligand
 selection_b: "com(resname LIG)"
 
 # Single atom
-selection_a: "protein and resid 77 and name OG"
+selection_a: "protein and resid 76 and name OG"
 
 # The 2740th atom of the system, counted from 1
 selection_a: "pdbindex 2740"
@@ -139,7 +150,7 @@ d = study.timeseries(
     pair_distance,
     pz.select("protein and resid 76 and name OG"),
     pz.select("resname RBY and name C13x"),
-    unit="Å",
+    unit="A",
 )
 print(d.reduce("mean").compare(control="No polymer").to_agent_text())
 below = d.transform(lambda x, cutoff: x < cutoff, cutoff=10.0, unit=None)

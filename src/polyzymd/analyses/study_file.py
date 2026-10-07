@@ -250,7 +250,7 @@ def _unknown(keys: Any, known: tuple[str, ...], where: str) -> None:
 
 def _analysis_entry(run: str, raw: Any, path: Path) -> AnalysisEntry:
     """Check one ``analyses:`` entry against the settings of the analysis it names."""
-    from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+    from polyzymd.analyses.protocols import ANALYSES
 
     if raw is None:
         raw = {}
@@ -280,18 +280,18 @@ def _analysis_entry(run: str, raw: Any, path: Path) -> AnalysisEntry:
         return AnalysisEntry(run, None, {}, _user_function(run, raw, path), **own)
     settings = dict(raw)
     analysis = str(settings.pop("analysis", run))
-    if analysis not in FUNCTION_ANALYSES:
-        close = difflib.get_close_matches(analysis, list(FUNCTION_ANALYSES), n=1)
+    if analysis not in ANALYSES:
+        close = difflib.get_close_matches(analysis, list(ANALYSES), n=1)
         raise ProtocolError(
             f"{path}: analyses.{run} names the analysis {analysis!r}, which PolyzyMD does not ship.",
             hint=(f"Did you mean {close[0]!r}? " if close else "")
-            + f"Use one of {', '.join(FUNCTION_ANALYSES)}"
+            + f"Use one of {', '.join(ANALYSES)}"
             + ("" if "analysis" in raw else f", or add 'analysis: NAME' to the {run!r} entry")
             + ".",
         )
     _unknown(
         settings,
-        (*_ENTRY_KEYS, *WINDOW_KEYS, *FUNCTION_ANALYSES[analysis]),
+        (*_ENTRY_KEYS, *WINDOW_KEYS, *ANALYSES[analysis].defaults),
         f"{path}: analyses.{run}",
     )
     # A relative file, such as reference_file: structures/ref.pdb, is relative

@@ -50,6 +50,17 @@ For the definitions, and for which quantity answers which question, see
 
 ## From the command line
 
+In a {term}`study`, give the study folder. The study names the conditions,
+the control and the equilibration window. The results go to
+`<study>/results/rmsf/`:
+
+```bash
+polyzymd analyze rmsf --study my_study
+```
+
+For a quick look without a study, give the `config.yaml` of each condition
+instead. The results then go to the current folder:
+
 ```bash
 polyzymd analyze rmsf -c noPoly/config.yaml -c SBMA50/config.yaml \
   --label "No polymer" --label "SBMA 50%" --eq 200ns
@@ -181,7 +192,7 @@ rows = study.per_replicate(
     pz.select(ca),
     pz.select(ca),
     pz.reference("external", ca, file="structures/1ISP.pdb", alignment=ca),
-    unit="Å",
+    unit="A",
     labels=lambda u: u.select_atoms(ca).residues.resids,
     parts=RMS_PARTS + MS_PARTS,
     bounds=(0.0, None),

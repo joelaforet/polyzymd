@@ -30,8 +30,10 @@ Alternatively, prefix each command with `pixi run -e analysis`.
 
 In a serine hydrolase the serine hydroxyl donates to the histidine NE2, and
 the histidine ND1-H donates to the aspartate carboxylate. The numbering below
-is that of *B. subtilis* lipase A in a PolyzyMD topology, Ser76, His155 and
-Asp132; use your enzyme's residues.
+is that of *B. subtilis* lipase A in a PolyzyMD topology: Ser76, His155 and
+Asp132. In the crystal structure 1ISP, they are Ser77, His156 and Asp133.
+Use the residue numbers of your built system, as
+{doc}`../explanation/residue_assignment` explains.
 
 `hbond_count(group_a, group_b)` counts, at one frame, the hydrogen bonds
 between two groups with MDAnalysis `HydrogenBondAnalysis`, the donor within
@@ -110,10 +112,10 @@ with `all_below`:
 from polyzymd.analyses.functions import all_below, pair_distance
 
 ser_his_d = study.timeseries(pair_distance, pz.select("protein and resid 76 and name OG"),
-                             pz.select("protein and resid 155 and name NE2"), unit="Å")
+                             pz.select("protein and resid 155 and name NE2"), unit="A")
 his_asp_d = study.timeseries(pair_distance, pz.select("protein and resid 155 and name ND1"),
                              pz.select("protein and resid 132 and name OD1 OD2"),
-                             mode_b="midpoint", unit="Å")
+                             mode_b="midpoint", unit="A")
 close = ser_his_d.transform(all_below, his_asp_d, thresholds=[3.5, 3.5], unit=None)
 print(close.reduce("mean").compare(control="No polymer").to_agent_text())
 ```

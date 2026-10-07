@@ -1,0 +1,275 @@
+{
+ "one condition": {
+  "conditions": [{"ci95":null,"ci_method":"not_estimable","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"control","mean":0.0,"n_effective":[],"n_replicates":3,"replicate_values":[0.0,0.0,0.0],"replicates":[1,2,3],"sem":0.0,"statistical_inefficiency":[]}],
+  "frames_per_replicate": {
+   "control": [12,12,12]
+  },
+  "metric": "protein_polymer_mean_hbonds",
+  "pairwise": [],
+  "provenance.output_paths.results": "<tmp>/one/polyzymd_results/hydrogen_bonds_protein_polymer",
+  "run": "protein_polymer_mean_hbonds",
+  "text": "# polyzymd analyze hydrogen_bonds  metric protein_polymer_mean_hbonds  unit none  run protein_polymer_mean_hbonds  eq 0ns  conditions 1  replicates 3  protocol hydrogen_bonds/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nwarning: condition control has the same protein_polymer_mean_hbonds in every replicate, so its interval is not estimable\nwarning: hydrogen_bonds: second group 'chainid C' matched no atoms in control replicate 1, 2, 3, so the hydrogen-bond count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: control protein_polymer_mean_hbonds 0 (no interval, n 3)\n",
+  "unit": null
+ },
+ "records": {
+  "hbond_lifetimes_protein_polymer": {
+   "B/replicate_1": {},
+   "B/replicate_2": {},
+   "B/replicate_3": {},
+   "control/replicate_1": {},
+   "control/replicate_2": {},
+   "control/replicate_3": {},
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_lifetime","n_events","censored_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hbond_lifetimes"},"record.json:labels":null,"record.json:name":"hbond_lifetimes_protein_polymer","record.json:parts":["mean_lifetime","n_events","censored_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+  },
+  "hydrogen_bonds_protein_polymer": {
+   "B/replicate_1": {},
+   "B/replicate_2": {},
+   "B/replicate_3": {},
+   "control/replicate_1": {},
+   "control/replicate_2": {},
+   "control/replicate_3": {},
+   "shared": {"files":["parts.json","record.json","values.npz"],"parts.json:":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"hydrogen_bonds"},"record.json:labels":null,"record.json:name":"hydrogen_bonds_protein_polymer","record.json:parts":["mean_hbonds","mean_residue_pairs","any_fraction"],"record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+  },
+  "residue_hbond_occupancy_protein_polymer": {
+   "B/replicate_1": {},
+   "B/replicate_2": {},
+   "B/replicate_3": {},
+   "control/replicate_1": {},
+   "control/replicate_2": {},
+   "control/replicate_3": {},
+   "shared": {"files":["record.json","values.npz"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_hbond_occupancy"},"record.json:labels":[12,30,45],"record.json:name":"residue_hbond_occupancy_protein_polymer","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+  },
+  "residue_pair_hbond_occupancy_protein_polymer": {
+   "B/replicate_1": {"labels.json:":["12-SBM","45-EGM"]},
+   "B/replicate_2": {"labels.json:":["12-SBM","45-EGM"]},
+   "B/replicate_3": {"labels.json:":["12-SBM","45-EGM"]},
+   "control/replicate_1": {"labels.json:":[]},
+   "control/replicate_2": {"labels.json:":[]},
+   "control/replicate_3": {"labels.json:":[]},
+   "shared": {"files":["labels.json","record.json","values.npz"],"record.json:arguments":{"args":[{"select":"chainid A"},{"select":"chainid C"}],"kwargs":{}},"record.json:chosen":{},"record.json:config_hash":"c4429a507b8cea42","record.json:equilibration":"0ns","record.json:frames":[0,1,2,3,4,5,6,7,8,9,10,11],"record.json:function":{"hash":"<shipped code>","hash_of":"polyzymd_modules","module":"polyzymd.analyses.functions","qualname":"residue_pair_hbond_occupancy"},"record.json:labels":"returned","record.json:missing":0.0,"record.json:name":"residue_pair_hbond_occupancy_protein_polymer","record.json:stride":1,"record.json:times_ns":[0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1],"record.json:unit":null,"record.json:versions":"<masked>"}
+  }
+ },
+ "shared": {
+  "all_metrics": [],
+  "all_runs": ["protein_polymer_mean_hbonds","protein_polymer_mean_residue_pairs","protein_polymer_any_fraction","protein_polymer_mean_lifetime","protein_polymer_lifetime_events","protein_polymer_censored_fraction","protein_polymer_residues","protein_polymer_pairs"],
+  "analysis": "hydrogen_bonds",
+  "equilibration": "0ns",
+  "frames_per_replicate": {
+   "B": [12,12,12],
+   "control": [12,12,12]
+  },
+  "problems": [],
+  "protocol_version": "2",
+  "provenance.config_hashes.B": "c4429a507b8cea42",
+  "provenance.config_hashes.control": "c4429a507b8cea42",
+  "provenance.mdanalysis_version": "<masked>",
+  "provenance.output_paths.figures": "<tmp>/out/figures/hydrogen_bonds",
+  "provenance.polyzymd_version": "<masked>",
+  "provenance.settings.acceptors": null,
+  "provenance.settings.d_a_cutoff": 3.5,
+  "provenance.settings.d_h_a_angle_cutoff": 150.0,
+  "provenance.settings.donors": null,
+  "provenance.settings.groups": {
+   "polymer": "chainid C",
+   "protein": "chainid A"
+  },
+  "provenance.settings.hbond_atoms": {
+   "acceptors": {"GLN O":1,"SER OG":1,"THR OG1":1},
+   "donors": {"SER OG":1,"THR OG1":1},
+   "hydrogens": 2
+  },
+  "provenance.settings.hydrogens": null,
+  "provenance.settings.lifetime_key": "residue",
+  "provenance.settings.summaries": {
+   "protein_polymer": {"between":["protein","polymer"]}
+  },
+  "provenance.settings.summary": {
+   "groups": ["chainid A","chainid C"],
+   "name": "protein_polymer"
+  },
+  "provenance.settings.tolerance_ps": 0.0,
+  "provenance.settings_fingerprint": null,
+  "provenance.study": null,
+  "status": "complete",
+  "stride": 1,
+  "trends": [],
+  "verdict": "<text>",
+  "warnings": "<text>"
+ },
+ "two conditions, run protein_polymer_any_fraction": {
+  "conditions": {
+   "ci95": [null,[0.291293,1.15315]],
+   "ci_method": ["not_estimable","student_t"],
+   "every row": {"entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B"],
+   "mean": [0.0,0.722222],
+   "replicate_values": [[0.0,0.0,0.0],[0.666667,0.916667,0.583333]],
+   "sem": [0.0,0.100154]
+  },
+  "figures": ["hydrogen_bonds/hbonds_protein_polymer_any_fraction_comparison.png"],
+  "metric": "protein_polymer_any_fraction",
+  "pairwise": [{"a":"control","b":"B","cohens_d":5.88784,"correction":"BH","delta":0.722222,"delta_ci95":[0.291293,1.15315],"direction":"increased","entry":null,"family_size":1,"hedges_g":4.71027,"p":0.0186932,"p_adjusted":0.0186932,"significant":true,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hydrogen_bonds_protein_polymer",
+  "run": "protein_polymer_any_fraction",
+  "text": "# polyzymd analyze hydrogen_bonds  metric protein_polymer_any_fraction  unit none  run protein_polymer_any_fraction  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0.7222  sem 0.1002  ci95 0.2913 to 1.153  values 0.6667, 0.9167, 0.5833\ncontrol vs B  delta +0.7222  ci95 0.2913 to 1.153  p 0.01869  p_adj 0.01869  test welch_t  correction BH  family 1  d 5.888  significant\nwarning: condition control has the same protein_polymer_any_fraction in every replicate, so its interval is not estimable\nwarning: the 95 percent interval of condition B extends past the bounds 0 to 1 of protein_polymer_any_fraction, where a t interval is not reliable\nwarning: hydrogen_bonds: second group 'chainid C' matched no atoms in control replicate 1, 2, 3, so the hydrogen-bond count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: B larger protein_polymer_any_fraction than control (delta +0.7222, 95% CI 0.2913 to 1.153, p_adj 0.01869, p 0.01869, n 3 vs 3; little power: control has the same value in every replicate)\n",
+  "unit": null
+ },
+ "two conditions, run protein_polymer_censored_fraction": {
+  "conditions": {
+   "ci95": [[NaN,NaN],[-0.0057092,0.573963]],
+   "every row": {"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B"],
+   "mean": [NaN,0.284127],
+   "replicate_values": [[NaN,NaN,NaN],[0.285714,0.4,0.166667]],
+   "sem": [NaN,0.0673622]
+  },
+  "figures": ["hydrogen_bonds/hbonds_protein_polymer_censored_fraction_comparison.png"],
+  "metric": "protein_polymer_censored_fraction",
+  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":null,"p":NaN,"p_adjusted":null,"significant":false,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hbond_lifetimes_protein_polymer",
+  "run": "protein_polymer_censored_fraction",
+  "text": "# polyzymd analyze hydrogen_bonds  metric protein_polymer_censored_fraction  unit none  run protein_polymer_censored_fraction  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\ncontrol  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\nB  n 3  mean 0.2841  sem 0.06736  ci95 -0.005709 to 0.574  values 0.2857, 0.4, 0.1667\ncontrol vs B  delta nan  ci95 na  p nan  p_adj na  test welch_t  correction BH  d na  no_test\nwarning: the 95 percent interval of condition B extends past the bounds 0 to 1 of protein_polymer_censored_fraction, where a t interval is not reliable\nwarning: hydrogen_bonds: second group 'chainid C' matched no atoms in control replicate 1, 2, 3, so the hydrogen-bond count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nwarning: hydrogen_bonds: control replicate 1, control replicate 2, control replicate 3 have no hydrogen bond in summary 'protein_polymer', so protein_polymer_censored_fraction is undefined (nan) there.\nverdict: no test recorded for protein_polymer_censored_fraction between control and B; no multiplicity-corrected p value was computed (delta nan, 95% CI na, p_adj na, p nan, n 3 vs 3)\n",
+  "unit": null
+ },
+ "two conditions, run protein_polymer_lifetime_events": {
+  "conditions": {
+   "ci95": [null,[3.51586,8.48414]],
+   "ci_method": ["not_estimable","student_t"],
+   "every row": {"entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B"],
+   "mean": [0.0,6.0],
+   "replicate_values": [[0.0,0.0,0.0],[7.0,5.0,6.0]],
+   "sem": [0.0,0.57735]
+  },
+  "figures": ["hydrogen_bonds/hbonds_protein_polymer_lifetime_events_comparison.png"],
+  "metric": "protein_polymer_lifetime_events",
+  "pairwise": [{"a":"control","b":"B","cohens_d":8.48528,"correction":"BH","delta":6.0,"delta_ci95":[3.51586,8.48414],"direction":"increased","entry":null,"family_size":1,"hedges_g":6.78823,"p":0.00913261,"p_adjusted":0.00913261,"significant":true,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hbond_lifetimes_protein_polymer",
+  "run": "protein_polymer_lifetime_events",
+  "text": "# polyzymd analyze hydrogen_bonds  metric protein_polymer_lifetime_events  unit none  run protein_polymer_lifetime_events  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 6  sem 0.5774  ci95 3.516 to 8.484  values 7, 5, 6\ncontrol vs B  delta +6  ci95 3.516 to 8.484  p 0.009133  p_adj 0.009133  test welch_t  correction BH  family 1  d 8.485  significant\nwarning: condition control has the same protein_polymer_lifetime_events in every replicate, so its interval is not estimable\nwarning: hydrogen_bonds: second group 'chainid C' matched no atoms in control replicate 1, 2, 3, so the hydrogen-bond count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: B larger protein_polymer_lifetime_events than control (delta +6, 95% CI 3.516 to 8.484, p_adj 0.009133, p 0.009133, n 3 vs 3; little power: control has the same value in every replicate)\n",
+  "unit": null
+ },
+ "two conditions, run protein_polymer_mean_hbonds": {
+  "conditions": {
+   "ci95": [null,[0.572674,1.2051]],
+   "ci_method": ["not_estimable","student_t"],
+   "every row": {"entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B"],
+   "mean": [0.0,0.888889],
+   "replicate_values": [[0.0,0.0,0.0],[1.0,0.916667,0.75]],
+   "sem": [0.0,0.0734931]
+  },
+  "figures": ["hydrogen_bonds/hbonds_protein_polymer_mean_hbonds_comparison.png"],
+  "metric": "protein_polymer_mean_hbonds",
+  "pairwise": [{"a":"control","b":"B","cohens_d":9.87541,"correction":"BH","delta":0.888889,"delta_ci95":[0.572674,1.2051],"direction":"increased","entry":null,"family_size":1,"hedges_g":7.90033,"p":0.00676663,"p_adjusted":0.00676663,"significant":true,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hydrogen_bonds_protein_polymer",
+  "run": "protein_polymer_mean_hbonds",
+  "text": "# polyzymd analyze hydrogen_bonds  metric protein_polymer_mean_hbonds  unit none  run protein_polymer_mean_hbonds  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0.8889  sem 0.07349  ci95 0.5727 to 1.205  values 1, 0.9167, 0.75\ncontrol vs B  delta +0.8889  ci95 0.5727 to 1.205  p 0.006767  p_adj 0.006767  test welch_t  correction BH  family 1  d 9.875  significant\nwarning: condition control has the same protein_polymer_mean_hbonds in every replicate, so its interval is not estimable\nwarning: hydrogen_bonds: second group 'chainid C' matched no atoms in control replicate 1, 2, 3, so the hydrogen-bond count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: B larger protein_polymer_mean_hbonds than control (delta +0.8889, 95% CI 0.5727 to 1.205, p_adj 0.006767, p 0.006767, n 3 vs 3; little power: control has the same value in every replicate)\n",
+  "unit": null
+ },
+ "two conditions, run protein_polymer_mean_lifetime": {
+  "conditions": {
+   "ci95": [[NaN,NaN],[-0.216589,0.876271]],
+   "every row": {"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B"],
+   "mean": [NaN,0.329841],
+   "replicate_values": [[NaN,NaN,NaN],[0.242857,0.58,0.166667]],
+   "sem": [NaN,0.126998]
+  },
+  "figures": ["hydrogen_bonds/hbonds_protein_polymer_mean_lifetime_comparison.png"],
+  "metric": "protein_polymer_mean_lifetime",
+  "pairwise": [{"a":"control","b":"B","cohens_d":null,"correction":"BH","delta":NaN,"delta_ci95":null,"direction":"no significant change","entry":null,"family_size":null,"hedges_g":null,"p":NaN,"p_adjusted":null,"significant":false,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hbond_lifetimes_protein_polymer",
+  "run": "protein_polymer_mean_lifetime",
+  "text": "# polyzymd analyze hydrogen_bonds  metric protein_polymer_mean_lifetime  unit ns  run protein_polymer_mean_lifetime  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\ncontrol  n 3  mean nan  sem nan  ci95 nan to nan  values nan, nan, nan\nB  n 3  mean 0.3298  sem 0.127  ci95 -0.2166 to 0.8763  values 0.2429, 0.58, 0.1667\ncontrol vs B  delta nan  ci95 na  p nan  p_adj na  test welch_t  correction BH  d na  no_test\nwarning: the 95 percent interval of condition B extends past the bounds 0 to inf of protein_polymer_mean_lifetime, where a t interval is not reliable\nwarning: hydrogen_bonds: second group 'chainid C' matched no atoms in control replicate 1, 2, 3, so the hydrogen-bond count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nwarning: hydrogen_bonds: control replicate 1, control replicate 2, control replicate 3 have no hydrogen bond in summary 'protein_polymer', so protein_polymer_mean_lifetime is undefined (nan) there.\nverdict: no test recorded for protein_polymer_mean_lifetime between control and B; no multiplicity-corrected p value was computed (delta nan ns, 95% CI na, p_adj na, p nan, n 3 vs 3)\n",
+  "unit": "ns"
+ },
+ "two conditions, run protein_polymer_mean_residue_pairs": {
+  "conditions": {
+   "ci95": [null,[0.572674,1.2051]],
+   "ci_method": ["not_estimable","student_t"],
+   "every row": {"entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B"],
+   "mean": [0.0,0.888889],
+   "replicate_values": [[0.0,0.0,0.0],[1.0,0.916667,0.75]],
+   "sem": [0.0,0.0734931]
+  },
+  "figures": ["hydrogen_bonds/hbonds_protein_polymer_mean_residue_pairs_comparison.png"],
+  "metric": "protein_polymer_mean_residue_pairs",
+  "pairwise": [{"a":"control","b":"B","cohens_d":9.87541,"correction":"BH","delta":0.888889,"delta_ci95":[0.572674,1.2051],"direction":"increased","entry":null,"family_size":1,"hedges_g":7.90033,"p":0.00676663,"p_adjusted":0.00676663,"significant":true,"test":"welch_t","testable":true}],
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/hydrogen_bonds_protein_polymer",
+  "run": "protein_polymer_mean_residue_pairs",
+  "text": "# polyzymd analyze hydrogen_bonds  metric protein_polymer_mean_residue_pairs  unit none  run protein_polymer_mean_residue_pairs  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\ncontrol  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0\nB  n 3  mean 0.8889  sem 0.07349  ci95 0.5727 to 1.205  values 1, 0.9167, 0.75\ncontrol vs B  delta +0.8889  ci95 0.5727 to 1.205  p 0.006767  p_adj 0.006767  test welch_t  correction BH  family 1  d 9.875  significant\nwarning: condition control has the same protein_polymer_mean_residue_pairs in every replicate, so its interval is not estimable\nwarning: hydrogen_bonds: second group 'chainid C' matched no atoms in control replicate 1, 2, 3, so the hydrogen-bond count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: B larger protein_polymer_mean_residue_pairs than control (delta +0.8889, 95% CI 0.5727 to 1.205, p_adj 0.006767, p 0.006767, n 3 vs 3; little power: control has the same value in every replicate)\n",
+  "unit": null
+ },
+ "two conditions, run protein_polymer_pairs": {
+  "conditions": {
+   "ci95": [null,[0.316519,0.794592],null,[-0.0252211,0.691888]],
+   "ci_method": ["not_estimable","student_t","not_estimable","student_t"],
+   "entry": ["12-SBM","12-SBM","45-EGM","45-EGM"],
+   "every row": {"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B","control","B"],
+   "mean": [0.0,0.555556,0.0,0.333333],
+   "replicate_values": [[0.0,0.0,0.0],[0.5,0.666667,0.5],[0.0,0.0,0.0],[0.5,0.25,0.25]],
+   "sem": [0.0,0.0555556,0.0,0.0833333]
+  },
+  "figures": ["hydrogen_bonds/hbonds_protein_polymer_pairs_difference.png","hydrogen_bonds/hbonds_protein_polymer_pairs_profile.png"],
+  "metric": "protein_polymer_pairs",
+  "pairwise": {
+   "cohens_d": [8.16497,3.26599],
+   "delta": [0.555556,0.333333],
+   "delta_ci95": [[0.316519,0.794592],[-0.0252211,0.691888]],
+   "direction": ["increased","no significant change"],
+   "entry": ["12-SBM","45-EGM"],
+   "every row": {"a":"control","b":"B","correction":"BH","family_size":2,"test":"welch_t","testable":true},
+   "hedges_g": [6.53197,2.61279],
+   "p": [0.00985246,0.057191],
+   "p_adjusted": [0.0197049,0.057191],
+   "significant": [true,false]
+  },
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_pair_hbond_occupancy_protein_polymer",
+  "run": "protein_polymer_pairs",
+  "text": "# polyzymd analyze hydrogen_bonds  metric protein_polymer_pairs  unit none  run protein_polymer_pairs  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\ncontrol vs B  labels 2  tested 2  family 2  test welch_t  correction BH  lower 0  higher 1\ncontrol vs B  higher: 12-SBM delta +0.5556 p_adj 0.0197\nnote: the 4 per-label condition rows and 2 per-label comparison rows are in the JSON report\nwarning: condition control has the same protein_polymer_pairs at 12-SBM in every replicate, so its interval is not estimable\nwarning: condition control has the same protein_polymer_pairs at 45-EGM in every replicate, so its interval is not estimable\nwarning: the 95 percent interval of condition B at 45-EGM extends past the bounds 0 to 1 of protein_polymer_pairs, where a t interval is not reliable\nwarning: hydrogen_bonds: second group 'chainid C' matched no atoms in control replicate 1, 2, 3, so the hydrogen-bond count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: B vs control: 1 of 2 tested labels differ in protein_polymer_pairs after BH over a family of 2; larger at 12-SBM; smaller at none\n",
+  "unit": null
+ },
+ "two conditions, run protein_polymer_residues": {
+  "conditions": {
+   "ci95": [null,[0.316519,0.794592],null,null,null,[-0.0252211,0.691888]],
+   "ci_method": ["not_estimable","student_t","not_estimable","not_estimable","not_estimable","student_t"],
+   "entry": ["12","12","30","30","45","45"],
+   "every row": {"eq_detected_frame":[],"eq_detected_ns":[],"n_effective":[],"n_replicates":3,"replicates":[1,2,3],"statistical_inefficiency":[]},
+   "label": ["control","B","control","B","control","B"],
+   "mean": [0.0,0.555556,0.0,0.0,0.0,0.333333],
+   "replicate_values": [[0.0,0.0,0.0],[0.5,0.666667,0.5],[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,0.0],[0.5,0.25,0.25]],
+   "sem": [0.0,0.0555556,0.0,0.0,0.0,0.0833333]
+  },
+  "figures": ["hydrogen_bonds/hbonds_protein_polymer_residues_difference.png","hydrogen_bonds/hbonds_protein_polymer_residues_profile.png"],
+  "metric": "protein_polymer_residues",
+  "pairwise": {
+   "cohens_d": [8.16497,0.0,3.26599],
+   "delta": [0.555556,0.0,0.333333],
+   "delta_ci95": [[0.316519,0.794592],null,[-0.0252211,0.691888]],
+   "direction": ["increased","no significant change","no significant change"],
+   "entry": ["12","30","45"],
+   "every row": {"a":"control","b":"B","correction":"BH","test":"welch_t"},
+   "family_size": [2,null,2],
+   "hedges_g": [6.53197,0.0,2.61279],
+   "p": [0.00985246,null,0.057191],
+   "p_adjusted": [0.0197049,null,0.057191],
+   "significant": [true,false,false],
+   "testable": [true,false,true]
+  },
+  "provenance.output_paths.results": "<tmp>/out/polyzymd_results/residue_hbond_occupancy_protein_polymer",
+  "run": "protein_polymer_residues",
+  "text": "# polyzymd analyze hydrogen_bonds  metric protein_polymer_residues  unit none  run protein_polymer_residues  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\ncontrol vs B  labels 3  tested 2  family 2  test welch_t  correction BH  lower 0  higher 1\ncontrol vs B  higher: 12 delta +0.5556 p_adj 0.0197\nnote: the 6 per-label condition rows and 3 per-label comparison rows are in the JSON report\nwarning: condition control has the same protein_polymer_residues at 12 in every replicate, so its interval is not estimable\nwarning: condition control has the same protein_polymer_residues at 30 in every replicate, so its interval is not estimable\nwarning: condition B has the same protein_polymer_residues at 30 in every replicate, so its interval is not estimable\nwarning: condition control has the same protein_polymer_residues at 45 in every replicate, so its interval is not estimable\nwarning: the 95 percent interval of condition B at 45 extends past the bounds 0 to 1 of protein_polymer_residues, where a t interval is not reliable\nwarning: control vs B at 30 is not testable: a condition has fewer than two replicates, or both have one value in every replicate\nwarning: hydrogen_bonds: second group 'chainid C' matched no atoms in control replicate 1, 2, 3, so the hydrogen-bond count there is 0 (none of those atoms to touch). Check the selection if that condition has them.\nverdict: B vs control: 1 of 2 tested labels differ in protein_polymer_residues after BH over a family of 2; larger at 12; smaller at none\n",
+  "unit": null
+ },
+ "unknown run": {
+  "hint": "Use --run with one of ['protein_polymer_mean_hbonds', 'protein_polymer_mean_residue_pairs', 'protein_polymer_any_fraction', 'protein_polymer_mean_lifetime', 'protein_polymer_lifetime_events', 'protein_polymer_censored_fraction', 'protein_polymer_residues', 'protein_polymer_pairs'].",
+  "message": "hydrogen_bonds: no result named 'bogus'."
+ },
+ "unknown setting": {
+  "hint": "Run polyzymd analyze hydrogen_bonds -c A/config.yaml --set groups=..., one of the settings above.",
+  "message": "hydrogen_bonds takes no setting other than groups, summaries, d_a_cutoff, d_h_a_angle_cutoff, donors, hydrogens, acceptors, lifetime_key, tolerance_ps."
+ }
+}

@@ -129,8 +129,8 @@ polyzymd study locate ~/Downloads/zenodo_1234567 --study lipase_363K
 ```
 
 ```
-No polymer: runs [1, 2, 3, 4, 5] under /home/me/Downloads/zenodo_1234567/no_polymer
-SBMA 50%: runs [1, 2, 3, 4, 5] under /home/me/Downloads/zenodo_1234567/sbma_50
+No polymer: replicates [1, 2, 3, 4, 5] under /home/me/Downloads/zenodo_1234567/no_polymer
+SBMA 50%: replicates [1, 2, 3, 4, 5] under /home/me/Downloads/zenodo_1234567/sbma_50
 wrote /home/me/lipase_363K/data.local.yaml
 ```
 

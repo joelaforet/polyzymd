@@ -8,6 +8,7 @@ listed in {doc}`../reference/analysis_functions`, and
 | Module | What it holds |
 |---|---|
 | `polyzymd.analyses.study` | `Study`, `Condition` and `Replicate`: every replicate of every condition as an MDAnalysis `Universe` with its equilibration window removed |
+| `polyzymd.analyses.project` | `Project`: the studies of `project.yaml`, and their stored results in one table |
 | `polyzymd.analyses.timeseries` | `Study.timeseries` and `Study.per_replicate`, the stored `Timeseries` and `ReplicateValues`, their summaries and comparisons |
 | `polyzymd.analyses.figures` | Figures drawn from stored values |
 | `polyzymd.analyses.reference` | Reference structures (frame, centroid, average or file) for RMSD, RMSF and native contacts |
@@ -22,6 +23,14 @@ listed in {doc}`../reference/analysis_functions`, and
 .. automodule:: polyzymd.analyses.study
    :members:
    :show-inheritance:
+   :no-index:
+```
+
+## Project
+
+```{eval-rst}
+.. automodule:: polyzymd.analyses.project
+   :members:
    :no-index:
 ```
 
@@ -90,7 +99,7 @@ listed in {doc}`../reference/analysis_functions`, and
 
 ```{eval-rst}
 .. automodule:: polyzymd.analyses.protocols
-   :members: analyze, ProtocolReport, ConditionReport, PairwiseReport, ProtocolProvenance, FUNCTION_ANALYSES
+   :members: analyze, ProtocolReport, ConditionReport, PairwiseReport, ProtocolProvenance, ANALYSES, ShippedAnalysis
    :show-inheritance:
    :no-index:
 ```
