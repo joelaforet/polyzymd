@@ -376,13 +376,16 @@ class TestReproduce:
         result = freeze(study)
         copy = shutil.copytree(result.deposit / "study", tmp_path / "reproducer" / "my_study")
         download = shutil.copytree(tmp_path / "scratch", tmp_path / "download")
-        dcd = next(download.rglob("*.dcd"))
+        dcd = next((download / condition_folder("Polymer")).rglob("*.dcd"))
         dcd.write_bytes(dcd.read_bytes()[:-8] + b"\0" * 8)
         located = CliRunner().invoke(
             cli, ["study", "locate", str(download), "--study", str(copy), "--verify"]
         )
         assert located.exit_code == 2
         assert "has another SHA-256" in located.output
+        # The changed runs are not recorded, so analyze cannot read them as the deposited ones.
+        written = yaml.safe_load((copy / "data.local.yaml").read_text())
+        assert list(written) == ["No polymer"]
 
     def test_locate_verify_reads_a_file_replaced_with_the_same_size_and_time(
         self, study: Path, tmp_path: Path
