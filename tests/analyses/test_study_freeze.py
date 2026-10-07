@@ -786,6 +786,7 @@ def test_an_unknown_package_version_is_not_recorded_and_the_lock_file_is_hashed(
     versions = freeze(study).manifest["versions"]
     assert versions["numpy"] is None
     assert versions["pixi.lock"] == hashlib.sha256(b"version: 6\n").hexdigest()
+    assert versions["pixi.lock_file"] == "environment/pixi.lock (deposited)"
 
 
 def test_versions_come_from_the_pixi_environment_that_runs_freeze(
@@ -809,6 +810,7 @@ def test_versions_come_from_the_pixi_environment_that_runs_freeze(
     (prefix / "conda-meta" / "numpy-base-1.0-py312_0.json").write_text(
         '{"name": "numpy-base", "version": "1.0"}'
     )
+    (prefix / "conda-meta" / "numpy-broken.json").write_text("[]")
     (workspace / "pixi.lock").write_text("version: 6\n")
     monkeypatch.setattr(sys, "prefix", str(prefix))
     monkeypatch.setattr(numpy, "__version__", "0.0.0")
@@ -816,6 +818,7 @@ def test_versions_come_from_the_pixi_environment_that_runs_freeze(
     assert versions["numpy"] == "9.9.1"
     assert versions["openmm"] == get_openmm_version()
     assert versions["pixi.lock"] == hashlib.sha256(b"version: 6\n").hexdigest()
+    assert "not deposited" in versions["pixi.lock_file"]
 
 
 def test_a_non_ascii_file_name_is_deposited(study: Path) -> None:
@@ -927,11 +930,12 @@ def test_a_deposited_config_keeps_relative_directories() -> None:
     assert without_machine_paths(copied) == copied
     old = "# Copied by polyzymd study init from /home/u/runs/config.yaml\n" + body
     assert without_machine_paths(old) == copied
-    absolute = copied.replace("null", "/scratch/u/water")
-    assert yaml.safe_load(without_machine_paths(absolute))["output"] == {
-        "projects_directory": "../../runs/water",
-        "scratch_directory": "data",
-    }
+    for value in ("/scratch/u/water", "$SCRATCH/water", "${SCRATCH}/water"):
+        absolute = copied.replace("null", value)
+        assert yaml.safe_load(without_machine_paths(absolute))["output"] == {
+            "projects_directory": "../../runs/water",
+            "scratch_directory": "data",
+        }
 
 
 def test_every_deposited_file_matches_its_manifest_entry(study: Path, tmp_path: Path) -> None:
@@ -950,7 +954,10 @@ def test_every_deposited_file_matches_its_manifest_entry(study: Path, tmp_path: 
         "scratch_directory": str(tmp_path / "scratch" / "polymer"),
     }
     config.write_text(yaml.safe_dump(data, sort_keys=False))
-    kept = (study / "conditions" / "no_polymer" / "config.yaml").read_text()
+    # CRLF line ends, which the deposit keeps as the manifest hashed them.
+    other = study / "conditions" / "no_polymer" / "config.yaml"
+    kept = other.read_text().replace("\n", "\r\n").encode()
+    other.write_bytes(kept)
     _git(study, "commit", "-qam", "Absolute directories")
     result = freeze(study)
     manifest = result.manifest
@@ -965,7 +972,7 @@ def test_every_deposited_file_matches_its_manifest_entry(study: Path, tmp_path: 
             for name in opened.namelist()
             if not name.endswith("/")
         }
-    assert members["conditions/no_polymer/config.yaml"].decode() == kept
+    assert members["conditions/no_polymer/config.yaml"] == kept
     assert str(tmp_path).encode() not in members["conditions/polymer/config.yaml"]
     for name in ("md_checklist.yaml", "system_summary.csv", "CITATION.cff", ".zenodo.json"):
         assert name in manifest["files"], name

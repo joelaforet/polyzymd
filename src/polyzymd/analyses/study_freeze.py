@@ -109,6 +109,7 @@ def _versions(root: Path) -> dict[str, str | None]:
     ``None``. ``pixi.lock`` is the SHA-256 of ``environment/pixi.lock`` under
     ``root``, or else of the ``pixi.lock`` of the pixi workspace that runs
     freeze, which pins every package; ``None`` when neither exists.
+    ``pixi.lock_file`` says which file it is, and whether it is deposited.
     """
     import hashlib
     import platform
@@ -146,16 +147,20 @@ def _versions(root: Path) -> dict[str, str | None]:
                     found = json.loads(record.read_text())
                 except (OSError, ValueError):
                     continue
-                if found.get("name") == name:
+                if isinstance(found, dict) and found.get("name") == name:
                     versions[module] = found.get("version")
     versions["openmm"] = get_openmm_version()
     lock = root / "environment" / "pixi.lock"
+    versions["pixi.lock_file"] = "environment/pixi.lock (deposited)"
     workspace = pixi_workspace()
     if not lock.is_file() and workspace:
         lock = workspace / "pixi.lock"
-    versions["pixi.lock"] = (
-        hashlib.sha256(lock.read_bytes()).hexdigest() if lock.is_file() else None
-    )
+        versions["pixi.lock_file"] = (
+            "pixi.lock of the pixi workspace that ran freeze (not deposited)"
+        )
+    if not lock.is_file():
+        lock, versions["pixi.lock_file"] = None, None
+    versions["pixi.lock"] = hashlib.sha256(lock.read_bytes()).hexdigest() if lock else None
     return versions
 
 
@@ -580,7 +585,7 @@ def deposited_entry(file: Path, root: Path, configs: set[Path]) -> dict[str, Any
     import hashlib
 
     if file.resolve() in configs:
-        text = file.read_text()
+        text = file.read_bytes().decode()
         deposited = without_machine_paths(text, file.parent, root)
         if deposited != text:
             data = deposited.encode()
@@ -692,8 +697,10 @@ _MACHINE_KEYS = {"projects_directory": ".", "scratch_directory": "data"}
 
 
 def _is_machine_path(value: Any) -> bool:
-    """Return whether a config value is an absolute path or starts with ``~``."""
-    return isinstance(value, str) and (value.startswith("~") or Path(value).is_absolute())
+    """Return whether a config value is an absolute path, starts with ``~`` or names a ``$VAR``."""
+    return isinstance(value, str) and (
+        value.startswith("~") or "$" in value or Path(value).is_absolute()
+    )
 
 
 def _rewrite_machine_lines(text: str) -> str:
@@ -703,7 +710,9 @@ def _rewrite_machine_lines(text: str) -> str:
     import yaml
 
     lines = []
-    for line in text.splitlines():
+    for full in text.splitlines(keepends=True):
+        line = full.rstrip("\r\n")
+        end = full[len(line) :]
         match = re.match(r"^(\s*)(projects_directory|scratch_directory):(.*)$", line)
         try:
             value = yaml.safe_load(match.group(3)) if match else None
@@ -714,8 +723,8 @@ def _rewrite_machine_lines(text: str) -> str:
         header = re.match(r"^# Copied by polyzymd(?: study init)? from (.+)$", line)
         if header:
             line = f"# Copied by polyzymd from {Path(header.group(1).strip()).name}"
-        lines.append(line)
-    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+        lines.append(line + end)
+    return "".join(lines)
 
 
 def _production_length_warnings(conditions: dict[str, Any]) -> list[str]:
@@ -1587,9 +1596,11 @@ def _copy_frozen_folder(
     for config in configs:
         copied = copy / config
         if copied.is_file():
-            copied.write_text(
-                without_machine_paths(copied.read_text(), (root / config).parent, root)
-            )
+            # Bytes, so that CRLF line ends stay as the manifest hashed them.
+            text = copied.read_bytes().decode()
+            deposited = without_machine_paths(text, (root / config).parent, root)
+            if deposited != text:
+                copied.write_bytes(deposited.encode())
 
 
 def _finish_deposit(

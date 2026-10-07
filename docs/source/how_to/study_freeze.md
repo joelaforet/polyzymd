@@ -167,7 +167,7 @@ Otherwise, freeze does these steps:
 
    | File | Holds |
    |---|---|
-   | `manifest.json` | Each study file, trajectory, engine input and final frame, by size and SHA-256, as deposited; this includes the other files in this table. The package versions (`null` when a package reports none) and the SHA-256 of `environment/pixi.lock`, or, without that file, of the `pixi.lock` of the pixi workspace that runs freeze. The full config of each condition. The production length of each replicate. The parent of the tagged commit (`git.parent_commit`; the tag names the frozen commit). The warnings |
+   | `manifest.json` | Each study file, trajectory, engine input and final frame, by size and SHA-256, as deposited; this includes the other files in this table. The package versions (`null` when a package reports none) and the SHA-256 of `environment/pixi.lock`, or, without that file, of the `pixi.lock` of the pixi workspace that runs freeze, which is not deposited; `pixi.lock_file` says which one. The full config of each condition. The production length of each replicate. The parent of the tagged commit (`git.parent_commit`; the tag names the frozen commit). The warnings |
    | `CITATION.cff` | Citation File Format 1.2.0: the paper as `preferred-citation`, and PolyzyMD and the trajectory deposits under `references` |
    | `.zenodo.json` | Zenodo deposit metadata: `isSupplementTo` the paper, `requires` PolyzyMD, `references` the trajectories |
    | `md_checklist.yaml` | The reliability and reproducibility checklist of Communications Biology (2023), filled in from the manifest. Review each answer |
@@ -214,8 +214,9 @@ which git ignores:
 
 No file in the deposit names a path of your machine. Records and reports name
 files relative to the study, or to the folder of the replicate folders. In
-the deposited configs, an absolute `projects_directory` becomes `.` and an
-absolute `scratch_directory` becomes `data`; relative ones stay. A comment
+the deposited configs, a `projects_directory` that is absolute, starts with
+`~` or names a `$VARIABLE` becomes `.`, and such a `scratch_directory`
+becomes `data`; relative ones stay. A comment
 tells a reader how to point the study at a copy of the trajectories. The
 config hash leaves out both directories, so stored results still match. The
 manifest gives the size and SHA-256 of the deposited config.
