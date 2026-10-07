@@ -17,7 +17,6 @@ import yaml
 from polyzymd.config.schema import SimulationConfig
 from polyzymd.core.branding import prepend_file_header
 
-
 #: Config keys whose values are file or directory paths, resolved against the
 #: folder holding the config when they are relative.
 PATH_KEYS = frozenset(
