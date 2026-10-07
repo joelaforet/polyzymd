@@ -299,65 +299,15 @@ class TestExitCodes:
         assert "Cannot read --replicates" in result.stderr
 
 
-class TestRetiredComparisonFile:
-    """-f comparison.yaml is refused with the equivalent -c command and the docs to read."""
+class TestRemovedOptions:
+    """Options that polyzymd analyze no longer has."""
 
-    DOCS = "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html"
+    def test_file_option_is_unknown(self, tmp_path: Path) -> None:
+        """-f comparison.yaml gives Click's usage error: analyze reads only -c configs."""
+        result = CliRunner().invoke(analyze_command, ["rg", "-f", str(tmp_path / "x.yaml")])
 
-    def _comparison(self, tmp_path: Path, config_paths: list[Path]) -> Path:
-        import yaml
-
-        comparison = tmp_path / "comparison.yaml"
-        conditions = [
-            {"label": "No Polymer", "config": str(config_paths[0]), "replicates": [1, 2, 3]},
-            {"label": "SBMA", "config": str(config_paths[1]), "replicates": [1, 2, 3]},
-        ]
-        data = {
-            "name": "x",
-            "conditions": conditions,
-            "defaults": {"equilibration_time": "200ns"},
-            "plugins": {"hydrogen_bonds": {"distance_cutoff": 3.2}},
-        }
-        comparison.write_text(yaml.safe_dump(data, sort_keys=False))
-        return comparison
-
-    def test_comparison_file_prints_the_config_command(
-        self, stub_analyze: dict[str, object], config_paths: list[Path], tmp_path: Path
-    ) -> None:
-        """The fix is the polyzymd analyze -c command built from the file, and nothing runs."""
-        comparison = self._comparison(tmp_path, config_paths)
-        result = CliRunner().invoke(analyze_command, ["hydrogen_bonds", "-f", str(comparison)])
-
-        assert result.exit_code == EXIT_ANALYSIS_ERROR
-        assert "error: comparison.yaml is no longer read by polyzymd analyze" in result.stderr
-        fix = next(line for line in result.stderr.splitlines() if line.startswith("fix: "))
-        assert fix.startswith(
-            f"fix: Run polyzymd analyze hydrogen_bonds -c {config_paths[0]} --label 'No Polymer' "
-            f"-c {config_paths[1]} --label SBMA --replicates 1,2,3 --eq 200ns. "
-        )
-        assert self.DOCS in fix
-        assert ".claude/skills/polyzymd-analyze/SKILL.md" in fix
-        assert stub_analyze == {}
-
-    def test_eq_overrides_the_file_and_configs_do_not_matter(
-        self, config_paths: list[Path], tmp_path: Path
-    ) -> None:
-        """--eq replaces the file's window; -c or --stride next to -f still get the message."""
-        comparison = self._comparison(tmp_path, config_paths)
-        arguments = ["rg", "-f", str(comparison), "-c", str(config_paths[0]), "--eq", "5ns"]
-        result = CliRunner().invoke(analyze_command, [*arguments, "--stride", "2"])
-
-        assert result.exit_code == EXIT_ANALYSIS_ERROR
-        assert "--replicates 1,2,3 --eq 5ns." in result.stderr
-
-    def test_unreadable_comparison_file_gets_the_placeholder_command(self, tmp_path: Path) -> None:
-        """A missing -f file still gets the retirement message, with placeholders."""
-        result = CliRunner().invoke(analyze_command, ["rg", "-f", str(tmp_path / "nope.yaml")])
-
-        assert result.exit_code == EXIT_ANALYSIS_ERROR
-        assert "no longer read by polyzymd analyze" in result.stderr
-        assert "fix: Run polyzymd analyze rg -c <config.yaml> --label <label>" in result.stderr
-        assert self.DOCS in result.stderr
+        assert result.exit_code == 2
+        assert "No such option: -f" in result.output
 
     def test_stride_below_one_is_refused(self, config_paths: list[Path]) -> None:
         """--stride takes a whole number of at least 1."""

@@ -385,6 +385,19 @@ class TestEquilibrationPortableState:
         assert runner._current_step_count == 1234
         assert runner._current_time == "time"
 
+    def test_load_refuses_a_stage_without_portable_state(self, tmp_path):
+        """A completed stage is resumed only from its state XML, not from a binary checkpoint."""
+        from polyzymd.simulation.runner import SimulationRunner
+
+        stage_dir = tmp_path / "equilibration_0_heating"
+        stage_dir.mkdir()
+        (stage_dir / "equilibration_0_heating_checkpoint.chk").write_bytes(b"checkpoint")
+        runner = SimulationRunner.__new__(SimulationRunner)
+        runner._working_dir = tmp_path
+
+        with pytest.raises(FileNotFoundError, match="equilibration_0_heating_state.xml"):
+            runner._load_eq_stage_state(0, "heating")
+
 
 class TestEquilibrationResumeMetadata:
     """Resume markers must match the current derived stage schedule."""
@@ -506,6 +519,7 @@ def _write_eq_stage(
         )
 
     if interrupted:
+        (stage_dir / f"{dir_name}_state.xml").write_text("<State/>")
         (stage_dir / "EQ_INTERRUPTED").write_text(
             f"stage_index={stage_index}\n"
             f"stage_name={stage_name}\n"
@@ -683,6 +697,24 @@ class TestFindInterruptedEqStage:
         )
         runner = self._make_runner(tmp_path)
         info = runner._find_interrupted_eq_stage(stages, completed_indices=[])
+        assert info is None
+
+    def test_interrupted_with_checkpoint_only_restarts_stage(self, tmp_path):
+        """A marker with only a binary checkpoint restarts the stage from its start."""
+        stages = [self._make_stage("heating")]
+        dir_name = "equilibration_0_heating"
+        stage_dir = tmp_path / dir_name
+        stage_dir.mkdir()
+        (stage_dir / "EQ_INTERRUPTED").write_text(
+            "stage_index=0\nstage_name=heating\n"
+            "steps_completed=5000\ntotal_steps=10000\n"
+            "current_temperature=300.0\nis_temperature_ramping=False\n"
+        )
+        (stage_dir / f"{dir_name}_checkpoint.chk").write_bytes(b"\x00" * 16)
+        runner = self._make_runner(tmp_path)
+
+        info = runner._find_interrupted_eq_stage(stages, completed_indices=[])
+
         assert info is None
 
     def test_interrupted_with_portable_state_can_resume(self, tmp_path):

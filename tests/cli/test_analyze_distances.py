@@ -143,23 +143,12 @@ def test_all_below_gives_the_fraction_with_every_pair_below_its_threshold(
     assert len(record["inputs"]) == 2
 
 
-def test_catalytic_triad_is_refused_with_the_routine_and_distances(configs, tmp_path) -> None:
-    """catalytic_triad is a routine now: Python and the CLI name its page and distances."""
-    from polyzymd.analyses import analyze
-
-    url = "https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html"
-    with pytest.raises(ProtocolError, match="routine on the study API") as raised:
-        analyze("catalytic_triad", [configs["A"]], equilibration=EQUILIBRATION)
-    assert url in raised.value.hint
-    assert "polyzymd analyze distances -c <config.yaml> --set pairs=<pairs.yaml>" in (
-        raised.value.hint
-    )
-    assert ".claude/skills/polyzymd-analyze/SKILL.md" in raised.value.hint
-
+def test_catalytic_triad_is_an_unknown_analysis(configs, tmp_path) -> None:
+    """catalytic_triad is not an analysis: the CLI lists the analyses and the study API page."""
     result = CliRunner().invoke(analyze_command, ["catalytic_triad", "-c", str(configs["A"])])
     assert result.exit_code == EXIT_ANALYSIS_ERROR
-    assert "error: catalytic_triad is no longer a polyzymd analyze analysis" in result.stderr
-    assert f"fix: Follow {url}" in result.stderr
+    assert "error: No analysis named 'catalytic_triad'." in result.stderr
+    assert "how_to/study_api.html" in result.stderr
     assert not (tmp_path / "polyzymd_results").exists()
 
 

@@ -387,7 +387,6 @@ class TestSolvateAssemblyCoordinates:
         monkeypatch.setattr(
             packmol, "run_packmol", MagicMock(return_value=tmp_path / "packmol.pdb")
         )
-        monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
 
         result = packmol.pack_polymers(
             molecules=[object()],
@@ -499,7 +498,6 @@ class TestSolvateAssemblyCoordinates:
         monkeypatch.setattr(
             packmol, "run_packmol", MagicMock(return_value=tmp_path / "packmol.pdb")
         )
-        monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
 
         monkeypatch.setattr(packmol, "SOLVATION_CLASH_ATOM_LIMIT", 0)
         with pytest.raises(packmol.SolvationClashError, match="1 polymer atom"):
@@ -628,7 +626,6 @@ class TestPackmolSeed:
         monkeypatch.setitem(sys.modules, "polyzymd.utils.boxvectors", boxvectors_mod)
         run_packmol = MagicMock(return_value=tmp_path / "packmol.pdb")
         monkeypatch.setattr(packmol, "run_packmol", run_packmol)
-        monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
 
         packmol.pack_polymers(
             molecules=[object()],
@@ -678,7 +675,7 @@ class TestClashAtomLimit:
 
 
 class TestPolymerShellExclusion:
-    """The solute bounding-box annulus is opt-in."""
+    """The Packmol input of the polymer packing stage."""
 
     def _run(self, monkeypatch, tmp_path, **kwargs):
         from polyzymd.utils import packmol
@@ -700,7 +697,6 @@ class TestPolymerShellExclusion:
         monkeypatch.setitem(sys.modules, "polyzymd.utils.boxvectors", boxvectors_mod)
         run_packmol = MagicMock(return_value=tmp_path / "packmol.pdb")
         monkeypatch.setattr(packmol, "run_packmol", run_packmol)
-        monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
         packmol.pack_polymers(
             molecules=[object()],
             number_of_copies=[1],
@@ -711,16 +707,28 @@ class TestPolymerShellExclusion:
         )
         return run_packmol.call_args.kwargs["input_text"], boxvectors_mod.get_topology_bbox_bounds
 
-    def test_default_has_no_outside_box(self, monkeypatch, tmp_path):
+    def test_default_packmol_input_is_unchanged(self, monkeypatch, tmp_path):
+        """The default polymer packing writes this exact Packmol input."""
         text, bbox = self._run(monkeypatch, tmp_path)
-        assert "outside box" not in text
-        assert "inside box" in text
+        assert text == (
+            "tolerance 2.000000\n"
+            "filetype pdb\n"
+            "output packmol_output.pdb\n"
+            "\n"
+            "nloop 200\n"
+            "\n"
+            "structure solute.pdb\n"
+            "  number 1\n"
+            "  fixed 0. 0. 0. 0. 0. 0.\n"
+            "end structure\n"
+            "\n"
+            "structure water.pdb\n"
+            "  number 1\n"
+            "  inside box 0. 0. 0. 28.000000 38.000000 48.000000\n"
+            "  inside sphere 15.000000 20.000000 25.000000 20.000000\n"
+            "end structure\n"
+        )
         bbox.assert_not_called()
-
-    def test_opt_in_restores_annulus(self, monkeypatch, tmp_path):
-        text, bbox = self._run(monkeypatch, tmp_path, exclude_solute_bbox=True)
-        assert "outside box 8.000000 8.000000 8.000000 22.000000 22.000000 22.000000" in text
-        bbox.assert_called_once()
 
     def test_nloop_is_rendered(self, monkeypatch, tmp_path):
         text, _ = self._run(monkeypatch, tmp_path, nloop=50)
@@ -729,9 +737,7 @@ class TestPolymerShellExclusion:
     def test_packing_config_defaults(self):
         from polyzymd.config.schema import PolymerPackingConfig
 
-        cfg = PolymerPackingConfig()
-        assert cfg.exclude_solute_bbox is False
-        assert cfg.nloop == 200
+        assert PolymerPackingConfig().nloop == 200
 
 
 # ---------------------------------------------------------------------------
@@ -932,7 +938,6 @@ class TestPackPolymersFinalBox:
         )
         run_packmol = MagicMock(return_value=tmp_path / "packmol.pdb")
         monkeypatch.setattr(packmol, "run_packmol", run_packmol)
-        monkeypatch.setattr(packmol, "_max_molecule_diameter_angstrom", MagicMock(return_value=1.0))
 
         packmol.pack_polymers(
             molecules=[object()],

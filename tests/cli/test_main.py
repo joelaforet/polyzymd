@@ -844,7 +844,7 @@ class TestRunReusesBuild:
         config = self._config(tmp_path)
         _run_openmm_impl(config, replicate=1)
 
-        validate.assert_called_once_with(tmp_path / "run_1", config, allow_legacy=False)
+        validate.assert_called_once_with(tmp_path / "run_1", config)
         assert run_initial_segment.call_args.kwargs["skip_build"] is True
         assert f"Reusing the build in {tmp_path / 'run_1'}" in capsys.readouterr().out
 
@@ -2161,3 +2161,12 @@ class TestNoPolymerWording:
         assert "packmol:" in result.output
         assert "gmx:" in result.output
         assert "Enzyme-Polymer" not in result.output
+
+
+@pytest.mark.parametrize("command", ["compare", "new-analysis"])
+def test_removed_commands_are_unknown(command: str) -> None:
+    """polyzymd compare and polyzymd new-analysis are not commands."""
+    result = CliRunner().invoke(cli, [command, "run"])
+
+    assert result.exit_code == 2
+    assert f"No such command '{command}'" in result.output

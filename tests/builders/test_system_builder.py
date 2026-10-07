@@ -403,28 +403,6 @@ class TestPackPolymersUsesTheFinalBox:
         # solute bbox 10 x 20 x 20 A -> circumradius 15 A, plus 20 A padding
         assert builder.build_provenance["polymer_sphere_radius_nm"] == pytest.approx(3.5)
 
-    def test_legacy_box_is_used_when_no_final_box_is_given(self, monkeypatch):
-        import numpy as np
-
-        captured: dict = {}
-        builder = self._builder(monkeypatch, captured)
-
-        boxvectors = pytest.importorskip("polyzymd.utils.boxvectors")
-        monkeypatch.setattr(
-            boxvectors,
-            "get_topology_bbox",
-            lambda topology: __import__("openff.units", fromlist=["Quantity"]).Quantity(
-                np.diag([10.0, 20.0, 20.0]), "angstrom"
-            ),
-        )
-
-        builder.pack_polymers(padding=2.0)
-
-        # bbox + 2 * 2.0 nm padding, on the diagonal, in nanometers
-        np.testing.assert_allclose(
-            np.diagonal(captured["box_vectors"].m_as("nanometer")), [5.0, 6.0, 6.0]
-        )
-
 
 class TestBuildFromConfigSharesOneBox:
     """Packing and solvation must be handed the same, pre-computed cell."""
@@ -506,7 +484,7 @@ class TestBuildFromConfigSharesOneBox:
         # is what has to be reserved up front
         assert calls["extra_padding_nm"] == pytest.approx(2.0)
 
-    def test_control_build_keeps_the_legacy_path(self, monkeypatch):
+    def test_control_build_keeps_the_solute_only_path(self, monkeypatch):
         calls, _ = self._run(monkeypatch, self._config(with_polymers=False))
 
         assert "pack" not in calls

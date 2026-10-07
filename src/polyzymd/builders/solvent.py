@@ -270,7 +270,7 @@ class SolventBuilder:
         extra_padding : float
             Additional padding in nm reserved for molecules that will be packed
             later (``polymers.packing.padding``).  ``0.0`` for a build without
-            polymers, which reproduces the legacy box exactly.
+            polymers.
 
         Returns
         -------
