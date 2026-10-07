@@ -66,7 +66,7 @@ Use:
 Run the generator from the repository root:
 
 ```bash
-pixi run -e build python src/polyzymd/data/solvents/_generator.py
+pixi run -e build python scripts/generate_solvent_sdfs.py
 ```
 
 This creates a charged SDF in `src/polyzymd/data/solvents/`.
