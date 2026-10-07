@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import sys
+
 from polyzymd.utils.version import (
     RECORD_PROVENANCE_KEYS,
     get_openmm_version,
     get_polyzymd_version,
+    pixi_workspace,
     record_provenance,
     runtime_provenance,
 )
@@ -26,7 +29,8 @@ def test_runtime_provenance_reads_environment(monkeypatch):
     assert isinstance(prov["hostname"], str) and prov["hostname"]
 
 
-def test_runtime_provenance_missing_environment(monkeypatch):
+def test_runtime_provenance_missing_environment(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "venv"))
     monkeypatch.delenv("PIXI_ENVIRONMENT_NAME", raising=False)
     monkeypatch.delenv("SLURM_JOB_ID", raising=False)
     prov = runtime_provenance()
@@ -38,3 +42,11 @@ def test_record_provenance_is_subset():
     rec = record_provenance()
     assert set(rec) == set(RECORD_PROVENANCE_KEYS)
     assert "hostname" not in rec
+
+
+def test_pixi_environment_without_pixi_run_comes_from_the_environment_folder(monkeypatch, tmp_path):
+    """Python run directly from a pixi environment still records that environment."""
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / ".pixi" / "envs" / "sim-cuda-12-6"))
+    monkeypatch.delenv("PIXI_ENVIRONMENT_NAME", raising=False)
+    assert runtime_provenance()["pixi_environment"] == "sim-cuda-12-6"
+    assert pixi_workspace() == tmp_path

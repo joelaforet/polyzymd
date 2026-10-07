@@ -774,15 +774,47 @@ def test_an_unknown_package_version_is_not_recorded_and_the_lock_file_is_hashed(
 ) -> None:
     """A package reporting version 0.0.0 is recorded as unknown; the deposited pixi.lock pins it."""
     import hashlib
+    import sys
 
     import numpy
 
+    monkeypatch.setattr(sys, "prefix", str(study.parent / "env"))
     (study / "environment" / "pixi.lock").write_text("version: 6\n")
     _git(study, "add", "environment/pixi.lock")
     _git(study, "commit", "-qm", "Lock file")
     monkeypatch.setattr(numpy, "__version__", "0.0.0")
     versions = freeze(study).manifest["versions"]
     assert versions["numpy"] is None
+    assert versions["pixi.lock"] == hashlib.sha256(b"version: 6\n").hexdigest()
+
+
+def test_versions_come_from_the_pixi_environment_that_runs_freeze(
+    study: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 0.0.0 package has its conda record's version, OpenMM its full version, and the
+    pixi.lock of the running workspace pins the environment when the study has none."""
+    import hashlib
+    import sys
+
+    import numpy
+
+    from polyzymd.utils.version import get_openmm_version
+
+    workspace = study.parent / "workspace"
+    prefix = workspace / ".pixi" / "envs" / "analysis"
+    (prefix / "conda-meta").mkdir(parents=True)
+    (prefix / "conda-meta" / "numpy-9.9.1-py312_0.json").write_text(
+        '{"name": "numpy", "version": "9.9.1"}'
+    )
+    (prefix / "conda-meta" / "numpy-base-1.0-py312_0.json").write_text(
+        '{"name": "numpy-base", "version": "1.0"}'
+    )
+    (workspace / "pixi.lock").write_text("version: 6\n")
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    monkeypatch.setattr(numpy, "__version__", "0.0.0")
+    versions = freeze(study).manifest["versions"]
+    assert versions["numpy"] == "9.9.1"
+    assert versions["openmm"] == get_openmm_version()
     assert versions["pixi.lock"] == hashlib.sha256(b"version: 6\n").hexdigest()
 
 
@@ -829,7 +861,7 @@ def test_the_manifest_lists_the_gitignore_written_by_a_first_freeze(study: Path)
     _git(study, "commit", "-qm", "No .gitignore")
     result = freeze(study)
     assert ".gitignore" in result.manifest["files"]
-    assert _zip_names(result.deposit, "study") - set(GENERATED) == set(result.manifest["files"])
+    assert _zip_names(result.deposit, "study") - {"manifest.json"} == set(result.manifest["files"])
 
 
 def test_freeze_refuses_a_condition_config_outside_the_study(tmp_path: Path) -> None:
@@ -881,10 +913,9 @@ def test_freeze_ignores_the_polymer_cache_of_a_build(study: Path) -> None:
     assert ".polymer_cache/chain.sdf" not in _git(study, "ls-tree", "-r", "--name-only", "HEAD")
 
 
-def test_the_deposited_copied_config_names_no_runs_path() -> None:
-    """The header of a copied config, which says where the runs go, leaves the deposit."""
-    text = (
-        "# Copied by polyzymd from config.yaml\n"
+def test_a_deposited_config_keeps_relative_directories() -> None:
+    """Only absolute directories and the path of an old copy header leave a deposited config."""
+    body = (
         "#   the runs go into ../../runs/water (relative to this file) unless you set\n"
         "#   scratch_directory in config.yaml.\n"
         "name: water\n"
@@ -892,6 +923,65 @@ def test_the_deposited_copied_config_names_no_runs_path() -> None:
         '  projects_directory: "../../runs/water"\n'
         "  scratch_directory: null\n"
     )
-    deposited = without_machine_paths(text)
-    assert "../../runs" not in deposited and "the runs go into" not in deposited
-    assert deposited.startswith("# Copied by polyzymd from config.yaml\nname: water\n")
+    copied = "# Copied by polyzymd from config.yaml\n" + body
+    assert without_machine_paths(copied) == copied
+    old = "# Copied by polyzymd study init from /home/u/runs/config.yaml\n" + body
+    assert without_machine_paths(old) == copied
+    absolute = copied.replace("null", "/scratch/u/water")
+    assert yaml.safe_load(without_machine_paths(absolute))["output"] == {
+        "projects_directory": "../../runs/water",
+        "scratch_directory": "data",
+    }
+
+
+def test_every_deposited_file_matches_its_manifest_entry(study: Path, tmp_path: Path) -> None:
+    """The deposit verifies against its manifest, configs with absolute directories included.
+
+    The polymer config gets absolute directories, which the deposit removes;
+    the other keeps the relative ones study init wrote, which it keeps.
+    """
+    import hashlib
+    import zipfile
+
+    config = study / "conditions" / "polymer" / "config.yaml"
+    data = yaml.safe_load(config.read_text())
+    data["output"] = {
+        "projects_directory": str(tmp_path / "jobs"),
+        "scratch_directory": str(tmp_path / "scratch" / "polymer"),
+    }
+    config.write_text(yaml.safe_dump(data, sort_keys=False))
+    kept = (study / "conditions" / "no_polymer" / "config.yaml").read_text()
+    _git(study, "commit", "-qam", "Absolute directories")
+    result = freeze(study)
+    manifest = result.manifest
+
+    def entry(content: bytes) -> dict:
+        return {"size": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+
+    (archive,) = result.upload.glob("*-study-v*.zip")
+    with zipfile.ZipFile(archive) as opened:
+        members = {
+            name.removeprefix("study/"): opened.read(name)
+            for name in opened.namelist()
+            if not name.endswith("/")
+        }
+    assert members["conditions/no_polymer/config.yaml"].decode() == kept
+    assert str(tmp_path).encode() not in members["conditions/polymer/config.yaml"]
+    for name in ("md_checklist.yaml", "system_summary.csv", "CITATION.cff", ".zenodo.json"):
+        assert name in manifest["files"], name
+    for name, content in members.items():
+        if name != "manifest.json":
+            assert manifest["files"].get(name) == entry(content), name
+    replicates = [r for c in manifest["conditions"].values() for r in c["replicates"].values()]
+    recorded = [
+        {"size": f["size"], "sha256": f["sha256"]}
+        for r in replicates
+        for f in [*r.get("engine_inputs", []), r.get("final_frame")]
+        if f
+    ]
+    for part in ("engine_inputs", "final_frames"):
+        with zipfile.ZipFile(result.upload / f"{part}.zip") as opened:
+            for name in opened.namelist():
+                if not name.endswith("/"):
+                    assert entry(opened.read(name)) in recorded, name
+    assert (result.upload / "CITATION.cff").read_bytes() == members["CITATION.cff"]
