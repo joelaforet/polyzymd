@@ -1904,7 +1904,9 @@ class GromacsExporter:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         if prefix is None:
-            prefix = self._generate_prefix()
+            from polyzymd.analyses.shared.gromacs import system_prefix
+
+            prefix = system_prefix(self._config)
 
         result: Dict[str, any] = {}
 
@@ -2335,18 +2337,6 @@ class GromacsExporter:
                             pass
                     else:
                         atom.metadata["residue_number"] = residue_num + 1
-
-    def _generate_prefix(self) -> str:
-        """Generate filename prefix from config."""
-        parts = []
-
-        if self._config.enzyme:
-            parts.append(self._config.enzyme.name)
-
-        if self._config.polymers and self._config.polymers.enabled:
-            parts.append(self._config.polymers.type_prefix)
-
-        return "_".join(parts) if parts else "system"
 
     def _log_summary(self, result: Dict[str, any], output_dir: Path) -> None:
         """Log summary of generated files."""

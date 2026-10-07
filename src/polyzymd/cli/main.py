@@ -265,38 +265,6 @@ def _warn_for_submission_pixi_env(
     )
 
 
-def _generate_system_prefix(sim_config: object) -> str:
-    """Generate a system filename prefix from simulation config.
-
-    Replicates ``GromacsExporter._generate_prefix`` so CLI checks use the
-    same naming convention as build and submit workflows.
-
-    Parameters
-    ----------
-    sim_config : object
-        Simulation configuration object.
-
-    Returns
-    -------
-    str
-        System prefix (e.g. ``"CALB_SBMA-EGMA"``).
-    """
-    parts: list[str] = []
-
-    enzyme = getattr(sim_config, "enzyme", None)
-    enzyme_name = getattr(enzyme, "name", None)
-    if isinstance(enzyme_name, str) and enzyme_name:
-        parts.append(enzyme_name)
-
-    polymers = getattr(sim_config, "polymers", None)
-    polymers_enabled = getattr(polymers, "enabled", False)
-    polymer_prefix = getattr(polymers, "type_prefix", None)
-    if isinstance(polymers_enabled, bool) and polymers_enabled and isinstance(polymer_prefix, str):
-        parts.append(polymer_prefix)
-
-    return "_".join(parts) if parts else "system"
-
-
 def _emit_reference_warnings(sim_config: object, *, phase: str = "cli") -> bool:
     """Print missing referenced-file warnings for a loaded config.
 
@@ -3618,7 +3586,9 @@ def recover(
         if nodelist:
             slurm_config.nodelist = nodelist
 
-        prefix = _generate_system_prefix(sim_config)
+        from polyzymd.analyses.shared.gromacs import system_prefix
+
+        prefix = system_prefix(sim_config)
         gromacs_inputs_exist = all(
             (working_dir / f).exists()
             for f in [f"{prefix}.top", f"{prefix}.gro", "em.mdp", "prod.mdp"]
