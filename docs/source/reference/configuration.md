@@ -828,9 +828,10 @@ The optional `openmm:` block selects the OpenMM platform. It is used when
 | `device_index` | `str \| null` | `null` | GPU device index. |
 | `precision` | `str` | `"mixed"` | Floating-point precision on CUDA. |
 
-The replicate number fixes the starting structure and every random seed. CPU
-threads, PME and GPUs add up forces in a different order on each run, so two
-runs of a replicate differ from the first minimization on. They agree
+The replicate number fixes the starting structure and every random seed. On
+the CPU, OpenCL and CUDA platforms, CPU threads, PME and GPUs add up forces in
+a different order on each run, so two runs of a replicate differ from the
+first minimization on (the slow Reference platform is deterministic). They agree
 statistically, not frame by frame. Each production segment records the
 platform and the property values it used under `openmm_platform` in
 `progress.json`.

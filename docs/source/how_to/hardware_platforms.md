@@ -155,9 +155,9 @@ context = openmm.Context(system, integrator, platform)
 print(context.getPlatform().getName())
 ```
 
-After this preflight succeeds, run `polyzymd run` as in the CPU section above. Run a short,
-deterministic simulation and compare its energies with a known result before a
-full campaign.
+After this preflight succeeds, run `polyzymd run` as in the CPU section above. Run a short
+simulation and compare its initial potential energy with a known result, within
+a stated tolerance, before a full campaign.
 
 ## Add a supported hardware environment
 
@@ -174,7 +174,7 @@ Use this checklist when a site has a new NVIDIA driver or GPU cohort:
    Slurm template, `src/polyzymd/workflow/templates/openmm_self_resubmitting.sh.jinja`.
 6. Add script tests in `tests/workflow/test_slurm.py`.
 7. Create an explicit CUDA Context on each hardware cohort. Then run a short,
-   deterministic benchmark without CPU fallback.
+   benchmark without CPU fallback.
 8. Compare particle identity and energy behavior with an existing supported
    environment. Record the test tolerance and result.
 9. Add the verified hardware to this guide. Do not infer support from a node
