@@ -759,7 +759,18 @@ def analyze_command(
             text = report.model_dump_json(indent=2) + "\n"
             # A rerun on unchanged inputs keeps the report it made before, so
             # committing between the runs leaves nothing new to commit.
-            if not saved.is_file() or _without_commit(saved.read_text()) != _without_commit(text):
+            new = _without_commit(text)
+            old = _without_commit(saved.read_text()) if saved.is_file() else None
+            if old != new:
+                # Say so when the result itself changes, such as another --run.
+                if old is not None and {**old, "provenance": None} != {**new, "provenance": None}:
+                    shown = saved.resolve()
+                    if shown.is_relative_to(study_root):
+                        shown = shown.relative_to(study_root)
+                    click.echo(
+                        f"note: replaced the stored {shown}, which reported {old.get('metric')}",
+                        err=True,
+                    )
                 saved.write_text(text)
             # Records of replicates the study no longer lists would be read and
             # deposited; the replicates this report used stay.
@@ -772,6 +783,8 @@ def analyze_command(
                     number = folder.name.removeprefix("replicate_")
                     if number.isdigit() and int(number) not in keep:
                         shutil.rmtree(folder)
+    if recompute:
+        click.echo("note: --recompute: values recomputed from the trajectories", err=True)
     rendered = _render(report, output_format)
     click.echo(rendered)
     if output_path is not None:
