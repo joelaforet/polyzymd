@@ -1,188 +1,300 @@
-# Tutorial: Analyze a Study from Finished Simulations
+# Compare a polymer condition with water
 
-In this tutorial you analyze a study of three conditions with finished
-simulations: one without polymer and two with a polymer. You do these steps:
+In this tutorial you add a second condition to the quickstart study: Trp-cage
+with two short chains of sulfobetaine methacrylate (SBMA). You run three
+replicates of it, and then compare it with the `Water` condition in four
+analyses with one command.
 
-1. Compare the protein-polymer hydrogen bonds of the two polymer conditions.
-2. Read the result, and report another result of the same analysis.
-3. Find the stored values and the figures.
-4. Add RMSF and contacts for all three conditions.
+You learn these steps:
 
-At the end, you have comparisons with intervals, stored per-replicate results
-and figures for the study.
+1. Copy a condition with `polyzymd study add-condition --from`.
+2. Add polymer chains to its config.
+3. Run the replicates of the new condition.
+4. Run every analysis of the project with `polyzymd analyze --project`.
+5. Read the comparisons with the control, and their warnings.
 
-## What You Will Learn
+## Before you start
 
-- How to compare conditions with `polyzymd analyze NAME -c ... -c ...`
-- How to read the per-condition values and the comparisons against the control
-- How to pick another result of the same analysis with `--run`
-- What the output directory structure looks like after a successful run
+Do {doc}`first_analysis` first. This tutorial continues in its project
+folder, `~/pz_quickstart`, where the `Water` condition has three replicates.
 
-## Prerequisites
+:::{admonition} Environment Setup
+:class: tip
 
-Before starting, make sure you have:
+Run every command of this tutorial in the `build` environment. It holds
+PACKMOL, the polymer builder and the analysis tools. From the repository
+root, activate it once:
 
-- Completed production trajectories for at least three conditions (DCD format
-  in PolyzyMD's standard directory layout)
-- One `config.yaml` per condition
-- The topology written by the build: `system.prmtop`, or `solvated_system.pdb`
-  for older runs (see {doc}`../reference/data_requirements`)
-- PolyzyMD installed in a pixi environment (see {doc}`../get_started/installation`)
+```bash
+pixi shell -e build
+```
+:::
 
-If you have not run a single-condition analysis yet, complete
-{doc}`first_analysis` first.
+## Step 1: Copy the condition
 
-```{important}
-**Resource requirements:** `polyzymd analyze` loads trajectories and can
-require substantial RAM, CPU time, and scratch I/O. On shared HPC systems, run
-it inside an allocated job or interactive compute session, not on a login
-node; {doc}`../how_to/hpc_execution` shows a batch script.
+```bash
+cd ~/pz_quickstart
+polyzymd study add-condition SBMA --from Water --study trpcage
 ```
 
-## The Study We Will Analyze
+The output is:
 
-We will assume a project laid out like this:
+```
+condition SBMA: /home/me/pz_quickstart/trpcage/conditions/sbma/config.yaml, listed in study.yaml
+warning: the runs go into runs/trpcage/sbma unless you set scratch_directory in config.yaml; trajectories can use a lot of disk space, so on a cluster set scratch_directory to scratch storage
+next: commit, and run polyzymd study check
+```
+
+The copy is in `trpcage/conditions/sbma/`. `Water` is the first condition of
+the study, so it stays the control. Every other condition is compared with
+it.
+
+## Step 2: Add the polymer
+
+Open `trpcage/conditions/sbma/config.yaml`. Change the name and the
+description:
+
+```yaml
+name: trpcage_sbma
+description: Trp-cage with two SBMA 3-mers in water with NaCl
+```
+
+Add this section at the end of the file:
+
+```yaml
+polymers:
+  enabled: true
+  generation_mode: dynamic
+  type_prefix: SBMA
+  reactions:
+    initiation: default
+    polymerization: default
+    termination: default
+  monomers:
+    - label: A
+      probability: 1.0
+      name: SBMA
+      residue_name: SBM
+      smiles: "[H]C([H])=C(C(=O)OC([H])([H])C([H])([H])[N+](C([H])([H])[H])(C([H])([H])[H])C([H])([H])C([H])([H])C([H])([H])S(=O)(=O)[O-])C([H])([H])[H]"
+  length: 3
+  count: 2
+  packing:
+    padding: 0.5
+```
+
+The section asks for two chains of three SBMA monomers. `dynamic` builds each
+chain from the SMILES of the monomer, with the ATRP reaction templates that
+ship with PolyzyMD. `residue_name: SBM` names the monomers in the topology.
+`packing.padding: 0.5` places the chains within 0.5 nm of the protein
+surface, so they touch the protein within the few picoseconds of this
+tutorial. A real study uses the default, 2.0 nm, and a long simulation. For
+every key, see {doc}`../how_to/dynamic_polymers`.
+
+Check the config:
+
+```bash
+polyzymd validate -c trpcage/conditions/sbma/config.yaml
+```
+
+The summary now lists the polymer:
+
+```
+Summary:
+  Name: trpcage_sbma
+  Engine: openmm
+  Enzyme: trpcage
+  Substrate: None (apo simulation)
+  Polymers: SBMA
+    Count: 2
+    Length: 3
+    Monomer A: 100.0%
+  Co-solvents: none
+  Temperature: 300.0 K
+  Pressure: 1.0 atm
+```
+
+The build writes the polymer fragments into `.polymer_cache/` in the current
+folder. Keep it out of git, and commit the new condition:
+
+```bash
+echo ".polymer_cache/" >> .gitignore
+git add -A
+git commit -m "Add the SBMA condition"
+```
+
+## Step 3: Run three replicates
+
+```bash
+polyzymd run -c trpcage/conditions/sbma/config.yaml -r 1-3
+```
+
+For each replicate, the build draws the chains, places them around the
+protein with PACKMOL, and then adds water and ions. The first build also
+makes the polymer fragments. The three runs take about seven minutes. The
+last line is:
+
+```
+All 3 replicate(s) completed successfully.
+```
+
+Check that the study finds the runs of both conditions:
+
+```bash
+polyzymd study check trpcage
+```
+
+The condition lines are:
+
+```
+control Water: replicates [1, 2, 3] under /home/me/pz_quickstart/trpcage/conditions/water/../../../runs/trpcage/water (from config)
+condition SBMA: replicates [1, 2, 3] under /home/me/pz_quickstart/trpcage/conditions/sbma/../../../runs/trpcage/sbma (from config)
+```
+
+## Step 4: Analyze the project
+
+Open `project.yaml` and list two more analyses: the polymer contacts and the
+protein-polymer hydrogen bonds.
+
+```yaml
+analyses:
+  rg: {}
+  rmsf: {}
+  contacts: {}
+  hydrogen_bonds: {}
+```
+
+Commit, and run every analysis of the project:
+
+```bash
+git add -A
+git commit -m "Add the contacts and hydrogen_bonds analyses"
+polyzymd analyze --project .
+```
+
+The command runs each analysis on every replicate of both conditions. It
+takes less than a minute. The output is:
+
+```
+log: /home/me/pz_quickstart/logs/polyzymd-analyze-20261006-210749-pid22351.log
+== study trpcage
+== rg
+# polyzymd analyze rg  metric mean_rg  unit A  eq 0ns  conditions 2  replicates 3,3  protocol rg/2
+Water  n 3  mean 7.315  sem 0.03064  ci95 7.183 to 7.447  values 7.254, 7.346, 7.346  replicates 1, 2, 3  g 1, 1, 1  n_eff 4, 4, 4  eq_detected 0.001 ns
+SBMA  n 3  mean 7.381  sem 0.07171  ci95 7.073 to 7.69  values 7.269, 7.515, 7.359  replicates 1, 2, 3  g 1, 1, 1  n_eff 4, 4, 4  eq_detected 0.001 ns
+Water vs SBMA  delta +0.06592  ci95 -0.1982 to 0.33  p 0.466  p_adj 0.466  test welch_t  correction BH  family 1  d 0.6903  not_significant
+warning: condition Water, condition SBMA: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected
+verdict: no significant difference in mean_rg between Water and SBMA (delta +0.06592 A, 95% CI -0.1982 to 0.33, p_adj 0.466, p 0.466, n 3 vs 3)
+
+== rmsf
+# polyzymd analyze rmsf  metric core_rmsf  unit A  run core_rmsf  eq 0ns  conditions 2  replicates 3,3  protocol rmsf/2
+Water  n 3  mean 0.3463  sem 0.01661  ci95 0.2748 to 0.4178  values 0.3669, 0.3585, 0.3134
+SBMA  n 3  mean 0.3687  sem 0.03553  ci95 0.2159 to 0.5216  values 0.3071, 0.4302, 0.369
+Water vs SBMA  delta +0.02248  ci95 -0.1066 to 0.1515  p 0.6089  p_adj 0.6089  test welch_t  correction BH  family 1  d 0.4679  not_significant
+verdict: no significant difference in core_rmsf between Water and SBMA (delta +0.02248 A, 95% CI -0.1066 to 0.1515, p_adj 0.6089, p 0.6089, n 3 vs 3)
+
+== contacts
+# polyzymd analyze contacts  metric coverage  unit none  run coverage  eq 0ns  conditions 2  replicates 3,3  protocol contacts/2
+Water  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0
+SBMA  n 3  mean 0.1  sem 0.02887  ci95 -0.02421 to 0.2242  values 0.1, 0.15, 0.05
+Water vs SBMA  delta +0.1  ci95 -0.02421 to 0.2242  p 0.07418  p_adj 0.07418  test welch_t  correction BH  family 1  d 2.828  not_significant
+warning: condition Water has the same coverage in every replicate, so its interval is not estimable
+warning: the 95 percent interval of condition SBMA extends past the bounds 0 to 1 of coverage, where a t interval is not reliable
+warning: contacts: polymer_selection 'chainid C' matched no atoms in Water replicate 1, 2, 3, so contact there is 0 (none of those atoms to touch). Check the selection if that condition has them.
+verdict: no significant difference in coverage between Water and SBMA (delta +0.1, 95% CI -0.02421 to 0.2242, p_adj 0.07418, p 0.07418, n 3 vs 3; little power: Water has the same value in every replicate)
+
+== hydrogen_bonds
+# polyzymd analyze hydrogen_bonds  metric protein_polymer_mean_hbonds  unit none  run protein_polymer_mean_hbonds  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2
+Water  n 3  mean 0  sem 0  ci95 na  values 0, 0, 0
+SBMA  n 3  mean 1.083  sem 0.5069  ci95 -1.098 to 3.264  values 2, 0.25, 1
+Water vs SBMA  delta +1.083  ci95 -1.098 to 3.264  p 0.166  p_adj 0.166  test welch_t  correction BH  family 1  d 1.745  not_significant
+warning: condition Water has the same protein_polymer_mean_hbonds in every replicate, so its interval is not estimable
+warning: the 95 percent interval of condition SBMA extends past the bounds 0 to inf of protein_polymer_mean_hbonds, where a t interval is not reliable
+warning: hydrogen_bonds: second group 'chainid C' matched no atoms in Water replicate 1, 2, 3, so the hydrogen-bond count there is 0 (none of those atoms to touch). Check the selection if that condition has them.
+verdict: no significant difference in protein_polymer_mean_hbonds between Water and SBMA (delta +1.083, 95% CI -1.098 to 3.264, p_adj 0.166, p 0.166, n 3 vs 3; little power: Water has the same value in every replicate)
+```
+
+Your values differ, because each run adds up the forces in a different
+order.
+
+## Step 5: Read the comparisons
+
+Each analysis prints one line per condition, then one comparison line,
+`Water vs SBMA`. The comparison gives the difference of the means (`delta`)
+with its 95 % interval, the p value of Welch's t test, the p value after the
+{term}`Benjamini-Hochberg` correction (`p_adj`) and the effect size `d`. The
+last word says whether the difference is significant.
+
+- **rg and rmsf.** The radius of gyration and the fluctuation of Trp-cage do
+  not differ between the conditions.
+- **contacts.** `coverage` is the fraction of protein residues that the
+  polymer touches on at least one frame. In `SBMA`, the chains touch 5 % to
+  15 % of the residues. `Water` has no polymer, so its coverage is 0.
+- **hydrogen_bonds.** In `SBMA`, the chains form about one hydrogen bond with
+  the protein per frame.
+
+Read every `warning:` line. Each says what limits the result:
+
+- `matched no atoms in Water` says that the control has no chain C, so its
+  value is 0 by definition. The warning asks you to check that this is
+  expected. Here it is.
+- `the same ... in every replicate` says that `Water` has no variance. The
+  test then has little power, and the verdict says so.
+- `extends past the bounds` says that a t interval does not suit the values,
+  such as a fraction close to 0.
+- `fewer than 20 effective samples` comes from the four frames of each
+  replicate. A real study has many more.
+
+With three replicates of four frames, no difference here is significant. The
+numbers show the steps, not a result about SBMA.
+
+## Step 6: Find the results
+
+Each analysis has its folder in `trpcage/results/`:
 
 ```text
-my_enzyme_study/
-├── noPoly_enzyme_DMSO/
-│   ├── config.yaml
-│   └── scratch/
-├── SBMA_100_enzyme_DMSO/
-│   ├── config.yaml
-│   └── scratch/
-└── EGMA_100_enzyme_DMSO/
-    ├── config.yaml
-    └── scratch/
+trpcage/results/
+├── rg/
+├── rmsf/
+├── contacts/
+│   ├── report.json
+│   ├── figures/contacts/
+│   │   ├── contacts_coverage_comparison.png
+│   │   ├── contacts_contact_fraction_profile.png
+│   │   ├── contacts_contact_fraction_difference.png
+│   │   └── contacts_class_bars.png
+│   └── polyzymd_results/residue_occlusion/
+└── hydrogen_bonds/
+    ├── report.json
+    ├── figures/hydrogen_bonds/
+    │   └── hbonds_protein_polymer_mean_hbonds_comparison.png
+    └── polyzymd_results/hydrogen_bonds_protein_polymer/
 ```
 
-The `scratch/` directories may be symlinks to large trajectory storage on your
-cluster. PolyzyMD resolves those paths through each condition's `config.yaml`.
+Each `polyzymd_results/` folder holds one folder per condition, with one
+folder per replicate. Each replicate folder holds the values and the
+`record.json` that says how they were made.
 
-<!-- IMAGE OPPORTUNITY: Add a campaign directory-tree diagram showing the three
-conditions plus the results folder. -->
-
-## Step 1: Compare the Hydrogen Bonds
-
-From the study root, make a folder for the results and run the comparison
-there. The question of this step is which polymer forms more hydrogen bonds
-with the protein, so compare the two polymer conditions. The first `-c` is the
-control, and `--label` names the conditions in the same order:
+To compare the residues one by one, report another result of contacts:
 
 ```bash
-cd my_enzyme_study
-mkdir polymer_stabilization_study
-cd polymer_stabilization_study
-pixi run -e analysis polyzymd analyze hydrogen_bonds \
-  -c ../SBMA_100_enzyme_DMSO/config.yaml \
-  -c ../EGMA_100_enzyme_DMSO/config.yaml \
-  --label "100% SBMA" --label "100% EGMA" \
-  --replicates 1-3 --eq 10ns
+polyzymd analyze contacts --study trpcage --run contact_fraction_residues
 ```
 
-The command discards the first 10 ns of every replicate and, on every
-production frame, counts the hydrogen bonds between the protein (`chainid A`)
-and the polymer (`chainid C`) with MDAnalysis `HydrogenBondAnalysis`, a donor
-within 3.5 Å of the acceptor and a donor-hydrogen-acceptor angle of at least
-150°. It prints one line per condition with the mean number of hydrogen bonds
-per frame over the replicates, its 95% interval and every replicate value,
-one line comparing 100% EGMA with 100% SBMA by Welch's t test, and a
-`verdict:` line. Every `warning:` line is part of the result.
+It reuses the stored values. Its comparison line is:
 
-## Step 2: Pick Another Result
-
-`all_runs` in the JSON report (`--format json`) lists every result of the
-analysis. Pick the per-residue occupancy, the fraction of frames in which
-each protein residue has a hydrogen bond to the polymer:
-
-```bash
-pixi run -e analysis polyzymd analyze hydrogen_bonds \
-  -c ../SBMA_100_enzyme_DMSO/config.yaml \
-  -c ../EGMA_100_enzyme_DMSO/config.yaml \
-  --label "100% SBMA" --label "100% EGMA" \
-  --replicates 1-3 --eq 10ns \
-  --run protein_polymer_residues
+```
+Water vs SBMA  labels 20  tested 5  family 5  test welch_t  correction BH  lower 0  higher 0
 ```
 
-The comparison is made at every residue, with the Benjamini-Hochberg
-correction over all of them; see {doc}`../how_to/hydrogen_bonds` for every
-result and its figures.
+Of the 20 residues, 5 have values that vary, so 5 are tested. None differs
+after the correction. A `warning:` line follows for each residue whose test
+or interval is limited. The JSON report (`--format json`) holds every row.
 
-## Step 3: Check the Outputs
+## What you did
 
-At this point you should have:
-
-```text
-polymer_stabilization_study/
-├── polyzymd_results/
-│   ├── hydrogen_bonds_protein_polymer/
-│   │   ├── 100_SBMA/
-│   │   │   ├── replicate_1/
-│   │   │   │   ├── record.json
-│   │   │   │   └── values.npz
-│   │   │   └── ...
-│   │   └── 100_EGMA/
-│   └── residue_hbond_occupancy_protein_polymer/
-│       └── ...
-└── figures/
-    └── hydrogen_bonds/
-        ├── hbonds_protein_polymer_mean_hbonds_comparison.png
-        ├── hbonds_protein_polymer_residues_profile.png
-        └── hbonds_protein_polymer_residues_difference.png
-```
-
-Each folder name is the result or condition label with every run of
-characters other than letters, digits, `.`, `+` and `-` replaced by `_`.
-`record.json` holds what was measured and on which inputs, and `values.npz`
-the replicate's values. A later run with the same settings reads them back
-instead of loading the trajectories again.
-
-<!-- IMAGE OPPORTUNITY: Add one example comparison figure here so the tutorial
-has a visual payoff immediately before the final success state. -->
-
-## Step 4: Add RMSF and Contacts for the Same Study
-
-RMSF takes all three conditions, with the no-polymer condition as the
-control:
-
-```bash
-pixi run -e analysis polyzymd analyze rmsf \
-  -c ../noPoly_enzyme_DMSO/config.yaml \
-  -c ../SBMA_100_enzyme_DMSO/config.yaml \
-  -c ../EGMA_100_enzyme_DMSO/config.yaml \
-  --label "No Polymer" --label "100% SBMA" --label "100% EGMA" \
-  --replicates 1-3 --eq 10ns
-```
-
-The report compares each condition's core RMSF with the control, and the
-figures go to `figures/rmsf/`. See {doc}`../how_to/analysis_rmsf_quickstart`
-for the reference, the core and the per-residue comparison.
-
-Polymer-protein contacts run the same way, over the two conditions that have a
-polymer. The command below compares the fraction of protein residues in contact
-with the polymer on at least one frame, where a residue is in contact when the
-polymer occludes its solvent-accessible surface; `--run mean_lifetime` reports
-how long contacts last instead:
-
-```bash
-pixi run -e analysis polyzymd analyze contacts \
-  -c ../SBMA_100_enzyme_DMSO/config.yaml \
-  -c ../EGMA_100_enzyme_DMSO/config.yaml \
-  --label "100% SBMA" --label "100% EGMA" \
-  --replicates 1-3 --eq 10ns
-```
-
-See {doc}`../how_to/analysis_contacts_quickstart` for the other results and the
-distance method.
-
-## What to Do Next
-
-- Use [How to Compare Simulation Conditions](../how_to/analysis_compare_conditions.md) for
-  a shorter operational version of this workflow
-- Use [Get a validated number with one command](../how_to/analysis_agent_protocol.md)
-  to read every line of the report
-- Explore metric-specific guides:
-  - [Run RMSF Analysis](../how_to/analysis_rmsf_quickstart.md)
-  - [Run Contacts Analysis](../how_to/analysis_contacts_quickstart.md)
-  - [Run Distance Analysis](../how_to/analysis_distances_quickstart.md)
-  - [Measure a Catalytic Triad on the Analysis API](../how_to/analysis_triad_quickstart.md)
+You added a polymer condition to a study, ran it, and compared it with the
+control in four analyses with one command. Next, measure how much of the
+protein surface the polymer covers in {doc}`sasa_analysis`. For the settings
+of each analysis, see {doc}`../how_to/analysis_contacts_quickstart` and
+{doc}`../how_to/hydrogen_bonds`. For every line of the report, see
+{doc}`../how_to/analysis_agent_protocol`.

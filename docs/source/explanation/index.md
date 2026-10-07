@@ -68,6 +68,5 @@ analysis_hydrogen_bonds_verification
 
 simulation_safeguards
 residue_assignment
-architecture
 colored_logging
 ```

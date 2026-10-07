@@ -564,7 +564,7 @@ restraints:
   - type: "flat_bottom"                  # Restraint type
     name: "substrate_active_site"        # Identifier
     atom1:
-      selection: "resid 77 and name OG"  # First atom selection
+      selection: "resid 76 and name OG"  # First atom selection
       description: "Catalytic serine"    # Optional description
     atom2:
       selection: "resname LIG and name C1"
@@ -630,8 +630,9 @@ simulation_phases:
   
 ```
 
-PolyzyMD requires staged equilibration. Use one or more entries in
-`equilibration_stages` even for minimal workflows.
+Equilibration cannot be skipped: list at least one stage in
+`equilibration_stages`, with a duration above 0 ns. Any duration above 0 is
+accepted. The quickstart uses one stage of 0.002 ns.
 
 ### Minimization (`simulation_phases.minimization`)
 

@@ -21,7 +21,7 @@ src/polyzymd/
 ├── analyses/      # study API, analysis functions and the analyze protocol
 ├── builders/      # molecular system construction
 ├── cli/           # command-line entry points
-├── config/        # simulation and comparison configuration
+├── config/        # simulation configuration
 ├── core/          # shared domain types
 ├── data/          # bundled package data
 ├── engines/       # engine-specific integration layer
@@ -43,8 +43,7 @@ contributors change one phase without accidentally coupling it to another.
 
 ### Configuration describes intent
 
-`config/` holds schema and loading logic for YAML configuration, including
-comparison configuration. It validates what a study should do before lower-level
+`config/` holds schema and loading logic for YAML configuration. It validates what a study should do before lower-level
 builders or analyses act on it.
 
 ### Builders create simulation-ready systems
@@ -220,7 +219,7 @@ written the same way.
 - **CLI commands:** `src/polyzymd/cli/`
 
 For the chain-ID convention used by selections and interpretation, see
-{doc}`residue_assignment`.
+{doc}`../explanation/residue_assignment`.
 
 ## A practical mental model
 
@@ -241,7 +240,7 @@ into module-level details or API reference pages.
 
 - contributor workflows: {doc}`../contributor_guide/contributing`
 - adding an analysis: {doc}`../contributor_guide/adding_an_analysis`
-- chain conventions: {doc}`residue_assignment`
+- chain conventions: {doc}`../explanation/residue_assignment`
 - SLURM usage: {doc}`../how_to/hpc_slurm`
 - API reference: {doc}`../api/index`
 

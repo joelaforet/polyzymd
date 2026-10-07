@@ -109,14 +109,14 @@ def check_command(path: Path, production: bool = False) -> None:
         where = f"{config.output.effective_scratch_directory} (from {source})"
         if not found:
             click.echo(
-                f"{role} {label}: no runs found under {where}; stored results can still be read, "
+                f"{role} {label}: no replicates found under {where}; stored results can still be read, "
                 "and polyzymd study locate DIR finds downloaded runs"
             )
             continue
         missing = sorted(set(protocol.replicates or []) - set(found))
         factors = protocol.factors.get(label)
         click.echo(
-            f"{role} {label}: runs {found} under {where}"
+            f"{role} {label}: replicates {found} under {where}"
             + (f"; factors {', '.join(f'{k}={v}' for k, v in factors.items())}" if factors else "")
             + (f"; missing replicates {missing}" if missing else "")
             + (_production_summary(label, config_path, protocol) if production else "")
@@ -329,7 +329,7 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
         )
         located[label] = best
         others = f" ({len(parents) - 1} other folders also hold some)" if len(parents) > 1 else ""
-        click.echo(f"{label}: runs {parents[best]} under {best}{others}")
+        click.echo(f"{label}: replicates {parents[best]} under {best}{others}")
         for line in _check_against_manifest(protocol.root, label, best, verify):
             click.echo(line)
             if line.startswith("error"):

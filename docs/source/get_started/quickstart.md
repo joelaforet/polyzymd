@@ -252,5 +252,6 @@ and the hardware change.
   {doc}`../how_to/polymers`.
 - **More studies.** Add a study for another protein with
   `polyzymd project add-study LABEL`. See {doc}`../how_to/project`.
-- **More analyses.** See {doc}`../how_to/analysis_chooser` and
-  {doc}`../tutorials/first_analysis`.
+- **More analyses.** The next lesson, {doc}`../tutorials/first_analysis`,
+  runs more replicates and measures their RMSF. See also
+  {doc}`../how_to/analysis_chooser`.

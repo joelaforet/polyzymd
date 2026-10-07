@@ -262,7 +262,7 @@ class TestCheck:
         assert _analyze("rg", "--study", str(study_dir)).exit_code == 0
         result = CliRunner().invoke(cli, ["study", "check", str(study_dir)])
         assert result.exit_code == 0, result.output
-        assert "control No polymer: runs [1, 2]" in result.output
+        assert "control No polymer: replicates [1, 2]" in result.output
         assert "analysis rg: selection=all; window eq 0.25ns; stored results" in result.output
         assert (
             "analysis rg as rg_first: selection=index 0; window eq 0.25ns; no stored results"
@@ -274,7 +274,7 @@ class TestCheck:
         shutil.rmtree(tmp_path / "data")
         result = CliRunner().invoke(cli, ["study", "check", str(study_dir)])
         assert result.exit_code == 0, result.output
-        assert "no runs found" in result.output
+        assert "no replicates found" in result.output
 
     def test_bad_file_exits_2(self, tmp_path: Path) -> None:
         _write(

@@ -1075,7 +1075,7 @@ directory) without loading any trajectory, and prints:
 | system | `system: <description>`, when the study has one |
 | project | `project <project.yaml> as study <label>`, when a project lists the study |
 | names | `structure <name>: <path>` and `region <name>: <selection>`, one line each |
-| condition | `control\|condition <label>: runs <numbers> under <directory> (from data.local.yaml\|config)`, with `; production <ns>` (a range when the replicates differ) under `--production`, or `no runs found under <directory> ...` |
+| condition | `control\|condition <label>: replicates <numbers> under <directory> (from data.local.yaml\|config)`, with `; production <ns>` (a range when the replicates differ) under `--production`, or `no replicates found under <directory> ...` |
 | analysis | `analysis <run>: <settings>; stored results in <folder>[ with its report]`, or `no stored results`; for the study's own function, `analysis <run> (<file>:<function>, <kind>)`, after importing it |
 | git | `git: commit <sha>; inputs committed`, `git: commit <sha>; <n> uncommitted inputs: <first five paths> and <m> more`, or `git: not a repository` |
 | metadata | `metadata: complete`, or `metadata: <n> gaps for publishing; ...` |

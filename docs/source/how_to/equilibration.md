@@ -15,9 +15,9 @@ Multi-stage equilibration is useful when:
 
 ## Basic rule
 
-PolyzyMD requires `simulation_phases.equilibration_stages`.
-
-Even if your protocol is minimal, represent it as one or more named stages.
+PolyzyMD requires `simulation_phases.equilibration_stages`. Equilibration
+cannot be skipped: list at least one stage, with a duration above 0 ns. Any
+duration above 0 is accepted. The quickstart uses one stage of 0.002 ns.
 
 ## What happens before stage 1: minimization
 

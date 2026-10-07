@@ -113,21 +113,17 @@ PolyzyMD therefore makes wholeness an explicit choice at load time through
 `pbc_policy`, records the choice in provenance, and refuses to unwrap a topology
 that has no bonds, because unwrapping walks the bond graph.
 
-Alignment does not belong anywhere in a distance calculation, for two reasons.
-The first is that a distance is invariant under rotation and translation, so
-removing rigid-body motion cannot change a correct answer, and paying for a full
-in-memory copy of the trajectory to do it buys nothing. The second is that it
-was actively harmful here. MDAnalysis applies the minimum image convention by
-building box vectors from the stored `(a, b, c, alpha, beta, gamma)` and
-assuming those vectors describe the lattice of the coordinates it is handed.
-Aligning in memory rotates every coordinate but copies the box unchanged, so the
-two no longer agree. For a pair separated by less than half a box length in
-every Cartesian component the wrapping is a no-op and the answer survives, which
-is why catalytic-triad distances looked fine. For a long pair, such as a domain
-center of mass against a polymer center of mass in a 90 Angstrom box, a
-component can be folded against the wrong lattice vector and the reported
-distance is wrong. Distances are therefore measured on the coordinates as the
-trajectory stores them.
+Distances are measured on the coordinates as the trajectory stores them,
+without alignment. A distance does not change under rotation or translation,
+so alignment cannot improve it, and an in-memory aligned copy of the
+trajectory costs memory. Alignment can also make a distance wrong. MDAnalysis
+applies the minimum image convention with box vectors built from the stored
+`(a, b, c, alpha, beta, gamma)`, and assumes that these vectors match the
+coordinates. An in-memory alignment rotates every coordinate but keeps the
+box, so the two no longer match. A pair closer than half a box length in each
+Cartesian component is not affected. A long pair, such as the center of mass
+of a domain and that of a polymer in a 90 Å box, can be folded against the
+wrong lattice vector.
 
 ### References
 

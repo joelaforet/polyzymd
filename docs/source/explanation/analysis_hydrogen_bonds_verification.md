@@ -53,6 +53,18 @@ and polymer atoms, including His NE2 (unprotonated), Met SD, and every
 carbonyl, carboxylate, hydroxyl, ether, ester and sulfonate oxygen. The
 chosen atoms are recorded in every report under `provenance.settings`.
 
+## Why pairs are named by residue and monomer type
+
+In `<s>_pairs`, a standard amino acid is named by its residue ID and any other
+residue by its residue name. So `149-SBM` is residue 149 with any SBM monomer,
+whichever chain and monomer it is. The polymers sample the protein surface
+freely, and the replicates of a copolymer hold different chains. The protein
+residue and the monomer type are therefore what line up between replicates and
+conditions. The value of a pair in a replicate is the fraction of its frames
+with at least one such bond. A pair that forms in one replicate but never in
+another has the value 0 in the other. This is a measured fraction, not a
+missing one.
+
 ## What the tests check
 
 `tests/analyses/test_hydrogen_bonds_functions.py` checks, on small synthetic

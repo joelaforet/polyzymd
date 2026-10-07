@@ -26,7 +26,7 @@ restraints:
   - type: "flat_bottom"
     name: "substrate_active_site"
     atom1:
-      selection: "protein and resid 77 and name OG"
+      selection: "protein and resid 76 and name OG"
       description: "Catalytic serine oxygen"
     atom2:
       selection: "resname LIG and name C1"
@@ -48,7 +48,7 @@ PolyzyMD uses MDAnalysis-style selections. The most useful selectors are:
 
 | Keyword | Meaning | Example |
 |---------|---------|---------|
-| `resid` | residue number | `resid 77` |
+| `resid` | residue number | `resid 76` |
 | `resname` | residue name | `resname LIG` |
 | `name` | atom name | `name OG` |
 | `pdbindex` | Position in the built system, counted from 1: the PDB ATOM serial PolyzyMD writes. Analyses read it the same way. | `pdbindex 2740` |
@@ -59,7 +59,7 @@ Combine them with `and` or `or` as needed.
 
 ```{warning}
 Always make protein selections chain-aware enough to avoid accidental matches.
-`protein and resid 77 and name OG` is safer than `resid 77 and name OG`.
+`protein and resid 76 and name OG` is safer than `resid 76 and name OG`.
 ```
 
 ```{important}
@@ -107,7 +107,7 @@ restraints:
   - type: "flat_bottom"
     name: "substrate_catalytic"
     atom1:
-      selection: "protein and resid 77 and name OG"
+      selection: "protein and resid 76 and name OG"
     atom2:
       selection: "resname LIG and name C1"
     distance: 3.5
@@ -137,7 +137,7 @@ restraints:
   - type: "flat_bottom"
     name: "optional_restraint"
     atom1:
-      selection: "protein and resid 77 and name OG"
+      selection: "protein and resid 76 and name OG"
     atom2:
       selection: "resname LIG and name C1"
     distance: 4.0

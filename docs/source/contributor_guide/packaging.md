@@ -147,6 +147,34 @@ Current AmberTools builds conflict with that stack, so document charging
 workflows as NAGL/OpenFF or pre-charged-molecule workflows unless a dedicated
 AmberTools/AM1-BCC environment is designed in response to a user issue.
 
+(add-hardware-environment)=
+### Add a supported hardware environment
+
+Use this checklist when a site has a new NVIDIA driver or GPU cohort:
+
+1. Record the node, GPU model, driver, maximum CUDA version, and compute
+   capability from an allocated node.
+2. Add a named rich platform to the `workspace.platforms` list in `pixi.toml`.
+3. Add or update a simulation feature, environment, and solve group in
+   `pixi.toml`. Keep the OpenMM version fixed for an active campaign.
+4. Regenerate `pixi.lock` with Pixi 0.72.2 or newer. Install the environment on
+   an allocated node.
+5. Add the validated driver threshold and environment name in the OpenMM
+   Slurm template, `src/polyzymd/workflow/templates/openmm_self_resubmitting.sh.jinja`.
+6. Add script tests in `tests/workflow/test_slurm.py`.
+7. Create an explicit CUDA Context on each hardware cohort. Then run a short,
+   benchmark without CPU fallback.
+8. Compare particle identity and energy behavior with an existing supported
+   environment. Record the test tolerance and result.
+9. Add the verified hardware to {doc}`../how_to/hardware_platforms`. Do not infer support from a node
+   name or a CUDA toolkit module.
+
+To add a reusable scheduler preset, edit `SlurmConfig.from_preset()` and
+`PRESET_DEFAULT_PIXI_ENV` in `src/polyzymd/workflow/slurm.py`. Assign the
+validated environment as the preset default. Add its CLI choice and tests. Use
+CLI overrides when the difference is only an account, partition, QoS,
+constraint, or node selection.
+
 ## Lazy imports for heavy dependencies
 
 PolyzyMD keeps package imports lightweight by importing heavy dependencies only
@@ -238,4 +266,4 @@ For a normal version bump:
 - {doc}`setup` — contributor environment setup
 - {doc}`contributing` — contribution workflow and review expectations
 - {doc}`../get_started/installation` — user installation guide
-- {doc}`../explanation/architecture` — architecture overview
+- {doc}`architecture` — architecture overview

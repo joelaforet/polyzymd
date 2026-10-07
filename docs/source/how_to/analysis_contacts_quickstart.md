@@ -53,6 +53,17 @@ Before you run the analysis, check these points:
 
 ## From the command line
 
+In a {term}`study`, give the study folder. The study names the conditions,
+the control and the equilibration window. The results go to
+`<study>/results/contacts/`:
+
+```bash
+polyzymd analyze contacts --study my_study
+```
+
+For a quick look without a study, give the `config.yaml` of each condition
+instead. The results then go to the current folder:
+
 ```bash
 polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml \
   --label "SBMA 50%" --label "SBMA 100%" --eq 200ns --stride 10
@@ -128,7 +139,7 @@ compares how much SBMA buries the active site in two polymer conditions:
 
 ```bash
 polyzymd analyze contacts -c SBMA50/config.yaml -c SBMA100/config.yaml --eq 200ns \
-  --stride 10 --set "regions={active_site: resid 77 or resid 133 or resid 156}" \
+  --stride 10 --set "regions={active_site: resid 76 or resid 132 or resid 155}" \
   --run active_site_contact_fraction
 ```
 

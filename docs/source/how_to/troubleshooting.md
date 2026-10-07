@@ -191,7 +191,7 @@ close, so the build stops.
 A contact between half the tolerance and the full tolerance gives only a
 warning. Minimization removes it.
 
-### `ValueError: No atoms match selection: 'resid 77 and name OG'`
+### `ValueError: No atoms match selection: 'resid 76 and name OG'`
 
 A restraint selection matches no atom.
 
