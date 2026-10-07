@@ -2,162 +2,24 @@
  "agent": "# polyzymd analyze hydrogen_bonds  metric protein_polymer_mean_hbonds  unit none  run protein_polymer_mean_hbonds  eq 0ns  conditions 2  replicates 3,3  protocol hydrogen_bonds/2\nA  n 3  mean 0.6944  sem 0.1211  ci95 0.1735 to 1.215  values 0.6667, 0.5, 0.9167\nB  n 3  mean 0.8889  sem 0.07349  ci95 0.5727 to 1.205  values 1, 0.9167, 0.75\nA vs B  delta +0.1944  ci95 -0.2342 to 0.623  p 0.2557  p_adj 0.2557  test welch_t  correction BH  family 1  d 1.121  not_significant\nverdict: no significant difference in protein_polymer_mean_hbonds between A and B (delta +0.1944, 95% CI -0.2342 to 0.623, p_adj 0.2557, p 0.2557, n 3 vs 3)\n\n",
  "json": {
   "all_metrics": [],
-  "all_runs": [
-   "protein_polymer_mean_hbonds",
-   "protein_polymer_mean_residue_pairs",
-   "protein_polymer_any_fraction",
-   "protein_polymer_mean_lifetime",
-   "protein_polymer_lifetime_events",
-   "protein_polymer_censored_fraction",
-   "protein_polymer_residues",
-   "protein_polymer_pairs"
-  ],
+  "all_runs": ["protein_polymer_mean_hbonds","protein_polymer_mean_residue_pairs","protein_polymer_any_fraction","protein_polymer_mean_lifetime","protein_polymer_lifetime_events","protein_polymer_censored_fraction","protein_polymer_residues","protein_polymer_pairs"],
   "analysis": "hydrogen_bonds",
-  "conditions": [
-   {
-    "ci95": [
-     0.173477,
-     1.21541
-    ],
-    "ci_method": "student_t",
-    "entry": null,
-    "eq_detected_frame": [],
-    "eq_detected_ns": [],
-    "label": "A",
-    "mean": 0.694444,
-    "n_effective": [],
-    "n_replicates": 3,
-    "replicate_values": [
-     0.666667,
-     0.5,
-     0.916667
-    ],
-    "replicates": [
-     1,
-     2,
-     3
-    ],
-    "sem": 0.121081,
-    "statistical_inefficiency": []
-   },
-   {
-    "ci95": [
-     0.572674,
-     1.2051
-    ],
-    "ci_method": "student_t",
-    "entry": null,
-    "eq_detected_frame": [],
-    "eq_detected_ns": [],
-    "label": "B",
-    "mean": 0.888889,
-    "n_effective": [],
-    "n_replicates": 3,
-    "replicate_values": [
-     1.0,
-     0.916667,
-     0.75
-    ],
-    "replicates": [
-     1,
-     2,
-     3
-    ],
-    "sem": 0.0734931,
-    "statistical_inefficiency": []
-   }
-  ],
+  "conditions": [{"ci95":[0.173477,1.21541],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"A","mean":0.694444,"n_effective":[],"n_replicates":3,"replicate_values":[0.666667,0.5,0.916667],"replicates":[1,2,3],"sem":0.121081,"statistical_inefficiency":[]},{"ci95":[0.572674,1.2051],"ci_method":"student_t","entry":null,"eq_detected_frame":[],"eq_detected_ns":[],"label":"B","mean":0.888889,"n_effective":[],"n_replicates":3,"replicate_values":[1.0,0.916667,0.75],"replicates":[1,2,3],"sem":0.0734931,"statistical_inefficiency":[]}],
   "equilibration": "0ns",
   "frames_per_replicate": {
-   "A": [
-    12,
-    12,
-    12
-   ],
-   "B": [
-    12,
-    12,
-    12
-   ]
+   "A": [12,12,12],
+   "B": [12,12,12]
   },
   "metric": "protein_polymer_mean_hbonds",
-  "pairwise": [
-   {
-    "a": "A",
-    "b": "B",
-    "cohens_d": 1.1209,
-    "correction": "BH",
-    "delta": 0.194444,
-    "delta_ci95": [
-     -0.234156,
-     0.623045
-    ],
-    "direction": "no significant change",
-    "entry": null,
-    "family_size": 1,
-    "hedges_g": 0.896718,
-    "p": 0.255736,
-    "p_adjusted": 0.255736,
-    "significant": false,
-    "test": "welch_t",
-    "testable": true
-   }
-  ],
+  "pairwise": [{"a":"A","b":"B","cohens_d":1.1209,"correction":"BH","delta":0.194444,"delta_ci95":[-0.234156,0.623045],"direction":"no significant change","entry":null,"family_size":1,"hedges_g":0.896718,"p":0.255736,"p_adjusted":0.255736,"significant":false,"test":"welch_t","testable":true}],
   "problems": [],
   "protocol_version": "2",
   "provenance": {
-   "config_hashes": {
-    "A": "c4429a507b8cea42",
-    "B": "c4429a507b8cea42"
-   },
+   "config_hashes": {"A":"c4429a507b8cea42","B":"c4429a507b8cea42"},
    "mdanalysis_version": "<masked>",
-   "output_paths": {
-    "results": "<out>/polyzymd_results/hydrogen_bonds_protein_polymer"
-   },
+   "output_paths": {"results":"<out>/polyzymd_results/hydrogen_bonds_protein_polymer"},
    "polyzymd_version": "<masked>",
-   "settings": {
-    "acceptors": null,
-    "d_a_cutoff": 3.5,
-    "d_h_a_angle_cutoff": 150.0,
-    "donors": null,
-    "groups": {
-     "polymer": "chainid C",
-     "protein": "chainid A"
-    },
-    "hbond_atoms": {
-     "acceptors": {
-      "EGM O2": 1,
-      "GLN O": 1,
-      "SBM O1": 1,
-      "SER OG": 1,
-      "THR OG1": 1
-     },
-     "donors": {
-      "EGM O2": 1,
-      "SER OG": 1,
-      "THR OG1": 1
-     },
-     "hydrogens": 3
-    },
-    "hydrogens": null,
-    "lifetime_key": "residue",
-    "summaries": {
-     "protein_polymer": {
-      "between": [
-       "protein",
-       "polymer"
-      ]
-     }
-    },
-    "summary": {
-     "groups": [
-      "chainid A",
-      "chainid C"
-     ],
-     "name": "protein_polymer"
-    },
-    "tolerance_ps": 0.0
-   },
+   "settings": {"acceptors":null,"d_a_cutoff":3.5,"d_h_a_angle_cutoff":150.0,"donors":null,"groups":{"polymer":"chainid C","protein":"chainid A"},"hbond_atoms":{"acceptors":{"EGM O2":1,"GLN O":1,"SBM O1":1,"SER OG":1,"THR OG1":1},"donors":{"EGM O2":1,"SER OG":1,"THR OG1":1},"hydrogens":3},"hydrogens":null,"lifetime_key":"residue","summaries":{"protein_polymer":{"between":["protein","polymer"]}},"summary":{"groups":["chainid A","chainid C"],"name":"protein_polymer"},"tolerance_ps":0.0},
    "settings_fingerprint": null,
    "study": null
   },
@@ -166,9 +28,7 @@
   "stride": 1,
   "trends": [],
   "unit": null,
-  "verdict": [
-   "no significant difference in protein_polymer_mean_hbonds between A and B (delta +0.1944, 95% CI -0.2342 to 0.623, p_adj 0.2557, p 0.2557, n 3 vs 3)"
-  ],
+  "verdict": ["no significant difference in protein_polymer_mean_hbonds between A and B (delta +0.1944, 95% CI -0.2342 to 0.623, p_adj 0.2557, p 0.2557, n 3 vs 3)"],
   "warnings": []
  }
 }

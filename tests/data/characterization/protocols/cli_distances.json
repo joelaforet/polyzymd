@@ -2,146 +2,22 @@
  "agent": "# polyzymd analyze distances  metric mean_distance  unit A  run ser_sbm  eq 0ns  conditions 2  replicates 3,3  protocol distances/2\nA  n 3  mean 16.55  sem 2.221  ci95 6.996 to 26.11  values 17.79, 19.63, 12.24  replicates 1, 2, 3  g 1, 1, 1  n_eff 12, 12, 12  eq_detected 0.1 ns\nB  n 3  mean 12.86  sem 1.232  ci95 7.556 to 18.16  values 14.09, 10.39, 14.09  replicates 1, 2, 3  g 1, 1, 1  n_eff 12, 12, 12  eq_detected 0.2 ns\nA vs B  delta -3.697  ci95 -11.6 to 4.209  p 0.2381  p_adj 0.2381  test welch_t  correction BH  family 1  d -1.188  not_significant\nwarning: condition A, condition B: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected\nverdict: no significant difference in mean_distance between A and B (delta -3.697 A, 95% CI -11.6 to 4.209, p_adj 0.2381, p 0.2381, n 3 vs 3)\n\n",
  "json": {
   "all_metrics": [],
-  "all_runs": [
-   "ser_sbm",
-   "ser_sbm below 3.5 A",
-   "gln_egm",
-   "gln_egm bound"
-  ],
+  "all_runs": ["ser_sbm","ser_sbm below 3.5 A","gln_egm","gln_egm bound"],
   "analysis": "distances",
-  "conditions": [
-   {
-    "ci95": [
-     6.99633,
-     26.1118
-    ],
-    "ci_method": "student_t",
-    "entry": null,
-    "eq_detected_frame": [
-     1,
-     0,
-     0
-    ],
-    "eq_detected_ns": [
-     0.1,
-     0.0,
-     0.0
-    ],
-    "label": "A",
-    "mean": 16.5541,
-    "n_effective": [
-     12.0,
-     12.0,
-     12.0
-    ],
-    "n_replicates": 3,
-    "replicate_values": [
-     17.7862,
-     19.6345,
-     12.2414
-    ],
-    "replicates": [
-     1,
-     2,
-     3
-    ],
-    "sem": 2.22136,
-    "statistical_inefficiency": [
-     1.0,
-     1.0,
-     1.0
-    ]
-   },
-   {
-    "ci95": [
-     7.55582,
-     18.1592
-    ],
-    "ci_method": "student_t",
-    "entry": null,
-    "eq_detected_frame": [
-     2,
-     0,
-     0
-    ],
-    "eq_detected_ns": [
-     0.2,
-     0.0,
-     0.0
-    ],
-    "label": "B",
-    "mean": 12.8575,
-    "n_effective": [
-     12.0,
-     12.0,
-     12.0
-    ],
-    "n_replicates": 3,
-    "replicate_values": [
-     14.0897,
-     10.3931,
-     14.0897
-    ],
-    "replicates": [
-     1,
-     2,
-     3
-    ],
-    "sem": 1.23219,
-    "statistical_inefficiency": [
-     1.0,
-     1.0,
-     1.0
-    ]
-   }
-  ],
+  "conditions": [{"ci95":[6.99633,26.1118],"ci_method":"student_t","entry":null,"eq_detected_frame":[1,0,0],"eq_detected_ns":[0.1,0.0,0.0],"label":"A","mean":16.5541,"n_effective":[12.0,12.0,12.0],"n_replicates":3,"replicate_values":[17.7862,19.6345,12.2414],"replicates":[1,2,3],"sem":2.22136,"statistical_inefficiency":[1.0,1.0,1.0]},{"ci95":[7.55582,18.1592],"ci_method":"student_t","entry":null,"eq_detected_frame":[2,0,0],"eq_detected_ns":[0.2,0.0,0.0],"label":"B","mean":12.8575,"n_effective":[12.0,12.0,12.0],"n_replicates":3,"replicate_values":[14.0897,10.3931,14.0897],"replicates":[1,2,3],"sem":1.23219,"statistical_inefficiency":[1.0,1.0,1.0]}],
   "equilibration": "0ns",
   "frames_per_replicate": {
-   "A": [
-    12,
-    12,
-    12
-   ],
-   "B": [
-    12,
-    12,
-    12
-   ]
+   "A": [12,12,12],
+   "B": [12,12,12]
   },
   "metric": "mean_distance",
-  "pairwise": [
-   {
-    "a": "A",
-    "b": "B",
-    "cohens_d": -1.18818,
-    "correction": "BH",
-    "delta": -3.69656,
-    "delta_ci95": [
-     -11.6017,
-     4.20857
-    ],
-    "direction": "no significant change",
-    "entry": null,
-    "family_size": 1,
-    "hedges_g": -0.950542,
-    "p": 0.23814,
-    "p_adjusted": 0.23814,
-    "significant": false,
-    "test": "welch_t",
-    "testable": true
-   }
-  ],
+  "pairwise": [{"a":"A","b":"B","cohens_d":-1.18818,"correction":"BH","delta":-3.69656,"delta_ci95":[-11.6017,4.20857],"direction":"no significant change","entry":null,"family_size":1,"hedges_g":-0.950542,"p":0.23814,"p_adjusted":0.23814,"significant":false,"test":"welch_t","testable":true}],
   "problems": [],
   "protocol_version": "2",
   "provenance": {
-   "config_hashes": {
-    "A": "c4429a507b8cea42",
-    "B": "c4429a507b8cea42"
-   },
+   "config_hashes": {"A":"c4429a507b8cea42","B":"c4429a507b8cea42"},
    "mdanalysis_version": "<masked>",
-   "output_paths": {
-    "results": "<out>/polyzymd_results/distances_ser_sbm"
-   },
+   "output_paths": {"results":"<out>/polyzymd_results/distances_ser_sbm"},
    "polyzymd_version": "<masked>",
    "settings": {},
    "settings_fingerprint": null,
@@ -152,11 +28,7 @@
   "stride": 1,
   "trends": [],
   "unit": "A",
-  "verdict": [
-   "no significant difference in mean_distance between A and B (delta -3.697 A, 95% CI -11.6 to 4.209, p_adj 0.2381, p 0.2381, n 3 vs 3)"
-  ],
-  "warnings": [
-   "condition A, condition B: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected"
-  ]
+  "verdict": ["no significant difference in mean_distance between A and B (delta -3.697 A, 95% CI -11.6 to 4.209, p_adj 0.2381, p 0.2381, n 3 vs 3)"],
+  "warnings": ["condition A, condition B: replicates 1, 2, 3 have fewer than 20 effective samples, so the start of an equilibrated region cannot be detected reliably; values and statistics are unaffected"]
  }
 }

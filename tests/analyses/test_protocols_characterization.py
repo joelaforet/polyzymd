@@ -2,24 +2,28 @@
 
 Each case runs one shipped analysis on a small synthetic simulation and
 compares, with a stored copy in ``tests/data/characterization/protocols/``:
-the JSON report, the agent text, the values and records stored under
-``polyzymd_results/``, the figure file names and the text ``polyzymd
-analyze`` prints. Floats are rounded to six significant digits, and paths,
-versions, file hashes and code hashes are masked. A change in what an
-analysis reports therefore fails here. Run ``pytest
+the JSON report, the agent text and the figure file names of every run, the
+records stored under ``polyzymd_results/`` and the text ``polyzymd analyze``
+prints. Report fields that are the same in every run, such as most of the
+provenance, are stored once per case. Record files are stored without the
+values the reports already give. Floats are rounded to six significant
+digits, and paths, versions, file hashes and code hashes are masked. A change
+in what an analysis reports therefore fails here. Run ``pytest
 --update-characterization`` to rewrite the stored copies, only in a change
 that says why they differ.
 
-Two systems are used: the helical peptide of ``test_secondary_structure.py``
-for the per-structure analyses, and the protein-polymer system of
+Three systems are used: the helical peptide of ``test_secondary_structure.py``
+for the per-structure analyses, the protein-polymer system of
 ``test_hydrogen_bonds_analyze.py`` for hydrogen bonds, contacts and
-distances.
+distances, and that system with a control condition whose replicates have no
+polymer atoms.
 """
 
 from __future__ import annotations
 
 import json
 import math
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +35,7 @@ from polyzymd.analyses import analyze
 from polyzymd.analyses.exceptions import ProtocolError
 from polyzymd.cli.analyze import analyze_command
 from tests._support.analysis_testkit import write_openmm_frames, write_simulation_config
+from tests._support.openmm_system import write_openmm_system
 
 mda = pytest.importorskip("MDAnalysis")
 pytest.importorskip("mdtraj")
@@ -93,6 +98,16 @@ CASES = {
         {"method": "distance", "cutoff": 6.0, "regions": {"first": "resid 12 30"}},
     ),
     "distances": ("polymer", "distances", {"pairs": PAIRS}),
+    "contacts_without_polymer": ("mixed", "contacts", {}),
+    "hydrogen_bonds_without_polymer": ("mixed", "hydrogen_bonds", {}),
+    "hydrogen_bonds_polymer_first": (
+        "mixed",
+        "hydrogen_bonds",
+        {
+            "groups": {"polymer": "chainid C", "protein": "chainid A"},
+            "summaries": {"polymer_protein": {"between": ["polymer", "protein"]}},
+        },
+    ),
 }
 
 
@@ -114,6 +129,7 @@ def systems(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, Pat
         for replicate in (1, 2, 3)
     }
     polymer = hbonds._write(root / "polymer", schedules)
+    control = _without_polymer(root / "control", schedules)
     configs = {}
     for label, chance in (("A", 0.8), ("B", 0.3)):
         config = write_simulation_config(
@@ -132,7 +148,35 @@ def systems(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, Pat
                 elements=peptide.ELEMENTS,
             )
         configs[label] = config
-    return {"peptide": configs, "polymer": polymer, "root": root}
+    mixed = {"A": control, "B": polymer["B"]}
+    return {"peptide": configs, "polymer": polymer, "mixed": mixed, "root": root}
+
+
+def _without_polymer(folder: Path, schedules: dict) -> Path:
+    """Config of the protein-polymer system of condition A with the chain C atoms removed."""
+    from tests.analyses import test_hydrogen_bonds_analyze as hbonds
+
+    keep = [index for index, atom in enumerate(hbonds.ATOMS) if atom[4] != "C"]
+    new = {old: index for index, old in enumerate(keep)}
+    atoms = [hbonds.ATOMS[index] for index in keep]
+    residues = list(dict.fromkeys((atom[2], atom[3], atom[4]) for atom in atoms))
+    config = write_simulation_config(folder, scratch=folder / "scratch")
+    for replicate in (1, 2, 3):
+        run_dir = write_openmm_frames(
+            config,
+            replicate,
+            hbonds._frames(schedules[("A", replicate)])[:, keep],
+            [residues.index((atom[2], atom[3], atom[4])) for atom in atoms],
+            resids=[residue[0] for residue in residues],
+            names=[atom[0] for atom in atoms],
+            resnames=[residue[1] for residue in residues],
+            elements=[atom[1] for atom in atoms],
+            chain_ids=[atom[4] for atom in atoms],
+            dimensions=hbonds.BOX,
+        )
+        constraints = [(new[a], new[b]) for a, b in hbonds.CONSTRAINTS if a in new and b in new]
+        write_openmm_system(run_dir, [hbonds.CHARGES[index] for index in keep], (), constraints)
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +204,8 @@ def _masked(value: Any, root: Path) -> Any:
         if isinstance(item, dict):
             out = {}
             for key, entry in item.items():
-                if key in ("polyzymd_version", "mdanalysis_version", "versions", "sha256"):
+                field = key.rsplit(".", 1)[-1]
+                if field in ("polyzymd_version", "mdanalysis_version", "versions", "sha256"):
                     out[key] = "<masked>"
                 elif key == "hash" and item.get("hash_of") == "polyzymd_modules":
                     out[key] = "<shipped code>"
@@ -175,30 +220,115 @@ def _masked(value: Any, root: Path) -> Any:
 
 
 def _records(folder: Path, root: Path) -> dict[str, Any]:
-    """Every stored record and value file under ``folder``, by path relative to it."""
-    stored: dict[str, Any] = {}
+    """The record files under ``folder``, by record name and replicate folder.
+
+    Each JSON field is a key ``file:field``, and ``files`` names every file of
+    the replicate folder. Keys the same in every replicate of a record are
+    stored once under ``shared``. The values in ``.npz`` files are left out,
+    since the reports summarise them, and so are the input files a record
+    lists, which the study tests check. The condition and replicate of a
+    record are left out when they are those of the folder it is in.
+    """
+    replicates: dict[str, dict[str, dict[str, Any]]] = {}
     for path in sorted(folder.rglob("*")):
-        if not path.is_file() or path.suffix not in (".json", ".npz"):
+        if not path.is_file():
             continue
-        key = path.relative_to(folder).as_posix()
-        if path.suffix == ".json":
-            stored[key] = _masked(json.loads(path.read_text()), root)
+        name, condition, replicate = path.relative_to(folder).parts[:3]
+        found = replicates.setdefault(name, {}).setdefault(f"{condition}/{replicate}", {})
+        found.setdefault("files", []).append(path.name)
+        if path.suffix != ".json":
+            continue
+        content = _masked(json.loads(path.read_text()), root)
+        if isinstance(content, dict):
+            content.pop("topology", None), content.pop("trajectories", None)
+            number = int(replicate.removeprefix("replicate_"))
+            if content.get("condition") == condition and content.get("replicate") == number:
+                del content["condition"], content["replicate"]
+        items = content.items() if isinstance(content, dict) else [("", content)]
+        found.update({f"{path.name}:{key}": value for key, value in items})
+    return {name: _shared(found) for name, found in replicates.items()}
+
+
+def _shared(items: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Split ``items`` into the keys the same in all of them and what each has besides."""
+    first = next(iter(items.values()))
+    shared = {
+        key: value
+        for key, value in first.items()
+        if all(key in item and item[key] == value for item in items.values())
+    }
+    rest = {
+        name: {key: value for key, value in item.items() if key not in shared}
+        for name, item in items.items()
+    }
+    return {"shared": shared, **rest}
+
+
+def _flat(report: dict[str, Any], text: str) -> dict[str, Any]:
+    """The report as one level of keys, so that equal values can be stored once.
+
+    Each provenance field, and each field of a provenance mapping, is its own
+    key such as ``provenance.settings.cutoff``. The condition and comparison
+    rows are stored as columns, one list per field, with the fields that are
+    the same in every row stored once under ``every row``. ``warnings`` and
+    ``verdict`` read ``<text>`` when they are the warning and verdict lines of
+    the agent text.
+    """
+    flat = {key: value for key, value in report.items() if key != "provenance"}
+    for key, value in (report.get("provenance") or {}).items():
+        if isinstance(value, dict) and value:
+            flat.update({f"provenance.{key}.{name}": item for name, item in value.items()})
         else:
-            with np.load(path, allow_pickle=False) as data:
-                stored[key] = {
-                    name: _round(np.asarray(data[name], dtype=float).tolist())
-                    for name in sorted(data.files)
-                }
-    return stored
+            flat[f"provenance.{key}"] = value
+    for key in ("conditions", "pairwise"):
+        rows = flat[key]
+        if len(rows) > 1 and all(list(row) == list(rows[0]) for row in rows):
+            same = {
+                field: value
+                for field, value in rows[0].items()
+                if all(row[field] == value for row in rows)
+            }
+            flat[key] = {"every row": same}
+            flat[key].update(
+                {field: [row[field] for row in rows] for field in rows[0] if field not in same}
+            )
+    lines = text.splitlines()
+    for key, start in (("warnings", "warning: "), ("verdict", "verdict: ")):
+        if flat.get(key) == [line.removeprefix(start) for line in lines if line.startswith(start)]:
+            flat[key] = "<text>"
+    return flat
+
+
+def _outcome(call: Any) -> dict[str, Any]:
+    """The flat report and the agent text ``call`` returns, or the error it raises."""
+    try:
+        report = call()
+    except ProtocolError as exc:
+        return {"error": type(exc).__name__, "message": str(exc), "hint": exc.hint}
+    text = report.to_agent_text()
+    return {**_flat(report.model_dump(mode="json"), text), "text": text}
 
 
 def _figures(folder: Path) -> list[str]:
     return sorted(path.relative_to(folder).as_posix() for path in folder.rglob("*.png"))
 
 
+def _dumps(value: Any, depth: int = 0) -> str:
+    """``value`` as JSON with the mappings of the first three levels indented.
+
+    Deeper values are written on one line, so a stored file has one line per
+    report field or record field.
+    """
+    if not isinstance(value, dict) or not value or depth == 3:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    pad = " " * (depth + 1)
+    items = [f"{pad}{json.dumps(key)}: {_dumps(value[key], depth + 1)}" for key in sorted(value)]
+    return "{\n" + ",\n".join(items) + "\n" + " " * depth + "}"
+
+
 def _compare(name: str, found: dict[str, Any], update: bool) -> None:
     path = STORED / f"{name}.json"
-    text = json.dumps(found, indent=1, sort_keys=True) + "\n"
+    text = _dumps(found) + "\n"
     if update:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
@@ -232,26 +362,31 @@ def test_every_result_of_a_shipped_analysis_matches_the_stored_copy(
     both = [configs["A"], configs["B"]]
     options = {"equilibration": "0ns", "settings": settings}
     roots = (tmp_path, systems["root"])
+    out = tmp_path / "out"
 
     def masked(value: Any) -> Any:
         return _masked(_masked(value, roots[0]), roots[1])
 
+    runs = analyze(name, both, output_dir=out, plots=False, **options).all_runs or [None]
     found: dict[str, Any] = {}
-    first = analyze(name, both, output_dir=tmp_path / "plots", **options)
-    found["figures"] = _figures(tmp_path / "plots" / "figures")
-    runs = first.all_runs or [None]
     for run in runs:
-        report = analyze(name, both, output_dir=tmp_path / "out", run=run, plots=False, **options)
+        shutil.rmtree(out / "figures", ignore_errors=True)
+        result = _outcome(lambda run=run: analyze(name, both, output_dir=out, run=run, **options))
         found[f"two conditions, run {run}"] = {
-            "report": masked(report.model_dump(mode="json")),
-            "text": masked(report.to_agent_text()),
+            **masked(result),
+            "figures": _figures(out / "figures"),
         }
-    single = analyze(name, both[:1], output_dir=tmp_path / "one", plots=False, **options)
+    found = _shared(found)
+    single = masked(
+        _outcome(
+            lambda: analyze(name, both[:1], output_dir=tmp_path / "one", plots=False, **options)
+        )
+    )
+    shared = found["shared"]
     found["one condition"] = {
-        "report": masked(single.model_dump(mode="json")),
-        "text": masked(single.to_agent_text()),
+        key: value for key, value in single.items() if key not in shared or shared[key] != value
     }
-    found["records"] = masked(_records(tmp_path / "out" / "polyzymd_results", tmp_path))
+    found["records"] = masked(_records(out / "polyzymd_results", tmp_path))
     found["unknown setting"] = _error(lambda: analyze(name, both, settings={"bogus": 1}))
     found["unknown run"] = _error(
         lambda: analyze(
@@ -259,6 +394,39 @@ def test_every_result_of_a_shipped_analysis_matches_the_stored_copy(
         )
     )
     _compare(case, found, request.config.getoption("--update-characterization"))
+
+
+def test_condition_labels_name_the_conditions_in_the_stored_report(
+    systems, tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    """With ``labels=`` the report, text and warnings use the given condition names."""
+    configs = systems["mixed"]
+    found = _outcome(
+        lambda: analyze(
+            "hydrogen_bonds",
+            [configs["A"], configs["B"]],
+            labels=["no polymer", "polymer"],
+            equilibration="0ns",
+            output_dir=tmp_path,
+            plots=False,
+        )
+    )
+    found = _masked(_masked(found, tmp_path), systems["root"])
+    _compare("labels", found, request.config.getoption("--update-characterization"))
+
+
+def test_selections_that_match_no_atoms_give_the_stored_error(
+    systems, tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    """Default contact selections on a system without chains A and C raise NoMatchingAtomsError."""
+    configs = systems["peptide"]
+    found = _outcome(
+        lambda: analyze(
+            "contacts", [configs["A"]], equilibration="0ns", output_dir=tmp_path, plots=False
+        )
+    )
+    assert found["error"] == "NoMatchingAtomsError"
+    _compare("no_matching_atoms", found, request.config.getoption("--update-characterization"))
 
 
 @pytest.mark.parametrize("name", ["rg", "rmsf", "hydrogen_bonds", "contacts", "distances"])
