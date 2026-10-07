@@ -44,7 +44,9 @@ The units differ between the two keys:
 
 ## Step 3: make selections specific
 
-PolyzyMD uses MDAnalysis-style selections. The most useful selectors are:
+PolyzyMD reads selections with MDTraj. Before MDTraj reads a selection,
+PolyzyMD translates `resid`, `chain` and `pdbindex` to the meanings in the
+table below. The most useful selectors are:
 
 | Keyword | Meaning | Example |
 |---------|---------|---------|
@@ -55,7 +57,18 @@ PolyzyMD uses MDAnalysis-style selections. The most useful selectors are:
 | `index` | OpenMM atom index, 0-indexed | `index 2739` |
 | `chain` | chain identifier | `chain A` |
 
-Combine them with `and` or `or` as needed.
+Combine them with `and`, `or`, `not` and parentheses. Write a range as
+`resid 70 to 80`.
+
+- Atom and residue names are case-sensitive: `name OG` and `name og` are
+  different selections.
+- The words `and`, `or`, `not` and `to` may be written in any case.
+- `index`, `resid` and `pdbindex` take numbers only. A word after one of them,
+  such as `index 6 x`, is refused with an error that names the selection.
+- Each restraint selection must match exactly one atom. Otherwise the build
+  stops with `Restraint '<name>' requires exactly one atom per selection. Got
+  <n> for atom1, <m> for atom2`. A selection that matches no atom stops with
+  `No atoms match selection: '<selection>'`.
 
 ```{warning}
 Always make protein selections chain-aware enough to avoid accidental matches.
