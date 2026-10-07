@@ -204,11 +204,3 @@ def test_build_validates_with_a_copied_config_and_with_the_absolute_path_hash(tm
     with pytest.raises(ArtifactIntegrityError, match="Configuration does not match"):
         validate_build_bundle(run, second)
 
-
-def test_deterministic_setting_keeps_a_build_valid(tmp_path):
-    config = _copied_quickstart_config(tmp_path / "a")
-    run = tmp_path / "run"
-    topology, system, positions = _tiny_openmm_bundle()
-    publish_build_bundle(run, topology, system, positions, config)
-    config.openmm.deterministic = not config.openmm.deterministic
-    validate_build_bundle(run, config)

@@ -38,16 +38,13 @@ stages would repeat the same noise in every stage, because GROMACS starts
 the step count again at each stage.
 
 The two engines use different random number generators, so one seed does
-not give the same trajectory on OpenMM and on GROMACS. On OpenMM, a
-replicate run again gives the same trajectory only with
-`openmm.deterministic: true` and the same platform, precision and software
-versions. This setting sets `DeterministicForces=true` and, on CPU, runs one
-thread, which is slower. Without it, CPU threads and PME add up forces in a
-different order on each run, so two runs of a replicate differ from the
-first minimization on. They agree statistically, not frame by frame.
-GROMACS has its own settings for reproducible runs (`gmx mdrun -reprod`);
-PolyzyMD does not set them, so add them to `gromacs.mdrun_flags` if you need
-them.
+not give the same trajectory on OpenMM and on GROMACS. A replicate run
+again does not give the same trajectory either, even on one engine and
+machine. OpenMM's CPU threads, PME and GPUs add up forces in a different
+order on each run, so two runs of a replicate differ from the first
+minimization on. They agree statistically, not frame by frame. OpenMM has a
+`DeterministicForces` platform property, and GROMACS has
+`gmx mdrun -reprod`, for bitwise reruns; PolyzyMD sets neither.
 
 ## Nonbonded interactions and constraints
 

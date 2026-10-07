@@ -136,7 +136,6 @@ class SimulationRunner:
         platform: str = "CUDA",
         precision: str = "mixed",
         device_index: str | None = None,
-        deterministic: bool = False,
         replicate: int | None = None,
     ) -> None:
         """Initialize the SimulationRunner.
@@ -147,8 +146,6 @@ class SimulationRunner:
             positions: Initial positions with units.
             working_dir: Working directory for output files.
             platform: Compute platform (CUDA, OpenCL, CPU).
-            deterministic: Request deterministic forces
-                (:func:`polyzymd.simulation.platform.resolve_platform`).
             replicate: The replicate number, which seeds the initial
                 velocities and the thermostat noise of every phase
                 (:func:`polyzymd.simulation.seeds.dynamics_seed`). ``None``
@@ -163,7 +160,6 @@ class SimulationRunner:
         self._platform_name = platform
         self._platform_precision = precision
         self._platform_device_index = device_index
-        self._platform_deterministic = deterministic
         self._replicate = replicate
 
         self._simulation: Optional[Simulation] = None
@@ -216,7 +212,6 @@ class SimulationRunner:
             self._platform_name,
             precision=self._platform_precision,
             device_index=self._platform_device_index,
-            deterministic=self._platform_deterministic,
         )
 
     def _create_simulation(self, integrator: openmm.Integrator) -> Simulation:
@@ -1607,7 +1602,7 @@ class SimulationRunner:
         # Save parameters JSON (needed for continuation across segments)
         params_dict = {
             "__class__": "SimulationParameters",
-            "provenance": runtime_provenance(self._simulation.context),
+            "provenance": runtime_provenance(self._simulation),
             "__values__": {
                 "thermo_params": {
                     "__class__": "ThermoParameters",
@@ -1912,7 +1907,7 @@ class SimulationRunner:
             steps_requested=total_steps,
             samples_written=0,
             status=SegmentStatus.RUNNING,
-            **record_provenance(self._simulation.context),
+            **record_provenance(self._simulation),
         )
 
         _update_or_append_segment(progress, record)
@@ -2016,7 +2011,7 @@ class SimulationRunner:
             samples_written=num_samples,
             status=SegmentStatus.COMPLETED,
             duration_ns=duration_ns,
-            **record_provenance(self._simulation.context),
+            **record_provenance(self._simulation),
             **trajectory_digest(segment_dir / f"production_{segment_index}_trajectory.dcd"),
         )
         record.finished_at = _now_iso()
@@ -2083,7 +2078,7 @@ class SimulationRunner:
             samples_written=0,  # Interrupted — samples may be partial
             status=SegmentStatus.INTERRUPTED,
             duration_ns=actual_duration_ns,
-            **record_provenance(self._simulation.context),
+            **record_provenance(self._simulation),
         )
 
         _update_or_append_segment(progress, record)

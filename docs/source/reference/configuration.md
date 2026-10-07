@@ -822,24 +822,17 @@ For more details on this behavior, see the OpenFF Interchange documentation:
 The optional `openmm:` block selects the OpenMM platform. It is used when
 `engine` is `openmm`.
 
-```yaml
-openmm:
-  platform: "CPU"
-  deterministic: true
-```
-
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `platform` | `str` | `"CUDA"` | OpenMM platform: `CUDA`, `OpenCL`, `CPU` or `Reference`. PolyzyMD never falls back to another platform. |
 | `device_index` | `str \| null` | `null` | GPU device index. |
 | `precision` | `str` | `"mixed"` | Floating-point precision on CUDA. |
-| `deterministic` | `bool` | `false` | Compute forces in a fixed order. PolyzyMD sets `DeterministicForces=true` on CPU, CUDA and OpenCL, and runs one CPU thread (`Threads=1`). A rerun of a replicate then gives the same trajectory on the same platform, precision and software versions. One CPU thread is slower than several. |
 
-The replicate number fixes the starting structure and every random seed. With
-`deterministic: false`, CPU threads and PME add up forces in a different order
-on each run, so two runs of a replicate differ from the first minimization on.
-They agree statistically, not frame by frame. Each production segment records
-the platform and the property values it used under `openmm_platform` in
+The replicate number fixes the starting structure and every random seed. CPU
+threads, PME and GPUs add up forces in a different order on each run, so two
+runs of a replicate differ from the first minimization on. They agree
+statistically, not frame by frame. Each production segment records the
+platform and the property values it used under `openmm_platform` in
 `progress.json`.
 
 ---

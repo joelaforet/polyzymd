@@ -1491,22 +1491,11 @@ class OpenMMEngineConfig(_ConfigModel):
         platform: OpenMM platform to use for computation.
         device_index: GPU device index (platform-specific).
         precision: Floating-point precision mode.
-        deterministic: Compute forces in a fixed order, so a rerun of a
-            replicate on the same platform, precision and software gives
-            the same trajectory. On CPU this also runs one thread, which is
-            slower.
     """
 
     platform: str = Field("CUDA", description="OpenMM compute platform")
     device_index: str | None = Field(None, description="GPU device index")
     precision: str = Field("mixed", description="Floating-point precision")
-    deterministic: bool = Field(
-        False,
-        description=(
-            "Set DeterministicForces on CPU, CUDA and OpenCL, and run one CPU thread, "
-            "so a rerun gives the same trajectory"
-        ),
-    )
 
 
 class GromacsEngineConfig(_ConfigModel):

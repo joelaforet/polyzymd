@@ -30,14 +30,6 @@ def _digest(payload: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _config_payload(config: Any) -> dict[str, Any]:
-    # openmm.deterministic changes how a run computes forces, not what the
-    # build holds, so switching it on keeps an existing build valid.
-    payload = config.model_dump(mode="json")
-    (payload.get("openmm") or {}).pop("deterministic", None)
-    return payload
-
-
 def _portable(value: Any, key: str | None = None) -> Any:
     from polyzymd.config.loader import OUTPUT_PATH_KEYS, PATH_KEYS
 
@@ -54,18 +46,17 @@ def _portable(value: Any, key: str | None = None) -> Any:
 def config_hash(config: Any) -> str:
     """Return a SHA-256 identity for a validated simulation config that does not depend on its folder.
 
-    The hash covers the config's fields, except ``openmm.deterministic``.
-    An input file (such as ``enzyme.pdb_path``) counts by its SHA-256, a
+    The hash covers the config's fields. An input file (such as ``enzyme.pdb_path``) counts by its SHA-256, a
     folder by its name, and the output folders (``projects_directory``,
     ``scratch_directory``) are left out. So copies of one config.yaml in two
     folders give the same hash.
     """
-    return _digest(_portable(_config_payload(config)))
+    return _digest(_portable(config.model_dump(mode="json")))
 
 
 def _absolute_path_config_hash(config: Any) -> str:
     """Return the hash that earlier builds recorded, which includes absolute paths."""
-    return _digest(_config_payload(config))
+    return _digest(config.model_dump(mode="json"))
 
 
 def _file_hash(path: Path) -> str:

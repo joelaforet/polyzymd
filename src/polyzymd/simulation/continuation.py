@@ -149,7 +149,6 @@ class ContinuationManager:
         platform: str = "CUDA",
         precision: str = "mixed",
         device_index: str | None = None,
-        deterministic: bool = False,
         replicate: int | None = None,
     ) -> None:
         """Initialize the ContinuationManager.
@@ -161,9 +160,6 @@ class ContinuationManager:
         segment_index : int
             Current segment index (0-based for first continuation after
             initial production, incrementing from there).
-        deterministic : bool
-            Request deterministic forces
-            (:func:`polyzymd.simulation.platform.resolve_platform`).
         replicate : int, optional
             The replicate number, which seeds this segment's thermostat
             noise (:func:`polyzymd.simulation.seeds.dynamics_seed`). A
@@ -176,7 +172,6 @@ class ContinuationManager:
         self._platform_name = platform
         self._platform_precision = precision
         self._platform_device_index = device_index
-        self._platform_deterministic = deterministic
         self._replicate = replicate
 
         # State
@@ -793,7 +788,7 @@ class ContinuationManager:
             samples_written=num_samples,
             status=SegmentStatus.COMPLETED,
             duration_ns=duration_ns,
-            **record_provenance(self._simulation.context),
+            **record_provenance(self._simulation),
             **trajectory_digest(segment_dir / f"production_{self._segment_index}_trajectory.dcd"),
         )
         from polyzymd.simulation.progress import _now_iso
@@ -937,7 +932,6 @@ class ContinuationManager:
             self._platform_name,
             precision=self._platform_precision,
             device_index=self._platform_device_index,
-            deterministic=self._platform_deterministic,
         )
         self._simulation = Simulation(
             self._topology,
@@ -1007,7 +1001,7 @@ class ContinuationManager:
         if self._param_dict:
             from polyzymd.utils.version import runtime_provenance
 
-            self._param_dict["provenance"] = runtime_provenance(self._simulation.context)
+            self._param_dict["provenance"] = runtime_provenance(self._simulation)
             param_path = output_dir / f"production_{self._segment_index}_parameters.json"
             with open(param_path, "w") as f:
                 json.dump(self._param_dict, f, indent=2)

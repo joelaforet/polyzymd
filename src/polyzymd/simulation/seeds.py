@@ -7,11 +7,10 @@ equilibration stage, a production segment) takes its own seed, so no phase
 repeats another's noise, and the same replicate run again draws the same
 numbers.
 
-The same seeds give the same trajectory only with ``openmm.deterministic:
-true`` on the same platform, precision and software versions. Otherwise CPU
-threads and PME add up forces in a different order on each run, so two runs
-of a replicate differ from the first minimization on and agree only
-statistically.
+The same seeds do not give the same trajectory. OpenMM's CPU threads, PME
+and GPUs add up forces in a different order on each run, so two runs of a
+replicate differ from the first minimization on and agree statistically,
+not frame by frame.
 """
 
 from __future__ import annotations

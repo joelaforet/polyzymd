@@ -2393,7 +2393,6 @@ def _run_initial_segment(
         platform=sim_config.openmm.platform,
         precision=sim_config.openmm.precision,
         device_index=sim_config.openmm.device_index,
-        deterministic=sim_config.openmm.deterministic,
         replicate=replicate,
     )
 
@@ -2553,7 +2552,6 @@ def _run_continuation_segment(
         platform=sim_config.openmm.platform,
         precision=sim_config.openmm.precision,
         device_index=sim_config.openmm.device_index,
-        deterministic=sim_config.openmm.deterministic,
         replicate=replicate,
     )
     manager.load_previous_state()

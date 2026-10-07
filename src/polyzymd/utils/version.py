@@ -35,14 +35,14 @@ def get_openmm_version() -> str | None:
         return None
 
 
-def runtime_provenance(context: Any = None) -> dict[str, Any]:
+def runtime_provenance(simulation: Any = None) -> dict[str, Any]:
     """Describe the software and host that a simulation phase runs under.
 
     Parameters
     ----------
-    context : openmm.Context, optional
-        The Context that runs the phase. When given, ``openmm_platform``
-        records its platform and property values
+    simulation : openmm.app.Simulation, optional
+        The Simulation that runs the phase. When given, ``openmm_platform``
+        records the platform and property values of its Context
         (:func:`polyzymd.simulation.platform.platform_record`).
 
     Returns
@@ -66,20 +66,20 @@ def runtime_provenance(context: Any = None) -> dict[str, Any]:
         "hostname": hostname,
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
     }
-    if context is not None:
+    if simulation is not None:
         from polyzymd.simulation.platform import platform_record
 
-        found["openmm_platform"] = platform_record(context)
+        found["openmm_platform"] = platform_record(simulation.context)
     return found
 
 
 RECORD_PROVENANCE_KEYS = ("polyzymd_version", "openmm_version", "pixi_environment")
 
 
-def record_provenance(context: Any = None) -> dict[str, Any]:
+def record_provenance(simulation: Any = None) -> dict[str, Any]:
     """Subset of :func:`runtime_provenance` stored on progress records.
 
-    With ``context``, it also holds ``openmm_platform``.
+    With ``simulation``, it also holds ``openmm_platform``.
     """
-    full = runtime_provenance(context)
+    full = runtime_provenance(simulation)
     return {key: full[key] for key in (*RECORD_PROVENANCE_KEYS, "openmm_platform") if key in full}
