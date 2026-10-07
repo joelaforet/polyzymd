@@ -1808,10 +1808,15 @@ def test_a_stop_file_stops_the_chain(tmp_path, monkeypatch) -> None:
         stub.write_text(f'#!/bin/sh\necho {tool} >> "{tmp_path}/calls"\n')
         stub.chmod(0o755)
     result = subprocess.run(
-        ["bash", str(script)],
-        # Exported shell functions (a cluster's Lmod `module`) would shadow the stubs.
+        ["bash", "--noprofile", "--norc", str(script)],
+        # A cluster's Lmod `module` (an exported function, or one BASH_ENV
+        # defines) would shadow the stubs.
         env={
-            **{k: v for k, v in os.environ.items() if not k.startswith("BASH_FUNC_")},
+            **{
+                k: v
+                for k, v in os.environ.items()
+                if not k.startswith("BASH_FUNC_") and k != "BASH_ENV"
+            },
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
         },
         capture_output=True,
