@@ -8,9 +8,10 @@ of restraints (flat-bottom, harmonic, etc.) to OpenMM simulations.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from openmm import CustomBondForce, HarmonicBondForce, System
@@ -103,13 +104,13 @@ class RestraintType(str, Enum):
 
 @dataclass
 class AtomSelection:
-    """Represents a selection of atoms using MDAnalysis-style syntax.
+    """An atom selection for a restraint, resolved with MDTraj on the built topology.
 
-    This class provides a flexible way to specify atoms for restraints
-    using selection strings that are compatible with MDAnalysis.
+    ``resid``, ``chain`` and ``pdbindex`` keep their MDAnalysis meaning; see
+    :func:`_parse_selection`.
 
     Attributes:
-        selection: MDAnalysis-compatible selection string
+        selection: Selection string, such as ``"protein and resid 77 and name OG"``
         description: Human-readable description of what this selects
 
     Example:
@@ -122,9 +123,6 @@ class AtomSelection:
 
     def resolve(self, topology: OpenMMTopology) -> List[int]:
         """Resolve the selection to atom indices.
-
-        For OpenMM topologies, we parse the selection string and
-        find matching atoms. Supports basic MDAnalysis-style selections.
 
         Args:
             topology: OpenMM Topology object
@@ -139,138 +137,36 @@ class AtomSelection:
 
 
 def _parse_selection(selection: str, topology: OpenMMTopology) -> List[int]:
-    """Parse an MDAnalysis-style selection string for OpenMM topology.
+    """Return the sorted 0-based indices of the atoms ``selection`` picks in ``topology``.
 
-    Supports a subset of MDAnalysis selection syntax:
-    - resid N: Select atoms in residue with ID N (1-indexed, like PDB)
-    - resname XXX: Select atoms in residue with name XXX
-    - name XXX: Select atoms with name XXX
-    - index N: Select atom with OpenMM index N (0-indexed)
-    - pdbindex N: Select atom with PDB serial number N (1-indexed, auto-converts)
-    - and: Intersection of selections
-    - or: Union of selections
+    The selection is an MDTraj selection with three MDAnalysis spellings
+    translated first: ``resid N`` is the residue number of the built PDB
+    (MDTraj ``resSeq N``), ``chain X`` or ``chainid X`` is the chain letter,
+    and ``pdbindex N`` is the PDB atom serial, counted from 1 (``index
+    N-1``). ``index N`` counts from 0, as OpenMM does. ``protein``, ``not``,
+    ``element``, ranges (``resid 70 to 80``) and parentheses work as in MDTraj.
 
-    Index conventions:
-    - `resid` uses 1-indexed residue numbers (matches PDB/PyMOL display)
-    - `index` uses 0-indexed atom indices (matches OpenMM internal indexing)
-    - `pdbindex` uses 1-indexed atom serial (matches PDB ATOM column, PyMOL display)
-
-    Example: If PyMOL shows atom serial 2740 and residue 77:
-    - Use "pdbindex 2740" or "index 2739" to select that atom
-    - Use "resid 77" to select all atoms in that residue
-
-    Args:
-        selection: Selection string
-        topology: OpenMM Topology
-
-    Returns:
-        List of matching atom indices
+    Raises:
+        ValueError: If the selection cannot be parsed or matches no atom.
     """
-    # Tokenize the selection
-    tokens = selection.lower().replace("(", " ( ").replace(")", " ) ").split()
+    import mdtraj
 
-    # Build list of all atoms with their properties
-    atoms_data = []
-    for atom in topology.atoms():
-        atoms_data.append(
-            {
-                "index": atom.index,
-                "name": atom.name.lower() if atom.name else "",
-                "resname": atom.residue.name.lower() if atom.residue else "",
-                "resid": int(atom.residue.id),  # PDB residue number (resSeq)
-                "chain": atom.residue.chain.id if atom.residue and atom.residue.chain else "",
-            }
-        )
+    md_topology = mdtraj.Topology.from_openmm(topology)
 
-    def evaluate_simple(tokens: List[str], start: int) -> Tuple[set, int]:
-        """Evaluate a simple selection (keyword value)."""
-        if start >= len(tokens):
-            return set(), start
+    def chain(match: re.Match) -> str:
+        found = [str(c.index) for c in md_topology.chains if c.chain_id == match.group(1)]
+        return "(" + " or ".join(f"chainid {i}" for i in found) + ")" if found else "none"
 
-        keyword = tokens[start]
-
-        if keyword == "(":
-            # Recurse into parentheses
-            result, end = evaluate_or(tokens, start + 1)
-            if end < len(tokens) and tokens[end] == ")":
-                return result, end + 1
-            return result, end
-
-        if start + 1 >= len(tokens):
-            raise ValueError(f"Missing value after keyword '{keyword}'")
-
-        value = tokens[start + 1]
-
-        matching = set()
-
-        if keyword == "resid":
-            # resid matches PDB residue number (resSeq) directly
-            target_resid = int(value)
-            for atom in atoms_data:
-                if atom["resid"] == target_resid:
-                    matching.add(atom["index"])
-
-        elif keyword == "resname":
-            for atom in atoms_data:
-                if atom["resname"] == value.lower():
-                    matching.add(atom["index"])
-
-        elif keyword == "name":
-            for atom in atoms_data:
-                if atom["name"] == value.lower():
-                    matching.add(atom["index"])
-
-        elif keyword == "index":
-            # index is 0-indexed (matches OpenMM internal indexing)
-            target_idx = int(value)
-            if 0 <= target_idx < len(atoms_data):
-                matching.add(target_idx)
-
-        elif keyword == "pdbindex":
-            # pdbindex is 1-indexed (matches PDB ATOM serial number / PyMOL display)
-            # Converts to 0-indexed for internal use
-            target_idx = int(value) - 1
-            if 0 <= target_idx < len(atoms_data):
-                matching.add(target_idx)
-
-        elif keyword == "chainid" or keyword == "chain":
-            for atom in atoms_data:
-                if atom["chain"].lower() == value.lower():
-                    matching.add(atom["index"])
-        else:
-            raise ValueError(f"Unknown selection keyword: '{keyword}'")
-
-        return matching, start + 2
-
-    def evaluate_and(tokens: List[str], start: int) -> Tuple[set, int]:
-        """Evaluate AND expressions."""
-        result, pos = evaluate_simple(tokens, start)
-
-        while pos < len(tokens) and tokens[pos] == "and":
-            right, pos = evaluate_simple(tokens, pos + 1)
-            result = result & right
-
-        return result, pos
-
-    def evaluate_or(tokens: List[str], start: int) -> Tuple[set, int]:
-        """Evaluate OR expressions."""
-        result, pos = evaluate_and(tokens, start)
-
-        while pos < len(tokens) and tokens[pos] == "or":
-            right, pos = evaluate_and(tokens, pos + 1)
-            result = result | right
-
-        return result, pos
-
-    if not tokens:
-        raise ValueError("Empty selection string")
-
-    result, _ = evaluate_or(tokens, 0)
-
-    if not result:
+    translated = re.sub(r"\bpdbindex\s+(\d+)", lambda m: f"index {int(m.group(1)) - 1}", selection)
+    translated = re.sub(r"\bchain(?:id)?\s+([^\s()]+)", chain, translated)
+    translated = re.sub(r"\bresid\b", "resSeq", translated)
+    try:
+        indices = md_topology.select(translated)
+    except Exception as error:  # MDTraj raises several types for a bad selection
+        raise ValueError(f"Cannot parse selection {selection!r}: {error}") from error
+    if len(indices) == 0:
         raise ValueError(f"No atoms match selection: '{selection}'")
-
-    return sorted(list(result))
+    return sorted(int(i) for i in indices)
 
 
 @dataclass

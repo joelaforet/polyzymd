@@ -743,14 +743,16 @@ class SolventConfig(_ConfigModel):
 class AtomSelectionConfig(_ConfigModel):
     """Configuration for selecting atoms for restraints.
 
-    Uses MDAnalysis-compatible selection syntax for flexibility.
+    The selection is an MDTraj selection in which ``resid``, ``chain`` and
+    ``pdbindex`` keep their MDAnalysis meaning (PDB residue number, chain
+    letter, PDB atom serial).
 
     Attributes:
-        selection: MDAnalysis selection string (e.g., "resid 77 and name OG")
+        selection: Selection string (e.g., "protein and resid 77 and name OG")
         description: Optional human-readable description
     """
 
-    selection: str = Field(..., description="MDAnalysis selection string")
+    selection: str = Field(..., description="Atom selection, e.g. 'resid 77 and name OG'")
     description: str | None = Field(None, description="Human-readable description")
 
 
