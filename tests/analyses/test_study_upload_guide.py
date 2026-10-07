@@ -186,3 +186,23 @@ def test_sizes(size: int, text: str) -> None:
     from polyzymd.analyses.study_upload_guide import _gb
 
     assert _gb(size) == text
+
+
+@pytest.mark.parametrize("project", [True, False])
+def test_deposit_readme_says_where_to_locate_and_how_to_analyze_one_study(
+    tmp_path: Path, project: bool
+) -> None:
+    """The README says which folder runs `study locate`, and a project's
+    README gives the per-study analyze for a reader who downloaded one study."""
+    from polyzymd.analyses.study_upload_guide import deposit_readme
+
+    text = deposit_readme(
+        study_name="paper", tag="v1", meta={}, analyses={}, root=tmp_path, project=project
+    )
+    assert "the unzipped `study/` folder" in text
+    assert "DOWNLOAD_DIR is the folder that holds" in text
+    if project:
+        assert "`polyzymd study locate DOWNLOAD_DIR --verify --study <study>`" in text
+        assert "`polyzymd analyze --study <study>`" in text
+    else:
+        assert "`polyzymd study locate DOWNLOAD_DIR --verify`" in text
