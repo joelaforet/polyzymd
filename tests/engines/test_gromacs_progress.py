@@ -142,3 +142,36 @@ def test_gromacs_records_take_times_and_seeds_from_mdrun(tmp_path: Path) -> None
     assert segment.started_at == _logged("Wed Oct  7 00:18:20 2026")
     assert segment.finished_at == _logged("Wed Oct  7 00:18:43 2026")
     assert segment.seeds == {"ld_seed": 1482133866}
+
+
+def test_killed_gromacs_run_ends_at_its_last_log_write(tmp_path: Path) -> None:
+    """A run with no Finished line after its last start ends at the log's mtime, not now."""
+    import os
+    from datetime import datetime, timezone
+
+    log = tmp_path / "prod.log"
+    log.write_text(
+        "nsteps = 100000\n"
+        "Started mdrun on rank 0 Wed Oct  7 00:00:00 2026\n"
+        "Finished mdrun on rank 0 Wed Oct  7 01:00:00 2026\n"
+        "Started mdrun on rank 0 Wed Oct  7 05:00:00 2026\n"
+        " Step Time\n 50000 100.0\n"
+    )
+    os.utime(log, (1_790_000_000, 1_790_000_000))
+
+    (segment,) = scan_gromacs_progress(tmp_path, total_steps=100000).segments
+    assert segment.started_at == _logged("Wed Oct  7 00:00:00 2026")
+    assert segment.finished_at == datetime.fromtimestamp(1_790_000_000, timezone.utc).isoformat()
+
+
+def test_unreadable_mdp_and_unlogged_random_seeds(tmp_path: Path) -> None:
+    """An unreadable MDP is skipped; a seed of -1 that GROMACS chose is recorded as None."""
+    from polyzymd.engines.gromacs.progress import _seeds
+
+    unreadable = tmp_path / "eq_01_heating.mdp"
+    unreadable.write_text("gen_vel = yes\ngen_seed = 5\n")
+    unreadable.chmod(0)
+    assert _seeds(unreadable, tmp_path / "eq_01.log") is None
+    mdp = tmp_path / "prod.mdp"
+    mdp.write_text("ld_seed = -1\ngen_vel = yes\ngen_seed = -1\n")
+    assert _seeds(mdp, tmp_path / "prod.log") == {"ld_seed": None, "gen_seed": None}

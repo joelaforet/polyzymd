@@ -307,7 +307,8 @@ def _mdrun_times(log_path: Path, first_start: bool = False) -> tuple[str | None,
     """Return when mdrun started and finished, from the lines it writes to ``log_path``.
 
     A restarted run appends to its log, so the start is the last one, or the
-    first with ``first_start``. The finish is the last one after that start.
+    first with ``first_start``. The finish is the one after the last start,
+    so a run that is still going or was killed has none.
     Times are the local time of the reading machine, written as UTC ISO
     timestamps; ``None`` when the log has no such line.
     """
@@ -325,7 +326,8 @@ def _mdrun_times(log_path: Path, first_start: bool = False) -> tuple[str | None,
         iso = when.astimezone(timezone.utc).isoformat()
         if kind == "Started":
             if started is None or not first_start:
-                started, finished = iso, None
+                started = iso
+            finished = None
         else:
             finished = iso
     return started, finished
@@ -334,21 +336,24 @@ def _mdrun_times(log_path: Path, first_start: bool = False) -> tuple[str | None,
 def _mdp_values(mdp_path: Path | None) -> dict[str, str]:
     """Return the ``key = value`` settings of an MDP file, keys with ``-`` written as ``_``."""
     values: dict[str, str] = {}
-    if mdp_path is None or not mdp_path.is_file():
+    try:
+        text = mdp_path.read_text(errors="ignore") if mdp_path is not None else ""
+    except OSError:
         return values
-    for line in mdp_path.read_text(errors="ignore").splitlines():
+    for line in text.splitlines():
         key, sep, value = line.split(";", 1)[0].partition("=")
         if sep:
             values[key.strip().lower().replace("-", "_")] = value.strip()
     return values
 
 
-def _seeds(mdp_path: Path | None, log_path: Path) -> dict[str, int] | None:
+def _seeds(mdp_path: Path | None, log_path: Path) -> dict[str, int | None] | None:
     """Return the ``ld_seed`` mdrun used and the ``gen_seed`` of a stage that drew velocities.
 
     ``ld_seed`` comes from the parameters mdrun writes to the log, which hold
     the seed GROMACS chose when the MDP said -1; ``gen_seed`` comes from the
-    MDP file when it sets ``gen_vel = yes``.
+    MDP file when it sets ``gen_vel = yes``. A seed of -1 (GROMACS chose one
+    and did not log it) is recorded as None.
     """
     mdp = _mdp_values(mdp_path)
     seeds: dict[str, int] = {}
@@ -362,7 +367,7 @@ def _seeds(mdp_path: Path | None, log_path: Path) -> dict[str, int] | None:
         seeds["ld_seed"] = int(mdp["ld_seed"])
     if mdp.get("gen_vel", "no").lower() == "yes" and mdp.get("gen_seed", "").lstrip("-").isdigit():
         seeds["gen_seed"] = int(mdp["gen_seed"])
-    return seeds or None
+    return {name: (None if seed == -1 else seed) for name, seed in seeds.items()} or None
 
 
 def _segment_record(working_dir: Path, first_start: bool = False, **fields) -> SegmentRecord:
@@ -373,9 +378,10 @@ def _segment_record(working_dir: Path, first_start: bool = False, **fields) -> S
     """
     log = working_dir / "prod.log"
     started_at, finished_at = _mdrun_times(log, first_start=first_start)
+    # A run that was killed, or is still going, ends at its last log write.
     record = SegmentRecord(
         samples_written=0,
-        finished_at=finished_at,
+        finished_at=finished_at or _mtime_iso(log),
         seeds=_seeds(working_dir / "prod.mdp", log),
         **fields,
     )

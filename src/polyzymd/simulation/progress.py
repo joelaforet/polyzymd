@@ -106,7 +106,7 @@ class EquilibrationStageRecord(BaseModel):
     polyzymd_version: str | None = None
     openmm_version: str | None = None
     pixi_environment: str | None = None
-    seeds: dict[str, int] | None = None
+    seeds: dict[str, int | None] | None = None
 
 
 class SegmentRecord(BaseModel):
@@ -167,7 +167,8 @@ class SegmentRecord(BaseModel):
         (thermostat noise), ``barostat`` (volume moves) and, when the
         segment drew new velocities, ``velocities``; 0 means OpenMM chose
         a random seed. GROMACS records ``ld_seed`` and, when the stage drew
-        new velocities, ``gen_seed``. ``None`` for older records.
+        new velocities, ``gen_seed``; None means GROMACS chose one that was
+        not logged. ``None`` for older records.
     """
 
     index: int
@@ -190,7 +191,7 @@ class SegmentRecord(BaseModel):
     resumed_from: str | None = None
     overlap_frames: int = 0
     gap_frames: int = 0
-    seeds: dict[str, int] | None = None
+    seeds: dict[str, int | None] | None = None
 
 
 def flush_reporters(simulation: Any) -> None:
