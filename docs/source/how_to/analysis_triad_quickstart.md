@@ -110,9 +110,10 @@ with `all_below`:
 from polyzymd.analyses.functions import all_below, pair_distance
 
 ser_his_d = study.timeseries(pair_distance, pz.select("protein and resid 76 and name OG"),
-                             pz.select("protein and resid 155 and name NE2"), unit="A")
+                             pz.select("protein and resid 155 and name NE2"), unit="Å")
 his_asp_d = study.timeseries(pair_distance, pz.select("protein and resid 155 and name ND1"),
-                             pz.select("protein and resid 132 and name OD2"), unit="A")
+                             pz.select("protein and resid 132 and name OD1 OD2"),
+                             mode_b="midpoint", unit="Å")
 close = ser_his_d.transform(all_below, his_asp_d, thresholds=[3.5, 3.5], unit=None)
 print(close.reduce("mean").compare(control="No polymer").to_agent_text())
 ```
@@ -139,4 +140,4 @@ carboxylate acceptor.
 - **Interpret triad results**: {doc}`../explanation/analysis_triad_best_practices`
 - **Count hydrogen bonds between groups**: {doc}`hydrogen_bonds`
 - **Measure other atom pairs**: {doc}`analysis_distances_quickstart`
-- **Write a measurement of your own**: {doc}`../explanation/analysis_api`
+- **Write a measurement of your own**: {doc}`study_api`

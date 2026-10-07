@@ -38,7 +38,7 @@ to one value per replicate whose `summary()` and `compare()` give the same
 report as `polyzymd analyze`. `Timeseries.transform` combines stored series,
 for example the hydrogen bonds of a catalytic triad in
 {doc}`../how_to/analysis_triad_quickstart`. Use this route when no shipped
-analysis measures what you need; see {doc}`analysis_api`.
+analysis measures what you need; see {doc}`../how_to/study_api`.
 
 ## Loading trajectories yourself
 

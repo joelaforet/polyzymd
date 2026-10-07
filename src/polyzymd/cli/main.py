@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -423,8 +424,8 @@ def build(
     workflows.
 
     The ``--replicates`` option accepts range syntax (for example ``1-3`` or
-    ``1,3,5``). Each replicate is built independently with a different polymer
-    random seed.
+    ``1,3,5``). The replicate number seeds the build (Packmol and polymer
+    draws) and the dynamics of each replicate.
 
     \b
     Export Notes:
@@ -455,6 +456,10 @@ def build(
         if projects_dir:
             sim_config.output.projects_directory = Path(projects_dir)
 
+        # A config for GROMACS builds GROMACS inputs unless --format says otherwise.
+        if export_format is None and sim_config.engine == "gromacs":
+            export_format = "gromacs"
+
         if dry_run:
             colored_echo("=" * 60, phase="build")
             colored_echo("DRY RUN — Validation Report", phase="build")
@@ -471,7 +476,13 @@ def build(
             colored_echo("Replicates:", phase="build")
             colored_echo(f"  Count: {len(replicate_list)}", phase="build")
             colored_echo(f"  IDs: {replicate_list}", phase="build")
-            colored_echo(f"  Polymer seeds: {replicate_list} (one per replicate)", phase="build")
+            polymer = bool(sim_config.polymers and sim_config.polymers.enabled)
+            what = "Packmol and polymer draws" if polymer else "Packmol"
+            colored_echo(
+                f"  Seeds: the replicate number seeds {what}, the velocities"
+                " and the thermostat noise",
+                phase="build",
+            )
             colored_echo(phase="build")
 
             colored_echo("System Components:", phase="build")
@@ -498,9 +509,22 @@ def build(
             colored_echo(f"  Chain D+ (Solvent): {sim_config.solvent.primary.model}", phase="build")
             colored_echo(f"    Box padding: {sim_config.solvent.box.padding} nm", phase="build")
             colored_echo(
-                f"    NaCl concentration: {sim_config.solvent.ions.nacl_concentration} M",
+                f"    NaCl concentration: {sim_config.solvent.ions.nacl_concentration} M, "
+                f"neutralize: {sim_config.solvent.ions.neutralize}",
                 phase="build",
             )
+            for cs in sim_config.solvent.co_solvents:
+                if cs.count is not None:
+                    amount = f"{cs.count} molecules"
+                elif cs.concentration is not None:
+                    amount = f"{cs.concentration} M"
+                else:
+                    amount = f"{cs.mole_fraction * 100:g} mol%"
+                colored_echo(
+                    f"    Co-solvent {cs.name} ({cs.residue_name}): {amount}, "
+                    f"SMILES {cs.smiles}, charges {cs.charge_method.value}",
+                    phase="build",
+                )
             colored_echo(phase="build")
 
             colored_echo("Parameterization Plan:", phase="build")
@@ -660,6 +684,7 @@ def build(
                     output_dir=export_dir,
                     fmt=export_format,
                     component_info=builder.get_component_info(),
+                    replicate=rep,
                 )
 
                 colored_echo(f"{export_format.upper()} export successful!", phase="export")
@@ -777,7 +802,7 @@ def build(
                     phase="build",
                 )
                 colored_echo(
-                    "or 'polyzymd run-segment' to run a single segment locally.",
+                    "or 'polyzymd run' to run it on this machine.",
                     phase="build",
                 )
             build_lock.__exit__(None, None, None)
@@ -925,9 +950,9 @@ def _print_run_dry_run_report(
 )
 @click.option(
     "--engine",
-    required=True,
+    default=None,
     type=click.Choice(["gromacs", "openmm"], case_sensitive=False),
-    help="Simulation engine to run locally",
+    help="Simulation engine to run locally. Default: the config's engine.",
 )
 @click.option(
     "--dry-run",
@@ -940,7 +965,7 @@ def run(
     scratch_dir: str | None,
     projects_dir: str | None,
     gmx_path: str | None,
-    engine: str,
+    engine: str | None,
     dry_run: bool,
 ) -> None:
     """Build and run a simulation locally.
@@ -957,6 +982,13 @@ def run(
         - ``--gmx-path`` is valid only with ``--engine gromacs``
         - ``--dry-run`` validates and previews without writing files
     """
+    if engine is None:
+        from polyzymd.config.schema import SimulationConfig
+
+        try:
+            engine = SimulationConfig.from_yaml(config).engine
+        except Exception:  # noqa: BLE001 - the full load below reports the problem
+            engine = "openmm"
     engine = engine.lower()
     if engine == "openmm":
         warn_if_wrong_pixi_env(
@@ -1022,6 +1054,7 @@ def run(
                 _run_openmm_impl(
                     sim_config=sim_config,
                     replicate=rep,
+                    config_path=str(Path(config).resolve()),
                 )
 
             succeeded += 1
@@ -1100,6 +1133,7 @@ def _run_gromacs_impl(
         interchange=interchange,
         config=sim_config,
         component_info=component_info,
+        replicate=replicate,
     )
     export_result = exporter.export(
         output_dir=gromacs_dir,
@@ -1161,6 +1195,7 @@ def _run_gromacs_impl(
 def _run_openmm_impl(
     sim_config: "SimulationConfig",
     replicate: int,
+    config_path: str = "",
 ) -> None:
     """Build and run a full local OpenMM simulation.
 
@@ -1170,13 +1205,34 @@ def _run_openmm_impl(
         Validated simulation configuration.
     replicate : int
         Replicate number.
+    config_path : str
+        The config file, recorded in ``progress.json``.
     """
-    from polyzymd.simulation.progress import calculate_report_interval
+    from polyzymd.simulation.progress import (
+        calculate_report_interval,
+        load_or_scan_progress,
+        save_progress,
+    )
 
     production = sim_config.simulation_phases.production
     working_dir = sim_config.get_working_directory(replicate)
     total_steps = int(production.duration * 1e6 / production.time_step)
     report_interval = calculate_report_interval(total_steps, production.samples)
+
+    # progress.json records each stage and segment, and the trajectory hash of
+    # each finished segment, as a run under SLURM does.
+    working_dir.mkdir(parents=True, exist_ok=True)
+    save_progress(
+        working_dir,
+        load_or_scan_progress(
+            working_dir=working_dir,
+            config_path=config_path,
+            total_steps=total_steps,
+            total_samples=production.samples,
+            timestep_fs=production.time_step,
+            replicate=replicate,
+        ),
+    )
 
     colored_echo(f"Building and running OpenMM in {working_dir}", phase="simulation")
     _run_initial_segment(
@@ -1582,10 +1638,35 @@ def submit(
                 email=email,
             )
         else:
+            from polyzymd.workflow.slurm import SlurmConfig
+
             script_dir = (
                 Path(output_dir) if output_dir else sim_config.output.get_job_scripts_directory()
             )
             colored_echo(f"  Script dir:  {script_dir}", phase="workflow")
+            slurm = SlurmConfig.from_preset(preset)
+            for key, value in (
+                ("time_limit", time_limit),
+                ("memory", memory),
+                ("account", account),
+                ("partition", partition),
+                ("qos", qos),
+            ):
+                if value:
+                    setattr(slurm, key, value)
+            colored_echo(
+                f"  SLURM:       partition {slurm.partition}, qos {slurm.qos or '(none)'}, "
+                f"time {slurm.time_limit}, account {slurm.account or '(none)'}, "
+                f"GPUs {slurm.gpus}",
+                phase="workflow",
+            )
+            platform = str(getattr(getattr(sim_config, "openmm", None), "platform", "") or "")
+            if platform.upper().endswith("CPU") and slurm.gpus:
+                colored_echo(
+                    f"  warning: the config runs on the CPU platform, but preset {preset} asks "
+                    "for GPUs; choose a CPU partition (--partition) or set openmm.platform: CUDA",
+                    phase="workflow",
+                )
 
         colored_echo(phase="workflow")
         colored_echo("Dry run complete. No files were written.", phase="workflow")
@@ -2068,6 +2149,7 @@ def _run_segment_locked(
                 sim_config=sim_config,
                 working_dir=working_dir,
                 segment_index=seg_idx,
+                replicate=replicate,
                 duration_ns=duration_ns,
                 num_samples=samples_to_write,
                 timestep_fs=timestep_fs,
@@ -2242,6 +2324,7 @@ def _run_initial_segment(
         platform=sim_config.openmm.platform,
         precision=sim_config.openmm.precision,
         device_index=sim_config.openmm.device_index,
+        replicate=replicate,
     )
 
     # ------------------------------------------------------------------
@@ -2365,6 +2448,7 @@ def _run_continuation_segment(
     timestep_fs: float,
     report_interval: int,
     checkpoint_interval_s: float,
+    replicate: int | None = None,
 ) -> None:
     """Continue from the last completed segment.
 
@@ -2399,6 +2483,7 @@ def _run_continuation_segment(
         platform=sim_config.openmm.platform,
         precision=sim_config.openmm.precision,
         device_index=sim_config.openmm.device_index,
+        replicate=replicate,
     )
     manager.load_previous_state()
 
@@ -2889,7 +2974,11 @@ def _status_report(
     else:
         click.echo(
             render_agent(
-                reports, now=now, slurm_available=slurm_available, preset_hint=preset_hint
+                reports,
+                now=now,
+                slurm_available=slurm_available,
+                preset_hint=preset_hint,
+                slurm_queried=not no_slurm,
             ),
             nl=False,
         )
@@ -3209,7 +3298,7 @@ def init(name: str) -> None:
         colored_echo(f"  4. Build:    polyzymd build -c {name}/config.yaml -r 1")
         colored_echo()
         colored_echo(
-            "Documentation: https://polyzymd.readthedocs.io/en/latest/tutorials/quickstart.html"
+            "Documentation: https://polyzymd.readthedocs.io/en/latest/get_started/quickstart.html"
         )
 
     except Exception as e:
@@ -3265,6 +3354,11 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
         polyzymd clean-pdb -i raw.pdb -o cleaned.pdb --ph 7.0
     """
     warn_if_wrong_pixi_env("clean-pdb", "build")
+
+    # PDBFixer places hydrogens with an OpenMM context on the fastest platform.
+    # A GPU whose driver is older than the CUDA toolkit then fails
+    # (CUDA_ERROR_UNSUPPORTED_PTX_VERSION); the CPU is fast enough for this.
+    os.environ.setdefault("OPENMM_DEFAULT_PLATFORM", "CPU")
 
     from openmm.app import PDBFile
     from pdbfixer import PDBFixer
@@ -3699,38 +3793,6 @@ def recover(
             sys.exit(1)
 
 
-def _find_topology_pdb(working_dir: Path) -> Path:
-    """Find a suitable topology PDB in the working directory.
-
-    Parameters
-    ----------
-    working_dir : Path
-        Working directory to search.
-
-    Returns
-    -------
-    Path
-        Path to the PDB file.
-
-    Raises
-    ------
-    FileNotFoundError
-        If no suitable PDB is found.
-    """
-    allowed_paths = (
-        working_dir / "solvated_system.pdb",
-        working_dir / "production_0" / "production_0_topology.pdb",
-        working_dir / "production" / "production_topology.pdb",
-    )
-    for pdb_path in allowed_paths:
-        if pdb_path.exists():
-            return pdb_path
-
-    # Arbitrary recursive PDB discovery is disallowed to avoid selecting decoys or inputs
-
-    raise FileNotFoundError(f"Could not find topology PDB in {working_dir}")
-
-
 # =============================================================================
 # Info Command
 # =============================================================================
@@ -3797,6 +3859,9 @@ def _register_optional_command_groups() -> None:
     cli.add_command(new_analysis)
     cli.add_command(analyze_command)
     cli.add_command(study_group)
+    from polyzymd.cli.project import project_group
+
+    cli.add_command(project_group)
     from polyzymd.cli.hashes import hash_trajectories_command
 
     cli.add_command(hash_trajectories_command)

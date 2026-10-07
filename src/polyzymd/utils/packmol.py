@@ -587,7 +587,6 @@ def build_packmol_input(
 def run_packmol(
     input_text: str,
     working_directory: str | Path,
-    retain_working_files: bool = True,
 ) -> Path:
     """Write a Packmol input file and execute Packmol.
 
@@ -597,11 +596,8 @@ def run_packmol(
         Complete Packmol input file content (from :func:`build_packmol_input`).
     working_directory : str or Path
         Directory in which to write working files and invoke Packmol.
-        The directory is created if it does not exist.
-    retain_working_files : bool, optional
-        When ``True`` (default), all files in *working_directory* are kept
-        after the run.  When ``False`` the directory is removed on success
-        (mimicking OpenFF behaviour for temporary directories).
+        The directory is created if it does not exist. Its files are kept
+        after the run.
 
     Returns
     -------
@@ -616,18 +612,10 @@ def run_packmol(
         If Packmol exits with a non-zero return code or does not print
         ``'Success!'`` in its output.
     """
-    packmol_binary = shutil.which("packmol")
-    if packmol_binary is None:
-        raise OSError(
-            "Packmol binary not found on PATH. "
-            "Install Packmol and make sure it is accessible as 'packmol'."
-        )
+    packmol_binary = _require_packmol()
 
     working_directory = Path(working_directory)
     working_directory.mkdir(parents=True, exist_ok=True)
-
-    _temporary = False
-    _actual_dir = working_directory
 
     input_path = working_directory / _PACKMOL_INPUT_FILE
     output_path = working_directory / _PACKMOL_OUTPUT_FILE
@@ -683,15 +671,24 @@ def run_packmol(
             f"Working directory: {working_directory}"
         )
 
-    if not retain_working_files and _temporary:
-        shutil.rmtree(_actual_dir, ignore_errors=True)
-
     return output_path.resolve()
 
 
 # ---------------------------------------------------------------------------
 # High-level polymer packing helper
 # ---------------------------------------------------------------------------
+
+
+def _require_packmol() -> str:
+    """Return the path of the ``packmol`` binary, or raise an error that says it is missing."""
+    packmol_binary = shutil.which("packmol")
+    if packmol_binary is None:
+        raise OSError(
+            "Packmol is not on PATH, and PolyzyMD packs every system with it. Run PolyzyMD in "
+            "its pixi environment (pixi run -e build ...), which installs Packmol, or install "
+            "Packmol and make it callable as 'packmol'."
+        )
+    return packmol_binary
 
 
 def pack_polymers(
@@ -783,6 +780,7 @@ def pack_polymers(
         If any atom of the packed system ends up closer than
         ``0.5 * tolerance_angstrom`` to one of its own periodic images.
     """
+    _require_packmol()
     import numpy as np
     from openff.packmol._packmol import (
         _center_topology_at,
@@ -893,7 +891,6 @@ def pack_polymers(
         output_path = run_packmol(
             input_text=input_text,
             working_directory=working_directory,
-            retain_working_files=True,  # always keep; we clean up below
         )
 
         positions = _load_positions(str(output_path.name))
@@ -1017,6 +1014,7 @@ def solvate_with_packmol(
         If any atom of the solvated system ends up closer than
         ``0.5 * tolerance_angstrom`` to one of its own periodic images.
     """
+    _require_packmol()
     import numpy as np
     from openff.packmol._packmol import (
         _center_topology_at,
@@ -1090,7 +1088,6 @@ def solvate_with_packmol(
         output_path = run_packmol(
             input_text=input_text,
             working_directory=working_directory,
-            retain_working_files=True,  # always keep; we clean up below
         )
 
         positions = _load_positions(str(output_path.name))

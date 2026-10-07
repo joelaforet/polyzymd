@@ -35,8 +35,9 @@ def compute_config_hash(config: "SimulationConfig") -> str:
     of: the config name; the enzyme name and the content of its PDB file; the
     temperature and pressure; the naming template of the run directories; the
     substrate name and the content of its SDF file when there is a substrate;
-    and the polymer type prefix, length, count and monomers (label,
-    probability, name) when polymers are enabled.
+    the polymer type prefix, length, count and monomers (label,
+    probability, name) when polymers are enabled; and each co-solvent's
+    name, SMILES and amount when there are co-solvents.
 
     Locations are left out: input files are identified by their SHA-256, not
     their path, and the projects and scratch directories are not hashed,
@@ -69,6 +70,11 @@ def compute_config_hash(config: "SimulationConfig") -> str:
         "enzyme": {
             "name": config.enzyme.name,
             "pdb": _content(config.enzyme.pdb_path),
+            **(
+                {"custom_substructures": _content(config.enzyme.custom_substructures_path)}
+                if getattr(config.enzyme, "custom_substructures_path", None)
+                else {}
+            ),
         },
         "thermodynamics": {
             "temperature": config.thermodynamics.temperature,
@@ -97,6 +103,24 @@ def compute_config_hash(config: "SimulationConfig") -> str:
                 for m in config.polymers.monomers
             ],
         }
+
+    # Co-solvents change the system the trajectories hold (water vs SDS);
+    # a config without them keeps the hash it always had.
+    solvent = getattr(config, "solvent", None)
+    if solvent is not None and solvent.co_solvents:
+        hash_data["co_solvents"] = sorted(
+            (
+                {
+                    "name": c.name,
+                    "smiles": c.smiles,
+                    "mole_fraction": c.mole_fraction,
+                    "concentration": c.concentration,
+                    "count": getattr(c, "count", None),
+                }
+                for c in solvent.co_solvents
+            ),
+            key=lambda item: str(item["name"]),
+        )
 
     # Serialize and hash
     json_str = json.dumps(hash_data, sort_keys=True, default=str)

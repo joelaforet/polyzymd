@@ -4,7 +4,7 @@ These functions ship in `polyzymd.analyses.functions`. The per-frame functions
 measure one frame and run through `Study.timeseries`, and the per-replicate
 functions measure all production frames of one replicate and run through
 `Study.per_replicate`, like functions you write yourself; see
-{doc}`../explanation/analysis_api`.
+{doc}`study_api`.
 
 ## Per-frame functions
 
@@ -77,8 +77,9 @@ see {doc}`../how_to/analysis_triad_quickstart`.
 `rms_decomposition` once per replicate, with `selection` measured and
 `alignment_selection` fitted (both `protein and name CA` by default) against
 `pz.reference(reference_mode, "(selection) or (alignment_selection)", frame=reference_frame, file=reference_file, alignment=alignment_selection)`.
-`reference_mode` defaults to `centroid` for `rmsf`; for `rmsd_per_residue` it is
-`external` when `reference_file` is set and `centroid` otherwise. Each
+Without `reference_mode`, the reference is `reference_file` when one is set
+(`external`), otherwise the `centroid` frame. A `reference_file` with another
+mode is refused. Each
 replicate's `core_<part>` value is the square root of the mean over the core
 residues of the part's mean-square row, so
 `core_rmsd_per_residue² = core_rmsf² + core_offset²`. The core is the residues of
@@ -121,14 +122,33 @@ and `--run <class>_residues` compares every residue. The default is the
 scheme's first class, `helix` or `alpha_helix`. A warning names the replicates
 with unassigned residues. See {doc}`../how_to/analysis_secondary_structure_quickstart`.
 
+(dssp-classes)=
+The two schemes use these classes. `simplified` calls
+`mdtraj.compute_dssp(simplified=True)`, and `full` calls
+`mdtraj.compute_dssp(simplified=False)`. `DSSP_GROUPS` gives the same mapping
+in Python.
+
+| `scheme=full` class | DSSP code | `scheme=simplified` class |
+|---|---|---|
+| `alpha_helix` | H | `helix` |
+| `3_10_helix` | G | `helix` |
+| `pi_helix` | I | `helix` |
+| `extended_strand` | E | `strand` |
+| `isolated_bridge` | B | `strand` |
+| `turn` | T | `coil` |
+| `bend` | S | `coil` |
+| `loop` | blank | `coil` |
+| `unassigned` | NA | `unassigned` |
+
 `polyzymd analyze contacts` runs, once per replicate between `--set
 protein_selection=...` (default `chainid A`) and `polymer_selection` (default
-`chainid C`, narrowed to the residue names of `polymer_types` when set),
+`chainid C`; a replicate where it matches no atoms, such as a control without
+polymer, has no contact: 0),
 `residue_occlusion` with `exposed_threshold`, `buried_threshold`, `max_asa`, `probe_radius_nm` and
 `n_sphere_points` for `method=occlusion` (default), or `residue_contacts` with
 `cutoff` for `method=distance`, on heavy atoms only when `heavy_atoms` is true
-(default). `use_pbc` sets `pbc`, and every polymer residue name of the
-control's first replicate gets a row. `coverage`, the default, is the fraction
+(default). `use_pbc` sets `pbc`, and every polymer residue name in any
+condition gets a row (`polymer_types`), 0 in a replicate without it. `coverage`, the default, is the fraction
 of measured residues with a contact fraction above zero;
 `mean_contact_fraction`, `<type>_contact_fraction`, `<class>_contact_fraction`
 for each amino-acid class of `ProteinAAClassification` and

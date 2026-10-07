@@ -10,7 +10,9 @@ source, so editing a helper the function calls recomputes them.
 
 from __future__ import annotations
 
+import shutil
 import sys
+import tempfile
 import types
 from pathlib import Path
 from typing import Any, Callable
@@ -24,9 +26,8 @@ MODULE_FILE_ATTRIBUTE = "__polyzymd_module_file__"
 def load_function(file: Path, qualname: str) -> Callable:
     """Import ``qualname`` from the Python file ``file`` and return it.
 
-    The file's folder is put first on ``sys.path`` while it imports, so it
-    can import helper modules beside it. The function is marked so its
-    stored results are keyed on the hash of the whole file.
+    The file is imported by :func:`load_module`. The function is marked so
+    its stored results are keyed on the hash of the whole file.
 
     Raises
     ------
@@ -34,25 +35,7 @@ def load_function(file: Path, qualname: str) -> Callable:
         If the file cannot be imported or has no such callable.
     """
     file = Path(file).resolve()
-    # The record keeps the module name, so it must not depend on where the
-    # study folder sits; the module is not added to sys.modules.
-    module_name = f"polyzymd_study.{file.stem}"
-    module = types.ModuleType(module_name)
-    module.__file__ = str(file)
-    sys.path.insert(0, str(file.parent))
-    try:
-        # Compile the file's current text rather than importing it, so a
-        # cached .pyc that predates an edit is never run: the code that runs
-        # is the code whose hash keys the stored results.
-        exec(compile(file.read_bytes(), str(file), "exec"), module.__dict__)  # noqa: S102
-    except Exception as exc:  # noqa: BLE001 - any error in user code is reported the same way
-        raise ProtocolError(
-            f"Importing {file} failed: {type(exc).__name__}: {exc}",
-            hint="Run 'python FILE' to see the full error, and fix it in the file.",
-        ) from exc
-    finally:
-        sys.path.remove(str(file.parent))
-    function: Any = module
+    function: Any = load_module(file)
     for part in qualname.split("."):
         function = getattr(function, part, None)
     if not callable(function):
@@ -65,6 +48,74 @@ def load_function(file: Path, qualname: str) -> Callable:
     except (AttributeError, TypeError):
         pass
     return function
+
+
+def load_module(file: Path) -> types.ModuleType:
+    """Import the Python file ``file`` from its current text and return the module.
+
+    The file's folder is put first on ``sys.path`` while it imports, so it
+    can import helper modules beside it; helpers imported earlier from that
+    folder are imported again, so edits since then take effect.
+
+    Raises
+    ------
+    ProtocolError
+        If the file cannot be imported.
+    """
+    file = Path(file).resolve()
+    # The record keeps the module name, so it must not depend on where the
+    # study folder sits; the module is not added to sys.modules.
+    module_name = f"polyzymd_study.{file.stem}"
+    module = types.ModuleType(module_name)
+    module.__file__ = str(file)
+    # A helper module imported from the file's folder earlier in this process
+    # may have been edited since; drop it so the import reads it again, as
+    # its current content is what the stored results' hash covers. Only
+    # modules imported through that folder are dropped (helper.py,
+    # util/k.py): an installed package that merely lies under it, in a
+    # .pixi environment or a source checkout, is left alone.
+    for name, loaded in list(sys.modules.items()):
+        if _imported_from(loaded, name, file.parent):
+            del sys.modules[name]
+    sys.path.insert(0, str(file.parent))
+    # Helpers it imports are compiled into a fresh cache: a .pyc beside them is
+    # trusted by modification second and size, so an edit of the same size
+    # within one second would otherwise run the old helper.
+    saved_prefix, sys.pycache_prefix = sys.pycache_prefix, tempfile.mkdtemp(prefix="pzpyc")
+    try:
+        # Compile the file's current text rather than importing it, so a
+        # cached .pyc that predates an edit is never run: the code that runs
+        # is the code whose hash keys the stored results.
+        exec(compile(file.read_bytes(), str(file), "exec"), module.__dict__)  # noqa: S102
+    except Exception as exc:  # noqa: BLE001 - any error in user code is reported the same way
+        raise ProtocolError(
+            f"Importing {file} failed: {type(exc).__name__}: {exc}",
+            hint="Run 'python FILE' to see the full error, and fix it in the file.",
+        ) from exc
+    finally:
+        sys.path.remove(str(file.parent))
+        shutil.rmtree(sys.pycache_prefix, ignore_errors=True)
+        sys.pycache_prefix = saved_prefix
+    return module
+
+
+def _imported_from(module: Any, name: str, folder: Path) -> bool:
+    """Return whether ``module`` was imported through ``folder`` on ``sys.path``.
+
+    True when its top-level name is a file or package directly in ``folder``
+    and its file lies there: ``helper`` from ``folder/helper.py``, or
+    ``util.k`` from ``folder/util/k.py``.
+    """
+    origin = getattr(module, "__file__", None)
+    if not origin:
+        return False
+    try:
+        relative = Path(origin).resolve().relative_to(folder)
+    except ValueError:
+        return False
+    top = name.split(".")[0]
+    first = relative.parts[0]
+    return first == top or first == f"{top}.py"
 
 
 def run_user_analysis(
@@ -129,6 +180,7 @@ def run_user_analysis(
             unit=user.unit,
             labels=user.labels,
             missing=user.missing,
+            note_filled=True,
             name=run,
             recompute=recompute,
             output_dir=output_dir,

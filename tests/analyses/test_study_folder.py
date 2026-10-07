@@ -209,12 +209,22 @@ class TestData:
     def test_data_option(self, tmp_path: Path, sources: dict[str, Path]) -> None:
         root = _study(tmp_path, sources, git=False)
         shutil.move(tmp_path / "scratch" / "polymer", tmp_path / "elsewhere")
+        import json
+
         result = _analyze(
-            "rg", "--study", str(root), "--label", "Polymer", "--data", str(tmp_path / "elsewhere")
+            "rg",
+            "--study",
+            str(root),
+            "--label",
+            "Polymer",
+            "--data",
+            str(tmp_path / "elsewhere"),
+            "--format",
+            "json",
         )
         assert result.exit_code == 0, result.output
-        report = read_results(root / "results" / "rg").report
-        assert report.conditions[0].mean == pytest.approx(2.21)
+        report = json.loads(result.stdout[result.stdout.index("{") :])
+        assert report["conditions"][0]["mean"] == pytest.approx(2.21)
 
     def test_locate_writes_data_local_yaml(self, tmp_path: Path, sources: dict[str, Path]) -> None:
         root = _study(tmp_path, sources, git=False)
@@ -245,6 +255,9 @@ class TestData:
 
     def test_data_example_is_not_read(self, tmp_path: Path, sources: dict[str, Path]) -> None:
         root = _study(tmp_path, sources, git=False)
+        # study init records where the copied conditions' runs are; without
+        # that file, data.example.yaml is still never read.
+        (root / "data.local.yaml").unlink()
         assert load_study_file(root).data == {}
 
 
@@ -264,7 +277,7 @@ class TestGitProvenance:
 
         (root / "analyses" / "new.py").write_text("x = 1\n")
         result = _analyze("rg", "--study", str(root), "--set", "selection=all")
-        assert "uncommitted changes (analyses/new.py)" in result.output
+        assert "1 uncommitted input files (analyses/new.py)" in result.output
         study = json.loads((root / "results/rg/report.json").read_text())["provenance"]["study"]
         assert "analyses/new.py" in study["git"]["inputs_uncommitted"]
 

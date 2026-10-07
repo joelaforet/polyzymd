@@ -79,14 +79,15 @@ def _sequence(value: Any, where: str) -> list:
     return list(value)
 
 
-def check_metadata(raw: Any) -> tuple[dict[str, Any], list[str]]:
+def check_metadata(raw: Any, what: str = "study") -> tuple[dict[str, Any], list[str]]:
     """Check the ``metadata:`` block and return it completed, with a warning per gap.
 
     Missing ``title``, ``description``, ``purpose`` and ``authors`` become
     ``TODO`` placeholders; a missing licence becomes the default
     (:data:`DEFAULT_LICENSE`); a missing or placeholder paper DOI is noted.
-    ``doi`` is the study's own DOI, reserved in Zenodo before publishing; it
-    is ``None`` until set, with a warning.
+    ``doi`` is the dataset's own DOI, reserved in Zenodo before publishing;
+    it is ``None`` until set, with a warning that names ``what`` is published
+    (``"study"``, or ``"project"`` for a project's metadata).
 
     Raises
     ------
@@ -102,7 +103,7 @@ def check_metadata(raw: Any) -> tuple[dict[str, Any], list[str]]:
         value = raw.get(key)
         if not value or not str(value).strip():
             warnings.append(f"metadata.{key} is missing")
-            meta[key] = f"{TODO}: add metadata.{key} to study.yaml"
+            meta[key] = f"{TODO}: add metadata.{key} to {what}.yaml"
         else:
             meta[key] = str(value).strip()
     for key in ("keywords", "system_type"):
@@ -124,13 +125,13 @@ def check_metadata(raw: Any) -> tuple[dict[str, Any], list[str]]:
         authors.append({k: str(v) for k, v in person.items() if v})
     if not authors:
         warnings.append("metadata.authors is empty")
-        authors = [{"name": f"{TODO}: add metadata.authors to study.yaml"}]
+        authors = [{"name": f"{TODO}: add metadata.authors to {what}.yaml"}]
     meta["authors"] = authors
     meta["contact"] = dict(_mapping(raw.get("contact"), "metadata.contact"))
     doi = raw.get("doi")
     if is_placeholder(doi):
         warnings.append(
-            "metadata.doi is not set: reserve a DOI for the study in Zenodo, add it here and "
+            f"metadata.doi is not set: reserve a DOI for the {what} in Zenodo, add it here and "
             "refreeze (deposit/UPLOAD.md says how)"
         )
         meta["doi"] = None
@@ -230,8 +231,8 @@ def citation_cff(
     cff: dict[str, Any] = {
         "cff-version": "1.2.0",
         "type": "dataset",
-        "message": "If you use this study, please cite the article in preferred-citation, "
-        "this dataset, and PolyzyMD, which produced its analyses.",
+        "message": "If you use this study, please cite this dataset and PolyzyMD, "
+        "which produced its analyses.",
         "title": meta["title"],
         "abstract": meta["description"],
         "authors": [_cff_person(p) for p in meta["authors"]],
@@ -255,6 +256,10 @@ def citation_cff(
             if paper.get(key) and not (key == "doi" and is_placeholder(paper[key])):
                 preferred[key] = paper[key]
         cff["preferred-citation"] = preferred
+        cff["message"] = (
+            "If you use this study, please cite the article in preferred-citation, "
+            "this dataset, and PolyzyMD, which produced its analyses."
+        )
     references = [software_reference()]
     if paper_reference():
         references.append(paper_reference())

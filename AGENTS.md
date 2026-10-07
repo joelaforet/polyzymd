@@ -5,27 +5,41 @@
 
 ## Environment
 
-**All simulation-stack commands MUST use a PolyzyMD pixi environment:**
+Run every command that needs the simulation or analysis stack in a PolyzyMD
+pixi environment: `pixi run -e <env> <command>`. Pixi 0.72.2 or newer reads
+`pixi.toml`. The default environment has no numpy, so analysis code and tests
+fail there.
+
+| Task | Environment | Command |
+|------|-------------|---------|
+| Run tests | `test` | `pixi run -e test pytest tests/analyses -q` |
+| Run analysis or library code | `analysis` | `pixi run -e analysis python -c "import polyzymd"` |
+| Lint | `build` | `pixi run -e build ruff check src tests` |
+| Format check | `build` | `pixi run -e build black --check <changed files>` |
+| Build docs | `build` | `pixi run -e build make -C docs clean html` |
+| Submit OpenMM jobs | `build` | see "OpenMM site runtime" below |
+
+- Do not run `pixi install` or edit `pixi.toml` during a task. Re-solving the
+  environments is slow and is the maintainer's job.
+- Never `pip install` OpenMM, OpenFF, AmberTools, parmed or PDBFixer. They come
+  from conda-forge through pixi. Do not add OpenMM or OpenFF to
+  `pyproject.toml`; pip-installable analysis extras go in
+  `[project.optional-dependencies]`.
+
+### Worktrees
+
+A git worktree shares the main checkout's pixi environments, and their
+editable install points at the main checkout's `src`. Set `PYTHONPATH` to the
+worktree's `src` and call the environment's interpreter directly:
 
 ```bash
-pixi run -e <env> <command>
+MAIN=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+PYTHONPATH=$PWD/src $MAIN/.pixi/envs/test/bin/python -m pytest tests/analyses -q
+$MAIN/.pixi/envs/build/bin/ruff check src tests
 ```
 
-The PolyzyMD pixi environments contain OpenMM, OpenFF, MDAnalysis and other
-heavy dependencies resolved from conda-forge. Never `pip install` these
-outside the managed pixi environment.
-
-**Quick commands:**
-
-| Task | Command |
-|------|---------|
-| Install env | `pixi install -e build` |
-| Activate shell | `pixi shell -e build` |
-| Run tests | `pixi run -e build pytest tests/ -v` |
-| Lint | `ruff check src/` |
-| Format | `black src/ --check` (or `black src/` to fix) |
-| Build docs | `pixi run -e build make -C docs clean html` |
-| Type check | `pixi run -e build mypy src/polyzymd` |
+Before you trust a test run from a worktree, print `polyzymd.__file__` and
+check that it points inside the worktree.
 
 ## Git Workflow
 
@@ -40,21 +54,45 @@ outside the managed pixi environment.
   and rebases for unpublished local work.
 - Use conventional commits with an imperative subject near 50 characters.
   Keep each commit atomic and explain important reasoning in the body.
-- Run `ruff check` and `black --check` before committing
-- Never force-push to `main`, `dev`, or `release/*`.
+- Commit as Joe (`git config user.name`/`user.email`). Do not add
+  generated-by text or co-author trailers.
+- Run `ruff check` and `black --check` before committing.
+- Never force-push to `main`, `dev`, or `release/*`. Force-push any other
+  shared branch only with Joe's approval, and then with `--force-with-lease`.
+- Do not commit or push failing, incomplete or scientifically unresolved work.
+- Open pull requests as drafts. Joe reviews and merges them; never merge
+  yourself. State the user goal, scientific assumptions, validation and
+  limitations in the description.
 - Never merge a pull request. Joe reviews every PR and merges it manually.
 
-See `.opencode/instructions/development-workflow.md` for collaboration,
-scope, validation, authorship, push, and PR rules.
+### Priorities and scope
 
-## Harness Capabilities and Living Guidance
+Priorities, in order: scientific correctness and reproducibility, low-friction
+user experience, OpenMM and GROMACS parity, small reviewable changes, docs that
+match the code. Ask Joe before you choose a chemistry, topology,
+parameterization, force-field or interpretation assumption.
 
-Treat `AGENTS.md`, `.opencode/instructions/`, and the personal PolyzyMD Skills
-as living guidance. When repository behavior, scientific contracts, branch
-names, tools, permissions, or recurring workflows change, update the affected
-guidance in the same atomic task so future agents do not follow stale rules.
-Validate edited Skills and run the relevant repository documentation or static
-checks before committing.
+- One end-user goal per PR. Above about 300 changed lines (tests included),
+  look for scope creep and split independent behavior. Above 500, stop and
+  explain why the change cannot be split. An "and" in a subject is a signal
+  to check for two changes.
+- Use one writing agent per worktree. Parallel writing tasks use separate
+  worktrees.
+- Run cheap checks first: static checks, focused tests, subsystem tests, then
+  integration and scientific checks. GPU simulations are for feature
+  acceptance and release gates.
+- Engine-facing features need OpenMM and GROMACS coverage with the same
+  particles, masses, bonds, constraints, charges, parameters, exclusions,
+  coordinates and box. Document the tolerance for any engine difference, such
+  as small PME energy differences.
+
+## Living Guidance
+
+`AGENTS.md`, `CLAUDE.md`, `.claude/skills/` and the personal PolyzyMD Skills
+are living guidance. When code, scientific contracts, commands, branch names,
+tools or recurring workflows change, update the affected guidance in the same
+task. Remove obsolete rules instead of adding contradicting ones. If you cannot
+update it, give Joe the stale file and the replacement text.
 
 ## Architecture Quick Reference
 
@@ -98,6 +136,25 @@ protocol: conditions, the equilibration window (an entry may set its own
 `equilibration:`/`until:`, `StudyFile.window`) and each analysis run's
 settings, including the study's own functions (`function: file.py:name`,
 `analyses/user_functions.py`, keyed on the whole file's hash).
+A study is a set of conditions compared in one analysis frame (same residue
+numbering, structures, regions, window and control; a different protein
+usually needs its own study); a project (`project.yaml`,
+`analyses/project_file.py`, `analyses/project.py`, `cli/project.py`) lists a
+paper's studies and the analyses each runs, with each study's `regions:` and
+`structures:` resolved into `region <name>` / `structure <name>`
+(`resolve_names`); `analyze --project`, `project check` and
+`pz.Project(...).results(run)` (a `study` column, factor columns).
+Statistics (`analyses/study_statistics.py`): `replicate_table(run)` (one row
+per replicate, the test unit) and a slope test per numeric condition factor
+in every `--study` report (`TrendReport`). A paper's own statistics are
+scripts in the project's `stats/` folder; freeze hashes and publishes them.
+`polyzymd project init` (`analyses/project_scaffold.py`) writes a project
+with empty studies (existing studies are moved in by hand, following
+`docs/source/how_to/move_studies_into_project.md`), and `polyzymd project freeze`
+(`analyses/project_freeze.py`) freezes every study with
+`freeze(..., publish=False)` and publishes the project once. File arguments
+are recorded by name and SHA-256, never location, so moved studies reuse
+results.
 `polyzymd study check` reads it without trajectories (`cli/study.py`);
 `polyzymd analyze [RUN] --study study.yaml` runs one run or all of them into
 `<study>/results/<run>/`; `pz.Study("study.yaml").results(run)` reads them back
@@ -134,8 +191,8 @@ PolyzyMD through `polyzymd/citation.py`), `.zenodo.json`, `md_checklist.yaml` an
 `system_summary.csv`, commits and tags them with `results/`, and lays out the
 gitignored `deposit/`, with `deposit/upload/`, `deposit/trajectories.csv` and
 the step-by-step `deposit/UPLOAD.md` (`analyses/study_upload_guide.py`).
-PolyzyMD never uploads or publishes: that is the author's step. The design of study folders and
-the slices still to come are in `docs/source/explanation/study_folders.md`.
+PolyzyMD never uploads or publishes: that is the author's step. The design of study folders is in
+`docs/source/explanation/study_folders.md`.
 
 ## Key Patterns
 
@@ -144,6 +201,9 @@ the slices still to come are in `docs/source/explanation/study_folders.md`.
   documented in `docs/source/how_to/troubleshoot_openff_pdb_ingestion.md` and
   `docs/source/reference/openff_pdb_ingestion.md` before the task is closed,
   unless the user explicitly defers the durable documentation update.
+  Reproduce a failure with `openff.toolkit.Topology.from_pdb(path)` first.
+  Treat a charge mismatch as a chemistry or connectivity error: fix the
+  structure upstream. Never monkeypatch OpenFF or weaken its validation.
 - **OpenMM build identity:** A completed prebuild is committed by `build_manifest.json`. Never copy `solvated_system.pdb`,
   `system.xml`, or segment State/topology files independently. Continuation prefers the predecessor topology; root PDB fallback is legacy-only and must pass count validation.
 - **OpenMM site runtime:** Run submission commands from `build`. Known-site
@@ -151,7 +211,10 @@ the slices still to come are in `docs/source/explanation/study_folders.md`.
   `sim-cuda-12-4`, and Bridges-2 uses `sim-cuda-12-6`. A node probe can reject
   and exclude a node, but it must not upgrade the environment on a newer driver.
 - **Factory pattern:** `ClassName.from_config(config)` or `ClassName.from_yaml(path)`
-- **Lazy imports:** Heavy deps (OpenMM, MDAnalysis) imported inside functions/methods
+- **Trajectory loading:** `analyses/shared/loader.py` (`TrajectoryLoader`,
+  `open_universe`) finds and opens each replicate's files, and
+  `analyses/universe.py` (`UniverseProvider`) wraps it. Do not build a
+  replicate `Universe` or its file paths by hand elsewhere.
 - **Preemption lifecycle:** Install handlers at `run-segment` entry; only atomic
   `phase.json` records with `status: completed` may skip OpenMM phases. Keep
   reporter intervals independent from bounded signal-check chunks.
@@ -170,7 +233,7 @@ shipped analysis, as a `FUNCTION_ANALYSES` entry and an `_analyze_<name>` in
 | Resource | Location | What It Documents |
 |----------|----------|-------------------|
 | Shipped functions | `analyses/functions.py`, `docs/source/reference/analysis_functions.md` | What each function measures, its arguments and units |
-| Study API | `analyses/study.py`, `analyses/timeseries.py` | `Study.from_configs`, `timeseries`, `per_replicate`, `transform`, `reduce`, `compare`, records under `polyzymd_results/` |
+| Study API | `analyses/study.py`, `analyses/timeseries.py`, `docs/source/how_to/study_api.md`, `docs/source/reference/study_api.md` | `Study.from_configs`, `timeseries`, `per_replicate`, `transform`, `reduce`, `compare`, records under `polyzymd_results/` |
 | API explanation | `docs/source/explanation/analysis_api.md` | How the study API supplies universes, records and statistics |
 | `polyzymd analyze` | `analyses/protocols.py`, `docs/source/how_to/analysis_agent_protocol.md` | `FUNCTION_ANALYSES`, the `_analyze_<name>` functions, `ProtocolReport` |
 | Study folders | `analyses/study_file.py`, `analyses/results.py`, `analyses/study_scaffold.py`, `analyses/study_git.py`, `docs/source/how_to/study_yaml.md`, `docs/source/how_to/study_folder.md` | `study.yaml`, `--study`, `polyzymd study check/init/locate/freeze`, `data.local.yaml`, `--data`, `Study.results`, `docs/source/how_to/study_freeze.md` |
@@ -217,7 +280,7 @@ print(series.reduce("mean").compare().to_agent_text())
 
 ### When Adding New Features
 
-1. **Read** `docs/source/explanation/analysis_api.md` and `docs/source/reference/analysis_functions.md`
+1. **Read** `docs/source/reference/study_api.md`, `docs/source/explanation/analysis_api.md` and `docs/source/reference/analysis_functions.md`
 2. **Write the function** in `analyses/functions.py`, with a docstring that says concretely what it measures and in which unit
 3. **Test it on placed geometry** with a known answer, then on the synthetic OpenMM run directories of `tests/_support/analysis_testkit.py` (`write_simulation_config`, `write_openmm_replicate`)
 4. **For a shipped analysis**, add the `FUNCTION_ANALYSES` entry and `_analyze_<name>` in `protocols.py`, and document it in `analysis_functions.md` and a how-to page
@@ -237,39 +300,68 @@ two ways, and mixing them up picks the wrong structure:
   frame, so the same N points at a different structure when the window
   changes. Each record stores the trajectory frame actually used under
   `chosen`.
-- The removed plugins counted differently: rmsd took trajectory frames from 0
-  (default 0, inside the equilibration window), and rmsf took trajectory
-  frames from 1. With the first production frame's 0-based trajectory index,
-  convert an old rmsd value with new = old - (first production frame) + 1 and
-  an old rmsf value with new = old - (first production frame).
 - A frame inside the equilibration window, such as the starting structure,
   cannot be named as a `frame` reference. Use `external` mode with that
   structure's file, which is also hashed into the record.
 
 ## Code Style
 
-- **Formatter:** Black, line-length=100
-- **Linter:** Ruff (see `pyproject.toml` for rule selection)
-- **Docstrings:** NumPy style preferred (Google style exists in older modules)
-- **Type hints:** `X | None` (3.10+ union syntax) in new code
-- **Imports:** stdlib → third-party → local, lazy-import heavy deps
+- **Formatter:** Black, line-length 100. **Linter:** Ruff (rules in
+  `pyproject.toml`). CI also runs `ruff format --check src/polyzymd/`.
+- Run black only on the files your change touches. Never run `black src/` or
+  format whole files that the change does not otherwise edit: it buries the
+  change in unrelated diffs.
+- **Docstrings:** NumPy style in new code. Older modules (`builders/`,
+  `simulation/`, `workflow/`) use Google style; convert one only when you
+  rewrite most of that function.
+- **Type hints:** `X | None` in new code. Do not change `Optional[X]` in code
+  you do not otherwise touch.
+- **Imports:** stdlib, third-party, local. Import `openmm`, `openff.*`,
+  `MDAnalysis`, `parmed` and `pdbfixer` inside functions, never at module
+  level, so the config, CLI and docs build work without the full stack.
+
+## Testing
+
+- `tests/` mirrors `src/polyzymd/`: put the tests for `analyses/foo.py` in
+  `tests/analyses/test_foo.py`. Shared fixtures are in `tests/conftest.py`;
+  synthetic OpenMM run directories come from `tests/_support/analysis_testkit.py`.
+- A test must not leave files in the repository. Write to `tmp_path`, and use
+  `monkeypatch.chdir(tmp_path)` for code that writes to the working directory.
+- Do not commit trajectories (`.xtc`, `.dcd`) or large PDB files. Use small
+  synthetic data or placed geometry with a known answer.
+- Prefer the smallest test set that proves the behavior. Do not add layers of
+  fixtures or mocks without a concrete failure they catch.
+- Get the test count from `pytest tests --collect-only -q | tail -1`; do not
+  copy a number into docs.
+
+## Documentation
+
+Sphinx with MyST Markdown, sources in `docs/source/`. Update the docs in the
+same change when code changes a command, config field, output or scientific
+meaning.
+
+- Keep each page to one Diátaxis role: `get_started/` and `tutorials/` teach,
+  `how_to/` gives task steps, `reference/` lists facts, `explanation/` gives
+  concepts and reasons. Link between pages instead of duplicating content.
+- Keep the admonitions that tell readers which pixi environment to use.
+- Use `docs/source/get_started/quickstart.md` as the voice reference: short
+  sentences, exact commands, expected outputs, next steps.
+- Name repository paths and public symbols, or use MyST roles
+  (`{func}`, `{class}`, `{doc}`). Do not link to source line numbers.
+- CI builds the docs with `-W`: zero warnings. After you add or remove a
+  `toctree` entry, run `make clean html`, not `make html`, or the sidebar is
+  stale. Every new page goes in a `toctree`.
+- Add `:no-index:` to an `automodule` directive for a module with Pydantic
+  models or dataclasses, or Sphinx reports duplicate object descriptions.
+- Heading levels must be consecutive. In docstrings, put a blank line before a
+  list, and do not list Pydantic fields under `Attributes:` (autodoc-pydantic
+  documents them).
+- A new module-level import that the docs build cannot install goes in
+  `autodoc_mock_imports` in `docs/source/conf.py`.
 
 ## Known Issues
 
-1. **Docs sidebar** — after adding toctree entries, run `make clean html` (not just `make html`)
-2. **GitHub Issue #20** — tracks remaining analysis module TODOs
-3. **Pre-existing LSP type errors** — Pyright/Pylance reports false positives in `config/schema.py`, `builders/system_builder.py`, etc. due to missing type stubs for OpenMM/OpenFF. Does NOT affect runtime.
-
-## Modular Instructions
-
-See `.opencode/instructions/` for detailed rules on specific topics:
-- `code-style.md` — formatting, linting, import conventions
-- `architecture.md` — module structure, design patterns, extension points
-- `environment.md` — pixi environment setup, dependency management, CI
-- `testing.md` — test infrastructure, running tests, writing new tests
-- `development-workflow.md` — release flow, atomic scope, agent
-  collaboration, commits, pushes, and PR handoff
-- `analysis-module.md` — study API patterns and `polyzymd analyze` protocols
-- `documentation.md` — Sphinx/MyST conventions, API docs, zero-warning build gate, `:no-index:` rules
-- `openff-pdb-ingestion.md` — OpenFF protein/PDB ingestion troubleshooting and living error-log rules
-- `known-issues.md` — detailed bug descriptions and workarounds
+- **Pre-existing LSP type errors:** Pyright/Pylance reports false positives in
+  `config/schema.py`, `builders/system_builder.py` and others, from missing
+  OpenMM/OpenFF type stubs and Pydantic `default_factory` inference. They do
+  not affect runtime.

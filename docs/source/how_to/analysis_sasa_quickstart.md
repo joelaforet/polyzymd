@@ -1,21 +1,9 @@
-# SASA analysis: quick start
+# Run SASA analysis
 
-Measure the solvent-accessible surface area (SASA) of a protein, an active site
-or any other set of atoms on every production frame of every replicate, with or
-without neighbouring atoms such as polymer in the calculation, and compare
-conditions with the replicate as the sampling unit.
-
-```{versionadded} 1.3.0
-SASA analysis was added in PolyzyMD 1.3.0.
-```
-
-```{note}
-**Want to understand the measurement?** This guide focuses on getting results
-quickly. For what each shipped function measures, see
-{doc}`../reference/analysis_functions`; for how the values were checked, see
-{doc}`../explanation/analysis_sasa_verification`; for the statistics, see
-{doc}`../explanation/analysis_statistics_best_practices`.
-```
+Measure the solvent-accessible surface area (SASA) of a set of atoms, such as
+the protein or an active site, on each production frame of each replicate. You
+can include neighbor atoms, such as the polymer, in the calculation. Then
+compare the conditions, with one value per replicate.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -32,17 +20,17 @@ Alternatively, prefix each command with `pixi run -e analysis`.
 
 ## What is measured
 
-For each frame, `mdtraj.shrake_rupley` places `n_sphere_points` points on a
-sphere around every atom of the **context**, with radius the atom's radius
-from MDTraj's element table plus the probe radius, and counts the points that
-lie inside no other context atom's sphere. Each atom's SASA is its sphere's
-area times the fraction of its points left free. The SASA of the **target** is
-the sum over the target atoms. Atoms in the context but not in the target,
-such as polymer, cover part of the target's surface without being counted.
-Periodic images are not considered.
+PolyzyMD computes the SASA with the Shrake-Rupley method of MDTraj. Two
+selections control the calculation:
 
-The elements come from the loaded universe, which PolyzyMD fills in from atom
-types or names. Values are in Å².
+- The **target** is the set of atoms whose SASA PolyzyMD reports.
+- A **context** is the set of atoms present in the calculation. It contains
+  every target atom. Context atoms outside the target, such as polymer atoms,
+  cover part of the target surface but are not counted.
+
+The calculation does not use periodic images. Values are in Å². For the steps
+of the calculation and the checks, see
+{doc}`../explanation/analysis_sasa_verification`.
 
 ## From the command line
 
@@ -51,13 +39,15 @@ polyzymd analyze sasa -c noPoly/config.yaml -c SBMA50/config.yaml \
   --label "No polymer" --label "SBMA 50%" --eq 200ns
 ```
 
-The first `-c` is the control. By default the target is `protein`, measured on
-its own under the name `isolated`. For each replicate, the per-frame total SASA
-is averaged over the production frames. The replicate means are summarised per
-condition, and every other condition is compared with the control by Welch's t
-test with the Benjamini-Hochberg correction.
+The first `-c` is the control. By default, the target is `protein`, measured
+alone, in a context named `isolated`. The command does these steps:
 
-To see how much surface polymer covers, name the contexts to measure in:
+1. It measures the total SASA of the target on each production frame.
+2. It takes the mean over frames of each replicate.
+3. It compares each condition with the control by Welch's t test. It corrects
+   the p values with the {term}`Benjamini-Hochberg` method.
+
+To see how much surface the polymer covers, name the contexts:
 
 ```bash
 polyzymd analyze sasa -c noPoly/config.yaml -c SBMA50/config.yaml --eq 200ns \
@@ -65,30 +55,33 @@ polyzymd analyze sasa -c noPoly/config.yaml -c SBMA50/config.yaml --eq 200ns \
   --run with_polymer
 ```
 
-Each context gives two results, picked with `--run`:
+Each context gives two results. Select one with `--run`:
 
 | `--run` | One value per replicate |
 |---|---|
 | `<context>` (default: the first context) | Mean over production frames of the target's total SASA |
 | `<context>_residues` | Each target residue's SASA, averaged over production frames, compared residue by residue |
 
-Only the result that `--run` picks is measured, because every context is a
-separate Shrake-Rupley pass over every frame; run the command once per result
-you need. A per-residue comparison is corrected over every residue of every
-compared condition, and the text report gives, for each condition, how many
-residues are significantly lower and higher than in the control and lists
-them. Every per-residue row is kept in the JSON report.
+PolyzyMD measures only the result that `--run` selects, because each context
+is a separate pass over every frame. Run the command once for each result that
+you need.
+
+PolyzyMD corrects a per-residue comparison over every residue of every
+compared condition. For each condition, the text report gives the number of
+residues that are significantly lower and higher than in the control, and lists
+them. The JSON report keeps every per-residue row.
 
 Settings, passed with `--set`:
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `target` | `protein` | Atoms whose SASA is reported |
-| `contexts` | `{isolated: <target>}` | Mapping of names to the selections of atoms present in the calculation; each must contain every target atom |
-| `probe_radius_nm` | `0.14` | Probe radius in nm |
-| `n_sphere_points` | `960` | Points on each atom's sphere |
+| `contexts` | `{isolated: <target>}` | A mapping of names to selections of the atoms present in the calculation. Each must contain every target atom |
+| `probe_radius_nm` | `0.14` | The probe radius, in nm |
+| `n_sphere_points` | `960` | The number of points on the sphere of each atom |
 
-For example, to ask whether polymer covers an active site:
+For example, this command measures how much the polymer covers an active
+site:
 
 ```bash
 polyzymd analyze sasa -c noPoly/config.yaml -c SBMA50/config.yaml --eq 200ns \
@@ -97,8 +90,8 @@ polyzymd analyze sasa -c noPoly/config.yaml -c SBMA50/config.yaml --eq 200ns \
   --run site_with_polymer
 ```
 
-Check the residue names of the polymer in the topology before relying on a
-context selection:
+Before you use a context selection, check the residue names of the polymer in
+the topology:
 
 ```bash
 python - <<'PY'
@@ -109,31 +102,36 @@ print(sorted(set(u.select_atoms("not protein").residues.resnames)))
 PY
 ```
 
-Add `--format json` for the full report, `--replicates 1-3` to use only some
-replicates, and `--recompute` to ignore stored results. The settings, including
-the contexts, are recorded under `provenance.settings` in the JSON report.
+Useful options:
+
+- `--format json` prints the full report.
+- `--replicates 1-3` uses only some replicates.
+- `--recompute` ignores stored results.
+
+The JSON report records the settings, with the contexts, under
+`provenance.settings`.
 
 ```{note}
-Each frame is a separate MDTraj call, so a large context over a long trajectory
-takes a while. Pass `--stride 5` to measure every fifth production frame, or
-run the command inside a SLURM job on a cluster rather than on a login node.
+PolyzyMD gives each frame to MDTraj in a separate call, so a large context over
+a long trajectory takes time. Add `--stride 5` to measure every fifth
+production frame. Or run the command in a SLURM job, not on a login node.
 ```
 
 ```{note}
-`--stride` applies to every result of the command. PolyzyMD passes one frame
-per call to MDTraj's Shrake-Rupley SASA, because MDTraj 1.11.1 returns about
-0.1 percent more area for every frame after the first one each thread
-computes in a call. See {doc}`../explanation/analysis_sasa_verification`.
+`--stride` applies to every result of the command. PolyzyMD gives MDTraj one
+frame per call because of a defect in MDTraj 1.11.1. In one call, MDTraj
+returns about 0.1 % too much area for each frame after the first frame of each
+thread. See {doc}`../explanation/analysis_sasa_verification`.
 ```
 
 ## Figures
 
-`polyzymd analyze sasa` writes these figures to `<output-dir>/figures/sasa/`;
-`--no-plots` skips them.
+`polyzymd analyze sasa` writes these figures to `<output-dir>/figures/sasa/`.
+Add `--no-plots` to skip them.
 
 | Figure | What it shows |
 |---|---|
-| `sasa_timeseries_<context>` | Every replicate's total SASA against time, with each condition's mean and its 95 percent interval |
+| `sasa_timeseries_<context>` | The total SASA of each replicate against time, with the mean of each condition and its 95 % interval |
 | `sasa_comparison_<context>` | Each condition's mean with its interval and every replicate value |
 | `sasa_distribution_<context>` | Each condition's distribution of per-frame values, pooled and per replicate |
 | `sasa_profile_<context>` | For `<context>_residues`: each residue's SASA per replicate and each condition's mean with its interval |
@@ -152,7 +150,7 @@ study = pz.Study.from_configs(
 protein, with_polymer = "protein", "protein or resname SBM EGM"
 
 total = study.timeseries(
-    sasa, pz.select(protein), pz.select(with_polymer), unit="A^2", bounds=(0.0, None)
+    sasa, pz.select(protein), pz.select(with_polymer), unit="Å²", bounds=(0.0, None)
 )
 print(total.reduce("mean").compare(control="No polymer").to_agent_text())
 
@@ -160,16 +158,17 @@ per_residue = study.per_replicate(
     residue_sasa,
     pz.select(protein),
     pz.select(with_polymer),
-    unit="A^2",
+    unit="Å²",
     labels=lambda u: u.select_atoms(protein).residues.resids,
 )
 print(per_residue.compare(control="No polymer").to_agent_text())
 ```
 
-`sasa(target, context)` returns one frame's total and runs through
-`Study.timeseries`. `residue_sasa(target, context, frames)` returns each
-target residue's mean over the frames and runs through `Study.per_replicate`.
-Both take `probe_radius_nm` and `n_sphere_points` as keyword arguments.
+`sasa(target, context)` returns the total of one frame. Use it with
+`Study.timeseries`. `residue_sasa(target, context, frames)` returns the mean
+over the frames of each target residue. Use it with `Study.per_replicate`.
+Both take `probe_radius_nm` and `n_sphere_points` as keyword arguments. To
+measure your own quantity, see {doc}`study_api`.
 
 ## Next steps
 

@@ -1,11 +1,14 @@
 """Test that all public modules can be imported."""
 
+import json
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from polyzymd.config.schema import SimulationConfig
+from tests._support.analysis_testkit import write_simulation_config
 
 
 @pytest.fixture
@@ -258,10 +261,10 @@ class TestCoSolventCompositionValidation:
         """Each co-solvent should have exactly one composition method."""
         from polyzymd.config.schema import CoSolventSpec
 
-        with pytest.raises(ValidationError, match="Must specify either 'mole_fraction'"):
+        with pytest.raises(ValidationError, match="give exactly one of mole_fraction, concentration"):
             CoSolventSpec(name="dmso")
 
-        with pytest.raises(ValidationError, match="Cannot specify both 'mole_fraction'"):
+        with pytest.raises(ValidationError, match="give exactly one of mole_fraction, concentration"):
             CoSolventSpec(name="dmso", mole_fraction=0.1, concentration=1.0)
 
 
@@ -766,7 +769,7 @@ class TestEngineConfig:
         """GROMACS engine config should have sensible defaults."""
         config = SimulationConfig(**minimal_config_data)
         assert config.gromacs.gmx_binary is None
-        assert config.gromacs.grompp_flags == "-maxwarn 1"
+        assert config.gromacs.grompp_flags == ""
         assert config.gromacs.mdrun_flags_equilibration is None
         assert config.gromacs.mdrun_flags_production is None
         assert config.gromacs.command_prefix is None
@@ -1033,3 +1036,98 @@ class TestPolymerPackingSphereConfinement:
         with_block = copy.deepcopy(base)
         with_block["simulation_phases"]["minimization"] = {"freeze_solute": False}
         assert config_hash(without) == config_hash(SimulationConfig(**with_block))
+
+
+SDS = "CCCCCCCCCCCCOS(=O)(=O)[O-]"
+
+
+def _config_with_solvent(tmp_path: Path, **solvent) -> SimulationConfig:
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    if solvent:
+        data["solvent"] = solvent
+    path.write_text(yaml.safe_dump(data))
+    return SimulationConfig.from_yaml(path)
+
+
+class TestCoSolventAmount:
+    def test_a_count_is_a_third_way_to_give_the_amount(self, tmp_path: Path) -> None:
+        """A co-solvent takes a number of molecules, or a concentration, but not both."""
+        config = _config_with_solvent(
+            tmp_path, co_solvents=[{"name": "sds", "smiles": SDS, "count": 8}]
+        )
+        assert config.solvent.co_solvents[0].count == 8
+        with pytest.raises(ValidationError, match="exactly one"):
+            _config_with_solvent(
+                tmp_path,
+                co_solvents=[{"name": "sds", "smiles": SDS, "count": 8, "concentration": 0.1}],
+            )
+
+    def test_custom_cosolvents_default_to_nagl(self, tmp_path: Path) -> None:
+        """AM1-BCC needs AmberTools, which the default environment lacks, so NAGL is the default."""
+        config = _config_with_solvent(
+            tmp_path, co_solvents=[{"name": "sds", "smiles": SDS, "count": 8}]
+        )
+        assert config.solvent.co_solvents[0].charge_method.value == "nagl"
+        assert "charge_method" not in config.solvent.co_solvents[0].model_fields_set
+
+
+def test_checkpoint_interval_has_a_default_and_unknown_keys_are_refused(tmp_path: Path) -> None:
+    """checkpoint_interval defaults to 60 s, and a key a section does not define is refused."""
+    import yaml
+
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    del data["simulation_phases"]["production"]["checkpoint_interval"]
+    path.write_text(yaml.safe_dump(data))
+    assert SimulationConfig.from_yaml(path).simulation_phases.production.checkpoint_interval == 60.0
+    data["solvent"] = {"co_solvents": [{"name": "x", "smiles": "CO", "concentration": 1.0, "bananas": 3}]}
+    path.write_text(yaml.safe_dump(data))
+    with pytest.raises(ValidationError, match="bananas"):
+        SimulationConfig.from_yaml(path)
+
+
+_CYSTINE_TEMPLATES = (
+    Path(__file__).resolve().parents[2]
+    / "examples"
+    / "pdb_preparation"
+    / "4cha"
+    / "nterminal_cystine_substructure.json"
+)
+
+
+def _config_with_templates(tmp_path: Path, templates):
+    """Load a config whose enzyme.custom_substructures_path is templates.json beside it."""
+    import shutil
+
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    if isinstance(templates, Path):
+        shutil.copy(templates, tmp_path / "c" / "templates.json")
+    else:
+        (tmp_path / "c" / "templates.json").write_text(templates)
+    data = yaml.safe_load(path.read_text())
+    data["enzyme"]["custom_substructures_path"] = "templates.json"
+    path.write_text(yaml.safe_dump(data))
+    return SimulationConfig.from_yaml(path)
+
+
+class TestCustomSubstructures:
+    def test_the_config_takes_the_file_relative_to_itself(self, tmp_path: Path) -> None:
+        """enzyme.custom_substructures_path resolves against the config's folder, like pdb_path."""
+        config = _config_with_templates(tmp_path, _CYSTINE_TEMPLATES)
+        assert config.enzyme.custom_substructures_path == (tmp_path / "c" / "templates.json").resolve()
+
+    def test_a_file_of_another_shape_is_refused(self, tmp_path: Path) -> None:
+        """A templates file that does not map residue names to SMARTS and atom names is refused."""
+        with pytest.raises(ValidationError, match="must map each residue name"):
+            _config_with_templates(tmp_path, json.dumps({"NCYX": ["N", "CA"]}))

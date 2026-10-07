@@ -42,7 +42,7 @@ def new_analysis_message() -> str:
             "of an MDAnalysis Universe, and there is no plugin to scaffold.",
             "write the function and run it with Study.per_replicate (one value per replicate) "
             "or Study.timeseries (one value per frame)",
-            f"docs: {ANALYSIS_API_URL} (docs/source/explanation/analysis_api.md)",
+            f"docs: {ANALYSIS_API_URL} (docs/source/how_to/study_api.md)",
             f"for an agent: point it at {ANALYZE_AGENT_SKILL} or that page",
         ]
     )

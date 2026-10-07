@@ -395,13 +395,18 @@ def openmm_system_file(trajectory_file: str | Path) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def open_universe(topology_file: str | Path, trajectory_files: Sequence[str | Path]) -> Any:
+def open_universe(
+    topology_file: str | Path,
+    trajectory_files: Sequence[str | Path],
+    gromacs_topology: str | Path | None = None,
+) -> Any:
     """Return the MDAnalysis universe of ``trajectory_files`` with ``topology_file``.
 
     Several trajectory files are read in order as one trajectory. A GROMACS
     ``prod.tpr`` written by a GROMACS newer than this MDAnalysis can read
     (GROMACS 2026 for MDAnalysis 2.10) is replaced by the run's ``.top``
-    beside it, laid out as MDAnalysis lays out a TPR
+    beside it (``gromacs_topology`` when given, else the only ``.top``), laid
+    out as MDAnalysis lays out a TPR
     (:func:`~polyzymd.analyses.shared.gromacs.universe_from_gromacs_top`),
     with a warning. A universe read from a TPR or ``.top`` takes PolyzyMD's
     chain IDs (A protein, B substrate, C polymer) from the build's
@@ -432,17 +437,21 @@ def open_universe(topology_file: str | Path, trajectory_files: Sequence[str | Pa
     except ValueError as error:
         if not (is_tpr and tpr_unsupported(error)):
             raise
-        top_file = gromacs_topology_file(topology.parent)
-        if topology not in _WARNED_TPR_FALLBACK_PATHS:
-            _WARNED_TPR_FALLBACK_PATHS.add(topology)
-            LOGGER.warning(
-                "MDAnalysis %s cannot read %s (%s); reading its topology from %s instead, "
-                "laid out as MDAnalysis lays out a TPR.",
-                mda.__version__,
-                topology,
-                str(error.__context__).strip(),
-                top_file.name,
-            )
+        top_file = gromacs_topology_file(
+            topology.parent, Path(gromacs_topology).name if gromacs_topology else None
+        )
+        # The same MDAnalysis cannot read any run's TPR: say so once, then log each.
+        level = logging.DEBUG if _WARNED_TPR_FALLBACK_PATHS else logging.WARNING
+        _WARNED_TPR_FALLBACK_PATHS.add(topology)
+        LOGGER.log(
+            level,
+            "MDAnalysis %s cannot read %s (%s); reading its topology from %s instead, "
+            "laid out as MDAnalysis lays out a TPR. Other runs' TPRs are read the same way.",
+            mda.__version__,
+            topology,
+            str(error.__context__).strip(),
+            top_file.name,
+        )
         universe = universe_from_gromacs_top(top_file, files)
         universe._polyzymd_bond_source = "top"
         universe._polyzymd_topology_source = str(top_file)
@@ -1298,6 +1307,9 @@ class TrajectoryInfo:
         Segment indices the engine left out because their file holds no frame.
     segment_status : dict[int, str]
         Status the engine recorded for each production segment index.
+    gromacs_topology_file : Path or None
+        The GROMACS ``.top`` that replaces ``prod.tpr`` when MDAnalysis cannot
+        read it, by the name the run uses.
     """
 
     topology_file: Path
@@ -1311,6 +1323,7 @@ class TrajectoryInfo:
     excluded_segments: list[int] = field(default_factory=list)
     empty_segments: list[int] = field(default_factory=list)
     segment_status: dict[int, str] = field(default_factory=dict)
+    gromacs_topology_file: Path | None = None
 
     @property
     def n_trajectory_files(self) -> int:
@@ -1645,6 +1658,7 @@ class TrajectoryLoader:
             excluded_segments=list(layout.excluded_segments),
             empty_segments=list(getattr(layout, "empty_segments", [])),
             segment_status=dict(layout.segment_status),
+            gromacs_topology_file=getattr(layout, "gromacs_topology_path", None),
         )
 
     def load_universe(
@@ -1711,7 +1725,7 @@ class TrajectoryLoader:
 
         # Load universe - MDAnalysis handles multiple trajectory files
         if len(info.trajectory_files) == 1:
-            u = open_universe(info.topology_file, info.trajectory_files)
+            u = open_universe(info.topology_file, info.trajectory_files, info.gromacs_topology_file)
         else:
             # Multiple segments - use ChainReader, but only after checking
             # that the segments actually chain (no branched/duplicate chains).
@@ -1725,7 +1739,7 @@ class TrajectoryLoader:
                 reference_dt = next((t.dt for t in timings if t.dt is not None and t.dt > 0), None)
                 if reference_dt is not None and all(t.first_time is not None for t in timings):
                     self._segment_joins[replicate] = _segment_join(timings, reference_dt)
-            u = open_universe(info.topology_file, info.trajectory_files)
+            u = open_universe(info.topology_file, info.trajectory_files, info.gromacs_topology_file)
         enrich_universe_elements(u, topology_key=info.topology_file)
         enrich_universe_force_field(u, openmm_system_file(info.trajectory_files[0]))
         apply_pbc_policy(u, pbc_policy, topology=info.topology_file)

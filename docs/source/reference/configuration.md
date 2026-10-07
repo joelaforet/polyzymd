@@ -36,6 +36,7 @@ enzyme:
 |-------|------|----------|-------------|
 | `name` | string | Yes | Short identifier for the enzyme |
 | `pdb_path` | path | Yes | Path to prepared PDB file |
+| `custom_substructures_path` | path | No | JSON file of residue templates for residues that OpenFF does not know, such as an N-terminal cystine. See {doc}`openff_pdb_ingestion` |
 | `description` | string | No | Human-readable description |
 
 ---
@@ -176,7 +177,7 @@ polymers:
 | `movebadrandom` | bool | No | false | Pass PACKMOL's `movebadrandom`; helps dense or heterogeneous systems converge |
 | `confine_to_sphere` | bool | No | true | Confine chains to a sphere centred on the solute (radius = half the solute bounding-box diagonal + `padding`) while packing inside the final periodic brick. Set `false` to let chains fill the whole brick |
 | `box_vectors` | list[float] (nm) | No | null | Explicit `[Lx, Ly, Lz]` packing box. **Opts out of the deterministic cell**: the periodic box is then derived from the packed topology, as before, and differs between replicates |
-| `exclude_solute_bbox` | bool | No | false | Confine chains to a rectangular shell outside the solute bounding box (legacy). Off by default because the tolerance against the fixed solute already prevents overlap and the shell over-constrains long chains |
+| `exclude_solute_bbox` | bool | No | false | Confine chains to a rectangular shell outside the solute bounding box. Off by default because the tolerance against the fixed solute already prevents overlap and the shell over-constrains long chains |
 | `nloop` | int | No | 200 | Maximum PACKMOL GENCAN loops per molecule type |
 
 PACKMOL is seeded with the replicate number for both polymer packing and
@@ -280,8 +281,7 @@ polymers are configured, `polymers.packing.padding` is added to it and the
 resulting cell is computed from the protein and substrate before any packing
 happens, so it is identical across replicates of a condition; the packed
 topology is not re-centred afterwards. Without polymers the box is computed
-from the solute at solvation time, exactly as before, so existing control
-bundles remain valid. The number of waters and ions follows from the box
+from the solute at solvation time. The number of waters and ions follows from the box
 volume and `target_density`, so a deterministic box means deterministic
 solvent counts.
 
@@ -304,7 +304,7 @@ solvent counts.
 
 ### Co-solvents
 
-PolyzyMD supports adding co-solvents to a water primary solvent. You can specify co-solvents using either **mole fraction** or **molar concentration**.
+PolyzyMD supports adding co-solvents to a water primary solvent. Give the amount of each as a **mole fraction**, a **molar concentration** or a **count** of molecules.
 
 #### Specification Methods
 
@@ -312,8 +312,9 @@ PolyzyMD supports adding co-solvents to a water primary solvent. You can specify
 |--------|-------|-------------|-----------------|
 | Mole Fraction | `mole_fraction` | Fraction of neutral solvent molecules (0-1) | Replaces water in the neutral solvent mixture |
 | Concentration | `concentration` | Molar concentration (mol/L) | Additive (water unchanged) |
+| Count | `count` | Number of molecules in the box | Additive (water unchanged) |
 
-**Important:** Use exactly ONE method per co-solvent. Do not specify both `mole_fraction` and `concentration` for the same co-solvent. The previous `volume_fraction` key has been removed and is rejected instead of converted automatically. Existing configs that used `volume_fraction` must be updated explicitly to either `mole_fraction` or `concentration`; PolyzyMD does not infer mole fractions from volume fractions.
+**Important:** Use exactly ONE method per co-solvent. The previous `volume_fraction` key has been removed and is rejected instead of converted automatically. Existing configs that used `volume_fraction` must be updated explicitly to either `mole_fraction` or `concentration`; PolyzyMD does not infer mole fractions from volume fractions.
 
 #### Mole Fraction Method
 
@@ -508,18 +509,30 @@ All 12 library co-solvents plus water models have pre-computed charges:
 
 #### Custom Solvents
 
-When you use a custom co-solvent (not in the library), PolyzyMD will:
+When you use a custom co-solvent (not in the library), PolyzyMD:
 
-1. Generate the molecule from your SMILES string
-2. Compute AM1BCC partial charges (this may take a few seconds)
-3. Cache the parameterized molecule to `~/.polyzymd/solvent_cache/`
-4. Reuse the cached version for all future simulations
+1. Generates the molecule from your SMILES string.
+2. Assigns partial charges with `charge_method`: `nagl` by default, the
+   OpenFF graph network trained on AM1-BCC. Set `charge_method: am1bcc` for
+   AM1-BCC itself, which needs AmberTools. When you leave the default, the
+   build writes a warning that asks you to check that NAGL charges suit the
+   molecule.
+3. Charges each part of a SMILES with several parts on its own: a single-atom
+   ion takes its formal charge.
+4. Caches the charged molecule in `~/.polyzymd/solvent_cache/`, one file per
+   charge method, and reuses it.
+
+A charged molecule can carry its counter-ion in the SMILES, which keeps it
+neutral. Without the counter-ion, `solvent.ions.neutralize: true` adds the
+counter-ions. Either way the system is neutral.
 
 ```yaml
 co_solvents:
-  - name: "my_custom_solvent"
-    smiles: "CC(=O)OCC"        # First use: computes and caches charges
-    concentration: 0.5         # Future uses: loads from cache instantly
+  - name: "sds"
+    smiles: "CCCCCCCCCCCCOS(=O)(=O)[O-].[Na+]"   # sodium dodecyl sulfate with Na+
+    residue_name: "SDS"
+    count: 8
+    charge_method: nagl                          # the default; am1bcc needs AmberTools
 ```
 
 #### Managing the Cache
@@ -835,10 +848,11 @@ gromacs:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `gmx_binary` | `str \| null` | `null` | GROMACS binary path or name. When null, resolved via `$GMX_BIN` environment variable or PATH discovery. |
+| `analysis_topology` | `str \| null` | `null` | File name of the run's `.top` in the run folder. Analyses read it when MDAnalysis cannot read `prod.tpr`, and freeze deposits it with the files it includes. When null, PolyzyMD uses `<prefix>.top`, the file it writes, so another `.top` in the folder does not matter. |
 | `mdrun_flags` | `str` | `""` | Extra flags passed to `gmx mdrun` for all stages. |
 | `mdrun_flags_equilibration` | `str \| null` | `null` | Override `mdrun_flags` for equilibration stages only. Falls back to `mdrun_flags` when null. |
 | `mdrun_flags_production` | `str \| null` | `null` | Override `mdrun_flags` for production only. Falls back to `mdrun_flags` when null. |
-| `grompp_flags` | `str` | `"-maxwarn 1"` | Extra flags passed to `gmx grompp`. |
+| `grompp_flags` | `str` | `""` | Extra flags passed to `gmx grompp`, such as `-maxwarn 1` to accept a warning you have read. By default every warning stops the run. |
 | `command_prefix` | `str \| null` | `null` | Prefix prepended to all GROMACS commands. Use for container wrappers (e.g., `singularity exec ...`). When set with a real-MPI binary, automatic `mpirun` wrapping is skipped. |
 | `mpi_launcher_flags` | `str` | `""` | Extra flags for the MPI launcher (`mpirun`). Only used with real-MPI builds (`gmx_mpi`). |
 | `module_load` | `str \| null` | `null` | Module load command inserted verbatim into SLURM scripts. List prerequisites before the GROMACS module. |

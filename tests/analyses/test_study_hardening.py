@@ -435,8 +435,10 @@ class TestMissingLabels:
         root = self._study(tmp_path, ".nan")
         result = CliRunner().invoke(cli, ["analyze", "byf", "--study", str(root), "--no-plots"])
         assert result.exit_code == 0, result.output
-        table = pz.Study(root).results("byf").table
-        assert set(table["label"]) == {f"f{i}" for i in range(6)}
+        results = pz.Study(root).results("byf")
+        assert set(results.table["label"]) == {f"f{i}" for i in range(6)}
+        filled = [w for w in results.report.warnings if "were given missing=nan" in w]
+        assert len(filled) == 2 and "f4, f5" in filled[0]
 
     def test_missing_needs_returned_labels(self, tmp_path: Path) -> None:
         from polyzymd.analyses.study_file import load_study_file

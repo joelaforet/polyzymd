@@ -1,13 +1,9 @@
-# Hydrogen bonds analysis: quick start
+# Run hydrogen bonds analysis
 
 Count the hydrogen bonds between named groups of atoms, or within one group,
 on the production frames of every replicate, and compare how many form, how
 long they last, and which residues and residue pairs form them, with the
 replicate as the sampling unit.
-
-```{versionadded} 1.3.0
-Hydrogen bonds analysis runs on the study API from PolyzyMD 1.3.0.
-```
 
 ```{note}
 **Want to understand the measurement?** For what each shipped function
@@ -87,11 +83,12 @@ between `chainid A` and `chainid C`. By default the report shows
 bonds per frame. The replicate values are summarised per condition, and every
 other condition is compared with the control by Welch's t test with the
 Benjamini-Hochberg correction.
-A replicate where a group's selection matches no atoms, such as every replicate
-of a no-polymer control for `protein_polymer`, is left out of the statistics
-with a warning; when the control is left out, the other conditions are
-summarised and not compared. A selection that matches no atoms in any replicate
-is refused.
+A replicate where a summary's second group matches no atoms, such as every
+replicate of a no-polymer control for `protein_polymer`, has no hydrogen bond
+with it: its values are 0 (0 events, no lifetime), it is compared like any
+other, and a warning names it. A replicate where the first group matches no
+atoms is left out with a warning, and a first group that matches no atoms in
+any replicate is refused.
 
 Groups and summaries are named. `groups` maps a name to an MDAnalysis
 selection, and each summary is `between: [a, b]`, the bonds with one partner

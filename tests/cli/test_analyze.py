@@ -20,6 +20,8 @@ from polyzymd.analyses.protocols import (
     ProtocolReport,
 )
 from polyzymd.cli.analyze import EXIT_ANALYSIS_ERROR, analyze_command
+from polyzymd.cli.main import cli
+from tests._support.analysis_testkit import write_committed_study
 
 
 def _report() -> ProtocolReport:
@@ -256,7 +258,7 @@ class TestExitCodes:
         assert result.exit_code == EXIT_ANALYSIS_ERROR
         assert "error: No analysis named 'definitely_not_an_analysis'." in result.stderr
         assert "fix: Use one of rg, rmsd, rmsf" in result.stderr
-        assert "explanation/analysis_api.html" in result.stderr
+        assert "how_to/study_api.html" in result.stderr
 
     def test_missing_config_exits_two(self, tmp_path: Path) -> None:
         """A config path that does not exist is reported before any work."""
@@ -378,3 +380,53 @@ class TestRegistration:
         assert result.exit_code == 0
         assert "--format" in result.output
         assert "agent" in result.output
+
+
+def test_set_values_round_trip() -> None:
+    """A float such as 1e-05 stays a float through --set."""
+    from polyzymd.cli.analyze import _set_value, _settings
+
+    values = {"a": 1e-05, "b": "protein and name CA", "c": ["EGM", "SBM"], "d": None, "e": "x: y"}
+    text = tuple(f"{key}={_set_value(value)}" for key, value in values.items())
+    assert _settings(text) == values
+
+
+def _analyze_cli(*arguments: str):
+    return CliRunner().invoke(cli, ["analyze", *arguments], catch_exceptions=False)
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_a_subset_report_is_not_saved_and_the_report_job_gets_the_labels(
+    tmp_path: Path,
+) -> None:
+    """--label runs some conditions; their report never replaces the run's."""
+    import shlex
+
+    pytest.importorskip("MDAnalysis")
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    result = _analyze_cli("rg", "--study", str(root), "--label", "Polymer", "--no-plots")
+    assert result.exit_code == 0 and "not saved" in result.output
+    assert not (root / "results" / "rg" / "report.json").exists()
+    dry = _analyze_cli("rg", "--study", str(root), "--label", "Polymer", "--dry-run")
+    assert dry.exit_code == 0, dry.output
+    (report_job,) = (root / "results").rglob("report.sbatch")
+    words = shlex.split(report_job.read_text().splitlines()[-1])
+    assert words[words.index("--label") + 1] == "Polymer"
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+def test_a_project_logs_once_in_its_own_folder(tmp_path: Path) -> None:
+    """analyze --project writes one log for the command, in the project's logs/."""
+    pytest.importorskip("MDAnalysis")
+    from tests.analyses.test_project import _study as project_study
+
+    paper = tmp_path / "Paper"
+    project_study(paper, tmp_path / "data", "lipa", "{core: name C1 C2}")
+    (paper / "project.yaml").write_text("studies: {lipa: lipa}\nanalyses: {rg: {selection: all}}\n")
+    result = _analyze_cli("--project", str(paper), "rg")
+    assert result.exit_code == 0, result.output
+    assert result.output.count("log: ") == 1
+    assert list((paper / "logs").glob("polyzymd-analyze-*.log"))
+    assert not (paper / "lipa" / "logs").exists() or not list((paper / "lipa" / "logs").iterdir())

@@ -8,7 +8,7 @@
 # 3. Validate your configuration: polyzymd validate -c config.yaml
 # 4. Build your system: polyzymd build -c config.yaml -r 1
 #
-# Documentation: https://polyzymd.readthedocs.io/en/latest/tutorials/quickstart.html
+# Documentation: https://polyzymd.readthedocs.io/en/latest/get_started/quickstart.html
 #
 # REQUIRED SECTIONS:
 #   - name (simulation identifier)
@@ -271,11 +271,12 @@ description: "Description of your simulation system"
 # Configure equilibration and production runs.
 #
 # ensemble options: NVT, NPT, NVE
-# thermostat options: LangevinMiddle (recommended), Langevin, Andersen
+# thermostat options: LangevinMiddle (recommended), Langevin. NoseHoover and
+#   Andersen run only on GROMACS; see "GROMACS and OpenMM" in the reference.
 # barostat options: MC (Monte Carlo), MCA (anisotropic)
 #
-# Use staged equilibration for all simulations. This is the only supported
-# simulation config path and is the recommended workflow for stable builds.
+# Equilibration is a list of stages. Each stage sets its ensemble, its
+# temperature (or a temperature ramp) and its position restraints.
 #
 # Use this pattern for protocols with:
 #   - Temperature ramping (simulated annealing style heating)
@@ -312,12 +313,12 @@ description: "Description of your simulation system"
 #       position_restraints:
 #         - group: "protein_heavy"
 #           force_constant: 4184.0        # kJ/mol/nm^2 (= 1 kcal/mol/A^2)
-#         - group: "polymer_heavy"
+#         - group: "polymer_heavy"         # only when polymers are enabled
 #           force_constant: 4184.0
 #     # Add a constant-temperature stage after heating to equilibrate at the endpoint.
-#     
-#     # Stage 2: Relax polymers while keeping protein restrained
-#     - name: "polymer_relaxation"
+#
+#     # Stage 2: Relax the solvent (and any polymers) with the protein restrained
+#     - name: "restrained_relaxation"
 #       duration: 1.0                     # nanoseconds
 #       samples: 100
 #       ensemble: "NVT"

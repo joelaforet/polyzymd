@@ -74,7 +74,8 @@ def reference(
     ------
     ProtocolError
         If the mode is unknown, ``frame`` is missing or below 1 in frame
-        mode, or ``file`` is missing in external mode.
+        mode, ``file`` is missing in external mode, or ``file`` is given with
+        another mode.
     """
     if mode not in MODES:
         raise ProtocolError(f"Unknown reference mode {mode!r}.", hint=f"Use one of {MODES}.")
@@ -82,6 +83,12 @@ def reference(
         raise ProtocolError(
             f"Reference mode 'frame' needs a production frame from 1, got {frame!r}.",
             hint="Pass frame=1 for the first frame after the equilibration window.",
+        )
+    if file is not None and mode != "external":
+        raise ProtocolError(
+            f"Reference mode {mode!r} does not use the file {file!r}, so it would be ignored.",
+            hint="Leave out the mode (a given file is the reference), set it to 'external', "
+            "or remove the file.",
         )
     path = Path(file).expanduser().resolve() if file is not None else None
     if mode == "external" and (path is None or not path.is_file()):

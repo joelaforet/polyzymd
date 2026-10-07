@@ -81,3 +81,56 @@ def test_a_real_config_keeps_its_hash_when_its_data_moves(tmp_path: Path) -> Non
     first = compute_config_hash(SimulationConfig.from_yaml(path))
     path.write_text(path.read_text().replace(str(tmp_path / "data_here"), "/pl/active/moved"))
     assert compute_config_hash(SimulationConfig.from_yaml(path)) == first
+
+
+def test_the_config_hash_knows_the_cosolvents(tmp_path) -> None:
+    """A water condition and an SDS condition with the same name have different config hashes."""
+    import yaml
+
+    from polyzymd.analyses.identity import compute_config_hash
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_simulation_config
+
+    def config(folder, **solvent):
+        path = write_simulation_config(folder / "c", scratch=folder / "s")
+        (folder / "c" / "test.pdb").write_text("END\n")
+        data = yaml.safe_load(path.read_text())
+        if solvent:
+            data["solvent"] = solvent
+        path.write_text(yaml.safe_dump(data))
+        return SimulationConfig.from_yaml(path)
+
+    sds = {"name": "sds", "smiles": "CCCCCCCCCCCCOS(=O)(=O)[O-]", "count": 8}
+    assert compute_config_hash(config(tmp_path / "w")) != compute_config_hash(
+        config(tmp_path / "s", co_solvents=[sds])
+    )
+
+
+def _config_with_templates(tmp_path: Path, templates):
+    """Load a config whose enzyme.custom_substructures_path is templates.json beside it."""
+    import shutil
+
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    if isinstance(templates, Path):
+        shutil.copy(templates, tmp_path / "c" / "templates.json")
+    else:
+        (tmp_path / "c" / "templates.json").write_text(templates)
+    data = yaml.safe_load(path.read_text())
+    data["enzyme"]["custom_substructures_path"] = "templates.json"
+    path.write_text(yaml.safe_dump(data))
+    return SimulationConfig.from_yaml(path)
+
+
+def test_the_custom_substructures_are_part_of_the_config_hash(tmp_path: Path) -> None:
+    """Two configs that differ only in their custom substructures file hash differently."""
+    import json
+
+    one = _config_with_templates(tmp_path / "a", json.dumps({"X": {"[#6:1]": ["C1"]}}))
+    two = _config_with_templates(tmp_path / "b", json.dumps({"X": {"[#6:1]": ["C2"]}}))
+    assert compute_config_hash(one) != compute_config_hash(two)

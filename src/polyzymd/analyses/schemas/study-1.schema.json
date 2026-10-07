@@ -2,21 +2,92 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/joelaforet/polyzymd/schemas/study-1.schema.json",
   "title": "PolyzyMD study.yaml",
-  "description": "The analysis protocol of a PolyzyMD study folder: its conditions, one equilibration window, and the settings of every analysis run. See docs/source/how_to/study_yaml.md.",
+  "description": "The analysis protocol of one PolyzyMD study: a set of conditions compared with each other in one analysis frame (one residue numbering, its structures and regions, one equilibration window and the control, the first condition), with its analyses. See docs/source/how_to/study_yaml.md and docs/source/explanation/projects.md.",
   "type": "object",
-  "required": ["equilibration", "conditions"],
+  "required": [
+    "equilibration",
+    "conditions"
+  ],
   "additionalProperties": false,
   "properties": {
-    "polyzymd": {"type": "string", "description": "PolyzyMD version that produced the results."},
-    "equilibration": {"type": "string", "description": "Window removed from the start of every replicate's production, e.g. 100ns."},
-    "stride": {"type": "integer", "minimum": 1},
-    "until": {"type": "string", "description": "End of a common analysis window, e.g. 38ns."},
-    "replicates": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "integer"}}]},
+    "description": {
+      "type": "string",
+      "description": "What the study simulates, such as the protein and what its conditions vary."
+    },
+    "equilibration": {
+      "type": "string",
+      "description": "Window removed from the start of every replicate's production, e.g. 100ns."
+    },
+    "stride": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "until": {
+      "type": "string",
+      "description": "End of a common analysis window, e.g. 38ns."
+    },
+    "replicates": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
+      ]
+    },
     "conditions": {
       "type": "object",
       "minProperties": 1,
-      "description": "Condition label to config.yaml path, relative to study.yaml; the first is the control.",
-      "additionalProperties": {"type": "string"}
+      "description": "Condition label to its config.yaml (or the folder holding it), relative to study.yaml, or to {config, factors}; the first is the control.",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "required": [
+              "config"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "config": {
+                "type": "string"
+              },
+              "factors": {
+                "type": "object",
+                "description": "What varies between conditions, such as sbma_fraction: 0.5.",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "structures": {
+      "type": "object",
+      "description": "Name to a structure file relative to study.yaml, used as 'structure <name>'.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "regions": {
+      "type": "object",
+      "description": "Name to an MDAnalysis selection, used as 'region <name>' in any selection.",
+      "additionalProperties": {
+        "type": "string"
+      }
     },
     "analyses": {
       "type": "object",
@@ -25,34 +96,101 @@
         "oneOf": [
           {
             "type": "object",
-            "required": ["function", "kind"],
+            "required": [
+              "function",
+              "kind"
+            ],
             "additionalProperties": false,
             "properties": {
-              "function": {"type": "string", "pattern": ".+\\.py:.+"},
-              "kind": {"enum": ["per_replicate", "timeseries"]},
-              "unit": {"type": "string"},
-              "selections": {"type": "object", "additionalProperties": {"type": "string"}},
-              "universe": {"type": "string"},
-              "settings": {"type": "object"},
-              "labels": {"const": "returned"},
-              "reduce": {"type": "string"},
-              "allow_empty": {"type": "boolean"},
-              "missing": {"type": "number"},
-              "parts": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
-              "equilibration": {"type": "string", "description": "This analysis's own equilibration window, e.g. 0ns."},
-              "until": {"type": "string", "description": "This analysis's own end of the analysis window, e.g. 500ns."}
+              "function": {
+                "type": "string",
+                "pattern": ".+\\.py:.+"
+              },
+              "kind": {
+                "enum": [
+                  "per_replicate",
+                  "timeseries"
+                ]
+              },
+              "unit": {
+                "type": "string"
+              },
+              "selections": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "universe": {
+                "type": "string"
+              },
+              "settings": {
+                "type": "object"
+              },
+              "labels": {
+                "const": "returned"
+              },
+              "reduce": {
+                "type": "string"
+              },
+              "allow_empty": {
+                "type": "boolean"
+              },
+              "missing": {
+                "type": "number"
+              },
+              "parts": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              },
+              "equilibration": {
+                "type": "string",
+                "description": "This analysis's own equilibration window, e.g. 0ns."
+              },
+              "until": {
+                "type": "string",
+                "description": "This analysis's own end of the analysis window, e.g. 500ns."
+              },
+              "stride": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "This analysis's own frame stride."
+              }
             }
           },
           {
             "type": "object",
-            "not": {"required": ["function"]},
+            "not": {
+              "required": [
+                "function"
+              ]
+            },
             "properties": {
-              "analysis": {"type": "string"},
-              "equilibration": {"type": "string", "description": "This analysis's own equilibration window, e.g. 0ns."},
-              "until": {"type": "string", "description": "This analysis's own end of the analysis window, e.g. 500ns."}
+              "analysis": {
+                "type": "string"
+              },
+              "equilibration": {
+                "type": "string",
+                "description": "This analysis's own equilibration window, e.g. 0ns."
+              },
+              "until": {
+                "type": "string",
+                "description": "This analysis's own end of the analysis window, e.g. 500ns."
+              },
+              "stride": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "This analysis's own frame stride."
+              }
             }
           },
-          {"type": "null"}
+          {
+            "type": "null"
+          }
         ]
       }
     },
@@ -61,50 +199,120 @@
       "description": "Publishing metadata; see docs/source/how_to/study_freeze.md.",
       "additionalProperties": false,
       "properties": {
-        "doi": {"type": "string"},
-        "title": {"type": "string"},
-        "description": {"type": "string"},
-        "purpose": {"type": "string"},
-        "keywords": {"type": "array", "items": {"type": "string"}},
-        "system_type": {"type": "array", "items": {"type": "string"}},
+        "doi": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "system_type": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "authors": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["family-names"],
+            "required": [
+              "family-names"
+            ],
             "additionalProperties": false,
             "properties": {
-              "family-names": {"type": "string"},
-              "given-names": {"type": "string"},
-              "name-suffix": {"type": "string"},
-              "orcid": {"type": "string"},
-              "affiliation": {"type": "string"},
-              "email": {"type": "string"}
+              "family-names": {
+                "type": "string"
+              },
+              "given-names": {
+                "type": "string"
+              },
+              "name-suffix": {
+                "type": "string"
+              },
+              "orcid": {
+                "type": "string"
+              },
+              "affiliation": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
             }
           }
         },
-        "contact": {"type": "object"},
+        "contact": {
+          "type": "object"
+        },
         "license": {
           "type": "object",
           "additionalProperties": false,
-          "properties": {"data": {"type": "string"}, "code": {"type": "string"}}
+          "properties": {
+            "data": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            }
+          }
         },
-        "funding": {"type": "array", "items": {"type": "object"}},
+        "funding": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
         "related": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "paper": {"type": "object"},
-            "trajectories": {"type": "array", "items": {"type": "object"}},
-            "experimental": {"type": "array", "items": {"type": "object"}}
+            "paper": {
+              "type": "object"
+            },
+            "trajectories": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "experimental": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
           }
         },
         "zenodo": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "communities": {"type": "array", "items": {"type": "string"}},
-            "access_right": {"enum": ["open", "embargoed", "restricted", "closed"]}
+            "communities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "access_right": {
+              "enum": [
+                "open",
+                "embargoed",
+                "restricted",
+                "closed"
+              ]
+            }
           }
         }
       }

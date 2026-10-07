@@ -55,12 +55,12 @@ Common Workflows
 
 - Install locally and validate the CLI:
   :doc:`Install PolyzyMD with pixi <get_started/installation>`
-- Build and submit a first simulation:
-  :doc:`Run Your First PolyzyMD Simulation <get_started/quickstart>`
+- Run a first simulation and analyze it:
+  :doc:`Run your first simulation <get_started/quickstart>`
 - Run a comparison study across multiple conditions:
   :doc:`Compare Simulation Conditions <how_to/analysis_compare_conditions>`
-- Generate comparison figures as a smoke test:
-  :doc:`Analyze a Multi-Condition Study <tutorials/analysis_complete_workflow>`
+- Analyze a study with several conditions and make its figures:
+  :doc:`tutorials/analysis_complete_workflow`
 
 .. IMAGE OPPORTUNITY: Add a single workflow schematic showing Build -> Submit ->
    Analyze -> Compare -> Plot, with stable and experimental analysis branches.

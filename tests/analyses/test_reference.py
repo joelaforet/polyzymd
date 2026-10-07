@@ -121,7 +121,7 @@ def test_external_file_is_hashed_and_a_changed_file_recomputes(study, tmp_path) 
     first = run()
     record = json.loads((first.path / "record.json").read_text())
     stored = record["arguments"]["args"][1]["reference"]["file"]
-    assert stored["path"] == str(path.resolve()) and len(stored["sha256"]) == 64
+    assert stored == {"name": path.name, "sha256": stored["sha256"]} and len(stored["sha256"]) == 64
     assert first.values == pytest.approx([s - 1.0 for s in SCALES[3:]], abs=1e-5)
     _write_cross(path, 2.0)
     assert run().values == pytest.approx([2.0 - s for s in SCALES[3:]], abs=1e-5)
@@ -141,7 +141,7 @@ def test_plain_path_argument_is_hashed(study, tmp_path) -> None:
 
     first = run()
     record = json.loads((first.path / "record.json").read_text())
-    assert record["arguments"]["args"][1]["file"]["path"] == str(path)
+    assert record["arguments"]["args"][1]["file"]["name"] == path.name
     path.write_text("1.5")
     assert run().values == pytest.approx(first.values + 1.0, abs=1e-5)
 
@@ -197,3 +197,14 @@ def test_centroid_rmsd_is_per_atom() -> None:
     index, value = _find_frame_closest_to_aligned_mean(coordinates)
     assert index == 1
     assert value == pytest.approx(0.1 / 3, abs=1e-5)
+
+
+def test_a_reference_file_is_the_reference() -> None:
+    """rmsd and rmsf with a reference_file and no mode measure from that file."""
+    from polyzymd.analyses.protocols import FUNCTION_ANALYSES
+    from polyzymd.analyses.reference import reference
+
+    for name in ("rmsd", "rmsf", "rmsd_per_residue"):
+        assert FUNCTION_ANALYSES[name]["reference_mode"] is None, name
+    with pytest.raises(ProtocolError, match="does not use the file"):
+        reference("centroid", "all", file=__file__)

@@ -367,7 +367,7 @@ def test_stride_measures_every_other_frame(configs, schedules, tmp_path) -> None
         ),
         ({"summaries": {"s": {}}}, None, "needs exactly one of"),
         ({"summaries": {"s": {"within": "ligand"}}}, None, "names groups \\['ligand'\\]"),
-        ({"groups": {"protein": "chainid A", "polymer": "chainid Z"}}, None, "match no atoms in any replicate"),
+        ({"groups": {"protein": "chainid Z", "polymer": "chainid C"}}, None, "match no atoms in any replicate"),
         ({"lifetime_key": "bond"}, None, "lifetime_key must be 'residue' or 'atom'"),
         ({"tolerance_ps": -1.0}, None, "tolerance_ps must be at least 0"),
         (None, "protein_polymer_rmsd", "no result named 'protein_polymer_rmsd'"),

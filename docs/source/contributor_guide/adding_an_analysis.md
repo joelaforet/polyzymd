@@ -9,9 +9,10 @@ produced it, and computes the intervals and tests between conditions with the
 replicate as the sampling unit. There is no base class to subclass and no
 registry to edit.
 
-{doc}`../explanation/analysis_api` describes the interface in full: how to
-load a study, measure on every frame, compare with a reference structure, turn
-a replicate into one value, compare conditions and draw figures.
+{doc}`../how_to/study_api` shows how to load a study, measure on every frame,
+compare with a reference structure, turn a replicate into one value, compare
+conditions and draw figures. {doc}`../reference/study_api` gives every
+signature.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -85,6 +86,6 @@ settings and their defaults to `FUNCTION_ANALYSES` in
 
 ## See also
 
-- {doc}`../explanation/analysis_api`: the study API
+- {doc}`../reference/study_api`: the study API
 - {doc}`../reference/analysis_functions`: the shipped functions
 - {doc}`../reference/analysis_protocol_report`: the fields of a `ProtocolReport`

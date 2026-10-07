@@ -136,6 +136,7 @@ class SimulationRunner:
         platform: str = "CUDA",
         precision: str = "mixed",
         device_index: str | None = None,
+        replicate: int | None = None,
     ) -> None:
         """Initialize the SimulationRunner.
 
@@ -145,6 +146,10 @@ class SimulationRunner:
             positions: Initial positions with units.
             working_dir: Working directory for output files.
             platform: Compute platform (CUDA, OpenCL, CPU).
+            replicate: The replicate number, which seeds the initial
+                velocities and the thermostat noise of every phase
+                (:func:`polyzymd.simulation.seeds.dynamics_seed`). ``None``
+                lets OpenMM choose random seeds.
         """
         _ensure_openmm_loaded()
 
@@ -155,6 +160,7 @@ class SimulationRunner:
         self._platform_name = platform
         self._platform_precision = precision
         self._platform_device_index = device_index
+        self._replicate = replicate
 
         self._simulation: Optional[Simulation] = None
         self._current_positions = positions
@@ -225,6 +231,7 @@ class SimulationRunner:
         friction: float = 1.0,
         timestep: float = 2.0,
         thermostat: str = "LangevinMiddle",
+        phase: str | None = None,
     ) -> openmm.Integrator:
         """Create an integrator for the simulation.
 
@@ -233,6 +240,9 @@ class SimulationRunner:
             friction: Friction coefficient in 1/ps.
             timestep: Time step in femtoseconds.
             thermostat: Thermostat type.
+            phase: The phase this integrator runs, such as
+                ``"equilibration:0:0"``; with the replicate number it seeds
+                the thermostat noise.
 
         Returns:
             OpenMM Integrator.
@@ -242,12 +252,33 @@ class SimulationRunner:
         dt = timestep * omm_unit.femtosecond
 
         if thermostat == "LangevinMiddle":
-            return openmm.LangevinMiddleIntegrator(temp, fric, dt)
+            integrator = openmm.LangevinMiddleIntegrator(temp, fric, dt)
         elif thermostat == "Langevin":
-            return openmm.LangevinIntegrator(temp, fric, dt)
+            integrator = openmm.LangevinIntegrator(temp, fric, dt)
         else:
             LOGGER.warning(f"Unknown thermostat {thermostat}, using LangevinMiddle")
-            return openmm.LangevinMiddleIntegrator(temp, fric, dt)
+            integrator = openmm.LangevinMiddleIntegrator(temp, fric, dt)
+        seed = self._seed(phase)
+        if seed is not None:
+            integrator.setRandomNumberSeed(seed)
+            LOGGER.info(f"Thermostat noise of {phase}: seed {seed}")
+        return integrator
+
+    def _seed(self, phase: str | None) -> int | None:
+        """Return the seed of ``phase`` from the replicate number, or ``None`` without one."""
+        if self._replicate is None or phase is None:
+            return None
+        from polyzymd.simulation.seeds import dynamics_seed
+
+        return dynamics_seed(self._replicate, phase)
+
+    def _set_velocities(self, temperature: float, phase: str) -> None:
+        """Draw Maxwell-Boltzmann velocities at ``temperature`` K, seeded by the replicate number."""
+        seed = self._seed(f"velocities:{phase}")
+        if seed is None:
+            self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)
+        else:
+            self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin, seed)
 
     def _add_barostat(
         self,
@@ -720,6 +751,8 @@ class SimulationRunner:
             temperature=start_temp,
             friction=friction,
             timestep=timestep_fs,
+            # A resumed stage draws new noise, not a repeat of its start.
+            phase=f"equilibration:{stage_index}:{resume_from_step}",
         )
         # Create simulation
         self._simulation = self._create_simulation(integrator)
@@ -747,7 +780,7 @@ class SimulationRunner:
         # from the previous stage for physical continuity — matching the
         # GROMACS convention (gen_vel=yes only for stage 0).
         if (stage_index == 0 and resume_from_step == 0) or self._current_velocities is None:
-            self._simulation.context.setVelocitiesToTemperature(start_temp * omm_unit.kelvin)
+            self._set_velocities(start_temp, f"equilibration:{stage_index}")
             LOGGER.info(f"Stage {stage_index}: initialized velocities at {start_temp} K")
         else:
             self._simulation.context.setVelocities(self._current_velocities)
@@ -1481,6 +1514,7 @@ class SimulationRunner:
             temperature=temperature,
             friction=friction,
             timestep=timestep_fs,
+            phase=f"production:{segment_index}",
         )
         self._simulation = self._create_simulation(integrator)
 
@@ -1514,7 +1548,7 @@ class SimulationRunner:
                 self._simulation.context.setVelocities(self._current_velocities)
                 LOGGER.info("Using velocities preserved from equilibration")
             else:
-                self._simulation.context.setVelocitiesToTemperature(temperature * omm_unit.kelvin)
+                self._set_velocities(temperature, "production")
                 LOGGER.info("Initialized velocities from Maxwell-Boltzmann distribution")
 
         # Add reporters

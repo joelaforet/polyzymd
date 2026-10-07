@@ -1,21 +1,13 @@
-# RMSD analysis: quick start
+# Run RMSD analysis
 
-Measure the RMSD of a selection from a reference structure on every production
-frame of every replicate, and compare conditions with the replicate as the
-sampling unit.
+Measure the RMSD of a selection from a reference structure on each production
+frame of each replicate. Then compare the conditions, with one value per
+replicate.
 
-```{versionadded} 1.3.0
-RMSD analysis was added in PolyzyMD 1.3.0.
-```
-
-```{note}
-**Want to understand the statistics?** This guide focuses on getting results
-quickly. For interpretation of RMSD curves and the choice of reference, see
-{doc}`../explanation/analysis_rmsd_best_practices`. For what each shipped
-function measures, see {doc}`../reference/analysis_functions`. `rmsd` is one
-number per frame; for how it differs from the per-residue `rmsd_per_residue`,
-`rmsf` and `offset`, and which to report, see {ref}`Fluctuation, offset and deviation <rmsf-fluctuation-offset-deviation>`.
-```
+For how to read RMSD curves and choose a reference, see
+{doc}`../explanation/analysis_rmsd_best_practices`. `rmsd` gives one number per
+frame. For the per-residue quantities `rmsd_per_residue`, `rmsf` and `offset`,
+see {ref}`Fluctuation, offset and deviation <rmsf-fluctuation-offset-deviation>`.
 
 :::{admonition} Environment Setup
 :class: tip
@@ -30,13 +22,6 @@ pixi shell -e analysis
 Alternatively, prefix each command with `pixi run -e analysis`.
 :::
 
-```{tip}
-**RMSD vs RMSF vs Distances, when to use which:**
-- **RMSD**: Global structural deviation over time, "is the protein drifting?"
-- **RMSF**: Per-residue fluctuation around average, "which residues are flexible?"
-- **Distances**: Specific atom-pair distances, "is this H-bond intact?"
-```
-
 ## From the command line
 
 ```bash
@@ -44,19 +29,22 @@ polyzymd analyze rmsd -c noPoly/config.yaml -c SBMA50/config.yaml \
   --label "No polymer" --label "SBMA 50%" --eq 200ns
 ```
 
-The first `-c` is the control. For each replicate, every production frame of
-the `protein and name CA` atoms is superposed on a reference structure and its
-RMSD is measured. The replicate means are then summarised per condition, and
-every other condition is compared with the control by Welch's t test with the
-Benjamini-Hochberg correction.
+The first `-c` is the control. The command does these steps:
+
+1. It superposes the `protein and name CA` atoms of each production frame on a
+   reference structure.
+2. It measures the RMSD of each frame.
+3. It takes the mean over frames of each replicate.
+4. It compares each condition with the control by Welch's t test. It corrects
+   the p values with the {term}`Benjamini-Hochberg` method.
 
 Change what is measured and what it is measured against with `--set`:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `selection` | `protein and name CA` | Atoms whose RMSD is measured; each frame is superposed on these atoms |
+| `selection` | `protein and name CA` | The atoms to measure. PolyzyMD superposes each frame on these atoms |
 | `alignment_selection` | `protein and name CA` | Atoms superposed to build the `average` and `centroid` references |
-| `reference_mode` | `centroid` | `centroid`, `average`, `frame` or `external` |
+| `reference_mode` | `external` if `reference_file` is set, else `centroid` | `centroid`, `average`, `frame` or `external` |
 | `reference_frame` | `1` | Production frame used by `frame` mode, counted from 1 after the equilibration window |
 | `reference_file` | none | Structure file used by `external` mode |
 
@@ -68,11 +56,10 @@ polyzymd analyze rmsd -c noPoly/config.yaml -c SBMA50/config.yaml --eq 200ns \
 ```
 
 ```{note}
-When using `external` reference mode, the structure file must contain atoms
-matching the `selection` string. PolyzyMD checks that the atom counts match
-between the trajectory and the file and raises an error on a mismatch. The
-file's SHA-256 hash is recorded with the result, so editing the file measures
-the replicates again.
+In `external` mode, the structure file must contain the atoms of `selection`.
+PolyzyMD stops with an error if the atom counts of the trajectory and the file
+differ. PolyzyMD records the SHA-256 of the file with the result. If you edit
+the file, the next command measures the replicates again.
 ```
 
 **Which reference to use:**
@@ -85,19 +72,24 @@ the replicates again.
 | `external` | How much does the structure deviate from a known functional geometry? |
 
 The `centroid` reference is the production frame closest to the mean
-structure, where the mean comes from MDAnalysis `align.iterative_average` on
-the `alignment_selection` atoms. The `average` and `centroid` references are
-built separately for every replicate from its own production frames.
+structure. MDAnalysis `align.iterative_average` computes the mean structure on
+the `alignment_selection` atoms. PolyzyMD builds the `average` and `centroid`
+references for each replicate from the production frames of that replicate.
 
 ```{tip}
-For enzyme studies, consider running RMSD twice: once with `centroid` mode
-(overall stability) and once with `external` mode pointing to a crystal
-structure (catalytic competence). These answer complementary questions.
+For an enzyme, run RMSD two times. Use `centroid` mode to measure overall
+stability. Use `external` mode with the crystal structure to measure the
+distance from the known active geometry.
 ```
 
-Add `--format json` for the full report, `--replicates 1-3` to use only some
-replicates, and `--recompute` to ignore stored results. The line format and the
-verdict words are described under {ref}`polyzymd analyze <cli-analyze>`.
+Useful options:
+
+- `--format json` prints the full report.
+- `--replicates 1-3` uses only some replicates.
+- `--recompute` ignores stored results.
+
+For the line format and the verdict words, see
+{ref}`polyzymd analyze <cli-analyze>`.
 
 ```{note}
 `reference_frame` counts production frames from 1, after the equilibration
@@ -121,20 +113,20 @@ values = study.timeseries(
 print(values.reduce("mean").compare(control="No polymer").to_agent_text())
 ```
 
-`pz.reference(mode, selection, frame=None, file=None, alignment=None)` stands
-for the reference atoms. It is built once per replicate in a separate
-universe, so the trajectory itself is never modified. The record of each
-replicate holds the mode, the selections, the frame the reference used and,
-for `external`, the file's hash.
+`pz.reference(mode, selection, frame=None, file=None, alignment=None)` gives
+the reference atoms. PolyzyMD builds the reference once per replicate in a
+separate universe, so the trajectory is not changed. The record of each
+replicate holds the mode, the selections and the reference frame. For
+`external`, it also holds the SHA-256 of the file.
+
+To measure your own quantity, see {doc}`study_api`.
 
 ## Before interpreting the numbers
 
-Check the per-replicate time series before choosing the equilibration window;
-RMSD that is still rising after the window means the replicate has not
-relaxed. {doc}`../explanation/analysis_rmsd_best_practices` covers how to read
-RMSD curves and choose a reference, and
-{doc}`../explanation/convergence_detection` covers the equilibration
-diagnostic in the report.
+Look at the time series of each replicate before you choose the equilibration
+window. If the RMSD still rises after the window, the replicate has not
+relaxed. For the equilibration diagnostic in the report, see
+{doc}`../explanation/convergence_detection`.
 
 ## Next steps
 

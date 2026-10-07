@@ -23,6 +23,7 @@ from polyzymd.core.branding import prepend_file_header
 PATH_KEYS = frozenset(
     {
         "pdb_path",
+        "custom_substructures_path",
         "sdf_path",
         "sdf_directory",
         "cache_directory",
@@ -31,6 +32,10 @@ PATH_KEYS = frozenset(
         "termination",
     }
 )
+#: Where runs and job files go. They are resolved against the config's folder,
+#: as the input files are, so a command finds the runs from any folder; they
+#: are never copied or hashed as inputs.
+OUTPUT_PATH_KEYS = frozenset({"projects_directory", "scratch_directory"})
 
 
 def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
@@ -49,7 +54,7 @@ def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
     Returns:
         Configuration with expanded paths
     """
-    path_keys = PATH_KEYS
+    path_keys = PATH_KEYS | OUTPUT_PATH_KEYS
 
     # Sentinel values that should be forwarded to Pydantic validators as-is,
     # not treated as filesystem paths.
@@ -86,7 +91,7 @@ def _convert_paths_to_relative(data: Dict[str, Any], base_path: Path) -> Dict[st
     Returns:
         Configuration with relative paths
     """
-    path_keys = PATH_KEYS
+    path_keys = PATH_KEYS | OUTPUT_PATH_KEYS
 
     # Sentinel values that should be forwarded as-is (see _expand_paths).
     _SENTINEL_VALUES = {"default"}
@@ -224,27 +229,3 @@ def save_config(
             allow_unicode=True,
             width=100,
         )
-
-
-def load_config_dict(data: Dict[str, Any], base_path: Path = Path.cwd()) -> SimulationConfig:
-    """Create a SimulationConfig from a dictionary.
-
-    This is useful for programmatic configuration creation.
-
-    Args:
-        data: Configuration dictionary
-        base_path: Base path for resolving relative paths
-
-    Returns:
-        Validated SimulationConfig instance
-
-    Example:
-        >>> data = {
-        ...     "name": "test_sim",
-        ...     "enzyme": {"name": "LipA", "pdb_path": "enzyme.pdb"},
-        ...     ...
-        ... }
-        >>> config = load_config_dict(data)
-    """
-    expanded = _expand_paths(data, base_path)
-    return SimulationConfig.model_validate(expanded)

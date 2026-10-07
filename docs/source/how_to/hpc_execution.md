@@ -264,7 +264,7 @@ Both clusters require all three scheduling flags. Omitting any of them causes
 | Flag | Alpine (shared) | Blanca (condo) |
 |------|-----------------|----------------|
 | `--partition` | `amilan` (CPU), `aa100` or `ami100` (GPU) | `blanca-<group>` (e.g. `blanca-shirts`) |
-| `--account` | Your allocation (e.g. `ucb625_asc1`) | Same as partition (e.g. `blanca-shirts`) |
+| `--account` | Your allocation, such as `<account>` | Same as partition (e.g. `blanca-shirts`) |
 | `--qos` | `normal` | Same as partition (e.g. `blanca-shirts`) |
 
 Add them to the batch script, for example on Blanca:

@@ -133,18 +133,92 @@ class RestraintType(str, Enum):
 # =============================================================================
 
 
-class EnzymeConfig(BaseModel):
+class _ConfigModel(BaseModel):
+    """Base of every config section: a key the section does not define is an error.
+
+    A misspelled or unsupported key (``chrage_method``) would otherwise be
+    dropped without a word, and the build would use the default.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def load_custom_substructures(path: Path) -> dict[str, dict[str, list[str]]]:
+    """Read a custom substructures JSON file and check its shape.
+
+    Parameters
+    ----------
+    path : Path
+        JSON file that maps each residue name to SMARTS patterns, and each
+        SMARTS pattern to the PDB atom names it matches, in order.
+
+    Returns
+    -------
+    dict
+        The file's content, ``{residue name: {SMARTS: [atom names]}}``.
+
+    Raises
+    ------
+    ValueError
+        When the file is missing, is not JSON or has another shape.
+    """
+    import json
+
+    try:
+        data = json.loads(Path(path).read_text())
+    except OSError as error:
+        raise ValueError(f"Cannot read custom_substructures_path {path}: {error}") from error
+    except json.JSONDecodeError as error:
+        raise ValueError(f"custom_substructures_path {path} is not JSON: {error}") from error
+    if not isinstance(data, dict) or not all(
+        isinstance(name, str)
+        and isinstance(patterns, dict)
+        and all(
+            isinstance(smarts, str)
+            and isinstance(atoms, list)
+            and all(isinstance(atom, str) for atom in atoms)
+            for smarts, atoms in patterns.items()
+        )
+        for name, patterns in data.items()
+    ):
+        raise ValueError(
+            f"custom_substructures_path {path} must map each residue name to SMARTS "
+            'patterns, and each pattern to a list of atom names: {"NCYX": {"[#7:1]...": ["N", ...]}}'
+        )
+    return data
+
+
+class EnzymeConfig(_ConfigModel):
     """Configuration for the enzyme/protein component.
 
     Attributes:
         name: Identifier for the enzyme (e.g., "LipA")
         pdb_path: Path to the PDB file containing the enzyme structure
         description: Optional description of the enzyme
+        custom_substructures_path: Optional JSON file of residue templates for
+            residues that OpenFF's template matcher does not know
     """
 
     name: str = Field(..., description="Enzyme identifier")
     pdb_path: Path = Field(..., description="Path to enzyme PDB file")
     description: str | None = Field(None, description="Optional description")
+    custom_substructures_path: Path | None = Field(
+        None,
+        description=(
+            "JSON file of extra residue templates, passed to OpenFF's "
+            "Topology.from_pdb(_custom_substructures=...): "
+            '{"RESNAME": {"SMARTS": ["ATOM", ...]}}. Relative to the config.'
+        ),
+    )
+
+    @field_validator("custom_substructures_path")
+    @classmethod
+    def validate_custom_substructures(cls, v: Path | None) -> Path | None:
+        """Check that the file exists and has the shape OpenFF reads."""
+        if v is None:
+            return v
+        load_custom_substructures(v)
+        return v
 
     @field_validator("pdb_path")
     @classmethod
@@ -160,7 +234,7 @@ class EnzymeConfig(BaseModel):
 # =============================================================================
 
 
-class SubstrateConfig(BaseModel):
+class SubstrateConfig(_ConfigModel):
     """Configuration for the docked substrate/ligand.
 
     Attributes:
@@ -191,7 +265,7 @@ class SubstrateConfig(BaseModel):
 # =============================================================================
 
 
-class PolymerPackingConfig(BaseModel):
+class PolymerPackingConfig(_ConfigModel):
     """Settings for packing polymers around the solute.
 
     Controls the box size and PACKMOL behavior when packing polymers
@@ -278,7 +352,7 @@ class PolymerPackingConfig(BaseModel):
 # =============================================================================
 
 
-class MonomerSpec(BaseModel):
+class MonomerSpec(_ConfigModel):
     """Specification for a single monomer type in a co-polymer.
 
     For dynamic polymer generation, provide the raw (unactivated) monomer SMILES.
@@ -321,7 +395,7 @@ class PolymerGenerationMode(str, Enum):
     DYNAMIC = "dynamic"  # Generate polymers on-the-fly using Polymerist
 
 
-class ReactionConfig(BaseModel):
+class ReactionConfig(_ConfigModel):
     """Paths to reaction templates for ATRP polymer generation.
 
     These .rxn files define the chemical transformations used to create
@@ -384,7 +458,7 @@ class ReactionConfig(BaseModel):
         return v
 
 
-class PolymerConfig(BaseModel):
+class PolymerConfig(_ConfigModel):
     """Configuration for polymer components.
 
     Supports two generation modes:
@@ -498,7 +572,7 @@ class PolymerConfig(BaseModel):
 # =============================================================================
 
 
-class CoSolventSpec(BaseModel):
+class CoSolventSpec(_ConfigModel):
     """Specification for a co-solvent component.
 
     You must specify either ``mole_fraction`` or ``concentration``, not both.
@@ -535,6 +609,18 @@ class CoSolventSpec(BaseModel):
     # Specification method 2: Molar concentration
     concentration: float | None = Field(None, gt=0.0, description="Molar concentration (mol/L)")
 
+    # Specification method 3: number of molecules
+    count: int | None = Field(None, ge=1, description="Number of molecules in the box")
+
+    charge_method: ChargeMethod = Field(
+        ChargeMethod.NAGL,
+        description=(
+            "How partial charges are assigned to a co-solvent that is not in the bundled "
+            "library: 'nagl' (default, the OpenFF graph network trained on AM1-BCC), "
+            "'am1bcc' (needs AmberTools) or 'espaloma'"
+        ),
+    )
+
     # Optional physical property for library metadata
     density: float | None = Field(
         None,
@@ -562,17 +648,13 @@ class CoSolventSpec(BaseModel):
         from polyzymd.data.cosolvent_library import get_cosolvent
 
         # Check that exactly one composition method is specified
-        has_mole_fraction = self.mole_fraction is not None
-        has_conc = self.concentration is not None
-
-        if not has_mole_fraction and not has_conc:
+        given = [
+            key for key in ("mole_fraction", "concentration", "count") if getattr(self, key) is not None
+        ]
+        if len(given) != 1:
             raise ValueError(
-                f"Co-solvent '{self.name}': Must specify either 'mole_fraction' or 'concentration'"
-            )
-        if has_mole_fraction and has_conc:
-            raise ValueError(
-                f"Co-solvent '{self.name}': Cannot specify both 'mole_fraction' "
-                f"and 'concentration' - choose one"
+                f"Co-solvent '{self.name}': give exactly one of mole_fraction, concentration "
+                f"and count, not {given or 'none'}"
             )
 
         # Look up from library
@@ -598,7 +680,7 @@ class CoSolventSpec(BaseModel):
         return self
 
 
-class PrimarySolventConfig(BaseModel):
+class PrimarySolventConfig(_ConfigModel):
     """Configuration for the primary solvent (usually water).
 
     Attributes:
@@ -610,7 +692,7 @@ class PrimarySolventConfig(BaseModel):
     model: WaterModel = Field(WaterModel.TIP3P, description="Water model")
 
 
-class IonConfig(BaseModel):
+class IonConfig(_ConfigModel):
     """Configuration for ions in the solvent.
 
     ``nacl_concentration`` is a NaCl-equivalent target for the final ion
@@ -630,7 +712,7 @@ class IonConfig(BaseModel):
     mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L)")
 
 
-class BoxConfig(BaseModel):
+class BoxConfig(_ConfigModel):
     """Configuration for the simulation box.
 
     Attributes:
@@ -646,7 +728,7 @@ class BoxConfig(BaseModel):
     tolerance: float = Field(2.0, gt=0.0, description="PACKMOL tolerance (Angstrom)")
 
 
-class SolventConfig(BaseModel):
+class SolventConfig(_ConfigModel):
     """Complete solvent configuration."""
 
     primary: PrimarySolventConfig = Field(
@@ -670,7 +752,7 @@ class SolventConfig(BaseModel):
 # =============================================================================
 
 
-class AtomSelectionConfig(BaseModel):
+class AtomSelectionConfig(_ConfigModel):
     """Configuration for selecting atoms for restraints.
 
     Uses MDAnalysis-compatible selection syntax for flexibility.
@@ -684,7 +766,7 @@ class AtomSelectionConfig(BaseModel):
     description: str | None = Field(None, description="Human-readable description")
 
 
-class RestraintConfig(BaseModel):
+class RestraintConfig(_ConfigModel):
     """Configuration for a single restraint.
 
     Attributes:
@@ -711,7 +793,7 @@ class RestraintConfig(BaseModel):
 # =============================================================================
 
 
-class ThermodynamicsConfig(BaseModel):
+class ThermodynamicsConfig(_ConfigModel):
     """Thermodynamic conditions for the simulation.
 
     Attributes:
@@ -729,7 +811,7 @@ class ThermodynamicsConfig(BaseModel):
 # =============================================================================
 
 
-class SimulationPhaseConfig(BaseModel):
+class SimulationPhaseConfig(_ConfigModel):
     """Configuration for a single simulation phase (equilibration or production).
 
     Attributes:
@@ -756,10 +838,10 @@ class SimulationPhaseConfig(BaseModel):
     barostat: BarostatType | None = Field(None, description="Barostat type")
     barostat_frequency: int = Field(25, ge=1, description="Barostat update frequency")
     checkpoint_interval: float = Field(
-        ...,
+        60.0,
         gt=0.0,
         description=(
-            "Wall-time interval in seconds between restart checkpoints. "
+            "Wall-time interval in seconds between restart checkpoints (default 60). "
             "Controls how frequently simulation state is saved for automatic "
             "restart on SLURM preemption or hard kill. Independent of "
             "trajectory/reporter output frequency. Must be positive so "
@@ -792,7 +874,7 @@ class SimulationPhaseConfig(BaseModel):
 # =============================================================================
 
 
-class PositionRestraintConfig(BaseModel):
+class PositionRestraintConfig(_ConfigModel):
     """Configuration for positional restraints on an atom group.
 
     Position restraints apply a harmonic potential to keep atoms near their
@@ -830,7 +912,7 @@ class PositionRestraintConfig(BaseModel):
         return v
 
 
-class EquilibrationStageConfig(BaseModel):
+class EquilibrationStageConfig(_ConfigModel):
     """Configuration for a single equilibration stage.
 
     Supports two temperature modes:
@@ -1119,7 +1201,7 @@ class EquilibrationStageConfig(BaseModel):
         )
 
 
-class MinimizationConfig(BaseModel):
+class MinimizationConfig(_ConfigModel):
     """Energy-minimisation settings.
 
     Attributes:
@@ -1141,7 +1223,7 @@ class MinimizationConfig(BaseModel):
     tolerance: float = Field(10.0, gt=0, description="Energy tolerance in kJ/mol/nm")
 
 
-class SimulationPhasesConfig(BaseModel):
+class SimulationPhasesConfig(_ConfigModel):
     """Configuration for all simulation phases.
 
     Attributes:
@@ -1224,7 +1306,7 @@ def expand_path(path: Path) -> Path:
     return Path(expanded)
 
 
-class OutputConfig(BaseModel):
+class OutputConfig(_ConfigModel):
     """Configuration for simulation output.
 
     Supports separate directories for:
@@ -1383,7 +1465,7 @@ class OutputConfig(BaseModel):
 # =============================================================================
 
 
-class ForceFieldConfig(BaseModel):
+class ForceFieldConfig(_ConfigModel):
     """Configuration for force field selection.
 
     Attributes:
@@ -1401,7 +1483,7 @@ class ForceFieldConfig(BaseModel):
 # =============================================================================
 
 
-class OpenMMEngineConfig(BaseModel):
+class OpenMMEngineConfig(_ConfigModel):
     """OpenMM-specific engine settings.
 
     These settings control OpenMM platform selection and device configuration.
@@ -1418,7 +1500,7 @@ class OpenMMEngineConfig(BaseModel):
     precision: str = Field("mixed", description="Floating-point precision")
 
 
-class GromacsEngineConfig(BaseModel):
+class GromacsEngineConfig(_ConfigModel):
     """GROMACS-specific engine settings.
 
     These settings control how GROMACS binaries are located and invoked,
@@ -1452,8 +1534,20 @@ class GromacsEngineConfig(BaseModel):
     """
 
     gmx_binary: str | None = Field(None, description="GROMACS binary path or name")
+    analysis_topology: str | None = Field(
+        None,
+        description=(
+            "File name of the run's GROMACS topology (.top) in the run folder. Analyses "
+            "read it when MDAnalysis cannot read prod.tpr, and freeze deposits it with the "
+            "files it includes. Default: <prefix>.top, the file PolyzyMD writes."
+        ),
+    )
     mdrun_flags: str = Field("", description="Extra flags for gmx mdrun (all stages)")
-    grompp_flags: str = Field("-maxwarn 1", description="Extra flags for gmx grompp")
+    grompp_flags: str = Field(
+        "",
+        description="Extra flags for gmx grompp, such as '-maxwarn 1' to accept a warning "
+        "you have read; by default every grompp warning stops the run",
+    )
     mdrun_flags_equilibration: str | None = Field(
         None,
         description=(
@@ -1594,7 +1688,7 @@ class GromacsEngineConfig(BaseModel):
 # =============================================================================
 
 
-class SimulationConfig(BaseModel):
+class SimulationConfig(_ConfigModel):
     """Complete simulation configuration.
 
     This is the top-level configuration model that contains all settings
@@ -1707,6 +1801,8 @@ class SimulationConfig(BaseModel):
             elif cosolvent.concentration is not None:
                 concentration = _format_decimal_token(cosolvent.concentration)
                 token = f"{name}_{concentration}M"
+            elif cosolvent.count is not None:
+                token = f"{name}_{cosolvent.count}mol"
             else:
                 # Validation guarantees one composition mode, but keep errors explicit
                 raise ValueError(f"Co-solvent '{cosolvent.name}' has no composition value")

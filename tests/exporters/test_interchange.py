@@ -202,6 +202,7 @@ class TestExportSystemGromacsPath:
             interchange=interchange_obj,
             config=sim_config,
             component_info=component_info,
+            replicate=None,
         )
         mock_exporter.export.assert_called_once_with(
             output_dir=output_dir,

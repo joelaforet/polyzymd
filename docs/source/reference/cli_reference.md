@@ -15,14 +15,8 @@ polyzymd --openff-logs <command>  # Show OpenFF toolkit logging
 polyzymd --no-color <command>     # Disable colored output
 ```
 
-> **Note:** Global options must appear *before* the subcommand.
-> For example: `polyzymd --no-color check-progress -c config.yaml`
-> (not `polyzymd check-progress --no-color -c config.yaml`).
-> `--version` prints the installed version and exits immediately.
-> `--help` shows top-level help; use `polyzymd <command> --help` for subcommand help.
-> `--verbose`/`-v` enables verbose output.
-> `--openff-logs` enables OpenFF toolkit logging.
-> `--no-color` disables colored output.
+Global options go *before* the subcommand: `polyzymd --no-color status -c
+config.yaml`, not `polyzymd status --no-color -c config.yaml`.
 
 ### Colored Output
 
@@ -47,31 +41,32 @@ polyzymd --openff-logs build -c config.yaml
 polyzymd --openff-logs run -c config.yaml --engine gromacs
 ```
 
-**OpenFF logs:** OpenFF Interchange and Toolkit libraries are suppressed by default (they generate per-atom INFO messages during system building). Use `--openff-logs` to enable them for debugging force field issues.
-- Investigating charge assignment problems
-- Troubleshooting system building failures
+Use `--openff-logs` to investigate charge assignment problems and build
+failures.
 
 ---
 
 ## polyzymd init
 
-Initialize a new PolyzyMD project directory with template files.
+Create a simulation folder for one condition, with a template `config.yaml`.
+This folder is not a {term}`project`: a project is one paper and is made with
+`polyzymd project init`.
 
 ```bash
-polyzymd init --name <project_name>
-polyzymd init -n <project_name>
+polyzymd init --name <name>
+polyzymd init -n <name>
 ```
 
 ### Options
 
 | Option | Short | Required | Description |
 |--------|-------|----------|-------------|
-| `--name` | `-n` | Yes | Name of the project directory to create |
+| `--name` | `-n` | Yes | Name of the folder to create |
 
 ### What It Creates
 
 ```
-<project_name>/
+<name>/
 ├── config.yaml              <- Template configuration (edit this)
 ├── structures/              <- Add your PDB/SDF files here
 │   ├── place_protein_here.placeholder.txt
@@ -83,7 +78,7 @@ polyzymd init -n <project_name>
 ### Example
 
 ```bash
-# Create a new project
+# Create a simulation folder
 polyzymd init --name lipase_dmso_study
 cd lipase_dmso_study
 
@@ -531,9 +526,9 @@ and `POLYZYMD_STOP_FILE=<path>` to relocate the marker.
   `polyzymd submit` afterwards.
 - Outside a SLURM environment (no `scancel`) the marker is still written and
   the missing scheduler is reported as a warning.
-- Already-running chains keep the job script that was rendered at submission
-  time. A chain submitted before this feature existed does not check the
-  marker; stop those with `scancel --batch --signal=KILL <job_id>`.
+- A running chain keeps the job script that `submit` wrote. Job scripts of
+  PolyzyMD 1.2 and earlier, and GROMACS job scripts, do not check the marker.
+  Stop those chains with `scancel --batch --signal=KILL <job_id>`.
 
 ---
 
@@ -812,6 +807,35 @@ To resume, run:
 
 ---
 
+## polyzymd clean-pdb
+
+Replace nonstandard residues with their standard residues, and add the
+missing hydrogens, with PDBFixer.
+
+```bash
+polyzymd clean-pdb -i <input.pdb> [-o <output.pdb>] [--ph 7.4]
+```
+
+### Options
+
+| Option | Short | Required | Default | Description |
+|--------|-------|----------|---------|-------------|
+| `--input` | `-i` | Yes | - | The input PDB file |
+| `--output` | `-o` | No | `<input name>_clean.pdb` | The cleaned PDB file |
+| `--ph` | - | No | `7.4` | The pH for the protonation states of the added hydrogens |
+
+### Notes
+
+- The output keeps the chain IDs and residue numbers of the input.
+- The command does not remove waters or other molecules, does not select one
+  copy of a protein, does not set chain IDs, and does not add missing residues
+  or heavy atoms. See {doc}`../tutorials/prepare_pdb_for_openff`.
+- PDBFixer places the hydrogens with OpenMM on the CPU platform. To use
+  another platform, set `OPENMM_DEFAULT_PLATFORM`, for example to `CUDA`.
+- Run it in the `build` environment, which holds PDBFixer.
+
+---
+
 ## polyzymd info
 
 Display PolyzyMD installation and dependency information.
@@ -880,11 +904,13 @@ distances --set pairs=...` for the triad distances.
 | `NAME` | Yes, without `--study` | Canonical analysis name, for example `rg`; with `--study`, a run of the study file, and every run when left out. |
 | `-c, --config PATH` | Yes, without `--study` | Simulation `config.yaml`. Repeatable; the first one is the control. Refused with `--study`. |
 | `--data DIR` | No | Directory holding the run directories of every condition, for this command only, in place of each config's `scratch_directory` and of a study's `data.local.yaml`. The config hash is that of the config as written. |
-| `--study PATH` | No | `study.yaml`, or the folder holding it. Gives the conditions, `--eq`, `--stride`, `--replicates` and the run's settings, and stores the run in `<study>/results/<run>/` with its `report.json`. Options given on the command line override the file; `--label` then picks conditions of the study. |
+| `--project PATH` | No | `project.yaml`, or the project folder. Runs `RUN` (or every analysis) in each study of the project that runs it, as `--study` would, one study after another; a study that fails is reported and the next runs, then the command exits 2. Refused with `--study` or `-c`. |
+| `--study PATH` | No | `study.yaml`, or the folder holding it. Gives the conditions, `--eq`, `--stride`, `--replicates` and the run's settings, and stores the run in `<study>/results/<run>/` with its `report.json`. Options given on the command line override the file; `--label` then picks conditions of the study, and that report is printed but not saved as the run's `report.json`. |
 | `-f, --file PATH` | No | Retired. With a `comparison.yaml`, the command runs nothing and exits 2: the `error:` line says that `comparison.yaml` is no longer read by `polyzymd analyze`, and the `fix:` line gives the equivalent `polyzymd analyze NAME -c <config> --label <label> ... --replicates ... --eq ...` command built from the file's conditions, replicates and equilibration (or `--eq`), followed by the address of {doc}`../how_to/analysis_agent_protocol` and `.claude/skills/polyzymd-analyze/SKILL.md`, the skill to point an agent at. A file that cannot be read gives the command with placeholders. |
 | `--replicates SPEC` | No | Replicates to analyze, for example `1-3`, `1,3,5` or `1-9:2`. Default: the replicate directories found on disk for each condition. |
 | `--eq TEXT` | No | Equilibration window discarded from every replicate, for example `10ns`. Default `10ns`. |
 | `--label TEXT` | No | Condition label, one per `-c` in the same order. Default: the name of the directory holding the config. |
+| `--list` | No | Print every shipped analysis, what it measures, and its settings with their defaults, then exit. |
 | `--run LABEL` | No | Run or pair label to report when the analysis measures one metric on several selections, for example one atom pair for distances. Default: the first one the analysis lists; the rest appear in `all_runs`. |
 | `--set KEY=VALUE` | No | Top-level analysis setting. Repeatable. The value is read as YAML, so `--set threshold=3.0` gives a number and `--set groups='{protein: chainid A, polymer: chainid C}'` a mapping. A dotted key such as `groups.protein` is refused; give the whole top-level setting as a mapping instead. |
 | `--format agent\|json` | No | `agent` (default) prints one line per condition and comparison; `json` prints the full `ProtocolReport`. |
@@ -1025,6 +1051,52 @@ polyzymd analyze rg -c A/config.yaml -c B/config.yaml --set selection='protein a
 
 ---
 
+## polyzymd project
+
+Commands on a project folder: the studies of one paper; see
+{doc}`../how_to/project` and {doc}`../explanation/projects`.
+
+### polyzymd project check
+
+```bash
+polyzymd project check [PATH]
+```
+
+Reads `project.yaml` (`PATH` is the file or its folder, by default the
+current directory) and each study's `study.yaml` without loading any
+trajectory. Prints `analysis <run>: studies <labels>` for each project
+analysis, `stats <function>: up to date|stale: ...|not run` when it names a
+plan, then `== study <label>` and the `polyzymd study check` of each study.
+Exits 2 when the project file or a study cannot be read.
+
+### polyzymd project init
+
+```bash
+polyzymd project init PATH --study LABEL [--study ...] [--holder NAME] [--no-git]
+```
+
+Writes a project folder at `PATH`: `project.yaml` listing the studies,
+`analyses/`, `stats/` and `figures/`, licences, a README, and one study folder
+per `--study` with a `study.yaml` to fill in. Labels are also folder names
+(lower case, digits, `_`). Without `--no-git` the project becomes a git
+repository with one commit. To move existing studies in, see
+{doc}`../how_to/move_studies_into_project`.
+
+### polyzymd project freeze
+
+```bash
+polyzymd project freeze [PATH] [--tag TAG]
+```
+
+Freezes every study of the project, then writes the project's
+`manifest.json`, `CITATION.cff` and `.zenodo.json`, commits the generated
+files and every study's results, tags the project (`project-v<n>` by
+default), and lays out `deposit/` with `deposit/UPLOAD.md`. Every gap is a
+warning, prefixed with the study's label when it is a study's. Exits 2 only
+when a file cannot be read or the tag exists.
+
+---
+
 ## polyzymd study
 
 Commands on a study folder; see {doc}`../how_to/study_yaml` and
@@ -1033,8 +1105,12 @@ Commands on a study folder; see {doc}`../how_to/study_yaml` and
 ### polyzymd study check
 
 ```bash
-polyzymd study check [PATH]
+polyzymd study check [PATH] [--production]
 ```
+
+`--production` adds each condition's production length, read from every run's
+trajectory headers and segments (minutes for long restarted chains); without
+it no trajectory is read.
 
 Reads `study.yaml` (`PATH` is the file or its folder, by default the current
 directory) without loading any trajectory, and prints:
@@ -1042,7 +1118,10 @@ directory) without loading any trajectory, and prints:
 | Line | Fields |
 |---|---|
 | header | `study <path>  equilibration <window>  stride <n>[  replicates <list>]` |
-| condition | `control\|condition <label>: runs <numbers> under <directory> (from data.local.yaml\|config); production <ns>` (a range when the replicates differ), or `no runs found under <directory> ...` |
+| system | `system: <description>`, when the study has one |
+| project | `project <project.yaml> as study <label>`, when a project lists the study |
+| names | `structure <name>: <path>` and `region <name>: <selection>`, one line each |
+| condition | `control\|condition <label>: runs <numbers> under <directory> (from data.local.yaml\|config)`, with `; production <ns>` (a range when the replicates differ) under `--production`, or `no runs found under <directory> ...` |
 | analysis | `analysis <run>: <settings>; stored results in <folder>[ with its report]`, or `no stored results`; for the study's own function, `analysis <run> (<file>:<function>, <kind>)`, after importing it |
 | git | `git: commit <sha>; inputs committed`, `git: commit <sha>; uncommitted inputs: <paths>`, or `git: not a repository` |
 | metadata | `metadata: complete`, or `metadata: <n> gaps for publishing; ...` |
@@ -1194,7 +1273,7 @@ stderr and exit 2:
   and `.claude/skills/polyzymd-analyze/SKILL.md`, the skill to point an agent at.
 - `polyzymd new-analysis ...` says to write a function of an MDAnalysis
   `Universe` and run it with `Study.per_replicate` or `Study.timeseries`, and
-  prints the address of {doc}`../explanation/analysis_api` and the same skill.
+  prints the address of {doc}`../how_to/study_api` and the same skill.
 
 ---
 
@@ -1204,9 +1283,9 @@ PolyzyMD expands environment variables in configuration paths:
 
 | Variable | Example | Description |
 |----------|---------|-------------|
-| `$USER` | jola3134 | Current username |
-| `$HOME` | /home/jola3134 | Home directory |
-| `~` | /home/jola3134 | Home directory shortcut |
+| `$USER` | `me` | Current username |
+| `$HOME` | `/home/me` | Home directory |
+| `~` | `/home/me` | Home directory shortcut |
 | `${VAR}` | - | Any environment variable |
 
 ### Example

@@ -45,15 +45,12 @@ topology = Topology.from_pdb("enzyme.pdb")
 print(topology.n_molecules)
 ```
 
-Fixed PolyzyMD builds retain all enzyme molecules in the original OpenFF order
-before substrate and polymer components. Chain assignment still follows the
-canonical convention: every protein/enzyme molecule is chain `A`, substrate is
-chain `B`, polymers are chain `C`, and solvent/ions start at chain `D`.
-Generated PDB/GRO outputs renumber protein residues continuously across retained
-enzyme molecules. For example, a homodimer whose two source monomers both use
-residues 1-99 is written as chain `A` residues 1-198. Older builds incorrectly
-used only `molecule(0)`, which made homodimer outputs look like single-monomer
-systems even though OpenFF had loaded multiple protein molecules.
+PolyzyMD keeps every enzyme molecule, in OpenFF order, before the substrate
+and polymer components. Every protein molecule is chain `A`, the substrate is
+chain `B`, the polymers are chain `C`, and solvent and ions start at chain
+`D`. The built PDB and GRO files number the protein residues continuously
+across the molecules. For example, a homodimer whose two monomers both use
+residues 1-99 is written as chain `A` residues 1-198.
 
 ## OpenFF disulfide behavior
 
@@ -112,11 +109,9 @@ narrow custom-substructure proof of concept. Do not suppress the error.
 | Error dump names `CYS#0001`, terminal `H`, or N-terminal cysteine/cystine | N-terminal cysteine has terminal hydrogens plus disulfide chemistry that does not match OpenFF's template | Check SG-HG absence, SG-SG bond, N-terminal hydrogens, and residue naming | Curate the cystine or test a structure-specific `NCYX` custom substructure | Seen in 4CHA proof of concept; not universal |
 | Renaming disulfide cysteine to `CYX` does not resolve ingestion | `CYX` aliasing is not equivalent to a complete public template for all contexts | Validate direct OpenFF ingestion and inspect charge mismatch | Fix connectivity/hydrogens or prepare an upstream OpenFF issue/PR | Avoid relying on residue rename alone |
 | Failure adjacent to residues listed in `REMARK 465` | Missing-coordinate residues or missing heavy atoms alter termini or local chemistry | Read PDB header and visualize gaps | Model missing regions externally if required for the study | Automatic filling is a modeling decision |
-| `Topology.from_pdb()` reports `n_molecules > 1`, but older output contains only one protein copy | Historical PolyzyMD solute combination dropped all enzyme molecules except `molecule(0)` | Compare `Topology.from_pdb(path).n_molecules` and output atom counts/chains | Use a fixed PolyzyMD build; all enzyme molecules are retained before substrate/polymers | Multiple protein molecules intentionally share chain `A`; generated residue IDs are continuous across molecules |
 
-## Catalog maintenance rule
+## Report a new error
 
-When a new OpenFF PDB ingestion error is diagnosed, update this table and
-{doc}`../how_to/troubleshoot_openff_pdb_ingestion` with the exact error text,
-likely cause, diagnostic command, acceptable fix, and caveats before closing the
-task unless the user explicitly defers the durable documentation update.
+If you find an OpenFF PDB error that this table does not list, open an issue
+on GitHub. Include the exact error text, the likely cause if you know it, and
+the steps that you used to prepare the file.

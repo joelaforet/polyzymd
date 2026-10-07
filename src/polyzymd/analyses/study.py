@@ -54,7 +54,18 @@ class Replicate:
             segment records again. Use :attr:`frames` to skip both.
         """
         if self._universe is None:
-            self._universe = self.condition._provider.load_universe(self.index)
+            try:
+                self._universe = self.condition._provider.load_universe(self.index)
+            except (ValueError, IndexError, KeyError, OSError) as exc:
+                # MDAnalysis and ParmEd raise these for a topology they cannot
+                # read; say so, rather than leaving a bare parser error.
+                raise ProtocolError(
+                    f"Cannot load the topology and trajectory of {self!r}: "
+                    f"{type(exc).__name__}: {exc}",
+                    hint="Check the run's system.prmtop (or solvated_system.pdb). polyzymd "
+                    "analysis-topology --overwrite RUN_DIR writes system.prmtop again from the "
+                    "PDB and system.xml.",
+                ) from exc
         return self._universe
 
     def _production_window(self) -> TrajectoryWindow:
@@ -62,12 +73,14 @@ class Replicate:
         if self._window is None:
             from polyzymd.analyses.shared.window import resolve_replicate_trajectory_window
 
+            # Loaded first, so a topology that cannot be read is reported as such.
+            n_frames = len(self.universe().trajectory)
             try:
                 self._window = resolve_replicate_trajectory_window(
                     loader=self.condition._provider._get_loader(),
                     replicate=self.index,
                     equilibration=self.condition.equilibration,
-                    n_frames_total=len(self.universe().trajectory),
+                    n_frames_total=n_frames,
                 )
             except ValueError as exc:
                 raise ProtocolError(
@@ -443,6 +456,63 @@ class Study:
         """The study folder, when the study was read from a ``study.yaml``."""
         return None if self.protocol is None else self.protocol.root
 
+    def _folders(self) -> list[Path]:
+        if self.protocol is None:
+            raise ProtocolError(
+                "This study was not read from a study.yaml, so it has no folder.",
+                hint="Load it with pz.Study('path/to/study.yaml').",
+            )
+        project = self.protocol.project
+        return [self.protocol.root] + ([project.root] if project is not None else [])
+
+    def path(self, relative: str | Path) -> Path:
+        """Return ``relative`` resolved against the study folder.
+
+        For example, ``study.path(study.settings("rmsf")["reference_file"])``
+        for a structure that ``study.yaml`` names as ``structures/ref.pdb``.
+        In a project, a path that is not in the study folder is looked up in
+        the project folder. An absolute path is returned unchanged.
+
+        Raises
+        ------
+        ProtocolError
+            If the study was not read from a ``study.yaml``.
+        """
+        relative = Path(relative).expanduser()
+        if relative.is_absolute():
+            return relative
+        folders = self._folders()
+        for folder in folders:
+            if (folder / relative).exists():
+                return (folder / relative).resolve()
+        return (folders[0] / relative).resolve()
+
+    def module(self, name: str | Path) -> Any:
+        """Import a Python file of the study, as ``polyzymd analyze`` imports analysis functions.
+
+        ``name`` is a file such as ``analyses/interface.py``, or a bare name
+        such as ``interface`` for ``analyses/interface.py``. It is found by
+        :meth:`path`: in the study folder, then in its project. Figures that
+        use the module run the same definitions as the analyses.
+
+        Raises
+        ------
+        ProtocolError
+            If no such file exists, or importing it fails.
+        """
+        from polyzymd.analyses.user_functions import load_module
+
+        name = Path(name)
+        if name.suffix != ".py" and len(name.parts) == 1:
+            name = Path("analyses") / f"{name}.py"
+        file = self.path(name)
+        if not file.is_file():
+            raise ProtocolError(
+                f"No Python file {name} in {' or '.join(str(f) for f in self._folders())}.",
+                hint="Name a file relative to the study or project folder, such as analyses/lid.py.",
+            )
+        return load_module(file)
+
     def settings(self, run: str) -> dict[str, Any]:
         """Return the settings ``study.yaml`` gives the analysis run ``run``.
 
@@ -468,16 +538,36 @@ class Study:
         from polyzymd.analyses.results import read_results
 
         if folder is not None:
-            return read_results(Path(folder).expanduser())
+            return self._with_factors(read_results(Path(folder).expanduser()))
         default = self.results_dir(run)
         try:
-            return read_results(default)
+            return self._with_factors(read_results(default))
         except ProtocolError as exc:
             raise ProtocolError(
                 str(exc),
                 hint=f"Run polyzymd analyze {run} --study {self.protocol.path} first. Results "
                 "written with --output-dir are read with Study.results(run, folder=<that folder>).",
             ) from exc
+
+    def replicate_table(self, run: str) -> Any:
+        """Return one row per replicate of ``run``, from its stored results.
+
+        See :func:`polyzymd.analyses.study_statistics.replicate_table`: the
+        sampling unit of every test, with a column for each factor.
+        """
+        from polyzymd.analyses.study_statistics import replicate_table
+
+        return replicate_table(self, run)
+
+    def _with_factors(self, stored: Any) -> Any:
+        """Add a column for each factor the study's conditions declare, empty where one has none."""
+        factors = getattr(self.protocol, "factors", None) or {}
+        names = list(dict.fromkeys(name for values in factors.values() for name in values))
+        for name in names:
+            stored.table[name] = stored.table["condition"].map(
+                lambda label, name=name: factors.get(label, {}).get(name)
+            )
+        return stored
 
     def _entry(self, run: str) -> Any:
         if self.protocol is None:
@@ -604,6 +694,15 @@ class Study:
     def control(self) -> str:
         """Label of the first condition, the default control of a comparison."""
         return self.labels[0]
+
+    @property
+    def conditions(self) -> list[Condition]:
+        """The conditions in order, control first, as ``for condition in study`` gives them.
+
+        Building them reads each condition's config; reading stored results
+        (:meth:`results`) does not need them.
+        """
+        return list(self._conditions.values())
 
     def timeseries(self, function: Any, *args: Any, **kwargs: Any) -> Any:
         """Measure ``function`` on every production frame of every replicate.

@@ -111,13 +111,19 @@ class SystemBuilder:
         builder._config = config
         return builder
 
-    def build_enzyme(self, pdb_path: Union[str, Path]) -> Topology:
+    def build_enzyme(
+        self,
+        pdb_path: Union[str, Path],
+        custom_substructures_path: Union[str, Path, None] = None,
+    ) -> Topology:
         """Build the enzyme component.
 
         Parameters
         ----------
         pdb_path : str or Path
             Path to enzyme PDB file.
+        custom_substructures_path : str or Path, optional
+            JSON file of residue templates for residues OpenFF does not know.
 
         Returns
         -------
@@ -129,7 +135,7 @@ class SystemBuilder:
         RuntimeError
             If OpenFF loads the enzyme PDB without any molecules.
         """
-        self._enzyme_topology = self._enzyme_builder.build(pdb_path)
+        self._enzyme_topology = self._enzyme_builder.build(pdb_path, custom_substructures_path)
         self._n_enzyme_molecules = self._enzyme_topology.n_molecules
         if self._n_enzyme_molecules <= 0:
             raise RuntimeError("OpenFF enzyme topology contains no molecules")
@@ -863,11 +869,13 @@ class SystemBuilder:
                 residue_num = 1
 
                 if chain_idx >= len(chain_letters):
-                    LOGGER.warning(
-                        f"Exceeded {len(chain_letters)} chain letters - cycling. "
-                        "Consider using a topology format with larger chain ID capacity."
+                    # Cycling back would give solvent the chain IDs that mark the
+                    # protein, substrate and polymer, which analyses select on.
+                    raise ValueError(
+                        f"The solvent needs more than {len(chain_letters) - start_chain_idx} "
+                        f"chains of {max_residue} residues each ({n_solvent} solvent "
+                        "molecules), and chain IDs would repeat those of the solute."
                     )
-                    chain_idx = chain_idx % len(chain_letters)
 
             chain_id = chain_letters[chain_idx]
             mol = self._solvated_topology.molecule(mol_idx)
@@ -954,7 +962,7 @@ class SystemBuilder:
 
         # 1. Build enzyme
         LOGGER.info(f"Building enzyme: {config.enzyme.name}")
-        self.build_enzyme(config.enzyme.pdb_path)
+        self.build_enzyme(config.enzyme.pdb_path, config.enzyme.custom_substructures_path)
 
         # 2. Build substrate (if configured)
         if config.substrate:
@@ -1228,6 +1236,8 @@ class SystemBuilder:
                 interchange=self._interchange,
                 config=config,
                 component_info=component_info,
+                # The replicate number, as the build recorded it.
+                replicate=(getattr(self, "_build_provenance", None) or {}).get("polymer_seed"),
             )
 
             result = exporter.export(

@@ -41,9 +41,13 @@ __pycache__/
 deposit/
 # Full logs of polyzymd commands; the console shows only warnings.
 logs/
-# SLURM logs of polyzymd analyze --submit and of the simulations.
-results/*/slurm/*/logs/
+# Job scripts and logs of polyzymd analyze --submit, which name this
+# machine's paths, and SLURM logs of the simulations.
+results/*/slurm/
 conditions/*/slurm_logs/
+# Software environments, which are rebuilt, never committed.
+.pixi/
+.venv/
 """
 
 DATA_EXAMPLE = """\
@@ -123,8 +127,13 @@ def copy_condition(config: Path, folder: Path) -> tuple[list[str], list[str]]:
 
     Every path key of the config (``config.loader.PATH_KEYS``) that names an
     existing file or directory is copied into ``folder/structures/`` and
-    written as a path relative to the new config. Other paths, and the
-    scratch and projects directories, are kept as they were.
+    written as a path relative to the new config. The directories that say
+    where one machine keeps its runs and job files are taken out, as in a
+    deposited config: ``projects_directory`` becomes ``.``,
+    ``scratch_directory`` becomes ``data`` (where the runs are goes into
+    ``data.local.yaml`` instead, :func:`record_data_location`), and a polymer
+    ``cache_directory`` is left out so the default is used. The config hash
+    leaves these out, so stored results still match.
 
     Returns
     -------
@@ -179,10 +188,17 @@ def copy_condition(config: Path, folder: Path) -> tuple[list[str], list[str]]:
         return value
 
     rewritten = walk(None, data)
+    polymers = rewritten.get("polymers")
+    if isinstance(polymers, dict):
+        polymers.pop("cache_directory", None)
+    from polyzymd.analyses.study_freeze import without_machine_paths
+
     target = folder / "config.yaml"
     target.write_text(
-        f"# Copied by polyzymd study init from {config}\n"
-        + yaml.safe_dump(rewritten, sort_keys=False)
+        without_machine_paths(
+            f"# Copied by polyzymd from {config.name}\n"
+            + yaml.safe_dump(rewritten, sort_keys=False)
+        )
     )
     try:
         SimulationConfig.from_yaml(target)
@@ -194,22 +210,48 @@ def copy_condition(config: Path, folder: Path) -> tuple[list[str], list[str]]:
     return copied, missing
 
 
-def _study_yaml(conditions: dict[str, str], equilibration: str | None) -> str:
+def record_data_location(study_root: Path, label: str, config: Path) -> None:
+    """Write where the runs of ``config`` are into the study's ``data.local.yaml``, for ``label``.
+
+    The directory is the config's own scratch directory, read before the
+    copy takes it out; a relative one is relative to the config's folder.
+    Entries for other conditions are kept.
+    """
     import yaml
 
-    import polyzymd
+    from polyzymd.analyses.study_file import DATA_FILE
+    from polyzymd.config.schema import SimulationConfig
+
+    try:
+        where = SimulationConfig.from_yaml(Path(config)).output.effective_scratch_directory
+    except (OSError, ValueError):
+        return
+    where = Path(where).expanduser()
+    if not where.is_absolute():
+        where = Path(config).resolve().parent / where
+    file = Path(study_root) / DATA_FILE
+    current = yaml.safe_load(file.read_text()) if file.is_file() else None
+    current = dict(current or {})
+    current[label] = str(where.resolve())
+    file.write_text(
+        "# Where this machine keeps each condition's runs; never committed or published.\n"
+        + yaml.safe_dump(current, sort_keys=False)
+    )
+
+
+def _study_yaml(conditions: dict[str, str], equilibration: str | None) -> str:
+    import yaml
 
     listed = (
         yaml.safe_dump({"conditions": conditions}, sort_keys=False)
         if conditions
-        else ("conditions: {}   # add each condition: label: conditions/<name>/config.yaml\n")
+        else ("# Add each condition: label: conditions/<name>/config.yaml\nconditions: {}\n")
     )
     window = equilibration or "0ns"
     note = "" if equilibration else "   # set the window to discard from every replicate"
     return f"""\
 # The analysis protocol of this study: see
 # https://polyzymd.readthedocs.io/en/latest/how_to/study_yaml.html
-polyzymd: {polyzymd.__version__}
 equilibration: {window}{note}
 {listed}analyses: {{}}
 # analyses:
@@ -246,21 +288,24 @@ analysis setting. Each condition's simulation is in `conditions/<name>/config.ya
 
 ## Reproduce
 
-Install the PolyzyMD version named in `study.yaml` (see `environment/`), then:
+Install the PolyzyMD version the results were made with (each report and
+`manifest.json` record it; see `environment/`), then:
 
 1. **Figures, from the stored results only:** run the notebooks and scripts in
    `figures/`, which read `pz.Study("study.yaml").results(run)`.
 2. **Analyses, from the trajectories:** download them, run
    `polyzymd study locate DOWNLOAD_DIR`, check with `polyzymd study check`,
    and run `polyzymd analyze --study study.yaml`.
-To publish, fill in `metadata:` in `study.yaml` and run `polyzymd study freeze`,
-which writes `manifest.json`, `CITATION.cff`, `.zenodo.json` and
-`md_checklist.yaml`, commits and tags the study, and lays out `deposit/` for
-upload.
-
 3. **Simulations:** each `conditions/<name>/config.yaml` builds and runs its
    condition with `polyzymd`; the replicate number is the random seed.
    Results agree within the statistical noise of MD, not bit for bit.
+
+## Publish
+
+Fill in `metadata:` in `study.yaml` and run `polyzymd study freeze`, which
+writes `manifest.json`, `CITATION.cff`, `.zenodo.json` and
+`md_checklist.yaml`, commits and tags the study, and lays out `deposit/` for
+upload.
 
 ## How to cite
 
@@ -276,14 +321,17 @@ def _environment_readme() -> str:
     return f"""\
 # Environment
 
-This study was made with PolyzyMD {polyzymd.__version__}. To reproduce it,
-install that version, for example from https://github.com/joelaforet/polyzymd
-at tag v{polyzymd.__version__} with its pixi environment:
+This study was started with PolyzyMD {polyzymd.__version__}. To reproduce
+it, install the version its results were made with, for example from
+https://github.com/joelaforet/polyzymd at that tag, with its pixi environment:
 
     pixi install -e analysis
 
-`polyzymd study check` warns when the installed version differs from the one
-named in study.yaml.
+Every report records the PolyzyMD version that made it, and
+`polyzymd study freeze` records PolyzyMD and its main dependencies in
+`manifest.json` and warns when stored results were made with another version.
+To pin the whole environment, copy the `pixi.toml` and `pixi.lock` you ran
+with into this folder and commit them.
 """
 
 
@@ -333,6 +381,7 @@ def create_study(
     for label, config in (conditions or {}).items():
         folder = root / "conditions" / condition_folder(label)
         created.copied[label], created.left_absolute[label] = copy_condition(Path(config), folder)
+        record_data_location(root, label, Path(config))
         created.conditions[label] = folder / "config.yaml"
     for label in new_conditions or []:
         folder = root / "conditions" / condition_folder(label)
@@ -387,7 +436,7 @@ def add_condition(
         If neither or both of ``config`` and ``new`` are given, the label or
         its folder is taken, or the config cannot be copied.
     """
-    from polyzymd.analyses.study_file import find_study_file, load_study_file
+    from polyzymd.analyses.study_file import find_study_file
 
     if (config is None) == (not new):
         raise ProtocolError(
@@ -395,20 +444,43 @@ def add_condition(
             hint="polyzymd study add-condition LABEL --config path/to/config.yaml, or --new.",
         )
     file = find_study_file(study)
-    protocol = load_study_file(file)
-    folder = protocol.root / "conditions" / condition_folder(label)
-    if label in protocol.conditions or folder.exists():
+    # Only the existing labels are read, so a new study with no condition yet,
+    # or one still being filled in, takes its first conditions.
+    listed = (_read_yaml(file).get("conditions") or {}).keys()
+    root = file.parent
+    folder = root / "conditions" / condition_folder(label)
+    if label in listed or folder.exists():
         raise ProtocolError(
             f"{file} already has a condition {label!r} or a folder {folder}.",
             hint="Choose another label.",
         )
     if config is not None:
         copy_condition(Path(config), folder)
+        record_data_location(root, label, Path(config))
     else:
         _polyzymd_init(folder)
-    _list_condition(file, label, str((folder / "config.yaml").relative_to(protocol.root)))
-    load_study_file(file)
+    _list_condition(file, label, str((folder / "config.yaml").relative_to(root)))
+    if label not in (_read_yaml(file).get("conditions") or {}):
+        raise ProtocolError(
+            f"{file}: the condition {label!r} was not listed under conditions:.",
+            hint="Add it under conditions: by hand.",
+        )
     return folder / "config.yaml"
+
+
+def _read_yaml(file: Path) -> dict:
+    """Read a YAML mapping, or raise ProtocolError saying the file is not one."""
+    import yaml
+
+    try:
+        raw = yaml.safe_load(file.read_text()) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise ProtocolError(
+            f"Cannot read {file}: {exc}", hint="Check that it is valid YAML."
+        ) from exc
+    if not isinstance(raw, dict):
+        raise ProtocolError(f"{file} must be a YAML mapping.", hint="See the documented example.")
+    return raw
 
 
 def _list_condition(file: Path, label: str, path: str) -> None:

@@ -1,13 +1,9 @@
-# Native contacts analysis: quick start
+# Run native contacts analysis
 
 Measure the fraction of native contacts Q, how many of the contacts of a
 reference structure are still formed, on every production frame of every
 replicate, and compare each replicate's mean Q between conditions, for the
 whole protein or for regions such as an active site.
-
-```{versionadded} 1.3.0
-Native contacts analysis was added in PolyzyMD 1.3.0.
-```
 
 ```{note}
 **Want to understand the measurement?** For what each shipped function

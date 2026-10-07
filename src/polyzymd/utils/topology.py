@@ -34,7 +34,7 @@ SOFTWARE.
 import logging
 from ast import literal_eval
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Union
+from typing import TYPE_CHECKING, Any, Iterator, List, Union
 
 if TYPE_CHECKING:
     from openff.toolkit import Molecule, Topology
@@ -54,32 +54,6 @@ def _asiterable(obj: Any) -> Iterator:
         return iter(obj)
     else:
         return iter([obj])
-
-
-def _package_atom_metadata(offmol: "Molecule") -> "Molecule":
-    """Collect atom metadata into a serializable property of the parent Molecule.
-
-    Creates a copy of the molecule with metadata packaged for serialization.
-
-    Args:
-        offmol: OpenFF Molecule to package metadata from.
-
-    Returns:
-        Copy of the molecule with metadata packaged into properties dict.
-    """
-    from copy import deepcopy
-
-    packaged_mol = deepcopy(offmol)
-    packaged_mdat: Dict[int, Dict] = {
-        atom.molecule_atom_index: dict(atom.metadata)
-        for atom in packaged_mol.atoms
-        if atom.metadata
-    }
-
-    if packaged_mdat:  # only assign if metadata is present
-        packaged_mol.properties["metadata"] = packaged_mdat
-
-    return packaged_mol
 
 
 def _unpackage_atom_metadata(offmol: "Molecule") -> "Molecule":
@@ -162,41 +136,6 @@ def topology_from_sdf(
 
     # Build topology with metadata unpacked
     return Topology.from_molecules(_unpackage_atom_metadata(mol) for mol in _asiterable(molecules))
-
-
-def topology_to_sdf(
-    sdf_path: Union[str, Path],
-    topology: "Topology",
-) -> None:
-    """Save an OpenFF Topology to an SDF file.
-
-    Preserves all atom metadata by packaging it into molecule properties
-    before serialization.
-
-    This function is adapted from the Polymerist package by Timotej Bernat.
-
-    Args:
-        sdf_path: Path to save the SDF file.
-        topology: OpenFF Topology to save.
-
-    Raises:
-        ValueError: If the path doesn't have .sdf extension.
-
-    Example:
-        >>> from polyzymd.utils.topology import topology_to_sdf
-        >>> topology_to_sdf("output.sdf", my_topology)
-    """
-    sdf_path = Path(sdf_path)
-    if sdf_path.suffix.lower() != ".sdf":
-        raise ValueError(f"Expected .sdf extension, got: {sdf_path.suffix}")
-
-    with sdf_path.open("w") as sdf_file:
-        for mol in topology.molecules:
-            # Package metadata for serialization without modifying original
-            serial_mol = _package_atom_metadata(mol)
-            serial_mol.to_file(sdf_file, file_format="SDF")
-
-    LOGGER.debug(f"Successfully serialized SDF Topology to {sdf_path}")
 
 
 def get_largest_offmol(topology: "Topology") -> "Molecule":

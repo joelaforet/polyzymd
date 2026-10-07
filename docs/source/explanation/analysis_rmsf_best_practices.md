@@ -1,23 +1,12 @@
 # RMSF analysis: statistical best practices
 
-Root mean square fluctuation (RMSF) is useful for asking where a protein is
-more rigid or more flexible, but it is easy to over-interpret. This page
-explains what the RMSF analysis measures, how to combine residues into one
-number, how residues and conditions are compared, and which claims each
-quantity supports.
+Root mean square fluctuation (RMSF) measures how much each atom moves about
+its mean position. It shows where a protein is rigid and where it is flexible.
+It does not, by itself, show that a protein is more stable.
 
-```{note}
-**Need commands rather than interpretation guidance?** See the
-[RMSF quickstart](../how_to/analysis_rmsf_quickstart.md) for copy-paste CLI
-and Python examples.
-```
-
-```{seealso}
-For foundational concepts such as autocorrelation, statistical inefficiency and
-the replicate as the sampling unit, see
-[Statistics Best Practices](analysis_statistics_best_practices.md). This page
-focuses on RMSF-specific interpretation.
-```
+For the commands, see {doc}`../how_to/analysis_rmsf_quickstart`. For
+replicates, correlation and intervals, see
+{doc}`analysis_statistics_best_practices`.
 
 (rmsf-fluctuation-offset-deviation)=
 ## Fluctuation, offset and deviation
@@ -33,55 +22,62 @@ averaged **over**.
 | Fluctuation | `rmsf` | the atom's own mean position | frames, for one atom | one number per atom or residue |
 | Offset | `offset` | the reference structure, for the mean position | nothing: one mean | one number per atom or residue |
 
-After every frame is superposed on the reference, with $\mathbf{r}_i(t)$ the
-position of atom *i* at frame *t*, $\mathbf{r}_i^{\mathrm{ref}}$ its reference
-position and $\langle\cdot
-angle$ the mean over the production frames:
+PolyzyMD first superposes every production frame on the reference by the
+`alignment_selection` atoms. In the equations, $\mathbf{r}_i(t)$ is the
+position of atom *i* at frame *t*, and $\mathbf{r}_i^{\mathrm{ref}}$ is its
+reference position. $\langle\cdot\rangle$ is the mean over the production
+frames, and *N* is the number of selected atoms.
 
 $$
-	ext{RMSD}(t)^2 = rac{1}{N}\sum_i \lvert \mathbf{r}_i(t) - \mathbf{r}_i^{\mathrm{ref}} 
-vert^2,
+\text{RMSD}(t)^2 = \frac{1}{N}\sum_i \lvert \mathbf{r}_i(t) - \mathbf{r}_i^{\mathrm{ref}} \rvert^2,
 \qquad
-	ext{deviation}_i^2 = \left\langle \lvert \mathbf{r}_i(t) - \mathbf{r}_i^{\mathrm{ref}} 
-vert^2 
-ight
-angle,
+\text{deviation}_i^2 = \left\langle \lvert \mathbf{r}_i(t) - \mathbf{r}_i^{\mathrm{ref}} \rvert^2 \right\rangle,
 $$
 
 $$
-	ext{RMSF}_i^2 = \left\langle \lvert \mathbf{r}_i(t) - \langle \mathbf{r}_i 
-angle 
-vert^2 
-ight
-angle,
+\text{RMSF}_i^2 = \left\langle \lvert \mathbf{r}_i(t) - \langle \mathbf{r}_i \rangle \rvert^2 \right\rangle,
 \qquad
-	ext{offset}_i = \lvert \langle \mathbf{r}_i 
-angle - \mathbf{r}_i^{\mathrm{ref}} 
-vert .
+\text{offset}_i = \lvert \langle \mathbf{r}_i \rangle - \mathbf{r}_i^{\mathrm{ref}} \rvert .
 $$
 
-The deviation and the RMSF are both averages over time; they differ only in
-the point each distance is measured from, the reference or the atom's own mean.
-Splitting each displacement into the fluctuation about the mean and the mean's
-distance from the reference, $\mathbf{r}_i(t) - \mathbf{r}_i^{\mathrm{ref}} =
-(\mathbf{r}_i(t) - \langle \mathbf{r}_i 
-angle) + (\langle \mathbf{r}_i 
-angle -
-\mathbf{r}_i^{\mathrm{ref}})$, and averaging the square, the cross term vanishes
-because the fluctuations average to zero:
+The deviation and the RMSF are both averages over time. They differ only in
+the point that each distance is measured from: the reference, or the atom's
+own mean position. Split each displacement into two parts:
 
 $$
-	ext{deviation}_i^2 = 	ext{RMSF}_i^2 + 	ext{offset}_i^2 ,
+\mathbf{r}_i(t) - \mathbf{r}_i^{\mathrm{ref}} =
+(\mathbf{r}_i(t) - \langle \mathbf{r}_i \rangle) +
+(\langle \mathbf{r}_i \rangle - \mathbf{r}_i^{\mathrm{ref}}) .
 $$
 
-the familiar split of a mean square error into a variance and a squared bias.
-A residue's value of each is the square root of the mean over its atoms of
-their squared values, as `gmx rmsf -res` combines atoms, so the identity holds
-per residue too. GROMACS writes the RMSF with `gmx rmsf -o` and the deviation
-with `gmx rmsf -od` ("root mean square deviation with respect to the reference
-structure"). Other tools' "per-residue RMSD", such as cpptraj's `rmsd perres`,
-is a per-residue timeseries, one value per residue and frame, and not this
-deviation.
+The first part is the fluctuation about the mean. The second part is the
+distance of the mean from the reference. Square and average over frames. The
+cross term is zero, because the fluctuations average to zero. The result is
+
+$$
+\text{deviation}_i^2 = \text{RMSF}_i^2 + \text{offset}_i^2 .
+$$
+
+This is the usual split of a mean square error into a variance and a squared
+bias.
+
+A residue's value of each quantity is the square root of the mean of the
+squared values of its atoms in `selection`. `gmx rmsf -res` combines atoms in
+the same way, so the identity also holds for each residue. PolyzyMD gives each
+atom of a residue equal weight. GROMACS weights the atoms by mass. The two
+give the same result when the atoms of a residue have equal masses, for
+example with a Cα-only selection.
+
+GROMACS writes the RMSF with `gmx rmsf -o` and the deviation with
+`gmx rmsf -od` ("root mean square deviation with respect to the reference
+structure"). PolyzyMD's values agree with `gmx rmsf` to the 4 decimals in nm
+that GROMACS writes; see {doc}`analysis_rmsf_verification`. The "per-residue
+RMSD" of other tools, such as cpptraj's `rmsd perres`, is a different
+quantity: one value per residue and per frame, a timeseries.
+
+The reference decides two things: the structure that the frames are
+superposed on, and the point that the offset and the deviation are measured
+from. `rmsf` is always the fluctuation about the mean.
 
 ### An example with three atoms
 
@@ -212,8 +208,8 @@ the residue set, not the formula:
 Every comparison uses one value per replicate: the replicate is the sampling
 unit, so the number of frames never narrows an interval. For one-value results
 (the core, region and plain-mean values), each condition is compared with the
-control by Welch's t test, and the Benjamini-Hochberg correction runs over the
-compared conditions.
+control by Welch's t test. The {term}`Benjamini-Hochberg` correction runs over
+the compared conditions.
 
 For a per-residue profile, every residue of every compared condition is one
 test, and all of them form one Benjamini-Hochberg family, since together they
@@ -239,8 +235,8 @@ When reviewing RMSF differences, prefer cautious language:
 
 ## Replicates and trajectory length
 
-LiveCoMS guidance generally favours several independent simulations over one
-long trajectory when estimating uncertainty (Grossfield et al. 2018). For
+The LiveCoMS best-practices guide recommends several independent simulations
+over one long trajectory to estimate uncertainty (Grossfield et al. 2018). For
 RMSF, replicate-to-replicate variation shows whether a flexibility pattern is
 reproducible. Several replicates:
 
@@ -336,7 +332,7 @@ Journal* 98:861-871. https://doi.org/10.1016/j.bpj.2009.11.011
 thermostability in variants of lipase A from *Bacillus subtilis*." *PLoS ONE*
 10:e0130289. https://doi.org/10.1371/journal.pone.0130289
 
-## See Also
+## See also
 
 - [RMSF quickstart](../how_to/analysis_rmsf_quickstart.md) — commands and minimal setup
 - [Reference structure selection](analysis_reference_selection.md) — choose the reference and fitted atoms

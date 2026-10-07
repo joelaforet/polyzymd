@@ -12,6 +12,7 @@ default silently.
 from __future__ import annotations
 
 import difflib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,18 +28,22 @@ RESULTS_FOLDER = "results"
 DATA_FILE = "data.local.yaml"
 
 _TOP_KEYS = (
-    "polyzymd",
+    "description",
     "equilibration",
     "stride",
     "until",
     "replicates",
     "conditions",
+    "structures",
+    "regions",
     "analyses",
     "metadata",
 )
+#: Keys of a condition written as a mapping.
+_CONDITION_KEYS = ("config", "factors")
 _ENTRY_KEYS = ("analysis",)
 #: Keys of any ``analyses:`` entry that set its own analysis window.
-WINDOW_KEYS = ("equilibration", "until")
+WINDOW_KEYS = ("equilibration", "until", "stride")
 #: Keys of an ``analyses:`` entry that runs your own function.
 USER_KEYS = (
     "function",
@@ -122,8 +127,8 @@ class AnalysisEntry:
     ``run`` is the entry's key, which names its results folder. ``analysis``
     is the shipped analysis it runs, the key itself unless given, or
     ``None`` when ``function`` names your own function instead.
-    ``equilibration`` and ``until`` are the entry's own analysis window, or
-    ``None`` to use the study's.
+    ``equilibration``, ``until`` and ``stride`` are the entry's own analysis
+    window and frame stride, or ``None`` to use the study's.
     """
 
     run: str
@@ -132,6 +137,7 @@ class AnalysisEntry:
     function: UserFunction | None = None
     equilibration: str | None = None
     until: str | None = None
+    stride: int | None = None
 
 
 @dataclass(frozen=True)
@@ -142,12 +148,22 @@ class StudyFile:
     equilibration: str
     conditions: dict[str, Path]
     analyses: dict[str, AnalysisEntry]
-    polyzymd: str | None = None
     stride: int = 1
     replicates: list[int] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     data: dict[str, Path] = field(default_factory=dict)
     until: str | None = None
+    #: What the study simulates, such as the protein and temperature.
+    description: str | None = None
+    #: Named structure files, used as ``structure <name>``.
+    structures: dict[str, Path] = field(default_factory=dict)
+    #: Named selections, used as ``region <name>``.
+    regions: dict[str, str] = field(default_factory=dict)
+    #: Each condition's factors, such as ``{"sbma_fraction": 0.5}``.
+    factors: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: The project this study belongs to, and its label there.
+    project: Any = None
+    project_label: str | None = None
 
     @property
     def root(self) -> Path:
@@ -170,6 +186,11 @@ class StudyFile:
             entry.equilibration or self.equilibration,
             entry.until if entry.until is not None else self.until,
         )
+
+    def stride_of(self, run: str) -> int:
+        """Return the frame stride of ``run``: its entry's, else the study's."""
+        entry = self.analyses.get(run)
+        return entry.stride if entry is not None and entry.stride is not None else self.stride
 
 
 def find_study_file(path: str | Path) -> Path:
@@ -217,10 +238,17 @@ def _analysis_entry(run: str, raw: Any, path: Path) -> AnalysisEntry:
         else _equilibration(window["equilibration"], f"{path}: analyses.{run}")
     )
     until = _until(window.get("until"), f"{path}: analyses.{run}")
-    if "function" in raw:
-        return AnalysisEntry(
-            run, None, {}, _user_function(run, raw, path), equilibration=equilibration, until=until
+    stride = window.get("stride")
+    if stride is not None and (
+        isinstance(stride, bool) or not isinstance(stride, int) or stride < 1
+    ):
+        raise ProtocolError(
+            f"{path}: analyses.{run}: stride must be a whole number of at least 1, got {stride!r}.",
+            hint="Leave it out to use the study's stride.",
         )
+    own = {"equilibration": equilibration, "until": until, "stride": stride}
+    if "function" in raw:
+        return AnalysisEntry(run, None, {}, _user_function(run, raw, path), **own)
     settings = dict(raw)
     analysis = str(settings.pop("analysis", run))
     if analysis not in FUNCTION_ANALYSES:
@@ -237,7 +265,9 @@ def _analysis_entry(run: str, raw: Any, path: Path) -> AnalysisEntry:
         (*_ENTRY_KEYS, *WINDOW_KEYS, *FUNCTION_ANALYSES[analysis]),
         f"{path}: analyses.{run}",
     )
-    return AnalysisEntry(run, analysis, settings, equilibration=equilibration, until=until)
+    # A relative file, such as reference_file: structures/ref.pdb, is relative
+    # to the file that lists the analysis, whatever the shell's folder.
+    return AnalysisEntry(run, analysis, _resolve_files(settings, path.parent), **own)
 
 
 def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
@@ -318,7 +348,7 @@ def _user_function(run: str, raw: Mapping, path: Path) -> UserFunction:
         unit=None if unit is None else str(unit),
         selections={str(k): str(v) for k, v in (raw.get("selections") or {}).items()},
         universe=None if raw.get("universe") is None else str(raw["universe"]),
-        settings=dict(raw.get("settings") or {}),
+        settings=_resolve_files(dict(raw.get("settings") or {}), path.parent),
         labels=labels,
         reduce=reduce,
         allow_empty=bool(raw.get("allow_empty", False)),
@@ -360,6 +390,176 @@ def read_data_file(path: Path, labels: Any) -> dict[str, Path]:
         str(label): (path.parent / Path(str(folder)).expanduser()).resolve()
         for label, folder in raw.items()
     }
+
+
+#: Suffixes that mark a setting as naming a file, for ``study check``.
+FILE_SUFFIXES = (
+    ".pdb",
+    ".gro",
+    ".tpr",
+    ".top",
+    ".itp",
+    ".xtc",
+    ".dcd",
+    ".sdf",
+    ".mol2",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".csv",
+    ".tsv",
+    ".txt",
+    ".npy",
+    ".npz",
+    ".dat",
+)
+
+
+def _resolve_files(value: Any, folder: Path) -> Any:
+    """Make a relative path that names an existing file or folder under ``folder`` absolute.
+
+    A study's own function receives its ``settings`` as written, and runs
+    with the shell's working directory, so ``structures/ref.pdb`` is resolved
+    here against the folder of the file that lists it, as the shipped
+    analyses resolve theirs; other values are returned as they are.
+    """
+    if isinstance(value, Mapping):
+        return {key: _resolve_files(item, folder) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_files(item, folder) for item in value]
+    if (
+        isinstance(value, str)
+        and value
+        and "\n" not in value
+        and len(value) < 1024
+        and not Path(value).is_absolute()
+        and (folder / value).exists()
+    ):
+        return str((folder / value).resolve())
+    return value
+
+
+def missing_files(value: Any) -> list[str]:
+    """Return the settings values that look like file names but name no existing file.
+
+    A string ending in one of :data:`FILE_SUFFIXES` that is not an existing
+    path after :func:`_resolve_files`; ``study check`` reports them before
+    any analysis runs.
+    """
+    if isinstance(value, Mapping):
+        return [m for item in value.values() for m in missing_files(item)]
+    if isinstance(value, list):
+        return [m for item in value for m in missing_files(item)]
+    if (
+        isinstance(value, str)
+        and value.lower().endswith(FILE_SUFFIXES)
+        and not Path(value).exists()
+    ):
+        return [value]
+    return []
+
+
+def entry_record(protocol: StudyFile, run: str) -> dict[str, Any]:
+    """Return everything an ``analyses:`` entry says, resolved for the study, fit to publish.
+
+    The shipped analysis or the function (file relative to the study, name,
+    kind, unit, selections, settings, labels, reduce, allow_empty, missing,
+    parts), the window and the stride. A report records it, so ``freeze``
+    can tell when any of it changed since.
+    """
+    entry = protocol.analyses[run]
+    project_root = protocol.project.root if protocol.project is not None else None
+    equilibration, until = protocol.window(run)
+    record: dict[str, Any] = {
+        "analysis": entry.analysis,
+        "settings": portable(entry.settings, protocol.root, project_root),
+        "equilibration": equilibration,
+        "until": until,
+        "stride": protocol.stride_of(run),
+    }
+    function = entry.function
+    if function is not None:
+        record["function"] = {
+            "file": portable(str(function.file), protocol.root, project_root),
+            "qualname": function.qualname,
+            "kind": function.kind,
+            "unit": function.unit,
+            "selections": dict(function.selections),
+            "universe": function.universe,
+            "settings": portable(function.settings, protocol.root, project_root),
+            "labels": function.labels,
+            "reduce": function.reduce,
+            "allow_empty": function.allow_empty,
+            "missing": function.missing,
+            "parts": function.parts,
+        }
+    return json.loads(json.dumps(record, default=str))
+
+
+def portable(value: Any, root: Path, project_root: Path | None = None) -> Any:
+    """Return ``value`` with absolute paths made fit to publish, for reports and manifests.
+
+    A path inside the study folder ``root`` or its project folder becomes a
+    path relative to ``root`` (``structures/ref.pdb``, ``../analyses/f.py``);
+    any other absolute path, which names a place on one machine, becomes its
+    file name. Mappings and lists are converted item by item.
+    """
+    import os
+
+    if isinstance(value, Mapping):
+        return {key: portable(item, root, project_root) for key, item in value.items()}
+    if isinstance(value, list):
+        return [portable(item, root, project_root) for item in value]
+    if isinstance(value, str) and Path(value).is_absolute():
+        path = Path(value)
+        for base in (root, project_root):
+            if base is not None and path.is_relative_to(Path(base).resolve()):
+                return Path(os.path.relpath(path, Path(root).resolve())).as_posix()
+        return path.name
+    return value
+
+
+def _condition(label: str, value: Any, file: Path) -> tuple[Path, dict[str, Any]]:
+    """Read one condition: a config path (or its folder), or ``{config: ..., factors: {...}}``."""
+    factors: dict[str, Any] = {}
+    if isinstance(value, Mapping):
+        _unknown(value, _CONDITION_KEYS, f"{file}: conditions.{label}")
+        if "config" not in value:
+            raise ProtocolError(
+                f"{file}: conditions.{label} has no config.",
+                hint="Write it as '{config: conditions/<name>, factors: {name: value}}'.",
+            )
+        factors = value.get("factors") or {}
+        if not isinstance(factors, Mapping) or any(
+            isinstance(v, (Mapping, list)) for v in factors.values()
+        ):
+            raise ProtocolError(
+                f"{file}: conditions.{label}.factors must map names to single values.",
+                hint="For example 'factors: {sbma_fraction: 0.5}'.",
+            )
+        factors = {str(k): v for k, v in factors.items()}
+        value = value["config"]
+    path = (file.parent / Path(str(value)).expanduser()).resolve()
+    if path.is_dir():
+        path = path / "config.yaml"
+    return path, factors
+
+
+def _named(value: Any, key: str, file: Path) -> dict[str, Any]:
+    """Read ``structures:`` or ``regions:``: a mapping of names to values."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping) or any(
+        not isinstance(name, str) or not name.replace("_", "a").replace("-", "a").isalnum()
+        for name in value
+    ):
+        raise ProtocolError(
+            f"{file}: {key} must map names (letters, digits, _ and -) to values.",
+            hint=f"For example '{key}: {{core: resid 5-120}}'."
+            if key == "regions"
+            else f"For example '{key}: {{reference: structures/ref.pdb}}'.",
+        )
+    return dict(value)
 
 
 def _equilibration(value: Any, where: Any) -> str:
@@ -441,9 +641,24 @@ def load_study_file(path: str | Path) -> StudyFile:
             f"{file}: conditions must map each condition label to its config.yaml.",
             hint="For example 'conditions: {No polymer: conditions/no_polymer/config.yaml}'.",
         )
-    conditions = {
-        str(label): (file.parent / Path(str(config)).expanduser()).resolve()
-        for label, config in conditions_raw.items()
+    conditions: dict[str, Path] = {}
+    factors: dict[str, dict[str, Any]] = {}
+    for label, value in conditions_raw.items():
+        conditions[str(label)], factors[str(label)] = _condition(str(label), value, file)
+
+    structures = _named(raw.get("structures"), "structures", file)
+    structures = {
+        name: (file.parent / Path(str(where)).expanduser()).resolve()
+        for name, where in structures.items()
+    }
+    for name, where in structures.items():
+        if not where.is_file():
+            raise ProtocolError(
+                f"{file}: structure {name} is not a file: {where}.",
+                hint="Give each structure's path relative to study.yaml, such as structures/ref.pdb.",
+            )
+    regions = {
+        name: str(text) for name, text in _named(raw.get("regions"), "regions", file).items()
     }
 
     stride = raw.get("stride", 1)
@@ -475,25 +690,49 @@ def load_study_file(path: str | Path) -> StudyFile:
             f"{file}: analyses must map each run name to its settings.",
             hint="For example 'analyses: {contacts: {method: occlusion}}'.",
         )
-    analyses = {
-        str(run): _analysis_entry(str(run), entry, file) for run, entry in analyses_raw.items()
-    }
+    from polyzymd.analyses.project_file import find_project, resolve_names
+
+    found = find_project(file.parent)
+    project, project_label = found if found is not None else (None, None)
+    analyses: dict[str, AnalysisEntry] = {}
+    if project is not None:
+        # The project's analyses, for this study: its regions and structures resolved.
+        for run, entry in project.analyses.items():
+            listed = project.runs_in[run]
+            if listed is not None and project_label not in listed:
+                continue
+            where = f"{project.path}: analyses.{run} (in study {project_label})"
+            resolved = resolve_names(entry, regions, structures, where)
+            analyses[run] = _analysis_entry(run, resolved, project.path)
+    for run, entry in analyses_raw.items():
+        if str(run) in analyses:
+            raise ProtocolError(
+                f"{file}: analyses.{run} is also an analysis of {project.path}.",
+                hint="Give the study's own analysis another name, or change it in project.yaml.",
+            )
+        resolved = resolve_names(entry, regions, structures, f"{file}: analyses.{run}")
+        analyses[str(run)] = _analysis_entry(str(run), resolved, file)
 
     metadata = raw.get("metadata") or {}
     if not isinstance(metadata, Mapping):
         raise ProtocolError(f"{file}: metadata must be a mapping.", hint="Leave it out for now.")
 
-    version = raw.get("polyzymd")
     data = read_data_file(file.parent / DATA_FILE, conditions)
     return StudyFile(
         path=file,
         equilibration=equilibration,
         conditions=conditions,
         analyses=analyses,
-        polyzymd=None if version is None else str(version),
         stride=stride,
         replicates=replicates,
-        metadata=dict(metadata),
+        # A study of a project publishes with the project's metadata unless it has its own.
+        metadata=dict(metadata) or (dict(project.metadata) if project is not None else {}),
         data=data,
         until=_until(raw.get("until"), file),
+        description=None if raw.get("description") is None else str(raw["description"]),
+        structures=structures,
+        regions=regions,
+        factors={label: value for label, value in factors.items() if value},
+        project=project,
+        project_label=project_label,
     )

@@ -34,9 +34,11 @@ Benjamini, Y. (2010). Discovering the false discovery rate. Journal of the
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import inspect
 import json
+import logging
 import math
 import re
 import sys
@@ -46,6 +48,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from polyzymd.analyses.exceptions import ProtocolError
+
+LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import numpy as np
@@ -125,16 +129,29 @@ def universe() -> UniverseArgument:
 def _function_record(function: Callable) -> dict[str, Any]:
     """Name a function and hash its source, or its bytecode when no source exists.
 
-    A function loaded from a study's own file
-    (:func:`~polyzymd.analyses.user_functions.load_function`) is hashed by the
-    whole file, so a change to any helper in it changes the record.
+    A function loaded from a study's or project's own file
+    (:func:`~polyzymd.analyses.user_functions.load_function`) is hashed with
+    the Python files under that file's folder and the files of its ``data/``
+    folder (:func:`code_files`), by path and content: the folder is on
+    ``sys.path`` while the function runs, so a helper module or package it
+    imports from there, or a data file it reads from ``data/``, is part of
+    what produced the result. Editing any of those files changes the record.
+
+    A function shipped with PolyzyMD is hashed with its module's file and the
+    files of the PolyzyMD modules that file imports (:func:`_shipped_code_hash`),
+    so a fix to a helper it calls, such as ``_occlusion_frames``, recomputes
+    the results it made.
     """
     module_file = getattr(function, "__polyzymd_module_file__", None)
+    module = getattr(function, "__module__", None) or ""
     try:
         if module_file:
-            code, basis = Path(module_file).read_bytes(), "module"
+            digest, basis = folder_hash(Path(module_file)), "module_folder"
+        elif module.startswith("polyzymd.") and _shipped_code_hash(module):
+            digest, basis = _shipped_code_hash(module), "polyzymd_modules"
         else:
-            code, basis = inspect.getsource(function).encode(), "source"
+            source = inspect.getsource(function).encode()
+            digest, basis = hashlib.sha256(source).hexdigest(), "source"
     except (OSError, TypeError):
         warnings.warn(
             f"No source file for {function!r}, so its bytecode is hashed instead; a changed "
@@ -143,19 +160,194 @@ def _function_record(function: Callable) -> dict[str, Any]:
         )
         body = getattr(function, "__code__", None)
         code = repr((body.co_code, body.co_consts) if body else function).encode()
-        basis = "bytecode"
+        digest, basis = hashlib.sha256(code).hexdigest(), "bytecode"
     return {
         "qualname": getattr(function, "__qualname__", repr(function)),
         "module": getattr(function, "__module__", None),
-        "hash": hashlib.sha256(code).hexdigest(),
+        "hash": digest,
         "hash_of": basis,
     }
 
 
+#: PolyzyMD modules whose text never changes a result: error messages and hints.
+_NOT_RESULT_MODULES = {"polyzymd.analyses.exceptions"}
+
+
+def _json_number(value: float) -> float | str:
+    """Return ``value``, or its name when it is not finite, so a record compares equal to itself."""
+    return value if math.isfinite(value) else str(value)
+
+
+@functools.lru_cache(maxsize=None)
+def _shipped_code_hash(module: str) -> str | None:
+    """Return the SHA-256 of a PolyzyMD module's file and the PolyzyMD modules it imports.
+
+    The imports are read from the module's source (``import polyzymd.x`` and
+    ``from polyzymd.x import y``, at any depth of the file, as PolyzyMD
+    imports inside functions), one level deep. Each file is hashed by module
+    name and content. :data:`_NOT_RESULT_MODULES` are left out. Returns
+    ``None`` when the module has no source file.
+    """
+    import ast
+    import importlib.util
+
+    def located(name: str) -> Path | None:
+        try:
+            spec = importlib.util.find_spec(name)
+        except (ImportError, ValueError):
+            return None
+        origin = getattr(spec, "origin", None) if spec else None
+        return Path(origin) if origin and origin.endswith(".py") else None
+
+    own = located(module)
+    if own is None:
+        return None
+    names = {module}
+    for node in ast.walk(ast.parse(own.read_text())):
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            names.add(node.module)
+        elif isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+    digest = hashlib.sha256()
+    for name in sorted(n for n in names if n.split(".")[0] == "polyzymd"):
+        path = located(name)
+        if path is not None and name not in _NOT_RESULT_MODULES:
+            digest.update(name.encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
+#: Folders whose files are outputs or inputs of their own, never code a function uses.
+_NOT_CODE = {
+    "__pycache__",
+    "results",
+    "logs",
+    "deposit",
+    "conditions",
+    "figures",
+    "slurm",
+    "slurm_logs",
+    "site-packages",
+}
+#: Files beside code that say where data is on one machine, or that freeze writes.
+_NOT_CODE_FILES = {
+    "data.local.yaml",
+    "manifest.json",
+    "md_checklist.yaml",
+    "system_summary.csv",
+    "CITATION.cff",
+    ".zenodo.json",
+}
+
+
+#: The folder, beside a function's file, whose files of any type count as its data.
+DATA_FOLDER = "data"
+
+
+def _candidate_files(folder: Path) -> list[tuple[Path, Path]]:
+    """Return ``(path, relative path)`` of each file under ``folder`` outside skipped folders.
+
+    Skipped: hidden files and folders (``.git``, ``.pixi``, ``.venv``),
+    output and job folders (``results/``, ``logs/``, ``deposit/``,
+    ``conditions/``, ``figures/``, ``slurm/``, ``site-packages/``,
+    ``__pycache__``), the folders of other studies and the files that
+    ``freeze`` writes.
+    """
+    found = []
+    for path in sorted(folder.rglob("*")):
+        relative = path.relative_to(folder)
+        if (
+            not path.is_file()
+            or path.name in _NOT_CODE_FILES
+            or any(part.startswith(".") for part in relative.parts)
+            or any(part in _NOT_CODE for part in relative.parts[:-1])
+        ):
+            continue
+        if any(
+            (folder / Path(*relative.parts[:i])).joinpath("study.yaml").is_file()
+            for i in range(1, len(relative.parts))
+        ):
+            continue
+        found.append((path, relative))
+    return found
+
+
+def code_files(folder: Path) -> list[Path]:
+    """Return the files a function or plan in ``folder`` may use, in path order.
+
+    Two kinds of files count, in subfolders too:
+
+    - every Python file (``*.py``): the function's own file, and the helper
+      modules and packages it imports from ``folder``;
+    - every file under ``folder/data/``: the data files the function reads.
+
+    When ``folder`` holds ``study.yaml`` or ``project.yaml`` (a function file
+    beside it), only the Python files count: a ``data/`` folder there may
+    hold trajectories. Keep data files in ``analyses/data/`` or
+    ``stats/data/``. Other files, such as notes, figures or a copied
+    trajectory, never count, so adding them recomputes nothing.
+    :func:`ignored_files` names them.
+    Skipped folders are listed in :func:`_candidate_files`.
+    """
+    root_of_study = (folder / "study.yaml").is_file() or (folder / "project.yaml").is_file()
+    return [
+        path
+        for path, relative in _candidate_files(folder)
+        if path.suffix == ".py" or (relative.parts[0] == DATA_FOLDER and not root_of_study)
+    ]
+
+
+def ignored_files(folder: Path) -> list[Path]:
+    """Return the files under ``folder`` that :func:`code_files` leaves out of the hash.
+
+    Compiled bytecode (``*.pyc``) is not listed. For a study's or project's
+    own folder, where only Python files count by design, the list is empty.
+    """
+    if (folder / "study.yaml").is_file() or (folder / "project.yaml").is_file():
+        return []
+    counted = set(code_files(folder))
+    return [
+        path
+        for path, _ in _candidate_files(folder)
+        if path not in counted and path.suffix != ".pyc"
+    ]
+
+
+def folder_hash(module_file: Path) -> str:
+    """Return the SHA-256 of the path and content of every file :func:`code_files` gives.
+
+    The files are read in blocks, so a large data file beside the code is
+    never held in memory whole.
+    """
+    folder = module_file.parent
+    ignored = ignored_files(folder)
+    if ignored:
+        LOGGER.info(
+            "The stored results of %s do not depend on %s: only Python files and the "
+            "files in %s/ count. Move a file the function reads into %s/.",
+            module_file.name,
+            ", ".join(path.relative_to(folder).as_posix() for path in ignored),
+            DATA_FOLDER,
+            DATA_FOLDER,
+        )
+    digest = hashlib.sha256()
+    for path in code_files(folder):
+        digest.update(path.relative_to(folder).as_posix().encode() + b"\0")
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1 << 22), b""):
+                digest.update(block)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def _file_record(path: str | Path) -> dict[str, str]:
-    """Record a file by its absolute path and the SHA-256 hash of its content."""
+    """Record a file by its name and the SHA-256 hash of its content.
+
+    Not by its location, so a study folder moved, copied or migrated to
+    another machine reuses its stored results, while a changed file changes
+    the record.
+    """
     path = Path(path).expanduser().resolve()
-    return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    return {"name": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
 def _argument_record(value: Any) -> Any:
@@ -337,6 +529,8 @@ def run_timeseries(
             "kwargs": {key: _argument_record(value) for key, value in kwargs.items()},
         },
         "unit": unit,
+        # The order of the parts names the stored columns, so it keys reuse.
+        **({"parts": list(parts)} if parts is not None else {}),
     }
     series: dict[str, list[ReplicateSeries]] = {}
     for condition in study:
@@ -388,8 +582,7 @@ def run_timeseries(
                     json.dumps({**stored, "versions": _versions()}, indent=1)
                 )
                 if parts is not None:
-                    # The part names, for polyzymd.analyses.results; the function's
-                    # source, in the record, already decides reuse.
+                    # The part names, for polyzymd.analyses.results.
                     (folder / "parts.json").write_text(json.dumps(list(parts)))
             else:
                 stored = json.loads((folder / "record.json").read_text())
@@ -489,6 +682,7 @@ def run_per_replicate(
     unit: str | None,
     labels: Sequence | Callable | None = None,
     missing: float | None = None,
+    note_filled: bool = False,
     name: str | None = None,
     recompute: bool = False,
     output_dir: str | Path | None = None,
@@ -527,6 +721,11 @@ def run_per_replicate(
     missing : float, optional
         Value given to a label that one replicate lacks and another has.
         By default a missing label is an error.
+    note_filled : bool, optional
+        Name, in the report's warnings, every replicate given ``missing`` and
+        its labels. For a value chosen to stand in for one that was not
+        measured, as a study's ``missing:``; not for a shipped analysis whose
+        ``missing`` is a definition (an unformed hydrogen bond is zero).
     name : str, optional
         Result name. Defaults to the function's ``__name__``.
     recompute : bool, optional
@@ -568,6 +767,10 @@ def run_per_replicate(
             "kwargs": {key: _argument_record(value) for key, value in kwargs.items()},
         },
         "unit": unit,
+        # The order of the parts names the stored columns, so it keys reuse.
+        **({"parts": list(parts)} if parts is not None else {}),
+        # Readers fill a label a replicate lacks with it, as the report does.
+        **({"missing": _json_number(missing)} if missing is not None else {}),
     }
     rows: dict[str, list[tuple]] = {}
     found: dict[str, list[Path]] = {}
@@ -598,9 +801,11 @@ def run_per_replicate(
                     values = None
             if values is None:
                 built, chosen = _build_arguments({**dict(enumerate(args)), **kwargs}, replicate)
+                extra = {"times": replicate.times} if _takes(function, "times") else {}
                 output = function(
                     *(built[index] for index in range(len(args))),
                     frames=replicate.frames,
+                    **extra,
                     **{key: built[key] for key in kwargs},
                 )
                 if returned:
@@ -624,10 +829,9 @@ def run_per_replicate(
                 (folder / "record.json").write_text(
                     json.dumps({**record, "chosen": chosen, "versions": _versions()}, indent=1)
                 )
-            if parts is not None and not (folder / "parts.json").is_file():
-                # The part names, for polyzymd.analyses.results. They are not in
-                # the record, so they decide nothing about reuse.
-                (folder / "parts.json").write_text(json.dumps(list(parts)))
+                if parts is not None:
+                    # The part names, for polyzymd.analyses.results; the record keys them.
+                    (folder / "parts.json").write_text(json.dumps(list(parts)))
             if given is None:
                 value = float(values) if parts is None else values.tolist()
             else:
@@ -646,9 +850,11 @@ def run_per_replicate(
     source = Source(name, unit, study, found, root)
 
     def result(table: dict[str, list[tuple]], metric: str) -> ReplicateValues:
-        order = None if labels is None else _label_order(table, missing, metric)
+        filled: list[str] = []
+        order = None if labels is None else _label_order(table, missing, metric, filled)
         values = ReplicateValues(source, metric, unit, False, table, order)
         values.bounds = tuple(bounds)
+        values.filled = filled if note_filled else []
         return values
 
     if parts is None:
@@ -661,8 +867,25 @@ def run_per_replicate(
     }
 
 
-def _label_order(rows: dict[str, list[tuple]], missing: float | None, name: str) -> list:
-    """Replace each replicate's label mapping with an array in the order labels first appear."""
+def _takes(function: Callable, name: str) -> bool:
+    """Return whether ``function`` has a parameter called ``name``."""
+    try:
+        return name in inspect.signature(function).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _label_order(
+    rows: dict[str, list[tuple]],
+    missing: float | None,
+    name: str,
+    filled: list[str] | None = None,
+) -> list:
+    """Replace each replicate's label mapping with an array in the order labels first appear.
+
+    A label a replicate lacks gets ``missing``; each replicate that got one is
+    named in ``filled``, with its labels, for the report's warnings.
+    """
     import numpy as np
 
     order = list(dict.fromkeys(key for items in rows.values() for row in items for key in row[1]))
@@ -676,6 +899,12 @@ def _label_order(rows: dict[str, list[tuple]], missing: float | None, name: str)
                     hint="Measure the same labels in every replicate, or give the value a "
                     "replicate gets for a label it lacks: missing: .nan in the study.yaml entry "
                     "(missing=<value> in Python).",
+                )
+            if absent and filled is not None:
+                filled.append(
+                    f"condition {condition} replicate {row[0]}: {len(absent)} of {len(order)} "
+                    f"labels had no value and were given missing={missing}: "
+                    + ", ".join(str(key) for key in absent)
                 )
             values = np.array([row[1].get(key, missing) for key in order], dtype=np.float64)
             items[position] = (row[0], values, *row[2:])
@@ -962,6 +1191,8 @@ class ReplicateValues:
         self.source, self.metric, self.unit = source, metric, unit
         self.is_fraction, self.rows, self.labels = is_fraction, rows, labels
         self.bounds: tuple[float | None, float | None] = (0.0, 1.0) if is_fraction else (None, None)
+        #: One note per replicate whose missing labels were filled with ``missing``.
+        self.filled: list[str] = []
 
     @property
     def values(self) -> dict[str, list]:
@@ -1211,7 +1442,7 @@ class ReplicateValues:
             _verdict,
         )
 
-        conditions, notes = [], []
+        conditions, notes = [], list(self.filled)
         for position, entry in self._entries():
             at = "" if entry is None else f" at {entry}"
             values = self._column(position)

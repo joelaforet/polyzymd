@@ -30,12 +30,13 @@ References
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from polyzymd.analyses.exceptions import ProtocolError
+from polyzymd.analyses.exceptions import NoMatchingAtomsError, ProtocolError
 
 #: Published page of the polyzymd analyze protocol.
 ANALYZE_PROTOCOL_URL = (
@@ -46,7 +47,7 @@ ANALYZE_PROTOCOL_URL = (
 ANALYZE_AGENT_SKILL = ".claude/skills/polyzymd-analyze/SKILL.md"
 
 #: Published page on writing an analysis as a function for the study API.
-ANALYSIS_API_URL = "https://polyzymd.readthedocs.io/en/latest/explanation/analysis_api.html"
+ANALYSIS_API_URL = "https://polyzymd.readthedocs.io/en/latest/how_to/study_api.html"
 
 #: Published page of the catalytic triad routine on the study API.
 TRIAD_ROUTINE_URL = (
@@ -78,19 +79,33 @@ VERDICT_VOCABULARY = (
 
 #: The analyses polyzymd analyze runs, each through Study.timeseries or
 #: Study.per_replicate, with the settings each one takes and their defaults.
+#: One line on what each shipped analysis measures, for ``polyzymd analyze --list``.
+ANALYSIS_SUMMARIES = {
+    "rg": "radius of gyration of a selection per frame (A)",
+    "rmsd": "RMSD of a selection superposed on a reference, per frame (A)",
+    "rmsf": "per-residue RMS fluctuation about the mean structure, with core and region means (A)",
+    "rmsd_per_residue": "per-residue RMS deviation from a reference structure (A)",
+    "sasa": "solvent-accessible surface area of a target in each context, total and per residue (A^2)",
+    "secondary_structure": "DSSP secondary structure, fractions overall and per residue",
+    "hydrogen_bonds": "hydrogen bonds between groups: counts, lifetimes, per-residue and per-pair occupancy",
+    "native_contacts": "fraction of native contacts Q against a reference structure",
+    "contacts": "protein-polymer contacts per residue: method occlusion (buried surface) or distance",
+    "distances": "distances between atom pairs, and the fraction of frames below a threshold (A)",
+}
+
 FUNCTION_ANALYSES = {
     "rg": {"selection": "protein"},
     "rmsd": {
         "selection": "protein and name CA",
         "alignment_selection": "protein and name CA",
-        "reference_mode": "centroid",
+        "reference_mode": None,
         "reference_frame": 1,
         "reference_file": None,
     },
     "rmsf": {
         "selection": "protein and name CA",
         "alignment_selection": "protein and name CA",
-        "reference_mode": "centroid",
+        "reference_mode": None,
         "reference_frame": 1,
         "reference_file": None,
         "highlight_residues": [],
@@ -236,6 +251,37 @@ class PairwiseReport(BaseModel):
     testable: bool = True
 
 
+class TrendReport(BaseModel):
+    """The slope of the condition means against one numeric factor of the conditions.
+
+    ``conditions`` are those that declare the factor, each one point of the
+    fit: the mean of its replicate values at its factor level.
+    ``n_replicates`` counts the replicate values behind those means.
+    ``slope`` is in the metric's unit per unit of the factor, with a 95
+    percent t interval on ``k - 2`` degrees of freedom for ``k`` conditions;
+    ``p`` tests zero slope and ``p_adjusted`` corrects it over the study's
+    numeric factors (Benjamini-Hochberg). ``testable`` is ``False``, with the
+    ``reason``, when a replicate value is not finite, there are fewer than
+    three factor levels (two levels make the trend a pairwise comparison),
+    or the condition means all agree.
+    """
+
+    model_config = ConfigDict(ser_json_inf_nan="strings")
+
+    factor: str
+    conditions: list[str] = Field(default_factory=list)
+    n_replicates: int = 0
+    slope: float | None = None
+    slope_ci95: tuple[float, float] | None = None
+    p: float | None = None
+    p_adjusted: float | None = None
+    family_size: int | None = None
+    r_squared: float | None = None
+    significant: bool = False
+    testable: bool = False
+    reason: str | None = None
+
+
 class ProtocolProvenance(BaseModel):
     """Versions, config hashes, output paths and settings of one protocol run.
 
@@ -273,6 +319,7 @@ class ProtocolReport(BaseModel):
     analysis: str
     status: str = "complete"
     problems: list[str] = Field(default_factory=list)
+    trends: list[TrendReport] = Field(default_factory=list)
     protocol_version: str
     metric: str
     unit: str | None = None
@@ -326,6 +373,7 @@ class ProtocolReport(BaseModel):
             header,
             *(f"problem: {text}" for text in self.problems),
             *body,
+            *(_trend_line(item) for item in self.trends),
             *(f"warning: {text}" for text in self.warnings),
             *(f"verdict: {text}" for text in self.verdict),
         ]
@@ -487,7 +535,9 @@ def _analyze_function(
     of ``selection``. ``rmsd`` measures :func:`~polyzymd.analyses.functions.rmsd`
     of ``selection`` from the reference that ``reference_mode``,
     ``reference_frame``, ``reference_file`` and ``alignment_selection`` give
-    to :func:`~polyzymd.analyses.reference.reference`. Settings left out take
+    to :func:`~polyzymd.analyses.reference.reference`; a missing
+    ``reference_mode`` is ``"external"`` when a ``reference_file`` is given and
+    ``"centroid"`` otherwise. Settings left out take
     the defaults in :data:`FUNCTION_ANALYSES`. With one config the report
     summarises it; with several it compares each one with the first by
     Welch's t test. With ``plots``, ``rg`` and ``rmsd`` draw
@@ -552,6 +602,10 @@ def _analyze_function(
     settings = {**FUNCTION_ANALYSES[name], **(settings or {})}
     arguments = [select(str(settings["selection"]))]
     if name == "rmsd":
+        # A reference file given without a mode is the reference.
+        settings["reference_mode"] = settings["reference_mode"] or (
+            "external" if settings["reference_file"] else "centroid"
+        )
         arguments.append(
             reference(
                 str(settings["reference_mode"]),
@@ -601,9 +655,8 @@ def _analyze_rmsf(
     together, and gives for each residue of ``selection`` its RMS deviation
     from the reference, its RMSF about the mean position and the offset of
     the mean position from the reference, labelled by residue ID, with
-    their mean squares. For ``rmsd_per_residue`` a missing ``reference_mode``
-    is ``"external"`` when a ``reference_file`` is given and ``"centroid"``
-    otherwise; ``rmsf`` defaults to ``"centroid"``.
+    their mean squares. A missing ``reference_mode`` is ``"external"`` when a
+    ``reference_file`` is given and ``"centroid"`` otherwise.
 
     Each replicate's headline value of a quantity is the root of its mean
     square over the core residues, ``core_rmsd_per_residue``, ``core_rmsf`` and
@@ -737,11 +790,58 @@ def _first_universe(study: Any, empty: dict[tuple[str, int], list[str]], analysi
             if (condition.label, replicate.index) not in empty:
                 return replicate.universe()
     missing = sorted({name for names in empty.values() for name in names})
-    raise ProtocolError(
+    raise NoMatchingAtomsError(
         f"{analysis}: the selections {', '.join(missing)} match no atoms in any replicate.",
         hint="Choose selections that pick atoms, such as 'chainid A' for the protein and "
         "'chainid C' for the polymer.",
     )
+
+
+def _zero_partner_warning(
+    empty: dict[tuple[str, int], list[str]], analysis: str, measured: str
+) -> list[str]:
+    """Return a warning naming the replicates whose partner selection matched no atoms.
+
+    Those replicates, such as a control without polymer, are measured with
+    no partner, so their ``measured`` is 0 rather than left out.
+    """
+    if not empty:
+        return []
+    by_condition: dict[str, list[str]] = {}
+    for (label, index), _ in sorted(empty.items()):
+        by_condition.setdefault(label, []).append(str(index))
+    where = "; ".join(f"{label} replicate {', '.join(i)}" for label, i in by_condition.items())
+    names = sorted({name for names in empty.values() for name in names})
+    return [
+        f"{analysis}: {', '.join(names)} matched no atoms in {where}, so {measured} there is 0 "
+        "(none of those atoms to touch). Check the selection if that condition has them."
+    ]
+
+
+def study_wide_settings(analysis: str, study: Any, settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the settings of ``analysis`` that depend on every condition of ``study``.
+
+    A ``--submit`` task sees one replicate, yet some settings must be the
+    same for every replicate of the study, as ``until: common`` is. They are
+    resolved here, once: by a full run, and by ``--submit`` for every task
+    and the report job. For ``contacts`` without ``polymer_types``, the
+    residue names of the polymer selection over every condition (its first
+    replicate) become ``polymer_types``, so every replicate reports contact
+    with every monomer of the study (0 for one it lacks) and every stored
+    record has the same settings. Other analyses have none.
+    """
+    if analysis != "contacts":
+        return {}
+    merged = {**FUNCTION_ANALYSES["contacts"], **settings}
+    if merged["polymer_types"]:
+        return {}
+    names: set[str] = set()
+    for condition in study:
+        if condition.replicates:
+            universe = condition.replicates[0].universe()
+            polymer = universe.select_atoms(str(merged["polymer_selection"]))
+            names |= {str(name) for name in polymer.resnames}
+    return {"polymer_types": sorted(names)} if names else {}
 
 
 def _report_skipping(
@@ -901,11 +1001,10 @@ def _analyze_hydrogen_bonds(
         )
     first, second = summaries[summary]
     both = first if second is None else f"({first}) or ({second})"
-    group_selections = {
-        "first group": first,
-        **({} if second is None else {"second group": second}),
-    }
-    skipped = _empty_selections(study, group_selections)
+    # The first group is measured; a replicate without the second, such as
+    # a control without polymer, has no hydrogen bond with it: 0.
+    skipped = _empty_selections(study, {"first group": first})
+    no_partner = {} if second is None else _empty_selections(study, {"second group": second})
     universe = _first_universe(study, skipped, "hydrogen_bonds")
     explicit = {
         key: select(f"({both}) and ({settings[key]})", allow_empty=True)
@@ -1002,6 +1101,9 @@ def _analyze_hydrogen_bonds(
         )
     values.metric = run
     report = _report_skipping(values, study, skipped, "hydrogen_bonds")
+    report.warnings += _zero_partner_warning(
+        no_partner, "hydrogen_bonds", "the hydrogen-bond count"
+    )
     if part in life:
         empty = [
             f"{label} replicate {row[0]}"
@@ -1396,8 +1498,12 @@ def _analyze_contacts(
       counts a contact when any polymer atom is within ``cutoff`` Å of the
       residue, comparing heavy atoms only when ``heavy_atoms`` is true.
 
-    ``polymer_selection`` is narrowed to the residue names in
-    ``polymer_types`` when given, and ``use_pbc`` uses the frame's box: the
+    ``polymer_types`` names the polymer residue names (monomers) reported one
+    by one; by default every residue name of ``polymer_selection`` in any
+    condition (:func:`study_wide_settings`), so a replicate without one
+    reports 0 for it. A replicate whose ``polymer_selection`` matches no
+    atoms, such as a control without polymer, has no contact: 0, with a
+    warning. ``use_pbc`` uses the frame's box: the
     minimum image for ``distance``, and for ``occlusion`` each polymer
     molecule moved whole to its image nearest the protein. Results:
 
@@ -1460,21 +1566,21 @@ def _analyze_contacts(
             f"contacts: tolerance_ps must be at least 0, got {tolerance}.",
             hint="Pass --set tolerance_ps=0 for events that end at the first absent frame.",
         )
+    settings.update(study_wide_settings("contacts", study, settings))
     protein = str(settings["protein_selection"])
     polymer = str(settings["polymer_selection"])
-    types_filter = settings["polymer_types"]
-    if types_filter:
-        names = [types_filter] if isinstance(types_filter, str) else list(types_filter)
-        polymer = f"({polymer}) and (resname {' '.join(str(name) for name in names)})"
+    names = settings["polymer_types"] or []
+    types = sorted({str(name) for name in ([names] if isinstance(names, str) else names)})
     if method == "distance" and settings["heavy_atoms"]:
         protein = f"({protein}) and not element H"
         polymer = f"({polymer}) and not element H"
     regions = settings["regions"] or {}
-    skipped = _empty_selections(study, {"protein_selection": protein, "polymer_selection": polymer})
+    # A replicate without protein atoms cannot be measured; one without
+    # polymer atoms, such as a control, has no contact: 0.
+    skipped = _empty_selections(study, {"protein_selection": protein})
+    no_polymer = _empty_selections(study, {"polymer_selection": polymer})
     first = _first_universe(study, skipped, "contacts")
     protein_atoms = first.select_atoms(protein)
-    polymer_atoms = first.select_atoms(polymer)
-    types = sorted({str(name) for name in polymer_atoms.resnames})
 
     def measured(residues: Any) -> list:
         if method == "distance":
@@ -1579,6 +1685,7 @@ def _analyze_contacts(
             "censored_fraction": (None, (0.0, 1.0)),
         }[part]
         report = _report_skipping(values, study, skipped, "contacts")
+        report.warnings += _zero_partner_warning(no_polymer, "contacts", "the event count")
         no_events = [
             f"{label} replicate {row[0]}"
             for label, table_rows in values.rows.items()
@@ -1673,6 +1780,7 @@ def _analyze_contacts(
     runs = all_runs
     values = residue_runs[run] if run in residue_runs else totals[run]
     report = _report_skipping(values, study, skipped, "contacts")
+    report.warnings += _zero_partner_warning(no_polymer, "contacts", "contact")
     if unmeasured:
         report.warnings.append(
             f"contacts: {len(unmeasured)} residues of the protein selection have no maximum "
@@ -1819,6 +1927,15 @@ def _analyze_pairs(
             f"{name} needs pairs, a list of mappings with label, selection_a and selection_b, "
             f"and optionally threshold, below_label and above_label; got {pairs!r}.",
             hint="Write the list to pairs.yaml and pass --set pairs=pairs.yaml.",
+        )
+    labels = [str(pair["label"]) for pair in pairs]
+    repeated = sorted({label for label in labels if labels.count(label) > 1})
+    if repeated:
+        # Each pair's series is stored under its label, so a repeat would
+        # overwrite the other pair's values.
+        raise ProtocolError(
+            f"{name}: the pair labels {repeated} repeat.",
+            hint="Give every pair its own label.",
         )
     results, distances, thresholds = {}, [], []
     for pair in pairs:
@@ -1967,6 +2084,20 @@ def _difference_ci(
     return (low, high)
 
 
+def _trend_line(trend: TrendReport) -> str:
+    """One report line per trend test."""
+    if not trend.testable:
+        return (
+            f"trend {trend.factor}  not testable: {trend.reason}"
+            f"  condition_means {len(trend.conditions)}  replicates {trend.n_replicates}"
+        )
+    return (
+        f"trend {trend.factor}  slope {_num(trend.slope)}  ci95 {_interval(trend.slope_ci95)}"
+        f"  p {_num(trend.p)}  p_adj {_num(trend.p_adjusted)}  r2 {_num(trend.r_squared)}"
+        f"  condition_means {len(trend.conditions)}  replicates {trend.n_replicates}"
+    )
+
+
 def _verdict(
     metric: str,
     unit: str | None,
@@ -1995,9 +2126,15 @@ def _verdict(
             f"p_adj {_num(pair.p_adjusted)}, p {_num(pair.p)}, {n_text}"
         )
         if not pair.testable:
+            few = min(counts.get(pair.a, 0), counts.get(pair.b, 0)) < 2
+            why = (
+                "needs at least two replicates per condition"
+                if few
+                else "has the same value in every replicate of both conditions, so no "
+                "variance to test"
+            )
             sentences.append(
-                f"{VERDICT_NOT_TESTABLE}: {metric} for {pair.a} vs {pair.b} needs at least two "
-                f"replicates per condition and a value that varies ({n_text})"
+                f"{VERDICT_NOT_TESTABLE}: {metric} for {pair.a} vs {pair.b} {why} ({n_text})"
             )
         elif pair.p_adjusted is None:
             sentences.append(
@@ -2036,8 +2173,21 @@ def _signed(value: float | None) -> str:
 
 
 def _interval(limits: Sequence[float] | None) -> str:
-    """Format an interval as ``low to high``, or ``na``."""
-    return "na" if limits is None else f"{_num(limits[0])} to {_num(limits[1])}"
+    """Format an interval as ``low to high``, or ``na``.
+
+    Four significant digits, or more when four would print a narrow interval
+    as one number (``2 to 2``).
+    """
+    if limits is None:
+        return "na"
+    low, high = (float(limit) for limit in limits)
+    if math.isnan(low) or math.isnan(high):
+        return f"{_num(low)} to {_num(high)}"
+    for digits in range(4, 16):
+        shown = (f"{low:.{digits}g}", f"{high:.{digits}g}")
+        if shown[0] != shown[1] or low == high:
+            break
+    return f"{shown[0]} to {shown[1]}"
 
 
 def _condition_line(condition: ConditionReport) -> str:

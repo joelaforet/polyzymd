@@ -80,3 +80,12 @@ class TopologyBondsMissingError(AnalysisError):
 
 class ProtocolError(AnalysisError):
     """Raised when an agent-facing protocol run cannot be set up or reported."""
+
+
+class NoMatchingAtomsError(ProtocolError):
+    """Raised when an analysis's selections match no atoms in any replicate it was given.
+
+    In a whole study this is an error; in a ``--submit`` task that runs one
+    condition, such as a control without polymer, it means there is nothing
+    to measure there, and the report job leaves that condition out.
+    """

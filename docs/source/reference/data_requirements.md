@@ -311,7 +311,7 @@ results/
 
 A stored replicate result is read back instead of measured when every field
 of its `record.json` matches the new call; see
-{doc}`../explanation/analysis_api`.
+{doc}`study_api`.
 
 ---
 

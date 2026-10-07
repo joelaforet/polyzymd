@@ -4,7 +4,8 @@ A study folder can be a git repository (``polyzymd study init`` makes one).
 :func:`git_state` reads its commit and the files that differ from it, so a
 report says which version of the study produced it. Stored results are
 reused by content, never by commit, so committing changes nothing that is
-stored, and uncommitted changes give a warning, never a refusal.
+stored, and uncommitted changes give an analysis run a warning, never a
+refusal. ``freeze`` refuses them (:mod:`polyzymd.analyses.study_freeze`).
 """
 
 from __future__ import annotations
@@ -16,6 +17,23 @@ from typing import Any
 
 #: Folders and files of a study whose changes are outputs, not inputs, of an analysis.
 OUTPUTS = ("results/", "data.local.yaml", "logs/", "deposit/")
+
+
+def is_output(path: str) -> bool:
+    """Return whether ``path`` is an analysis output or machine file, at any depth.
+
+    ``results/``, ``logs/`` and ``deposit/`` folders and ``data.local.yaml``
+    count wherever they are, so a project's ``<study>/results/`` is an output too.
+    So do compiled Python (``__pycache__/``, ``*.pyc``) and one machine's job
+    and log folders (``slurm/``, ``slurm_logs/``), which are never inputs.
+    """
+    parts = Path(path).parts
+    return bool(parts) and (
+        parts[-1] == "data.local.yaml"
+        or parts[-1].endswith(".pyc")
+        or any(f"{part}/" in OUTPUTS for part in parts[:-1])
+        or any(part in ("__pycache__", "slurm", "slurm_logs") for part in parts[:-1])
+    )
 
 
 def _git(root: Path, *arguments: str) -> str | None:
@@ -59,7 +77,7 @@ def git_state(root: str | Path) -> dict[str, Any] | None:
             uncommitted.append(str((top / path).resolve().relative_to(root)))
         except ValueError:
             uncommitted.append(path)
-    inputs = [path for path in uncommitted if not path.startswith(OUTPUTS)]
+    inputs = [path for path in uncommitted if not is_output(path)]
     return {
         "commit": head.strip() if head else None,
         "uncommitted": sorted(uncommitted),

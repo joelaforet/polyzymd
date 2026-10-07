@@ -246,7 +246,7 @@ class TestTransform:
         assert record["transform"]["hash_of"] == "source"
         source = tmp_path / "polyzymd_results/rg/A/replicate_1/record.json"
         assert record["inputs"] == [
-            {"path": str(source), "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
+            {"name": "record.json", "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
         ]
         kwargs = rg.transform(below, threshold=1.155).series["A"][0].path / "record.json"
         assert json.loads(kwargs.read_text())["kwargs"] == {"threshold": 1.155}

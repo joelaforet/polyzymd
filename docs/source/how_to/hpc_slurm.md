@@ -1,33 +1,30 @@
-# Run PolyzyMD on SLURM Clusters
+# Run simulations on SLURM clusters
 
-Use this guide when you already have a working `config.yaml` and want the
-shortest path to a reliable SLURM submission workflow.
-
-PolyzyMD generates self-resubmitting job scripts. Each replicate runs one
-segment, checks whether more work remains, and resubmits itself when needed.
-That lets long simulations continue across wall-time limits without requiring
-manual dependency chains.
+Submit each replicate as a chain of SLURM jobs. Each job runs one
+{term}`segment` of the simulation. It then checks whether work remains, and
+submits its successor if it does. The chain continues across wall-time limits
+without manual job dependencies.
 
 ## Before you start
 
-- validate your config locally first
-- know which SLURM preset you want to use
+- Validate your config with `polyzymd validate -c config.yaml`.
+- Choose a SLURM preset (see Step 2).
 
-If you are still setting up the project itself, start with {doc}`../get_started/quickstart`.
+If you do not have a config yet, do {doc}`../get_started/quickstart` first.
 
 :::{admonition} Use compute resources, not login nodes
 :class: important
 
-Validation and SLURM script generation are lightweight. System builds and local
-simulation commands can require substantial RAM, CPU/GPU time, and scratch I/O.
-On shared HPC systems, submit jobs to compute nodes or use an interactive
-compute allocation; do not run heavy build or simulation commands directly on a
-login node.
+Validation and script generation are light. A system build or a local
+simulation needs a lot of memory, CPU or GPU time, and scratch I/O. On a shared
+cluster, run these commands in a batch job or an interactive compute
+allocation. Do not run them on a login node.
 :::
 
-## Step 1: validate and dry-run locally
+Run `polyzymd submit` from the `build` environment. Prefix each command with
+`pixi run -e build`, or activate the environment once with `pixi shell -e build`.
 
-From the repository root or a subdirectory under it:
+## Step 1: write the job script and read it
 
 ```bash
 pixi run -e build polyzymd validate -c config.yaml
@@ -39,33 +36,36 @@ pixi run -e build polyzymd submit \
     --generate-only
 ```
 
-The `--generate-only` flag creates a script in `job_scripts/` without submitting it,
-so you can inspect it before launching real jobs.
+`--generate-only` writes the script to `job_scripts/` and does not submit it.
+Read the `#SBATCH` lines before you submit real jobs.
 
-:::{versionchanged} 1.3.0
-`--dry-run` is now preview-only (no files written, no submission). Use
-`--generate-only` to generate SLURM scripts without submitting — this is
-the behavior that `--dry-run` had in earlier versions. The two flags are
-mutually exclusive.
-:::
+`--dry-run` prints the submission plan. It writes no file and submits nothing.
+You cannot use `--dry-run` and `--generate-only` together.
 
-## Step 2: pick a preset
+## Step 2: choose a preset
 
-PolyzyMD includes presets for common clusters:
+A preset sets the partition, QoS, account and time limit of each job.
 
-| Preset | Cluster style | Typical use |
-|--------|---------------|-------------|
-| `aa100` | NVIDIA A100 partition | main production runs |
-| `al40` | NVIDIA L40 partition | production runs on L40 nodes |
-| `blanca-shirts` | Blanca condo partition | preemptable or condo runs |
-| `testing` | short queue | smoke tests only |
-| `bridges2` | PSC Bridges2 | Bridges2 GPU jobs |
+| Preset | Partition | QoS | Time limit | Use |
+|--------|-----------|-----|------------|-----|
+| `aa100` | `aa100` | `normal` | 23:59:59 | NVIDIA A100 nodes (CU Boulder Alpine) |
+| `al40` | `al40` | `normal` | 23:59:59 | NVIDIA L40 nodes (CU Boulder Alpine) |
+| `blanca-shirts` | `blanca,blanca-shirts` | `preemptable` | 23:59:59 | CU Boulder Blanca condo nodes |
+| `blanca-chbe-rdi` | `blanca,blanca-chbe-rdi` | `preemptable` | 23:59:59 | CU Boulder Blanca condo nodes |
+| `bridges2` | `GPU-shared` | none | 24:00:00 | PSC Bridges-2 GPU nodes |
+| `testing` | `atesting_a100` | `testing` | 0:05:59 | Short tests on CU Boulder Alpine |
 
-Use `testing` first when you are verifying a new system or workflow.
+The Alpine presets (`aa100`, `al40` and `testing`) set a CU Boulder
+allocation as the account. On another allocation, give your own with
+`--account <account>`. To use another cluster, override the preset's fields
+with `--partition`, `--account`, `--qos` and `--gpu-type`. See
+{doc}`hardware_platforms`.
 
-## Step 3: submit one small test job
+Use `testing` first when you try a new system or a new workflow.
 
-Run a short job before launching many replicates:
+## Step 3: submit one short test job
+
+Run a short job before you submit many replicates:
 
 ```bash
 pixi run -e build polyzymd submit \
@@ -76,12 +76,10 @@ pixi run -e build polyzymd submit \
     --replicates 1
 ```
 
-This is the fastest way to catch bad paths, scheduler issues, or environment
-problems.
+A short job finds a wrong path, a scheduler problem or a broken environment
+in minutes.
 
-## Step 4: submit your real run
-
-Once the short test succeeds, submit production jobs:
+## Step 4: submit the production replicates
 
 ```bash
 pixi run -e build polyzymd submit \
@@ -92,18 +90,21 @@ pixi run -e build polyzymd submit \
     --email your.email@university.edu
 ```
 
-Useful variants:
+To write the output to other folders, give `--projects-dir` and
+`--scratch-dir`:
 
 ```bash
-# Override storage locations
 pixi run -e build polyzymd submit \
     -c config.yaml \
     --preset aa100 \
     --pixi-env auto \
     --projects-dir /projects/$USER/polyzymd \
     --scratch-dir /scratch/alpine/$USER/polyzymd_sims
+```
 
-# Give a larger system more RAM
+To give a large system more memory, set `--memory`:
+
+```bash
 pixi run -e build polyzymd submit \
     -c config.yaml \
     --preset aa100 \
@@ -111,9 +112,9 @@ pixi run -e build polyzymd submit \
     --memory 8G
 ```
 
-## Monitor jobs
+## Monitor the jobs
 
-Use normal SLURM tools for the scheduler view:
+Use the SLURM tools to see the scheduler state:
 
 ```bash
 squeue -u $USER
@@ -121,26 +122,26 @@ scontrol show job <job_id>
 tail -f slurm_logs/*.out
 ```
 
-Use PolyzyMD for simulation progress:
+Use PolyzyMD to see the simulation progress:
 
 ```bash
 pixi run -e build polyzymd status -c config.yaml
 pixi run -e build polyzymd check-progress -c config.yaml -r 1
 ```
 
-To see SLURM state, throughput, ETA, and the reason a chain died in one
-report across many configs, use `polyzymd status --format agent`; see
-{doc}`monitor_simulations`.
+`polyzymd status --format agent` prints the SLURM state, the throughput, the
+time to completion and the reason a chain stopped, for many configs at once.
+See {doc}`monitor_simulations`.
 
 ## Recover a stalled replicate
 
-If a replicate stops progressing, inspect it first:
+Show what remains of replicate 1:
 
 ```bash
 pixi run -e build polyzymd recover -c config.yaml -r 1
 ```
 
-If the report shows unfinished work, resubmit a recovery job:
+If work remains, submit a recovery job:
 
 ```bash
 pixi run -e build polyzymd recover \
@@ -154,97 +155,195 @@ pixi run -e build polyzymd recover \
 (hpc-slurm-stop-a-chain)=
 ## Stop a chain
 
-A self-resubmitting chain survives `scancel`. SLURM sends `SIGTERM`,
-`run-segment` exits 99, and the wrapper reads that as "interrupted, work
-remains" and queues a successor within seconds — each attempt also creating a
-new `production_N` directory. Stop the chain instead of the job:
+`scancel` alone does not stop an OpenMM chain. SLURM sends `SIGTERM` to the
+job. `run-segment` then exits with code 99. The job script reads code 99 as
+"interrupted, work remains" and submits a successor within seconds. Each new
+attempt also makes a new `production_N` folder.
+
+Stop the chain with `polyzymd cancel`:
 
 ```bash
 pixi run -e build polyzymd cancel -c config.yaml -r 1-3
 ```
 
-This writes a `STOP` marker into each replicate working directory and then
-cancels the queued and running jobs for those replicates. The marker is what
-makes the stop stick: the wrapper checks for it before submitting any
-successor and at the start of every job, so a successor that was already
-queued exits without starting a segment.
+The command does two things:
 
-To let the current segment finish and stop after it, keep the running job:
+1. It writes a `STOP` file into each replicate folder.
+2. It cancels the queued and running jobs of those replicates.
+
+The job script checks for `STOP` at the start of every job and before it
+submits a successor. A successor that is already queued exits before it starts
+a segment.
+
+To let the current segment finish and then stop, keep the running job:
 
 ```bash
 pixi run -e build polyzymd cancel -c config.yaml -r 1-3 --stop-only
 ```
 
-To start again, remove the marker and resubmit:
+To start again, remove the marker and submit again:
 
 ```bash
 pixi run -e build polyzymd cancel -c config.yaml -r 1-3 --resume
 pixi run -e build polyzymd submit -c config.yaml -r 1-3 --preset blanca-shirts
 ```
 
-The marker is a readable text file (`<working_dir>/STOP`) naming who stopped
-the chain, when, and how to undo it; deleting it by hand is equivalent to
-`--resume`. The job environment variables `POLYZYMD_STOP_CHAIN=1` and
-`POLYZYMD_STOP_FILE=<path>` are honoured as well.
+`STOP` is a text file at `<replicate folder>/STOP`. It names who stopped the
+chain, when, and how to undo the stop. To delete it by hand has the same effect
+as `--resume`. The job script also stops when the job environment sets
+`POLYZYMD_STOP_CHAIN=1`. `POLYZYMD_STOP_FILE=<path>` moves the marker to
+another path.
 
-:::{note}
-A chain keeps the script that was rendered when it was submitted. Chains
-submitted before this release do not check the marker; stop those the old
-way, with `scancel --batch --signal=KILL <job_id>`, and use `polyzymd cancel`
-for everything you submit from now on.
-:::
+A chain uses the job script that `submit` wrote, and OpenMM and GROMACS job
+scripts both check for `STOP`. A GROMACS script written by PolyzyMD 1.2 or
+older, and an OpenMM script written before `polyzymd cancel` existed, do
+not. Stop such a chain with `SIGKILL`, which the script cannot trap:
+
+```bash
+scancel --batch --signal=KILL <job_id>
+```
+
+Then cancel any successor that is already queued (`squeue -u $USER`).
+
+## Build integrity and recovery
+
+For a campaign with a separate build step, wait until `polyzymd build` ends
+before you submit simulation jobs. A complete build has these files in each
+replicate folder:
+
+- `solvated_system.pdb`
+- `system.prmtop`, the analysis topology. If ParmEd cannot convert the
+  system, the file is missing and the build log says so.
+- `system.xml`
+- `build_manifest.json`
+
+The build writes `build_manifest.json` last. Before OpenMM makes a simulation,
+`--skip-build` checks the manifest's config hash, its file hashes and its
+particle count. A missing or damaged manifest means that the build did not
+finish. A replicate folder without a manifest can still continue when the
+particle counts of the topology and the System agree. PolyzyMD then logs a
+warning. It does not write a manifest for that folder.
+
+The build and the simulation share the lock file `.polyzymd.lock` in the
+replicate folder. A second process exits and does not write. PolyzyMD refuses
+to build again in a folder that has progress, minimization, equilibration or
+production files. Use a new output folder for a new molecular system.
+
+A continuation loads `production_N_topology.pdb`, the System and the State of
+the previous segment. If no previous segment has them, it uses the
+`solvated_system.pdb` of the replicate folder and logs a warning. If an error
+names two different particle counts, restore all files from the same build. Do
+not copy single files until the counts agree.
 
 ## OpenMM runtime policy
 
-Run `polyzymd submit` from the `build` environment. The `--pixi-env` option
-selects the environment that the Slurm job will use. It does not select the
-environment that runs the submit command.
+`--pixi-env` selects the environment that the SLURM job uses. It does not
+select the environment that runs `submit`.
 
-For a known site, `--pixi-env auto` resolves to the site policy when PolyzyMD
-generates the script. Blanca uses `sim-cuda-12-4`. Bridges-2 uses
-`sim-cuda-12-6`. A newer driver does not change this selection.
+For a known site, `--pixi-env auto` takes the site's environment when
+PolyzyMD writes the script. Blanca uses `sim-cuda-12-4`. Bridges-2 uses
+`sim-cuda-12-6`. A newer driver does not change this choice.
 
-On the allocated node, PolyzyMD checks the driver and activates the selected
-environment. It then creates an explicit CUDA Context, calculates an energy,
-and runs one integration step. This test detects an unusable CUDA runtime or
-PTX compiler before molecular setup. PolyzyMD does not fall back to CPU.
+On the allocated node, the job checks the driver and activates the
+environment. It then makes an explicit CUDA Context, calculates an energy and
+runs one integration step. This test finds an unusable CUDA runtime or PTX
+compiler before the molecular setup. PolyzyMD does not fall back to the CPU.
 
-If the node is not compatible, PolyzyMD submits a replacement job and excludes
-that node. It stops after three failed routing attempts. Nodes that are known
-in advance to be incompatible are excluded up front by the preset, so they
-never consume a routing attempt — see
-[Excluded Blanca GPU nodes](#excluded-blanca-gpu-nodes).
+If the node is not compatible, the job submits a replacement job that
+excludes the node. After three failed attempts, the chain stops. The preset
+excludes nodes that are known to be incompatible, so these nodes never use an
+attempt. See [Excluded Blanca GPU nodes](#excluded-blanca-gpu-nodes).
 
-PolyzyMD records the selected runtime. A replica cannot change its Pixi
-environment, OpenMM version, platform, or precision during resubmission. For
-supported runtimes and instructions for new hardware, see
+PolyzyMD records the runtime of each replicate. A replicate cannot change its
+pixi environment, OpenMM version, platform or precision when it is submitted
+again. For the supported runtimes and for new hardware, see
 {doc}`hardware_platforms`.
 
+## Bridges-2
+
+The `bridges2` preset requests PSC Bridges-2 resources. It resolves `auto` to
+the `sim-cuda-12-6` environment:
+
+```bash
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --preset bridges2 \
+    --account <allocation> \
+    --pixi-env auto \
+    --replicates 1-3
+```
+
+- Give `--account` to charge a specific allocation.
+- Change the GPU type with `--gpu-type`. The default is `v100-32`.
+- The preset sets no `--mem`, because Bridges-2 allocates memory per GPU.
+
+The allocated node must make a CUDA Context with this environment. The job
+does not select another environment.
+
+(cu-boulder-site-notes)=
+## CU Boulder Alpine and Blanca
+
+CU Boulder runs two SLURM clusters. Load the module of the cluster before you
+submit:
+
+```bash
+ml slurm/alpine   # shared campus cluster
+ml slurm/blanca   # condo nodes owned by research groups
+```
+
+:::{important}
+Run `ml slurm/blanca` before `sbatch` or `polyzymd submit` to use Blanca. If
+you do not, SLURM does not show the Blanca partitions.
+:::
+
+Both clusters need a partition, an account and a QoS. The presets set all
+three. Alpine example, with your own allocation:
+
+```bash
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --preset aa100 \
+    --account <account> \
+    --pixi-env auto \
+    --replicates 1-5
+```
+
+On Blanca, the partition, the account and the QoS usually have the same name:
+
+```bash
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --preset blanca-shirts \
+    --pixi-env auto \
+    --replicates 1-5
+```
+
+For GROMACS on Blanca, request compatible hardware with `--constraint`. See
+{doc}`gromacs_export`.
+
 (excluded-blanca-gpu-nodes)=
-## Excluded Blanca GPU nodes
+### Excluded Blanca GPU nodes
 
-The `blanca-shirts` and `blanca-chbe-rdi` presets ship with a SLURM
-`--exclude` list so that jobs never land on GPU nodes that are known to be
-unusable:
+The `blanca-shirts` and `blanca-chbe-rdi` presets give SLURM an `--exclude`
+list. Jobs do not start on these nodes:
 
-| Node | Why it is excluded |
-|------|--------------------|
-| `bgpu-bortz1` | Unreliable node; pre-existing exclusion |
-| `bgpu-g4-u20` | NVIDIA driver 525.147, too old for the pinned `sim-cuda-12-4` builds (CUDA 12.4 needs driver >= 550) |
-| `bgpu-g4-u24` | Same old driver as `bgpu-g4-u20` |
+| Node | Reason |
+|------|--------|
+| `bgpu-bortz1` | Unreliable node |
+| `bgpu-g4-u20` | NVIDIA driver 525.147. The pinned `sim-cuda-12-4` builds need driver 550 or newer. |
+| `bgpu-g4-u24` | The same old driver as `bgpu-g4-u20` |
 
-Without these entries, a job that landed on `bgpu-g4-u20` or `bgpu-g4-u24`
-logged `ROUTING: sim-cuda-12-4 is incompatible with driver 525.147`, spent one
-of its three routing attempts, and resubmitted. A chain that drew both nodes
-on consecutive attempts exhausted the budget and died with
+Without the list, a job on `bgpu-g4-u20` or `bgpu-g4-u24` logs
+`ROUTING: sim-cuda-12-4 is incompatible with driver 525.147`. It then uses one
+of its three routing attempts and submits again. A chain that gets both nodes
+in a row uses all its attempts and stops with
 `FATAL: CUDA routing failed after 3 retries`.
 
-Only newly rendered job scripts pick up the list. A chain that is already
-running keeps the exclusions baked into its current script until its next
+A running chain keeps the exclude list of its current script until its next
 submission.
 
-Override the list with `--exclude` when you need a different set — for
-example, to re-test a node after CURC upgrades its driver:
+To use a different list, give `--exclude`. For example, test a node again after
+CURC upgrades its driver:
 
 ```bash
 pixi run -e build polyzymd submit \
@@ -254,220 +353,134 @@ pixi run -e build polyzymd submit \
     --replicates 1
 ```
 
-`--exclude` **replaces** the preset value rather than appending to it. Pass an
-empty string (`--exclude ""`) to exclude nothing. Omit the flag to keep the
-preset default.
+`--exclude` replaces the preset's list. It does not add to it. Give
+`--exclude ""` to exclude no node. Leave out the option to keep the preset's
+list.
 
-:::{versionadded} 1.3.0
-`polyzymd submit --exclude` and the `bgpu-g4-u20` / `bgpu-g4-u24` preset
-exclusions.
-:::
+### GROMACS on Blanca
 
-## Bridges-2
+A GROMACS acceptance test ran on 14 August 2026 with the `blanca-shirts`
+account and QoS. Both short jobs used GROMACS 2024.2 from the site module.
 
-Use the `bridges2` preset to request PSC Bridges-2 scheduler resources. The
-preset resolves `auto` to the checked-in `sim-cuda-12-6` site environment:
+| Mode | Node | Hardware | Result |
+|------|------|----------|--------|
+| CPU | `bgpu-shirts3` | 2 CPU threads | 20-step test completed |
+| GPU | `bgpu-shirts1` | NVIDIA A40, driver 550.90.07 | 20-step GPU nonbonded test completed |
 
-```bash
-pixi run -e build polyzymd submit \
-    -c config.yaml \
-    --preset bridges2 \
-    --account abc123_gpu \
-    --pixi-env auto \
-    --replicates 1-3
-```
-
-Common Bridges-2 differences:
-
-- you may need `--account` if you want to charge a specific allocation
-- GPU selection can be adjusted with `--gpu-type`
-
-The allocated node must be able to create a CUDA Context with this environment.
-It does not select a different environment.
-
-## CU Boulder Alpine and Blanca
-
-CU Boulder runs two SLURM clusters. Switch between them with environment
-modules before submitting:
-
-```bash
-ml slurm/alpine   # shared campus resource
-ml slurm/blanca   # PI-owned condo nodes
-```
-
-:::{important}
-You must run `module load slurm/blanca` (or `ml slurm/blanca`) before
-`sbatch` to see Blanca partitions. Without it, Blanca queues are invisible
-to the scheduler.
-:::
-
-Both clusters require `--partition`, `--account`, and `--qos` explicitly.
-Alpine example:
-
-```bash
-pixi run -e build polyzymd submit \
-    -c config.yaml \
-    --preset aa100 \
-    --account ucb625_asc1 \
-    --pixi-env auto \
-    --replicates 1-5
-```
-
-Blanca example (partition, account, and QoS are typically the same value):
-
-```bash
-pixi run -e build polyzymd submit \
-    -c config.yaml \
-    --preset blanca-shirts \
-    --pixi-env auto \
-    --replicates 1-5
-```
-
-If you run GROMACS on Blanca, use `--constraint` to request hardware that is
-compatible with the site GROMACS build. See {doc}`gromacs_export`.
+The site module reported CUDA GPU support. These results apply only to the
+tested module and nodes. Run the short test again after a module or driver
+update.
 
 :::{tip}
-For analysis jobs, including one job per condition and replicate in parallel,
-see {doc}`hpc_execution`.
+To run analyses on the cluster, with one job per condition and replicate, see
+{doc}`hpc_execution`.
 :::
 
-## What the generated scripts do
+## What the job scripts do
 
-Each generated NVIDIA OpenMM script follows the same loop:
+Each OpenMM job script for an NVIDIA GPU does these steps:
 
-1. exit immediately if a `STOP` marker is present (see
-   [Stop a chain](#hpc-slurm-stop-a-chain))
-2. detect GPU capability and validate the environment selected at submission
-3. activate the environment, create an explicit CUDA Context, calculate an
-   energy, and run one integration step
-4. run `polyzymd run-segment`
-5. call `polyzymd check-progress`
-6. resubmit itself if work remains and no `STOP` marker has appeared
+1. It exits if a `STOP` file exists (see [Stop a chain](#hpc-slurm-stop-a-chain)).
+2. It reads the GPU's capability and checks the environment selected at
+   submission.
+3. It activates the environment, makes an explicit CUDA Context, calculates an
+   energy and runs one integration step.
+4. It runs `polyzymd run-segment`.
+5. It runs `polyzymd check-progress`.
+6. It submits itself again if work remains and no `STOP` file exists.
 
-This loop lets a simulation continue across wall-time limits.
+The OpenMM job scripts need an NVIDIA GPU. A local run with
+`polyzymd run` can use the `CPU` or `OpenCL` platform. See
+{doc}`hardware_platforms`.
 
-Version 1.3 OpenMM SLURM scripts require an NVIDIA GPU. The Python simulation
-path can use explicit CPU and OpenCL platforms, but these platforms need a
-site-managed batch wrapper. See {doc}`hardware_platforms`.
+On `SIGTERM` or `SIGUSR1`, an OpenMM job submits one successor at once, with an
+`afterany` dependency on the current job. It then passes the signal to
+`run-segment`. A receipt file in the replicate folder stops a second trap, or
+the normal exit, from submitting a second successor. If `sbatch` fails, the job
+exits with an error and prints the command to recover by hand.
 
-For OpenMM jobs, `SIGTERM` or `SIGUSR1` immediately submits one successor with
-an `afterany` dependency on the current job, then forwards the signal to
-`run-segment`. A receipt in the replicate directory prevents duplicate traps
-and normal exit handling from submitting a second successor. If `sbatch`
-fails, the job exits with an error and prints the manual recovery command.
+The routing state passes from job to job. A rerouted successor inherits
+`POLYZYMD_ROUTING_RETRY_COUNT` and `POLYZYMD_ROUTING_FAILED_NODES`. Its
+`--exclude` is the failed nodes plus the preset's list. After a segment that
+ran, the successor gets a count of zero and an empty node list.
 
-Routing state travels with the chain. A rerouted successor inherits
-`POLYZYMD_ROUTING_RETRY_COUNT` and `POLYZYMD_ROUTING_FAILED_NODES`, whose
-union with the preset exclusions becomes its `--exclude`; a successor queued
-after a segment that actually ran is exported a reset counter and an empty
-node list.
+OpenMM records each minimization and equilibration phase in `phase.json`,
+which it writes atomically. A successor skips a phase only when the record
+says `status: completed`. A checkpoint without that record is incomplete.
+PolyzyMD then resumes from a synchronized portable state if one exists.
+Otherwise, it starts the phase again from the end of the previous completed
+phase. A temperature ramp records the step and the scheduled temperature.
+An interrupted minimization starts again, because OpenMM cannot resume a
+minimization part way through.
 
-OpenMM records each minimization and equilibration phase in an atomic
-`phase.json`. Only `status: completed` permits a successor to skip a phase.
-A checkpoint without that record is incomplete: PolyzyMD resumes from a
-synchronized portable state when one exists, or restarts the current phase
-from the preceding completed phase. Temperature ramps record the exact step
-and scheduled temperature. Minimization is restarted when interrupted because
-OpenMM minimization itself has no portable mid-minimization resume point.
+Each dynamics loop first calibrates with at most 1,000 steps. It then runs
+about five seconds of steps per `Simulation.step()` call. Python therefore
+sees a preemption signal within seconds, whatever the reporter interval.
 
-Every dynamics loop first calibrates with at most 1,000 steps and then targets
-five seconds per `Simulation.step()` call. Reporter frequency does not
-determine how quickly Python notices a preemption signal.
+The GROMACS job scripts do these steps:
 
-For GROMACS jobs the scripts additionally:
-
-- run EM, equilibration stages, and production with checkpoint restart
-- pass `-maxh` so GROMACS exits cleanly before the wall-time limit
-- trap SIGTERM and forward it to `gmx mdrun`, which flushes a checkpoint
-- self-resubmit until the full production duration completes
+- They run minimization, the equilibration stages and production, and restart
+  each from its checkpoint.
+- They pass `-maxh` to `gmx mdrun`, so GROMACS stops before the wall-time
+  limit.
+- They pass `SIGTERM` to `gmx mdrun`, which then writes a checkpoint.
+- They submit themselves again until production is complete.
 
 ## Submit GROMACS jobs
 
-### CPU GROMACS
+Set `engine: gromacs` in the config. `submit` then writes GROMACS scripts.
+The `--engine` option overrides the config.
+
+On CPU nodes:
 
 ```bash
 pixi run -e build polyzymd submit \
     -c config.yaml \
-    --engine gromacs \
     --preset aa100 \
     --replicates 1-3
 ```
 
-### GPU GROMACS
+On GPU nodes:
 
 ```bash
 pixi run -e build polyzymd submit \
     -c config.yaml \
-    --engine gromacs \
     --preset blanca-shirts \
     --constraint "A40|A100" \
     --replicates 1-3
 ```
 
-GROMACS uses the site module or container from `config.yaml`. For CPU and GPU
-configuration, MPI settings, constraints, and recovery details, see
+GROMACS uses the site module or container that the config's `gromacs:` block
+names. For CPU and GPU settings, MPI, constraints and recovery, see
 {doc}`gromacs_export`.
 
 ## Common fixes
 
 ### `pixi: command not found`
 
-Make sure `pixi` is available in non-interactive shells, not only your login
-shell setup.
+Make `pixi` available in non-interactive shells. A setting in your login shell
+files alone is not enough.
 
-### job dies with OOM
+### The job stops with an out-of-memory error
 
-Increase `--memory`, reduce system size, or test with fewer polymers.
+Increase `--memory`. You can also make the system smaller, or test with fewer
+polymer chains.
 
-### config path no longer exists
+### The config path no longer exists
 
-The generated script stores the config path it was given at submission time. If
-you move the config, regenerate the scripts and resubmit.
+The job script keeps the config path that you gave at submission. If you move
+the config, write the scripts again and submit again.
 
 (hpc-slurm-stop-permanently)=
-### need to stop a job permanently
+### Stop a job permanently
 
-See [Stop a chain](#hpc-slurm-stop-a-chain). Plain `scancel` is not enough:
-the chain resubmits itself within seconds.
+See [Stop a chain](#hpc-slurm-stop-a-chain). `scancel` alone is not enough,
+because the chain submits itself again within seconds.
 
-## Related reference pages
+## Related pages
 
-- command details: {doc}`../reference/cli_reference`
-- configuration fields: {doc}`../reference/configuration`
-- GROMACS HPC guide: {doc}`gromacs_export`
-- first-run setup: {doc}`../get_started/quickstart`
-- hardware portability and extension: {doc}`hardware_platforms`
-
-<!-- IMAGE OPPORTUNITY: Add a simple lifecycle diagram showing `submit ->
-run-segment -> check-progress -> resubmit`, plus a second annotated screenshot
-of a generated SLURM script header. -->
-# Build integrity and recovery
-
-For prebuilt OpenMM campaigns, wait for `polyzymd build` to finish before
-submitting simulation jobs. A successful build contains these files in each
-replicate directory:
-
-- `solvated_system.pdb`
-- `system.prmtop` (the analysis topology; absent only if ParmEd could not
-  convert the system, in which case the build log says so)
-- `system.xml`
-- `build_manifest.json`
-
-The manifest is the final commit marker. `--skip-build` verifies its
-configuration hash, artifact hashes, and particle count before OpenMM creates a
-simulation. A missing or malformed manifest means the build is incomplete.
-Older campaigns without a manifest remain recoverable only when the topology
-and System particle counts agree; PolyzyMD emits a warning and does not silently
-create a manifest.
-
-Build and simulation processes share `.polyzymd.lock` in the replicate
-directory. A second process exits instead of writing concurrently. PolyzyMD
-also refuses to rebuild a directory after progress, minimization,
-equilibration, or production artifacts exist. Use a new output directory for a
-new molecular system.
-
-Continuation loads `production_N_topology.pdb` from the predecessor production
-segment together with its System and State. The root `solvated_system.pdb` is a
-warned legacy fallback only. If a diagnostic names different particle counts,
-restore all artifacts from the same build; do not copy individual files until
-the counts happen to match.
+- Command options: {doc}`../reference/cli_reference`
+- Configuration keys: {doc}`../reference/configuration`
+- GROMACS on a cluster: {doc}`gromacs_export`
+- Other hardware: {doc}`hardware_platforms`
+- First simulation: {doc}`../get_started/quickstart`

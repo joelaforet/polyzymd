@@ -1,10 +1,9 @@
-# Get a validated number with one command
+# Get one number with its uncertainty
 
-Use this when you want the value of a metric for one simulation, or want to
-know whether two simulations differ. `polyzymd analyze` reads the simulation
-`config.yaml` of each condition directly; it does not read `comparison.yaml`.
-One command gives a number that carries its unit, its uncertainty,
-its sample size and its provenance.
+Run one `polyzymd analyze` command to get the value of a metric for one
+condition, or to find out whether two conditions differ. The command reads the
+`config.yaml` of each condition. Its result carries the unit, the 95 %
+confidence interval, the number of replicates and the provenance.
 
 ## Summarize one condition
 
@@ -18,12 +17,13 @@ enzyme_water  n 3  mean 18.42  sem 0.05  ci95 18.2 to 18.64  values 18.4, 18.5, 
 verdict: enzyme_water mean_rg 18.42 A (95% CI 18.2 to 18.64, n 3)
 ```
 
-The replicates come from the directories the config points at. Name them
-explicitly with `--replicates 1-3` when only some of them should be used.
+PolyzyMD finds the replicates in the folders that the config names. To use
+only some replicates, add `--replicates 1-3`.
 
 ## Compare two or more conditions
 
-The first `-c` is the control; every other condition is compared against it.
+The first `-c` is the control. PolyzyMD compares each other condition with
+it.
 
 ```bash
 pixi run -e analysis polyzymd analyze rg \
@@ -41,14 +41,14 @@ no polymer vs 50% SBMA  delta +0.31  ci95 0.02 to 0.6  p 0.041  p_adj 0.041  tes
 verdict: 50% SBMA larger mean_rg than no polymer (delta +0.31 A, 95% CI 0.02 to 0.6, p_adj 0.041, n 3 vs 3)
 ```
 
-Without `--label`, each condition is named after the directory holding its
+Without `--label`, each condition takes the name of the folder that holds its
 config.
 
 ## Change analysis settings
 
-Pass `--set key=value` once per setting. Values are read as YAML, so numbers
-and booleans arrive with the right type. `--set` takes only top-level settings;
-give a nested setting as one YAML mapping, for example
+Give `--set key=value` once for each setting. PolyzyMD reads each value as
+YAML, so numbers and booleans keep their type. `--set` takes only top-level
+settings. Give a nested setting as one YAML mapping, for example
 `--set groups='{protein: chainid A, polymer: chainid C}'`.
 
 ```bash
@@ -57,12 +57,17 @@ pixi run -e analysis polyzymd analyze rmsf \
   --set selection='name CA' --set reference_mode=average
 ```
 
-## Pick a selection when the analysis measures several
+## Select one result
 
-Some analyses report several results: sasa reports each context's total and
-per-residue SASA, distances reports a mean distance and a fraction below threshold for each atom pair, and
-rmsf reports core, region and plain-mean values and the per-residue profiles. The report covers one of them at a time, names it in `run`, and lists the
-rest in `all_runs`. Pick another with `--run`:
+Some analyses report several results:
+
+- `sasa` reports the total and the per-residue SASA of each context.
+- `distances` reports a mean distance and a fraction below the threshold for
+  each atom pair.
+- `rmsf` reports core, region and mean values, and the per-residue profiles.
+
+The report covers one result at a time. It names that result in `run` and
+lists the others in `all_runs`. To report a different result, use `--run`:
 
 ```bash
 pixi run -e analysis polyzymd analyze distances -c A/config.yaml -c B/config.yaml \
@@ -71,10 +76,14 @@ pixi run -e analysis polyzymd analyze distances -c A/config.yaml -c B/config.yam
 
 ## Get the full record
 
-`--format json` prints the whole `ProtocolReport`, including every metric the
-analysis reported, the frames each replicate contributed, the package versions
-and a SHA-256 of each simulation config. Every field is listed in
-{doc}`../reference/analysis_protocol_report`.
+`--format json` prints the whole `ProtocolReport`. It includes these items:
+
+- every metric that the analysis reported;
+- the frames that each replicate contributed;
+- the package versions;
+- the SHA-256 of each simulation config.
+
+For every field, see {doc}`../reference/analysis_protocol_report`.
 
 ```bash
 pixi run -e analysis polyzymd analyze rg -c A/config.yaml -c B/config.yaml \
@@ -84,96 +93,65 @@ pixi run -e analysis polyzymd analyze rg -c A/config.yaml -c B/config.yaml \
 In Python the same call is:
 
 ```python
-from polyzymd.analyses.protocols import analyze
+from polyzymd.analyses import analyze
 
 report = analyze("rg", ["A/config.yaml", "B/config.yaml"], equilibration="10ns")
 print(report.to_agent_text())
 print(report.conditions[0].ci95, report.unit)
 ```
 
-## If you have a `comparison.yaml`
+The catalytic triad is not an analysis of this command. Measure it with the
+routine in {doc}`analysis_triad_quickstart`. For the triad distances alone, run
+`polyzymd analyze distances --set pairs=<pairs.yaml>`.
 
-Every analysis, rg, rmsd, rmsf, rmsd_per_residue, distances, sasa,
-secondary_structure, contacts, native_contacts and hydrogen_bonds, reads the
-simulation configs given with `-c`. `comparison.yaml` is no longer read by
-`polyzymd analyze`: with `-f comparison.yaml` the command exits 2 without
-measuring anything, and prints the equivalent command built from the file's
-conditions, labels, replicates and equilibration window, with this page and
-the agent skill to read:
-
-```bash
-pixi run -e analysis polyzymd analyze hydrogen_bonds -f comparison.yaml
-```
-
-```
-error: comparison.yaml is no longer read by polyzymd analyze: every analysis reads the simulation configs given with -c, control first.
-fix: Run polyzymd analyze hydrogen_bonds -c /study/A/config.yaml --label 'No Polymer' -c /study/B/config.yaml --label SBMA --replicates 1,2,3 --eq 100ns. Read https://polyzymd.readthedocs.io/en/latest/how_to/analysis_agent_protocol.html, or point an agent at .claude/skills/polyzymd-analyze/SKILL.md or that page to learn the protocol.
-```
-
-`polyzymd compare`, with any arguments, exits 2 in the same way and prints
-`polyzymd analyze NAME -c config.yaml ...`, the `--submit --preset <cluster>`
-form for SLURM, this page and the agent skill.
-
-The catalytic triad is not an analysis of this command: `polyzymd analyze
-catalytic_triad` exits 2 and points to {doc}`analysis_triad_quickstart`, the
-routine on the analysis API, and to `polyzymd analyze distances
---set pairs=<pairs.yaml>` for the triad distances.
-
-## Point an agent at this protocol
-
-An agent that runs PolyzyMD analyses learns this protocol from
+An agent learns this protocol from
 `.claude/skills/polyzymd-analyze/SKILL.md` in the repository, or from this
 page.
 
-How long polymer contacts last comes from `polyzymd analyze contacts` too:
-`--run mean_lifetime` reports the Kaplan-Meier restricted mean duration of a
-contact event per replicate, and `--run lifetime_events` and
-`--run censored_fraction` the counts behind it:
-
-```bash
-pixi run -e analysis polyzymd analyze contacts -c A/config.yaml -c B/config.yaml --eq 10ns --run mean_lifetime
-```
-
 ## Read the result
 
-- `n` is the number of replicates. It is the sample size for every test; frames
-  are never treated as independent samples.
-- `ci95` on a condition is the Student t interval on its mean. On a comparison
-  it is the interval on the difference and carries no multiplicity correction,
-  so it can exclude zero while `p_adj` does not clear alpha.
-- `not testable` means a condition has fewer than two replicates, so no test
-  exists. It does not mean the conditions are the same.
-- `no test recorded` means a stored comparison result holds a raw p value but
-  no multiplicity-corrected one, so the line describes a difference without
-  deciding it.
-- A stored comparison result that holds only means and standard errors gets
-  its condition intervals rebuilt from the standard error and the replicate count;
-  `ci_method` then reads `student_t_from_sem` and no interval is given on a
-  difference.
-- Every `warning:` line is part of the answer. A warning that a condition has
-  two replicates changes how wide the interval really is.
+For the format of each line and the verdict words, see
+{ref}`polyzymd analyze <cli-analyze>`. Read these points first:
+
+- `n` is the number of replicates. It is the sample size of every test.
+  PolyzyMD never treats frames as independent samples.
+- `ci95` of a condition is the Student t interval of its mean. `ci95` of a
+  comparison is the interval of the difference. It has no correction for
+  multiple tests. So it can exclude zero while `p_adj` is above alpha.
+- `not testable` means that a condition has fewer than two replicates, so no
+  test is possible. It does not mean that the conditions are the same.
+- `no test recorded` means that a stored comparison holds a raw p value but no
+  corrected p value. The line gives the difference but no decision.
+- A stored comparison that holds only means and standard errors gets condition
+  intervals rebuilt from the standard error and the number of replicates.
+  `ci_method` is then `student_t_from_sem`, and the difference has no interval.
+- Each `warning:` line is part of the answer. For example, a warning that a
+  condition has two replicates changes how much the interval tells you.
 
 ## Where the outputs land
 
-The run writes `polyzymd_results/`, which holds every replicate's values and
-their record, and `figures/<name>/` under the current directory, or under
-`--output-dir` when you give one. A stored replicate result is read back when
-the function, settings, config, input files, equilibration window and frames
-are unchanged; pass `--recompute` to measure it again.
+The command writes two folders in the current folder, or in `--output-dir`:
+
+- `polyzymd_results/` holds the values of each replicate and their record.
+- `figures/<name>/` holds the figures.
+
+PolyzyMD reuses a stored replicate result if these items are unchanged: the
+function, the settings, the config, the input files, the equilibration window
+and the frames. To measure it again, add `--recompute`.
 
 ## Troubleshooting
 
 | Message | Fix |
 |---|---|
-| `error: Unknown analysis 'rgyr'` | Use one of the names the error's `hint:` line lists. |
-| `error: ... no replicate directories under the scratch directory` | Pass `--replicates 1-3` to state which replicates to use. |
+| `error: No analysis named 'rgyr'.` | Use one of the names that the `fix:` line lists. |
+| `error: Condition ...: replicates [...] have no run directory under ...` | Give replicates that exist with `--replicates`, or run the simulations first. If the replicate folders are in another place, name it with `data.local.yaml`, `polyzymd study locate DIR` or `--data`. |
 | `error: Config file(s) not found` | Point `-c` at a simulation `config.yaml`, not a `comparison.yaml`. |
-| `error: comparison.yaml is no longer read by polyzymd analyze` | Run the command on the `fix:` line, which gives each condition with `-c`. |
+| `error: comparison.yaml is no longer read by polyzymd analyze` | Run the command on the `fix:` line. It gives each condition with `-c`. |
 | `error: catalytic_triad is no longer a polyzymd analyze analysis` | Follow {doc}`analysis_triad_quickstart`, or run `polyzymd analyze distances --set pairs=<pairs.yaml>` for the distances. |
 | `polyzymd: command not found` | Run through `pixi run -e analysis`. |
 
-The command exits 0 on success and 2 on any of the errors above, printing the
-message and the fix on one line each.
+The command exits with 0 on success. On each error above, it exits with 2 and
+prints the message and the fix, one line each.
 
 ## See also
 

@@ -79,6 +79,12 @@ class CoSolvent:
     density: float | None = None  # g/mL
     residue_name: str = "COS"
     molecule: Molecule | None = field(default=None, repr=False)
+    count: int | None = None
+    #: How charges are assigned when the molecule is not in the bundled library.
+    charge_method: str = "nagl"
+    #: Whether the config set charge_method; when it did not, the build asks
+    #: the user to check the default.
+    charge_method_given: bool = False
 
     def __post_init__(self) -> None:
         """Validate co-solvent specification.
@@ -92,14 +98,16 @@ class CoSolvent:
             self.residue_name = self.residue_name[:3].upper()
 
         # Validate that exactly one composition method is used
-        if self.mole_fraction is None and self.concentration is None:
+        given = [
+            v for v in (self.mole_fraction, self.concentration, self.count) if v is not None
+        ]
+        if len(given) != 1:
             raise ValueError(
-                f"CoSolvent '{self.name}': Must specify either mole_fraction or concentration"
+                f"CoSolvent '{self.name}': give exactly one of mole_fraction, concentration "
+                "and count"
             )
-        if self.mole_fraction is not None and self.concentration is not None:
-            raise ValueError(
-                f"CoSolvent '{self.name}': Cannot specify both mole_fraction and concentration"
-            )
+        if self.count is not None and self.count < 1:
+            raise ValueError(f"CoSolvent '{self.name}': count must be at least 1")
         if self.mole_fraction is not None and not 0.0 < self.mole_fraction < 1.0:
             raise ValueError(f"CoSolvent '{self.name}': mole_fraction must be between 0 and 1")
         if self.concentration is not None and self.concentration <= 0.0:
@@ -368,7 +376,7 @@ class SolventBuilder:
         from openff.toolkit import Molecule
         from openff.units import Quantity
 
-        from polyzymd.data.solvent_molecules import get_solvent_molecule
+        from polyzymd.data.solvent_molecules import get_solvent_molecule, is_bundled_solvent
         from polyzymd.utils import boxvectors
         from polyzymd.utils.packmol import solvate_with_packmol
 
@@ -442,17 +450,26 @@ class SolventBuilder:
                     name=cosolvent.name,
                     smiles=cosolvent.smiles,
                     residue_name=cosolvent.residue_name,
+                    charge_method=cosolvent.charge_method,
                 )
+                if not cosolvent.charge_method_given and not is_bundled_solvent(cosolvent.name):
+                    LOGGER.warning(
+                        f"Co-solvent {cosolvent.name}: partial charges are from "
+                        f"{cosolvent.charge_method.upper()} (the default). Check that they suit "
+                        "this molecule; set charge_method: am1bcc in its co_solvents entry to "
+                        "use AM1-BCC, which needs AmberTools."
+                    )
 
             cosolvent_molar_mass = sum(atom.mass for atom in cosolvent.molecule.atoms)
             if cosolvent.mole_fraction is not None:
                 cosolvent_masses.append(
                     (cosolvent.name, cosolvent.mole_fraction, cosolvent_molar_mass)
                 )
-            elif cosolvent.concentration is None:
+            elif cosolvent.concentration is None and cosolvent.count is None:
                 # Should not reach here due to validation in CoSolvent.__post_init__
                 raise ValueError(
-                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction nor concentration"
+                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction, concentration "
+                    "nor count"
                 )
 
         neutral_solvent_mass = self._calculate_neutral_solvent_mass(
@@ -515,15 +532,68 @@ class SolventBuilder:
                     f"Adding {n_cosolvent} {cosolvent.name} molecules ({cosolvent.concentration} M)"
                 )
 
+            elif cosolvent.count is not None:
+                n_cosolvent = int(cosolvent.count)
+                LOGGER.info(f"Adding {n_cosolvent} {cosolvent.name} molecules (count)")
+
             else:
                 # Should not reach here due to validation in CoSolvent.__post_init__
                 raise ValueError(
-                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction nor concentration"
+                    f"CoSolvent '{cosolvent.name}' has neither mole_fraction, concentration "
+                    "nor count"
                 )
 
             solvent_molecules.append(cosolvent.molecule)
             solvent_counts.append(n_cosolvent)
             cosolvent_counts_list.append((cosolvent.name, n_cosolvent))
+
+        # A charged co-solvent (a SMILES such as dodecyl sulfate without its
+        # counter-ion) carries charge the first ion count did not know. A
+        # SMILES that holds its counter-ion ("...[O-].[Na+]") is neutral.
+        solute_int = self._charge_to_integer(solute_charge)
+        cosolvent_int = sum(
+            self._charge_to_integer(cosolvent.molecule.total_charge) * count
+            for cosolvent, (_, count) in zip(composition.co_solvents, cosolvent_counts_list)
+        )
+        if composition.neutralize and cosolvent_int:
+            na_to_add, cl_to_add = self._calculate_ion_counts(
+                nacl_to_add=nacl_to_add,
+                solute_charge=solute_int + cosolvent_int,
+                neutralize=True,
+            )
+            neutral_solvent_mass = self._calculate_neutral_solvent_mass(
+                solvent_mass=solvent_mass,
+                na_count=na_to_add,
+                cl_count=cl_to_add,
+                na_mass=na_mass,
+                cl_mass=cl_mass,
+            )
+            if cosolvent_masses:
+                water_to_add, _ = self._calculate_mole_fraction_counts(
+                    neutral_solvent_mass=neutral_solvent_mass,
+                    water_mass=water_mass,
+                    cosolvent_mole_fractions=cosolvent_masses,
+                )
+            else:
+                water_to_add = self._round_dimensionless_to_int(neutral_solvent_mass / water_mass)
+            solvent_counts[:3] = [int(water_to_add), na_to_add, cl_to_add]
+            LOGGER.info(
+                f"Co-solvents carry charge {cosolvent_int:+d}: now {int(water_to_add)} water, "
+                f"{na_to_add} Na+, {cl_to_add} Cl-"
+            )
+        net_charge = solute_int + cosolvent_int + na_to_add - cl_to_add
+        if net_charge and composition.neutralize:
+            raise ValueError(
+                f"The solvated system would carry net charge {net_charge:+d} although neutralize "
+                "is on; check the charges of the solute and co-solvents."
+            )
+        if net_charge:
+            LOGGER.warning(
+                f"The solvated system carries net charge {net_charge:+d} (solute {solute_int:+d}, "
+                f"co-solvents {cosolvent_int:+d}, ions {na_to_add - cl_to_add:+d}) because "
+                "solvent.ions.neutralize is false. Periodic electrostatics then add a uniform "
+                "neutralizing background; set neutralize: true unless you mean this."
+            )
 
         # Pack the box using PACKMOL (with CONECT-record overflow protection)
         solvated_top = solvate_with_packmol(
@@ -588,6 +658,9 @@ class SolventBuilder:
                 concentration=cs.concentration,
                 density=cs.density,
                 residue_name=cs.residue_name or cs.name[:3].upper(),
+                count=cs.count,
+                charge_method=cs.charge_method.value,
+                charge_method_given="charge_method" in cs.model_fields_set,
             )
             for cs in config.co_solvents
         ]
@@ -978,6 +1051,14 @@ class SolventBuilder:
                 residue_name = smiles_to_residue[mol_smiles]
                 for atom in mol.atoms:
                     atom.metadata["residue_name"] = residue_name
+            # A molecule made from SMILES has blank atom names, which the
+            # Amber topology analyses read cannot hold: ions get their element
+            # (NA, CL), other molecules OpenFF's unique names.
+            if any(not atom.name.strip() for atom in mol.atoms):
+                if mol.n_atoms == 1:
+                    mol.atoms[0].name = mol.atoms[0].symbol.upper()
+                else:
+                    mol.generate_unique_atom_names()
 
     @property
     def packmol_seed(self) -> Optional[int]:

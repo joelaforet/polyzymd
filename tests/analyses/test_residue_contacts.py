@@ -386,16 +386,26 @@ def test_analyze_residue_runs_are_labelled_by_resid(configs, schedules, tmp_path
         assert row.replicate_values == pytest.approx(expected, abs=1e-12)
 
 
-def test_polymer_types_narrow_the_polymer_selection(configs, schedules, tmp_path) -> None:
+def test_polymer_types_name_the_monomers_reported(configs, schedules, tmp_path) -> None:
+    """polymer_types picks the per-monomer rows; the polymer itself is polymer_selection."""
     report = analyze("contacts", [configs["A"]], **_options(tmp_path, {"polymer_types": "SBM"}))
 
     settings = report.provenance.settings
-    assert settings["polymer_selection"] == "((chainid C) and (resname SBM)) and not element H"
+    assert settings["polymer_selection"] == "(chainid C) and not element H"
     assert settings["polymer_types_found"] == ["SBM"]
     assert "EGM_contact_fraction" not in report.all_runs
     assert "SBM_contact_fraction_residues" in report.all_runs
-    expected = [float(np.mean(_expected(schedules[("A", r)])["SBM"] > 0)) for r in (1, 2, 3)]
+    # coverage counts contact with the whole polymer.
+    expected = [float(np.mean(_expected(schedules[("A", r)])["any"] > 0)) for r in (1, 2, 3)]
     assert _by_label(report)["A"] == pytest.approx(expected, abs=1e-12)
+    sbm = analyze(
+        "contacts",
+        [configs["A"]],
+        run="SBM_contact_fraction",
+        **_options(tmp_path, {"polymer_types": "SBM"}),
+    )
+    expected = [float(np.mean(_expected(schedules[("A", r)])["SBM"])) for r in (1, 2, 3)]
+    assert _by_label(sbm)["A"] == pytest.approx(expected, abs=1e-12)
 
 
 def test_analyze_refuses_an_unknown_run_with_the_list(configs, tmp_path) -> None:
@@ -432,15 +442,14 @@ def test_an_unknown_run_is_refused_before_any_frame_is_measured(
 
 @pytest.mark.parametrize(
     "settings",
-    [
-        {"polymer_selection": "chainid Z"},
-        {"protein_selection": "resname TRP"},
-        {"polymer_types": ["XYZ"]},
-    ],
+    [{"protein_selection": "resname TRP"}],
 )
 @pytest.mark.parametrize("method", ["distance", "occlusion"])
 def test_an_empty_selection_is_refused(configs, settings, method) -> None:
-    """The selections are checked before any frame is measured, for either method."""
+    """The protein selection is checked before any frame is measured, for either method.
+
+    An empty polymer selection is a control without polymer: no contact, 0.
+    """
     with pytest.raises(ProtocolError, match=r"match no atoms in any replicate"):
         analyze(
             "contacts",

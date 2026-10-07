@@ -375,8 +375,29 @@ def prepare_upload(
     return {"upload": deposit / UPLOAD, "trajectories": trajectories, "guide": guide}
 
 
+def report_summary(path: Path) -> str:
+    """Return a stored report's verdicts on one line, saying first when the report is partial."""
+    import json
+
+    try:
+        report = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return "no stored report"
+    text = " ".join(report.get("verdict", []))
+    if report.get("status", "complete") != "complete":
+        problems = "; ".join(report.get("problems") or [])
+        text = f"PARTIAL REPORT ({problems}). " + text
+    return text
+
+
 def deposit_readme(
-    *, study_name: str, tag: str | None, meta: dict[str, Any], analyses: dict[str, Any], root: Path
+    *,
+    study_name: str,
+    tag: str | None,
+    meta: dict[str, Any],
+    analyses: dict[str, Any],
+    root: Path,
+    project: bool = False,
 ) -> str:
     """Return the README at the top of the deposit, written from the study's metadata.
 
@@ -430,7 +451,14 @@ def deposit_readme(
         "| `manifest.json` | Every file by size and SHA-256, software versions, each condition's resolved config, and the production analysed |",
         "| `CITATION.cff` | How to cite the paper, this dataset and PolyzyMD |",
         "| `manifest-1.schema.json` | The JSON Schema `manifest.json` follows |",
-        f"| `{study_name}-{tag or 'untagged'}.zip` | The study: `study.yaml`, `conditions/`, `analyses/`, `figures/`, `results/` |",
+        (
+            f"| `{study_name}-{tag or 'untagged'}.zip` | The project: `project.yaml`, shared "
+            "`analyses/`, `stats/` and `figures/`, and one folder per study (`study.yaml`, "
+            "`conditions/`, `structures/`, `results/`) |"
+            if project
+            else f"| `{study_name}-{tag or 'untagged'}.zip` | The study: `study.yaml`, "
+            "`conditions/`, `analyses/`, `figures/`, `results/` |"
+        ),
         "| `engine_inputs.zip` | Each replicate's serialized engine inputs |",
         "| `final_frames.zip` | Each replicate's final frame |",
         "",
@@ -438,25 +466,37 @@ def deposit_readme(
         "",
         "## Reproduce",
         "",
-        "Install the PolyzyMD version named in `study.yaml`, unzip the study, then:",
+        "Install the PolyzyMD version recorded in `manifest.json` (`versions`), unzip the "
+        + ("project" if project else "study")
+        + ", then:",
         "",
         "1. **Figures, without trajectories:** run the scripts in `figures/`, which read",
-        '   `pz.Study("study.yaml").results(run)`.',
+        '   `pz.Project(".").results(run)`.'
+        if project
+        else '   `pz.Study("study.yaml").results(run)`.',
         "2. **Analyses, from the trajectories:** download them, run",
-        "   `polyzymd study locate DOWNLOAD_DIR --verify`, then `polyzymd analyze --study study.yaml`.",
+        "   `polyzymd study locate DOWNLOAD_DIR --verify --study <study>` for each study, then",
+        "   `polyzymd analyze --project .`."
+        if project
+        else "   `polyzymd study locate DOWNLOAD_DIR --verify`, then `polyzymd analyze --study study.yaml`.",
         "3. **Simulations:** build and run each `conditions/<name>/config.yaml` with PolyzyMD;",
-        "   the replicate number is the random seed, so results agree within MD noise.",
-        "",
-        "## Results",
+        "   the replicate number seeds each replicate's starting structure (Packmol and",
+        "   polymer draws), initial velocities and thermostat noise. On other hardware",
+        "   or software versions, results agree within MD noise, not frame by frame.",
         "",
     ]
+    if project:
+        # The project's results are each study's; the Studies section that
+        # follows gives them.
+        lines += [
+            f"Licences: {meta.get('license', {}).get('data', 'CC-BY-4.0')} for data, results "
+            f"and figures; {meta.get('license', {}).get('code', 'MIT')} for code.",
+            "",
+        ]
+        return "\n".join(lines)
+    lines += ["## Results", ""]
     for run in analyses:
-        report = root / "results" / run / "report.json"
-        try:
-            verdicts = json.loads(report.read_text()).get("verdict", [])
-        except (OSError, ValueError):
-            verdicts = ["no stored report"]
-        lines.append(f"- **{run}:** " + " ".join(verdicts))
+        lines.append(f"- **{run}:** " + report_summary(root / "results" / run / "report.json"))
     lines += [
         "",
         f"Licences: {meta.get('license', {}).get('data', 'CC-BY-4.0')} for data, results and figures; "

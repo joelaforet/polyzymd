@@ -87,24 +87,9 @@ class GromacsEngine(SimulationEngine):
         str
             System prefix (e.g. ``"CALB_SBMA-EGMA"``).
         """
-        parts: list[str] = []
+        from polyzymd.analyses.shared.gromacs import system_prefix
 
-        enzyme = getattr(self._config, "enzyme", None)
-        enzyme_name = getattr(enzyme, "name", None)
-        if isinstance(enzyme_name, str) and enzyme_name:
-            parts.append(enzyme_name)
-
-        polymers = getattr(self._config, "polymers", None)
-        polymers_enabled = getattr(polymers, "enabled", False)
-        polymer_prefix = getattr(polymers, "type_prefix", None)
-        if (
-            isinstance(polymers_enabled, bool)
-            and polymers_enabled
-            and isinstance(polymer_prefix, str)
-        ):
-            parts.append(polymer_prefix)
-
-        return "_".join(parts) if parts else "system"
+        return system_prefix(self._config)
 
     def run_local(self, replicate: int, working_dir: Path, skip_build: bool = False) -> None:
         """Run local GROMACS workflow with exported files.
@@ -184,7 +169,12 @@ class GromacsEngine(SimulationEngine):
                 polymer_seed=request.replicate,
             )
             component_info = builder.get_component_info()
-            exporter = GromacsExporter(interchange, self._config, component_info=component_info)
+            exporter = GromacsExporter(
+                interchange,
+                self._config,
+                component_info=component_info,
+                replicate=request.replicate,
+            )
             exporter.export(
                 output_dir=request.working_dir,
                 prefix=prefix,
@@ -569,8 +559,11 @@ class GromacsEngine(SimulationEngine):
         if topology_path is not None:
             logger.info("Resolved topology for analysis: %s", topology_path.name)
 
+        from polyzymd.analyses.shared.gromacs import topology_name
+
         return TrajectoryLayout(
             topology_path=topology_path,
+            gromacs_topology_path=working_dir / topology_name(self._config),
             trajectory_paths=trajectory_paths,
             trajectory_format="xtc",
             topology_format=topology_format,

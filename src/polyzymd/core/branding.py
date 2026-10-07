@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 FULL_CREDIT_LINE = "PolyzyMD: Created by Joseph R. Laforet Jr."
 SHORT_CREDIT_LINE = "PolyzyMD by Joseph R. Laforet Jr."
 CREDIT_LINE = "Created by Joseph R. Laforet Jr."
@@ -48,20 +46,3 @@ def file_header(comment_prefix: str = "#", *, width: int = 76) -> str:
 def prepend_file_header(content: str, comment_prefix: str = "#", *, width: int = 76) -> str:
     """Prepend a branding header to generated file content."""
     return f"{file_header(comment_prefix, width=width)}\n\n{content.lstrip()}"
-
-
-def cli_banner_lines(*details: str) -> list[str]:
-    """Return short CLI branding lines for high-level commands."""
-    lines = [SHORT_CREDIT_LINE]
-    lines.extend(detail for detail in details if detail)
-    return lines
-
-
-def cli_banner_text(*details: str) -> str:
-    """Return short CLI branding text for high-level commands."""
-    return "\n".join(cli_banner_lines(*details))
-
-
-def append_credit_comment(lines: Sequence[str], comment_prefix: str = "#") -> list[str]:
-    """Append a trailing credit line to an existing generated block."""
-    return [*lines, f"{comment_prefix} {FULL_CREDIT_LINE}"]

@@ -21,7 +21,11 @@ from polyzymd.analyses.exceptions import ProtocolError
 from polyzymd.analyses.results import read_results
 from polyzymd.analyses.study_file import load_study_file
 from polyzymd.cli.main import cli
-from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+from tests._support.analysis_testkit import (
+    write_committed_study,
+    write_openmm_replicate,
+    write_simulation_config,
+)
 
 pytest.importorskip("MDAnalysis")
 pytestmark = [
@@ -51,7 +55,6 @@ def study_dir(tmp_path: Path) -> Path:
             )
     _write(
         root / "study.yaml",
-        "polyzymd: 1.3.0\n"
         "equilibration: 0.25ns\n"
         "conditions:\n"
         "  No polymer: conditions/no_polymer/config.yaml\n"
@@ -195,10 +198,14 @@ class TestAnalyzeStudy:
         assert "-c cannot be given" in result.output
 
     def test_label_picks_conditions(self, study_dir: Path) -> None:
-        result = _analyze("rg", "--study", str(study_dir), "--label", "Polymer")
+        import json
+
+        result = _analyze("rg", "--study", str(study_dir), "--label", "Polymer", "--format", "json")
         assert result.exit_code == 0, result.output
-        report = read_results(study_dir / "results" / "rg").report
-        assert [c.label for c in report.conditions] == ["Polymer"]
+        report = json.loads(result.stdout[result.stdout.index("{") :])
+        assert [c["label"] for c in report["conditions"]] == ["Polymer"]
+        # A run of some conditions never replaces the run's report.
+        assert not (study_dir / "results" / "rg" / "report.json").exists()
         assert _analyze("rg", "--study", str(study_dir), "--label", "Nope").exit_code == 2
 
     def test_unlisted_shipped_analysis_runs_with_a_note(self, study_dir: Path) -> None:
@@ -392,7 +399,7 @@ class TestUserFunctions:
                 (user_study / "results" / "my_rg").glob("polyzymd_results/*/*/*/record.json")
             ).read_text()
         )
-        assert record["function"]["hash_of"] == "module"
+        assert record["function"]["hash_of"] == "module_folder"
         assert record["function"]["module"] == "polyzymd_study.metrics"
 
     def test_check_imports_the_function(self, user_study: Path) -> None:
@@ -520,3 +527,32 @@ class TestCommonUntil:
         record = next((root / "results" / "rg").rglob("record.json"))
         assert json.loads(record.read_text())["until_ns"] == pytest.approx(0.5)
         assert "rg" not in stale_runs(load_study_file(root))
+
+
+def test_an_analysis_sets_its_own_stride(study_dir: Path) -> None:
+    from polyzymd.analyses.study_freeze import stale_runs
+
+    text = (study_dir / "study.yaml").read_text()
+    _write(
+        study_dir / "study.yaml", text + "  rg_sparse: {analysis: rg, selection: all, stride: 2}\n"
+    )
+    protocol = load_study_file(study_dir)
+    assert protocol.stride_of("rg_sparse") == 2 and protocol.stride_of("rg") == 1
+    assert _analyze("rg_sparse", "--study", str(study_dir)).exit_code == 0
+    table = pz.Study(study_dir).results("rg_sparse").table
+    assert len(table.query("condition == 'Polymer' and replicate == 1")) == 4
+    assert "rg_sparse" not in stale_runs(protocol)
+    check = CliRunner().invoke(cli, ["study", "check", str(study_dir)])
+    assert "window eq 0.25ns stride 2 (its own)" in check.output
+
+
+@pytest.mark.usefixtures("git_identity")
+def test_relative_files_of_shipped_analyses_follow_the_study(tmp_path: Path) -> None:
+    """reference_file: structures/ref.pdb is relative to study.yaml, not the shell."""
+    root = write_committed_study(
+        tmp_path, "  rmsd: {selection: all, reference_file: structures/ref.pdb}\n"
+    )
+    (root / "structures").mkdir(exist_ok=True)
+    (root / "structures" / "ref.pdb").write_text("END\n")
+    entry = load_study_file(root).analyses["rmsd"]
+    assert Path(entry.settings["reference_file"]) == (root / "structures" / "ref.pdb").resolve()

@@ -18,7 +18,7 @@ from click.testing import CliRunner
 import polyzymd as pz
 from polyzymd.analyses.exceptions import ProtocolError
 from polyzymd.analyses.study_file import load_study_file
-from polyzymd.analyses.study_freeze import freeze, stale_runs
+from polyzymd.analyses.study_freeze import freeze, stale_runs, without_machine_paths
 from polyzymd.analyses.study_metadata import (
     check_metadata,
     citation_cff,
@@ -27,7 +27,11 @@ from polyzymd.analyses.study_metadata import (
 )
 from polyzymd.analyses.study_scaffold import condition_folder, create_study
 from polyzymd.cli.main import cli
-from tests._support.analysis_testkit import write_openmm_replicate, write_simulation_config
+from tests._support.analysis_testkit import (
+    write_committed_study,
+    write_openmm_replicate,
+    write_simulation_config,
+)
 
 pytest.importorskip("MDAnalysis")
 pytestmark = [
@@ -187,10 +191,14 @@ class TestStale:
             "        total += atoms.radius_of_gyration()\n"
             "    return factor * total / len(frames)\n"
         )
-        text = (study / "study.yaml").read_text().replace(
-            "  rg: {selection: all}",
-            "  rg: {selection: all}\n  scaled:\n    function: analyses/metrics.py:scaled_rg\n"
-            "    kind: per_replicate\n    selections: {atoms: all}\n    settings: {factor: 2.0}",
+        text = (
+            (study / "study.yaml")
+            .read_text()
+            .replace(
+                "  rg: {selection: all}",
+                "  rg: {selection: all}\n  scaled:\n    function: analyses/metrics.py:scaled_rg\n"
+                "    kind: per_replicate\n    selections: {atoms: all}\n    settings: {factor: 2.0}",
+            )
         )
         (study / "study.yaml").write_text(text)
         result = CliRunner().invoke(
@@ -234,7 +242,7 @@ class TestFreeze:
         manifest = freeze(study).manifest
         assert manifest["schema"] == "polyzymd-study-manifest/1"
         replicate = manifest["conditions"]["Polymer"]["replicates"]["2"]
-        assert replicate["frames_analysed"] == 7 and replicate["production_frames"] == 10
+        assert "frames_analysed" not in replicate and replicate["production_frames"] == 10
         assert all(len(f["sha256"]) == 64 for f in replicate["files"])
         assert not any(f["path"].startswith("/") for f in replicate["files"])
         assert manifest["conditions"]["Polymer"]["resolved_config"]["enzyme"][
@@ -316,12 +324,13 @@ class TestFreeze:
         with pytest.raises(ProtocolError, match="already exists"):
             freeze(study, tag="study-v1")
 
-    def test_warnings_never_block(self, study: Path) -> None:
+    def test_uncommitted_inputs_are_refused(self, study: Path) -> None:
+        """The tag and deposit hold committed files, so the manifest may describe only those."""
         (study / "analyses" / "draft.py").write_text("x = 1\n")
-        result = freeze(study)
-        assert result.tag
-        assert any("analyses/draft.py" in w for w in result.warnings)
-        assert "analyses/draft.py" not in _git(study, "show", "--name-only", "--format=", "HEAD")
+        with pytest.raises(ProtocolError, match="uncommitted input") as info:
+            freeze(study)
+        assert "analyses/draft.py" in str(info.value) and "git" in info.value.hint
+        assert not _git(study, "tag")
 
     def test_without_trajectories(self, study: Path, tmp_path: Path) -> None:
         shutil.rmtree(tmp_path / "scratch")
@@ -362,7 +371,7 @@ class TestReproduce:
 
     def test_check_reports_metadata_gaps_and_the_next_step(self, study: Path) -> None:
         result = CliRunner().invoke(cli, ["study", "check", str(study)])
-        assert "metadata: 2 gaps" in result.output
+        assert "metadata (study.yaml): 2 gaps" in result.output
         assert "publish: when the analyses are final, run polyzymd study freeze" in result.output
         freeze(study)
         result = CliRunner().invoke(cli, ["study", "check", str(study)])
@@ -383,3 +392,128 @@ class TestReproduce:
         )
         assert json.loads((study / ".zenodo.json").read_text())["doi"] == "10.5281/zenodo.7654321"
         assert "already set: `10.5281/zenodo.7654321`" in result.guide.read_text()
+
+
+def test_freeze_needs_a_git_identity_before_writing(tmp_path: Path, monkeypatch) -> None:
+    """Without a git name and email nothing is written that names a tag."""
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    for key in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    with pytest.raises(ProtocolError, match="no user name and email"):
+        freeze(root)
+    assert not (root / "manifest.json").exists()
+
+
+def test_a_flow_style_output_loses_its_machine_paths() -> None:
+    """Flow-style and block-scalar output paths are rewritten through YAML."""
+    flow = "output: {projects_directory: /home/u/p, scratch_directory: /scratch/u/r}\nx: 1\n"
+    block = "output:\n  projects_directory: >-\n    /home/u/p\n  scratch_directory: /s/u\n"
+    for text in (flow, block):
+        output = yaml.safe_load(without_machine_paths(text))["output"]
+        assert output == {"projects_directory": ".", "scratch_directory": "data"}
+
+
+def test_the_freeze_warning_names_no_machine_path(tmp_path: Path) -> None:
+    """The manifest is published, so its warnings hold no scratch path."""
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    shutil.rmtree(tmp_path / "scratch")
+    result = freeze(root)
+    assert not any(str(tmp_path) in warning for warning in result.warnings)
+
+
+def test_a_study_of_a_project_is_frozen_with_the_project(tmp_path: Path) -> None:
+    """study freeze inside a project refuses, since it would leave out project.yaml and analyses/."""
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n", name="lipa")
+    (tmp_path / "project.yaml").write_text("studies: {lipa: lipa}\n")
+    with pytest.raises(ProtocolError, match="is a study of the project") as info:
+        freeze(root)
+    assert "polyzymd project freeze" in info.value.hint
+
+
+def test_freeze_names_cosolvents_and_missing_build_files(tmp_path: Path) -> None:
+    """Freeze recognises co-solvents in the composition check and names a listed build file that is missing."""
+    from types import SimpleNamespace
+
+    from polyzymd.analyses.study_freeze import _missing_build_files, composition_warnings
+
+    config = SimpleNamespace(
+        substrate=None,
+        polymers=None,
+        solvent=SimpleNamespace(co_solvents=[SimpleNamespace(name="sds", residue_name="SDS")]),
+    )
+
+    class Residues:
+        resnames = ["SDS", "SDS"]
+
+    universe = SimpleNamespace(select_atoms=lambda selection: SimpleNamespace(residues=Residues()))
+    assert composition_warnings("SDS", config, universe) == []
+    (tmp_path / "build_manifest.json").write_text(
+        json.dumps({"artifacts": {"system.prmtop": {}, "system.xml": {}}})
+    )
+    (tmp_path / "system.xml").write_text("<x/>")
+    assert _missing_build_files(tmp_path) == ["system.prmtop"]
+
+
+def test_identical_warnings_for_several_conditions_are_one_line() -> None:
+    """Conditions that share one warning give one line naming them all."""
+    from polyzymd.analyses.study_freeze import group_warnings
+
+    warnings = [
+        "A: no hashes; run x",
+        "B: no hashes; run x",
+        "metadata.doi is not set",
+        "A replicate 1: odd",
+    ]
+    assert group_warnings(warnings, ["A", "B"]) == [
+        "A, B: no hashes; run x",
+        "metadata.doi is not set",
+        "A replicate 1: odd",
+    ]
+
+
+def test_freeze_deposits_only_names_polyzymd_chooses(tmp_path: Path) -> None:
+    """Stray files in a study are neither hashed nor published, and freeze says so."""
+    from polyzymd.analyses.study_freeze import _listed_files, left_out_files
+
+    root = tmp_path / "study"
+    for name in (
+        "study.yaml",
+        "README.md",
+        "analyses/f.py",
+        "analyses/data/t.csv",
+        "conditions/A/config.yaml",
+        "conditions/A/enzyme.pdb",
+        "structures/crystal.pdb",
+        "results/rg/A/replicate_1/record.json",
+        "notes.txt",
+        "scratch/copy.xtc",
+        "scratch/more.xtc",
+    ):
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text("x")
+    assert _listed_files(root, None) == [
+        "README.md",
+        "analyses/data/t.csv",
+        "analyses/f.py",
+        "conditions/A/config.yaml",
+        "conditions/A/enzyme.pdb",
+        "results/rg/A/replicate_1/record.json",
+        "structures/crystal.pdb",
+        "study.yaml",
+    ]
+    message = left_out_files(root, None)
+    assert message.startswith("not deposited: notes.txt, scratch/.")
+
+
+def test_a_project_applies_the_deposit_rule_inside_each_study(tmp_path: Path) -> None:
+    """In a project, each study's stray files are left out as in a lone study."""
+    from polyzymd.analyses.study_freeze import _listed_files, left_out_files
+
+    root = tmp_path / "paper"
+    for name in ("project.yaml", "stats/plan.py", "lipa/study.yaml", "lipa/notes.docx", "todo.md"):
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text("x")
+    assert _listed_files(root, None) == ["lipa/study.yaml", "project.yaml", "stats/plan.py"]
+    assert left_out_files(root, None).startswith("not deposited: lipa/notes.docx, todo.md.")

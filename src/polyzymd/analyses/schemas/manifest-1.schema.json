@@ -17,16 +17,15 @@
     },
     "replicate": {
       "type": "object",
-      "required": ["files", "production_ns", "frames_analysed"],
+      "required": ["files", "production_ns"],
       "properties": {
         "files": {"type": "array", "items": {"$ref": "#/$defs/file"}},
         "engine_inputs": {"type": "array", "items": {"$ref": "#/$defs/file"}},
         "final_frame": {"$ref": "#/$defs/file"},
         "production_frames": {"type": "integer"},
         "production_ns": {"type": "number", "description": "Time of the last production frame, in ns."},
-        "frames_analysed": {"type": "integer"},
-        "first_analysed_ns": {"type": ["number", "null"]},
         "trajectory_variant": {"type": ["string", "null"]},
+        "missing_build_files": {"type": "array", "items": {"type": "string"}, "description": "Files build_manifest.json lists that are missing from the run directory."},
         "bond_source": {"type": ["string", "null"]},
         "simulated_with": {"type": "object", "description": "PolyzyMD, OpenMM and environment versions recorded by the build and by each production segment."},
         "warnings": {"type": "array", "items": {"type": "string"}}

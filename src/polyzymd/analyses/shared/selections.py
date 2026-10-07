@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import logging
 import re
-import sys
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -50,21 +49,6 @@ if TYPE_CHECKING:
     from MDAnalysis.core.universe import Universe
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _expected_selection_exceptions() -> tuple[type[Exception], ...]:
-    """Return exception types that represent expected selection failures.
-
-    MDAnalysis exception classes are inspected only when already loaded so
-    selection helpers remain importable without the analysis stack installed.
-    """
-
-    exceptions: list[type[Exception]] = [ValueError, AttributeError]
-    mda_exceptions = sys.modules.get("MDAnalysis.exceptions")
-    selection_error = getattr(mda_exceptions, "SelectionError", None)
-    if isinstance(selection_error, type) and issubclass(selection_error, Exception):
-        exceptions.append(selection_error)
-    return tuple(exceptions)
 
 
 # =============================================================================
@@ -80,16 +64,15 @@ def translate_selection(selection: str) -> str:
 
     Translations
     ------------
-    - ``pdbindex N`` → ``id N`` (PDB ATOM serial number)
+    - ``pdbindex N`` → ``bynum N``: the N-th atom of the system, counted
+      from 1
 
-    The ``pdbindex`` keyword refers to the 1-indexed atom serial number
-    from the PDB ATOM record (column 7-11), which is what PyMOL displays
-    as "id". In MDAnalysis, this is accessed via the ``id`` selection keyword.
-
-    Note: MDAnalysis also has ``bynum`` which is 1-indexed *positional*
-    (i.e., bynum 1 = first atom, bynum 2 = second atom), but this does NOT
-    correspond to PDB serial numbers when there are gaps in numbering.
-    We use ``id`` because it matches actual PDB serial numbers.
+    ``pdbindex`` means the same as in a config's restraints
+    (:mod:`polyzymd.core.restraints`): the atom at position N - 1 of the
+    built system, which is the PDB ATOM serial PolyzyMD writes and PyMOL
+    shows. MDAnalysis's ``bynum`` selects by that position. ``id`` would
+    select by the serial read from the topology file, which differs from the
+    position when serials wrap above 99,999 atoms.
 
     Parameters
     ----------
@@ -104,16 +87,15 @@ def translate_selection(selection: str) -> str:
     Examples
     --------
     >>> translate_selection("pdbindex 100 and name CA")
-    "id 100 and name CA"
+    "bynum 100 and name CA"
 
     >>> translate_selection("midpoint(pdbindex 100 and name OD1 OD2)")
-    "midpoint(id 100 and name OD1 OD2)"
+    "midpoint(bynum 100 and name OD1 OD2)"
     """
-    # pdbindex N → id N (PDB ATOM serial number)
-    translated = re.sub(r"\bpdbindex\b", "id", selection, flags=re.IGNORECASE)
+    translated = re.sub(r"\bpdbindex\b", "bynum", selection, flags=re.IGNORECASE)
 
     if translated != selection:
-        LOGGER.debug("Translated selection keyword: 'pdbindex' → 'id' (PDB ATOM serial number)")
+        LOGGER.debug("Translated selection keyword: 'pdbindex' → 'bynum' (position from 1)")
 
     return translated
 
@@ -167,7 +149,7 @@ def parse_selection_string(selection: str) -> ParsedSelection:
         - "resid 77 and name OG" - standard MDAnalysis
         - "midpoint(resid 133 and name OD1 OD2)" - midpoint mode
         - "com(resid 50-75)" - center of mass mode
-        - "pdbindex 100 and name CA" - PolyzyMD pdbindex (translated to id)
+        - "pdbindex 100 and name CA" - PolyzyMD pdbindex (translated to bynum)
 
     Returns
     -------
@@ -293,153 +275,3 @@ def get_position(
 
     else:
         raise ValueError(f"Unknown selection mode: {mode}")
-
-
-def get_position_from_selection(
-    universe: "Universe",
-    selection: str,
-) -> NDArray[np.float64]:
-    """Get position from selection string in one step.
-
-    This is a convenience function that combines parsing, selection,
-    and position calculation.
-
-    Parameters
-    ----------
-    universe : Universe
-        MDAnalysis Universe
-    selection : str
-        Selection string (standard or special syntax)
-
-    Returns
-    -------
-    NDArray[np.float64]
-        3D position vector [x, y, z]
-
-    Examples
-    --------
-    >>> # Single atom
-    >>> pos = get_position_from_selection(u, "resid 77 and name OG")
-    >>>
-    >>> # Midpoint of Asp carboxyl
-    >>> pos = get_position_from_selection(u, "midpoint(resid 133 and name OD1 OD2)")
-    """
-    from polyzymd.analyses.shared.diagnostics import get_selection_diagnostics
-
-    parsed = parse_selection_string(selection)
-    atoms = universe.select_atoms(parsed.selection)
-
-    if len(atoms) == 0:
-        diag = get_selection_diagnostics(universe, selection)
-        raise ValueError(f"Selection '{selection}' matched no atoms.\n\n{diag}")
-
-    return get_position(atoms, parsed.mode)
-
-
-def validate_selection(universe: "Universe", selection: str) -> dict:
-    """Validate a selection string and return diagnostic info.
-
-    Parameters
-    ----------
-    universe : Universe
-        MDAnalysis Universe
-    selection : str
-        Selection string to validate
-
-    Returns
-    -------
-    dict
-        Diagnostic information:
-        - valid: bool
-        - n_atoms: int
-        - mode: str
-        - atoms: list of atom info dicts
-        - error: str (if invalid)
-        - diagnostics: str (detailed diagnostics if invalid)
-    """
-    from polyzymd.analyses.shared.diagnostics import get_selection_diagnostics
-
-    try:
-        parsed = parse_selection_string(selection)
-        atoms = universe.select_atoms(parsed.selection)
-
-        if len(atoms) == 0:
-            diag = get_selection_diagnostics(universe, selection)
-            return {
-                "valid": False,
-                "error": f"Selection matched no atoms: {parsed.selection}",
-                "diagnostics": diag,
-                "mode": parsed.mode.value,
-                "n_atoms": 0,
-            }
-
-        atom_info = []
-        for atom in atoms[:10]:  # Limit to first 10
-            atom_info.append(
-                {
-                    "name": atom.name,
-                    "resname": atom.resname,
-                    "resid": atom.resid,
-                    "index": atom.index,
-                }
-            )
-
-        return {
-            "valid": True,
-            "n_atoms": len(atoms),
-            "mode": parsed.mode.value,
-            "atoms": atom_info,
-            "truncated": len(atoms) > 10,
-        }
-
-    except _expected_selection_exceptions() as exc:
-        return {
-            "valid": False,
-            "error": str(exc),
-            "n_atoms": 0,
-        }
-
-
-def format_selection_for_label(selection: str) -> str:
-    """Convert selection string to a short label for filenames/display.
-
-    Parameters
-    ----------
-    selection : str
-        Selection string (standard or special syntax)
-
-    Returns
-    -------
-    str
-        Short label (e.g., "Asp133_mid" or "Ser77_OG")
-
-    Examples
-    --------
-    >>> format_selection_for_label("midpoint(resid 133 and name OD1 OD2)")
-    "res133_mid"
-    >>> format_selection_for_label("resid 77 and name OG")
-    "res77_OG"
-    """
-    parsed = parse_selection_string(selection)
-
-    # Extract resid
-    resid_match = re.search(r"resid\s+(\d+)", parsed.selection, re.IGNORECASE)
-    resid_str = f"res{resid_match.group(1)}" if resid_match else ""
-
-    # Extract atom name(s)
-    name_match = re.search(r"name\s+(\w+(?:\s+\w+)*)", parsed.selection, re.IGNORECASE)
-    if name_match:
-        names = name_match.group(1).split()
-        if len(names) == 1:
-            name_str = names[0].upper()
-        else:
-            name_str = "mid" if parsed.mode == SelectionMode.MIDPOINT else "cog"
-    else:
-        name_str = "com" if parsed.mode == SelectionMode.COM else "grp"
-
-    if resid_str and name_str:
-        return f"{resid_str}_{name_str}"
-    elif resid_str:
-        return resid_str
-    else:
-        return name_str or "sel"

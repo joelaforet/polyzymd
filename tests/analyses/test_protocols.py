@@ -255,7 +255,7 @@ class TestErrors:
         hint = excinfo.value.hint or ""
         assert hint.startswith(f"Use one of {', '.join(FUNCTION_ANALYSES)}.")
         assert "Study.timeseries or Study.per_replicate" in hint
-        assert "explanation/analysis_api.html" in hint
+        assert "how_to/study_api.html" in hint
 
     @pytest.mark.parametrize("name", ["toy_protocol", "radius_of_gyration", "catalytic_triad_v1"])
     def test_names_outside_the_analyses_are_refused_before_any_config_is_read(
@@ -297,3 +297,45 @@ class TestErrors:
 
         with pytest.raises(ProtocolError, match="label\\(s\\) for"):
             analyze("rg", configs, labels=["only_one"], replicates=[1])
+
+
+def test_repeated_pair_labels_are_refused() -> None:
+    """Two distance pairs with one label would overwrite each other's values."""
+    from polyzymd.analyses.protocols import _analyze_pairs
+
+    pair = {"label": "d", "selection_a": "name C1", "selection_b": "name C2"}
+    with pytest.raises(ProtocolError, match="repeat"):
+        _analyze_pairs(
+            "distances",
+            None,
+            {"pairs": [pair, pair]},
+            None,
+            recompute=False,
+            output_dir=None,
+            eq_check=False,
+            plots=False,
+        )
+
+
+@pytest.mark.parametrize(
+    ("limits", "text"),
+    [((1.9999995, 2.0000004), "1.999999 to 2"), ((0.7733, 1.227), "0.7733 to 1.227"), (None, "na")],
+)
+def test_a_narrow_interval_is_not_printed_as_one_number(limits, text) -> None:
+    """A real, narrow interval prints with enough digits to show both ends, not as 'ci95 2 to 2'."""
+    from polyzymd.analyses.protocols import _interval
+
+    assert _interval(limits) == text
+
+
+def test_the_untestable_reason_is_the_real_one() -> None:
+    """Two replicates with no variance are said to have no variance, not to lack replicates."""
+    from polyzymd.analyses.protocols import _verdict
+
+    conditions = [
+        ConditionReport(label=label, n_replicates=2, mean=0.0, replicate_values=[0.0, 0.0])
+        for label in ("A", "B")
+    ]
+    pair = PairwiseReport(a="A", b="B", delta=0.0, testable=False)
+    text = " ".join(_verdict("m", None, conditions, [pair]))
+    assert "same value in every replicate" in text and "at least two" not in text

@@ -37,17 +37,24 @@ def study_group() -> None:
 
 @study_group.command("check")
 @click.argument("path", type=click.Path(path_type=Path), default=Path("."))
-def check_command(path: Path) -> None:
+@click.option(
+    "--production",
+    is_flag=True,
+    help="Also give each condition's production length, read from every run's trajectory "
+    "headers and segments: seconds for a few runs, minutes for long restarted chains.",
+)
+def check_command(path: Path, production: bool = False) -> None:
     """Check a study.yaml without loading any trajectory.
 
     PATH is the study.yaml or the folder holding it (default: here). Prints
     one line per condition, saying where its runs were found, and one per
-    analysis run, saying whether it has stored results. Exits 2 when the file
-    or a condition's config cannot be read; missing runs are reported but are
-    not errors, so a study folder without its trajectories still checks.
+    analysis run, saying whether it has stored results. With --production,
+    each condition line also gives how long its replicates were simulated.
+    Exits 2 when the file or a condition's config cannot be read; missing
+    runs are reported but are not errors, so a study folder without its
+    trajectories still checks.
     """
     _study_logging(path, "study-check")
-    import polyzymd
     from polyzymd.analyses.exceptions import ProtocolError
     from polyzymd.analyses.results import REPORT_FILE
     from polyzymd.analyses.study import with_data_dir
@@ -67,10 +74,14 @@ def check_command(path: Path) -> None:
         f"study {protocol.path}  equilibration {protocol.equilibration}  stride {protocol.stride}"
         + (f"  replicates {protocol.replicates}" if protocol.replicates else "")
     )
-    if protocol.polyzymd and protocol.polyzymd != polyzymd.__version__:
-        click.echo(
-            f"warning: written for PolyzyMD {protocol.polyzymd}; this is {polyzymd.__version__}"
-        )
+    if protocol.description:
+        click.echo(f"system: {protocol.description}")
+    if protocol.project is not None:
+        click.echo(f"project {protocol.project.path} as study {protocol.project_label}")
+    for name, where in protocol.structures.items():
+        click.echo(f"structure {name}: {where}")
+    for name, selection in protocol.regions.items():
+        click.echo(f"region {name}: {selection}")
     failed = False
     for index, (label, config_path) in enumerate(protocol.conditions.items()):
         role = "control" if index == 0 else "condition"
@@ -93,10 +104,12 @@ def check_command(path: Path) -> None:
             )
             continue
         missing = sorted(set(protocol.replicates or []) - set(found))
+        factors = protocol.factors.get(label)
         click.echo(
             f"{role} {label}: runs {found} under {where}"
+            + (f"; factors {', '.join(f'{k}={v}' for k, v in factors.items())}" if factors else "")
             + (f"; missing replicates {missing}" if missing else "")
-            + _production_summary(label, config_path, protocol)
+            + (_production_summary(label, config_path, protocol) if production else "")
         )
     from polyzymd.analyses.user_functions import load_function
 
@@ -117,6 +130,13 @@ def check_command(path: Path) -> None:
                 else user.file
             )
             what = f"{run} ({relative}:{user.qualname}, {user.kind})"
+            from polyzymd.analyses.study_file import missing_files
+
+            for value in missing_files(user.settings):
+                click.echo(
+                    f"warning: analysis {run}: setting {value} names no file; give a path "
+                    "relative to the file that lists the analysis, or a structure <name>"
+                )
             settings = (
                 ", ".join(
                     [f"{k}={v!r}" for k, v in user.selections.items()]
@@ -128,10 +148,12 @@ def check_command(path: Path) -> None:
             what = entry.analysis if entry.analysis == run else f"{entry.analysis} as {run}"
             settings = ", ".join(f"{k}={v}" for k, v in entry.settings.items()) or "defaults"
         equilibration, until = protocol.window(run)
-        own = entry.equilibration is not None or entry.until is not None
+        own = any(x is not None for x in (entry.equilibration, entry.until, entry.stride))
+        stride = protocol.stride_of(run)
         window = (
             f"window eq {equilibration}"
             + (f" until {until}" if until else "")
+            + (f" stride {stride}" if stride != 1 else "")
             + (" (its own)" if own else "")
         )
         click.echo(
@@ -144,15 +166,24 @@ def check_command(path: Path) -> None:
         )
     from polyzymd.analyses.study_git import describe, git_state
 
-    click.echo(describe(git_state(protocol.root)))
+    # A study of a project is committed with it, so project.yaml and the shared
+    # analyses/ count among its inputs.
+    project = protocol.project
+    click.echo(describe(git_state(project.root if project is not None else protocol.root)))
     from polyzymd.analyses.study_metadata import check_metadata
 
     try:
         _, gaps = check_metadata(protocol.metadata)
+        # A study of a project publishes with the project's metadata.
+        owner, command = (
+            ("project.yaml", "project freeze")
+            if protocol.project is not None
+            else ("study.yaml", "study freeze")
+        )
         click.echo(
-            f"metadata: {len(gaps)} gaps for publishing; polyzymd study freeze lists them"
+            f"metadata ({owner}): {len(gaps)} gaps for publishing: {'; '.join(gaps)}"
             if gaps
-            else "metadata: complete"
+            else f"metadata ({owner}): complete"
         )
     except ProtocolError as exc:
         click.echo(f"error: {' '.join(str(exc).split())}")
@@ -168,7 +199,8 @@ def check_command(path: Path) -> None:
             "--study, or redraw figures from results/ without trajectories"
         )
     elif protocol.analyses:
-        click.echo("publish: when the analyses are final, run polyzymd study freeze")
+        command = "project freeze" if protocol.project is not None else "study freeze"
+        click.echo(f"publish: when the analyses are final, run polyzymd {command}")
     click.echo(f"cite: {citation_line()}")
     if failed:
         sys.exit(EXIT_STUDY_ERROR)
@@ -245,13 +277,19 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
         sys.exit(EXIT_STUDY_ERROR)
     located = {label: str(folder) for label, folder in protocol.data.items()}
     missing = []
+    configs = {}
     for label, config_path in protocol.conditions.items():
         try:
-            config = SimulationConfig.from_yaml(config_path)
+            configs[label] = SimulationConfig.from_yaml(config_path)
         except (OSError, ValueError) as exc:
             click.echo(f"error: {label}: cannot read {config_path}: {' '.join(str(exc).split())}")
             missing.append(label)
-            continue
+    # Run directories are found by name only, so two conditions whose configs
+    # name their runs alike cannot be told apart, except by manifest.json.
+    named: dict[str, list[str]] = {}
+    for label, config in configs.items():
+        named.setdefault(config.format_run_directory_name("*"), []).append(label)
+    for label, config in configs.items():
         parents = find_run_parents(config, directory)
         if not parents:
             click.echo(
@@ -261,6 +299,27 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
             missing.append(label)
             continue
         matching = [p for p in parents if _matches_manifest(protocol.root, label, p, verify)]
+        alike = [other for other in named[config.format_run_directory_name("*")] if other != label]
+        if alike and not matching:
+            # One folder per condition, named as in the study (no_polymer/,
+            # sds/), as a deposit lays them out, tells them apart.
+            from polyzymd.analyses.study_scaffold import condition_folder
+
+            matching = [p for p in parents if condition_folder(label) in p.parts]
+            matching = matching if len(matching) == 1 else []
+        if alike and not matching:
+            click.echo(
+                f"error: {label}: its runs are named like those of {', '.join(alike)} "
+                f"({config.format_run_directory_name('*')}), so their folders cannot be told "
+                f"apart: {', '.join(str(p) for p in parents)}"
+            )
+            click.echo(
+                f"fix: Write the folder of {label}'s runs into {protocol.root / DATA_FILE} by "
+                f"hand ('{label}: /path/to/folder'), or run study locate on a directory that "
+                "holds only its runs."
+            )
+            missing.append(label)
+            continue
         candidates = matching or list(parents)
         best = max(candidates, key=lambda parent: (len(parents[parent]), -len(parent.parts)))
         located[label] = str(best)
@@ -511,8 +570,9 @@ def freeze_command(path: Path, tag: str | None) -> None:
     md_checklist.yaml, system_summary.csv, CITATION.cff and .zenodo.json;
     commits those and results/, tags the commit, and lays out deposit/ for
     upload, with deposit/UPLOAD.md saying how to publish it on Zenodo; PolyzyMD
-    uploads and publishes nothing. Every gap is a warning, never a refusal.
-    Refreeze after filling a gap, such as the study's or paper's DOI.
+    uploads and publishes nothing. Freeze refuses while the study's input files
+    have uncommitted changes, so the deposit matches a commit; every other gap,
+    such as a missing DOI, is a warning. Refreeze after filling a gap.
     """
     _study_logging(path, "study-freeze")
     from polyzymd.analyses.exceptions import ProtocolError
@@ -533,7 +593,7 @@ def freeze_command(path: Path, tag: str | None) -> None:
     )
     click.echo(
         f"manifest: {len(result.manifest['files'])} study files, {len(conditions)} conditions, "
-        f"{replicates} replicates hashed"
+        f"{replicates} replicates' files hashed for the manifest"
     )
     click.echo(f"deposit: {result.deposit}; files to upload in {result.upload}")
     for warning in result.warnings:
