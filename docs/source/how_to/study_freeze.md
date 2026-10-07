@@ -217,7 +217,7 @@ files relative to the study, or to the folder of the replicate folders. The
 manifest names each engine input and final frame by its path in `deposit/`,
 which is also its name in `engine_inputs.zip` or `final_frames.zip`: for
 example `engine_inputs/water/replicate_1/prod.tpr.gz`. In a project's deposit,
-that path starts with the study's folder: `engine_inputs/<study>/water/...`. In
+that path starts with the study's label in `project.yaml`: `engine_inputs/<label>/water/...`. In
 the deposited configs, a `projects_directory` that is absolute, starts with
 `~` or names a `$VARIABLE` becomes `.`, and such a `scratch_directory`
 becomes `data`; relative ones stay. A comment
