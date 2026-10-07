@@ -1,2 +1,3 @@
 # pixi.lock is auto-generated; always accept ours on merge, then regenerate
 pixi.lock merge=ours -diff linguist-generated=true
+tests/data/characterization/** linguist-generated=true
