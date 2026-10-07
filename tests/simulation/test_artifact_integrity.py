@@ -199,3 +199,25 @@ def test_build_validates_with_a_copied_config_and_with_the_absolute_path_hash(tm
     with pytest.raises(ArtifactIntegrityError, match="Configuration does not match"):
         validate_build_bundle(run, second)
 
+
+def test_a_moved_build_validates(tmp_path):
+    """Artifacts are recorded relative to the run folder, so a moved run folder still validates."""
+    import shutil
+
+    topology, system, positions = _tiny_openmm_bundle()
+    manifest = publish_build_bundle(tmp_path / "run", topology, system, positions, _Config())
+    assert manifest["artifacts"]["system.xml"]["path"] == "system.xml"
+    moved = Path(shutil.move(tmp_path / "run", tmp_path / "moved"))
+    validate_build_bundle(moved, _Config())
+
+    # A manifest written before records absolute paths, which a move leaves behind.
+    recorded = json.loads((moved / MANIFEST_NAME).read_text())
+    for name, artifact in recorded["artifacts"].items():
+        artifact["path"] = str(tmp_path / "run" / name)
+    (moved / MANIFEST_NAME).write_text(json.dumps(recorded))
+    validate_build_bundle(moved, _Config())
+
+    recorded["artifacts"]["system.xml"]["path"] = "other.xml"
+    (moved / MANIFEST_NAME).write_text(json.dumps(recorded))
+    with pytest.raises(ArtifactIntegrityError, match="path mismatch"):
+        validate_build_bundle(moved, _Config())

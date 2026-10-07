@@ -114,7 +114,7 @@ def publish_build_bundle(
             "provenance": dict(provenance or {}),
             "artifacts": {
                 name: {
-                    "path": str((working_dir / name).resolve()),
+                    "path": name,
                     "sha256": file_sha256(staging / name),
                 }
                 for name in written
@@ -181,11 +181,12 @@ def validate_build_bundle(working_dir: Path, config: Any) -> None:
                 f"Manifest lists {name} but {path} is missing; rerun the build or "
                 "polyzymd analysis-topology"
             )
+        # Paths are relative to the run folder, so a moved run folder validates.
+        # Earlier manifests recorded absolute paths, compared by file name.
         recorded_path = artifacts.get(name, {}).get("path")
-        if recorded_path != str(path.resolve()):
+        if recorded_path is None or Path(recorded_path).name != name:
             raise ArtifactIntegrityError(
-                f"Artifact path mismatch for {name}: manifest={recorded_path!r}, "
-                f"current={str(path.resolve())!r}"
+                f"Artifact path mismatch for {name}: manifest={recorded_path!r}, current={name!r}"
             )
         expected = artifacts.get(name, {}).get("sha256")
         actual = file_sha256(path)
