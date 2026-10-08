@@ -1166,6 +1166,9 @@ def _run_gromacs_impl(
         colored_echo(f"Reusing the GROMACS files in {gromacs_dir}", phase="export")
         eq_mdp_names = sorted(path.name for path in gromacs_dir.glob("eq_*.mdp"))
     else:
+        from polyzymd.simulation.artifact_integrity import assert_rebuild_allowed
+
+        assert_rebuild_allowed(working_dir)
         click.echo(f"Building system for replicate {replicate}...")
         builder = SystemBuilder.from_config(sim_config)
         new_run_dir = not working_dir.exists()

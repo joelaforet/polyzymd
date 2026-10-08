@@ -376,6 +376,30 @@ class TestEngineSubmitModuleLoad:
         assert result["submitted"] is True
 
 
+class TestPrepareSubmissionRebuild:
+    """prepare_submission builds missing inputs only before a run has started."""
+
+    @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
+    def test_prepare_submission_does_not_rebuild_a_started_run(self, from_config, tmp_path):
+        from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
+
+        engine = GromacsEngine(config=_make_config(), gmx_binary="gmx")
+        working_dir = tmp_path / "gromacs"
+        working_dir.mkdir()
+        (working_dir / "state.cpt").write_text("")
+        request = EngineSubmitRequest(
+            replicate=1,
+            config_path=tmp_path / "config.yaml",
+            working_dir=working_dir,
+            slurm_config=SlurmConfig(),
+        )
+
+        with pytest.raises(ArtifactIntegrityError, match="Refusing to rebuild"):
+            engine.prepare_submission(request)
+
+        from_config.assert_not_called()
+
+
 class TestPrepareSubmissionPassThrough:
     """Tests for passing config fields to script generator."""
 
