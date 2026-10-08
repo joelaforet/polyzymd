@@ -329,6 +329,18 @@ def _echo_box_plan(sim_config: "SimulationConfig", *, phase: str) -> None:
     )
 
 
+def _check_time_limit(value: str | None) -> str | None:
+    """Refuse a ``--time-limit`` SLURM does not read (minutes, M:SS, H:MM:SS, D-H[:MM[:SS]])."""
+    import re
+
+    if value is not None and not re.fullmatch(r"\d+(:\d{2}){0,2}|\d+-\d+(:\d{2}){0,2}", value):
+        raise click.BadParameter(
+            f"{value!r} is not a SLURM time; give minutes, M:SS, H:MM:SS or D-H:MM:SS "
+            "(for example 23:59:00)."
+        )
+    return value
+
+
 def _remove_empty_run_dir(run_dir: Path) -> None:
     """Remove a run folder that holds nothing but its replicate lock file."""
     try:
@@ -1573,6 +1585,7 @@ def _print_gromacs_dry_run_details(
 @click.option(
     "--time-limit",
     default=None,
+    callback=lambda ctx, param, value: _check_time_limit(value),
     help="Override SLURM time limit (format: HH:MM:SS or M:SS)",
 )
 @click.option(
@@ -1584,8 +1597,8 @@ def _print_gromacs_dry_run_details(
     "--account",
     default=None,
     help=(
-        "Override SLURM account / allocation ID. Required for bridges2 "
-        "(find yours at https://www.psc.edu/resources/bridges-2/user-guide)."
+        "Override SLURM account / allocation ID. On bridges2, omit it to charge the "
+        "login's default allocation."
     ),
 )
 @click.option(
@@ -1715,7 +1728,7 @@ def submit(
                 param_hint="--time-limit",
             )
     try:
-        sim_config.require_buildable(engine_name)
+        sim_config.require_buildable(engine_name, inputs=False)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
@@ -3481,14 +3494,20 @@ def validate(config: str) -> None:
                 colored_echo(f"  - {r.name} ({r.type.value}): {status}")
 
     except FileNotFoundError as e:
-        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+        click.echo(click.style(f"error: {e}", fg="red"), err=True)
         sys.exit(1)
-    except (yaml.YAMLError, ValidationError, ValueError) as e:
-        # Drop Pydantic's "For further information visit <url>" lines.
-        message = "\n".join(
-            line for line in str(e).splitlines() if "errors.pydantic.dev" not in line
+    except ValidationError as e:
+        for error in e.errors():
+            where = ".".join(str(part) for part in error["loc"]) or "config"
+            click.echo(click.style(f"error: {where}: {error['msg']}", fg="red"), err=True)
+        click.echo(
+            f"fix: correct these keys in {config} and run polyzymd validate again.", err=True
         )
-        click.echo(click.style(f"Validation failed: {message}", fg="red"), err=True)
+        sys.exit(1)
+    except ValueError as e:
+        message, _, fix = str(e).partition("\nfix: ")
+        click.echo(click.style(f"error: {message}", fg="red"), err=True)
+        click.echo(f"fix: {fix or f'correct {config} and run polyzymd validate again.'}", err=True)
         sys.exit(1)
 
 

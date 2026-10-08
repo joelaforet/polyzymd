@@ -10,14 +10,17 @@ from pydantic import ValidationError
 from polyzymd.config.schema import CoSolventSpec, SimulationConfig
 from tests._support.analysis_testkit import write_simulation_config
 
+_ONE_ATOM_PDB = "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\nEND\n"
+
 
 @pytest.fixture
-def minimal_config_data():
-    """Provide minimal valid SimulationConfig input data."""
+def minimal_config_data(tmp_path):
+    """Provide minimal valid SimulationConfig input data, with a one-atom enzyme PDB."""
+    (tmp_path / "test.pdb").write_text(_ONE_ATOM_PDB)
     return {
         "name": "test_simulation",
         "engine": "openmm",
-        "enzyme": {"name": "TestEnzyme", "pdb_path": "test.pdb"},
+        "enzyme": {"name": "TestEnzyme", "pdb_path": str(tmp_path / "test.pdb")},
         "thermodynamics": {"temperature": 300.0},
         "simulation_phases": {
             "equilibration_stages": [
@@ -1206,7 +1209,7 @@ def test_gromacs_refuses_position_restraints_on_groups_it_cannot_restrain(minima
     """GROMACS writes position restraints for protein, ligand and polymer groups only."""
     minimal_config_data["engine"] = "gromacs"
     stage = minimal_config_data["simulation_phases"]["equilibration_stages"][0]
-    stage["position_restraints"] = [{"group": "protein_heavy"}, {"group": "ligand_heavy"}]
+    stage["position_restraints"] = [{"group": "protein_heavy"}]
     SimulationConfig(**minimal_config_data).require_buildable()
     stage["position_restraints"] = [{"group": "water_only"}]
     with pytest.raises(ValueError, match="water_only"):
@@ -1249,3 +1252,96 @@ def test_salts_the_build_does_not_add_load_but_are_not_built(minimal_config_data
         config.require_buildable()
     minimal_config_data["solvent"] = {"ions": {key: 0.0}}
     SimulationConfig(**minimal_config_data).require_buildable()
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("simulation_phases", "production", "duration"), float("inf"), "finite"),
+        (("thermodynamics", "temperature"), float("nan"), "finite"),
+        (("thermodynamics", "temperature"), True, "must be a number, not true"),
+        (("simulation_phases", "production", "samples"), False, "must be a number, not false"),
+        (("output", "naming_template"), "{enzyme}_{foo}_run{replicate}", "unknown placeholders"),
+        (("output", "naming_template"), "{enzyme}_{}", "unknown placeholders"),
+    ],
+)
+def test_values_no_config_can_hold_are_refused_on_load(minimal_config_data, path, value, message):
+    """Infinite numbers, true/false as numbers and unknown name placeholders are refused."""
+    section = minimal_config_data
+    for key in path[:-1]:
+        section = section.setdefault(key, {})
+    section[path[-1]] = value
+    with pytest.raises(ValidationError, match=message):
+        SimulationConfig(**minimal_config_data)
+
+
+def _phase(data, where):
+    phases = data["simulation_phases"]
+    return phases["production"] if where == "production" else phases["equilibration_stages"][0]
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (lambda d: _phase(d, "production").update(ensemble="NVE"), "ensemble NVE is not run"),
+        (lambda d: _phase(d, "eq").update(ensemble="NVE"), "ensemble NVE is not run"),
+        (
+            lambda d: _phase(d, "production").update(thermostat="NoseHoover"),
+            "NoseHoover runs only with engine gromacs",
+        ),
+        (
+            lambda d: _phase(d, "eq").update(thermostat="Andersen"),
+            "Andersen runs only with engine gromacs",
+        ),
+        (lambda d: d.update(solvent={"primary": {"type": "methanol"}}), "makes only water"),
+        (lambda d: _phase(d, "production").update(samples=600000), "more than its 500000 steps"),
+        (lambda d: _phase(d, "eq").update(duration=1e-7), "shorter than one 2 fs time step"),
+        (
+            lambda d: _phase(d, "eq").update(position_restraints=[{"group": "ligand_heavy"}]),
+            "no substrate",
+        ),
+        (
+            lambda d: _phase(d, "eq").update(position_restraints=[{"group": "polymer_heavy"}]),
+            "no enabled polymers",
+        ),
+        (lambda d: d.update(output={"naming_template": "{enzyme}_x"}), "no {replicate}"),
+        (lambda d: d["enzyme"].update(name=" "), "enzyme.name is empty"),
+        (lambda d: d["enzyme"].update(name="x/../y"), "not a single folder name"),
+        (lambda d: _phase(d, "eq").update(name="a/b"), "used in a folder name"),
+        (lambda d: d.update(openmm={"platform": "GPU"}), "not an OpenMM platform"),
+        (lambda d: d.update(openmm={"precision": "dubble"}), "not an OpenMM precision"),
+    ],
+)
+def test_settings_a_new_build_would_not_run_as_written_load_but_are_refused(
+    minimal_config_data, edit, message
+):
+    """Old runs with these settings still load; validate and build refuse them."""
+    edit(minimal_config_data)
+    config = SimulationConfig(**minimal_config_data)
+    with pytest.raises(ValueError, match=message):
+        config.require_buildable()
+
+
+def test_gromacs_runs_nose_hoover_and_refuses_bad_job_settings(minimal_config_data):
+    """GROMACS runs NoseHoover; its memory and command prefix must suit the job script."""
+    minimal_config_data["engine"] = "gromacs"
+    minimal_config_data["simulation_phases"]["production"]["thermostat"] = "NoseHoover"
+    SimulationConfig(**minimal_config_data).require_buildable()
+    minimal_config_data["gromacs"] = {"memory": "lots"}
+    with pytest.raises(ValueError, match="not a SLURM --mem value"):
+        SimulationConfig(**minimal_config_data).require_buildable()
+    minimal_config_data["gromacs"] = {"command_prefix": "singularity exec --bind $PWD img.sif"}
+    with pytest.raises(ValueError, match="characters the job script refuses"):
+        SimulationConfig(**minimal_config_data).require_buildable()
+
+
+def test_new_openmm_builds_of_a_gromacs_config_refuse_the_anisotropic_barostat(
+    minimal_config_data,
+):
+    """run/submit --engine openmm on a GROMACS MCA config are refused before the run."""
+    minimal_config_data["engine"] = "gromacs"
+    minimal_config_data["simulation_phases"]["production"]["barostat"] = "MCA"
+    config = SimulationConfig(**minimal_config_data)
+    config.require_buildable()
+    with pytest.raises(ValueError, match="MCA"):
+        config.require_buildable("openmm")

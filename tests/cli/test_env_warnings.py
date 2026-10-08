@@ -26,7 +26,7 @@ def _make_submission_config(engine: str = "openmm") -> SimpleNamespace:
             slurm_logs_subdir="slurm_logs",
             get_slurm_logs_directory=lambda: Path("/tmp/polyzymd-slurm-logs"),
         ),
-        require_buildable=lambda engine=None: None,
+        require_buildable=lambda engine=None, inputs=True: None,
     )
 
 

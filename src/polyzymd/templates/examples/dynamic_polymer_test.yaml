@@ -136,7 +136,7 @@ simulation_phases:
 output:
   projects_directory: "."
   scratch_directory: null  # Use projects_directory
-  naming_template: "{enzyme}_{polymer_type}_dynamic_test"
+  naming_template: "{enzyme}_{polymer_type}_dynamic_test_run{replicate}"
   save_checkpoint: true
   save_state_data: true
   trajectory_format: "dcd"  # Not read: OpenMM writes dcd, GROMACS xtc

@@ -90,10 +90,13 @@ polyzymd validate -c <path>
 
 ### What It Checks
 
-- YAML syntax validity
-- Required fields are present
-- Referenced files (PDB, SDF, cached polymer SDFs, reaction templates) are reported as
-  warnings when missing
+- YAML syntax validity: the file is a mapping and gives each key once
+- Required fields are present, numbers are finite and not `true`/`false`
+- The enzyme PDB has atoms, the substrate SDF holds the conformer, SMILES parse
+  and the charge method can charge each molecule (errors, exit 1)
+- Cached polymer SDFs and reaction templates are reported as warnings when missing
+- Settings a new build would not run as written: `NVE`, Nose-Hoover or Andersen
+  on OpenMM, `samples` above the MD steps, unset `$VAR` in paths (errors)
 - Monomer probabilities sum to 1.0
 - Valid enum values (water model, ensemble, etc.)
 - Co-solvent specification (mole_fraction XOR concentration)
@@ -359,7 +362,7 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--output-dir` | - | No | auto | Directory for job scripts |
-| `--time-limit` | - | No | from preset | Override SLURM time limit (HH:MM:SS). OpenMM refuses 5 minutes or less: SLURM tells the job to stop 5 minutes before the limit. |
+| `--time-limit` | - | No | from preset | Override SLURM time limit: minutes, M:SS, H:MM:SS or D-H:MM:SS; other values are refused. OpenMM refuses 5 minutes or less: SLURM tells the job to stop 5 minutes before the limit. |
 | `--memory` | - | No | 3G | Override SLURM memory allocation |
 | `--account` | - | No | - | Override SLURM account / allocation ID |
 | `--partition` | - | No | from preset | Override SLURM partition |
