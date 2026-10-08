@@ -455,8 +455,9 @@ def test_a_condition_not_yet_simulated_is_named_in_a_partial_report(
 
 @pytest.mark.filterwarnings("ignore")
 @pytest.mark.usefixtures("git_identity")
-def test_without_any_runs_the_stored_report_is_printed(tmp_path: Path) -> None:
-    """With no run of the study on this machine, analyze prints the stored report and says so."""
+@pytest.mark.parametrize("extra", [(), ("--eq", "0ns"), ("--format", "json")])
+def test_without_any_runs_no_stored_number_is_printed(tmp_path: Path, extra: tuple) -> None:
+    """With no run of the study here, analyze exits 2 naming the stored report, never its values."""
     import shutil
 
     pytest.importorskip("MDAnalysis")
@@ -466,14 +467,14 @@ def test_without_any_runs_the_stored_report_is_printed(tmp_path: Path) -> None:
     assert computed.exit_code == 0, computed.output
     stored = (root / "results" / "rg" / "report.json").read_text()
     shutil.rmtree(tmp_path / "scratch")
-    result = _analyze_cli(*options)
-    assert result.exit_code == 0, result.output
-    assert "stored report" in result.output and "not recomputed" in result.output
-    assert "Polymer  n 3  mean 2.26" in result.output
+    result = _analyze_cli(*options, *extra)
+    assert result.exit_code == EXIT_ANALYSIS_ERROR, result.output
+    assert "no runs of study my_study are on this machine" in result.output
+    assert (
+        "results/rg/report.json" in result.output and "study locate DIR --verify" in result.output
+    )
+    assert "2.26" not in result.output and "mean_rg" not in result.output
     assert (root / "results" / "rg" / "report.json").read_text() == stored
-    recomputed = _analyze_cli(*options, "--recompute")
-    assert recomputed.exit_code == EXIT_ANALYSIS_ERROR
-    assert "no runs found" in recomputed.output
 
 
 @pytest.mark.filterwarnings("ignore")

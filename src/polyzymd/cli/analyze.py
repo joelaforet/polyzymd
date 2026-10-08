@@ -558,7 +558,7 @@ def analyze_command(
     # task, or a quick look. Such a run never replaces the run's report.
     subset = study_path is not None and bool(labels)
     if study_path is not None:
-        requested_output, given_settings = output_dir, setting_overrides
+        requested_output = output_dir
         try:
             (
                 name,
@@ -599,26 +599,23 @@ def analyze_command(
                     f"them; read them with Study.results({run_name!r}, folder=...)",
                     err=True,
                 )
-        if not (recompute or submit or dry_run or is_task or subset or run or given_settings):
-            here = {"*": Path(data_dir).expanduser().resolve()} if data_dir is not None else data
-            from polyzymd.analyses.protocols import ProtocolReport
-            from polyzymd.analyses.results import REPORT_FILE
+        here = {"*": Path(data_dir).expanduser().resolve()} if data_dir is not None else data
+        stored = Path(output_dir) / "report.json"
+        if stored.is_file() and not _runs_here(configs, labels, here):
+            # Stored numbers are never printed as the answer to this request.
+            from polyzymd.analyses.study_file import find_study_file
 
-            stored = Path(output_dir) / REPORT_FILE
-            if stored.is_file() and not _runs_here(configs, labels, here):
-                # A reader of the deposit without its trajectories still sees the result.
-                click.echo(
-                    f"note: no runs of this study are on this machine, so this is the stored "
-                    f"report of {run_name}, not recomputed; polyzymd study locate DIR or --data "
-                    "gives the runs",
-                    err=True,
-                )
-                report = ProtocolReport.model_validate_json(stored.read_text())
-                rendered = _render(report, output_format)
-                click.echo(rendered)
-                if output_path is not None:
-                    Path(output_path).write_text(rendered.rstrip("\n") + "\n")
-                return
+            folder = find_study_file(study_path).parent
+            shown = stored.resolve()
+            shown = shown.relative_to(folder) if shown.is_relative_to(folder) else shown
+            click.echo(f"error: no runs of study {folder.name} are on this machine.", err=True)
+            click.echo(
+                f"fix: The stored report is {shown}, readable with "
+                f"pz.Study(...).results({run_name!r}); to analyse again, give the runs with "
+                "polyzymd study locate DIR --verify or --data.",
+                err=True,
+            )
+            sys.exit(EXIT_ANALYSIS_ERROR)
     stride = stride or 1
     if study_path is not None and until is None:
         until = study_until
