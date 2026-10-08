@@ -89,7 +89,7 @@ pixi run -e build polyzymd submit \
     -c config.yaml \
     --preset testing \
     --pixi-env auto \
-    --time-limit 0:05:00 \
+    --time-limit 0:10:00 \
     --replicates 1
 ```
 

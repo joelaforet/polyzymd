@@ -177,7 +177,9 @@ class TestJobNameGeneration:
         assert result.script_path == tmp_path / "run_rep1.sh"
         script = result.script_path.read_text()
         assert f"#SBATCH --job-name={job_name}" in script
-        assert f"#SBATCH --output={Path.cwd() / 'slurm_logs'}/{job_name}.%j.out" in script
+        # Logs go where `polyzymd status` looks for them, whatever the current folder.
+        logs_dir = sim_config.output.get_slurm_logs_directory()
+        assert f"#SBATCH --output={logs_dir}/{job_name}.%j.out" in script
         assert f'#SBATCH --chdir="{run_dir}"' in script
 
 

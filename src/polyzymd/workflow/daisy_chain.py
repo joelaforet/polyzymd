@@ -482,8 +482,9 @@ class DaisyChainSubmitter:
         str
             Complete SLURM batch script content.
         """
-        logs_subdir = self._sim_config.output.slurm_logs_subdir
-        output_file = f"{logs_subdir}/{job_name}.%j.out"
+        # `polyzymd status` reads the logs from this folder.
+        logs_dir = self._sim_config.output.get_slurm_logs_directory()
+        output_file = str(logs_dir / f"{job_name}.%j.out")
 
         return self._generator.generate_job_script(
             config_path=self._dc_config.config_path,

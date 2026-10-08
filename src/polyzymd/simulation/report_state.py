@@ -247,6 +247,36 @@ def first_report_step(step: int, report_interval: int) -> int:
     return (step // report_interval + 1) * report_interval
 
 
+class SkipReportsThrough:
+    """Wrap an OpenMM reporter so it writes nothing at or before *last_step*.
+
+    A segment that resumes from a state older than the previous segment's
+    last frame integrates those report steps again; wrapping its reporters
+    keeps the trajectory at one frame per step.
+
+    Parameters
+    ----------
+    reporter : object
+        OpenMM reporter to wrap.
+    last_step : int
+        Step of the last frame the trajectory already holds.
+    """
+
+    def __init__(self, reporter: Any, last_step: int) -> None:
+        self._reporter = reporter
+        self._last_step = int(last_step)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._reporter, name)
+
+    def describeNextReport(self, simulation: Any) -> Any:
+        return self._reporter.describeNextReport(simulation)
+
+    def report(self, simulation: Any, state: Any) -> None:
+        if simulation.currentStep > self._last_step:
+            self._reporter.report(simulation, state)
+
+
 class ReportedStateTracker:
     """OpenMM reporter that writes ``restart_state.xml`` at every frame.
 

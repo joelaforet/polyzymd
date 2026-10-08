@@ -311,6 +311,10 @@ class TestRampResumeIntegrity:
 
         assert result["total_steps"] == 10
         assert not (stage_dir / "EQ_INTERRUPTED").exists()
+        # The first job's velocity and integrator seeds are kept beside the resumed job's.
+        first, second = result["seeds_by_attempt"]
+        assert "velocities" in first and "velocities" not in second
+        assert result["seeds"] == second
         state_lines = (
             (stage_dir / "equilibration_0_heating_state_data.csv").read_text().splitlines()
         )
@@ -1006,6 +1010,28 @@ class TestFrozenSoluteMinimization:
         # Only the heavy atom is massless.
         assert frozen_system.getParticleMass(0).value_in_unit(openmm.unit.dalton) == 0.0
         assert frozen_system.getParticleMass(1).value_in_unit(openmm.unit.dalton) == 1.0
+
+    def test_signal_during_minimization_keeps_the_finished_result(self, tmp_path, monkeypatch):
+        """A job stopped by a signal sent during minimization does not redo it in the next job."""
+        import json
+
+        from polyzymd.simulation import signals
+
+        calls = {"n": 0}
+
+        def interrupted_after_first_check() -> bool:
+            calls["n"] += 1
+            return calls["n"] > 1
+
+        monkeypatch.setattr(signals, "is_interrupted", interrupted_after_first_check)
+        top, system, positions = self._system(tmp_path)
+        runner = self._runner(tmp_path, top, system, positions)
+        with pytest.raises(signals.GracefulExit):
+            runner.minimize(max_iterations=0, tolerance=1.0, freeze_solute=True)
+
+        record = json.loads((tmp_path / "minimization" / "phase.json").read_text())
+        assert record["status"] == "completed"
+        assert (tmp_path / "minimization" / "minimized_state.xml").exists()
 
     def test_unfrozen_minimization_moves_solute(self, tmp_path):
         import numpy as np

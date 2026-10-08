@@ -29,17 +29,11 @@ from pydantic import BaseModel, Field, ValidationError
 
 LOGGER = logging.getLogger(__name__)
 
-# Threshold (in seconds) for checkpoint file recency.  When a segment
-# directory has a checkpoint file but no ``state.xml`` or ``INTERRUPTED``
-# marker, we check the file's modification time.  If it was written
-# within the last ``CHECKPOINT_RECENCY_SECONDS`` seconds, we assume the
-# simulation process is still alive and classify the segment as RUNNING.
-# If the checkpoint is older, the process was likely hard-killed and the
-# segment is classified as INTERRUPTED.
-#
-# NOTE: This is a **heuristic** — we do not inspect running processes or
-# query SLURM.  Checkpoints are typically written every 10-35 seconds of
-# wall time, so 600 s (10 minutes) provides a very conservative margin.
+# A segment directory with a checkpoint but no ``state.xml`` or
+# ``INTERRUPTED`` marker is RUNNING while another process holds the
+# replicate lock.  Only when the lock file cannot be opened is the segment
+# called RUNNING if its checkpoint was written in the last
+# ``CHECKPOINT_RECENCY_SECONDS`` seconds.
 CHECKPOINT_RECENCY_SECONDS: int = 600
 
 # How often (wall-clock seconds) the simulation loop should update
@@ -93,7 +87,11 @@ class EquilibrationStageRecord(BaseModel):
         Software provenance of the process that ran the stage. ``None`` for
         records written by PolyzyMD versions that predate these fields.
     seeds : dict | None
-        Random seeds the stage ran with (see ``SegmentRecord.seeds``).
+        Random seeds the stage ran with (see ``SegmentRecord.seeds``).  For a
+        stage resumed after an interruption, the seeds of the last job.
+    seeds_by_attempt : list of dict | None
+        Seeds of every job that ran the stage, oldest first, when the stage
+        was interrupted and resumed; ``None`` otherwise.
     """
 
     index: int
@@ -107,6 +105,7 @@ class EquilibrationStageRecord(BaseModel):
     openmm_version: str | None = None
     pixi_environment: str | None = None
     seeds: dict[str, int | None] | None = None
+    seeds_by_attempt: list[dict[str, int | None]] | None = None
 
 
 class SegmentRecord(BaseModel):
@@ -590,6 +589,11 @@ def record_equilibration_stages(working_dir: str | Path, stages: List[Dict[str, 
                 started_at=stage["started_at"],
                 finished_at=stage["finished_at"],
                 seeds=stage.get("seeds"),
+                seeds_by_attempt=(
+                    stage["seeds_by_attempt"]
+                    if len(stage.get("seeds_by_attempt") or []) > 1
+                    else None
+                ),
                 **provenance,
             )
         )
@@ -915,19 +919,18 @@ def _scan_segment_dir(
 
         if checkpoint_chk.exists():
             # Checkpoint exists but no state.xml or INTERRUPTED marker.
-            # This means either:
-            #   (a) the simulation is still running (checkpoint recently written), or
-            #   (b) the process was hard-killed (SIGKILL / OOM / node failure).
-            #
-            # We distinguish these using a **heuristic**: if the checkpoint
-            # file was modified within the last CHECKPOINT_RECENCY_SECONDS
-            # (default 10 min), the simulation is likely still alive.
-            # Checkpoints are written every ~10-35 s of wall time, so a
-            # 10-minute threshold provides a very conservative margin.
-            #
-            # NOTE: This does NOT inspect running processes or query SLURM.
+            # Either the run is still going, or its process was hard-killed
+            # (SIGKILL / OOM / node failure).  A live run holds the replicate
+            # lock for as long as its process exists, so the lock decides.
+            # Only when the lock cannot be probed is the checkpoint age used.
+            from polyzymd.simulation.artifact_integrity import replicate_lock_held_elsewhere
+
             checkpoint_age = time.time() - checkpoint_chk.stat().st_mtime
-            is_likely_running = checkpoint_age < CHECKPOINT_RECENCY_SECONDS
+            lock_held = replicate_lock_held_elsewhere(seg_dir.parent)
+            if lock_held is None:
+                is_likely_running = checkpoint_age < CHECKPOINT_RECENCY_SECONDS
+            else:
+                is_likely_running = lock_held
 
             steps_completed = (
                 _estimate_steps_from_csv(state_data_csv) if state_data_csv.exists() else 0
@@ -936,9 +939,7 @@ def _scan_segment_dir(
 
             if is_likely_running:
                 LOGGER.info(
-                    f"Segment {seg_idx} has a recent checkpoint "
-                    f"(age {checkpoint_age:.0f}s < {CHECKPOINT_RECENCY_SECONDS}s) — "
-                    f"treating as running (~{steps_completed} steps so far)"
+                    f"Segment {seg_idx} is still running " f"(~{steps_completed} steps so far)"
                 )
                 return SegmentRecord(
                     index=seg_idx,
@@ -1388,6 +1389,17 @@ def validate_progress(
                 f"Segment {idx}: in progress file but not on filesystem — keeping record"
             )
             reconciled.append(file_rec)
+
+    # A segment ends where the next one resumed.  The scan's estimate for a
+    # hard-killed segment counts steps after its last saved state, which
+    # the next segment integrated again.
+    for current, following in zip(reconciled, reconciled[1:]):
+        if current.start_step is None or following.start_step is None:
+            continue
+        actual = following.start_step - current.start_step
+        if actual >= 0 and actual != current.steps_completed:
+            current.steps_completed = actual
+            current.duration_ns = actual * timestep_fs / 1e6
 
     progress.segments = reconciled
 
