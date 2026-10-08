@@ -841,8 +841,11 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
     OpenMM platform and properties) combination that ``progress.json``
     records for its production segments,
     so a reproducer knows which engine produced the trajectories, not only
-    which PolyzyMD analysed them. For a GROMACS run, ``gromacs_version`` is
-    the version that ``gmx mdrun`` wrote into ``gromacs/prod.log``.
+    which PolyzyMD analysed them. ``seeds`` gives the random seeds each
+    equilibration stage (by name) and production segment (by index) ran
+    with. For a GROMACS run, whose ``progress.json`` is in ``gromacs/``,
+    ``gromacs_version`` is the version that ``gmx mdrun`` wrote into
+    ``gromacs/prod.log``.
     """
     from polyzymd.simulation.progress import load_progress
 
@@ -861,8 +864,12 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
         }
     except (OSError, ValueError):
         pass
+    from polyzymd.engines.gromacs.engine import GromacsEngine
+
     try:
-        progress = load_progress(working_dir)
+        progress = load_progress(working_dir) or load_progress(
+            working_dir / GromacsEngine.engine_subdir
+        )
     except Exception:  # noqa: BLE001 - an unreadable progress file records nothing
         progress = None
     if progress is not None:
@@ -884,8 +891,12 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
             }
             for a, b, c, d in sorted(combos, key=lambda t: tuple(str(x) for x in t))
         ]
-    from polyzymd.engines.gromacs.engine import GromacsEngine
-
+        seeds = {
+            "equilibration": {s.name: s.seeds for s in progress.equilibration_stages if s.seeds},
+            "production": {str(s.index): s.seeds for s in progress.segments if s.seeds},
+        }
+        if any(seeds.values()):
+            found["seeds"] = seeds
     try:
         with open(working_dir / GromacsEngine.engine_subdir / "prod.log", errors="ignore") as log:
             versions = {

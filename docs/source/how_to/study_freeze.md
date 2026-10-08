@@ -180,9 +180,12 @@ Otherwise, freeze does these steps:
 
 More about the manifest and the checklist:
 
-- The manifest records, for each replicate, the PolyzyMD and OpenMM versions
-  that built and ran it (`simulated_with`, from `build_manifest.json` and
-  `progress.json`).
+- The manifest records, for each replicate, the PolyzyMD, OpenMM and OpenFF
+  versions that built it, the OpenMM or GROMACS version that ran it, and the
+  random seeds of each equilibration stage and production segment
+  (`simulated_with`, from `build_manifest.json`, `progress.json` and the
+  GROMACS log). The deposited `build_manifest.json` of each replicate, in
+  `engine_inputs/`, also gives the Packmol seeds and the box the build made.
 - The manifest follows the JSON Schema `manifest-1.schema.json`. The schema
   ships with PolyzyMD, and freeze writes it into the deposit. `study.yaml`
   has its own schema, `study-1.schema.json`.

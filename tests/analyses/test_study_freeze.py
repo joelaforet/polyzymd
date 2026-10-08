@@ -680,6 +680,33 @@ class TestGromacsFreeze:
             assert replicate["simulated_with"]["build"] == built
             assert replicate["simulated_with"]["gromacs_version"] == "2025.2"
 
+    def test_manifest_records_the_seeds_of_each_stage_and_segment(
+        self, gromacs_study: Path, tmp_path: Path
+    ) -> None:
+        """The seeds GROMACS ran with come from gromacs/progress.json, as OpenMM's do."""
+        from polyzymd.simulation.progress import (
+            EquilibrationStageRecord,
+            SegmentRecord,
+            SimulationProgress,
+            save_progress,
+        )
+
+        for run in (tmp_path / "scratch").iterdir():
+            progress = SimulationProgress(
+                equilibration_stages=[
+                    EquilibrationStageRecord(index=0, name="eq_01", seeds={"ld_seed": 5}),
+                ],
+                segments=[SegmentRecord(index=0, seeds={"ld_seed": 7, "gen_seed": None})],
+            )
+            save_progress(run / "gromacs", progress)
+        result = freeze(gromacs_study)
+        for replicate in result.manifest["conditions"]["Water"]["replicates"].values():
+            assert replicate["simulated_with"]["seeds"] == {
+                "equilibration": {"eq_01": {"ld_seed": 5}},
+                "production": {"0": {"ld_seed": 7, "gen_seed": None}},
+            }
+            assert replicate["simulated_with"]["segments"]
+
     def test_checklist_gives_what_gromacs_ran(self, gromacs_study: Path) -> None:
         """4b lists the GROMACS integrator and barostat; 1d has no polymers for a study without them."""
         freeze(gromacs_study)
