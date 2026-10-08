@@ -276,8 +276,8 @@ solvent:
 `nacl_concentration` sets the number of NaCl pairs. With `neutralize: true`,
 the Na+ or Cl- ions that cancel the charge of the solute and co-solvents are
 added on top of the salt, as OpenMM `Modeller` and `gmx genion -neutral` do.
-NaCl is the only salt the build adds: `validate` refuses a non-zero
-`kcl_concentration` or `mgcl2_concentration`.
+NaCl is the only salt the build adds: `validate`, `build`, `run` and `submit`
+refuse a non-zero `kcl_concentration` or `mgcl2_concentration`.
 
 `box.padding` is the distance from the **solute** to the box edge. The edge of
 the cell is the solute diameter (its largest atom-to-atom distance) plus
@@ -295,8 +295,10 @@ solvent counts.
 
 ### Water Models
 
-`tip3p` (TIP3P) is the only water model. The force fields PolyzyMD loads carry
-the TIP3P water parameters, so `validate` refuses any other `model`.
+`tip3p` (TIP3P) is the only water model PolyzyMD builds. The force fields it
+loads carry the TIP3P water parameters, so `validate`, `build`, `run` and
+`submit` refuse any other `model`. A config of an existing run with another
+model still loads for `status` and analysis.
 
 ### Box Shapes
 

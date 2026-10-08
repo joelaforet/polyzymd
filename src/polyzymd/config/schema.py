@@ -78,14 +78,19 @@ class ChargeMethod(str, Enum):
 
 
 class WaterModel(str, Enum):
-    """Supported water models.
+    """Water models a config may name.
 
-    Only TIP3P: the force fields PolyzyMD loads carry the TIP3P water
-    parameters, so another 3-site model would get TIP3P Lennard-Jones terms
-    and geometry, and 4-site models need virtual sites the build does not make.
+    Only TIP3P is built: the force fields PolyzyMD loads carry the TIP3P water
+    parameters. The other values stay loadable so configs of existing runs
+    still load for status and analysis; new builds refuse them
+    (:meth:`SimulationConfig.require_buildable`).
     """
 
     TIP3P = "tip3p"
+    SPCE = "spce"
+    TIP4P = "tip4p"
+    TIP4PEW = "tip4pew"
+    OPC = "opc"
 
 
 class BoxShape(str, Enum):
@@ -681,17 +686,6 @@ class PrimarySolventConfig(_ConfigModel):
     type: str = Field("water", description="Primary solvent type")
     model: WaterModel = Field(WaterModel.TIP3P, description="Water model")
 
-    @field_validator("model", mode="before")
-    @classmethod
-    def refuse_unbuilt_water_models(cls, v: Any) -> Any:
-        """Refuse water models other than TIP3P and say how to fix the config."""
-        if isinstance(v, str) and v.lower().strip() != WaterModel.TIP3P.value:
-            raise ValueError(
-                f"Water model '{v}' is not supported: PolyzyMD builds only TIP3P water, "
-                "the water model of the force fields it loads. Set solvent.primary.model: tip3p."
-            )
-        return v
-
 
 class IonConfig(_ConfigModel):
     """Configuration for ions in the solvent.
@@ -707,19 +701,8 @@ class IonConfig(_ConfigModel):
         ge=0.0,
         description="NaCl salt concentration (mol/L), before neutralizing ions",
     )
-    kcl_concentration: float = Field(0.0, ge=0.0, description="KCl conc. (mol/L); only 0")
-    mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L); only 0")
-
-    @field_validator("kcl_concentration", "mgcl2_concentration")
-    @classmethod
-    def refuse_salts_not_built(cls, v: float, info: Any) -> float:
-        """Refuse KCl and MgCl2: the build adds only NaCl."""
-        if v:
-            raise ValueError(
-                f"{info.field_name} is not supported: the build adds only Na+ and Cl- ions. "
-                f"Remove {info.field_name}, or use nacl_concentration."
-            )
-        return v
+    kcl_concentration: float = Field(0.0, ge=0.0, description="KCl conc. (mol/L); not built")
+    mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L); not built")
 
 
 class BoxConfig(_ConfigModel):
@@ -1694,21 +1677,41 @@ class SimulationConfig(_ConfigModel):
             self.require_engine_barostats("openmm")
         return self
 
-    @model_validator(mode="after")
-    def validate_restraints_for_engine(self) -> "SimulationConfig":
-        """Refuse restraints that engine gromacs would drop."""
-        if self.engine == "gromacs":
-            self.require_engine_restraints("gromacs")
-        return self
+    def require_buildable(self, engine: str | None = None) -> None:
+        """Raise ``ValueError`` when a new system built from this config would be wrong.
+
+        Loading a config does not run these checks, so the configs of existing
+        runs still load for status and analysis. The commands that build a new
+        system (``validate``, ``build``, ``run``, ``submit``) call this.
+
+        Parameters
+        ----------
+        engine : str or None
+            Engine that will run the system. Default: the config's engine.
+        """
+        model = self.solvent.primary.model
+        if model != WaterModel.TIP3P:
+            raise ValueError(
+                f"PolyzyMD cannot build water model '{model.value}' correctly: the force fields "
+                "it loads carry TIP3P water parameters; use model: tip3p for new systems."
+            )
+        ions = self.solvent.ions
+        for key in ("kcl_concentration", "mgcl2_concentration"):
+            if getattr(ions, key):
+                raise ValueError(
+                    f"{key}: the build adds only Na+ and Cl- ions. For new systems, remove "
+                    f"{key} and use nacl_concentration."
+                )
+        self.require_engine_restraints(engine or self.engine)
 
     def require_engine_restraints(self, engine: str) -> None:
         """Raise ``ValueError`` when ``engine`` would drop a restraint this config names.
 
         Only the OpenMM engine applies distance restraints (``restraints:``).
         The GROMACS export writes position restraints for the protein, ligand
-        and polymer groups only. Commands that build or run GROMACS inputs call
-        this, so ``build --format gromacs`` and ``run --engine gromacs`` on an
-        OpenMM config are refused too.
+        and polymer groups only. :meth:`require_buildable` calls this with the
+        engine a command builds for, so ``build --format gromacs`` and
+        ``run --engine gromacs`` on an OpenMM config are refused too.
         """
         if engine != "gromacs":
             return
@@ -1740,15 +1743,15 @@ class SimulationConfig(_ConfigModel):
         if varying:
             raise ValueError(
                 f"On GROMACS a position restraint group has one force constant in every stage, "
-                f"but {', '.join(varying)} has several. Give it the same force_constant in "
-                "each stage, or set engine: openmm."
+                f"but {', '.join(varying)} has several. Use the same force_constant in "
+                "every stage."
             )
         protein = sorted(group for group in force_constants if mapping[group][0] == "protein")
         if len(protein) > 1:
             raise ValueError(
                 f"On GROMACS the protein groups share one restraint switch, so {', '.join(protein)} "
-                "would all be on in every stage that names one of them. Use one protein group "
-                "in all stages, or set engine: openmm."
+                "would all be on in every stage that names one of them. Use the same protein "
+                "group in every stage."
             )
 
     def require_engine_barostats(self, engine: str) -> None:

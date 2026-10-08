@@ -66,7 +66,7 @@ def _make_dry_run_config() -> SimpleNamespace:
         ),
         restraints=[],
         get_working_directory=lambda rep: Path(f"/tmp/scratch/run_{rep}"),
-        require_engine_restraints=lambda engine: None,
+        require_buildable=lambda engine=None: None,
     )
 
 
@@ -378,17 +378,20 @@ _DISTANCE_RESTRAINT = {
 }
 
 
-def test_validate_refuses_a_water_model_the_build_cannot_make(tmp_path: Path) -> None:
-    """validate refuses spce, which would build SPC/E charges on TIP3P water."""
+@pytest.mark.parametrize("command", [["validate"], ["build", "--dry-run"], ["run", "--dry-run"]])
+def test_new_builds_refuse_a_water_model_the_build_cannot_make(
+    tmp_path: Path, command: list[str]
+) -> None:
+    """validate, build and run refuse spce, which would build SPC/E charges on TIP3P water."""
     data = _minimal_cli_config_data("missing.pdb")
     data["solvent"] = {"primary": {"type": "water", "model": "spce"}}
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
-    result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+    result = CliRunner().invoke(cli, [command[0], "-c", str(config_path), *command[1:]])
 
     assert result.exit_code != 0
-    assert "model: tip3p" in result.output
+    assert "model: tip3p for new systems" in result.output
 
 
 def test_validate_refuses_distance_restraints_with_engine_gromacs(tmp_path: Path) -> None:
