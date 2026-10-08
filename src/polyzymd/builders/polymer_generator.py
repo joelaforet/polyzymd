@@ -244,6 +244,7 @@ class PolymerGenerator:
         cache_directory: Path,
         max_retries: int = 10,
         charger_type: str = "nagl",
+        type_prefix: str | None = None,
     ):
         """Initialize the polymer generator.
 
@@ -257,8 +258,13 @@ class PolymerGenerator:
             Maximum attempts for building after ring-piercing failures, by default 10.
         charger_type : str, optional
             Charge method, by default "nagl".
+        type_prefix : str | None, optional
+            Filename prefix of every chain, the config's ``type_prefix``, so
+            cached mode finds the files. Without it the prefix is the names of
+            the monomers in the sequence.
         """
         self.monomer_group = monomer_group
+        self.type_prefix = type_prefix
         self.cache_directory = Path(cache_directory)
         self.max_retries = max_retries
         self.charger_type = charger_type.lower()
@@ -1047,7 +1053,7 @@ class PolymerGenerator:
 
         # Build monomer prefix
         monomers_used = [monomer_names[label] for label in unique_labels]
-        monomer_prefix = "-".join(monomers_used) if monomers_used else "NO_MONOMERS"
+        monomer_prefix = self.type_prefix or "-".join(monomers_used)
 
         length = len(sequence)
         filename = f"{monomer_prefix}_seq={sequence}_{length}-mer"

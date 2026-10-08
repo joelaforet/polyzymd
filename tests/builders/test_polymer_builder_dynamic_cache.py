@@ -245,3 +245,62 @@ def test_cached_builder_loads_sdf_directory_hit_without_dynamic_metadata(
     monkeypatch.setattr(builder, "_load_from_sdf", lambda path: sentinel)
 
     assert builder._get_or_create_molecule("A") is sentinel
+
+
+def test_cached_mode_finds_the_file_dynamic_mode_writes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Both modes name a chain's SDF after type_prefix, so cached mode reuses a dynamic cache."""
+    import polyzymd.builders.fragment_generator as fragment_generator_module
+
+    class _Fragments:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def load_or_generate(self, **kwargs: object) -> FakeMonomerGroup:
+            return FakeMonomerGroup({"SBMA_2-site": ["s"], "EGPMA_2-site": ["e"]})
+
+    monkeypatch.setattr(fragment_generator_module, "FragmentGenerator", _Fragments)
+    names = {"A": "SBMA", "B": "EGPMA"}
+    dynamic = PolymerBuilder(
+        characters=["A", "B"],
+        probabilities=[0.5, 0.5],
+        length=5,
+        type_prefix="SE",
+        cache_directory=tmp_path,
+        generation_mode="dynamic",
+        monomer_smiles={"SBMA": "C", "EGPMA": "CO"},
+        monomer_names=names,
+        reactions=type("Reactions", (), dict.fromkeys(_REACTION_FIELDS))(),
+    )
+    dynamic._ensure_generators_initialized()
+    written = dynamic._polymer_generator._make_polymer_filename("AABBA", names) + ".sdf"
+    cached = PolymerBuilder(
+        characters=["A", "B"],
+        probabilities=[0.5, 0.5],
+        length=5,
+        type_prefix="SE",
+        sdf_directory=tmp_path,
+        generation_mode="cached",
+    )
+    assert cached._get_sdf_path("AABBA", tmp_path).name == written
+
+
+_REACTION_FIELDS = ("initiation", "polymerization", "termination")
+
+
+def test_missing_cached_sdf_error_names_real_config_keys(tmp_path: Path) -> None:
+    """The error for a missing cached chain points at config keys that exist."""
+    cached = PolymerBuilder(
+        characters=["A"],
+        probabilities=[1.0],
+        length=5,
+        type_prefix="SE",
+        sdf_directory=tmp_path,
+        generation_mode="cached",
+    )
+    with pytest.raises(FileNotFoundError) as error:
+        cached._get_or_create_molecule("AAAAA")
+    assert "allow_generation" not in str(error.value)
+    assert "generation_mode: dynamic" in str(error.value)
