@@ -80,9 +80,11 @@ Empty selections:
 
 - **A control without polymer.** If `polymer_selection` matches no atoms in a
   replicate, the replicate has no contact. Its values are 0, with 0 events and
-  no lifetime. PolyzyMD keeps it in the statistics, compares it like any other
-  replicate, and prints a warning that names it. So you can put a control
-  without polymer first, as the control.
+  no lifetime. PolyzyMD keeps the rows and prints a warning that names them.
+  That 0 is not a measurement, so the condition is marked `no_partner`, every
+  comparison with it is `not testable`, with the reason, and a trend leaves
+  it out. One such replicate marks the whole condition, so its other
+  replicates are not compared either.
 - **No protein.** If `protein_selection` matches no atoms in a replicate,
   PolyzyMD leaves the replicate out and prints a warning. If it matches no
   atoms in any replicate, PolyzyMD stops with an error.

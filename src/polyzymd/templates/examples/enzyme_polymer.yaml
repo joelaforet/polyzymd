@@ -181,7 +181,7 @@ output:
   # Output options
   save_checkpoint: true
   save_state_data: true
-  trajectory_format: "dcd"
+  trajectory_format: "dcd"  # Not read: OpenMM writes dcd, GROMACS xtc
 
 # ============================================================================
 # Force Field Selection

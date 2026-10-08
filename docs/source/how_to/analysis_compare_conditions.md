@@ -116,8 +116,9 @@ The command does these steps:
 5. It compares each condition with the control by Welch's t test. It corrects
    the p values with the {term}`Benjamini-Hochberg` method.
 
-A condition without polymer can be the control. Its replicates report 0
-hydrogen bonds and stay in the statistics.
+A condition without polymer reports 0 hydrogen bonds with the polymer in each
+replicate. Its rows stay in the report, but that 0 is not a measurement, so
+every comparison with it is `not testable`, with the reason.
 
 Without `--label`, each condition takes the name of the folder that holds its
 config. For the meaning of each output line, see {doc}`analysis_agent_protocol`.
@@ -226,6 +227,20 @@ directory of the config. Do one of these:
 - Run the simulations first.
 - If the replicate folders are in another place, name the place in
   `data.local.yaml`, with `polyzymd study locate DIR`, or with `--data`.
+
+### `no runs found under ...`
+
+The condition has no replicate folder under the scratch directory of its
+config, for example a condition added with `polyzymd study add-condition --new`
+that is not simulated yet. With `--study`, the report holds the other
+conditions, marks itself `partial`, and a `problem:` line names the condition
+left out. Run its simulations, or name the place of its runs as above.
+
+When no condition of the study has runs on this machine and a stored report
+exists, `analyze --study` exits 2 with `error: no runs of study ... are on this
+machine.` It never prints the stored values as its result. Read them with
+`pz.Study("study.yaml").results(run)`, or give the runs with
+`polyzymd study locate DIR --verify` to analyse again.
 
 ### `the control ... has no replicate where every selection matches atoms`
 

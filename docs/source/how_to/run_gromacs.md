@@ -21,7 +21,9 @@ activated the environment with `pixi shell -e build`.
 
 ## Run locally
 
-Set `engine: gromacs` in `config.yaml`. Then run one replicate:
+Set `engine: gromacs` in `config.yaml`. GROMACS does not read the `openmm:`
+block of the template, and it writes `.xtc` trajectories whatever
+`output.trajectory_format` says. Then run one replicate:
 
 ```bash
 pixi run -e build polyzymd run -c config.yaml -r 1
