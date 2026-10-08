@@ -882,8 +882,11 @@ gromacs:
   ntmpi: 1
   ntomp: 12
   module_load: "module load gcc/11.2.0 gromacs/2024.2"
-  mdrun_flags: "-nb gpu -pme gpu -bonded gpu -update gpu -pin on"
+  mdrun_flags: "-pin on"
 ```
+
+`gpu: true` adds `-nb gpu`, `-pme gpu` and `-bonded gpu` unless
+`mdrun_flags` sets those flags. It never adds `-update gpu`. See the notes.
 
 ### Full Field Reference
 
@@ -897,7 +900,7 @@ gromacs:
 | `grompp_flags` | `str` | `""` | Extra flags passed to `gmx grompp`, such as `-maxwarn 1` to accept a warning you have read. By default every warning stops the run. |
 | `command_prefix` | `str \| null` | `null` | Prefix prepended to all GROMACS commands. Use for container wrappers (e.g., `singularity exec ...`). When set with a real-MPI binary, automatic `mpirun` wrapping is skipped. |
 | `mpi_launcher_flags` | `str` | `""` | Extra flags for the MPI launcher (`mpirun`). Only used with real-MPI builds (`gmx_mpi`). |
-| `module_load` | `str \| null` | `null` | Module load command inserted verbatim into SLURM scripts. List prerequisites before the GROMACS module. |
+| `module_load` | `str \| null` | `null` | Module load command inserted verbatim into SLURM scripts. The job runs it; the submitting host does not, so load the scheduler module in your shell before `submit`. List prerequisites before the GROMACS module. |
 | `env_exports` | `dict[str, str]` | `{}` | Environment variables exported before GROMACS commands. Keys must be valid shell variable names. |
 | `setup_commands` | `list[str]` | `[]` | Shell commands run after `module_load` and before GROMACS commands. |
 | `ntmpi` | `int` | `1` | Number of MPI ranks for `gmx mdrun -ntmpi`. Also sets SLURM `--ntasks` unless `slurm_ntasks` overrides it. Must be >= 1. |
@@ -911,6 +914,10 @@ gromacs:
 
 - Unsafe GPU flags (`-pme gpu`, `-bonded gpu`, `-update gpu`) are automatically
   stripped during energy minimization stages. Only `-nb gpu` is safe for EM.
+- GROMACS updates on the GPU (`-update gpu`) only with `integrator = md`.
+  The Langevin thermostats (the default) run as `integrator = sd`, and
+  GROMACS then stops with *"Only the md integrator is supported"*. The GROMACS
+  documentation lists the other conditions.
 - When `gpu` is true and `ntmpi` > 1, a warning is emitted about GPU sharing.
 - Set `slurm_ntasks` above `ntmpi` when the scheduler must reserve more tasks
   than GROMACS runs ranks, for example for a container or a multi-GPU allocation.
@@ -927,7 +934,7 @@ gromacs:
 gromacs:
   mdrun_flags: "-pin on"                      # all stages
   mdrun_flags_equilibration: "-pin on -dlb yes"
-  mdrun_flags_production: "-pin on -dlb auto -nb gpu -pme gpu -bonded gpu -update gpu"
+  mdrun_flags_production: "-pin on -dlb auto -nb gpu -pme gpu -bonded gpu"
 ```
 
 ### `command_prefix` and `mpi_launcher_flags`
@@ -936,7 +943,8 @@ Use one of the two, not both.
 
 - `command_prefix` goes before every GROMACS command. Use it for a container
   or a site launcher:
-  `command_prefix: "singularity exec --rocm --bind $PWD /path/to/gromacs.sif"`.
+  `command_prefix: "singularity exec --rocm /path/to/gromacs.sif"`. The value
+  cannot hold shell variables such as `$PWD`; script generation refuses them.
 - `mpi_launcher_flags` goes after the `mpirun` that PolyzyMD writes for a
   real-MPI binary: `mpi_launcher_flags: "-genv I_MPI_FABRICS shm:tcp"` gives
   `mpirun -genv I_MPI_FABRICS shm:tcp gmx_mpi mdrun ...`.
@@ -972,7 +980,7 @@ These `gmx mdrun` flags go in `mdrun_flags`, `mdrun_flags_equilibration` or
 | `-nb gpu` | Nonbonded forces on the GPU. Allowed in minimization. |
 | `-pme gpu` | PME electrostatics on the GPU. Removed in minimization. |
 | `-bonded gpu` | Bonded forces on the GPU. Removed in minimization. |
-| `-update gpu` | Integration and constraints on the GPU. Removed in minimization. |
+| `-update gpu` | Integration and constraints on the GPU. Needs `integrator = md`, so not with the Langevin thermostats. Removed in minimization. |
 | `-pin on` | Pin threads to CPU cores. |
 | `-pinstride N` | Stride between pinned threads. |
 | `-dlb yes\|auto` | Dynamic load balancing. |
