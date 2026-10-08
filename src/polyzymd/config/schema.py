@@ -1613,6 +1613,22 @@ class GromacsEngineConfig(_ConfigModel):
 
         return self
 
+    @model_validator(mode="after")
+    def _refuse_noconfout(self) -> Self:
+        """Refuse ``-noconfout``: without it mdrun writes the final ``.gro`` and checkpoint.
+
+        PolyzyMD finds a finished equilibration stage by its ``.gro`` and a
+        finished production by its last checkpoint, so a run with
+        ``-noconfout`` would never count as finished.
+        """
+        for name in ("mdrun_flags", "mdrun_flags_equilibration", "mdrun_flags_production"):
+            if "-noconfout" in (getattr(self, name) or "").split():
+                raise ValueError(
+                    f"gromacs.{name} contains -noconfout. PolyzyMD needs the final .gro "
+                    "and checkpoint that mdrun writes to know a stage finished; remove it."
+                )
+        return self
+
 
 # =============================================================================
 # Main Simulation Configuration

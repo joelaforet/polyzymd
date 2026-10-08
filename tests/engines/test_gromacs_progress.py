@@ -214,7 +214,9 @@ def test_production_records_count_the_frames_written(tmp_path: Path) -> None:
     first = update_gromacs_progress(tmp_path)
     assert first.segments[-1].samples_written == 21
 
-    (tmp_path / "prod.log").write_text("nsteps = 5000\n" + _CHECKPOINT.format(step=5000))
+    (tmp_path / "prod.log").write_text(
+        "nsteps = 5000\n" + _CHECKPOINT.format(step=2000) + _CHECKPOINT.format(step=5000)
+    )
     second = update_gromacs_progress(tmp_path)
     assert second.segments[-1].samples_written == 30
     assert sum(segment.samples_written for segment in second.segments) == 51
@@ -251,7 +253,9 @@ def test_update_records_its_version_only_on_what_it_ran(tmp_path: Path, monkeypa
     save_progress(tmp_path, load_or_scan_gromacs_progress(tmp_path))
     monkeypatch.setattr("polyzymd.utils.version.get_polyzymd_version", lambda: "1.3.0")
 
-    (tmp_path / "prod.log").write_text("nsteps = 200\n" + _CHECKPOINT.format(step=200))
+    (tmp_path / "prod.log").write_text(
+        "nsteps = 200\n" + _CHECKPOINT.format(step=100) + _CHECKPOINT.format(step=200)
+    )
     progress = update_gromacs_progress(tmp_path)
     assert [r.polyzymd_version for r in progress.segments] == [None, "1.3.0"]
     assert progress.equilibration_stages[0].polyzymd_version is None
@@ -393,7 +397,8 @@ def test_a_production_restart_from_step_0_replaces_the_lost_segments(tmp_path: P
     # started again from step 0, and mdrun backed up the old prod.log.
     (tmp_path / "state.cpt").unlink()
     (tmp_path / "prod.log").write_text(first + " Step Time\n 3000 6.0\n")
-    assert load_or_scan_gromacs_progress(tmp_path).total_steps_completed == 0
+    # Without a checkpoint file nothing proves the loss yet, so nothing is dropped.
+    assert load_or_scan_gromacs_progress(tmp_path).total_steps_completed == 5000
 
     (tmp_path / "state.cpt").write_text("cpt")
     (tmp_path / "prod.log").write_text(
@@ -414,3 +419,44 @@ def test_a_local_run_counts_up_to_its_prod_cpt(tmp_path: Path) -> None:
     (tmp_path / "prod.log").write_text(_FINISHED_LOG)
 
     assert scan_gromacs_progress(tmp_path).status == SimulationStatus.COMPLETED
+
+
+def test_a_checkpoint_being_replaced_keeps_the_records(tmp_path: Path) -> None:
+    """While mdrun replaces state.cpt only state_prev.cpt exists; nothing is lost or dropped."""
+    from polyzymd.engines.gromacs.progress import load_or_scan_gromacs_progress
+
+    (tmp_path / "state.cpt").write_text("cpt")
+    (tmp_path / "prod.log").write_text("nsteps = 20000\n" + _CHECKPOINT.format(step=5000))
+    update_gromacs_progress(tmp_path)
+    (tmp_path / "state.cpt").rename(tmp_path / "state_prev.cpt")
+    (tmp_path / "prod.log").write_text(
+        "nsteps = 20000\n" + _CHECKPOINT.format(step=5000) + _CHECKPOINT.format(step=8000)
+    )
+
+    progress = load_or_scan_gromacs_progress(tmp_path)
+
+    assert [s.steps_completed for s in progress.segments] == [5000, 3000]
+
+
+def test_records_are_kept_whatever_the_reading_machine_clock(tmp_path: Path, monkeypatch) -> None:
+    """Restarts are found from the checkpoint steps of prod.log, not by comparing times."""
+    import time
+
+    (tmp_path / "state.cpt").write_text("cpt")
+    log = "nsteps = 20000\nStarted mdrun on rank 0 Thu Oct  8 06:46:46 2026\n"
+    (tmp_path / "prod.log").write_text(log + _CHECKPOINT.format(step=5000))
+    monkeypatch.setenv("TZ", "Pacific/Kiritimati")
+    time.tzset()
+    try:
+        update_gromacs_progress(tmp_path)
+        monkeypatch.setenv("TZ", "Pacific/Pago_Pago")
+        time.tzset()
+        (tmp_path / "prod.log").write_text(
+            log + _CHECKPOINT.format(step=5000) + _CHECKPOINT.format(step=9000)
+        )
+        progress = update_gromacs_progress(tmp_path)
+    finally:
+        monkeypatch.delenv("TZ")
+        time.tzset()
+
+    assert [s.steps_completed for s in progress.segments] == [5000, 4000]

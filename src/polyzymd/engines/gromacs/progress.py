@@ -41,8 +41,8 @@ def scan_gromacs_progress(
 
     - Equilibration: presence of ``eq_NN.gro`` files
     - Production: the step of the last checkpoint that ``prod.log``
-      records, 0 without its checkpoint file (``state.cpt``, or ``prod.cpt``
-      of a local run). The job script restarts production
+      records, 0 without a checkpoint file (``state.cpt``, or ``prod.cpt``
+      of a local run, or their ``_prev`` copies). The job script restarts production
       from ``state.cpt``, or from step 0 without it, so steps after the last
       checkpoint are not counted: a restart runs them again.
     - Completion: the last checkpoint is at the requested step count.
@@ -74,8 +74,7 @@ def scan_gromacs_progress(
 
     log_info = _parse_gromacs_log(working_dir / "prod.log")
     steps_completed = 0
-    # The SLURM job script writes state.cpt, a local `polyzymd run` prod.cpt.
-    if any((working_dir / name).is_file() for name in ("state.cpt", "prod.cpt")):
+    if any((working_dir / name).is_file() for name in _PRODUCTION_CHECKPOINTS):
         steps_completed = int(log_info["checkpoint_step"])
     nsteps_requested = int(log_info["nsteps_requested"])
 
@@ -191,7 +190,7 @@ def update_gromacs_progress(
             progress.total_samples_requested = scanned.total_samples_requested
 
         new_steps = scanned.total_steps_completed
-        _drop_lost_segments(progress, working_dir, new_steps)
+        _drop_lost_segments(progress, working_dir)
         old_steps = progress.total_steps_completed
         delta_steps = max(0, new_steps - old_steps)
         old_segments = len(progress.segments)
@@ -245,26 +244,32 @@ def update_gromacs_progress(
 _CHECKPOINT_STEP = re.compile(r"^Writing checkpoint, step (\d+)", re.MULTILINE)
 
 
-def _drop_lost_segments(
-    progress: SimulationProgress, working_dir: Path, checkpointed_steps: int
-) -> None:
+#: Checkpoint files of production: the SLURM job script writes ``state.cpt``,
+#: a local ``polyzymd run`` ``prod.cpt``. While mdrun replaces one, only its
+#: ``_prev`` copy exists.
+_PRODUCTION_CHECKPOINTS = ("state.cpt", "state_prev.cpt", "prod.cpt", "prod_prev.cpt")
+
+
+def _drop_lost_segments(progress: SimulationProgress, working_dir: Path) -> None:
     """Remove the segments of ``progress`` whose steps production lost.
 
-    Production restarts from its last checkpoint, or from step 0 without one;
-    then mdrun backs up ``prod.log`` and starts a new one. Segments that
-    started before the first mdrun of ``prod.log`` belong to such a lost run,
-    and the last segments past ``checkpointed_steps`` were run again. The
-    caller records the checkpointed steps again as a new segment.
+    Every segment ends at a checkpoint, and a restart from a checkpoint keeps
+    the ``Writing checkpoint`` lines of ``prod.log`` up to it. A segment whose
+    end step is not among them belongs to a run that production started
+    again from step 0 (mdrun then backs up ``prod.log``), or lies past the
+    last checkpoint; it and the segments after it are removed. Nothing is
+    removed while no checkpoint file exists. The caller records the
+    checkpointed steps again as a new segment.
     """
-    run_started, _ = _mdrun_times(working_dir / "prod.log", first_start=True)
-    if run_started is not None:
-        progress.segments = [
-            segment
-            for segment in progress.segments
-            if datetime.fromisoformat(segment.started_at) >= datetime.fromisoformat(run_started)
-        ]
-    while progress.segments and progress.total_steps_completed > checkpointed_steps:
-        progress.segments.pop()
+    if not any((working_dir / name).is_file() for name in _PRODUCTION_CHECKPOINTS):
+        return
+    logged = set(_parse_gromacs_log(working_dir / "prod.log")["checkpoint_steps"])
+    end_step = 0
+    for kept, segment in enumerate(progress.segments):
+        end_step += segment.steps_completed
+        if end_step not in logged:
+            del progress.segments[kept:]
+            return
 
 
 def _parse_gromacs_log(log_path: Path) -> dict:
@@ -283,6 +288,7 @@ def _parse_gromacs_log(log_path: Path) -> dict:
         - ``steps_completed``: int, the last step of the energy table
         - ``time_completed_ps``: float
         - ``checkpoint_step``: int, the step of the last checkpoint written
+        - ``checkpoint_steps``: list[int], the steps of every checkpoint written
         - ``nsteps_requested``: int
     """
     try:
@@ -292,6 +298,7 @@ def _parse_gromacs_log(log_path: Path) -> dict:
             "steps_completed": 0,
             "time_completed_ps": 0.0,
             "checkpoint_step": 0,
+            "checkpoint_steps": [],
             "nsteps_requested": 0,
         }
     checkpoints = _CHECKPOINT_STEP.findall(text)
@@ -318,6 +325,7 @@ def _parse_gromacs_log(log_path: Path) -> dict:
         "steps_completed": steps_completed,
         "time_completed_ps": time_completed_ps,
         "checkpoint_step": int(checkpoints[-1]) if checkpoints else 0,
+        "checkpoint_steps": [int(step) for step in checkpoints],
         "nsteps_requested": nsteps_requested,
     }
 
@@ -556,7 +564,7 @@ def load_or_scan_gromacs_progress(
         progress.equilibration_stages = _keep_provenance(
             scanned.equilibration_stages, progress.equilibration_stages
         )
-        _drop_lost_segments(progress, working_dir, scanned.total_steps_completed)
+        _drop_lost_segments(progress, working_dir)
         if scanned.total_steps_completed > progress.total_steps_completed:
             delta_steps = scanned.total_steps_completed - progress.total_steps_completed
             segment_status = (
