@@ -24,6 +24,7 @@ def _make_submission_config(engine: str = "openmm") -> SimpleNamespace:
             get_job_scripts_directory=lambda: "/tmp/polyzymd-job-scripts",
             slurm_logs_subdir="slurm_logs",
         ),
+        require_buildable=lambda engine=None: None,
     )
 
 

@@ -42,7 +42,7 @@ AVOGADRO_CONSTANT = 6.02214076e23
 ION_CHARGE_TOLERANCE = 1.0e-5
 
 # Water model type
-WaterModelType = Literal["tip3p", "spce", "tip4p", "tip4pew", "opc"]
+WaterModelType = Literal["tip3p"]
 
 # Box shape type
 BoxShapeType = Literal["cube", "rhombic_dodecahedron"]
@@ -152,16 +152,12 @@ class SolventComposition:
         water_model: Water model to use.
         co_solvents: List of co-solvent specifications.
         nacl_concentration: NaCl salt concentration in mol/L, before neutralizing ions.
-        kcl_concentration: KCl concentration in mol/L.
-        mgcl2_concentration: MgCl2 concentration in mol/L.
         neutralize: Whether to neutralize system charge.
     """
 
     water_model: WaterModelType = "tip3p"
     co_solvents: List[CoSolvent] = field(default_factory=list)
     nacl_concentration: float = 0.0  # NaCl salt concentration, mol/L
-    kcl_concentration: float = 0.0
-    mgcl2_concentration: float = 0.0
     neutralize: bool = True
 
     def __post_init__(self) -> None:
@@ -608,8 +604,6 @@ class SolventBuilder:
             water_model=config.primary.model.value,
             co_solvents=co_solvents,
             nacl_concentration=config.ions.nacl_concentration,
-            kcl_concentration=config.ions.kcl_concentration,
-            mgcl2_concentration=config.ions.mgcl2_concentration,
             neutralize=config.ions.neutralize,
         )
 
@@ -864,8 +858,6 @@ class SolventBuilder:
         """
         from polyzymd.data.solvent_molecules import get_solvent_molecule
 
-        # Map water model name to canonical form
-        # get_solvent_molecule handles: tip3p, spce, tip4pew, opc, etc.
         return get_solvent_molecule(model)
 
     def _center_topology_in_box(self, topology: Topology, box_vecs: NDArray) -> None:

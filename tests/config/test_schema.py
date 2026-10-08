@@ -1138,3 +1138,87 @@ def test_cosolvent_residue_name_that_selections_take_for_protein_or_water_is_ref
 
     with pytest.raises(ValueError, match="residue_name"):
         CoSolventSpec(name=name, smiles="CCO", count=1, residue_name=residue_name)
+
+
+@pytest.mark.parametrize("model", ["spce", "tip4p", "tip4pew", "opc"])
+def test_water_models_the_build_cannot_make_load_but_are_not_built(minimal_config_data, model):
+    """Configs of existing runs with another water model load; a new build refuses them."""
+    minimal_config_data["solvent"] = {"primary": {"type": "water", "model": model}}
+    config = SimulationConfig(**minimal_config_data)
+    with pytest.raises(ValueError, match="use model: tip3p for new systems"):
+        config.require_buildable()
+
+
+_DISTANCE_RESTRAINT = {
+    "type": "flat_bottom",
+    "name": "substrate_active_site",
+    "atom1": {"selection": "protein and resid 76 and name OG"},
+    "atom2": {"selection": "resname LIG and name C1"},
+    "distance": 3.5,
+}
+
+
+def test_gromacs_refuses_enabled_distance_restraints(minimal_config_data):
+    """GROMACS runs apply no distance restraints, so a build refuses an enabled one."""
+    minimal_config_data["engine"] = "gromacs"
+    minimal_config_data["restraints"] = [_DISTANCE_RESTRAINT]
+    config = SimulationConfig(**minimal_config_data)
+    with pytest.raises(ValueError, match="set engine: openmm"):
+        config.require_buildable()
+    minimal_config_data["restraints"] = [{**_DISTANCE_RESTRAINT, "enabled": False}]
+    SimulationConfig(**minimal_config_data).require_buildable()
+    minimal_config_data["engine"] = "openmm"
+    minimal_config_data["restraints"] = [_DISTANCE_RESTRAINT]
+    config = SimulationConfig(**minimal_config_data)
+    config.require_buildable()
+    with pytest.raises(ValueError, match="set engine: openmm"):
+        config.require_buildable("gromacs")
+
+
+def test_gromacs_refuses_position_restraints_on_groups_it_cannot_restrain(minimal_config_data):
+    """GROMACS writes position restraints for protein, ligand and polymer groups only."""
+    minimal_config_data["engine"] = "gromacs"
+    stage = minimal_config_data["simulation_phases"]["equilibration_stages"][0]
+    stage["position_restraints"] = [{"group": "protein_heavy"}, {"group": "ligand_heavy"}]
+    SimulationConfig(**minimal_config_data).require_buildable()
+    stage["position_restraints"] = [{"group": "water_only"}]
+    with pytest.raises(ValueError, match="water_only"):
+        SimulationConfig(**minimal_config_data).require_buildable()
+
+
+@pytest.mark.parametrize(
+    ("stages", "fix"),
+    [
+        ([[("protein_heavy", 4184.0)], [("protein_heavy", 1000.0)]], "same force_constant"),
+        ([[("protein_heavy", 4184.0)], [("protein_backbone", 4184.0)]], "same protein group"),
+    ],
+)
+def test_gromacs_refuses_position_restraints_its_export_would_merge(
+    minimal_config_data, stages, fix
+):
+    """GROMACS writes one block per group and one switch for all protein groups."""
+    minimal_config_data["engine"] = "gromacs"
+    first = minimal_config_data["simulation_phases"]["equilibration_stages"][0]
+    minimal_config_data["simulation_phases"]["equilibration_stages"] = [
+        {
+            **first,
+            "name": f"eq{i}",
+            "position_restraints": [{"group": group, "force_constant": fc} for group, fc in stage],
+        }
+        for i, stage in enumerate(stages)
+    ]
+    config = SimulationConfig(**minimal_config_data)
+    with pytest.raises(ValueError, match=fix):
+        config.require_buildable()
+    config.require_buildable("openmm")
+
+
+@pytest.mark.parametrize("key", ["kcl_concentration", "mgcl2_concentration"])
+def test_salts_the_build_does_not_add_load_but_are_not_built(minimal_config_data, key):
+    """Configs of existing runs with KCl or MgCl2 load; a new build refuses them."""
+    minimal_config_data["solvent"] = {"ions": {key: 0.15}}
+    config = SimulationConfig(**minimal_config_data)
+    with pytest.raises(ValueError, match="use nacl_concentration"):
+        config.require_buildable()
+    minimal_config_data["solvent"] = {"ions": {key: 0.0}}
+    SimulationConfig(**minimal_config_data).require_buildable()

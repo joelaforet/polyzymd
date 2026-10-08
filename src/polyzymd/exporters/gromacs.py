@@ -1915,6 +1915,8 @@ class GromacsExporter:
             - "posres": Dictionary of position restraint files
             - "run_script": Run script path
         """
+        # GROMACS drops restraints that an OpenMM config may name.
+        self._config.require_engine_restraints("gromacs")
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
