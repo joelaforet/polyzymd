@@ -120,12 +120,16 @@ For each chain, the build does these steps:
 1. It draws a sequence from the monomer probabilities. The replicate number
    seeds the draw, unless you set `random_seed`.
 2. It puts end fragments at the two ends and middle fragments between them.
-3. It builds the 3D structure with Polymerist.
+3. It builds the 3D structure with Polymerist. The sequence seeds the
+   structure, so the same sequence always gives the same coordinates.
 4. It checks that no bond passes through a ring. If one does, it builds the
    chain again, up to `max_retries` times.
 5. It assigns partial charges with `charger`.
-6. It saves the charged chain as an SDF file in `cache_directory`, with a
-   `.metadata.json` file beside it.
+6. It saves the charged chain as
+   `<type_prefix>_seq=<sequence>_<length>-mer_charged.sdf` in
+   `cache_directory`, with a `.metadata.json` file beside it. This is the name
+   that `cached` mode reads, so a later config can set
+   `generation_mode: cached` and `sdf_directory` to this folder.
 
 The next build with the same monomers loads the fragments and chains from
 `cache_directory`. It generates a chain again if the metadata does not match

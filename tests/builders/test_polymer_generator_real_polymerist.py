@@ -200,3 +200,26 @@ def test_real_monomer_group_list_content_change_rejects_cache_metadata(
     monkeypatch.setattr(polymer_generator_module, "_topology_from_sdf", fail_load_cache)
 
     assert current_generator.get_cached_polymer("BBBBB", {"A": "SBMA", "B": "PEGMA"}) is None
+
+
+def test_same_sequence_builds_the_same_chain_conformer(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Two builds of one sequence give identical coordinates, whatever the global random state."""
+    import numpy as np
+
+    monkeypatch.setattr(
+        polymer_generator_module, "_mbmol_to_openmm_pdb", lambda path, chain, resname_map: None
+    )
+    coordinates = []
+    for global_seed in (1, 2):
+        np.random.seed(global_seed)
+        generator = PolymerGenerator(
+            monomer_group=_make_real_halogen_monomer_group(),
+            cache_directory=tmp_path / str(global_seed),
+            max_retries=1,
+        )
+        chain, _ = generator._build_polymer_structure("AABBA", {"A": "SBMA", "B": "PEGMA"})
+        coordinates.append(chain.xyz)
+    np.testing.assert_array_equal(coordinates[0], coordinates[1])
