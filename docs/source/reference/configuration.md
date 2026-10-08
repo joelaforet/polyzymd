@@ -7,18 +7,21 @@ This document describes all configuration options for PolyzyMD YAML files.
 A complete configuration file has these sections:
 
 ```yaml
-name: "simulation_name"
+name: "simulation_name"   # Required
+engine: "openmm"          # Required: openmm or gromacs
 description: "optional description"
 
 enzyme: { ... }           # Required
 substrate: { ... }        # Optional (null for apo)
 polymers: { ... }         # Optional (null to disable)
-solvent: { ... }          # Required
+solvent: { ... }          # Optional (default: TIP3P water, neutralizing ions)
 restraints: [ ... ]       # Optional
 thermodynamics: { ... }   # Required
 simulation_phases: { ... } # Required
-output: { ... }           # Required
+output: { ... }           # Optional (has defaults)
 force_field: { ... }      # Optional (has defaults)
+openmm: { ... }           # Optional (has defaults; read when engine is openmm)
+gromacs: { ... }          # Optional (has defaults; read when engine is gromacs)
 ```
 
 ---
@@ -111,7 +114,7 @@ polymers:
   length: 5                              # Monomers per chain
   count: 2                               # Number of polymer chains
   
-  sdf_directory: null                    # Pre-built polymer SDFs (optional)
+  sdf_directory: "polymer_sdfs/SBMA-EGPMA" # Pre-built polymer SDFs (required in cached mode)
   cache_directory: ".polymer_cache"      # Cache for generated polymers
 ```
 
@@ -160,7 +163,7 @@ polymers:
 | `monomers` | list | Yes | - | Monomer specifications |
 | `length` | int | Yes | - | Chain length (number of monomers) |
 | `count` | int | Yes | - | Number of chains to add |
-| `sdf_directory` | path | No | null | Directory with pre-built polymer SDFs |
+| `sdf_directory` | path | In cached mode | null | Directory with pre-built polymer SDFs |
 | `cache_directory` | path | No | ".polymer_cache" | Cache directory |
 | `reactions` | object | No | all "default" | ATRP reaction templates (dynamic mode) |
 | `charger` | string | No | "nagl" | Charge method for dynamic generation |
@@ -241,10 +244,11 @@ platform.
 
 ```yaml
 polymers: null
-# or
-polymers:
-  enabled: false
 ```
+
+You can also leave out the `polymers:` section. A section with
+`enabled: false` must still contain `type_prefix`, `monomers`, `length` and
+`count`, because the schema requires them.
 
 ---
 
@@ -488,7 +492,7 @@ PolyzyMD solves this by computing charges **once** and reusing them:
 1. Check in-memory cache (fastest)
 2. Check bundled library: src/polyzymd/data/solvents/dmso.sdf (used when no SMILES or the library SMILES is given)
 3. Check user cache: ~/.polyzymd/solvent_cache/<name>.<charge method>.<SMILES hash>.sdf
-4. Generate from SMILES + AM1BCC, save to user cache
+4. Generate from SMILES, charge with charge_method (default nagl), save to user cache
 ```
 
 #### Available Pre-computed Solvents
@@ -549,10 +553,11 @@ You can inspect and manage the solvent cache programmatically:
 ```python
 from polyzymd.data import list_available_solvents, clear_cache
 
-# List all available solvents (bundled + cached)
+# Map each available solvent name to its source
 solvents = list_available_solvents()
 print(solvents)
-# {'bundled': ['dmso', 'ethanol', ...], 'cached': ['my_custom_solvent']}
+# {'tip3p': 'library', 'spce': 'built-in', 'dmso': 'library', ...,
+#  'my_custom_solvent.nagl.9a7ebe92ac51': 'user_cache'}
 
 # Clear the user cache (does not affect bundled solvents)
 clear_cache()
@@ -685,8 +690,8 @@ stages continue to require an explicit `duration`.
 |------------|-------------|
 | `LangevinMiddle` | Langevin integrator (recommended) |
 | `Langevin` | Standard Langevin |
-| `Andersen` | Andersen thermostat |
-| `NoseHoover` | Nosé-Hoover chain |
+| `Andersen` | Andersen thermostat. Only with `engine: gromacs`; the OpenMM engine runs `LangevinMiddle` instead, with a warning at run time. |
+| `NoseHoover` | Nosé-Hoover chain. Only with `engine: gromacs`; the OpenMM engine runs `LangevinMiddle` instead, with a warning at run time. |
 
 ### Barostats
 
@@ -717,11 +722,11 @@ output:
   # Naming
   naming_template: "{enzyme}_{substrate}_{polymer_type}_{temperature}K_run{replicate}"
   
-  # Output options
-  save_checkpoint: true                  # Save restart files
-  save_state_data: true                  # Save energy/temperature CSV
-  trajectory_format: "dcd"               # dcd or xtc
 ```
+
+The schema also accepts `save_checkpoint`, `save_state_data` and
+`trajectory_format`, but no code reads them. The OpenMM engine always writes
+DCD trajectories and checkpoints; the GROMACS engine always writes XTC.
 
 ### Naming Template Variables
 

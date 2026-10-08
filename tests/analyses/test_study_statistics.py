@@ -124,6 +124,26 @@ def test_a_factor_written_as_text_is_reported_untestable() -> None:
     assert "write 1.0e-3" in trend.reason
 
 
+def test_a_trend_leaves_out_a_condition_without_partner() -> None:
+    """A level without partner has no measured value: it is left out and the rest is fitted."""
+    from polyzymd.analyses.protocols import ConditionReport, _trend_line
+    from polyzymd.analyses.study_statistics import trend_sentence, trend_tests
+
+    report = _ThreeConditions()
+    report.conditions.append(
+        ConditionReport(label="d", n_replicates=2, mean=0.0, replicate_values=[3.0, 4.0])
+    )
+    report.conditions[0].no_partner = "polymer_selection 'resname SDS' matched no atoms"
+    factors = {"a": {"sds": 0}, "b": {"sds": 4}, "c": {"sds": 8}, "d": {"sds": 12}}
+    (trend,) = trend_tests(report, factors)
+    assert trend.testable and trend.p is not None and trend.conditions == ["b", "c", "d"]
+    assert "a left out: no partner" in trend.reason and "resname SDS" in trend.reason
+    assert "a left out" in trend_sentence("m", None, trend) and "a left out" in _trend_line(trend)
+
+    (short,) = trend_tests(report, {k: v for k, v in factors.items() if k != "d"})
+    assert not short.testable and "2 levels" in short.reason and "a left out" in short.reason
+
+
 @pytest.mark.parametrize("levels", [("PEG", "PEG", "SBMA"), (True, False, True), ("PEG", 1.0, 2.0)])
 def test_a_factor_that_is_not_numeric_gets_no_trend(levels: tuple) -> None:
     """A factor such as polymer: PEG or a boolean names a condition; it has no slope to test."""
