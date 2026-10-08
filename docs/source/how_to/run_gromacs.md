@@ -168,7 +168,8 @@ pixi run -e build polyzymd submit \
 
 The CPU and GPU scripts use the same restart process:
 
-1. GROMACS writes a checkpoint during `mdrun`.
+1. GROMACS writes a checkpoint during `mdrun`, every
+   `simulation_phases.production.checkpoint_interval` seconds (`mdrun -cpt`).
 2. The script passes `-cpi` and `-append` when it restarts production.
 3. The script forwards `SIGTERM` to `mdrun` so GROMACS can write a checkpoint.
 4. The script submits one successor when work remains.
@@ -287,7 +288,11 @@ preempts a job. When the trap fires:
 With `--constraint`, the next job also lands on a compatible GPU. This
 matters most with a preemptable QoS.
 
-The script sets `-maxh`, so GROMACS stops before the SLURM wall-time limit.
+The script sets `-maxh` to 90 % of the wall time, so GROMACS stops before
+the SLURM wall-time limit. Production is complete when the last checkpoint
+in `prod.log` is at `nsteps`; until then the script submits a successor.
+Progress counts only the steps up to the last checkpoint, because a restart
+runs the later steps again.
 
 ```{note}
 **Stop a GROMACS chain.**

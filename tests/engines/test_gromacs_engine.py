@@ -407,7 +407,7 @@ class TestPrepareSubmissionPassThrough:
     def test_prepare_submission_passes_env_exports_and_setup_commands(
         self, mock_generator_cls, tmp_path
     ):
-        """prepare_submission should pass env_exports and setup_commands to generator."""
+        """prepare_submission should pass env_exports, setup_commands and checkpoint_interval."""
         config = _make_config()
         config.gromacs.env_exports = {
             "GMX_GPU_DD_COMMS": "true",
@@ -421,6 +421,7 @@ class TestPrepareSubmissionPassThrough:
         config.gromacs.mdrun_flags_production = None
         config.gromacs.command_prefix = None
         config.gromacs.mpi_launcher_flags = ""
+        config.simulation_phases.production.checkpoint_interval = 90.0
 
         engine = GromacsEngine(config=config, gmx_binary="gmx")
 
@@ -452,6 +453,7 @@ class TestPrepareSubmissionPassThrough:
         assert kwargs["pixi_env"] == "build"
         assert kwargs["env_exports"] == config.gromacs.env_exports
         assert kwargs["setup_commands"] == config.gromacs.setup_commands
+        assert kwargs["checkpoint_interval_s"] == 90.0
 
     @patch("polyzymd.engines.gromacs.engine.GromacsSlurmScriptGenerator")
     def test_prepare_submission_passes_stage_specific_mdrun_flags(

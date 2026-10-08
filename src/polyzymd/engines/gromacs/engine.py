@@ -211,6 +211,7 @@ class GromacsEngine(SimulationEngine):
             module_load=self._config.gromacs.module_load,
             env_exports=self._config.gromacs.env_exports,
             setup_commands=self._config.gromacs.setup_commands,
+            checkpoint_interval_s=self._config.simulation_phases.production.checkpoint_interval,
         )
         script = generator.generate_job_script(
             config_path=str(request.config_path),

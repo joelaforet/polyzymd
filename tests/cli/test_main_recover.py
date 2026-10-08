@@ -1396,7 +1396,10 @@ class TestUpdateGromacsProgressCmd:
 
         working_dir = tmp_path / "gromacs"
         working_dir.mkdir()
-        (working_dir / "prod.log").write_text("nsteps = 5000\n1000 2.0\n")
+        (working_dir / "prod.log").write_text(
+            "nsteps = 5000\n1000 2.0\nWriting checkpoint, step 1000 at Thu Oct  8 00:23:40 2026\n"
+        )
+        (working_dir / "state.cpt").write_text("cpt")
 
         runner = CliRunner()
         result = runner.invoke(
