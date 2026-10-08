@@ -32,7 +32,8 @@
 # Simulation identifier - used in output directory names
 name: {{ project_name | yaml_quote }}
 
-# Required simulation engine: "openmm" or "gromacs"
+# Required simulation engine: "openmm" or "gromacs". For GROMACS, write
+# "gromacs"; GROMACS does not read the openmm: block below.
 engine: "openmm"
 
 description: "Description of your simulation system"
@@ -307,10 +308,10 @@ output:
   # Output options
   save_checkpoint: true
   save_state_data: true
-  trajectory_format: "dcd"              # Options: dcd, xtc
+  trajectory_format: "dcd"              # Not read: OpenMM writes dcd, GROMACS xtc
 
 # ============================================================================
-# OpenMM Platform (REQUIRED for the OpenMM engine)
+# OpenMM Platform (REQUIRED for the OpenMM engine; not read by GROMACS)
 # ============================================================================
 # CUDA runs on NVIDIA GPUs; job scripts made by `polyzymd submit` need it.
 # To run on a CPU with `polyzymd run`, set platform: "CPU".

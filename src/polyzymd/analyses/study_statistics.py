@@ -247,10 +247,11 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
     list of TrendReport
         One :class:`~polyzymd.analyses.protocols.TrendReport` per factor whose
         levels are all numbers or text that reads as a number. A factor with
-        a level in text (YAML reads ``1e-3`` as text), or a replicate value that is not
-        finite, fewer than three levels (two make it a pairwise comparison),
-        or condition means that are all equal, has ``testable=False``, its
-        ``reason``, and no slope. The list is empty when the report holds labelled results
+        a level in text (YAML reads ``1e-3`` as text), a replicate value that
+        is not finite, fewer than three levels (two make it a pairwise
+        comparison), or condition means that are all equal, has ``testable=False``, its
+        ``reason``, and no slope. A condition without partner
+        (``no_partner``) is left out of the fit, and ``reason`` says so. The list is empty when the report holds labelled results
         (any condition with an ``entry``, such as one value per residue).
 
     Notes
@@ -283,10 +284,14 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
         if not all(_number_or_number_text(level) for level in declared):
             continue
         numeric = not any(isinstance(level, str) for level in declared)
-        levels, means, used, n_values, bad = [], [], [], 0, 0
+        levels, means, used, n_values, bad, left = [], [], [], 0, 0, []
         for item in report.conditions:
             level = factors.get(item.label, {}).get(name)
             if level is None:
+                continue
+            if getattr(item, "no_partner", None):
+                # Its 0 is not a measurement, so it is no point of the fit.
+                left.append(f"{item.label} left out: no partner ({item.no_partner})")
                 continue
             values = [float(v) for v in item.replicate_values]
             used.append(item.label)
@@ -307,8 +312,9 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
             reason = FLAT_TREND
         else:
             reason = None
+        note = "; ".join(left) or None
         if reason is not None:
-            trend = trend.model_copy(update={"reason": reason})
+            trend = trend.model_copy(update={"reason": "; ".join(filter(None, [reason, note]))})
         else:
             fit = stats.linregress(levels, means)
             dof = len(means) - 2
@@ -320,6 +326,7 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
                     "p": float(fit.pvalue),
                     "r_squared": float(fit.rvalue**2),
                     "testable": True,
+                    "reason": note,
                 }
             )
         trends.append(trend)
@@ -361,7 +368,8 @@ def trend_sentence(metric: str, unit: str | None, trend: Any) -> str:
     from polyzymd.analyses.protocols import FLAT_TREND, VERDICT_NOT_TESTABLE, _interval, _num
 
     if not trend.testable:
-        head = "no trend" if trend.reason == FLAT_TREND else f"{VERDICT_NOT_TESTABLE}: trend"
+        flat = trend.reason.startswith(FLAT_TREND)
+        head = "no trend" if flat else f"{VERDICT_NOT_TESTABLE}: trend"
         return (
             f"{head} of {metric} with {trend.factor}: {trend.reason} "
             f"({len(trend.conditions)} conditions, {trend.n_replicates} replicates)"
@@ -371,6 +379,7 @@ def trend_sentence(metric: str, unit: str | None, trend: Any) -> str:
         f"slope {_num(trend.slope)}{per}, 95% CI {_interval(trend.slope_ci95)}, "
         f"p_adj {_num(trend.p_adjusted)}, fitted on {len(trend.conditions)} condition means "
         f"of {trend.n_replicates} replicates"
+        + (f"; {trend.reason}" if trend.reason else "")
     )
     if trend.significant:
         direction = "rises" if trend.slope > 0 else "falls"

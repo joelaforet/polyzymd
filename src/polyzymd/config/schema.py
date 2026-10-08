@@ -1246,7 +1246,7 @@ class OutputConfig(_ConfigModel):
         slurm_logs_subdir: Subdirectory name for SLURM logs within projects
         save_checkpoint: Whether to save checkpoint files
         save_state_data: Whether to save thermodynamic state data
-        trajectory_format: Output trajectory format
+        trajectory_format: Not read; the engine picks the format (OpenMM dcd, GROMACS xtc)
 
     Example YAML:
         output:
@@ -1284,7 +1284,9 @@ class OutputConfig(_ConfigModel):
     # Output options
     save_checkpoint: bool = Field(True, description="Save checkpoint files")
     save_state_data: bool = Field(True, description="Save state data CSV")
-    trajectory_format: str = Field("dcd", description="Trajectory file format")
+    trajectory_format: str = Field(
+        "dcd", description="Not read: OpenMM writes dcd and GROMACS writes xtc trajectories"
+    )
 
     @field_validator("projects_directory", "scratch_directory", mode="before")
     @classmethod

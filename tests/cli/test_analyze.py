@@ -412,7 +412,7 @@ def test_a_partial_report_names_no_machine_path(tmp_path: Path) -> None:
     result = _analyze_cli("rg", "--study", str(root), "--no-plots", "--no-eq-check")
     report = json.loads((root / "results" / "rg" / "report.json").read_text())
     assert report["status"] == "partial", result.output
-    assert any("no run directory under polymer" in p for p in report["problems"])
+    assert any("no runs found under polymer" in p for p in report["problems"])
     (log,) = (root / "logs").glob("polyzymd-analyze-*.log")
     assert "Traceback" in log.read_text() and str(tmp_path / "scratch") in log.read_text()
     deposit = freeze(root).deposit
@@ -422,6 +422,59 @@ def test_a_partial_report_names_no_machine_path(tmp_path: Path) -> None:
         deposit / "README.md",
     ):
         assert str(tmp_path) not in path.read_text(), path
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+@pytest.mark.parametrize(
+    ("name", "entry"),
+    [("rg", "{selection: all}"), ("rmsf", "{selection: all, alignment_selection: all}")],
+)
+def test_a_condition_not_yet_simulated_is_named_in_a_partial_report(
+    tmp_path: Path, name: str, entry: str
+) -> None:
+    """A condition added with --new and not run yet is listed as having no runs; the rest are reported."""
+    import json
+
+    pytest.importorskip("MDAnalysis")
+    root = write_committed_study(tmp_path, f"  {name}: {entry}\n")
+    added = CliRunner().invoke(cli, ["study", "add-condition", "X", "--new", "--study", str(root)])
+    assert added.exit_code == 0, added.output
+    result = _analyze_cli(
+        name, "--study", str(root), "--no-plots", "--no-eq-check", "--format", "json"
+    )
+    assert result.exit_code == 0, result.output
+    report = json.loads((root / "results" / name / "report.json").read_text())
+    assert report["status"] == "partial"
+    assert [c["label"] for c in report["conditions"]] == ["No polymer", "Polymer"]
+    assert any(
+        p.startswith("condition X is left out") and "no runs found under runs/x" in p
+        for p in report["problems"]
+    ), report["problems"]
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.usefixtures("git_identity")
+@pytest.mark.parametrize("extra", [(), ("--eq", "0ns"), ("--format", "json")])
+def test_without_any_runs_no_stored_number_is_printed(tmp_path: Path, extra: tuple) -> None:
+    """With no run of the study here, analyze exits 2 naming the stored report, never its values."""
+    import shutil
+
+    pytest.importorskip("MDAnalysis")
+    root = write_committed_study(tmp_path, "  rg: {selection: all}\n")
+    options = ["rg", "--study", str(root), "--no-plots", "--no-eq-check"]
+    computed = _analyze_cli(*options)
+    assert computed.exit_code == 0, computed.output
+    stored = (root / "results" / "rg" / "report.json").read_text()
+    shutil.rmtree(tmp_path / "scratch")
+    result = _analyze_cli(*options, *extra)
+    assert result.exit_code == EXIT_ANALYSIS_ERROR, result.output
+    assert "no runs of study my_study are on this machine" in result.output
+    assert (
+        "results/rg/report.json" in result.output and "study locate DIR --verify" in result.output
+    )
+    assert "2.26" not in result.output and "mean_rg" not in result.output
+    assert (root / "results" / "rg" / "report.json").read_text() == stored
 
 
 @pytest.mark.filterwarnings("ignore")
