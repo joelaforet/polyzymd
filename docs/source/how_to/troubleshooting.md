@@ -12,7 +12,7 @@ of the command that fails:
 |------|------------------|
 | PDB preparation, `polyzymd validate`, `polyzymd build`, `polyzymd run` | `build` |
 | OpenMM `polyzymd submit` or `recover --submit` | `build`. The SLURM job activates the site environment |
-| OpenMM inside a SLURM job on an NVIDIA GPU | `sim-cuda-12-4` or `sim-cuda-12-6` |
+| OpenMM inside a SLURM job on an NVIDIA GPU | `sim-cuda-12-0`, `sim-cuda-12-4` or `sim-cuda-12-6` |
 | Trajectory analysis and plots, `polyzymd analyze ...` | `analysis` |
 
 Use `pixi shell -e <env>` to activate an environment, or put
@@ -81,9 +81,9 @@ The YAML syntax is wrong. Check these points:
 ### Several `Field required` errors for the items of a list
 
 ```
-Build failed: 3 validation errors for SimulationConfig
+Validation failed: 3 validation errors for SimulationConfig
 solvent.co_solvents.0
-  Value error, Co-solvent 'dmso': Must specify either 'mole_fraction' or 'concentration'
+  Value error, Co-solvent 'dmso': give exactly one of mole_fraction, concentration and count, not none [type=value_error, input_value={'name': 'dmso'}, input_type=dict]
 solvent.co_solvents.1.name
   Field required [type=missing, input_value={'mole_fraction': 0.1}, input_type=dict]
 solvent.co_solvents.2.name

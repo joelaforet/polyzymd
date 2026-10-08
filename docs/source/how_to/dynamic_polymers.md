@@ -61,7 +61,7 @@ polymers:
 | Key | Meaning |
 |---|---|
 | `smiles` | The SMILES of the monomer before polymerization, with its C=C double bond. Every monomer needs one. |
-| `name` | The monomer name. Dynamic mode uses it to name the fragments, such as `SBMA_1-site` and `SBMA_2-site`, so give one for every monomer. |
+| `name` | The monomer name. Dynamic mode uses it to name the fragments, such as `SBMA_1-site` and `SBMA_2-site`, so give one for every monomer. `polyzymd validate` does not check this; the build stops instead. |
 | `residue_name` | The 3-character residue name of the monomer in the topology. Optional. If you leave it out, PolyzyMD makes one from `name`. |
 | `reactions` | The three ATRP reaction templates. `"default"` selects the templates that ship with PolyzyMD. You can also give the path of your own `.rxn` file. |
 | `charger` | The partial-charge method for the chains: `nagl` (default), `am1bcc` or `espaloma`. |
@@ -164,7 +164,8 @@ rm -rf .polymer_cache
 
 ### "No monomer name configured for sequence label"
 
-A monomer has no `name`. Give every monomer a `name`.
+A monomer has no `name`. Give every monomer a `name`. `polyzymd validate`
+passes such a config, so this error first appears at build time.
 
 ### "Failed to build polymer after N attempts due to ring-piercing"
 

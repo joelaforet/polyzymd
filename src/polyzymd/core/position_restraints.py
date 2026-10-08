@@ -23,12 +23,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Unit conversion constant
-# 1.0 kcal/mol/A^2 = 4.184 kJ/mol/A^2 = 418.4 kJ/mol/nm^2
-# But we typically express as kJ/mol/nm^2, so:
-# 1.0 kcal/mol/A^2 = 4184.0 kJ/mol/nm^2
-KCAL_MOL_ANGSTROM2_TO_KJ_MOL_NM2 = 4184.0
-
 
 class PositionalRestraintForce:
     """Creates and manages harmonic positional restraints.
@@ -53,7 +47,7 @@ class PositionalRestraintForce:
         particle_count: Number of particles added to the restraint
 
     Example:
-        >>> restraint = PositionalRestraintForce(4184.0)  # 1 kcal/mol/A^2
+        >>> restraint = PositionalRestraintForce(4184.0)  # 10 kcal/mol/A^2
         >>> restraint.add_particles_from_positions([0, 1, 2], positions)
         >>> force_idx = system.addForce(restraint.force)
     """
@@ -63,7 +57,7 @@ class PositionalRestraintForce:
 
         Args:
             default_force_constant: Default force constant in kJ/mol/nm^2.
-                                   Common value: 4184.0 = 1.0 kcal/mol/A^2
+                                   Common value: 4184.0 = 10 kcal/mol/A^2
                                    Can be overridden per-particle when adding atoms.
         """
         self._default_force_constant = default_force_constant

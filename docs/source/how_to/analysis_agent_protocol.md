@@ -13,7 +13,7 @@ pixi run -e analysis polyzymd analyze rg -c enzyme_water/config.yaml --eq 10ns
 
 ```
 # polyzymd analyze rg  metric mean_rg  unit A  eq 10ns  conditions 1  replicates 3  protocol rg/2
-enzyme_water  n 3  mean 18.42  sem 0.05  ci95 18.2 to 18.64  values 18.4, 18.5, 18.36  replicates 1,2,3  g 473.7  n_eff 19
+enzyme_water  n 3  mean 18.42  sem 0.05  ci95 18.2 to 18.64  values 18.4, 18.5, 18.36  replicates 1, 2, 3  g 473.7, 450.2, 498.1  n_eff 19, 20, 18  eq_detected 4.2 ns
 verdict: enzyme_water mean_rg 18.42 A (95% CI 18.2 to 18.64, n 3)
 ```
 
@@ -35,10 +35,10 @@ pixi run -e analysis polyzymd analyze rg \
 
 ```
 # polyzymd analyze rg  metric mean_rg  unit A  eq 10ns  conditions 2  replicates 3,3  protocol rg/2
-no polymer  n 3  mean 18.42  sem 0.05  ci95 18.2 to 18.64  values 18.4, 18.5, 18.36  replicates 1,2,3  g 473.7  n_eff 19
-50% SBMA  n 3  mean 18.73  sem 0.06  ci95 18.47 to 18.99  values 18.71, 18.8, 18.68  replicates 1,2,3  g 402.1  n_eff 22
-no polymer vs 50% SBMA  delta +0.31  ci95 0.02 to 0.6  p 0.041  p_adj 0.041  test welch_t  correction BH  d 1.9  significant
-verdict: 50% SBMA larger mean_rg than no polymer (delta +0.31 A, 95% CI 0.02 to 0.6, p_adj 0.041, n 3 vs 3)
+no polymer  n 3  mean 18.42  sem 0.05  ci95 18.2 to 18.64  values 18.4, 18.5, 18.36  replicates 1, 2, 3  g 473.7, 450.2, 498.1  n_eff 19, 20, 18  eq_detected 4.2 ns
+50% SBMA  n 3  mean 18.73  sem 0.06  ci95 18.47 to 18.99  values 18.71, 18.8, 18.68  replicates 1, 2, 3  g 402.1, 415.9, 390.4  n_eff 22, 21, 23  eq_detected 3.1 ns
+no polymer vs 50% SBMA  delta +0.31  ci95 0.02 to 0.6  p 0.041  p_adj 0.041  test welch_t  correction BH  family 1  d 1.9  significant
+verdict: 50% SBMA larger mean_rg than no polymer (delta +0.31 A, 95% CI 0.02 to 0.6, p_adj 0.041, p 0.041, n 3 vs 3)
 ```
 
 Without `--label`, each condition takes the name of the folder that holds its
@@ -118,8 +118,15 @@ For the format of each line and the verdict words, see
 - `ci95` of a condition is the Student t interval of its mean. `ci95` of a
   comparison is the interval of the difference. It has no correction for
   multiple tests. So it can exclude zero while `p_adj` is above alpha.
-- `not testable` means that a condition has fewer than two replicates, so no
-  test is possible. It does not mean that the conditions are the same.
+- `g` and `n_eff` give the statistical inefficiency and the effective sample
+  size of each replicate's time series. `eq_detected` is the latest start of
+  an equilibrated region that pymbar finds in any replicate. It is a
+  diagnostic and changes no value.
+- `family` is the number of comparisons that the BH correction covers.
+- `not_testable` on a comparison line, and `not testable:` in its verdict,
+  mean that no test is possible: a condition has fewer than two replicates,
+  or every replicate of both conditions has the same value, so there is no
+  variance to test. It does not mean that the conditions are the same.
 - `no test recorded` means that a stored comparison holds a raw p value but no
   corrected p value. The line gives the difference but no decision.
 - A stored comparison that holds only means and standard errors gets condition
