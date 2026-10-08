@@ -66,6 +66,7 @@ def _make_dry_run_config() -> SimpleNamespace:
         ),
         restraints=[],
         get_working_directory=lambda rep: Path(f"/tmp/scratch/run_{rep}"),
+        require_buildable=lambda engine=None: None,
     )
 
 
@@ -366,6 +367,67 @@ class TestValidateCommandReferenceWarnings:
         assert result.exit_code == 0, result.output
         assert "Engine: openmm" in result.output
         assert "Co-solvents: dmso" in result.output
+
+
+_DISTANCE_RESTRAINT = {
+    "type": "flat_bottom",
+    "name": "substrate_active_site",
+    "atom1": {"selection": "protein and resid 76 and name OG"},
+    "atom2": {"selection": "resname LIG and name C1"},
+    "distance": 3.5,
+}
+
+
+@pytest.mark.parametrize("command", [["validate"], ["build", "--dry-run"], ["run", "--dry-run"]])
+def test_new_builds_refuse_a_water_model_the_build_cannot_make(
+    tmp_path: Path, command: list[str]
+) -> None:
+    """validate, build and run refuse spce, which would build SPC/E charges on TIP3P water."""
+    data = _minimal_cli_config_data("missing.pdb")
+    data["solvent"] = {"primary": {"type": "water", "model": "spce"}}
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    result = CliRunner().invoke(cli, [command[0], "-c", str(config_path), *command[1:]])
+
+    assert result.exit_code != 0
+    assert "model: tip3p for new systems" in result.output
+
+
+def test_validate_refuses_distance_restraints_with_engine_gromacs(tmp_path: Path) -> None:
+    """GROMACS runs apply no distance restraints, so validate refuses them."""
+    data = _minimal_cli_config_data("missing.pdb")
+    data["engine"] = "gromacs"
+    data["restraints"] = [_DISTANCE_RESTRAINT]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["validate", "-c", str(config_path)])
+
+    assert result.exit_code != 0
+    assert "set engine: openmm" in result.output
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["build", "--format", "gromacs", "--dry-run"],
+        ["run", "--engine", "gromacs", "--dry-run"],
+        ["submit", "--engine", "gromacs", "--dry-run"],
+    ],
+)
+def test_gromacs_overrides_refuse_distance_restraints(tmp_path: Path, args: list[str]) -> None:
+    """A GROMACS build, run or submit of an OpenMM config never lists a restraint it drops."""
+    data = _minimal_cli_config_data("missing.pdb")
+    data["restraints"] = [_DISTANCE_RESTRAINT]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    result = CliRunner().invoke(cli, [args[0], "-c", str(config_path), *args[1:]])
+
+    assert result.exit_code != 0
+    assert "set engine: openmm" in result.output
+    assert "ENABLED" not in result.output
 
 
 @pytest.mark.parametrize("export_format", ["lammps", "amber"])

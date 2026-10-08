@@ -8,6 +8,11 @@ has no per-stage setting. To hold a substrate in one equilibration stage only,
 use a position restraint in that stage instead: see
 {ref}`restrain-substrate-one-stage`.
 
+Distance restraints need `engine: openmm`: the GROMACS engine does not apply
+them, so `validate` refuses an enabled restraint with `engine: gromacs`.
+Position restraints work on both engines. On GROMACS, see
+{doc}`../reference/configuration` for the groups it can restrain.
+
 ## Step 1: choose the restraint type
 
 PolyzyMD supports four distance restraint styles:
