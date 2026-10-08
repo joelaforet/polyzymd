@@ -2102,6 +2102,19 @@ def test_clean_pdb_runs_on_the_cpu(tmp_path: Path, monkeypatch) -> None:
     assert os.environ["OPENMM_DEFAULT_PLATFORM"] == "CPU"
 
 
+@pytest.mark.parametrize("text", ["garbage\n", ""], ids=["not a PDB", "empty"])
+def test_clean_pdb_refuses_a_file_without_atoms(tmp_path: Path, text: str) -> None:
+    """A PDB file with no atoms gives error: and fix:, not a traceback."""
+    pytest.importorskip("pdbfixer")
+    source = tmp_path / "in.pdb"
+    source.write_text(text)
+    result = CliRunner().invoke(cli, ["clean-pdb", "-i", str(source)])
+    assert result.exit_code == 1, result.output
+    assert isinstance(result.exception, SystemExit)
+    assert f"error: {source} has no atoms" in result.output and "fix:" in result.output
+    assert not (tmp_path / "in_clean.pdb").exists()
+
+
 class TestSubmitDryRunHardwareWarnings:
     """The submit dry run warns when the job's hardware does not fit the config."""
 

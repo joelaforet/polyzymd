@@ -3450,7 +3450,12 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     colored_echo(f"Cleaning PDB: {input_file}")
     colored_echo(f"  pH: {ph}")
 
-    fixer = PDBFixer(filename=str(input_file))
+    try:
+        fixer = PDBFixer(filename=str(input_file))
+    except IndexError:  # OpenMM's PDB reader finds no model in a file without atoms
+        click.echo(click.style(f"error: {input_file} has no atoms", fg="red"), err=True)
+        click.echo("fix: give a PDB file with ATOM or HETATM records", err=True)
+        sys.exit(1)
 
     fixer.findNonstandardResidues()
     n_nonstandard = len(fixer.nonstandardResidues)
