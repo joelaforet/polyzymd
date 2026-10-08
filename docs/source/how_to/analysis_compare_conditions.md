@@ -81,6 +81,9 @@ the last flush. A warning names the segments that PolyzyMD left out.
 
   ```python
   from polyzymd.analyses.shared.loader import TrajectoryLoader
+  from polyzymd.config.schema import SimulationConfig
+
+  config = SimulationConfig.from_yaml("config.yaml")
   u = TrajectoryLoader(config).load_universe(replicate=1, require_complete=False)
   ```
 
@@ -186,7 +189,9 @@ polymer_stability_study/
 ```
 
 Each folder name is the result or condition label. PolyzyMD replaces each
-series of characters other than letters, digits, `.`, `+` and `-` with `_`.
+series of characters other than letters, digits, `_`, `.`, `+` and `-` with
+`_`, and drops `_` at the start and end. For example, `SBMA 50%` becomes
+`SBMA_50`.
 
 - `record.json` records what was measured and from which inputs.
 - `values.npz` holds the values of the replicate.

@@ -93,7 +93,7 @@ stride: 1                       # optional
 replicates: [1, 2, 3, 4, 5]     # optional; default: every replicate found
 conditions:                     # control first; paths relative to this file
   No polymer: conditions/no_polymer/config.yaml
-  SBMA 50%: conditions/sbma50/config.yaml
+  SBMA 50%: conditions/sbma_50/config.yaml
 analyses:
   contacts:                     # a shipped analysis, named by its key
     method: occlusion

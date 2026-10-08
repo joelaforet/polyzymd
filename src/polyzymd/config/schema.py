@@ -871,7 +871,7 @@ class PositionRestraintConfig(_ConfigModel):
 
     Attributes:
         group: Predefined atom group name
-        force_constant: Force constant in kJ/mol/nm^2 (4184.0 = 1.0 kcal/mol/A^2)
+        force_constant: Force constant in kJ/mol/nm^2 (4184.0 = 10 kcal/mol/A^2)
     """
 
     group: str = Field(
@@ -882,9 +882,9 @@ class PositionRestraintConfig(_ConfigModel):
         ),
     )
     force_constant: float = Field(
-        4184.0,  # 1.0 kcal/mol/A^2 in kJ/mol/nm^2
+        4184.0,  # 10 kcal/mol/A^2 in kJ/mol/nm^2
         gt=0.0,
-        description="Force constant (kJ/mol/nm^2). Default 4184.0 = 1.0 kcal/mol/A^2",
+        description="Force constant (kJ/mol/nm^2). Default 4184.0 = 10 kcal/mol/A^2",
     )
 
     @field_validator("group")

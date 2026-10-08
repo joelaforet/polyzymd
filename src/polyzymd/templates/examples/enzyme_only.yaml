@@ -58,7 +58,7 @@ solvent:
 # Flat-bottom distance restraint to keep substrate near active site
 #
 # Selection syntax supports:
-#   resid N      - Residue number (1-indexed, matches PDB/PyMOL)
+#   resid N      - Residue number in the built topology (protein renumbered from 1)
 #   resname XXX  - Residue name (e.g., RBY, SER, LIG)
 #   name XXX     - Atom name (e.g., OG, CA, C1)
 #   index N      - Atom index (0-indexed, OpenMM internal)
