@@ -448,6 +448,7 @@ class TestBuildFromConfigSharesOneBox:
         calls: dict = {}
         sentinel_box = Quantity(__import__("numpy").diag([9.0, 9.0, 9.0]), "nanometer")
 
+        monkeypatch.setattr("polyzymd.config.validation.require_inputs", lambda config: None)
         monkeypatch.setattr(SystemBuilder, "build_enzyme", lambda self, path, templates=None: None)
         monkeypatch.setattr(SystemBuilder, "combine_solutes", lambda self: None)
         monkeypatch.setattr(SystemBuilder, "build_polymers", lambda self, **kwargs: None)

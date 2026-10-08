@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 
 class TestSaveConfigYamlDumper:
     """save_config uses a local Dumper subclass, not the global yaml.Dumper."""
@@ -256,3 +258,58 @@ def test_configs_of_existing_runs_load_with_values_new_builds_refuse(tmp_path: P
 
     assert config.solvent.primary.model.value == "spce"
     assert config.solvent.ions.kcl_concentration == 0.15
+
+
+def _config_file(tmp_path: Path, edit=None) -> Path:
+    """Write the minimal test config, changed by ``edit(data)``, and return its path."""
+    import yaml
+
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    if edit is not None:
+        data = yaml.safe_load(path.read_text())
+        edit(data)
+        path.write_text(yaml.safe_dump(data))
+    return path
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("- a\n- b\n", "must be a mapping of config sections, not a list"),
+        ("42\n", "must be a mapping of config sections, not a int"),
+        ("name: x\nenzyme:\n\tpdb_path: a.pdb\n", "not valid YAML"),
+        ("name: [x\n", "not valid YAML"),
+        ("name: x\nengine: openmm\nengine: gromacs\n", "duplicate key 'engine'"),
+    ],
+)
+def test_a_file_that_is_not_a_config_mapping_is_refused(tmp_path: Path, text, message) -> None:
+    """Not-a-mapping, broken YAML and keys given twice are refused with a fix line."""
+    from polyzymd.config.loader import ConfigFileError, load_config
+
+    path = tmp_path / "config.yaml"
+    path.write_text(text)
+    with pytest.raises(ConfigFileError, match=message) as error:
+        load_config(path)
+    assert "fix:" in str(error.value)
+    if "YAML" in message:
+        assert "line" in str(error.value)
+
+
+def test_home_and_variables_expand_in_paths(tmp_path: Path, monkeypatch) -> None:
+    """'~' is the home folder; an unset $VAR is kept as written and a new build names it."""
+    from polyzymd.config.loader import load_config
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("POLYZYMD_TEST_UNSET", raising=False)
+
+    def edit(data):
+        data["output"]["scratch_directory"] = "~/sims"
+        data["output"]["projects_directory"] = "$POLYZYMD_TEST_UNSET/projects"
+
+    config = load_config(_config_file(tmp_path, edit))
+    assert config.output.scratch_directory == tmp_path / "home" / "sims"
+    assert str(config.output.projects_directory) == "$POLYZYMD_TEST_UNSET/projects"
+    with pytest.raises(ValueError, match=r"\$POLYZYMD_TEST_UNSET, which is not set"):
+        config.require_buildable()

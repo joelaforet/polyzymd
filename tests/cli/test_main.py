@@ -70,6 +70,17 @@ def _make_dry_run_config() -> SimpleNamespace:
     )
 
 
+_ONE_ATOM_PDB = (
+    "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\nEND\n"
+)
+
+
+def _config_with_pdb(tmp_path: Path) -> dict[str, object]:
+    """Minimal config data whose enzyme PDB exists, with one atom."""
+    (tmp_path / "enz.pdb").write_text(_ONE_ATOM_PDB)
+    return _minimal_cli_config_data(tmp_path / "enz.pdb")
+
+
 def _minimal_cli_config_data(pdb_path: str | Path) -> dict[str, object]:
     """Create minimal YAML-serializable config data for CLI tests."""
 
@@ -280,29 +291,25 @@ class TestResolveSubmissionPixiEnv:
 class TestValidateCommandReferenceWarnings:
     """Tests for validate command runtime reference warnings."""
 
-    def test_validate_exits_zero_and_warns_for_missing_referenced_files(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        """Validate should warn about missing PDB files without failing schema validation."""
-
+    @pytest.mark.parametrize("command", [["validate"], ["build", "--dry-run"]])
+    def test_a_missing_or_empty_enzyme_pdb_is_an_error(self, tmp_path: Path, command) -> None:
+        """validate and build --dry-run exit non-zero when the enzyme PDB is missing or empty."""
         config_path = tmp_path / "config.yaml"
-        config_path.write_text(
-            yaml.safe_dump(_minimal_cli_config_data("missing.pdb")),
-            encoding="utf-8",
-        )
-        runner = CliRunner()
+        config_path.write_text(yaml.safe_dump(_minimal_cli_config_data("missing.pdb")))
 
-        result = runner.invoke(cli, ["validate", "-c", str(config_path)])
+        result = CliRunner().invoke(cli, [command[0], "-c", str(config_path), *command[1:]])
 
-        assert result.exit_code == 0
-        assert "Configuration is valid!" in result.output
-        assert "Referenced file warnings" in result.output
-        assert "Missing enzyme PDB" in result.output
+        assert result.exit_code == 1
+        assert "missing.pdb does not exist" in result.output
+        (tmp_path / "empty.pdb").write_text("END\n")
+        config_path.write_text(yaml.safe_dump(_minimal_cli_config_data(tmp_path / "empty.pdb")))
+        result = CliRunner().invoke(cli, [command[0], "-c", str(config_path), *command[1:]])
+        assert result.exit_code == 1
+        assert "has no ATOM or HETATM records" in result.output
 
     def test_validate_reports_derived_temperature_ramp_duration(self, tmp_path: Path) -> None:
         """Validation clearly reports rate-based heating duration."""
-        data = _minimal_cli_config_data("missing.pdb")
+        data = _config_with_pdb(tmp_path)
         data["simulation_phases"]["equilibration_stages"] = [
             {
                 "name": "heating",
@@ -354,7 +361,7 @@ class TestValidateCommandReferenceWarnings:
         assert "errors.pydantic.dev" not in result.output
 
     def test_validate_prints_engine_and_cosolvents(self, tmp_path: Path) -> None:
-        data = _minimal_cli_config_data("missing.pdb")
+        data = _config_with_pdb(tmp_path)
         data["solvent"] = {
             "primary": {"type": "water", "model": "tip3p"},
             "co_solvents": [{"name": "dmso", "mole_fraction": 0.1}],
@@ -504,20 +511,23 @@ class TestBuildCommandReplicateFlags:
         assert "openmm" in result.output
 
     def test_build_dry_run_warns_for_missing_referenced_files(self, tmp_path: Path) -> None:
-        """Build dry-run should warn when schema-valid referenced files are absent."""
-
+        """Build dry-run warns about missing polymer files, which a build checks later."""
+        data = _config_with_pdb(tmp_path)
+        data["polymers"] = {
+            "type_prefix": "P",
+            "length": 5,
+            "count": 1,
+            "sdf_directory": str(tmp_path / "missing_sdfs"),
+            "monomers": [{"label": "A", "probability": 1.0}],
+        }
         config_path = tmp_path / "config.yaml"
-        config_path.write_text(
-            yaml.safe_dump(_minimal_cli_config_data("missing.pdb")),
-            encoding="utf-8",
-        )
-        runner = CliRunner()
+        config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
-        result = runner.invoke(cli, ["build", "-c", str(config_path), "--dry-run"])
+        result = CliRunner().invoke(cli, ["build", "-c", str(config_path), "--dry-run"])
 
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         assert "Referenced file warnings" in result.output
-        assert "Missing enzyme PDB" in result.output
+        assert "Missing polymer SDF directory" in result.output
 
     @pytest.mark.parametrize("option", ["--output-dir", "-o"])
     def test_build_output_dir_alias_is_rejected(self, option: str, tmp_path: Path) -> None:
@@ -2154,7 +2164,7 @@ def test_build_follows_the_config_engine(tmp_path: Path) -> None:
     from tests._support.analysis_testkit import write_simulation_config
 
     path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
-    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    (tmp_path / "c" / "test.pdb").write_text(_ONE_ATOM_PDB)
     data = yaml.safe_load(path.read_text())
     data["engine"] = "gromacs"
     data["solvent"] = {
@@ -2312,7 +2322,11 @@ def test_dry_run_box_report_says_a_substrate_is_left_out(tmp_path: Path) -> None
 
     path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
     _write_elongated_pdb(tmp_path / "c" / "test.pdb")
-    (tmp_path / "c" / "lig.sdf").write_text("\n")
+    from rdkit import Chem
+
+    (tmp_path / "c" / "lig.sdf").write_text(
+        Chem.MolToMolBlock(Chem.MolFromSmiles("CCO")) + "$$$$\n"
+    )
     data = yaml.safe_load(path.read_text())
     data["substrate"] = {"name": "lig", "sdf_path": "lig.sdf"}
     path.write_text(yaml.safe_dump(data))
@@ -2471,3 +2485,59 @@ def test_gromacs_submit_checks_every_build_before_submitting(
     assert result.exit_code == 1
     assert "No GROMACS build for replicate 2" in result.output
     mock_engine_submit.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["submit", "--dry-run", "--preset", "testing"],
+        ["run", "--dry-run"],
+        ["hash-trajectories", "--dry-run"],
+        ["status"],
+    ],
+)
+@pytest.mark.parametrize("text", ["- a\n- b\n", "name: x\nenzyme:\n\tpdb_path: a.pdb\n"])
+def test_a_config_that_is_not_a_yaml_mapping_is_a_handled_error(tmp_path: Path, command, text):
+    """A list or broken YAML gives an error line, not a traceback, in every command."""
+    path = tmp_path / "config.yaml"
+    path.write_text(text)
+    result = CliRunner().invoke(cli, [command[0], "-c", str(path), *command[1:]])
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert "mapping" in result.output or "not valid YAML" in result.output
+
+
+def test_validate_prints_error_and_fix_lines(tmp_path: Path) -> None:
+    data = _config_with_pdb(tmp_path)
+    data["simulation_phases"]["production"]["ensemble"] = "NVE"
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(data))
+    result = CliRunner().invoke(cli, ["validate", "-c", str(path)])
+    assert result.exit_code == 1
+    assert "error: production: ensemble NVE is not run" in result.output
+    assert "fix: use ensemble NVT or NPT." in result.output
+
+
+@pytest.mark.parametrize("command", [["run", "--dry-run"], ["submit", "--dry-run"]])
+def test_dry_runs_on_openmm_refuse_the_anisotropic_barostat(tmp_path: Path, command) -> None:
+    """The dry runs make the same engine check as the run, so MCA on OpenMM fails early."""
+    data = _config_with_pdb(tmp_path)
+    data["engine"] = "gromacs"
+    data["simulation_phases"]["production"]["barostat"] = "MCA"
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(data))
+    result = CliRunner().invoke(
+        cli, [command[0], "-c", str(path), *command[1:], "--engine", "openmm"]
+    )
+    assert result.exit_code != 0
+    assert "MCA" in result.output
+
+
+def test_submit_refuses_a_time_limit_slurm_cannot_read(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(_config_with_pdb(tmp_path)))
+    result = CliRunner().invoke(
+        cli, ["submit", "-c", str(path), "--dry-run", "--time-limit", "banana"]
+    )
+    assert result.exit_code == 2
+    assert "is not a SLURM time" in result.output

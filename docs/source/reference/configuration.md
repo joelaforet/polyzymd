@@ -37,8 +37,8 @@ enzyme:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Short identifier for the enzyme |
-| `pdb_path` | path | Yes | Path to prepared PDB file |
+| `name` | string | Yes | Short identifier for the enzyme. It names the run folder, so it must not be empty or hold `/` |
+| `pdb_path` | path | Yes | Path to prepared PDB file. `validate` refuses a missing file or one without ATOM/HETATM records |
 | `custom_substructures_path` | path | No | JSON file of residue templates for residues that OpenFF does not know, such as an N-terminal cystine. See {doc}`openff_pdb_ingestion` |
 | `description` | string | No | Human-readable description |
 
@@ -59,8 +59,8 @@ substrate:
 |-------|------|----------|---------|-------------|
 | `name` | string | Yes | - | Substrate identifier |
 | `sdf_path` | path | Yes | - | Path to SDF with docked conformers. To make it from a crystal ligand, see {ref}`ligand-sdf-from-crystal` |
-| `conformer_index` | int | No | 0 | Index of conformer to use (0-indexed) |
-| `charge_method` | string | No | "nagl" | Options: `nagl`, `espaloma`, `am1bcc` |
+| `conformer_index` | int | No | 0 | Index of conformer to use (0-indexed). `validate` refuses an index the SDF does not hold |
+| `charge_method` | string | No | "nagl" | Options: `nagl`, `espaloma`, `am1bcc`. `validate` refuses `nagl` for elements other than H, C, N, O, F, P, S, Cl, Br, I, and a method whose software is not installed |
 | `residue_name` | string | No | "LIG" | 3-letter code for topology |
 
 ### Charge Methods
@@ -257,7 +257,7 @@ You can also leave out the `polymers:` section. A section with
 ```yaml
 solvent:
   primary:
-    type: "water"
+    type: "water"                        # The only type the build makes
     model: "tip3p"                       # Water model
   
   co_solvents: []                        # List of co-solvents (optional)
@@ -593,7 +593,9 @@ restraints in equilibration stages (`position_restraints:`) work on both
 engines. On GROMACS they work for `protein_heavy`, `protein_backbone`,
 `protein_calpha`, `ligand_heavy` and `polymer_heavy`; each group must have
 the same `force_constant` in every stage, and all stages must use the same
-protein group. `validate` refuses other position restraints on GROMACS.
+protein group. `validate` refuses other position restraints on GROMACS, and
+refuses `ligand_heavy` without a substrate or `polymer_heavy` without polymers
+on both engines.
 
 ### Restraint Types
 
@@ -678,6 +680,8 @@ See {doc}`../explanation/simulation_safeguards` for why the solute is frozen.
 ```{note}
 The trajectory frame interval is derived from `production.duration` and
 `production.samples`. A config with `production.report_interval` is refused.
+`validate` refuses a phase with more `samples` than MD steps, or shorter than
+one time step.
 ```
 
 For a temperature ramp, omit `duration`. Set `temperature_increment` in K and
@@ -691,7 +695,7 @@ stages continue to require an explicit `duration`.
 |----------|-------------|
 | `NVT` | Constant volume, temperature |
 | `NPT` | Constant pressure, temperature |
-| `NVE` | Microcanonical (no thermostat) |
+| `NVE` | Not run: both engines keep the thermostat on, so `validate` refuses it |
 
 ### Thermostats
 
@@ -699,8 +703,8 @@ stages continue to require an explicit `duration`.
 |------------|-------------|
 | `LangevinMiddle` | Langevin integrator (recommended) |
 | `Langevin` | Standard Langevin |
-| `Andersen` | Andersen thermostat. Only with `engine: gromacs`; the OpenMM engine runs `LangevinMiddle` instead, with a warning at run time. |
-| `NoseHoover` | Nosé-Hoover chain. Only with `engine: gromacs`; the OpenMM engine runs `LangevinMiddle` instead, with a warning at run time. |
+| `Andersen` | Andersen thermostat. Only with `engine: gromacs`; `validate` refuses it with `engine: openmm`. |
+| `NoseHoover` | Nosé-Hoover chain. Only with `engine: gromacs`; `validate` refuses it with `engine: openmm`. |
 
 ### Barostats
 
@@ -713,7 +717,7 @@ stages continue to require an explicit `duration`.
 
 ## Output Configuration
 
-Environment variables (`$USER`, `$HOME`, `${VAR}`) and `~` are automatically expanded in path fields.
+Environment variables (`$USER`, `$HOME`, `${VAR}`) and `~` are automatically expanded in path fields. `validate` refuses a path that names an unset variable.
 
 ```yaml
 output:
@@ -738,6 +742,9 @@ The schema also accepts `save_checkpoint`, `save_state_data` and
 DCD trajectories and checkpoints; the GROMACS engine always writes XTC.
 
 ### Naming Template Variables
+
+A config with another placeholder is refused, and `validate` refuses a
+template without `{replicate}`, since the replicates would share one folder.
 
 | Variable | Description | Example |
 |----------|-------------|---------|
@@ -766,6 +773,8 @@ force_field:
 ```
 
 ### Available Force Fields
+
+`validate` refuses a name that is not an installed force field or an `.offxml` file.
 
 **Protein:**
 - `ff14sb_off_impropers_0.0.4.offxml` - Amber ff14SB (recommended)
@@ -842,9 +851,9 @@ The optional `openmm:` block selects the OpenMM platform. It is used when
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `platform` | `str` | `"CUDA"` | OpenMM platform: `CUDA`, `OpenCL`, `CPU` or `Reference`. PolyzyMD never falls back to another platform. |
+| `platform` | `str` | `"CUDA"` | OpenMM platform: `CUDA`, `OpenCL`, `CPU`, `Reference` or `HIP`; `validate` refuses other names. PolyzyMD never falls back to another platform. |
 | `device_index` | `str \| null` | `null` | GPU device index. |
-| `precision` | `str` | `"mixed"` | Floating-point precision on CUDA. |
+| `precision` | `str` | `"mixed"` | Floating-point precision on CUDA: `single`, `mixed` or `double`. |
 
 The replicate number fixes the starting structure and every random seed. On
 the CPU, OpenCL and CUDA platforms, CPU threads, PME and GPUs add up forces in
@@ -917,7 +926,7 @@ gromacs:
 | `ntomp` | `int` | `8` | OpenMP threads per rank for `gmx mdrun -ntomp`. Sets SLURM `--cpus-per-task`. Must be >= 1. |
 | `gpu` | `bool` | `false` | Request GPU via SLURM. When false, the `--gres=gpu` directive is omitted entirely. |
 | `gpus` | `int` | `1` | Number of GPUs to request when `gpu` is true. Ignored when `gpu` is false. Must be >= 1. |
-| `memory` | `str` | `"16G"` | SLURM `--mem` allocation for GROMACS jobs. |
+| `memory` | `str` | `"16G"` | SLURM `--mem` allocation for GROMACS jobs: a number with an optional `K`, `M`, `G` or `T`. |
 
 ### Notes
 
@@ -953,7 +962,7 @@ Use one of the two, not both.
 - `command_prefix` goes before every GROMACS command. Use it for a container
   or a site launcher:
   `command_prefix: "singularity exec --rocm /path/to/gromacs.sif"`. The value
-  cannot hold shell variables such as `$PWD`; script generation refuses them.
+  cannot hold shell variables such as `$PWD`; `validate` refuses them.
 - `mpi_launcher_flags` goes after the `mpirun` that PolyzyMD writes for a
   real-MPI binary: `mpi_launcher_flags: "-genv I_MPI_FABRICS shm:tcp"` gives
   `mpirun -genv I_MPI_FABRICS shm:tcp gmx_mpi mdrun ...`.

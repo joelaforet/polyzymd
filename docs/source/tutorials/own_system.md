@@ -113,18 +113,16 @@ not exist:
 polyzymd validate -c trpcage/conditions/water/config.yaml
 ```
 
-If `enzyme.pdb_path` still names the template file, the output has a
-warning:
+If `enzyme.pdb_path` still names the template file, `validate` stops with
+an error:
 
 ```
 Validating configuration: trpcage/conditions/water/config.yaml
-Configuration is valid!
-
-Referenced file warnings:
-  Warning: Missing enzyme PDB: /home/me/my_paper/trpcage/conditions/water/structures/protein_X.pdb
+error: enzyme PDB /home/me/my_paper/trpcage/conditions/water/structures/protein_X.pdb does not exist.
+fix: correct enzyme.pdb_path.
 ```
 
-Fix each warning, and run `validate` again until it prints no warning.
+Fix each error and warning, and run `validate` again until it prints none.
 
 Then let `build --dry-run` print what it would build, without building it:
 
