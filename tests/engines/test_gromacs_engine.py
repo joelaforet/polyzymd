@@ -225,7 +225,7 @@ class TestResolveMdrunFlagsGPU:
     """Test GPU offload flag auto-composition in _resolve_mdrun_flags."""
 
     def test_gpu_flags_auto_added(self):
-        """gpu:true should auto-add all four GPU offload flags."""
+        """gpu:true should auto-add the nonbonded, PME and bonded offload flags."""
         config = _make_config(gpu=True, ntmpi=1, ntomp=12, mdrun_flags="")
         engine = GromacsEngine(config=config, gmx_binary="gmx")
         slurm = SlurmConfig(ntasks=1, cpus_per_task=12)
@@ -233,7 +233,14 @@ class TestResolveMdrunFlagsGPU:
         assert "-nb gpu" in flags
         assert "-pme gpu" in flags
         assert "-bonded gpu" in flags
-        assert "-update gpu" in flags
+
+    def test_gpu_mode_never_requests_gpu_update(self):
+        """gpu:true leaves -update to mdrun: GPU update needs integrator md, the MDPs use sd."""
+        config = _make_config(gpu=True, ntmpi=1, ntomp=12, mdrun_flags="")
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+        slurm = SlurmConfig(ntasks=1, cpus_per_task=12)
+        flags = engine._resolve_mdrun_flags(slurm)
+        assert "-update" not in flags
 
     def test_gpu_flags_not_duplicated(self):
         """User-provided GPU flags should not be duplicated."""
@@ -262,7 +269,6 @@ class TestResolveMdrunFlagsGPU:
         # Other GPU flags should still be auto-added
         assert "-pme gpu" in flags
         assert "-bonded gpu" in flags
-        assert "-update gpu" in flags
 
     def test_user_override_update_cpu_respected(self):
         """-update cpu should prevent -update gpu but leave others."""
@@ -300,7 +306,6 @@ class TestResolveMdrunFlagsGPU:
         assert "-nb gpu" in flags
         assert "-pme gpu" in flags
         assert "-bonded gpu" in flags
-        assert "-update gpu" in flags
 
     def test_gpu_partial_user_override(self):
         """User specifies some GPU flags; others auto-added."""
@@ -313,19 +318,19 @@ class TestResolveMdrunFlagsGPU:
         assert "-bonded cpu" in flags
         # Non-specified GPU flags auto-added
         assert "-pme gpu" in flags
-        assert "-update gpu" in flags
         # No duplicates
         assert flags.count("-nb") == 1
         assert flags.count("-bonded") == 1
 
 
 class TestEngineSubmitModuleLoad:
-    """Tests that submit() passes module_load to run_sbatch."""
+    """Tests that submit() leaves module_load to the job script."""
 
     @patch("polyzymd.workflow.slurm_submit.run_sbatch")
-    def test_submit_passes_module_load(self, mock_run_sbatch):
-        """submit() should pass gromacs.module_load to run_sbatch."""
-        config = _make_config(module_load="module load slurm/blanca gromacs/2024.2")
+    @patch("polyzymd.engines.gromacs.engine.shutil.which", return_value="/usr/bin/sbatch")
+    def test_submit_does_not_load_modules_on_the_submit_host(self, _which, mock_run_sbatch):
+        """module_load runs inside the job only; sbatch gets the script alone."""
+        config = _make_config(module_load="module load gcc/11.2.0 gromacs/2024.2")
         engine = GromacsEngine(config=config, gmx_binary="gmx")
         script_path = Path("/tmp/run_rep1.sh")
         engine.prepare_submission = MagicMock(return_value=script_path)
@@ -345,13 +350,13 @@ class TestEngineSubmitModuleLoad:
 
         result = engine.submit(request)
 
-        mock_run_sbatch.assert_called_once_with(script_path, module_load=config.gromacs.module_load)
+        mock_run_sbatch.assert_called_once_with(script_path)
         assert result["submitted"] is True
 
     @patch("polyzymd.workflow.slurm_submit.run_sbatch")
     @patch("polyzymd.engines.gromacs.engine.shutil.which")
     def test_submit_no_module_load(self, mock_which, mock_run_sbatch):
-        """submit() should pass module_load=None when not configured."""
+        """submit() should call sbatch with the script when no module_load is configured."""
         config = _make_config(module_load=None)
         engine = GromacsEngine(config=config, gmx_binary="gmx")
         script_path = Path("/tmp/run_rep2.sh")
@@ -372,32 +377,29 @@ class TestEngineSubmitModuleLoad:
 
         result = engine.submit(request)
 
-        mock_run_sbatch.assert_called_once_with(script_path, module_load=None)
+        mock_run_sbatch.assert_called_once_with(script_path)
         assert result["submitted"] is True
 
 
 class TestPrepareSubmissionRebuild:
-    """prepare_submission builds missing inputs only before a run has started."""
+    """prepare_submission never builds; it needs the inputs from polyzymd build."""
 
     @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
-    def test_prepare_submission_does_not_rebuild_a_started_run(self, from_config, tmp_path):
-        from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
-
+    def test_prepare_submission_refuses_without_a_build(self, from_config, tmp_path):
         engine = GromacsEngine(config=_make_config(), gmx_binary="gmx")
         working_dir = tmp_path / "gromacs"
-        working_dir.mkdir()
-        (working_dir / "state.cpt").write_text("")
         request = EngineSubmitRequest(
-            replicate=1,
+            replicate=2,
             config_path=tmp_path / "config.yaml",
             working_dir=working_dir,
             slurm_config=SlurmConfig(),
         )
 
-        with pytest.raises(ArtifactIntegrityError, match="Refusing to rebuild"):
+        with pytest.raises(FileNotFoundError, match="polyzymd build -c .*config.yaml -r 2"):
             engine.prepare_submission(request)
 
         from_config.assert_not_called()
+        assert not (working_dir / "daisy_chain_scripts").exists()
 
 
 class TestPrepareSubmissionPassThrough:

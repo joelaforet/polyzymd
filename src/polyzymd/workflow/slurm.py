@@ -15,6 +15,7 @@ batch scripts for self-resubmitting MD simulation jobs.
 from __future__ import annotations
 
 import logging
+import os
 import re as _re
 import shutil
 from dataclasses import dataclass, field
@@ -222,9 +223,11 @@ def _validate_positive_replicate(value: object) -> int:
 def _discover_manifest_path() -> str:
     """Auto-detect the pixi workspace manifest (``pixi.toml``).
 
-    Strategy: find the ``polyzymd`` executable on ``$PATH`` (installed by
-    pixi into ``.pixi/envs/<name>/bin/``), walk up the directory tree from
-    the resolved binary to locate ``pixi.toml``.
+    Uses ``PIXI_PROJECT_MANIFEST``, which pixi sets in an activated
+    environment. Otherwise walks up from the ``polyzymd`` executable on
+    ``$PATH`` (``<workspace>/.pixi/envs/<name>/bin/``), first along the path
+    as found, so a symlinked ``.pixi`` folder still leads to the workspace,
+    then along the resolved path.
 
     Returns
     -------
@@ -236,28 +239,26 @@ def _discover_manifest_path() -> str:
     RuntimeError
         If the manifest cannot be found.
     """
+    active = os.environ.get("PIXI_PROJECT_MANIFEST")
+    if active and Path(active).is_file():
+        return str(Path(active).absolute())
     exe = shutil.which("polyzymd")
     if exe is None:
         raise RuntimeError(
             "Cannot auto-detect pixi manifest: 'polyzymd' is not on PATH. "
             "Are you running inside a pixi environment?"
         )
-    # Resolve symlinks → .pixi/envs/<env>/bin/polyzymd
-    exe_path = Path(exe).resolve()
-    # Walk up looking for pixi.toml
-    candidate = exe_path.parent
-    for _ in range(10):  # prevent infinite traversal
-        manifest = candidate / "pixi.toml"
-        if manifest.is_file():
-            return str(manifest)
-        if candidate.parent == candidate:
-            break
-        candidate = candidate.parent
+    exe_path = Path(exe).absolute()
+    for start in (exe_path, exe_path.resolve()):
+        for candidate in start.parents:
+            manifest = candidate / "pixi.toml"
+            if manifest.is_file():
+                return str(manifest)
 
     raise RuntimeError(
         f"Cannot auto-detect pixi manifest: walked up from {exe_path} "
-        "but no pixi.toml found. Ensure you cloned the polyzymd repo and "
-        "installed via 'pixi install'."
+        "but no pixi.toml found. Run polyzymd from the pixi workspace "
+        "(pixi run or pixi shell), or install it there with 'pixi install'."
     )
 
 

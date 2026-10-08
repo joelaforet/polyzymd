@@ -509,3 +509,48 @@ class TestDuplicateJobGuardIntegration:
 
         squeue_calls = [call for call in call_log if "squeue" in str(call)]
         assert len(squeue_calls) == 0, "squeue should not be called during dry run"
+
+
+class TestSubmitNeedsABuild:
+    """OpenMM jobs run in a simulation environment that cannot build a system."""
+
+    @staticmethod
+    def _config_file(tmp_path: Path) -> Path:
+        import yaml
+
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.safe_dump(_simulation_config_data(tmp_path)))
+        return path
+
+    def test_submit_refuses_a_replicate_without_a_build(self, tmp_path, monkeypatch):
+        from polyzymd.workflow import daisy_chain
+
+        monkeypatch.setattr(
+            "polyzymd.workflow.slurm._discover_manifest_path", lambda: "/ws/pixi.toml"
+        )
+        config = self._config_file(tmp_path)
+
+        with pytest.raises(FileNotFoundError, match=r"polyzymd build -c .*config.yaml -r 2"):
+            daisy_chain.submit_daisy_chain(config, "testing", replicates="2", generate_only=True)
+
+        assert not list(tmp_path.glob("projects/**/run_rep2.sh"))
+
+    def test_job_reuses_the_existing_build(self, tmp_path, monkeypatch):
+        from polyzymd.workflow import daisy_chain
+
+        monkeypatch.setattr(
+            "polyzymd.workflow.slurm._discover_manifest_path", lambda: "/ws/pixi.toml"
+        )
+        validated = []
+        monkeypatch.setattr(
+            "polyzymd.simulation.artifact_integrity.validate_build_bundle",
+            lambda working_dir, config: validated.append(working_dir),
+        )
+        config = self._config_file(tmp_path)
+
+        results = daisy_chain.submit_daisy_chain(
+            config, "testing", replicates="1", generate_only=True
+        )
+
+        assert len(validated) == 1
+        assert "--skip-build" in results[1][0].script_path.read_text()

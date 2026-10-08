@@ -394,7 +394,6 @@ class DaisyChainSubmitter:
         dc_config: DaisyChainConfig,
         pixi_env: str = "sim-cuda-12-4",
         openff_logs: bool = False,
-        skip_build: bool = False,
     ) -> None:
         """Initialize the submitter.
 
@@ -408,15 +407,13 @@ class DaisyChainSubmitter:
             Pixi environment name (e.g. ``"sim-cuda-12-4"``, ``"sim-cuda-12-6"``).
         openff_logs : bool
             Enable verbose OpenFF logs in generated scripts.
-        skip_build : bool
-            Skip system building in generated scripts.
         """
         self._sim_config = sim_config
         self._dc_config = dc_config
         self._openff_logs = openff_logs
-        self._skip_build = skip_build
+        # The simulation environments have no OpenFF, so jobs load the build.
         self._generator = SlurmScriptGenerator(
-            dc_config.slurm_config, pixi_env, openff_logs=openff_logs, skip_build=skip_build
+            dc_config.slurm_config, pixi_env, openff_logs=openff_logs, skip_build=True
         )
 
         # Track submitted jobs per replicate
@@ -784,7 +781,6 @@ def submit_daisy_chain(
     nodelist: str | None = None,
     exclude: str | None = None,
     openff_logs: bool = False,
-    skip_build: bool = False,
 ) -> Dict[int, List[SubmissionResult]]:
     """Submit daisy-chain simulation jobs from a YAML config.
 
@@ -838,8 +834,6 @@ def submit_daisy_chain(
         the preset's excluded-node list.
     openff_logs : bool
         Enable verbose OpenFF logs in generated scripts.
-    skip_build : bool
-        Skip system building in generated scripts.
 
     Returns
     -------
@@ -851,6 +845,9 @@ def submit_daisy_chain(
     ValueError
         If the SLURM account is empty on a preset that requires one
         and neither ``dry_run`` nor ``generate_only`` is set.
+    FileNotFoundError
+        If a replicate has no valid build from ``polyzymd build`` (not
+        checked for ``dry_run``).
     """
     # Load simulation config
     sim_config = SimulationConfig.from_yaml(config_path)
@@ -918,8 +915,24 @@ def submit_daisy_chain(
         config_path=str(Path(config_path).resolve()),
     )
 
+    # Jobs run in a simulation environment without OpenFF, so they cannot
+    # build. Check every replicate before any job is written or submitted.
+    if not dry_run:
+        from polyzymd.simulation.artifact_integrity import validate_build_bundle
+
+        for replicate in dc_config.replicates:
+            working_dir = sim_config.get_working_directory(replicate)
+            try:
+                validate_build_bundle(working_dir, sim_config)
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise FileNotFoundError(
+                    f"Replicate {replicate} has no usable build in {working_dir}: {exc}\n"
+                    f"Build it first, in a compute job: polyzymd build -c {config_path} "
+                    f"-r {replicate}. Then submit again."
+                ) from exc
+
     # Create submitter and submit
     submitter = DaisyChainSubmitter(
-        sim_config, dc_config, pixi_env=pixi_env, openff_logs=openff_logs, skip_build=skip_build
+        sim_config, dc_config, pixi_env=pixi_env, openff_logs=openff_logs
     )
     return submitter.submit_all()

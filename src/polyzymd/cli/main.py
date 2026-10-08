@@ -1630,7 +1630,8 @@ def _print_gromacs_dry_run_details(
 @click.option(
     "--skip-build",
     is_flag=True,
-    help="Skip system building in generated jobs (use pre-built system from 'polyzymd build')",
+    hidden=True,
+    help="No effect: jobs always load the build from 'polyzymd build'.",
 )
 @click.option(
     "--pixi-env",
@@ -1681,7 +1682,8 @@ def submit(
 
     Creates and optionally submits one self-resubmitting job per replicate.
     OpenMM submission uses the existing daisy-chain flow, while GROMACS
-    submission uses the engine submission interface.
+    submission uses the engine submission interface. Submit never builds:
+    each replicate needs a build from ``polyzymd build`` first.
 
     \b
     Directory structure:
@@ -1728,8 +1730,7 @@ def submit(
             f"Excluded nodes override: {exclude_nodes or '(none)'}",
             phase="workflow",
         )
-    if skip_build:
-        colored_echo("Skip-build mode: using pre-built systems", phase="workflow")
+    _ = skip_build
 
     if dry_run:
         replicate_list = _resolve_replicates_option(replicates)
@@ -1873,21 +1874,25 @@ def submit(
                 working_dir=working_dir,
                 slurm_config=slurm_config,
                 job_name=job_name,
-                extra={"pixi_env": resolved_pixi_env, "skip_build": skip_build},
+                extra={"pixi_env": resolved_pixi_env},
             )
 
-            if generate_only:
-                script_path = engine_impl.prepare_submission(request)
-                colored_echo(f"  Rep {rep}: script at {script_path}", phase="workflow")
-            else:
+            try:
+                if generate_only:
+                    script_path = engine_impl.prepare_submission(request)
+                    colored_echo(f"  Rep {rep}: script at {script_path}", phase="workflow")
+                    continue
                 result = engine_impl.submit(request)
-                if result.get("submitted"):
-                    colored_echo(f"  Rep {rep}: {result['stdout']}", phase="workflow")
-                else:
-                    colored_echo(
-                        f"  Rep {rep}: script at {result['script_path']} (sbatch not available)",
-                        phase="workflow",
-                    )
+            except (FileNotFoundError, ValueError, RuntimeError) as e:
+                colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
+                sys.exit(1)
+            if result.get("submitted"):
+                colored_echo(f"  Rep {rep}: {result['stdout']}", phase="workflow")
+            else:
+                colored_echo(
+                    f"  Rep {rep}: script at {result['script_path']} (sbatch not available)",
+                    phase="workflow",
+                )
 
         if not generate_only:
             colored_echo("\nGROMACS job submission complete!", phase="workflow")
@@ -1922,7 +1927,6 @@ def submit(
             nodelist=nodelist,
             exclude=exclude_nodes,
             openff_logs=submit_openff_logs,
-            skip_build=skip_build,
         )
 
         if not generate_only:
@@ -3778,10 +3782,7 @@ def recover(
 
         from polyzymd.workflow.slurm_submit import run_sbatch
 
-        module_load = (
-            getattr(sim_config.gromacs, "module_load", None) if sim_config.gromacs else None
-        )
-        result = run_sbatch(recovery_path, module_load=module_load)
+        result = run_sbatch(recovery_path)
         if result.returncode == 0:
             colored_echo(f"Submitted: {result.stdout.strip()}", phase="workflow")
             colored_echo("Monitor with: squeue -u $USER", phase="workflow")

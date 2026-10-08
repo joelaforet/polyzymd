@@ -320,9 +320,20 @@ of files, see {ref}`gromacs-output-files`.
 
 Submit self-resubmitting simulation jobs to SLURM for HPC execution.
 
-Each replicate gets one SLURM script that handles the full simulation
-lifecycle: building, equilibration, production segments, interruption
-recovery, and resubmission. See {doc}`../how_to/hpc_slurm` for details.
+Each replicate gets one SLURM script that handles the simulation lifecycle:
+equilibration, production segments, interruption recovery, and resubmission.
+See {doc}`../how_to/hpc_slurm` for details.
+
+`submit` does not build. Run `polyzymd build` for each replicate first, in a
+compute job. Before it writes any script, `submit` checks each replicate: an
+OpenMM build must match its `build_manifest.json` and the config, and a GROMACS
+build must have the `.top`, `.gro`, `em.mdp` and `prod.mdp` files. If a
+replicate fails the check, `submit` stops with an error that gives the
+`polyzymd build` command. `--generate-only` makes the same check.
+`--dry-run` does not.
+
+`submit` runs `sbatch --export=NONE`, so a job does not inherit the shell
+environment of the submitting host. GROMACS `module_load` runs in the job only.
 
 ```bash
 polyzymd submit --config <path> --replicates <range> [options]
@@ -351,7 +362,6 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
 | `--exclude` | - | No | from preset | SLURM `--exclude` override (e.g., "node01,node02"). Replaces the preset list; pass `""` to exclude nothing |
 | `--pixi-env` | - | No | engine-specific | Runtime for generated Slurm jobs; OpenMM `auto` uses a fixed environment for known-site presets, and GROMACS uses `build` |
-| `--skip-build` | - | No | false | Skip system building (use pre-built system from `polyzymd build`) |
 | `--force` | - | No | false | Skip duplicate-job check |
 | `--openff-logs` | - | No | false | Enable verbose OpenFF logs in job scripts |
 | `--dry-run` | - | No | false | Preview submission plan only (no files written, no submission) |
@@ -388,7 +398,7 @@ polyzymd submit -c config.yaml -r 1-3 --preset aa100 \
     --scratch-dir /scratch/alpine/$USER/sims \
     --projects-dir /projects/$USER/polyzymd
 
-# GROMACS GPU submission with constraint
+# GROMACS GPU submission with constraint (after polyzymd build ... --format gromacs)
 polyzymd submit -c config.yaml -r 1-3 \
     --engine gromacs \
     --preset blanca-shirts \

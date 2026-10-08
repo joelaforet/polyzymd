@@ -1843,3 +1843,26 @@ def test_a_stop_file_stops_the_chain(tmp_path, monkeypatch) -> None:
     assert "STOP: not starting replicate 1" in result.stdout
     calls = (tmp_path / "calls").read_text().split() if (tmp_path / "calls").exists() else []
     assert "gmx" not in calls and "sbatch" not in calls, calls
+
+
+def test_job_ignores_user_site_packages_and_loads_modules_itself(monkeypatch) -> None:
+    """The job sets PYTHONNOUSERSITE before Python starts and runs module_load itself."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+    lines = (
+        _generator()
+        .generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        .splitlines()
+    )
+
+    nousersite = lines.index("export PYTHONNOUSERSITE=1")
+    activation = next(i for i, line in enumerate(lines) if "pixi shell-hook" in line)
+    assert nousersite < activation < lines.index("module load gromacs/2024")

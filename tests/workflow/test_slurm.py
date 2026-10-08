@@ -1208,3 +1208,42 @@ def test_openmm_and_gromacs_scripts_request_the_same_resources(monkeypatch):
     assert set(resources) <= set(openmm) and set(resources) <= set(gromacs)
     assert "#SBATCH --mail-type=FAIL" in openmm
     assert "#SBATCH --mail-type=FAIL,END" in gromacs
+
+
+def test_openmm_job_ignores_user_site_packages(monkeypatch):
+    """The job sets PYTHONNOUSERSITE before its first Python process."""
+    monkeypatch.setattr(slurm_module, "_discover_manifest_path", lambda: "/ws/pixi.toml")
+    lines = _make_generator(SlurmConfig.from_preset("blanca-shirts")).generate_job_script(
+        "/c.yaml", 1, "/run_1"
+    )
+    lines = lines.splitlines()
+
+    first_python = next(i for i, line in enumerate(lines) if line.startswith("if ! python"))
+    assert lines.index("export PYTHONNOUSERSITE=1") < first_python
+
+
+class TestDiscoverManifestPath:
+    """The pixi manifest is found when the environments live outside the workspace."""
+
+    def test_uses_the_manifest_of_the_active_pixi_workspace(self, monkeypatch, tmp_path):
+        manifest = tmp_path / "ws" / "pixi.toml"
+        manifest.parent.mkdir()
+        manifest.write_text("")
+        monkeypatch.setenv("PIXI_PROJECT_MANIFEST", str(manifest))
+        monkeypatch.setattr(slurm_module.shutil, "which", lambda name: "/opt/elsewhere/polyzymd")
+
+        assert slurm_module._discover_manifest_path() == str(manifest)
+
+    def test_finds_the_workspace_through_a_symlinked_pixi_folder(self, monkeypatch, tmp_path):
+        workspace = tmp_path / "ws"
+        envs = tmp_path / "scratch" / "pixi-envs"
+        (envs / "envs" / "build" / "bin").mkdir(parents=True)
+        (envs / "envs" / "build" / "bin" / "polyzymd").write_text("")
+        workspace.mkdir()
+        (workspace / "pixi.toml").write_text("")
+        (workspace / ".pixi").symlink_to(envs)
+        monkeypatch.delenv("PIXI_PROJECT_MANIFEST", raising=False)
+        exe = workspace / ".pixi" / "envs" / "build" / "bin" / "polyzymd"
+        monkeypatch.setattr(slurm_module.shutil, "which", lambda name: str(exe))
+
+        assert slurm_module._discover_manifest_path() == str(workspace / "pixi.toml")

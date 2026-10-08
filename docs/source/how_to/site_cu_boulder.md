@@ -66,7 +66,30 @@ To list the accounts, partitions and QoS values that you can use:
 sacctmgr show association user=$USER format=account,partition,qos
 ```
 
+(cu-boulder-build)=
+## Build the systems on a compute node
+
+`polyzymd submit` does not build. Build each replicate first, in a compute
+job, not on a login node. On Blanca, this command builds three replicates on a
+CPU node of the condo:
+
+```bash
+ml slurm/blanca
+srun --partition=blanca,blanca-shirts --account=blanca-shirts --qos=preemptable \
+    --ntasks=1 --cpus-per-task=8 --mem=32G --time=01:00:00 \
+    pixi run -e build polyzymd build -c config.yaml -r 1-3
+```
+
+The quickstart system took 3 minutes. A preempted `srun` stops with an error;
+run it again. For a config with `engine: gromacs`, the same command writes the
+GROMACS inputs. To submit an OpenMM config with `--engine gromacs`, add
+`--format gromacs` to the build.
+
 ## Submit simulations
+
+`submit` checks that each replicate has a complete build. If a replicate has
+none, it stops before it writes any job script and prints the `polyzymd build`
+command to run.
 
 The Alpine presets (`aa100`, `al40` and `testing`) set a lab allocation as the
 account. Give your own allocation with `--account`:
@@ -80,17 +103,27 @@ pixi run -e build polyzymd submit \
     --replicates 1-5
 ```
 
-On Blanca, the preset sets the partition, the account and the QoS:
+On Blanca, the preset sets the partition, the account and the QoS. This
+OpenMM submission ran on Blanca on 7 October 2026:
 
 ```bash
 ml slurm/blanca
 pixi run -e build polyzymd submit \
     -c config.yaml \
     --preset blanca-shirts \
-    --replicates 1-5
+    --pixi-env auto \
+    --replicates 1-3
 ```
 
-For OpenMM, `--pixi-env auto` selects `sim-cuda-12-4` on Blanca.
+For OpenMM, `--pixi-env auto` selects `sim-cuda-12-4` on Blanca. This
+environment has no OpenFF, so the job loads the build and cannot make one.
+
+### Blanca GPU features
+
+`--constraint` takes the feature names of the Blanca GPU nodes: `A40`,
+`A100`, `L40`, `h100` (lower case), `V100` and `rtx6000`. The L40S nodes have
+no feature name, and `--constraint L40S` fails with
+*"Invalid feature specification"*. For example, `--constraint "A40|A100|L40"`.
 
 (excluded-blanca-gpu-nodes)=
 ## Excluded Blanca GPU nodes
@@ -144,11 +177,46 @@ The site module reported CUDA GPU support. These results apply only to the
 tested module and nodes. Run the short test again after a module or driver
 update.
 
+On 7 October 2026, the quickstart GROMACS config ran minimization,
+equilibration and production on a Blanca GPU through `polyzymd submit`. That
+test gave `gmx_binary` a wrapper script that loads the module.
+
+On the Blanca compute nodes, `gromacs/2024.2` provides `gmx`, a thread-MPI
+build with CUDA, and `gmx_mpi`. The login node cannot load this module. The
+job loads it: `polyzymd submit` starts the job with `sbatch --export=NONE`
+and the job script runs `module_load`.
+
 ### Recipes
 
 Each recipe gives the `gromacs:` block of `config.yaml` and the submit
-command. Blanca has mixed GPU types, so give `--constraint` for GPU jobs. See
+command. Build the replicates first (see {ref}`cu-boulder-build`).
+Blanca has mixed GPU types, so give `--constraint` for GPU jobs. See
 {doc}`run_gromacs` for the reason.
+
+**Blanca, 1 GPU, site module.** The equivalent of the 7 October test, with
+`module_load` in place of the wrapper. The job loads the module; this exact
+block has not run on Blanca yet.
+
+```yaml
+gromacs:
+  gmx_binary: "gmx"
+  module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
+  gpu: true
+  gpus: 1
+  ntmpi: 1
+  ntomp: 4
+  memory: "8G"
+```
+
+```bash
+ml slurm/blanca
+pixi run -e build polyzymd submit \
+    -c config.yaml \
+    --engine gromacs \
+    --preset blanca-shirts \
+    --constraint "A40|A100|L40" \
+    --replicates 1-3
+```
 
 **Alpine A100, 3 GPUs, real MPI.** If your own script runs
 `mpirun -np 3 gmx_mpi mdrun ...` with its own GMXRC or PLUMED set-up, put
@@ -181,11 +249,13 @@ pixi run -e build polyzymd submit \
 
 **Alpine MI100 (AMD), Singularity container.** `slurm_ntasks: 16` sets the
 SLURM task count apart from the GROMACS rank count (`ntmpi: 3`).
+`command_prefix` cannot hold shell variables such as `$PWD`. Singularity binds
+the current folder, which is the run folder of the job, by default.
 
 ```yaml
 gromacs:
   gmx_binary: "gmx"
-  command_prefix: "singularity exec --rocm --bind $PWD /projects/shared/gromacs-rocm.sif"
+  command_prefix: "singularity exec --rocm /projects/shared/gromacs-rocm.sif"
   gpu: true
   gpus: 3
   ntmpi: 3
@@ -201,6 +271,7 @@ pixi run -e build polyzymd submit \
     -c config.yaml \
     --engine gromacs \
     --preset aa100 \
+    --partition ami100 \
     --gpu-type mi100 \
     --replicates 1-3
 ```
