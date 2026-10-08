@@ -53,7 +53,7 @@ class PositionalRestraintForce:
         particle_count: Number of particles added to the restraint
 
     Example:
-        >>> restraint = PositionalRestraintForce(4184.0)  # 1 kcal/mol/A^2
+        >>> restraint = PositionalRestraintForce(4184.0)  # 10 kcal/mol/A^2
         >>> restraint.add_particles_from_positions([0, 1, 2], positions)
         >>> force_idx = system.addForce(restraint.force)
     """
@@ -63,7 +63,7 @@ class PositionalRestraintForce:
 
         Args:
             default_force_constant: Default force constant in kJ/mol/nm^2.
-                                   Common value: 4184.0 = 1.0 kcal/mol/A^2
+                                   Common value: 4184.0 = 10 kcal/mol/A^2
                                    Can be overridden per-particle when adding atoms.
         """
         self._default_force_constant = default_force_constant

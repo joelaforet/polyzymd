@@ -120,7 +120,7 @@ polyzymd study freeze lipase_363K
 
 ```
 froze /home/me/lipase_363K as study-v1 (dc94243466cf)
-manifest: 21 study files, 2 conditions, 10 replicates hashed
+manifest: 21 study files, 2 conditions, 10 replicates' files hashed for the manifest
 deposit: /home/me/lipase_363K/deposit; files to upload in /home/me/lipase_363K/deposit/upload
 warning: metadata.doi is not set: reserve a DOI for the study in Zenodo, add it here and refreeze
 next: follow /home/me/lipase_363K/deposit/UPLOAD.md, which says how to reserve the DOI, upload and publish on Zenodo; PolyzyMD uploads nothing

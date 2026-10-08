@@ -163,7 +163,7 @@ solvent:
 #
 # Selection syntax:
 #   protein         : All protein atoms (use to restrict to protein chain)
-#   resid N        : Residue number (1-indexed, matches PDB)
+#   resid N        : Residue number in the built topology (protein renumbered from 1)
 #   resname XXX    : Residue name (e.g., LIG, SER)
 #   name XXX       : Atom name (e.g., CA, OG, C1)
 #   pdbindex N     : PDB atom serial number (1-indexed, matches PyMOL)
@@ -242,7 +242,7 @@ simulation_phases:
       temperature_interval_steps: 600    # MD steps between updates
       position_restraints:
         - group: "protein_heavy"
-          force_constant: 4184.0        # kJ/mol/nm^2 (= 1 kcal/mol/A^2)
+          force_constant: 4184.0        # kJ/mol/nm^2 (= 10 kcal/mol/A^2)
         # With polymers, also restrain them:
         # - group: "polymer_heavy"
         #   force_constant: 4184.0
