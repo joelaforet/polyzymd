@@ -419,7 +419,9 @@ class TestRestartEndToEnd:
         reloaded = load_or_scan_progress(tmp_path, total_steps=100, timestep_fs=1.0)
         assert [s.steps_completed for s in reloaded.segments] == [15, 85]
         assert reloaded.total_steps_completed == 100
-        params = json.loads((tmp_path / "production_1" / "production_1_parameters.json").read_text())
+        params = json.loads(
+            (tmp_path / "production_1" / "production_1_parameters.json").read_text()
+        )
         assert params["__values__"]["integ_params"]["__values__"]["num_samples"] == 16
 
     def test_failed_frame_write_is_not_skipped(self, tmp_path, monkeypatch):

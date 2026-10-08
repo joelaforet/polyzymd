@@ -2077,12 +2077,12 @@ def run_segment(
     working_dir.mkdir(parents=True, exist_ok=True)
     raise_if_interrupted()
 
-    from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError, replicate_lock
-    from polyzymd.simulation.signals import EXIT_CODE_CONCURRENT
-
     # `status` and `recover` probe the lock for a moment; retry briefly so a
     # probe is not mistaken for a concurrent run.
     import time
+
+    from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError, replicate_lock
+    from polyzymd.simulation.signals import EXIT_CODE_CONCURRENT
 
     for attempt in range(10):
         run_lock = replicate_lock(working_dir)
@@ -2096,7 +2096,7 @@ def run_segment(
             time.sleep(1)
 
     # The lock must be released on every exit path, including sys.exit() and
-    # unhandled exceptions: a leaked flock makes every later job in the chain
+    # unhandled exceptions: a leaked lock makes every later job in the chain
     # exit with EXIT_CODE_CONCURRENT and silently stops the run.
     try:
         _run_segment_locked(

@@ -1461,9 +1461,7 @@ class TestSubmitEngineAware:
         config_path = tmp_path / "fake.yaml"
         config_path.write_text("name: test\n", encoding="utf-8")
 
-        result = CliRunner().invoke(
-            cli, ["submit", "-c", str(config_path), "--time-limit", limit]
-        )
+        result = CliRunner().invoke(cli, ["submit", "-c", str(config_path), "--time-limit", limit])
 
         assert result.exit_code == 2
         assert "--time-limit" in result.output

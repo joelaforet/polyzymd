@@ -1797,7 +1797,6 @@ class TestRunSegmentHardKillGuard:
         assert initial.called
         assert not continuation.called
 
-
     def test_segment_killed_seconds_ago_is_resumed(self, tmp_path):
         """A fresh checkpoint left by a killed job does not stop the chain.
 

@@ -565,7 +565,9 @@ def record_equilibration_stages(working_dir: str | Path, stages: List[Dict[str, 
                 finished_at=stage["finished_at"],
                 seeds=stage.get("seeds"),
                 seeds_by_attempt=(
-                    stage["seeds_by_attempt"] if len(stage.get("seeds_by_attempt") or []) > 1 else None
+                    stage["seeds_by_attempt"]
+                    if len(stage.get("seeds_by_attempt") or []) > 1
+                    else None
                 ),
                 **provenance,
             )
@@ -912,8 +914,7 @@ def _scan_segment_dir(
 
             if is_likely_running:
                 LOGGER.info(
-                    f"Segment {seg_idx} is still running "
-                    f"(~{steps_completed} steps so far)"
+                    f"Segment {seg_idx} is still running " f"(~{steps_completed} steps so far)"
                 )
                 return SegmentRecord(
                     index=seg_idx,

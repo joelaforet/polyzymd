@@ -1220,7 +1220,9 @@ class ContinuationManager:
             ]
         first_frame_after = max(start_step, skip_through or start_step)
         num_samples = max(
-            0, (start_step + total_steps) // seg_report_interval - first_frame_after // seg_report_interval
+            0,
+            (start_step + total_steps) // seg_report_interval
+            - first_frame_after // seg_report_interval,
         )
 
         # Save parameters for this segment
