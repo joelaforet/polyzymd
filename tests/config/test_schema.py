@@ -7,7 +7,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from polyzymd.config.schema import SimulationConfig
+from polyzymd.config.schema import CoSolventSpec, SimulationConfig
 from tests._support.analysis_testkit import write_simulation_config
 
 
@@ -1129,15 +1129,33 @@ def test_box_shape_refuses_truncated_octahedron():
         BoxConfig(shape="truncated_octahedron")
 
 
-@pytest.mark.parametrize(("name", "residue_name"), [("glycine_betaine", None), ("my_mol", "HOH")])
-def test_cosolvent_residue_name_that_selections_take_for_protein_or_water_is_refused(
-    name: str, residue_name: str | None
+@pytest.mark.parametrize("name", ["methylurea", "acetate", "sodium_dodecyl_sulfate", "proline"])
+def test_default_cosolvent_residue_name_avoids_protein_nucleic_water_and_ion_names(
+    minimal_config_data, name: str
 ) -> None:
-    """A co-solvent residue name that is an amino-acid or water name is refused."""
-    from polyzymd.config.schema import CoSolventSpec
+    """A config without residue_name loads, and its derived name is not one a selection takes."""
+    minimal_config_data["solvent"] = {"co_solvents": [{"name": name, "smiles": "CCO", "count": 1}]}
+    config = SimulationConfig(**minimal_config_data)
+    config.require_buildable()
 
+    from polyzymd.config.schema import reserved_residue_names
+
+    (cosolvent,) = config.solvent.co_solvents
+    assert len(cosolvent.residue_name) == 3
+    assert cosolvent.residue_name not in reserved_residue_names()
+    assert cosolvent.residue_name == CoSolventSpec(name=name, smiles="CCO", count=1).residue_name
+
+
+def test_explicit_clashing_cosolvent_residue_name_loads_but_is_not_built(
+    minimal_config_data,
+) -> None:
+    """A config that names a co-solvent GLY loads for analysis; validate and build refuse it."""
+    minimal_config_data["solvent"] = {
+        "co_solvents": [{"name": "glycerol", "mole_fraction": 0.1, "residue_name": "GLY"}]
+    }
+    config = SimulationConfig(**minimal_config_data)
     with pytest.raises(ValueError, match="residue_name"):
-        CoSolventSpec(name=name, smiles="CCO", count=1, residue_name=residue_name)
+        config.require_buildable()
 
 
 @pytest.mark.parametrize("model", ["spce", "tip4p", "tip4pew", "opc"])
