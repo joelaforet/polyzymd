@@ -272,6 +272,8 @@ solvent:
 `nacl_concentration` sets the number of NaCl pairs. With `neutralize: true`,
 the Na+ or Cl- ions that cancel the charge of the solute and co-solvents are
 added on top of the salt, as OpenMM `Modeller` and `gmx genion -neutral` do.
+NaCl is the only salt the build adds: `validate` refuses a non-zero
+`kcl_concentration` or `mgcl2_concentration`.
 
 `box.padding` is the distance from the **solute** to the box edge. The edge of
 the cell is the solute diameter (its largest atom-to-atom distance) plus

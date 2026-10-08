@@ -707,8 +707,19 @@ class IonConfig(_ConfigModel):
         ge=0.0,
         description="NaCl salt concentration (mol/L), before neutralizing ions",
     )
-    kcl_concentration: float = Field(0.0, ge=0.0, description="KCl conc. (mol/L)")
-    mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L)")
+    kcl_concentration: float = Field(0.0, ge=0.0, description="KCl conc. (mol/L); only 0")
+    mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L); only 0")
+
+    @field_validator("kcl_concentration", "mgcl2_concentration")
+    @classmethod
+    def refuse_salts_not_built(cls, v: float, info: Any) -> float:
+        """Refuse KCl and MgCl2: the build adds only NaCl."""
+        if v:
+            raise ValueError(
+                f"{info.field_name} is not supported: the build adds only Na+ and Cl- ions. "
+                f"Remove {info.field_name}, or use nacl_concentration."
+            )
+        return v
 
 
 class BoxConfig(_ConfigModel):

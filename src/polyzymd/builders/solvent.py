@@ -152,16 +152,12 @@ class SolventComposition:
         water_model: Water model to use.
         co_solvents: List of co-solvent specifications.
         nacl_concentration: NaCl salt concentration in mol/L, before neutralizing ions.
-        kcl_concentration: KCl concentration in mol/L.
-        mgcl2_concentration: MgCl2 concentration in mol/L.
         neutralize: Whether to neutralize system charge.
     """
 
     water_model: WaterModelType = "tip3p"
     co_solvents: List[CoSolvent] = field(default_factory=list)
     nacl_concentration: float = 0.0  # NaCl salt concentration, mol/L
-    kcl_concentration: float = 0.0
-    mgcl2_concentration: float = 0.0
     neutralize: bool = True
 
     def __post_init__(self) -> None:
@@ -608,8 +604,6 @@ class SolventBuilder:
             water_model=config.primary.model.value,
             co_solvents=co_solvents,
             nacl_concentration=config.ions.nacl_concentration,
-            kcl_concentration=config.ions.kcl_concentration,
-            mgcl2_concentration=config.ions.mgcl2_concentration,
             neutralize=config.ions.neutralize,
         )
 

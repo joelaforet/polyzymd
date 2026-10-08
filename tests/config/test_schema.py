@@ -1193,3 +1193,13 @@ def test_gromacs_refuses_position_restraints_its_export_would_merge(minimal_conf
         SimulationConfig(**minimal_config_data)
     minimal_config_data["engine"] = "openmm"
     SimulationConfig(**minimal_config_data)
+
+
+@pytest.mark.parametrize("key", ["kcl_concentration", "mgcl2_concentration"])
+def test_salts_the_build_does_not_add_are_refused(minimal_config_data, key):
+    """The build adds only NaCl, so a non-zero KCl or MgCl2 concentration is refused."""
+    minimal_config_data["solvent"] = {"ions": {key: 0.15}}
+    with pytest.raises(ValidationError, match="nacl_concentration"):
+        SimulationConfig(**minimal_config_data)
+    minimal_config_data["solvent"] = {"ions": {key: 0.0}}
+    SimulationConfig(**minimal_config_data)
