@@ -1129,6 +1129,13 @@ class TestSubmitDryRunVsGenerateOnly:
 class TestSubmitEngineAware:
     """Tests for engine-aware submit command."""
 
+    @pytest.fixture(autouse=True)
+    def _gromacs_builds_exist(self, monkeypatch):
+        """These tests check submission options, not the build check."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.engine.GromacsEngine.check_build", lambda self, request: None
+        )
+
     def test_submit_help_includes_build_pixi_env_choice(self) -> None:
         """submit --help should list build as an allowed pixi environment."""
         runner = CliRunner()
@@ -1386,9 +1393,9 @@ class TestSubmitEngineAware:
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
         mock_engine_submit.return_value = {
-            "submitted": False,
+            "submitted": True,
             "script_path": "/tmp/script.sh",
-            "reason": "sbatch_not_available",
+            "stdout": "Submitted batch job 1",
         }
 
         config_path = tmp_path / "fake.yaml"
@@ -1435,9 +1442,9 @@ class TestSubmitEngineAware:
         )
         mock_from_yaml.return_value = mock_config
         mock_engine_submit.return_value = {
-            "submitted": False,
+            "submitted": True,
             "script_path": "/tmp/script.sh",
-            "reason": "sbatch_not_available",
+            "stdout": "Submitted batch job 1",
         }
 
         config_path = tmp_path / "fake.yaml"
@@ -1505,6 +1512,13 @@ class TestSubmitEngineAware:
 
 class TestSubmitConstraintOption:
     """Tests for --constraint CLI option on submit command."""
+
+    @pytest.fixture(autouse=True)
+    def _gromacs_builds_exist(self, monkeypatch):
+        """These tests check submission options, not the build check."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.engine.GromacsEngine.check_build", lambda self, request: None
+        )
 
     def test_submit_help_shows_nodelist(self) -> None:
         """'polyzymd submit --help' should show --nodelist option."""
@@ -1670,9 +1684,9 @@ class TestSubmitConstraintOption:
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
         mock_engine_submit.return_value = {
-            "submitted": False,
+            "submitted": True,
             "script_path": "/tmp/script.sh",
-            "reason": "sbatch_not_available",
+            "stdout": "Submitted batch job 1",
         }
 
         config_path = tmp_path / "fake.yaml"
@@ -1734,9 +1748,9 @@ class TestSubmitConstraintOption:
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
         mock_engine_submit.return_value = {
-            "submitted": False,
+            "submitted": True,
             "script_path": "/tmp/script.sh",
-            "reason": "sbatch_not_available",
+            "stdout": "Submitted batch job 1",
         }
 
         config_path = tmp_path / "fake.yaml"
@@ -1863,9 +1877,9 @@ class TestSubmitConstraintOption:
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
         mock_engine_submit.return_value = {
-            "submitted": False,
+            "submitted": True,
             "script_path": "/tmp/script.sh",
-            "reason": "sbatch_not_available",
+            "stdout": "Submitted batch job 1",
         }
 
         config_path = tmp_path / "fake.yaml"
@@ -1980,6 +1994,13 @@ class TestSubmitConstraintOption:
 class TestSubmitGromacsDuplicateGuard:
     """Tests for duplicate-job detection in GROMACS submit path."""
 
+    @pytest.fixture(autouse=True)
+    def _gromacs_builds_exist(self, monkeypatch):
+        """These tests check submission options, not the build check."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.engine.GromacsEngine.check_build", lambda self, request: None
+        )
+
     @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=["12345"])
     @patch("polyzymd.workflow.daisy_chain.create_job_name", return_value="test_job")
     @patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
@@ -2049,9 +2070,9 @@ class TestSubmitGromacsDuplicateGuard:
         mock_config.generate_system_name = lambda: "test_system"
         mock_from_yaml.return_value = mock_config
         mock_submit.return_value = {
-            "submitted": False,
+            "submitted": True,
             "script_path": "/tmp/script.sh",
-            "reason": "sbatch_not_available",
+            "stdout": "Submitted batch job 1",
         }
 
         config_path = tmp_path / "fake.yaml"
@@ -2100,6 +2121,19 @@ def test_clean_pdb_runs_on_the_cpu(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert (tmp_path / "clean.pdb").is_file()
     assert os.environ["OPENMM_DEFAULT_PLATFORM"] == "CPU"
+
+
+@pytest.mark.parametrize("text", ["garbage\n", ""], ids=["not a PDB", "empty"])
+def test_clean_pdb_refuses_a_file_without_atoms(tmp_path: Path, text: str) -> None:
+    """A PDB file with no atoms gives error: and fix:, not a traceback."""
+    pytest.importorskip("pdbfixer")
+    source = tmp_path / "in.pdb"
+    source.write_text(text)
+    result = CliRunner().invoke(cli, ["clean-pdb", "-i", str(source)])
+    assert result.exit_code == 1, result.output
+    assert isinstance(result.exception, SystemExit)
+    assert f"error: {source} has no atoms" in result.output and "fix:" in result.output
+    assert not (tmp_path / "in_clean.pdb").exists()
 
 
 class TestSubmitDryRunHardwareWarnings:
@@ -2333,3 +2367,45 @@ def test_failed_gromacs_run_build_leaves_no_run_folder(tmp_path: Path) -> None:
         with pytest.raises(ValueError):
             _run_gromacs_impl(config, replicate=3, gmx_path="gmx")
     assert (config.get_working_directory(3) / "packmol_error.log").is_file()
+
+
+@patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
+@patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
+@patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+def test_gromacs_submit_checks_every_build_before_submitting(
+    mock_from_yaml, _resolve, mock_engine_submit, tmp_path, monkeypatch
+):
+    """With replicate 2 unbuilt, replicate 1 is not submitted either."""
+    mock_config = _make_dry_run_config()
+    mock_config.engine = "gromacs"
+    mock_config.gromacs = SimpleNamespace(
+        grompp_flags="",
+        mdrun_flags="",
+        module_load=None,
+        gmx_binary=None,
+        ntmpi=1,
+        slurm_ntasks=None,
+        ntomp=4,
+        gpu=False,
+        gpus=1,
+        memory="16G",
+    )
+    mock_from_yaml.return_value = mock_config
+
+    def check_build(self, request):
+        if request.replicate == 2:
+            raise FileNotFoundError("No GROMACS build for replicate 2")
+
+    monkeypatch.setattr("polyzymd.engines.gromacs.engine.GromacsEngine.check_build", check_build)
+    config_path = tmp_path / "fake.yaml"
+    config_path.write_text("name: test\n", encoding="utf-8")
+
+    with patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[]):
+        with patch("polyzymd.workflow.daisy_chain.create_job_name", return_value="test_job"):
+            result = CliRunner().invoke(
+                cli, ["submit", "-c", str(config_path), "--engine", "gromacs", "-r", "1-2"]
+            )
+
+    assert result.exit_code == 1
+    assert "No GROMACS build for replicate 2" in result.output
+    mock_engine_submit.assert_not_called()
