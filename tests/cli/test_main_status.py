@@ -957,3 +957,6 @@ def test_status_reports_an_unreadable_progress_record_and_keeps_it(
     assert "corrupt" in result.output.lower()
     assert "progress.json" in result.output
     assert _snapshot(scratch) == before
+    if output_format == "table":
+        assert "recover with" not in result.output
+        assert "move it aside" in result.output

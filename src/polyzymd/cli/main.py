@@ -3237,6 +3237,7 @@ def _status_table(config: str) -> None:
     need_attention = 0
     completed_count = 0
     running_count = 0
+    corrupt_count = 0
 
     for rep_num, rep_path in sorted(rep_map.items()):
         label = f"run{rep_num}"
@@ -3281,7 +3282,9 @@ def _status_table(config: str) -> None:
         pct = frac * 100
 
         # Count replicates by category
-        if status_str == "completed":
+        if corrupt is not None:
+            corrupt_count += 1
+        elif status_str == "completed":
             completed_count += 1
         elif status_str == "running":
             running_count += 1
@@ -3306,9 +3309,15 @@ def _status_table(config: str) -> None:
                 f"  {need_attention}/{total_reps} need attention "
                 f"(recover with: polyzymd recover -c {config} -r <N> --submit)"
             )
+        if corrupt_count > 0:
+            click.echo(
+                f"  {corrupt_count}/{total_reps} have an unreadable progress.json: inspect it, "
+                f"then fix it or move it aside. recover refuses to run until it can read "
+                f"the file or the file is gone."
+            )
         if running_count > 0:
             click.echo(f"  {completed_count}/{total_reps} completed, {running_count} still running")
-        if need_attention == 0 and running_count == 0:
+        if need_attention == 0 and running_count == 0 and corrupt_count == 0:
             click.echo(f"  {completed_count}/{total_reps} completed")
     click.echo()
 

@@ -499,6 +499,7 @@ def build_system_report(
                     verdict=VERDICT_CORRUPT,
                     jobs=rep_jobs,
                     last_error=corrupt,
+                    note="slurm unavailable" if jobs is None else None,
                 )
             )
             continue
@@ -617,7 +618,9 @@ def render_replicate_line(rep: ReplicateReport, label_width: int) -> str:
     elif rep.verdict == VERDICT_NOT_FOUND:
         fields.append("no directory in scratch")
     else:
-        if rep.note:
+        if rep.jobs:
+            fields.extend(_fmt_job(j) for j in rep.jobs)
+        elif rep.note:
             fields.append(rep.note)
         else:
             fields.append("no job")
