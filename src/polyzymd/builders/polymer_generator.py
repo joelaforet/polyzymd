@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DYNAMIC_CACHE_SCHEMA_VERSION = 3
+DYNAMIC_CACHE_SCHEMA_VERSION = 4
 
 
 def _build_linear_polymer(**kwargs: Any) -> Any:
@@ -194,6 +194,21 @@ def _partition(topology: "OFFTopology") -> bool:
 
 class PolymerGenerationError(Exception):
     """Raised when polymer generation fails after all retries."""
+
+
+def _name_residues(topology: "OFFTopology", residue_names: dict[str, str] | None) -> None:
+    """Rename each residue from its fragment name (``EGPMA_2-site``) to its monomer's residue name.
+
+    A monomer without a configured residue name gets the first three letters
+    of its fragment name. The fragment name is kept as ``extended_name``.
+    """
+    for mol in topology.molecules:
+        for atom in mol.atoms:
+            if "residue_name" in atom.metadata:
+                fragment = atom.metadata["residue_name"]
+                monomer = fragment.rsplit("_", 1)[0]
+                atom.metadata["extended_name"] = fragment
+                atom.metadata["residue_name"] = (residue_names or {}).get(monomer, fragment[:3])
 
 
 def _validate_dynamic_sequence_labels(sequence: str, monomer_names: dict[str, str]) -> list[str]:
@@ -1138,12 +1153,7 @@ class PolymerGenerator:
         if not was_partitioned:
             raise PolymerGenerationError("Failed to partition polymer topology")
 
-        # Fix residue names (truncate to 3 chars)
-        for mol in off_top.molecules:
-            for atom in mol.atoms:
-                if "residue_name" in atom.metadata:
-                    atom.metadata["extended_name"] = atom.metadata["residue_name"]
-                    atom.metadata["residue_name"] = atom.metadata["residue_name"][:3]
+        _name_residues(off_top, residue_names)
 
         # Save uncharged SDF
         _topology_to_sdf(uncharged_sdf_path, off_top)
