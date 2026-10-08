@@ -144,24 +144,21 @@ polyzymd validate -c config.yaml
 polyzymd build -c config.yaml -r 1 --dry-run
 ```
 
-Add more conditions with `polyzymd study add-condition LABEL --from "No polymer"`.
+To add more conditions, go back to the project folder (`my_paper`) and run
+`polyzymd study add-condition LABEL --from "No polymer" --study my_protein`.
 
-Switch to the CUDA simulation environment that matches your cluster before
-running OpenMM simulation commands such as `polyzymd submit`:
+Run `polyzymd submit` from the `build` environment. The job script activates
+the CUDA simulation environment on the compute node:
 
 ```bash
-# Blanca / CUDA 12.4
-pixi shell -e sim-cuda-12-4
+pixi shell -e build
 polyzymd submit -c config.yaml --replicates 1-5 --preset blanca-shirts
-
-# Bridges2 / CUDA 12.6
-pixi shell -e sim-cuda-12-6
 polyzymd submit -c config.yaml --replicates 1-5 --preset bridges2
 ```
 
-The `--preset` flag selects SLURM configuration and automatically picks the
-correct pixi environment for generated job scripts (`sim-cuda-12-4` for Blanca,
-`sim-cuda-12-6` for Bridges2). You can override with `--pixi-env`:
+The `--preset` flag selects the SLURM settings and the pixi environment of
+the job script (`sim-cuda-12-4` for Blanca, `sim-cuda-12-6` for Bridges2).
+You can override the environment with `--pixi-env`:
 
 ```bash
 polyzymd submit -c config.yaml --replicates 1-5 --preset bridges2 --pixi-env sim-cuda-12-6

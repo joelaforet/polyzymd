@@ -124,8 +124,9 @@ values = study.timeseries(
 print(values.reduce("mean").compare(control="No polymer").to_agent_text())
 ```
 
-`pz.reference(mode, selection, frame=None, file=None, alignment=None)` gives
-the reference atoms. PolyzyMD builds the reference once per replicate in a
+`pz.reference(mode, selection, *, frame=None, file=None, alignment=None)`
+gives the reference atoms. Pass `frame`, `file` and `alignment` by keyword,
+for example `pz.reference("frame", "name CA", frame=5)`. PolyzyMD builds the reference once per replicate in a
 separate universe, so the trajectory is not changed. The record of each
 replicate holds the mode, the selections and the reference frame. For
 `external`, it also holds the SHA-256 of the file.

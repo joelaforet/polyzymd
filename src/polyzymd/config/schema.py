@@ -894,7 +894,7 @@ class PositionRestraintConfig(_ConfigModel):
 
     Attributes:
         group: Predefined atom group name
-        force_constant: Force constant in kJ/mol/nm^2 (4184.0 = 1.0 kcal/mol/A^2)
+        force_constant: Force constant in kJ/mol/nm^2 (4184.0 = 10 kcal/mol/A^2)
     """
 
     group: str = Field(
@@ -905,9 +905,9 @@ class PositionRestraintConfig(_ConfigModel):
         ),
     )
     force_constant: float = Field(
-        4184.0,  # 1.0 kcal/mol/A^2 in kJ/mol/nm^2
+        4184.0,  # 10 kcal/mol/A^2 in kJ/mol/nm^2
         gt=0.0,
-        description="Force constant (kJ/mol/nm^2). Default 4184.0 = 1.0 kcal/mol/A^2",
+        description="Force constant (kJ/mol/nm^2). Default 4184.0 = 10 kcal/mol/A^2",
     )
 
     @field_validator("group")
@@ -1269,7 +1269,7 @@ class OutputConfig(_ConfigModel):
         slurm_logs_subdir: Subdirectory name for SLURM logs within projects
         save_checkpoint: Whether to save checkpoint files
         save_state_data: Whether to save thermodynamic state data
-        trajectory_format: Output trajectory format
+        trajectory_format: Not read; the engine picks the format (OpenMM dcd, GROMACS xtc)
 
     Example YAML:
         output:
@@ -1307,7 +1307,9 @@ class OutputConfig(_ConfigModel):
     # Output options
     save_checkpoint: bool = Field(True, description="Save checkpoint files")
     save_state_data: bool = Field(True, description="Save state data CSV")
-    trajectory_format: str = Field("dcd", description="Trajectory file format")
+    trajectory_format: str = Field(
+        "dcd", description="Not read: OpenMM writes dcd and GROMACS writes xtc trajectories"
+    )
 
     @field_validator("projects_directory", "scratch_directory", mode="before")
     @classmethod

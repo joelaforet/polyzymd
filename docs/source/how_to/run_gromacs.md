@@ -21,7 +21,9 @@ activated the environment with `pixi shell -e build`.
 
 ## Run locally
 
-Set `engine: gromacs` in `config.yaml`. Then run one replicate:
+Set `engine: gromacs` in `config.yaml`. GROMACS does not read the `openmm:`
+block of the template, and it writes `.xtc` trajectories whatever
+`output.trajectory_format` says. Then run one replicate:
 
 ```bash
 pixi run -e build polyzymd run -c config.yaml -r 1
@@ -429,7 +431,9 @@ using Ewald electrostatics in a system with net charge": the system is not
 neutral.
 
 **Fix**: Read the warning. For a net charge, set `solvent.ions.neutralize:
-true`. To accept a warning on purpose, set `grompp_flags: "-maxwarn 1"`. See
+true`. To accept a warning on purpose, set `grompp_flags: "-maxwarn 1"`.
+Only the SLURM job scripts from `polyzymd submit` pass `grompp_flags`; a
+local `polyzymd run` calls `grompp` without them. See
 {doc}`../reference/gromacs_openmm`.
 
 ### "Fatal error: Number of atoms does not match"
