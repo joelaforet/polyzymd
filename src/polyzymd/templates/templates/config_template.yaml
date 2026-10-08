@@ -104,7 +104,7 @@ enzyme:
 # ============================================================================
 # Water model, ions, and box settings.
 #
-# water model options: tip3p, spce, tip4pew, opc
+# water model: tip3p (the only model PolyzyMD builds)
 # box shape options: cube, rhombic_dodecahedron
 #
 solvent:

@@ -483,6 +483,7 @@ def build(
         # A config for GROMACS builds GROMACS inputs unless --format says otherwise.
         if export_format is None and sim_config.engine == "gromacs":
             export_format = "gromacs"
+        sim_config.require_buildable(export_format or "openmm")
 
         if dry_run:
             colored_echo("=" * 60, phase="build")
@@ -1054,6 +1055,7 @@ def run(
         sim_config = SimulationConfig.from_yaml(config)
         colored_echo(f"Running local simulation: {sim_config.name}", phase="simulation")
         colored_echo(f"Engine: {engine}", phase="simulation")
+        sim_config.require_buildable(engine)
 
         # Override directories if provided via CLI
         if scratch_dir:
@@ -1712,6 +1714,10 @@ def submit(
                 "stop before it runs a step. Use a longer time limit.",
                 param_hint="--time-limit",
             )
+    try:
+        sim_config.require_buildable(engine_name)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
     _warn_for_site_pixi_override(preset, engine_name, resolved_pixi_env, pixi_env)
     _warn_for_submission_pixi_env(
@@ -3382,6 +3388,7 @@ def validate(config: str) -> None:
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
+        sim_config.require_buildable()
 
         click.echo(click.style("Configuration is valid!", fg="green"))
         colored_echo()

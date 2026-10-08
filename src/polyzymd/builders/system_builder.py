@@ -829,7 +829,12 @@ class SystemBuilder:
 
         Returns:
             OpenFF Interchange ready for simulation.
+
+        Raises:
+            ValueError: If the config names something the build cannot make
+                correctly (see ``SimulationConfig.require_buildable``).
         """
+        config.require_buildable()
         self._working_dir = Path(working_dir) if working_dir else None
         self._build_provenance = {"packmol_seed": polymer_seed}
         if config.polymers and config.polymers.enabled:

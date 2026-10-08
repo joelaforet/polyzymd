@@ -154,6 +154,12 @@ simulation_phases:
 
 ### Gradual restraint release
 
+This schedule runs on OpenMM only. On GROMACS a position restraint group has
+one force constant in every stage, and all stages must use the same protein
+group, so `validate` refuses it with `engine: gromacs`. On GROMACS, keep
+`protein_heavy` at one `force_constant` in each restrained stage and release
+it by leaving `position_restraints` out of the later stages.
+
 ```yaml
 simulation_phases:
   equilibration_stages:
