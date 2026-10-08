@@ -201,7 +201,7 @@ which git ignores:
 |---|---|
 | `UPLOAD.md` | The steps for this study: reserve its DOI, add the files, fill in each Zenodo form field, review, publish, and make new versions |
 | `upload/` | The files to add to the Zenodo upload, no more and no less. See below |
-| `trajectories.csv` | Each trajectory and topology file by size and SHA-256, in batches that each fit one Zenodo record |
+| `trajectories.csv` | Each trajectory and topology file by size and SHA-256, in batches that each fit one Zenodo record. It also lists the files the analyses read beside them: the build's `solvated_system.pdb`, which gives a GROMACS or `system.prmtop` topology its chain IDs, and the GROMACS `.top` and `.itp` files when MDAnalysis could not read `prod.tpr` |
 | `README.md` | Made from `metadata:`: what the study is and why, its authors, how to cite the paper, the dataset and PolyzyMD, its contents, how to reproduce it, and the verdict of each run. Your own `README.md` of the study stays in `study/` as you wrote it |
 | `study/`, `engine_inputs/`, `final_frames/`, and the top-level files | The same content, not zipped, for inspection |
 
