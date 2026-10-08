@@ -132,3 +132,23 @@ def test_collect_reference_warnings_reports_missing_reaction_templates(tmp_path:
         "Missing polymer polymerization reaction template" in warning for warning in warnings
     )
     assert any("Missing polymer termination reaction template" in warning for warning in warnings)
+
+
+def test_am1bcc_without_ambertools_is_reported_before_the_build(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A config that asks for AM1-BCC warns when no toolkit here can compute it."""
+    from polyzymd.utils import charging
+
+    monkeypatch.setattr(charging, "am1bcc_available", lambda: False)
+    data = _minimal_config_data(tmp_path)
+    data["solvent"] = {
+        "co_solvents": [
+            {"name": "etac", "smiles": "CCOC(C)=O", "count": 5, "charge_method": "am1bcc"}
+        ]
+    }
+    warnings = collect_reference_warnings(SimulationConfig(**data))
+    assert any("AmberTools" in warning for warning in warnings)
+
+    monkeypatch.setattr(charging, "am1bcc_available", lambda: True)
+    assert not any("AmberTools" in w for w in collect_reference_warnings(SimulationConfig(**data)))

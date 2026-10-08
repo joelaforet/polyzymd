@@ -36,7 +36,23 @@ def collect_reference_warnings(config: Any) -> list[str]:
     if polymers is not None and bool(getattr(polymers, "enabled", False)):
         _check_polymer_references(warnings, polymers)
 
+    _check_am1bcc(warnings, config)
     return warnings
+
+
+def _check_am1bcc(warnings: list[str], config: Any) -> None:
+    """Warn when the config asks for AM1-BCC charges and no toolkit here computes them."""
+    from polyzymd.utils import charging
+
+    substrate = getattr(config, "substrate", None)
+    solvent = getattr(config, "solvent", None)
+    polymers = getattr(config, "polymers", None)
+    methods = [getattr(substrate, "charge_method", None)]
+    methods += [cs.charge_method for cs in getattr(solvent, "co_solvents", None) or []]
+    if polymers is not None and getattr(polymers, "enabled", False):
+        methods.append(getattr(polymers, "charger", None))
+    if "am1bcc" in {getattr(m, "value", m) for m in methods} and not charging.am1bcc_available():
+        warnings.append(charging.AM1BCC_NEEDS_AMBERTOOLS)
 
 
 def _check_file(warnings: list[str], path_value: Any, label: str) -> None:
