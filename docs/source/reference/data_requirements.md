@@ -84,12 +84,14 @@ A GROMACS run writes a different set of files. The figure compares the two
 replicate folders.
 
 ```{figure} ../_static/diagrams/replicate_folders.svg
-:alt: Both engines write build_manifest.json, solvated_system.pdb and progress.json; GROMACS keeps its engine files and progress.json in gromacs/.
+:alt: Both engines write build_manifest.json, solvated_system.pdb and progress.json; GROMACS keeps solvated_system.pdb, its engine files and progress.json in gromacs/.
 :width: 100%
 
 The replicate folder after build and run. `build_manifest.json`,
-`solvated_system.pdb` and `progress.json` exist for both engines; GROMACS
-keeps its engine files and `progress.json` in `gromacs/` and writes one flat
+`solvated_system.pdb` and `progress.json` exist for both engines. GROMACS
+keeps its engine files, `progress.json` and, for runs started by `submit`,
+`solvated_system.pdb` in `gromacs/`; `build --export gromacs` writes
+`solvated_system.pdb` in the replicate folder. GROMACS writes one flat
 production run instead of `production_N/` folders.
 ```
 

@@ -228,7 +228,8 @@ The figure shows the chain of jobs and what each job does.
 :width: 100%
 
 An OpenMM replicate runs minimization, equilibration and production
-segments; every stage and segment writes `progress.json`. Each job checks for
+segments; `progress.json` records each segment and each completed
+equilibration stage. Each job checks for
 `STOP`, runs `run-segment`, runs `check-progress` and submits itself again
 while work remains. A GROMACS job resumes one production run with `-cpi` and
 `-maxh`, and centres the trajectory when production is finished.

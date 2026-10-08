@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1184 800" role="img" aria-labelledby="t d">
   <title id="t">Run lifecycle and restart chain</title>
-  <desc id="d">A replicate runs minimization, equilibration stages and production segments; on SLURM each job checks for STOP, runs the next piece with run-segment, checks progress and submits itself again until production is complete, writing progress.json at every stage and segment.</desc>
+  <desc id="d">A replicate runs minimization, equilibration stages and production segments; on SLURM each job checks for STOP, runs the next piece with run-segment, checks progress and submits itself again until production is complete; progress.json records each segment and each completed equilibration stage.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
       <path d="M0,1 L10,5 L0,9 z" fill="#1f2933"/>
@@ -62,7 +62,7 @@
     <!-- progress.json -->
     <rect x="256" y="208" width="864" height="40" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
     <text x="272" y="233" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">progress.json</text>
-    <text x="400" y="233" font-size="12" fill="#52606d">each stage and segment: RUNNING, then COMPLETED or INTERRUPTED; seeds; trajectory SHA-256</text>
+    <text x="400" y="233" font-size="12" fill="#52606d">segments: RUNNING → COMPLETED / INTERRUPTED / FAILED; stages when completed; seeds; SHA-256</text>
     <g stroke="#1f2933" stroke-width="1.5" fill="none">
       <line x1="340" y1="168" x2="340" y2="208" marker-end="url(#arrow)"/>
       <line x1="588" y1="168" x2="588" y2="208" marker-end="url(#arrow)"/>
@@ -121,7 +121,7 @@
     </g>
     <g font-size="12" fill="#52606d">
       <text x="132" y="420">STOP present</text>
-      <text x="416" y="420">exit 2: concurrent</text>
+      <text x="416" y="420">exit 2 or error</text>
       <text x="648" y="420" text-anchor="end">exit 0: done</text>
       <text x="752" y="420">exit 3: error</text>
     </g>
