@@ -265,8 +265,12 @@ class AM1BCCCharger(MoleculeCharger):
             The molecule with AM1-BCC charges assigned.
 
         Raises:
+            ValueError: If neither AmberTools nor OpenEye is installed.
             RuntimeError: If charging fails.
         """
+        if not am1bcc_available():
+            raise ValueError(AM1BCC_NEEDS_AMBERTOOLS)
+
         # AM1-BCC requires a conformer
         self._ensure_conformer(molecule)
 
@@ -289,6 +293,20 @@ class AM1BCCCharger(MoleculeCharger):
             raise RuntimeError(f"AM1-BCC charge assignment failed: {e}") from e
 
         return molecule
+
+
+AM1BCC_NEEDS_AMBERTOOLS = (
+    "charge_method am1bcc needs AmberTools (antechamber and sqm), which no PolyzyMD pixi "
+    "environment includes. Install it into the build environment "
+    "(conda install -c conda-forge ambertools), or use charge_method: nagl."
+)
+
+
+def am1bcc_available() -> bool:
+    """Return whether a toolkit that computes AM1-BCC charges (AmberTools or OpenEye) is installed."""
+    from openff.toolkit.utils import AmberToolsToolkitWrapper, OpenEyeToolkitWrapper
+
+    return AmberToolsToolkitWrapper.is_available() or OpenEyeToolkitWrapper.is_available()
 
 
 # Registry of available chargers

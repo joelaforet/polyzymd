@@ -761,11 +761,14 @@ def composition_warnings(label: str, config: Any, universe: Any) -> list[str]:
             f"{label}: the config names substrate residue {substrate_name}, which the topology "
             "does not contain"
         )
-    # Co-solvents (a surfactant, DMSO) are named by their residue_name, or
-    # the first three letters of their name, as the builder names them.
+    # Co-solvents (a surfactant, DMSO) are named by their residue_name. Runs
+    # built before the library got its own names used the first three
+    # letters of the name, so those count too.
     cosolvents = {
-        str(cs.residue_name or cs.name[:3]).upper()
+        str(name).upper()
         for cs in getattr(getattr(config, "solvent", None), "co_solvents", None) or []
+        for name in (cs.residue_name, cs.name[:3])
+        if name
     }
     others = {
         name: n for name, n in found.items() if name != substrate_name and name not in cosolvents

@@ -7,6 +7,7 @@ providing validation, type safety, and YAML/JSON serialization support.
 
 from __future__ import annotations
 
+import functools
 import logging
 import math
 import re
@@ -680,11 +681,36 @@ class CoSolventSpec(_ConfigModel):
         if self.density is None and library_data:
             object.__setattr__(self, "density", library_data.density)
 
-        # Set default residue name
+        # Set default residue name: the library's, or three letters of the
+        # name that no protein, nucleic, water or ion selection matches.
         if self.residue_name is None:
-            object.__setattr__(self, "residue_name", self.name[:3].upper())
+            if library_data:
+                default = library_data.residue_name
+            else:
+                letters = [c for c in self.name.upper() if c.isalnum()] or ["X"]
+                head = "".join(letters[:2]).ljust(2, "X")
+                candidates = [head + c for c in letters[2:] + list("0123456789")]
+                reserved = reserved_residue_names()
+                default = next(c for c in candidates if c not in reserved)
+            object.__setattr__(self, "residue_name", default)
 
         return self
+
+
+@functools.cache
+def reserved_residue_names() -> frozenset[str]:
+    """Return the residue names that protein, nucleic, water or ion selections match."""
+    from MDAnalysis.core.selection import NucleicSelection, ProteinSelection
+
+    from polyzymd.core.atom_groups import ION_RESIDUE_NAMES, WATER_RESIDUE_NAMES
+
+    return frozenset(
+        set(ProteinSelection.prot_res)
+        | set(NucleicSelection.nucl_res)
+        | {"SOL", "H2O", "OH2", "TIP", "T3P", "T4P", "T5P"}
+        | WATER_RESIDUE_NAMES
+        | ION_RESIDUE_NAMES
+    )
 
 
 class PrimarySolventConfig(_ConfigModel):
@@ -1769,6 +1795,14 @@ class SimulationConfig(_ConfigModel):
                 raise ValueError(
                     f"{key}: the build adds only Na+ and Cl- ions. For new systems, remove "
                     f"{key} and use nacl_concentration."
+                )
+        for cs in self.solvent.co_solvents:
+            if cs.residue_name.upper() in reserved_residue_names():
+                raise ValueError(
+                    f"Co-solvent '{cs.name}' has residue_name '{cs.residue_name}', an amino-acid, "
+                    "nucleic-acid, water or ion name, so selections such as 'protein' would "
+                    "include it. Set residue_name to another 3-letter name, such as the "
+                    "molecule's PDB chemical-component code, or leave it out."
                 )
         self._require_buildable_settings(engine)
         self.require_engine_restraints(engine)

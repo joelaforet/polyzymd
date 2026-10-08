@@ -71,7 +71,7 @@ def generate_all_solvents() -> None:
         try:
             mol = _generate_charged_molecule(
                 smiles=data.smiles,
-                residue_name=name[:3].upper(),
+                residue_name=data.residue_name,
                 name=name,
             )
 

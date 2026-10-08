@@ -119,3 +119,22 @@ def test_atoms_without_names_get_their_element() -> None:
         structure.add_atom(parmed.Atom(name="", atomic_number=number), "ION", 1)
     assert _name_unnamed_atoms(structure) == 2
     assert [atom.name for atom in structure.atoms] == ["NA", "CL"]
+
+
+def test_identical_systems_give_byte_identical_prmtops(
+    tmp_path: Path, water_box, monkeypatch
+) -> None:
+    """The file carries no write time, so identical builds hash the same."""
+    import datetime
+
+    topology, system, positions = water_box
+    first = write_analysis_topology(topology, system, positions, tmp_path / "a" / "system.prmtop")
+
+    class _Later(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.datetime(2001, 2, 3, 4, 5, 6)
+
+    monkeypatch.setattr(datetime, "datetime", _Later)
+    second = write_analysis_topology(topology, system, positions, tmp_path / "b" / "system.prmtop")
+    assert first.read_bytes() == second.read_bytes()

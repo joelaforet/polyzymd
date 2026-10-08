@@ -365,6 +365,10 @@ class MDPParameters:
             lines.append(f"tau_p           = {self.tau_p}")
             lines.append(f"ref_p           = {self.ref_p}")
             lines.append(f"compressibility = {self.compressibility}")
+            if self.define:
+                # Restrained NPT: scale the reference center of mass with the
+                # box, as grompp asks; it refuses absolute references here.
+                lines.append("refcoord-scaling = com")
         else:
             lines.append("pcoupl          = no")
         lines.append("")

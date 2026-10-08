@@ -174,6 +174,23 @@ class TestCompositionWarnings:
         assert any("substrate residue RBY" in n for n in notes)
         assert any("enables polymers" in n for n in notes)
 
+    def test_cosolvent_named_before_the_library_rename_is_not_flagged(self) -> None:
+        """A run built when ethylene glycol was ETH matches its config, which now says EDO."""
+        from types import SimpleNamespace
+
+        from polyzymd.analyses.study_freeze import composition_warnings
+        from polyzymd.config.schema import CoSolventSpec
+
+        config = SimpleNamespace(
+            substrate=None,
+            polymers=None,
+            solvent=SimpleNamespace(
+                co_solvents=[CoSolventSpec(name="ethylene_glycol", mole_fraction=0.1)]
+            ),
+        )
+        u = self._universe(["ALA", "HOH", "ETH", "ETH"])
+        assert composition_warnings("A", config, u) == []
+
 
 class TestAllowEmpty:
     def _study(self, tmp_path: Path, allow_empty: bool) -> Path:
