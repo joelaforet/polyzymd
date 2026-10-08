@@ -105,10 +105,11 @@ def check_command(path: Path, production: bool = False) -> None:
             )
         try:
             config = SimulationConfig.from_yaml(config_path)
-        except (OSError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 - any unreadable config is reported the same way
             click.echo(
                 f"error: {role} {label}: cannot read {config_path}: {' '.join(str(exc).split())}"
             )
+            click.echo(f"fix: correct it until polyzymd validate -c {config_path} passes")
             failed = True
             continue
         source = "data.local.yaml" if label in protocol.data else "config"
@@ -140,6 +141,10 @@ def check_command(path: Path, production: bool = False) -> None:
                 load_function(user.file, user.qualname)
             except ProtocolError as exc:
                 click.echo(f"error: analysis {run}: {' '.join(str(exc).split())}")
+                click.echo(
+                    f"fix: define {user.qualname} in {user.file} so that the file imports "
+                    f"without error; python {user.file} shows the full error"
+                )
                 failed = True
                 continue
             relative = (
@@ -296,8 +301,9 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
     for label, config_path in protocol.conditions.items():
         try:
             configs[label] = SimulationConfig.from_yaml(config_path)
-        except (OSError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 - any unreadable config is reported the same way
             click.echo(f"error: {label}: cannot read {config_path}: {' '.join(str(exc).split())}")
+            click.echo(f"fix: correct it until polyzymd validate -c {config_path} passes")
             missing.append(label)
     # Run directories are found by name only, so two conditions whose configs
     # name their runs alike cannot be told apart, except by manifest.json.
@@ -572,14 +578,20 @@ def _production_summary(label: str, config_path: Path, protocol: Any) -> str:
 
 
 def _study_logging(path: Path, command: str) -> None:
-    """Keep the console to warnings and log everything to ``<study>/logs/``; see analysis_logging."""
+    """Keep the console to warnings and log everything to ``<study>/logs/``; see analysis_logging.
+
+    Nothing is logged for a path that does not exist, so no folder is made
+    beside it; the command then says the path is missing.
+    """
     import logging
 
     from polyzymd.cli.logging_utils import analysis_logging
 
-    if any(isinstance(h, logging.FileHandler) for h in logging.getLogger().handlers):
-        return
     root = Path(path)
+    if not root.exists() or any(
+        isinstance(h, logging.FileHandler) for h in logging.getLogger().handlers
+    ):
+        return
     root = root if root.is_dir() else root.parent
     context = click.get_current_context(silent=True)
     verbose = bool(context and context.find_root().params.get("verbose"))
