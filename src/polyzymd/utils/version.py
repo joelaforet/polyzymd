@@ -37,6 +37,46 @@ def get_openmm_version() -> str | None:
         return None
 
 
+def package_version(module: str) -> str | None:
+    """Return the version of the package that ``import module`` loads, or ``None``.
+
+    A package that reports version ``0.0.0`` (a conda build without its
+    version in the metadata, such as OpenFF Interchange) has the version of
+    its conda package record (``conda-meta/<name>-<version>-<build>.json`` of
+    the environment), or ``None``.
+    """
+    import json
+
+    try:
+        imported = __import__(module, fromlist=["__version__"])
+        found = str(getattr(imported, "__version__", None) or getattr(imported, "version", None))
+        version: str | None = None if found == "0.0.0" else found
+    except Exception:  # noqa: BLE001 - an absent or broken package is recorded as absent
+        version = None
+    if version is None:
+        name = module.lower().replace(".", "-")
+        for record in Path(sys.prefix, "conda-meta").glob(f"{name}-*.json"):
+            try:
+                found_record = json.loads(record.read_text())
+            except (OSError, ValueError):
+                continue
+            if isinstance(found_record, dict) and found_record.get("name") == name:
+                version = found_record.get("version")
+    return version
+
+
+def build_versions() -> dict[str, str | None]:
+    """Return the versions of the OpenFF packages that parameterize a system, for either engine.
+
+    ``openff_toolkit_version`` and ``openff_interchange_version``
+    (:func:`package_version`), as ``build_manifest.json`` records them.
+    """
+    return {
+        "openff_toolkit_version": package_version("openff.toolkit"),
+        "openff_interchange_version": package_version("openff.interchange"),
+    }
+
+
 def pixi_workspace() -> Path | None:
     """Return the pixi workspace whose environment runs Python, or ``None``.
 

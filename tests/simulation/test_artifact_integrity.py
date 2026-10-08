@@ -314,6 +314,22 @@ def test_gromacs_build_manifest_records_the_exported_inputs(tmp_path):
     }
 
 
+def test_a_build_manifest_records_the_openff_versions_that_built_the_system(tmp_path):
+    """Both engines' systems are parameterized by OpenFF, so either build records its versions."""
+    pytest.importorskip("openff.interchange")
+    from polyzymd.simulation.artifact_integrity import write_gromacs_build_manifest
+    from polyzymd.utils.version import package_version
+
+    gromacs = tmp_path / "gromacs"
+    gromacs.mkdir()
+    write_gromacs_build_manifest(tmp_path, gromacs, _Config(), 3)
+
+    manifest = json.loads((tmp_path / MANIFEST_NAME).read_text())
+    assert manifest["openff_toolkit_version"] == package_version("openff.toolkit")
+    assert manifest["openff_interchange_version"] == package_version("openff.interchange")
+    assert manifest["openff_interchange_version"] not in (None, "0.0.0")
+
+
 @pytest.mark.parametrize(
     "marker", ["gromacs/em.log", "gromacs/eq_01.tpr", "gromacs/prod.cpt", "gromacs/state.cpt"]
 )

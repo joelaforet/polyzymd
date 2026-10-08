@@ -180,9 +180,12 @@ Otherwise, freeze does these steps:
 
 More about the manifest and the checklist:
 
-- The manifest records, for each replicate, the PolyzyMD and OpenMM versions
-  that built and ran it (`simulated_with`, from `build_manifest.json` and
-  `progress.json`).
+- The manifest records, for each replicate, the PolyzyMD, OpenMM and OpenFF
+  versions that built it, the OpenMM or GROMACS version that ran it, and the
+  random seeds of each equilibration stage and production segment
+  (`simulated_with`, from `build_manifest.json`, `progress.json` and the
+  GROMACS log). The deposited `build_manifest.json` of each replicate, in
+  `engine_inputs/`, also gives the Packmol seeds and the box the build made.
 - The manifest follows the JSON Schema `manifest-1.schema.json`. The schema
   ships with PolyzyMD, and freeze writes it into the deposit. `study.yaml`
   has its own schema, `study-1.schema.json`.
@@ -201,7 +204,7 @@ which git ignores:
 |---|---|
 | `UPLOAD.md` | The steps for this study: reserve its DOI, add the files, fill in each Zenodo form field, review, publish, and make new versions |
 | `upload/` | The files to add to the Zenodo upload, no more and no less. See below |
-| `trajectories.csv` | Each trajectory and topology file by size and SHA-256, in batches that each fit one Zenodo record |
+| `trajectories.csv` | Each trajectory and topology file by size and SHA-256, in batches that each fit one Zenodo record. It also lists the files the analyses read beside them: the build's `solvated_system.pdb`, which gives a GROMACS or `system.prmtop` topology its chain IDs, and the GROMACS `.top` and `.itp` files when MDAnalysis could not read `prod.tpr` |
 | `README.md` | Made from `metadata:`: what the study is and why, its authors, how to cite the paper, the dataset and PolyzyMD, its contents, how to reproduce it, and the verdict of each run. Your own `README.md` of the study stays in `study/` as you wrote it |
 | `study/`, `engine_inputs/`, `final_frames/`, and the top-level files | The same content, not zipped, for inspection |
 

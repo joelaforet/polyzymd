@@ -19,7 +19,7 @@
       "type": "object",
       "required": ["files", "production_ns"],
       "properties": {
-        "files": {"type": "array", "items": {"$ref": "#/$defs/file"}},
+        "files": {"type": "array", "items": {"$ref": "#/$defs/file"}, "description": "The topology, then the trajectories, then the other files the analyses read, each with its role: the GROMACS .top and its includes that replace a prod.tpr MDAnalysis cannot read (topology), and the build's solvated_system.pdb that gives the chain IDs (chain IDs)."},
         "engine_inputs": {"type": "array", "items": {"$ref": "#/$defs/file"}, "description": "Each path is relative to the deposit folder, and is the file's name in engine_inputs.zip."},
         "final_frame": {"$ref": "#/$defs/file", "description": "Its path is relative to the deposit folder, and is the file's name in final_frames.zip."},
         "production_frames": {"type": "integer"},
@@ -27,7 +27,7 @@
         "trajectory_variant": {"type": ["string", "null"]},
         "missing_build_files": {"type": "array", "items": {"type": "string"}, "description": "Files build_manifest.json lists that are missing from the run directory."},
         "bond_source": {"type": ["string", "null"]},
-        "simulated_with": {"type": "object", "description": "PolyzyMD, OpenMM and environment versions recorded by the build, and those versions with the OpenMM platform and its properties for each production segment."},
+        "simulated_with": {"type": "object", "description": "PolyzyMD, OpenMM and OpenFF versions recorded by the build, those versions with the OpenMM platform and its properties for each production segment, the GROMACS version that ran a GROMACS run, and the seeds of each equilibration stage and production segment."},
         "warnings": {"type": "array", "items": {"type": "string"}}
       }
     }

@@ -113,10 +113,9 @@ def _versions(root: Path) -> dict[str, str | None]:
     """
     import hashlib
     import platform
-    import sys
 
     import polyzymd
-    from polyzymd.utils.version import get_openmm_version, pixi_workspace
+    from polyzymd.utils.version import get_openmm_version, package_version, pixi_workspace
 
     versions: dict[str, str | None] = {
         "polyzymd": polyzymd.__version__,
@@ -132,23 +131,7 @@ def _versions(root: Path) -> dict[str, str | None]:
         "openff.toolkit",
         "openff.interchange",
     ):
-        try:
-            imported = __import__(module, fromlist=["__version__"])
-            version = str(
-                getattr(imported, "__version__", None) or getattr(imported, "version", None)
-            )
-            versions[module] = None if version == "0.0.0" else version
-        except Exception:  # noqa: BLE001 - an absent or broken package is recorded as absent
-            versions[module] = None
-        if versions[module] is None:
-            name = module.lower().replace(".", "-")
-            for record in Path(sys.prefix, "conda-meta").glob(f"{name}-*.json"):
-                try:
-                    found = json.loads(record.read_text())
-                except (OSError, ValueError):
-                    continue
-                if isinstance(found, dict) and found.get("name") == name:
-                    versions[module] = found.get("version")
+        versions[module] = package_version(module)
     versions["openmm"] = get_openmm_version()
     lock = root / "environment" / "pixi.lock"
     versions["pixi.lock_file"] = "environment/pixi.lock (deposited)"
@@ -235,8 +218,8 @@ def stale_runs(protocol: Any, conditions: dict[str, Any] | None = None) -> dict[
             here = (conditions or {}).get(label, {}).get("replicates", {})
             on_disk = here.get(str(record.get("replicate")))
             if on_disk is not None:
-                # The first file is the topology, the others the trajectories.
-                now = sorted(item["sha256"] for item in on_disk["files"][1:])
+                # The first file is the topology, the others without a role the trajectories.
+                now = sorted(item["sha256"] for item in on_disk["files"][1:] if "role" not in item)
                 then = [item.get("sha256") for item in record.get("trajectories", [])]
                 if None in then:
                     found.append(
@@ -805,6 +788,26 @@ def composition_warnings(label: str, config: Any, universe: Any) -> list[str]:
     return notes
 
 
+def _also_read(universe: Any) -> list[tuple[str, Path]]:
+    """Return the files besides the topology and trajectories that ``universe`` was read from.
+
+    Each comes with its role. A GROMACS ``prod.tpr`` this MDAnalysis cannot
+    read is replaced by the run's ``.top`` and the files it includes
+    (``"topology"``), and the chain IDs of a TPR, ``.top`` or ``system.prmtop``
+    come from the build's ``solvated_system.pdb`` (``"chain IDs"``). An
+    analysis reads the run as the authors did only with them beside it.
+    """
+    from polyzymd.analyses.shared.gromacs import topology_files
+
+    found: list[tuple[str, Path]] = []
+    if getattr(universe, "_polyzymd_bond_source", None) == "top":
+        found += [("topology", path) for path in topology_files(universe._polyzymd_topology_source)]
+    chains = getattr(universe, "_polyzymd_chain_ids", None) or {}
+    if chains.get("applied"):
+        found.append(("chain IDs", Path(chains["source"])))
+    return found
+
+
 def _hashes_recorded(condition: Any, replicate: int, provenance: Any) -> bool:
     """Return whether the run recorded the hash of every trajectory file the replicate reads.
 
@@ -838,8 +841,11 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
     OpenMM platform and properties) combination that ``progress.json``
     records for its production segments,
     so a reproducer knows which engine produced the trajectories, not only
-    which PolyzyMD analysed them. For a GROMACS run, ``gromacs_version`` is
-    the version that ``gmx mdrun`` wrote into ``gromacs/prod.log``.
+    which PolyzyMD analysed them. ``seeds`` gives the random seeds each
+    equilibration stage (by name) and production segment (by index) ran
+    with. For a GROMACS run, whose ``progress.json`` is in ``gromacs/``,
+    ``gromacs_version`` is the version that ``gmx mdrun`` wrote into
+    ``gromacs/prod.log``.
     """
     from polyzymd.simulation.progress import load_progress
 
@@ -847,11 +853,23 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
     build = working_dir / "build_manifest.json"
     try:
         manifest = json.loads(build.read_text())
-        found["build"] = {k: manifest.get(k) for k in ("polyzymd_version", "openmm_version")}
+        found["build"] = {
+            k: manifest.get(k)
+            for k in (
+                "polyzymd_version",
+                "openmm_version",
+                "openff_toolkit_version",
+                "openff_interchange_version",
+            )
+        }
     except (OSError, ValueError):
         pass
+    from polyzymd.engines.gromacs.engine import GromacsEngine
+
     try:
-        progress = load_progress(working_dir)
+        progress = load_progress(working_dir) or load_progress(
+            working_dir / GromacsEngine.engine_subdir
+        )
     except Exception:  # noqa: BLE001 - an unreadable progress file records nothing
         progress = None
     if progress is not None:
@@ -873,8 +891,12 @@ def simulated_with(working_dir: Path) -> dict[str, Any]:
             }
             for a, b, c, d in sorted(combos, key=lambda t: tuple(str(x) for x in t))
         ]
-    from polyzymd.engines.gromacs.engine import GromacsEngine
-
+        seeds = {
+            "equilibration": {s.name: s.seeds for s in progress.equilibration_stages if s.seeds},
+            "production": {str(s.index): s.seeds for s in progress.segments if s.seeds},
+        }
+        if any(seeds.values()):
+            found["seeds"] = seeds
     try:
         with open(working_dir / GromacsEngine.engine_subdir / "prod.log", errors="ignore") as log:
             versions = {
@@ -979,7 +1001,7 @@ def _replicates(
         for replicate in condition.replicates:
             with python_warnings.catch_warnings():
                 python_warnings.simplefilter("ignore")
-                replicate.universe()  # loading records the bond source in the provenance
+                loaded = replicate.universe()  # loading records the bond source in the provenance
             provenance = condition._provider.provenance_for(replicate.index)
             data_root = Path(condition.config.output.effective_scratch_directory)
 
@@ -995,6 +1017,9 @@ def _replicates(
                 {"path": relative(item.path), **hashes(Path(item.path))}
                 for item in (provenance.topology, *provenance.trajectories)
             ]
+            for role, file in _also_read(loaded):
+                if relative(file) not in {item["path"] for item in files}:
+                    files.append({"path": relative(file), **hashes(file), "role": role})
             folder = (
                 Path(DEPOSIT)
                 / "engine_inputs"

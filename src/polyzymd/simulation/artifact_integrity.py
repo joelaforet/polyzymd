@@ -82,7 +82,7 @@ def _manifest(
     artifacts: dict[str, Path],
 ) -> dict[str, Any]:
     """Return a build manifest; ``artifacts`` maps each recorded path to the file to hash."""
-    from polyzymd.utils.version import get_polyzymd_version
+    from polyzymd.utils.version import build_versions, get_polyzymd_version
 
     return {
         "schema_version": 1,
@@ -90,6 +90,7 @@ def _manifest(
         "config_hash": config_hash(config),
         "particle_count": int(particle_count),
         "openmm_version": openmm_version,
+        **build_versions(),
         "polyzymd_version": get_polyzymd_version(),
         "provenance": dict(provenance or {}),
         "artifacts": {
@@ -109,7 +110,7 @@ def write_gromacs_build_manifest(
     """Write ``build_manifest.json`` for a GROMACS build into the replicate folder.
 
     It has the keys of an OpenMM build's manifest, with ``openmm_version``
-    null. The artifacts are ``solvated_system.pdb``, the exported
+    null and the OpenFF versions that parameterized the system. The artifacts are ``solvated_system.pdb``, the exported
     ``<prefix>.gro``, and the topology, the files it includes and the MDP
     files (:func:`polyzymd.analyses.shared.gromacs.run_input_files`), each
     by its path relative to the replicate folder.

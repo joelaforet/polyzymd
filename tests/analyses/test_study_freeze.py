@@ -663,6 +663,50 @@ class TestGromacsFreeze:
         assert {r["simulated_with"]["gromacs_version"] for r in replicates.values()} == {"2025.2"}
         assert not any("gromacs version" in w.lower() for w in result.warnings)
 
+    def test_manifest_records_the_openff_versions_that_built_each_replicate(
+        self, gromacs_study: Path, tmp_path: Path
+    ) -> None:
+        """They come from build_manifest.json, beside the GROMACS version that ran it."""
+        built = {
+            "polyzymd_version": "1.3.0",
+            "openmm_version": None,
+            "openff_toolkit_version": "0.18.1",
+            "openff_interchange_version": "0.5.1",
+        }
+        for run in (tmp_path / "scratch").iterdir():
+            (run / "build_manifest.json").write_text(json.dumps(built))
+        result = freeze(gromacs_study)
+        for replicate in result.manifest["conditions"]["Water"]["replicates"].values():
+            assert replicate["simulated_with"]["build"] == built
+            assert replicate["simulated_with"]["gromacs_version"] == "2025.2"
+
+    def test_manifest_records_the_seeds_of_each_stage_and_segment(
+        self, gromacs_study: Path, tmp_path: Path
+    ) -> None:
+        """The seeds GROMACS ran with come from gromacs/progress.json, as OpenMM's do."""
+        from polyzymd.simulation.progress import (
+            EquilibrationStageRecord,
+            SegmentRecord,
+            SimulationProgress,
+            save_progress,
+        )
+
+        for run in (tmp_path / "scratch").iterdir():
+            progress = SimulationProgress(
+                equilibration_stages=[
+                    EquilibrationStageRecord(index=0, name="eq_01", seeds={"ld_seed": 5}),
+                ],
+                segments=[SegmentRecord(index=0, seeds={"ld_seed": 7, "gen_seed": None})],
+            )
+            save_progress(run / "gromacs", progress)
+        result = freeze(gromacs_study)
+        for replicate in result.manifest["conditions"]["Water"]["replicates"].values():
+            assert replicate["simulated_with"]["seeds"] == {
+                "equilibration": {"eq_01": {"ld_seed": 5}},
+                "production": {"0": {"ld_seed": 7, "gen_seed": None}},
+            }
+            assert replicate["simulated_with"]["segments"]
+
     def test_checklist_gives_what_gromacs_ran(self, gromacs_study: Path) -> None:
         """4b lists the GROMACS integrator and barostat; 1d has no polymers for a study without them."""
         freeze(gromacs_study)
@@ -670,6 +714,101 @@ class TestGromacsFreeze:
         ran = checklist["4b_simulation_parameters"]["evidence"]["Water"]["gromacs_production"]
         assert ran["integrator"] == "sd" and ran["pcoupl"] == "c-rescale"
         assert "polymer" not in checklist["1d_independent_starting_configurations"]["answer"]
+
+
+TPR_FALLBACK = Path(__file__).resolve().parents[1] / "data" / "gromacs" / "tpr_fallback"
+
+
+@pytest.fixture()
+def unreadable_tpr_study(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A committed, analysed GROMACS study whose prod.tpr this MDAnalysis cannot read.
+
+    Each replicate is the two methanols, sodium and five waters of
+    ``tests/data/gromacs/tpr_fallback``: the topology comes from its ``.top``,
+    and the chain IDs (methanols on A) from the build's solvated_system.pdb.
+    """
+    import MDAnalysis as mda
+    import numpy as np
+
+    from polyzymd.analyses.shared import loader
+    from polyzymd.analyses.shared.gromacs import universe_from_gromacs_top
+    from polyzymd.config.schema import SimulationConfig
+
+    # The loader warns once per process; keep these runs out of other tests' warnings.
+    monkeypatch.setattr(loader, "_WARNED_TPR_FALLBACK_PATHS", set())
+    monkeypatch.setattr(loader, "_WARNED_CHAIN_ID_PATHS", set())
+    tpr = TPR_FALLBACK / "system_gmx2026.tpr"
+    try:
+        mda.Universe(str(tpr))
+    except ValueError:
+        pass
+    else:
+        pytest.skip("this MDAnalysis reads the GROMACS 2026 TPR")
+    folder = tmp_path / "runs" / "water"
+    config = write_simulation_config(folder, scratch=tmp_path / "scratch")
+    data = yaml.safe_load(config.read_text())
+    data["engine"] = "gromacs"
+    data["gromacs"] = {"analysis_topology": "system.top"}
+    config.write_text(yaml.safe_dump(data, sort_keys=False))
+    (folder / "test.pdb").write_text("REMARK input\nEND\n")
+    for replicate in (1, 2):
+        working = SimulationConfig.from_yaml(config).get_working_directory(replicate) / "gromacs"
+        working.mkdir(parents=True)
+        for source in [*TPR_FALLBACK.glob("*.itp"), TPR_FALLBACK / "system.top"]:
+            shutil.copy(source, working / source.name)
+        shutil.copy(tpr, working / "prod.tpr")
+        universe = universe_from_gromacs_top(working / "system.top", TPR_FALLBACK / "system.gro")
+        universe.dimensions = [30.0, 30.0, 30.0, 90.0, 90.0, 90.0]
+        universe.atoms.chainIDs = np.where(universe.atoms.resnames == "MOH", "A", "B")
+        universe.atoms.write(str(working / "solvated_system.pdb"))
+        start = universe.atoms.positions.copy()
+        with mda.Writer(str(working / "prod.xtc"), n_atoms=len(start), dt=100.0) as writer:
+            for k in range(10):
+                universe.atoms.positions = start * (1.0 + 0.01 * (k + replicate))
+                universe.trajectory.ts.frame = k
+                writer.write(universe.atoms)
+    root = tmp_path / "my_study"
+    create_study(root, conditions={"Water": config}, equilibration="0.25ns")
+    text = (
+        (root / "study.yaml")
+        .read_text()
+        .replace("analyses: {}", "analyses:\n  rg: {selection: chainID A}")
+    )
+    text += METADATA.replace("[No polymer, Polymer]", "[Water]")
+    (root / "study.yaml").write_text(text)
+    _git(root, "commit", "-qam", "Add analyses and metadata")
+    result = CliRunner().invoke(
+        cli, ["analyze", "rg", "--study", str(root), "--no-eq-check", "--no-plots"]
+    )
+    assert result.exit_code == 0, result.output
+    return root
+
+
+def test_a_gromacs_deposit_reproduces_a_chain_selection_without_a_readable_tpr(
+    unreadable_tpr_study: Path, tmp_path: Path
+) -> None:
+    """The trajectory list holds the topology and chain-ID files the analysis read."""
+    import csv
+
+    result = freeze(unreadable_tpr_study)
+    authors = pz.Study(unreadable_tpr_study).results("rg").report.conditions[0].mean
+    copy = shutil.copytree(result.deposit / "study", tmp_path / "reproducer" / "my_study")
+    download = tmp_path / "download"
+    with (result.deposit / "trajectories.csv").open() as listed:
+        for row in csv.DictReader(listed):
+            target = download / row["path"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(tmp_path / "scratch" / row["path"], target)
+    located = CliRunner().invoke(
+        cli, ["study", "locate", str(download), "--study", str(copy), "--verify"]
+    )
+    assert located.exit_code == 0, located.output
+    recomputed = CliRunner().invoke(
+        cli,
+        ["analyze", "rg", "--study", str(copy), "--recompute", "--no-eq-check", "--no-plots"],
+    )
+    assert recomputed.exit_code == 0, recomputed.output
+    assert pz.Study(copy).results("rg").report.conditions[0].mean == pytest.approx(authors)
 
 
 def _zip_names(deposit: Path, part: str) -> set[str]:
