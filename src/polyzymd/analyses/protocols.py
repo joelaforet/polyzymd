@@ -781,6 +781,97 @@ def _measure_rg_rmsd(study: Any, settings: dict, request: Request) -> Measured:
     return Measured(values, figures)
 
 
+def _measure_polymer_rg(study: Any, settings: dict, request: Request) -> Measured:
+    """Measure the radius of gyration of each polymer chain and report the chain mean or each chain.
+
+    The chains are the bonded fragments of ``selection``, by default the
+    polymer, ``chainid C``; each is made whole across the periodic boundary
+    before it is measured (:func:`~polyzymd.analyses.functions.chain_radii_of_gyration`).
+    ``mean_rg``, the default result, measures
+    :func:`~polyzymd.analyses.functions.polymer_rg`, the mean over chains, on
+    every production frame, and each replicate's value is its mean over
+    frames. ``chain_rg`` measures
+    :func:`~polyzymd.analyses.functions.chain_rg`, each chain's mean over
+    frames, labelled 1, 2, ... in topology order, and needs the same number
+    of chains in every replicate. Only the chosen result is measured. A
+    replicate where ``selection`` matches no atoms, such as a control without
+    polymer, is left out of the statistics with a warning. The figures are
+    ``polymer_rg_timeseries``, ``polymer_rg_comparison`` and
+    ``polymer_rg_distribution`` for ``mean_rg``, and ``polymer_rg_chain_profile``
+    for ``chain_rg``.
+    """
+    from polyzymd.analyses import functions
+    from polyzymd.analyses.shared.topology import require_topology_bonds
+    from polyzymd.analyses.timeseries import select
+
+    name = request.name
+    selection = _selection(settings["selection"], "selection", "polymer")
+    runs = ["mean_rg", "chain_rg"]
+    run = _chosen(name, request.run, runs)
+    empty = _empty_selections(study, {"polymer": selection})
+    _first_universe(study, empty, name)
+    chains: dict[tuple[str, int], int] = {}
+    for condition in study:
+        for replicate in condition.replicates:
+            if (condition.label, replicate.index) in empty:
+                continue
+            atoms = replicate.universe().select_atoms(selection)
+            fragments, _ = require_topology_bonds(
+                atoms,
+                context=f"{name} chains of {selection!r} in {condition.label} "
+                f"replicate {replicate.index}",
+            )
+            chains[(condition.label, replicate.index)] = len(fragments)
+    if run == "chain_rg" and len(set(chains.values())) > 1:
+        found = ", ".join(f"{label} replicate {index}: {n}" for (label, index), n in chains.items())
+        raise ProtocolError(
+            f"{name}: chain_rg lines chains up by position, but the replicates have different "
+            f"numbers of chains ({found}).",
+            hint="Use --run mean_rg, the mean over chains, to compare these conditions.",
+        )
+    if run == "mean_rg":
+        series = study.timeseries(
+            functions.polymer_rg,
+            select(selection, allow_empty=True),
+            unit="A",
+            name=name,
+            recompute=request.recompute,
+            output_dir=request.output_dir,
+            bounds=(0.0, None),
+        )
+        values = series.reduce("mean", detect_equilibration=request.eq_check)
+    else:
+        series = None
+        values = study.per_replicate(
+            functions.chain_rg,
+            select(selection, allow_empty=True),
+            unit="A",
+            labels=lambda u: functions.polymer_chain_labels(u.select_atoms(selection)),
+            name=f"{name}_chains",
+            recompute=request.recompute,
+            output_dir=request.output_dir,
+            bounds=(0.0, None),
+        )
+    values.metric = run
+
+    def figures(folder: Path, report: ProtocolReport) -> None:
+        if series is None:
+            values.plot(
+                folder, f"{name}_chain_profile", "Radius of gyration per chain", None, (), "Chain"
+            )
+            return
+        series.plot(folder, f"{name}_timeseries")
+        values.plot(folder, f"{name}_comparison", title="Polymer radius of gyration, chain mean")
+        series.plot_distribution(output_dir=folder, name=f"{name}_distribution")
+
+    recorded = {
+        **settings,
+        "selection": selection,
+        "chains": {f"{k[0]} {k[1]}": n for k, n in chains.items()},
+    }
+    return Measured(values, figures, run, runs, recorded, skipped=empty)
+
+
 def _measure_rmsf(study: Any, settings: dict, request: Request) -> Measured:
     """Measure the per-residue RMS deviation, RMSF and offset of every replicate in one pass.
 
@@ -1853,6 +1944,12 @@ ANALYSES = {
         _measure_rg_rmsd,
         takes_run=False,
     ),
+    "polymer_rg": ShippedAnalysis(
+        "radius of gyration of each polymer chain, made whole across the box, chain mean or "
+        "per chain (A)",
+        {"selection": None},
+        _measure_polymer_rg,
+    ),
     "rmsf": ShippedAnalysis(
         "per-residue RMS fluctuation about the mean structure, with core and region means (A)",
         {
@@ -2095,10 +2192,12 @@ def _verdict(
             why = (
                 f", as {pair.reason}"
                 if pair.reason
-                else " needs at least two replicates per condition"
-                if few
-                else " has the same value in every replicate of both conditions, so no "
-                "variance to test"
+                else (
+                    " needs at least two replicates per condition"
+                    if few
+                    else " has the same value in every replicate of both conditions, so no "
+                    "variance to test"
+                )
             )
             sentences.append(
                 f"{VERDICT_NOT_TESTABLE}: {metric} for {pair.a} vs {pair.b}{why} ({n_text})"

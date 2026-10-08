@@ -4,9 +4,10 @@ The per-frame functions take MDAnalysis ``AtomGroup`` arguments positioned at
 one frame and return one number, so they run through
 :meth:`polyzymd.analyses.study.Study.timeseries` like any function you write.
 The per-replicate functions (:func:`rmsf`, :func:`rmsd_per_residue`,
-:func:`rms_decomposition`, :func:`residue_sasa`, :func:`dssp_occupancy` and
-:func:`residue_contacts` and :func:`residue_occlusion`) also take the production
-frame indices and return one value per residue, and run through
+:func:`rms_decomposition`, :func:`residue_sasa`, :func:`dssp_occupancy`,
+:func:`residue_contacts`, :func:`residue_occlusion` and :func:`chain_rg`) also
+take the production frame indices and return one value per residue, or per
+chain for :func:`chain_rg`, and run through
 :meth:`polyzymd.analyses.study.Study.per_replicate`.
 """
 
@@ -34,6 +35,142 @@ def radius_of_gyration(atoms: Any) -> float:
         Radius of gyration in Å.
     """
     return float(atoms.radius_of_gyration())
+
+
+def chain_radii_of_gyration(atoms: Any) -> Any:
+    """Return the mass-weighted radius of gyration of each chain of ``atoms`` at the current frame.
+
+    A chain is a bonded fragment: the atoms of ``atoms`` that share an
+    MDAnalysis fragment, in the order of the fragments' indices. A PolyzyMD
+    build puts every polymer chain in chain C with residue numbers running on
+    from one chain to the next, so the bonds are what tells the chains apart.
+    When the frame has a box, each chain is first made whole with
+    ``AtomGroup.unwrap(compound="fragments")``, so a chain split across a
+    periodic boundary is measured as one molecule; without a box the
+    coordinates are used as loaded. Each chain's value is
+    ``sqrt(sum_i m_i |r_i - r_com|^2 / sum_i m_i)`` over its atoms, the
+    definition ``AtomGroup.radius_of_gyration()`` uses, in Å.
+
+    Parameters
+    ----------
+    atoms : MDAnalysis.core.groups.AtomGroup
+        Atoms of whole chains, such as ``chainid C``. The topology must
+        carry bonds.
+
+    Returns
+    -------
+    numpy.ndarray
+        One radius of gyration per chain, in Å; empty for an empty ``atoms``.
+
+    Raises
+    ------
+    ProtocolError
+        If the topology has no bonds, or a chain of ``atoms`` is a single atom,
+        which happens when only some molecules have bonds.
+    """
+    import numpy as np
+    from MDAnalysis.exceptions import NoDataError
+
+    from polyzymd.analyses.exceptions import ProtocolError
+
+    if len(atoms) == 0:
+        return np.zeros(0)
+    try:
+        fragments = atoms.fragindices
+    except NoDataError as exc:
+        raise ProtocolError(
+            "polymer_rg: the topology has no bonds, so the polymer chains cannot be told apart.",
+            hint="Load a topology with bonds, such as the run's OpenMM system or a GROMACS .tpr.",
+        ) from exc
+    inverse = np.unique(fragments, return_inverse=True)[1]
+    counts = np.bincount(inverse)
+    if np.any(counts == 1):
+        raise ProtocolError(
+            f"polymer_rg: {int(np.sum(counts == 1))} chains of the selection are single atoms, "
+            "so their atoms have no bonds.",
+            hint="Select only polymer atoms, and load a topology with bonds for every molecule.",
+        )
+    box = atoms.dimensions
+    whole = box is not None and np.all(np.asarray(box[:3]) > 0)
+    positions = (
+        atoms.unwrap(compound="fragments", reference=None, inplace=False)
+        if whole
+        else atoms.positions
+    ).astype(np.float64)
+    masses = atoms.masses.astype(np.float64)
+    total = np.bincount(inverse, weights=masses)
+    centers = (
+        np.stack(
+            [np.bincount(inverse, weights=masses * positions[:, axis]) for axis in range(3)], axis=1
+        )
+        / total[:, None]
+    )
+    squared = np.sum((positions - centers[inverse]) ** 2, axis=1)
+    return np.sqrt(np.bincount(inverse, weights=masses * squared) / total)
+
+
+def polymer_rg(atoms: Any) -> float:
+    """Return the mean over chains of the radius of gyration of each chain of ``atoms``.
+
+    This is the arithmetic mean of :func:`chain_radii_of_gyration` at the
+    current frame, in Å, every chain counting once whatever its length; for
+    an empty ``atoms`` it is ``nan``, a frame with nothing to measure.
+
+    Parameters
+    ----------
+    atoms : MDAnalysis.core.groups.AtomGroup
+        Atoms of whole chains, such as ``chainid C``.
+
+    Returns
+    -------
+    float
+        Mean radius of gyration of the chains in Å.
+    """
+    import numpy as np
+
+    radii = chain_radii_of_gyration(atoms)
+    return float(np.mean(radii)) if len(radii) else float("nan")
+
+
+def chain_rg(atoms: Any, frames: Any) -> Any:
+    """Return each chain's radius of gyration averaged over ``frames``.
+
+    Each frame's values are those of :func:`chain_radii_of_gyration`, in Å,
+    one per chain in the order of the chains' fragment indices; label them
+    with :func:`polymer_chain_labels`.
+
+    Parameters
+    ----------
+    atoms : MDAnalysis.core.groups.AtomGroup
+        Atoms of whole chains, such as ``chainid C``.
+    frames : sequence of int
+        The production frame indices.
+
+    Returns
+    -------
+    numpy.ndarray
+        One mean radius of gyration per chain, in Å.
+    """
+    import numpy as np
+
+    trajectory = atoms.universe.trajectory
+    rows = []
+    for frame in frames:
+        trajectory[int(frame)]
+        rows.append(chain_radii_of_gyration(atoms))
+    return np.mean(np.asarray(rows, dtype=np.float64), axis=0)
+
+
+def polymer_chain_labels(atoms: Any) -> list[int]:
+    """Return the labels of the chains of ``atoms``: 1, 2, ... in the order of their fragments.
+
+    A label is a chain's position in the topology, not an identity: chain 2
+    of one replicate is the same molecule as chain 2 of another only when
+    the build places the same chain there.
+    """
+    import numpy as np
+
+    return list(range(1, len(np.unique(atoms.fragindices)) + 1)) if len(atoms) else []
 
 
 def rmsd(atoms: Any, reference: Any) -> float:
@@ -1301,9 +1438,10 @@ def hbond_atoms(atoms: Any) -> tuple[Any, Any]:
         if str(atom.element).strip().upper() == "O" or (bonded and len(atom.bonded_atoms) <= 2)
     ]
     universe = atoms.universe
-    return universe.atoms[np.asarray(donated, dtype=int)], universe.atoms[
-        np.asarray(acceptors, dtype=int)
-    ]
+    return (
+        universe.atoms[np.asarray(donated, dtype=int)],
+        universe.atoms[np.asarray(acceptors, dtype=int)],
+    )
 
 
 def _index_selection(atoms: Any) -> str:
@@ -1361,9 +1499,9 @@ def _hbond_events(
             donors_sel=None if donors is None else _index_selection(donors),
             hydrogens_sel=_index_selection(hydrogens),
             acceptors_sel=_index_selection(acceptors),
-            between=None
-            if group_b is None
-            else [_index_selection(group_a), _index_selection(group_b)],
+            between=(
+                None if group_b is None else [_index_selection(group_a), _index_selection(group_b)]
+            ),
             d_a_cutoff=d_a_cutoff,
             d_h_a_angle_cutoff=d_h_a_angle_cutoff,
             update_selections=False,

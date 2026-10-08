@@ -863,7 +863,7 @@ settings come from the study file, and `RUN` is one of its `analyses:`
 entries, a shipped analysis or the study's own function; with no `RUN`,
 every entry runs in turn. See {doc}`../how_to/study_yaml`.
 
-`NAME` is one of `rg`, `rmsd`, `rmsf`, `rmsd_per_residue`, `sasa`,
+`NAME` is one of `rg`, `polymer_rg`, `rmsd`, `rmsf`, `rmsd_per_residue`, `sasa`,
 `secondary_structure`, `contacts`, `native_contacts`, `hydrogen_bonds` and
 `distances`. `rmsd` is one value per frame, the root mean square over atoms
 of their distance from the reference; `rmsd_per_residue` is one value per residue,
@@ -891,8 +891,8 @@ as `gmx rmsf -od` reports. An unknown name is refused with the list of all of th
 | `--until TIME` | No | End of a common analysis window, for example `38ns`: production frames after it are left out for every condition, so conditions simulated for different lengths are compared over the same time. It is recorded with each stored result. A report comparing conditions whose analysed production ends more than 10% apart warns and suggests it. |
 | `--stride N` | No | Measure every `N`-th production frame of every replicate, starting with the first after the window. Default `1`. The report header then shows `stride N`. |
 | `--recompute` | No | Recompute replicates instead of reusing cached results. |
-| `--no-plots` | No | Do not draw figures. By default rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
-| `--no-eq-check` | No | Skip the pymbar equilibration diagnostic, which rg, rmsd, native_contacts, distances and the totals of sasa report for each replicate's per-frame series. Values and statistics are the same either way. |
+| `--no-plots` | No | Do not draw figures. By default rg, polymer_rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs to `<output-dir>/figures/<analysis>/`, and the folder is recorded under `output_paths.figures` in the JSON report. |
+| `--no-eq-check` | No | Skip the pymbar equilibration diagnostic, which rg, the mean_rg of polymer_rg, rmsd, native_contacts, distances and the totals of sasa report for each replicate's per-frame series. Values and statistics are the same either way. |
 | `--submit` | No | Submit to SLURM instead of running here: one array task per condition and replicate, then a report job; see [SLURM submission](#cli-analyze-submit). |
 | `--dry-run` | No | With `--submit`, or alone, write the SLURM scripts and print the two `sbatch` commands without submitting. |
 | `--preset NAME` | No | SLURM partition, QoS and account of a cluster for `--submit`: `alpine-cpu`, `blanca-shirts`, `blanca-chbe-rdi` or `bridges2-rm`. |

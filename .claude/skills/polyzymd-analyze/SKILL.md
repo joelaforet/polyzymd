@@ -24,7 +24,7 @@ so go through `pixi run -e analysis` or `pixi run -e build` there; a bare
 already runs (`polyzymd --version`), call it directly.
 
 `pixi run -e analysis polyzymd analyze --help` lists the analysis names: rg,
-rmsd, rmsf, rmsd_per_residue, sasa, secondary_structure, contacts, native_contacts,
+polymer_rg, rmsd, rmsf, rmsd_per_residue, sasa, secondary_structure, contacts, native_contacts,
 hydrogen_bonds and distances, the keys of
 `polyzymd.analyses.protocols.ANALYSES`. Every one reads `-c config.yaml`.
 For contacts, `--run mean_lifetime` reports how long contacts last; for

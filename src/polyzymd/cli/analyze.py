@@ -446,8 +446,8 @@ def _one_line(text: str) -> str:
     "--no-plots",
     "no_plots",
     is_flag=True,
-    help="Draw no figures. By default rg, rmsd, rmsf, rmsd_per_residue, distances, sasa, "
-    "secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs into "
+    help="Draw no figures. By default rg, polymer_rg, rmsd, rmsf, rmsd_per_residue, distances, "
+    "sasa, secondary_structure, contacts, native_contacts and hydrogen_bonds draw theirs into "
     "<output-dir>/figures/<name>/.",
 )
 @click.option(
@@ -519,8 +519,8 @@ def analyze_command(
     """Run one analysis and print a validated result.
 
     Give one -c config.yaml for a single-condition summary, or several for a
-    comparison with the first config as the control. NAME is rg, rmsd, rmsf,
-    rmsd_per_residue, sasa, secondary_structure, contacts, native_contacts,
+    comparison with the first config as the control. NAME is rg, polymer_rg, rmsd,
+    rmsf, rmsd_per_residue, sasa, secondary_structure, contacts, native_contacts,
     hydrogen_bonds or distances. The catalytic triad is a routine on the study
     API: see https://polyzymd.readthedocs.io/en/latest/how_to/analysis_triad_quickstart.html.
 
@@ -528,6 +528,7 @@ def analyze_command(
     Examples:
         polyzymd analyze rg -c A/config.yaml
         polyzymd analyze rg -c A/config.yaml -c B/config.yaml --eq 10ns
+        polyzymd analyze polymer_rg -c A/config.yaml -c B/config.yaml --run chain_rg
         polyzymd analyze rmsd -c A/config.yaml --set reference_mode=average
         polyzymd analyze distances -c A/config.yaml --set pairs=pairs.yaml
         polyzymd analyze rmsf -c A/config.yaml -c B/config.yaml --eq 10ns --run rmsf

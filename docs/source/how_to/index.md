@@ -93,6 +93,7 @@ hpc_execution
 
 analysis_rmsd_quickstart
 analysis_rg_quickstart
+analysis_polymer_rg_quickstart
 analysis_rmsf_quickstart
 analysis_distances_quickstart
 analysis_contacts_quickstart

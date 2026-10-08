@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`polyzymd analyze polymer_rg`.**  The radius of gyration of each polymer chain, the bonded fragments of the polymer selection (default `chainid C`), each made whole across the periodic box before it is measured. `--run mean_rg` (default) reports each replicate's mean over frames of the mean over chains; `--run chain_rg` reports each chain's mean, labelled by its position in the topology. A replicate without polymer is left out of the statistics with a warning. The functions are `chain_radii_of_gyration`, `polymer_rg`, `chain_rg` and `polymer_chain_labels` in `polyzymd.analyses.functions`.
+
 - **`enzyme.custom_substructures_path`.**  A JSON file of residue templates for residues OpenFF's template matcher does not know, such as the N-terminal cystine of 4CHA. The path is relative to the config, checked for shape on load, passed to `Topology.from_pdb(_custom_substructures=...)`, and part of the config hash. The docs described this key before any code read it.
 
 - **Seeded dynamics.**  The replicate number now seeds the initial velocities and the thermostat noise, on both engines. Each equilibration stage and production segment gets its own seed from `polyzymd.simulation.seeds.dynamics_seed(replicate, phase)`, so no stage repeats another's noise. OpenMM sets `integrator.setRandomNumberSeed` and `setVelocitiesToTemperature(T, seed)`; GROMACS MDP files get `gen_seed` and `ld_seed`. A replicate run again gives the same trajectory only on the same platform, precision and software versions.

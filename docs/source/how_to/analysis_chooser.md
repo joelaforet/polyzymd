@@ -39,6 +39,7 @@ This set gives a useful first pass before you move to more specialized analyses.
 | Is a specific atom-pair distance maintained? | `distances` |
 | Are specific hydrogen bonds formed, such as those of a catalytic triad? | the catalytic triad routine ({doc}`analysis_triad_quickstart`) |
 | How compact is the protein? | `rg` |
+| How compact are the polymer chains? | `polymer_rg` |
 
 ## Analysis quick reference
 
@@ -46,6 +47,7 @@ This set gives a useful first pass before you move to more specialized analyses.
 |----------|--------------|------|--------------|
 | `rmsd` | `polyzymd analyze rmsd` | Low | Atom selection |
 | `rg` | `polyzymd analyze rg` | Low | Atom selection |
+| `polymer_rg` | `polyzymd analyze polymer_rg` | Low | (uses the polymer, chain C, by default; needs topology bonds) |
 | `rmsf` | `polyzymd analyze rmsf` | Low | Atom selection |
 | `secondary_structure` | `polyzymd analyze secondary_structure` | Low | (uses protein by default) |
 | `contacts` | `polyzymd analyze contacts` | High (SASA with and without the polymer on every frame); lower with `--set method=distance` | Polymer + protein selections |

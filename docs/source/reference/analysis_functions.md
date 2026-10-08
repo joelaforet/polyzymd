@@ -11,6 +11,8 @@ functions measure all production frames of one replicate and run through
 | Function | Arguments | Returns | Measurement | Command |
 |---|---|---|---|---|
 | `radius_of_gyration` | `atoms`, an `AtomGroup` | float, Å | MDAnalysis `AtomGroup.radius_of_gyration()`: mass-weighted, coordinates as loaded, molecules split across periodic boundaries not unwrapped | `polyzymd analyze rg` |
+| `polymer_rg` | `atoms`, an `AtomGroup` of whole chains | float, Å; `nan` for no atoms | Arithmetic mean over chains of `chain_radii_of_gyration`, every chain counting once | `polyzymd analyze polymer_rg` |
+| `chain_radii_of_gyration` | `atoms`, an `AtomGroup` of whole chains | one value per chain, Å | A chain is a bonded fragment; with a box each chain is made whole by MDAnalysis `AtomGroup.unwrap(compound="fragments")`, then `sqrt(sum m_i \|r_i - r_com\|² / sum m_i)`, as `AtomGroup.radius_of_gyration()` defines it. Raises `ProtocolError` without bonds or for a one-atom chain. Not a per-frame value itself: `polymer_rg` and `chain_rg` call it | `polyzymd analyze polymer_rg` |
 | `rmsd` | `atoms` and `reference`, `AtomGroup`s with the same atoms | float, Å | MDAnalysis `rms.rmsd(center=True, superposition=True)`: unweighted, `atoms` superposed on `reference` | `polyzymd analyze rmsd` |
 | `pair_distance` | `atoms_a`, `atoms_b`, `mode_a` and `mode_b` (`single`, `midpoint`, `centroid` or `com`), `pbc` | float, Å | MDAnalysis `lib.distances.calc_bonds` between the two points, with the minimum image of the frame's box when `pbc` is true | `polyzymd analyze distances` |
 | `all_below` | distance series, `thresholds` | 1 or 0 per frame | 1 for each frame in which every distance is strictly below its threshold; used with `Timeseries.transform` | `polyzymd analyze distances`, for each pair's fraction below its threshold |
@@ -31,6 +33,7 @@ equal masses, giving one value per residue in the order of `atoms.residues`.
 
 | Function | Arguments | Returns | Measurement | Command |
 |---|---|---|---|---|
+| `chain_rg` | `atoms`, an `AtomGroup` of whole chains, and `frames` | one value per chain, Å | `chain_radii_of_gyration` on every frame, averaged over the frames; label it with `polymer_chain_labels(atoms)`, 1, 2, ... in fragment order, a chain's position in the topology | `polyzymd analyze polymer_rg --run chain_rg` |
 | `rmsf` | `atoms`, `fit`, `reference`, `frames` | one value per residue, Å | MDAnalysis `rms.RMSF` of the superposed positions: the fluctuation of each atom about its mean position, as `gmx rmsf -o` gives | `polyzymd analyze rmsf` |
 | `rmsd_per_residue` | `atoms`, `fit`, `reference`, `frames` | one value per residue, Å | Root mean square over frames of each atom's distance from its reference position, as `gmx rmsf -od` gives; `rmsd_per_residue² = rmsf² + offset²` per atom. Not `rmsd`, which is one value per frame, the root mean square over atoms | `polyzymd analyze rmsd_per_residue` |
 | `rms_decomposition` | `atoms`, `fit`, `reference`, `frames` | six rows of one value per residue | Rows `RMS_PARTS = ("rmsd_per_residue", "rmsf", "offset")`, the offset being the distance of each atom's mean position from its reference position, in Å; then rows `MS_PARTS = ("ms_deviation", "msf", "ms_offset")`, the means over each residue's atoms of the squared per-atom deviation, RMSF and offset, in Å². `ms_deviation = msf + ms_offset` for every residue | `polyzymd analyze rmsf`, `polyzymd analyze rmsd_per_residue` |
@@ -52,6 +55,17 @@ it, are in {doc}`../explanation/analysis_rmsf_verification`.
 (default `protein`) on every production frame, reduces each replicate to its
 mean, and compares every condition with the first by Welch's t test. See
 {doc}`../how_to/analysis_rg_quickstart`.
+
+`polyzymd analyze polymer_rg` ({doc}`../how_to/analysis_polymer_rg_quickstart`) measures the polymer chains of `--set
+selection=...` (default null, the polymer: `chainid C`), which must have
+topology bonds, since the bonds are what tell the chains of chain C apart.
+`--run mean_rg`, the default, measures `polymer_rg` on every production frame
+and reduces each replicate to its mean; `--run chain_rg` measures `chain_rg`,
+labelled by chain position, and needs the same number of chains in every
+replicate. A replicate where the selection matches no atoms, such as a control
+without polymer, is left out of the statistics with a warning, and a study with
+no polymer atoms at all is refused. The chain count of each replicate is
+recorded under `provenance.settings.chains`.
 
 `polyzymd analyze rmsd` measures `rmsd` of `--set selection=...` (default
 `protein and name CA`) against
@@ -195,6 +209,7 @@ and records the folder under `output_paths.figures` in the JSON report;
 | Analysis | Figures |
 |---|---|
 | `rg` | `rg_timeseries` (every replicate against time), `rg_comparison` (condition means with every replicate value), `rg_distribution` (per-frame distribution) |
+| `polymer_rg` | For `mean_rg`, `polymer_rg_timeseries`, `polymer_rg_comparison` and `polymer_rg_distribution`; for `chain_rg`, `polymer_rg_chain_profile` |
 | `rmsd` | `rmsd_timeseries`, `rmsd_comparison` |
 | `rmsf`, `rmsd_per_residue` | `rmsf_profile`, `offset_profile` and `rmsd_per_residue_profile` (each replicate and each condition's mean with its interval, `highlight_residues` marked), `rms_decomposition` (the three profiles of each condition together), `rmsf_comparison` (the three core values), and with several conditions `rmsf_difference`, `offset_difference` and `rmsd_per_residue_difference` (each condition minus the control at every residue, with the interval of the difference and the significant residues marked) |
 | `sasa` | For a total, `sasa_timeseries_<name>`, `sasa_comparison_<name>` and `sasa_distribution_<name>`; for `<name>_residues`, `sasa_profile_<name>` and with several conditions `sasa_difference_<name>` |

@@ -61,7 +61,9 @@ def _polyzymd(folder: Path, *arguments: str) -> subprocess.CompletedProcess:
         "config.yaml",
         pytest.param(
             "config_gromacs.yaml",
-            marks=pytest.mark.skipif(shutil.which("gmx") is None, reason="GROMACS is not installed"),
+            marks=pytest.mark.skipif(
+                shutil.which("gmx") is None, reason="GROMACS is not installed"
+            ),
         ),
     ],
 )
@@ -116,6 +118,7 @@ def test_the_quickstart_runs_and_analyzes(tmp_path: Path, config: str) -> None:
         assert len(universe.select_atoms("chainid A")) == len(universe.select_atoms("protein"))
     # Every shipped analysis runs with its defaults. Contacts and hydrogen bonds
     # select chainid A and chainid C; the quickstart has no polymer, so they report 0.
+    # polymer_rg measures only the polymer, so without one it has nothing to report.
     (folder / "pairs.yaml").write_text(
         "- {label: termini, selection_a: resid 1 and name CA, selection_b: resid 20 and name CA}\n"
     )
@@ -124,5 +127,8 @@ def test_the_quickstart_runs_and_analyzes(tmp_path: Path, config: str) -> None:
         result = _polyzymd(
             folder, "analyze", name, "--study", "paper/trpcage", "--no-plots", *settings
         )
+        if name == "polymer_rg":
+            assert result.returncode != 0 and "match no atoms" in result.stderr + result.stdout
+            continue
         assert result.returncode == 0, f"{name}\n{result.stdout}\n{result.stderr}"
         assert "verdict: Water" in result.stdout, name

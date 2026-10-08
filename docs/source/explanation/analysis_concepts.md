@@ -78,6 +78,7 @@ Each shipped analysis is a function in `polyzymd.analyses.functions`, and
 | Name | What it measures |
 |------|------------------|
 | `rg` | Radius of gyration |
+| `polymer_rg` | Radius of gyration of each polymer chain, and their mean |
 | `rmsd` | RMSD from a reference structure, one value per frame |
 | `rmsf` | Per-residue fluctuations |
 | `rmsd_per_residue` | Per-residue RMS deviation from a reference over the frames, as `gmx rmsf -od` gives |
