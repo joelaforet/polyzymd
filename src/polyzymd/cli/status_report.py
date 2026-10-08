@@ -132,6 +132,7 @@ VERDICT_COMPLETED = "completed"
 VERDICT_RUNNING = "running"
 VERDICT_QUEUED = "queued"
 VERDICT_DEAD = "dead"
+VERDICT_STOPPED = "stopped"
 VERDICT_NOT_STARTED = "not_started"
 VERDICT_NOT_FOUND = "not_found"
 VERDICT_ORDER = (
@@ -139,6 +140,7 @@ VERDICT_ORDER = (
     VERDICT_RUNNING,
     VERDICT_QUEUED,
     VERDICT_DEAD,
+    VERDICT_STOPPED,
     VERDICT_NOT_STARTED,
     VERDICT_NOT_FOUND,
 )
@@ -397,8 +399,20 @@ def last_error_line(log_path: Path | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def classify(progress_status: str, jobs: Sequence[SlurmJob], has_dir: bool) -> str:
-    """Map (progress.json status, live SLURM jobs) to a verdict."""
+def classify(
+    progress_status: str,
+    jobs: Sequence[SlurmJob],
+    has_dir: bool,
+    *,
+    stopped: bool = False,
+    run_started: bool = False,
+) -> str:
+    """Map (progress.json status, live SLURM jobs) to a verdict.
+
+    *stopped* means a ``STOP`` file from ``polyzymd cancel`` is present.
+    *run_started* means minimization or equilibration wrote output, so a
+    replicate with no production segment was still started.
+    """
     if not has_dir:
         return VERDICT_NOT_FOUND
     if progress_status == "completed":
@@ -407,9 +421,30 @@ def classify(progress_status: str, jobs: Sequence[SlurmJob], has_dir: bool) -> s
         return VERDICT_RUNNING
     if jobs:
         return VERDICT_QUEUED
-    if progress_status == "not_started":
+    if stopped:
+        return VERDICT_STOPPED
+    if progress_status == "not_started" and not run_started:
         return VERDICT_NOT_STARTED
     return VERDICT_DEAD
+
+
+def _run_started(run_dir: Path) -> bool:
+    """Return whether minimization, equilibration or production wrote output in *run_dir*."""
+    from polyzymd.simulation.artifact_integrity import (
+        ArtifactIntegrityError,
+        assert_rebuild_allowed,
+    )
+
+    try:
+        assert_rebuild_allowed(run_dir)
+    except ArtifactIntegrityError:
+        return True
+    return False
+
+
+def _stop_file_present(run_dir: Path) -> bool:
+    """Return whether ``polyzymd cancel`` left a ``STOP`` file for *run_dir*."""
+    return (run_dir / "STOP").exists() or (run_dir / "gromacs" / "STOP").exists()
 
 
 def build_system_report(
@@ -501,7 +536,13 @@ def build_system_report(
         )
         completed_ns = steps_for_display * progress.timestep_fs / 1e6
 
-        verdict = classify(status_str, rep_jobs, has_dir=True)
+        verdict = classify(
+            status_str,
+            rep_jobs,
+            has_dir=True,
+            stopped=_stop_file_present(rep_path),
+            run_started=_run_started(rep_path),
+        )
         live = verdict == VERDICT_RUNNING
         rate = None
         eta = None
@@ -512,7 +553,7 @@ def build_system_report(
 
         last_err = None
         last_log = None
-        if verdict in (VERDICT_DEAD, VERDICT_NOT_STARTED):
+        if verdict in (VERDICT_DEAD, VERDICT_STOPPED, VERDICT_NOT_STARTED):
             log_path = find_latest_log(logs_dir, job_name, run_dir)
             if log_path is None and logs_dir is not None and logs_dir.is_dir():
                 # Build logs are named build_r<N>_<jobid>.out
@@ -526,6 +567,10 @@ def build_system_report(
         note = None
         if jobs is None:
             note = "slurm unavailable"
+        elif verdict == VERDICT_STOPPED:
+            note = "STOP file present"
+        elif verdict == VERDICT_DEAD and status_str == "not_started":
+            note = "killed before production"
 
         replicates.append(
             ReplicateReport(
@@ -685,6 +730,19 @@ def render_agent(
         preset = f" --preset {preset_hint}" if preset_hint else " --preset <preset>"
         for cfg, reps in by_cfg.items():
             rep_arg = ",".join(str(r) for r in sorted(reps))
+            lines.append(f"polyzymd submit -c {cfg} -r {rep_arg}{preset}")
+
+    stopped = [(r, rep) for r in reports for rep in r.replicates if rep.verdict == VERDICT_STOPPED]
+    if stopped:
+        lines.append("")
+        lines.append("# stopped chains (polyzymd cancel left a STOP file) — restart with:")
+        by_cfg = {}
+        for report, rep in stopped:
+            by_cfg.setdefault(report.config_path, []).append(rep.replicate)
+        preset = f" --preset {preset_hint}" if preset_hint else " --preset <preset>"
+        for cfg, reps in by_cfg.items():
+            rep_arg = ",".join(str(r) for r in sorted(reps))
+            lines.append(f"polyzymd cancel -c {cfg} -r {rep_arg} --resume")
             lines.append(f"polyzymd submit -c {cfg} -r {rep_arg}{preset}")
     return "\n".join(lines) + "\n"
 

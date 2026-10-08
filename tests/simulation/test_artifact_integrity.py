@@ -16,6 +16,7 @@ from polyzymd.simulation.artifact_integrity import (
     config_hash,
     publish_build_bundle,
     replicate_lock,
+    replicate_lock_held_elsewhere,
     validate_build_bundle,
     validate_openmm_identity,
 )
@@ -135,6 +136,39 @@ def test_replicate_lock_blocks_concurrent_process(tmp_path):
         process.join(5)
     assert process.exitcode == 0
     assert queue.get(timeout=1) == "blocked"
+
+
+def _posix_lock_is_free(path: str, queue: Queue) -> None:
+    import fcntl
+
+    with open(Path(path) / ".polyzymd.lock", "a+") as stream:
+        try:
+            fcntl.lockf(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            queue.put("free")
+        except OSError:
+            queue.put("held")
+
+
+def test_replicate_lock_is_a_posix_record_lock(tmp_path):
+    """GPFS and NFS share POSIX record locks between nodes; flock locks stay on one node."""
+    queue: Queue = Queue()
+    with replicate_lock(tmp_path):
+        process = Process(target=_posix_lock_is_free, args=(str(tmp_path), queue))
+        process.start()
+        process.join(5)
+    assert queue.get(timeout=1) == "held"
+
+
+def test_lock_probe_reports_other_holders_only(tmp_path):
+    assert replicate_lock_held_elsewhere(tmp_path) is False
+    with replicate_lock(tmp_path):
+        # The holder itself must not probe (closing a descriptor drops the lock).
+        assert replicate_lock_held_elsewhere(tmp_path) is False
+        queue: Queue = Queue()
+        process = Process(target=_contend_for_lock, args=(str(tmp_path), queue))
+        process.start()
+        process.join(5)
+        assert queue.get(timeout=1) == "blocked"
 
 
 def test_manifest_records_provenance_and_versions(tmp_path):

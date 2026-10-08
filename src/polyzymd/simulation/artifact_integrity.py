@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import json
@@ -309,19 +310,69 @@ def assert_rebuild_allowed(working_dir: Path) -> None:
         )
 
 
+# Lock files this process holds through replicate_lock().  A POSIX lock is
+# dropped when the process closes *any* descriptor of the file, so this
+# process must never open a lock file it holds.
+_HELD_LOCKS: set[Path] = set()
+
+
+# lockf() fails with one of these when another process holds the lock.
+_LOCK_HELD_ERRNOS = (errno.EAGAIN, errno.EACCES)
+
+
+def _lock_path(working_dir: Path) -> Path:
+    return (Path(working_dir) / ".polyzymd.lock").absolute()
+
+
 @contextmanager
 def replicate_lock(working_dir: Path) -> Iterator[None]:
-    """Hold a non-blocking per-replicate build/run lock."""
+    """Hold a non-blocking per-replicate build/run lock.
+
+    The lock is a POSIX record lock (``fcntl.lockf``).  GPFS and NFS share
+    these between nodes, while ``flock`` locks are seen only on the node that
+    took them.  The kernel releases the lock when the holding process dies,
+    however it is killed.
+    """
     working_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = working_dir / ".polyzymd.lock"
+    lock_path = _lock_path(working_dir)
+    if lock_path in _HELD_LOCKS:
+        raise ArtifactIntegrityError(
+            f"Another PolyzyMD build or run holds the replicate lock: {lock_path}"
+        )
     with lock_path.open("a+") as stream:
         try:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
+            fcntl.lockf(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno not in _LOCK_HELD_ERRNOS:
+                raise
             raise ArtifactIntegrityError(
                 f"Another PolyzyMD build or run holds the replicate lock: {lock_path}"
             ) from exc
+        _HELD_LOCKS.add(lock_path)
         try:
             yield
         finally:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            _HELD_LOCKS.discard(lock_path)
+            fcntl.lockf(stream.fileno(), fcntl.LOCK_UN)
+
+
+def replicate_lock_held_elsewhere(working_dir: Path) -> bool | None:
+    """Return whether another process holds the replicate lock of *working_dir*.
+
+    A run holds this lock for as long as its process lives, so the answer
+    cannot be stale.  Returns ``False`` when this process holds the lock or
+    no lock file exists, and ``None`` when the lock file cannot be opened.
+    """
+    lock_path = _lock_path(working_dir)
+    if lock_path in _HELD_LOCKS or not lock_path.exists():
+        return False
+    try:
+        with lock_path.open("a+") as stream:
+            try:
+                fcntl.lockf(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                return True if exc.errno in _LOCK_HELD_ERRNOS else None
+            fcntl.lockf(stream.fileno(), fcntl.LOCK_UN)
+            return False
+    except OSError:
+        return None

@@ -378,8 +378,8 @@ class TestRestartEndToEnd:
         assert seg1.overlap_frames == 0
         assert seg1.gap_frames == 0
 
-    def test_resume_before_the_last_frame_is_recorded(self, tmp_path, caplog):
-        """A state older than the last frame is reported as overlap."""
+    def test_resume_before_the_last_frame_writes_no_frame_twice(self, tmp_path, caplog):
+        """A state older than the last frame does not repeat that frame's steps."""
         _run_segment_zero(tmp_path)
         seg_dir = tmp_path / "production_0"
         _hard_kill(seg_dir)
@@ -388,10 +388,39 @@ class TestRestartEndToEnd:
         restart.write_text(re.sub(r'stepCount="\d+"', 'stepCount="12"', restart.read_text()))
 
         _run_segment_one(tmp_path, total_steps=10)
-        assert _csv_steps(tmp_path / "production_1" / "production_1_state_data.csv") == [15, 20]
+        assert _csv_steps(tmp_path / "production_1" / "production_1_state_data.csv") == [25, 30]
         seg1 = next(s for s in load_progress(tmp_path).segments if s.index == 1)
-        assert seg1.overlap_frames == 2
-        assert "repeat steps already in the trajectory" in caplog.text
+        assert (seg1.overlap_frames, seg1.samples_written) == (0, 2)
+        assert "not writing its first 2 frame(s)" in caplog.text
+
+    def test_hard_killed_segment_resumed_from_an_older_state_completes_the_chain(self, tmp_path):
+        """The chain ends at the requested step with one frame per report step.
+
+        The killed segment wrote its frame at step 20 but its restart state
+        is still at step 15, and the scan estimated its steps as 20.
+        """
+        _run_segment_zero(tmp_path)
+        seg_dir = tmp_path / "production_0"
+        _hard_kill(seg_dir)
+        restart = seg_dir / "restart_state.xml"
+        restart.write_text(re.sub(r'stepCount="\d+"', 'stepCount="15"', restart.read_text()))
+        progress = load_progress(tmp_path)
+        seg0 = progress.segments[0]
+        seg0.status = SegmentStatus.INTERRUPTED
+        seg0.steps_completed = 20
+        save_progress(tmp_path, progress)
+
+        _run_segment_one(tmp_path, total_steps=progress.total_steps_requested - 20)
+
+        frames = _csv_steps(seg_dir / "production_0_state_data.csv") + _csv_steps(
+            tmp_path / "production_1" / "production_1_state_data.csv"
+        )
+        assert frames == list(range(5, 101, 5))
+        reloaded = load_or_scan_progress(tmp_path, total_steps=100, timestep_fs=1.0)
+        assert [s.steps_completed for s in reloaded.segments] == [15, 85]
+        assert reloaded.total_steps_completed == 100
+        params = json.loads((tmp_path / "production_1" / "production_1_parameters.json").read_text())
+        assert params["__values__"]["integ_params"]["__values__"]["num_samples"] == 16
 
     def test_failed_frame_write_is_not_skipped(self, tmp_path, monkeypatch):
         """Pattern C: the frame whose write raised is written by the next segment."""

@@ -589,3 +589,40 @@ def test_query_end_states_parses_sacct():
             "556": "CANCELLED exit 0:15",
         }
     assert query_end_states([]) == {}
+
+
+def test_stopped_and_killed_before_production_verdicts(tmp_path: Path):
+    """A STOP file reads as stopped; a replicate killed in equilibration reads as dead."""
+    from polyzymd.cli.status_report import build_system_report
+
+    scratch = tmp_path / "scratch"
+    logs = tmp_path / "slurm_logs"
+    stopped_dir = scratch / "SYS_run1"
+    killed_dir = scratch / "SYS_run2"
+    built_dir = scratch / "SYS_run3"
+    stopped = _write_progress(
+        stopped_dir, 60_000_000, SimulationStatus.INTERRUPTED, SegmentStatus.INTERRUPTED
+    )
+    (stopped_dir / "STOP").write_text("stopped\n")
+    (killed_dir / "equilibration_0_heating").mkdir(parents=True)
+    built_dir.mkdir(parents=True)
+    not_started = SimulationProgress(total_steps_requested=500_000_000, timestep_fs=2.0)
+
+    cfg = _mock_cfg(scratch, logs)
+    cfg.discover_replicate_dirs.return_value = [(1, stopped_dir), (2, killed_dir), (3, built_dir)]
+    engine = MagicMock()
+    engine.resolve_engine_working_directory.side_effect = lambda p: p
+    engine.load_or_scan_progress.side_effect = lambda d, r: stopped if r == 1 else not_started
+
+    report = build_system_report(
+        cfg, "c.yaml", engine_inst=engine, jobs=[], now=NOW, job_name_fn=lambda c, r: f"SYS_run{r}"
+    )
+    verdicts = [rep.verdict for rep in report.replicates]
+    assert verdicts == ["stopped", "dead", "not_started"]
+
+    text = render_agent([report], now=NOW, preset_hint="p")
+    assert "STOPPED      STOP file present" in text
+    assert "DEAD         killed before production" in text
+    assert "polyzymd cancel -c c.yaml -r 1 --resume" in text
+    assert "polyzymd submit -c c.yaml -r 1 --preset p" in text
+    assert "polyzymd submit -c c.yaml -r 2 --preset p" in text
