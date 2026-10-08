@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 528" role="img" aria-labelledby="t d">
+  <title id="t">Project, study, condition, replicate</title>
+  <desc id="d">A project holds studies, a study holds conditions, and a condition holds replicates; the replicate run folders sit in the git-ignored runs folder, and data.local.yaml points the study at them.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0,1 L10,5 L0,9 z" fill="#1f2933"/>
+    </marker>
+  </defs>
+  <rect width="960" height="528" fill="#ffffff"/>
+
+  <g font-family="Helvetica, Arial, sans-serif">
+    <!-- Project -->
+    <rect x="24" y="24" width="912" height="440" rx="6" fill="#ffffff" stroke="#9aa5b1" stroke-width="1.5"/>
+    <text x="48" y="56" font-size="16" font-weight="bold" fill="#1f2933">Project</text>
+    <text x="128" y="56" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">project.yaml</text>
+    <text x="48" y="80" font-size="14" fill="#1f2933">shared analyses · publishing metadata</text>
+
+    <!-- Study -->
+    <rect x="48" y="104" width="864" height="336" rx="6" fill="#ffffff" stroke="#9aa5b1" stroke-width="1.5"/>
+    <text x="72" y="136" font-size="16" font-weight="bold" fill="#1f2933">Study</text>
+    <text x="144" y="136" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">study.yaml</text>
+    <text x="72" y="160" font-size="14" fill="#1f2933">conditions · comparison and control · analyses</text>
+
+    <!-- Condition -->
+    <rect x="72" y="184" width="608" height="232" rx="6" fill="#ffffff" stroke="#9aa5b1" stroke-width="1.5"/>
+    <text x="96" y="216" font-size="16" font-weight="bold" fill="#1f2933">Condition</text>
+    <text x="200" y="216" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">conditions/&lt;c&gt;/config.yaml</text>
+    <text x="96" y="240" font-size="14" fill="#1f2933">engine + system (enzyme, ligand, polymers, solvent)</text>
+
+    <!-- runs folder (git-ignored) -->
+    <rect x="96" y="256" width="560" height="144" rx="6" fill="#f0f2f4" stroke="#9aa5b1" stroke-width="1.5"/>
+    <text x="112" y="282" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">runs/&lt;study&gt;/&lt;condition&gt;/</text>
+    <text x="320" y="282" font-size="12" fill="#52606d">git-ignored</text>
+
+    <!-- Replicates -->
+    <rect x="112" y="304" width="160" height="80" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="128" y="328" font-size="14" font-weight="bold" fill="#1f2933">Replicate 1</text>
+    <text x="128" y="350" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">…_run1/</text>
+    <text x="128" y="370" font-size="12" fill="#52606d">seed 1 · trajectory</text>
+
+    <rect x="296" y="304" width="160" height="80" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="312" y="328" font-size="14" font-weight="bold" fill="#1f2933">Replicate 2</text>
+    <text x="312" y="350" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">…_run2/</text>
+    <text x="312" y="370" font-size="12" fill="#52606d">seed 2 · trajectory</text>
+
+    <rect x="480" y="304" width="160" height="80" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="496" y="328" font-size="14" font-weight="bold" fill="#1f2933">Replicate 3</text>
+    <text x="496" y="350" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">…_run3/</text>
+    <text x="496" y="370" font-size="12" fill="#52606d">seed 3 · trajectory</text>
+
+    <!-- data.local.yaml -->
+    <rect x="728" y="296" width="160" height="64" rx="6" fill="#f0f2f4" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="744" y="324" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">data.local.yaml</text>
+    <text x="744" y="344" font-size="12" fill="#52606d">condition → folder</text>
+    <line x1="728" y1="328" x2="656" y2="328" stroke="#1f2933" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <text x="692" y="318" font-size="12" fill="#52606d" text-anchor="middle">locates</text>
+
+    <!-- Legend -->
+    <rect x="24" y="484" width="24" height="16" rx="3" fill="#f0f2f4" stroke="#9aa5b1" stroke-width="1.5"/>
+    <text x="56" y="497" font-size="12" fill="#52606d">grey: outside git (machine-specific, not committed)</text>
+  </g>
+</svg>

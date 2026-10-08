@@ -9,6 +9,17 @@ PolyzyMD organizes simulations in four levels:
 | {term}`Condition <condition>` | One point in the space of independent variables: one value of each variable, such as the protein variant, the polymer composition, the co-solvent and the temperature | A simulation `config.yaml`, and optionally its `factors:`, which name its coordinates | `conditions/<name>/config.yaml` |
 | {term}`Replicate <replicate>` | One independent simulation of a condition | Its trajectories. Its number seeds its starting structure and its dynamics | The {term}`replicate folder` |
 
+The figure shows the four levels as nested folders, and where the runs live.
+
+```{figure} ../_static/diagrams/hierarchy.svg
+:alt: A project holds studies, a study holds conditions, a condition holds replicates; the replicate folders live in the git-ignored runs folder and data.local.yaml points to them.
+:width: 100%
+
+Each level is defined by one file. The replicate folders sit in the
+git-ignored `runs/<study>/<condition>/` (or in `scratch_directory`), and
+`data.local.yaml` tells the study where they are on this machine.
+```
+
 ## A study shares one analysis frame
 
 A study is a set of conditions that you compare with each other: a part of

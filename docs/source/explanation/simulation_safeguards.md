@@ -221,6 +221,19 @@ Each job runs one {term}`segment` and submits the next job. The chain
 gives a usable trajectory only if each link can continue after an
 interruption. A person must also be able to stop the chain on purpose.
 
+The figure shows the chain of jobs and what each job does.
+
+```{figure} ../_static/diagrams/run_lifecycle.svg
+:alt: Each SLURM job checks for STOP, runs the next segment with run-segment, checks progress and submits itself again until production is complete; GROMACS resumes one production run from its checkpoint.
+:width: 100%
+
+An OpenMM replicate runs minimization, equilibration and production
+segments; every stage and segment writes `progress.json`. Each job checks for
+`STOP`, runs `run-segment`, runs `check-progress` and submits itself again
+while work remains. A GROMACS job resumes one production run with `-cpi` and
+`-maxh`, and centres the trajectory when production is finished.
+```
+
 **A chain must not run out of nodes.** A job pinned to a CUDA environment can
 land on a node whose driver is too old. The job then submits itself again and
 excludes that node. The list of excluded nodes passes to every following

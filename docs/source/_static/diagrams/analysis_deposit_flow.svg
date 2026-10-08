@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1192 400" role="img" aria-labelledby="t d">
+  <title id="t">Analysis to deposit</title>
+  <desc id="d">polyzymd analyze measures each replicate, reduces per condition with the replicate as the sampling unit, compares against the control and writes report.json; freeze hashes and tags the study and lays out the deposit; a reader verifies the downloaded trajectories against the manifest and reruns the analyses.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0,1 L10,5 L0,9 z" fill="#1f2933"/>
+    </marker>
+  </defs>
+  <rect width="1192" height="400" fill="#ffffff"/>
+
+  <g font-family="Helvetica, Arial, sans-serif">
+    <!-- Row 1: analyze -->
+    <rect x="24" y="56" width="176" height="112" rx="6" fill="#ffffff" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="40" y="84" font-size="16" font-weight="bold" fill="#1f2933">Inputs</text>
+    <g font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">
+      <text x="40" y="106">study.yaml</text>
+      <text x="40" y="124">project.yaml</text>
+      <text x="40" y="142">data.local.yaml</text>
+    </g>
+
+    <rect x="256" y="56" width="200" height="112" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="272" y="84" font-size="16" font-weight="bold" fill="#1f2933">Measure</text>
+    <text x="272" y="104" font-size="12" fill="#52606d">each replicate</text>
+    <text x="272" y="126" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">record.json + .npz</text>
+    <text x="272" y="146" font-size="12" fill="#52606d">reused unless --recompute</text>
+
+    <rect x="512" y="56" width="176" height="112" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="528" y="84" font-size="16" font-weight="bold" fill="#1f2933">Reduce</text>
+    <text x="528" y="104" font-size="12" fill="#52606d">per condition</text>
+    <text x="528" y="122" font-size="12" fill="#52606d">replicate is the</text>
+    <text x="528" y="140" font-size="12" fill="#52606d">sampling unit</text>
+
+    <rect x="744" y="56" width="200" height="112" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="760" y="84" font-size="16" font-weight="bold" fill="#1f2933">Compare</text>
+    <text x="760" y="104" font-size="12" fill="#52606d">against the control</text>
+    <text x="760" y="122" font-size="12" fill="#52606d">Welch t test</text>
+    <text x="760" y="140" font-size="12" fill="#52606d">Benjamini-Hochberg</text>
+
+    <rect x="1000" y="56" width="168" height="112" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="1016" y="84" font-size="16" font-weight="bold" fill="#1f2933">Report</text>
+    <g font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">
+      <text x="1016" y="106">report.json</text>
+      <text x="1016" y="124">figures/</text>
+    </g>
+    <text x="1016" y="146" font-size="12" fill="#52606d">in results/&lt;run&gt;/</text>
+
+    <g stroke="#1f2933" stroke-width="1.5" fill="none">
+      <line x1="200" y1="112" x2="256" y2="112" marker-end="url(#arrow)"/>
+      <line x1="456" y1="112" x2="512" y2="112" marker-end="url(#arrow)"/>
+      <line x1="688" y1="112" x2="744" y2="112" marker-end="url(#arrow)"/>
+      <line x1="944" y1="112" x2="1000" y2="112" marker-end="url(#arrow)"/>
+      <polyline points="1084,168 1084,192 136,192 136,248" marker-end="url(#arrow)"/>
+    </g>
+    <g font-size="12" fill="#52606d" text-anchor="middle">
+      <text x="228" y="104">reads</text>
+      <text x="484" y="104">pools</text>
+      <text x="716" y="104">tests</text>
+      <text x="972" y="104">writes</text>
+      <text x="610" y="184">polyzymd study freeze</text>
+    </g>
+    <text x="24" y="36" font-size="14" font-weight="bold" fill="#1f2933">polyzymd analyze</text>
+
+    <!-- Row 2: publish -->
+    <rect x="24" y="248" width="224" height="112" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="40" y="276" font-size="16" font-weight="bold" fill="#1f2933">Freeze</text>
+    <text x="40" y="298" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">manifest.json</text>
+    <text x="40" y="318" font-size="12" fill="#52606d">SHA-256 of every file</text>
+    <text x="40" y="336" font-size="12" fill="#52606d">commit + tag study-vN</text>
+
+    <rect x="304" y="248" width="208" height="112" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="320" y="276" font-size="16" font-weight="bold" fill="#1f2933">Deposit</text>
+    <text x="320" y="298" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">deposit/upload/</text>
+    <text x="320" y="318" font-size="12" fill="#52606d">zips for Zenodo</text>
+    <text x="320" y="336" font-size="12" fill="#52606d">the author uploads</text>
+
+    <!-- Reader -->
+    <rect x="592" y="208" width="576" height="168" rx="6" fill="#ffffff" stroke="#9aa5b1" stroke-width="1.5"/>
+    <text x="616" y="234" font-size="14" font-weight="bold" fill="#1f2933">Reader</text>
+    <text x="680" y="234" font-size="12" fill="#52606d">downloads the deposit</text>
+
+    <rect x="616" y="248" width="248" height="112" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="632" y="276" font-size="16" font-weight="bold" fill="#1f2933">Locate</text>
+    <text x="632" y="298" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">study locate DIR --verify</text>
+    <text x="632" y="318" font-size="12" fill="#52606d">SHA-256 against the manifest</text>
+    <text x="632" y="336" font-size="12" fill="#52606d">writes data.local.yaml</text>
+
+    <rect x="920" y="248" width="232" height="112" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="936" y="276" font-size="16" font-weight="bold" fill="#1f2933">Reanalyze</text>
+    <text x="936" y="298" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">analyze --recompute</text>
+    <text x="936" y="318" font-size="12" fill="#52606d">re-measures every replicate</text>
+
+    <g stroke="#1f2933" stroke-width="1.5" fill="none">
+      <line x1="248" y1="304" x2="304" y2="304" marker-end="url(#arrow)"/>
+      <line x1="512" y1="304" x2="616" y2="304" marker-end="url(#arrow)"/>
+      <line x1="864" y1="304" x2="920" y2="304" marker-end="url(#arrow)"/>
+    </g>
+    <g font-size="12" fill="#52606d" text-anchor="middle">
+      <text x="276" y="296">copies</text>
+      <text x="552" y="296">publishes</text>
+      <text x="892" y="296">feeds</text>
+    </g>
+  </g>
+</svg>

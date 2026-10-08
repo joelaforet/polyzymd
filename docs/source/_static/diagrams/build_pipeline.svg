@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1144 464" role="img" aria-labelledby="t d">
+  <title id="t">System build pipeline</title>
+  <desc id="d">polyzymd build turns a cleaned PDB into an enzyme topology, adds the charged ligand, sizes the box from the solute, optionally packs polymers, solvates, parameterizes with OpenFF Interchange and exports an OpenMM bundle or GROMACS files, each with build_manifest.json.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0,1 L10,5 L0,9 z" fill="#1f2933"/>
+    </marker>
+  </defs>
+  <rect width="1144" height="464" fill="#ffffff"/>
+
+  <g font-family="Helvetica, Arial, sans-serif">
+    <!-- Row 1: input and solute -->
+    <rect x="24" y="56" width="136" height="72" rx="6" fill="#ffffff" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="40" y="86" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">enzyme.pdb</text>
+    <text x="40" y="108" font-size="12" fill="#52606d">after clean-pdb</text>
+
+    <rect x="224" y="40" width="160" height="104" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="240" y="68" font-size="16" font-weight="bold" fill="#1f2933">Enzyme</text>
+    <text x="240" y="90" font-size="12" fill="#52606d">OpenFF Topology</text>
+    <text x="240" y="128" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">enzyme.py</text>
+
+    <rect x="448" y="40" width="176" height="104" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="464" y="68" font-size="16" font-weight="bold" fill="#1f2933">+ Ligand</text>
+    <text x="464" y="90" font-size="12" fill="#52606d">SDF conformers</text>
+    <text x="464" y="108" font-size="12" fill="#52606d">charged</text>
+    <text x="464" y="128" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">substrate.py</text>
+
+    <rect x="688" y="40" width="192" height="104" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="704" y="68" font-size="16" font-weight="bold" fill="#1f2933">Box sizing</text>
+    <text x="704" y="90" font-size="12" fill="#52606d">diameter + 2 × padding</text>
+    <text x="704" y="108" font-size="12" fill="#52606d">cube or dodecahedron</text>
+    <text x="704" y="128" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">boxvectors.py</text>
+
+    <rect x="960" y="40" width="160" height="104" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5" stroke-dasharray="6 4"/>
+    <text x="976" y="68" font-size="16" font-weight="bold" fill="#1f2933">Polymers</text>
+    <text x="976" y="90" font-size="12" fill="#52606d">optional</text>
+    <text x="976" y="108" font-size="12" fill="#52606d">packed by Packmol</text>
+    <text x="976" y="128" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">polymer.py</text>
+
+    <!-- Row 1 arrows -->
+    <g stroke="#1f2933" stroke-width="1.5" fill="none">
+      <line x1="160" y1="92" x2="224" y2="92" marker-end="url(#arrow)"/>
+      <line x1="384" y1="92" x2="448" y2="92" marker-end="url(#arrow)"/>
+      <line x1="624" y1="92" x2="688" y2="92" marker-end="url(#arrow)"/>
+      <line x1="880" y1="92" x2="960" y2="92" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    </g>
+    <g font-size="12" fill="#52606d" text-anchor="middle">
+      <text x="192" y="84">reads</text>
+      <text x="416" y="84">adds</text>
+      <text x="656" y="84">sizes</text>
+      <text x="920" y="84">optional</text>
+    </g>
+
+    <!-- Wrap to row 2 -->
+    <g stroke="#1f2933" stroke-width="1.5" fill="none">
+      <polyline points="1040,144 1040,184 124,184 124,240" marker-end="url(#arrow)"/>
+      <line x1="784" y1="144" x2="784" y2="184"/>
+    </g>
+    <text x="792" y="170" font-size="12" fill="#52606d">no polymers</text>
+    <text x="448" y="176" font-size="12" fill="#52606d" text-anchor="middle">fills the box</text>
+
+    <!-- Row 2 -->
+    <rect x="24" y="240" width="224" height="136" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="40" y="268" font-size="16" font-weight="bold" fill="#1f2933">Solvate</text>
+    <text x="40" y="290" font-size="12" fill="#52606d">water, co-solvents, ions</text>
+    <text x="40" y="308" font-size="12" fill="#52606d">neutralize · Packmol</text>
+    <text x="40" y="326" font-size="12" fill="#52606d">clash + image checks</text>
+    <text x="40" y="360" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">solvent.py · packmol.py</text>
+
+    <rect x="312" y="240" width="192" height="136" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="328" y="268" font-size="16" font-weight="bold" fill="#1f2933">Parameterize</text>
+    <text x="328" y="290" font-size="12" fill="#52606d">OpenFF Interchange</text>
+    <text x="328" y="308" font-size="12" fill="#52606d">keeps assigned charges</text>
+    <text x="328" y="342" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">system_builder</text>
+    <text x="328" y="360" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">.create_interchange</text>
+
+    <rect x="600" y="212" width="216" height="88" rx="6" fill="#e8f0fd" stroke="#2f6fdf" stroke-width="1.5"/>
+    <text x="616" y="238" font-size="16" font-weight="bold" fill="#1f2933">OpenMM bundle</text>
+    <text x="616" y="258" font-size="12" fill="#52606d">.pdb · system.xml · .prmtop</text>
+    <text x="616" y="286" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">artifact_integrity.py</text>
+
+    <rect x="600" y="316" width="216" height="88" rx="6" fill="#fbeee4" stroke="#c05621" stroke-width="1.5"/>
+    <text x="616" y="342" font-size="16" font-weight="bold" fill="#1f2933">GROMACS files</text>
+    <text x="616" y="362" font-size="12" fill="#52606d">.gro · .top · .itp · .mdp</text>
+    <text x="616" y="390" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">exporters/gromacs.py</text>
+
+    <rect x="912" y="268" width="192" height="80" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="928" y="298" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">build_manifest.json</text>
+    <text x="928" y="318" font-size="12" fill="#52606d">hashes, seeds, box</text>
+    <text x="928" y="336" font-size="12" fill="#52606d">written last</text>
+
+    <!-- Row 2 arrows -->
+    <g stroke="#1f2933" stroke-width="1.5" fill="none">
+      <line x1="248" y1="308" x2="312" y2="308" marker-end="url(#arrow)"/>
+      <line x1="504" y1="308" x2="528" y2="308"/>
+      <polyline points="528,308 528,256 600,256" marker-end="url(#arrow)"/>
+      <polyline points="528,308 528,360 600,360" marker-end="url(#arrow)"/>
+      <line x1="816" y1="256" x2="912" y2="292" marker-end="url(#arrow)"/>
+      <line x1="816" y1="360" x2="912" y2="324" marker-end="url(#arrow)"/>
+    </g>
+    <g font-size="12" fill="#52606d" text-anchor="middle">
+      <text x="280" y="300">types</text>
+      <text x="564" y="248">exports</text>
+      <text x="564" y="352">exports</text>
+      <text x="864" y="256">writes</text>
+      <text x="864" y="372">writes</text>
+    </g>
+
+    <!-- Legend -->
+    <rect x="24" y="424" width="24" height="16" rx="3" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5" stroke-dasharray="6 4"/>
+    <text x="56" y="437" font-size="12" fill="#52606d">optional stage</text>
+    <rect x="184" y="424" width="24" height="16" rx="3" fill="#e8f0fd" stroke="#2f6fdf" stroke-width="1.5"/>
+    <text x="216" y="437" font-size="12" fill="#52606d">OpenMM</text>
+    <rect x="304" y="424" width="24" height="16" rx="3" fill="#fbeee4" stroke="#c05621" stroke-width="1.5"/>
+    <text x="336" y="437" font-size="12" fill="#52606d">GROMACS</text>
+  </g>
+</svg>
