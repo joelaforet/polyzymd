@@ -1410,3 +1410,34 @@ def test_every_stage_passes_grompp_for_any_steps_per_frame(
             text=True,
         )
         assert result.returncode == 0, f"{name}: {result.stderr[-2000:]}"
+
+
+def test_gromacs_export_refuses_distance_restraints_it_would_drop(tmp_path):
+    """Exporting an OpenMM config with distance restraints to GROMACS is refused."""
+    from polyzymd.config.schema import SimulationConfig
+
+    config = SimulationConfig(
+        name="t",
+        engine="openmm",
+        enzyme={"name": "E", "pdb_path": "e.pdb"},
+        thermodynamics={"temperature": 300.0},
+        simulation_phases={
+            "equilibration_stages": [
+                {"name": "eq", "duration": 0.1, "temperature": 300.0, "ensemble": "NVT"}
+            ],
+            "production": {"ensemble": "NPT", "duration": 1.0, "samples": 10},
+        },
+        restraints=[
+            {
+                "type": "flat_bottom",
+                "name": "site",
+                "atom1": {"selection": "resid 1 and name CA"},
+                "atom2": {"selection": "resid 2 and name CA"},
+                "distance": 3.5,
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="set engine: openmm"):
+        GromacsExporter(interchange=None, config=config).export(tmp_path)
+    assert not any(tmp_path.iterdir())

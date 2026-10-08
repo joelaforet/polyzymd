@@ -78,7 +78,13 @@ class ChargeMethod(str, Enum):
 
 
 class WaterModel(str, Enum):
-    """Supported water models."""
+    """Water models a config may name.
+
+    Only TIP3P is built: the force fields PolyzyMD loads carry the TIP3P water
+    parameters. The other values stay loadable so configs of existing runs
+    still load for status and analysis; new builds refuse them
+    (:meth:`SimulationConfig.require_buildable`).
+    """
 
     TIP3P = "tip3p"
     SPCE = "spce"
@@ -695,8 +701,8 @@ class IonConfig(_ConfigModel):
         ge=0.0,
         description="NaCl salt concentration (mol/L), before neutralizing ions",
     )
-    kcl_concentration: float = Field(0.0, ge=0.0, description="KCl conc. (mol/L)")
-    mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L)")
+    kcl_concentration: float = Field(0.0, ge=0.0, description="KCl conc. (mol/L); not built")
+    mgcl2_concentration: float = Field(0.0, ge=0.0, description="MgCl2 conc. (mol/L); not built")
 
 
 class BoxConfig(_ConfigModel):
@@ -1670,6 +1676,83 @@ class SimulationConfig(_ConfigModel):
         if self.engine == "openmm":
             self.require_engine_barostats("openmm")
         return self
+
+    def require_buildable(self, engine: str | None = None) -> None:
+        """Raise ``ValueError`` when a new system built from this config would be wrong.
+
+        Loading a config does not run these checks, so the configs of existing
+        runs still load for status and analysis. The commands that build a new
+        system (``validate``, ``build``, ``run``, ``submit``) call this.
+
+        Parameters
+        ----------
+        engine : str or None
+            Engine that will run the system. Default: the config's engine.
+        """
+        model = self.solvent.primary.model
+        if model != WaterModel.TIP3P:
+            raise ValueError(
+                f"PolyzyMD cannot build water model '{model.value}' correctly: the force fields "
+                "it loads carry TIP3P water parameters; use model: tip3p for new systems."
+            )
+        ions = self.solvent.ions
+        for key in ("kcl_concentration", "mgcl2_concentration"):
+            if getattr(ions, key):
+                raise ValueError(
+                    f"{key}: the build adds only Na+ and Cl- ions. For new systems, remove "
+                    f"{key} and use nacl_concentration."
+                )
+        self.require_engine_restraints(engine or self.engine)
+
+    def require_engine_restraints(self, engine: str) -> None:
+        """Raise ``ValueError`` when ``engine`` would drop a restraint this config names.
+
+        Only the OpenMM engine applies distance restraints (``restraints:``).
+        The GROMACS export writes position restraints for the protein, ligand
+        and polymer groups only. :meth:`require_buildable` calls this with the
+        engine a command builds for, so ``build --format gromacs`` and
+        ``run --engine gromacs`` on an OpenMM config are refused too.
+        """
+        if engine != "gromacs":
+            return
+        enabled = [r.name for r in self.restraints if r.enabled]
+        if enabled:
+            raise ValueError(
+                f"Distance restraints ({', '.join(enabled)}) are applied only by the OpenMM "
+                "engine; GROMACS runs would drop them. To keep them, set engine: openmm. "
+                "To run on GROMACS, remove them or set enabled: false. Position restraints "
+                "in equilibration stages work on both engines."
+            )
+        from polyzymd.exporters.gromacs import PositionRestraintGenerator
+
+        mapping = PositionRestraintGenerator.GROUP_MAPPING
+        force_constants: dict[str, set[float]] = {}
+        for stage in self.simulation_phases.equilibration_stages or []:
+            for posres in stage.position_restraints:
+                force_constants.setdefault(posres.group, set()).add(posres.force_constant)
+        unknown = sorted(group for group in force_constants if group not in mapping)
+        if unknown:
+            raise ValueError(
+                f"GROMACS cannot apply position restraints on {', '.join(unknown)}: it restrains "
+                f"only {', '.join(mapping)}. Remove those groups from position_restraints, "
+                "or set engine: openmm."
+            )
+        # The GROMACS export writes one restraint block per group, with one
+        # force constant, and the protein groups share the POSRES_PROTEIN define.
+        varying = sorted(group for group, values in force_constants.items() if len(values) > 1)
+        if varying:
+            raise ValueError(
+                f"On GROMACS a position restraint group has one force constant in every stage, "
+                f"but {', '.join(varying)} has several. Use the same force_constant in "
+                "every stage."
+            )
+        protein = sorted(group for group in force_constants if mapping[group][0] == "protein")
+        if len(protein) > 1:
+            raise ValueError(
+                f"On GROMACS the protein groups share one restraint switch, so {', '.join(protein)} "
+                "would all be on in every stage that names one of them. Use the same protein "
+                "group in every stage."
+            )
 
     def require_engine_barostats(self, engine: str) -> None:
         """Raise ``ValueError`` when ``engine`` cannot run a barostat this config names.
