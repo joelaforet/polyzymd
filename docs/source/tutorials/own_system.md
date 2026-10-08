@@ -96,6 +96,10 @@ explain its keys. Change these fields:
 | `output.scratch_directory` | On a cluster, your scratch storage. Leave it `null` to write the runs into `runs/` |
 | `openmm.platform` | `CUDA` for a GPU, as `polyzymd submit` needs. `CPU` to run with `polyzymd run` on a laptop |
 
+The template is set up for OpenMM. To run GROMACS, change `engine` to
+`gromacs`. GROMACS does not read the `openmm:` block, and it writes `.xtc`
+trajectories whatever `output.trajectory_format` says, so you can leave both.
+
 The optional sections, such as `substrate:`, `polymers:` and `restraints:`,
 are commented out. Remove the leading `# ` of a section to use it. For every
 key, see {doc}`../reference/configuration`.
