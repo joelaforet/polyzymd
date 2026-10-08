@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -921,7 +922,38 @@ class PolymerGenerator:
         logger.debug(f"Middle sequence (block identifiers): {middle_sequence}")
         logger.debug(f"Middle sequence map: {sequence_map}")
 
-        # Attempt building with retries for ring-piercing
+        # mBuild's energy minimization kicks atoms with NumPy's global random
+        # state. Seeding it from the sequence makes the conformer a function of
+        # the sequence, as a cached chain is, so identical builds match.
+        import numpy as np
+
+        random_state = np.random.get_state()
+        np.random.seed(zlib.crc32(sequence.encode()))
+        try:
+            chain = self._build_chain_without_ring_piercing(
+                monogrp_local, sequence, middle_sequence, sequence_map
+            )
+        finally:
+            np.random.set_state(random_state)
+
+        # Save PDB
+        pdb_filename = self._make_polymer_filename(sequence, monomer_names, charged=False)
+        pdb_path = self.cache_directory / f"{pdb_filename}.pdb"
+
+        resname_map = self._build_resname_map(monomer_names, residue_names)
+        _mbmol_to_openmm_pdb(pdb_path, chain, resname_map=resname_map)
+        logger.info(f"Saved polymer PDB: {pdb_path}")
+
+        return chain, pdb_path
+
+    def _build_chain_without_ring_piercing(
+        self,
+        monogrp_local: "MonomerGroup",
+        sequence: str,
+        middle_sequence: str,
+        sequence_map: dict[str, str],
+    ) -> Any:
+        """Build the chain, retrying up to ``max_retries`` times while a ring is pierced."""
         for attempt in range(self.max_retries):
             logger.debug(f"Building polymer attempt {attempt + 1}/{self.max_retries}")
 
@@ -950,16 +982,7 @@ class PolymerGenerator:
             raise PolymerGenerationError(
                 f"Failed to build polymer after {self.max_retries} attempts due to ring-piercing"
             )
-
-        # Save PDB
-        pdb_filename = self._make_polymer_filename(sequence, monomer_names, charged=False)
-        pdb_path = self.cache_directory / f"{pdb_filename}.pdb"
-
-        resname_map = self._build_resname_map(monomer_names, residue_names)
-        _mbmol_to_openmm_pdb(pdb_path, chain, resname_map=resname_map)
-        logger.info(f"Saved polymer PDB: {pdb_path}")
-
-        return chain, pdb_path
+        return chain
 
     def _build_resname_map(
         self,
