@@ -451,7 +451,9 @@ remains" and queues a successor within seconds. `polyzymd cancel` writes a
 `STOP` marker into each replicate working directory first — the wrapper
 refuses to submit a successor while it exists, and a successor that is
 already queued exits before starting a segment — and then cancels the
-queued and running jobs that work in that directory.
+queued and running jobs that work in that directory. A replicate whose
+working directory does not exist and that has no queued job has nothing to
+cancel: the command says so and writes nothing.
 
 ### Options
 
@@ -591,6 +593,9 @@ polyzymd check-progress -c config.yaml -r 1
 ### Notes
 
 - This command is called by the generated SLURM scripts, not typically by users directly
+- When the run has a `progress.json`, it updates it from the files on disk. It
+  never creates one, so a run without one (a legacy or downloaded run) is left
+  as it is
 - For a visual overview of all replicates, use `polyzymd status` instead
 
 ---
@@ -661,6 +666,7 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | `DEAD` | Work remains and no matching job is queued or running. Nothing will restart it. The `last:` field is the most informative error line near the end of the newest SLURM log whose `Work dir:` line names this run directory, with the log filename in brackets. |
 | `NOT_STARTED` | Directory exists but production never began (typically a failed build; the build log is consulted). |
 | `NOT_FOUND` | Expected replicate directory is missing from scratch |
+| `CORRUPT` | `progress.json` exists but cannot be read (empty, truncated or of the wrong shape). The `last:` field says why. `status` leaves the file as it is; fix or remove it by hand. |
 
 Throughput (`ns/d`) is measured from the newest segment with a known wall
 window (a finished or interrupted segment), falling back to the live segment
@@ -699,7 +705,8 @@ that case.
 
 ### Notes
 
-- This is a **read-only** command — it only reads `progress.json` files
+- This is a **read-only** command: it reads `progress.json` files and writes
+  nothing. A run without `progress.json` is shown from a scan of its files
 - Replicate directories are auto-detected via the naming template in the config
 - The command is a one-shot snapshot (prints and exits)
 - Use `polyzymd recover -c config.yaml -r <N> --submit` to resume interrupted replicates
@@ -728,7 +735,7 @@ polyzymd recover -c CONFIG [OPTIONS]
 | `--preset` | - | No | aa100 | SLURM preset for recovery job |
 | `--engine` | - | No | from config | Override simulation engine (`gromacs` or `openmm`) |
 | `--submit / --no-submit` | - | No | --no-submit | Submit a recovery job (default: status only) |
-| `--dry-run` | - | No | false | Show what would be submitted without submitting |
+| `--dry-run` | - | No | false | With `--submit`, print the script path and SLURM settings; write and submit nothing |
 | `--email` | - | No | "" | Email for job notifications |
 | `--memory` | - | No | 3G | Override SLURM memory allocation (e.g. '4G', '8G') |
 | `--partition` | - | No | from preset | Override SLURM partition |
@@ -782,7 +789,12 @@ To resume, run:
 - Without `--submit`, this is a read-only status report — useful for inspecting
   simulation health across replicates
 - With `--submit`, generates a self-resubmitting SLURM job in
-  `{working_dir}/recovery_scripts/` and submits it
+  `{working_dir}/recovery_scripts/` and submits it. The chain's own script in
+  `daisy_chain_scripts/` is left as it was. The job uses `--preset` (default
+  `aa100`), so pass the preset the chain was submitted with
+- `recover` never writes `progress.json`; the recovery job's runner does
+- If `progress.json` cannot be read, `recover` (and `check-progress` in a
+  running chain) stops with an error and leaves the file as it is
 - The recovery job is identical to a normal submission job — it uses `run-segment`
   to determine what work remains and continues from there
 
