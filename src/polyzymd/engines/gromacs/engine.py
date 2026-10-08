@@ -150,6 +150,9 @@ class GromacsEngine(SimulationEngine):
         if not inputs_exist:
             from polyzymd.builders.system_builder import SystemBuilder
             from polyzymd.exporters.gromacs import GromacsExporter
+            from polyzymd.simulation.artifact_integrity import assert_rebuild_allowed
+
+            assert_rebuild_allowed(request.working_dir.parent)
 
             builder = SystemBuilder.from_config(self._config)
             interchange = builder.build_from_config(

@@ -828,6 +828,25 @@ class TestRunReusesBuild:
         assert f"Reusing the GROMACS files in {gromacs_dir}" in capsys.readouterr().out
 
     @patch("polyzymd.exporters.gromacs.GromacsRunner")
+    @patch("polyzymd.builders.system_builder.SystemBuilder.from_config")
+    @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
+    def test_gromacs_run_does_not_rebuild_a_started_run(
+        self, _prefix, from_config, gromacs_runner, tmp_path: Path
+    ) -> None:
+        from polyzymd.cli.main import _run_gromacs_impl
+        from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
+
+        gromacs_dir = tmp_path / "run_1" / "gromacs"
+        gromacs_dir.mkdir(parents=True)
+        (gromacs_dir / "em.log").write_text("")
+
+        with pytest.raises(ArtifactIntegrityError, match="Refusing to rebuild"):
+            _run_gromacs_impl(self._config(tmp_path), replicate=1, gmx_path="gmx")
+
+        from_config.assert_not_called()
+        gromacs_runner.assert_not_called()
+
+    @patch("polyzymd.exporters.gromacs.GromacsRunner")
     @patch("polyzymd.analyses.shared.gromacs.system_prefix", return_value="sys")
     def test_gromacs_run_records_the_polyzymd_version(
         self, _prefix, gromacs_runner, tmp_path: Path

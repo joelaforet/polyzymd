@@ -289,12 +289,19 @@ def validate_openmm_identity(
 
 
 def assert_rebuild_allowed(working_dir: Path) -> None:
-    """Refuse replacement once any simulation phase or production artifact exists."""
-    markers = [working_dir / "simulation_progress.json"]
-    markers.extend(working_dir.glob("minimization*"))
+    """Refuse replacement once an OpenMM or GROMACS run has written output.
+
+    GROMACS run outputs live in ``working_dir/gromacs``; the ``.mdp`` files
+    there are build outputs.
+    """
+    markers = [*working_dir.glob("minimization*")]
     markers.extend(working_dir.glob("equilibration_*"))
     markers.extend(working_dir.glob("production*"))
-    active = [path for path in markers if path.exists()]
+    for pattern in ("em.*", "eq_[0-9][0-9].*", "prod*", "state.cpt"):
+        markers.extend(
+            path for path in (working_dir / "gromacs").glob(pattern) if path.suffix != ".mdp"
+        )
+    active = sorted(markers)
     if active:
         raise ArtifactIntegrityError(
             f"Refusing to rebuild started campaign {working_dir}; found {active[0]}. "
