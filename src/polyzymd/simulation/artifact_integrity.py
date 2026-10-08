@@ -322,7 +322,8 @@ _LOCK_HELD_ERRNOS = (errno.EAGAIN, errno.EACCES)
 
 
 def _lock_path(working_dir: Path) -> Path:
-    return (Path(working_dir) / ".polyzymd.lock").absolute()
+    # resolve(): another spelling of the same folder must find the held lock.
+    return (Path(working_dir) / ".polyzymd.lock").resolve()
 
 
 @contextmanager

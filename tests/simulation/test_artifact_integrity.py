@@ -171,6 +171,21 @@ def test_lock_probe_reports_other_holders_only(tmp_path):
         assert queue.get(timeout=1) == "blocked"
 
 
+def test_probe_through_another_path_keeps_the_lock(tmp_path):
+    """A probe through a symlink or ``..`` spelling must not drop this process's lock."""
+    run_dir = tmp_path / "run"
+    link = tmp_path / "link"
+    with replicate_lock(run_dir):
+        link.symlink_to(run_dir)
+        assert replicate_lock_held_elsewhere(link) is False
+        assert replicate_lock_held_elsewhere(tmp_path / "run" / ".." / "run") is False
+        queue: Queue = Queue()
+        process = Process(target=_posix_lock_is_free, args=(str(run_dir), queue))
+        process.start()
+        process.join(5)
+        assert queue.get(timeout=1) == "held"
+
+
 def test_manifest_records_provenance_and_versions(tmp_path):
     topology, system, positions = _tiny_openmm_bundle()
     manifest = publish_build_bundle(
