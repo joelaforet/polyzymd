@@ -1630,7 +1630,8 @@ def _print_gromacs_dry_run_details(
 @click.option(
     "--skip-build",
     is_flag=True,
-    help="Skip system building in generated jobs (use pre-built system from 'polyzymd build')",
+    hidden=True,
+    help="No effect: jobs always load the build from 'polyzymd build'.",
 )
 @click.option(
     "--pixi-env",
@@ -1681,7 +1682,8 @@ def submit(
 
     Creates and optionally submits one self-resubmitting job per replicate.
     OpenMM submission uses the existing daisy-chain flow, while GROMACS
-    submission uses the engine submission interface.
+    submission uses the engine submission interface. Submit never builds:
+    each replicate needs a build from ``polyzymd build`` first.
 
     \b
     Directory structure:
@@ -1728,8 +1730,7 @@ def submit(
             f"Excluded nodes override: {exclude_nodes or '(none)'}",
             phase="workflow",
         )
-    if skip_build:
-        colored_echo("Skip-build mode: using pre-built systems", phase="workflow")
+    _ = skip_build
 
     if dry_run:
         replicate_list = _resolve_replicates_option(replicates)
@@ -1826,6 +1827,7 @@ def submit(
 
         colored_echo("Using GROMACS submission backend", phase="workflow")
 
+        requests = []
         for rep in replicate_list:
             slurm_config = SlurmConfig.from_preset(preset)
             if email:
@@ -1867,27 +1869,33 @@ def submit(
                     )
                     continue
 
-            request = EngineSubmitRequest(
-                replicate=rep,
-                config_path=config_path_abs,
-                working_dir=working_dir,
-                slurm_config=slurm_config,
-                job_name=job_name,
-                extra={"pixi_env": resolved_pixi_env, "skip_build": skip_build},
+            requests.append(
+                EngineSubmitRequest(
+                    replicate=rep,
+                    config_path=config_path_abs,
+                    working_dir=working_dir,
+                    slurm_config=slurm_config,
+                    job_name=job_name,
+                    extra={"pixi_env": resolved_pixi_env},
+                )
             )
 
-            if generate_only:
-                script_path = engine_impl.prepare_submission(request)
-                colored_echo(f"  Rep {rep}: script at {script_path}", phase="workflow")
-            else:
-                result = engine_impl.submit(request)
-                if result.get("submitted"):
-                    colored_echo(f"  Rep {rep}: {result['stdout']}", phase="workflow")
-                else:
+        # Check every build before any script is written or submitted.
+        try:
+            for request in requests:
+                engine_impl.check_build(request)
+            for request in requests:
+                if generate_only:
+                    script_path = engine_impl.prepare_submission(request)
                     colored_echo(
-                        f"  Rep {rep}: script at {result['script_path']} (sbatch not available)",
-                        phase="workflow",
+                        f"  Rep {request.replicate}: script at {script_path}", phase="workflow"
                     )
+                else:
+                    result = engine_impl.submit(request)
+                    colored_echo(f"  Rep {request.replicate}: {result['stdout']}", phase="workflow")
+        except (FileNotFoundError, ValueError, RuntimeError) as e:
+            colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
 
         if not generate_only:
             colored_echo("\nGROMACS job submission complete!", phase="workflow")
@@ -1922,7 +1930,6 @@ def submit(
             nodelist=nodelist,
             exclude=exclude_nodes,
             openff_logs=submit_openff_logs,
-            skip_build=skip_build,
         )
 
         if not generate_only:
@@ -3762,11 +3769,15 @@ def recover(
             working_dir=working_dir,
             slurm_config=slurm_config,
             job_name=job_name,
-            extra={"pixi_env": resolved_pixi_env, "skip_build": gromacs_inputs_exist},
+            extra={"pixi_env": resolved_pixi_env},
         )
 
         engine_impl = create_engine(sim_config, override="gromacs", defer_binary=True)
-        script_path = engine_impl.prepare_submission(request)
+        try:
+            script_path = engine_impl.prepare_submission(request)
+        except (FileNotFoundError, ValueError) as e:
+            colored_echo(f"Recovery failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
 
         recovery_dir = working_dir / "recovery_scripts"
         recovery_dir.mkdir(exist_ok=True)
@@ -3783,10 +3794,11 @@ def recover(
 
         from polyzymd.workflow.slurm_submit import run_sbatch
 
-        module_load = (
-            getattr(sim_config.gromacs, "module_load", None) if sim_config.gromacs else None
-        )
-        result = run_sbatch(recovery_path, module_load=module_load)
+        try:
+            result = run_sbatch(recovery_path)
+        except RuntimeError as e:
+            colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
         if result.returncode == 0:
             colored_echo(f"Submitted: {result.stdout.strip()}", phase="workflow")
             colored_echo("Monitor with: squeue -u $USER", phase="workflow")

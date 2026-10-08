@@ -94,7 +94,7 @@ For every other key of the config, see {doc}`../reference/configuration`.
    environment:
 
    ```bash
-   polyzymd submit -c config.yaml -r 1-3 --preset aa100
+   polyzymd submit -c config.yaml -r 1 --preset aa100
    ```
 
    The jobs start the simulation environment themselves. See

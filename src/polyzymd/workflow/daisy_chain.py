@@ -31,7 +31,7 @@ from polyzymd.workflow.slurm import (
     SlurmConfig,
     SlurmScriptGenerator,
 )
-from polyzymd.workflow.slurm_submit import make_log_folder
+from polyzymd.workflow.slurm_submit import make_log_folder, require_sbatch
 
 LOGGER = logging.getLogger(__name__)
 
@@ -394,7 +394,6 @@ class DaisyChainSubmitter:
         dc_config: DaisyChainConfig,
         pixi_env: str = "sim-cuda-12-4",
         openff_logs: bool = False,
-        skip_build: bool = False,
     ) -> None:
         """Initialize the submitter.
 
@@ -408,15 +407,13 @@ class DaisyChainSubmitter:
             Pixi environment name (e.g. ``"sim-cuda-12-4"``, ``"sim-cuda-12-6"``).
         openff_logs : bool
             Enable verbose OpenFF logs in generated scripts.
-        skip_build : bool
-            Skip system building in generated scripts.
         """
         self._sim_config = sim_config
         self._dc_config = dc_config
         self._openff_logs = openff_logs
-        self._skip_build = skip_build
+        # The simulation environments have no OpenFF, so jobs load the build.
         self._generator = SlurmScriptGenerator(
-            dc_config.slurm_config, pixi_env, openff_logs=openff_logs, skip_build=skip_build
+            dc_config.slurm_config, pixi_env, openff_logs=openff_logs, skip_build=True
         )
 
         # Track submitted jobs per replicate
@@ -579,6 +576,7 @@ class DaisyChainSubmitter:
                 is_generated_only=False,
             )
 
+        require_sbatch(script_path)
         # The job starts in its run directory (``#SBATCH --chdir``), and sbatch
         # does not create the folder of its log.
         Path(self._get_scratch_dir(replicate)).mkdir(parents=True, exist_ok=True)
@@ -762,6 +760,58 @@ class DaisyChainSubmitter:
             )
 
 
+def _check_build(
+    working_dir: Path, sim_config: SimulationConfig, config_path: Any, replicate: int
+) -> None:
+    """Refuse a replicate whose job could not run from the files in ``working_dir``.
+
+    A replicate that has not started needs a build that matches its manifest
+    and the config. A started replicate continues from its own run files, so
+    it needs only the build files and a readable ``progress.json``; a changed
+    production length or segment setting is then allowed.
+
+    Raises
+    ------
+    FileNotFoundError
+        With the ``polyzymd build`` command to run.
+    """
+    from polyzymd.simulation.artifact_integrity import validate_build_bundle
+    from polyzymd.simulation.progress import PROGRESS_FILENAME, load_progress
+
+    progress_file = working_dir / PROGRESS_FILENAME
+    started = progress_file.exists() or any(
+        any(working_dir.glob(pattern))
+        for pattern in ("minimization*", "equilibration_*", "production*")
+    )
+    if started:
+        missing = [
+            name
+            for name in ("solvated_system.pdb", "system.xml")
+            if not (working_dir / name).is_file()
+        ]
+        if missing:
+            raise FileNotFoundError(
+                f"Replicate {replicate} has started in {working_dir}, but its build files "
+                f"{', '.join(missing)} are missing. Restore them from the same build; "
+                "a new build needs a new output directory."
+            )
+        if progress_file.exists() and load_progress(working_dir) is None:
+            raise FileNotFoundError(
+                f"Replicate {replicate}: {progress_file} cannot be read. Check it with "
+                f"polyzymd recover -c {config_path} -r {replicate}."
+            )
+        return
+    try:
+        validate_build_bundle(working_dir, sim_config)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise FileNotFoundError(
+            f"Replicate {replicate} has no usable build in {working_dir}: {exc}\n"
+            f"Fix: build it, in a compute job: polyzymd build -c {config_path} "
+            f"-r {replicate}. The replicate has not started, so the build replaces the "
+            "old files. Then submit again."
+        ) from exc
+
+
 def submit_daisy_chain(
     config_path: Union[str, Path],
     slurm_preset: str = "aa100",
@@ -784,7 +834,6 @@ def submit_daisy_chain(
     nodelist: str | None = None,
     exclude: str | None = None,
     openff_logs: bool = False,
-    skip_build: bool = False,
 ) -> Dict[int, List[SubmissionResult]]:
     """Submit daisy-chain simulation jobs from a YAML config.
 
@@ -838,8 +887,6 @@ def submit_daisy_chain(
         the preset's excluded-node list.
     openff_logs : bool
         Enable verbose OpenFF logs in generated scripts.
-    skip_build : bool
-        Skip system building in generated scripts.
 
     Returns
     -------
@@ -851,6 +898,9 @@ def submit_daisy_chain(
     ValueError
         If the SLURM account is empty on a preset that requires one
         and neither ``dry_run`` nor ``generate_only`` is set.
+    FileNotFoundError
+        If a replicate has no valid build from ``polyzymd build`` (not
+        checked for ``dry_run``).
     """
     # Load simulation config
     sim_config = SimulationConfig.from_yaml(config_path)
@@ -918,8 +968,16 @@ def submit_daisy_chain(
         config_path=str(Path(config_path).resolve()),
     )
 
+    # Jobs run in a simulation environment without OpenFF, so they cannot
+    # build. Check every replicate before any job is written or submitted.
+    if not dry_run:
+        for replicate in dc_config.replicates:
+            _check_build(
+                sim_config.get_working_directory(replicate), sim_config, config_path, replicate
+            )
+
     # Create submitter and submit
     submitter = DaisyChainSubmitter(
-        sim_config, dc_config, pixi_env=pixi_env, openff_logs=openff_logs, skip_build=skip_build
+        sim_config, dc_config, pixi_env=pixi_env, openff_logs=openff_logs
     )
     return submitter.submit_all()
