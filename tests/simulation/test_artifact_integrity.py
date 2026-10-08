@@ -12,6 +12,7 @@ from polyzymd.simulation.artifact_integrity import (
     MANIFEST_NAME,
     ArtifactIntegrityError,
     _absolute_path_config_hash,
+    assert_rebuild_allowed,
     config_hash,
     publish_build_bundle,
     replicate_lock,
@@ -277,3 +278,40 @@ def test_gromacs_build_manifest_records_the_exported_inputs(tmp_path):
         "path": "gromacs/system.gro",
         "sha256": file_sha256(gromacs / "system.gro", use_cache=False),
     }
+
+
+@pytest.mark.parametrize(
+    "marker", ["gromacs/em.log", "gromacs/eq_01.tpr", "gromacs/prod.cpt", "gromacs/state.cpt"]
+)
+def test_rebuild_is_refused_once_a_gromacs_run_has_started(tmp_path, marker):
+    (tmp_path / "gromacs").mkdir()
+    (tmp_path / marker).write_text("")
+
+    with pytest.raises(ArtifactIntegrityError, match="Refusing to rebuild"):
+        assert_rebuild_allowed(tmp_path)
+
+
+def test_rebuild_is_allowed_over_gromacs_build_outputs(tmp_path):
+    gromacs = tmp_path / "gromacs"
+    gromacs.mkdir()
+    for name in (
+        "system.gro",
+        "system.top",
+        "system_MOL0.itp",
+        "em.mdp",
+        "eq_01_nvt.mdp",
+        "prod.mdp",
+        "run_system_gromacs.sh",
+    ):
+        (gromacs / name).write_text("")
+    (tmp_path / MANIFEST_NAME).write_text("{}")
+    (tmp_path / "progress.json").write_text("{}")
+
+    assert_rebuild_allowed(tmp_path)
+
+
+def test_rebuild_is_refused_once_an_openmm_run_has_started(tmp_path):
+    (tmp_path / "equilibration_0").mkdir()
+
+    with pytest.raises(ArtifactIntegrityError, match="equilibration_0"):
+        assert_rebuild_allowed(tmp_path)
