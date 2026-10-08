@@ -134,6 +134,24 @@ def _whole_study(
             continue
 
 
+def _runs_here(configs: Sequence[Path], labels: Sequence[str], data: dict | None) -> bool:
+    """Return whether any condition has a run directory on this machine, or a config is unreadable."""
+    from polyzymd.analyses.study import with_data_dir
+    from polyzymd.config.schema import SimulationConfig
+
+    data = data or {}
+    for label, config in zip(labels, configs, strict=True):
+        try:
+            found = with_data_dir(
+                SimulationConfig.from_yaml(config), data.get(label, data.get("*"))
+            ).discover_replicate_dirs()
+        except (OSError, ValueError):
+            return True  # the run itself reports the bad config
+        if found:
+            return True
+    return False
+
+
 def _without_commit(report_text: str) -> dict:
     """Return a saved report without the git commit its study record names."""
     import json
@@ -540,7 +558,7 @@ def analyze_command(
     # task, or a quick look. Such a run never replaces the run's report.
     subset = study_path is not None and bool(labels)
     if study_path is not None:
-        requested_output = output_dir
+        requested_output, given_settings = output_dir, setting_overrides
         try:
             (
                 name,
@@ -581,6 +599,26 @@ def analyze_command(
                     f"them; read them with Study.results({run_name!r}, folder=...)",
                     err=True,
                 )
+        if not (recompute or submit or dry_run or is_task or subset or run or given_settings):
+            here = {"*": Path(data_dir).expanduser().resolve()} if data_dir is not None else data
+            from polyzymd.analyses.protocols import ProtocolReport
+            from polyzymd.analyses.results import REPORT_FILE
+
+            stored = Path(output_dir) / REPORT_FILE
+            if stored.is_file() and not _runs_here(configs, labels, here):
+                # A reader of the deposit without its trajectories still sees the result.
+                click.echo(
+                    f"note: no runs of this study are on this machine, so this is the stored "
+                    f"report of {run_name}, not recomputed; polyzymd study locate DIR or --data "
+                    "gives the runs",
+                    err=True,
+                )
+                report = ProtocolReport.model_validate_json(stored.read_text())
+                rendered = _render(report, output_format)
+                click.echo(rendered)
+                if output_path is not None:
+                    Path(output_path).write_text(rendered.rstrip("\n") + "\n")
+                return
     stride = stride or 1
     if study_path is not None and until is None:
         until = study_until
