@@ -1944,12 +1944,6 @@ ANALYSES = {
         _measure_rg_rmsd,
         takes_run=False,
     ),
-    "polymer_rg": ShippedAnalysis(
-        "radius of gyration of each polymer chain, made whole across the box, chain mean or "
-        "per chain (A)",
-        {"selection": None},
-        _measure_polymer_rg,
-    ),
     "rmsf": ShippedAnalysis(
         "per-residue RMS fluctuation about the mean structure, with core and region means (A)",
         {
@@ -2045,6 +2039,12 @@ ANALYSES = {
         "distances between atom pairs, and the fraction of frames below a threshold (A)",
         {"pairs": None, "threshold": 3.5, "use_pbc": True},
         _measure_distances,
+    ),
+    "polymer_rg": ShippedAnalysis(
+        "radius of gyration of each polymer chain, made whole across the box, chain mean or "
+        "per chain (A)",
+        {"selection": None},
+        _measure_polymer_rg,
     ),
 }
 
