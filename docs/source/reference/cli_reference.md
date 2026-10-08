@@ -128,8 +128,10 @@ Simulation phases:
 ```
 
 With polymers, the summary also lists `Count`, `Length` and one
-`Monomer <label>: <percent>` line per monomer. Warnings about the reference
-structure print between `Configuration is valid!` and `Summary:`.
+`Monomer <label>: <percent>` line per monomer. When a file that the config
+names is missing, such as the polymer SDF directory, a `Referenced file
+warnings:` block with one `Warning:` line per file prints between
+`Configuration is valid!` and `Summary:`.
 
 ---
 
@@ -311,8 +313,8 @@ On any failure, execution stops immediately and intermediate files are preserved
 - OpenFF force field defaults are used (rcoulomb=0.9, rvdw=0.9, PME) for 1:1 parity with OpenMM
 - Position restraints are automatically generated for equilibration stages
 - Post-processing creates `prod_nojump.xtc` and `prod_centered.xtc` trajectories
-- For OpenMM, use `polyzymd run` (the default engine) to run on this machine,
-  or `polyzymd submit` to submit self-resubmitting SLURM jobs
+- For OpenMM, use `polyzymd run` with `engine: openmm` in the config (or
+  `--engine openmm`) to run on this machine, or `polyzymd submit` to submit self-resubmitting SLURM jobs
 
 ### Output Files
 

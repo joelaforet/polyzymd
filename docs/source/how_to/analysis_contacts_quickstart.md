@@ -99,7 +99,7 @@ To report a different result, use `--run`:
 | `coverage` (default) | Fraction of measured residues in contact on at least one frame |
 | `mean_contact_fraction` | Mean over residues of each residue's contact fraction |
 | `<type>_contact_fraction` | The same for one polymer residue name `<type>`, for each type in the polymer, such as `SBM` or `EGM` |
-| `<class>_contact_fraction` | Mean contact fraction of the residues of one amino-acid class: `aromatic`, `charged_positive`, `charged_negative`, `polar` or `nonpolar`, for the classes present. A residue name outside the 20 standard amino acids and their protonation variants, such as `SEP`, is in class `unknown`, so it gives `unknown_contact_fraction` |
+| `<class>_contact_fraction` | Mean contact fraction of the residues of one amino-acid class: `aromatic`, `charged_positive`, `charged_negative`, `polar` or `nonpolar`, for the classes present. With `method: distance`, a residue name outside the 20 standard amino acids and their protonation variants, such as `SEP`, is in class `unknown`, so it gives `unknown_contact_fraction`. The SASA and occlusion methods leave out residues without a maximum ASA, such as `SEP`, so they give no `unknown` class |
 | `<region>_contact_fraction` | Mean contact fraction of the residues of one region of `regions` |
 | `occluded_area` | Occlusion only: SASA the polymer removes from the measured residues, in Å² per frame |
 | `occlusion_fraction` | Occlusion only: that area over the residues' SASA with the protein alone, summed over frames |
