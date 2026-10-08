@@ -247,9 +247,9 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
     list of TrendReport
         One :class:`~polyzymd.analyses.protocols.TrendReport` per factor whose
         levels are all numbers or text that reads as a number. A factor with
-        a level in text (YAML reads ``1e-3`` as text), or a replicate value that is not
-        finite, fewer than three levels (two make it a pairwise comparison),
-        or condition means that are all equal, has ``testable=False``, its
+        a level in text (YAML reads ``1e-3`` as text), a condition without
+        partner (``no_partner``), a replicate value that is not finite, fewer
+        than three levels (two make it a pairwise comparison), or condition means that are all equal, has ``testable=False``, its
         ``reason``, and no slope. The list is empty when the report holds labelled results
         (any condition with an ``entry``, such as one value per residue).
 
@@ -296,7 +296,14 @@ def trend_tests(report: Any, factors: Mapping[str, Mapping[str, Any]]) -> list[A
                 levels.append(float(level))
                 means.append(sum(values) / len(values))
         trend = TrendReport(factor=name, conditions=used, n_replicates=n_values)
-        if not numeric:
+        absent = [
+            f"{item.label} has no partner: {item.no_partner}"
+            for item in report.conditions
+            if item.label in used and getattr(item, "no_partner", None)
+        ]
+        if absent:
+            reason = "; ".join(absent)
+        elif not numeric:
             reason = "some levels are text (YAML reads 1e-3 as text; write 1.0e-3)"
         elif bad:
             reason = f"{bad} replicate value{'s are' if bad != 1 else ' is'} not finite"

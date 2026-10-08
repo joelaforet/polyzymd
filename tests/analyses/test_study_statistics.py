@@ -124,6 +124,18 @@ def test_a_factor_written_as_text_is_reported_untestable() -> None:
     assert "write 1.0e-3" in trend.reason
 
 
+def test_a_trend_through_a_condition_without_partner_is_untestable() -> None:
+    """A condition whose partner selection matched no atoms has no measured value to fit."""
+    from polyzymd.analyses.study_statistics import trend_tests
+
+    report = _ThreeConditions()
+    report.conditions[0].no_partner = "polymer_selection 'resname SDS' matched no atoms"
+    factors = {"a": {"sds": 0}, "b": {"sds": 4}, "c": {"sds": 8}}
+    (trend,) = trend_tests(report, factors)
+    assert not trend.testable and trend.p is None
+    assert "a has no partner" in trend.reason and "resname SDS" in trend.reason
+
+
 @pytest.mark.parametrize("levels", [("PEG", "PEG", "SBMA"), (True, False, True), ("PEG", 1.0, 2.0)])
 def test_a_factor_that_is_not_numeric_gets_no_trend(levels: tuple) -> None:
     """A factor such as polymer: PEG or a boolean names a condition; it has no slope to test."""

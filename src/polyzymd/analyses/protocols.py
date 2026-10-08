@@ -90,7 +90,11 @@ class ConditionReport(BaseModel):
     the equilibrated region that pymbar ``detect_equilibration`` finds in the
     production series, as a production frame index from 0 and as simulation
     time. They are diagnostics and change no value. ``entry`` is the label of this row in a
-    labelled result, such as a residue ID, and ``None`` otherwise.
+    labelled result, such as a residue ID, and ``None`` otherwise. ``no_partner``
+    names the partner selection that matched no atoms in this condition, such
+    as the polymer of a control without polymer: its values are 0 by
+    construction, so no comparison with it is tested. It is ``None``, and
+    left out of the JSON, otherwise.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -108,6 +112,14 @@ class ConditionReport(BaseModel):
     n_effective: list[float] = Field(default_factory=list)
     eq_detected_frame: list[int] = Field(default_factory=list)
     eq_detected_ns: list[float] = Field(default_factory=list)
+    no_partner: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _without_empty_no_partner(self, handler: Any) -> dict[str, Any]:
+        data = handler(self)
+        if data.get("no_partner") is None:
+            data.pop("no_partner", None)
+        return data
 
 
 class PairwiseReport(BaseModel):
@@ -116,14 +128,16 @@ class PairwiseReport(BaseModel):
     ``delta`` is ``mean(b) - mean(a)`` and ``cohens_d`` is oriented to match it.
     ``p_adjusted`` of ``None`` means no corrected p value was computed, so
     the row describes a difference rather than deciding it; ``testable`` of
-    ``False`` means a condition has fewer than two replicates. ``family_size``
+    ``False`` means a condition has fewer than two replicates, both have one
+    value in every replicate, or, with the ``reason``, a condition has no
+    partner (see ``ConditionReport.no_partner``). ``family_size``
     is the number of tests in the Benjamini-Hochberg family this row was
     corrected in, one family per outcome, and ``None`` when that is not known
     or the row was not tested. ``entry`` is the label compared in a labelled
     result, such as a residue ID, and ``None`` otherwise. ``a`` is the control.
     ``stratum`` maps each ``within`` factor to its value when the conditions
     are compared with the control of their stratum; without ``within`` it is
-    ``None`` and left out of the JSON.
+    ``None`` and left out of the JSON, as ``reason`` is when it is ``None``.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -144,12 +158,14 @@ class PairwiseReport(BaseModel):
     direction: str = "unchanged"
     significant: bool = False
     testable: bool = True
+    reason: str | None = None
 
     @model_serializer(mode="wrap")
     def _without_empty_stratum(self, handler: Any) -> dict[str, Any]:
         data = handler(self)
-        if data.get("stratum") is None:
-            data.pop("stratum", None)
+        for key in ("stratum", "reason"):
+            if data.get(key) is None:
+                data.pop(key, None)
         return data
 
 
@@ -545,24 +561,31 @@ def _first_universe(study: Any, empty: dict[tuple[str, int], list[str]], analysi
     )
 
 
-def _zero_partner_warning(
-    empty: dict[tuple[str, int], list[str]], analysis: str, measured: str
+def _no_partner(
+    values: Any, empty: dict[tuple[str, int], list[str]], analysis: str, measured: str
 ) -> list[str]:
-    """Return a warning naming the replicates whose partner selection matched no atoms.
+    """Mark the conditions whose partner selection matched no atoms, and return a warning.
 
-    Those replicates, such as a control without polymer, are measured with
-    no partner, so their ``measured`` is 0 rather than left out.
+    Those replicates, such as a control without polymer, keep their rows
+    with ``measured`` 0. That 0 is not a measurement, so ``values`` records
+    each such condition in ``no_partner`` and no comparison with it is tested.
     """
     if not empty:
         return []
     by_condition: dict[str, list[str]] = {}
     for (label, index), _ in sorted(empty.items()):
         by_condition.setdefault(label, []).append(str(index))
+    for label, indices in by_condition.items():
+        names = sorted({n for (other, _), found in empty.items() if other == label for n in found})
+        values.no_partner[label] = (
+            f"{', '.join(names)} matched no atoms in replicate {', '.join(indices)}"
+        )
     where = "; ".join(f"{label} replicate {', '.join(i)}" for label, i in by_condition.items())
     names = sorted({name for names in empty.values() for name in names})
     return [
         f"{analysis}: {', '.join(names)} matched no atoms in {where}, so {measured} there is 0 "
-        "(none of those atoms to touch). Check the selection if that condition has them."
+        "(none of those atoms to touch) and no comparison with it is tested. Check the "
+        "selection if that condition has them."
     ]
 
 
@@ -1020,7 +1043,7 @@ def _measure_hydrogen_bonds(study: Any, settings: dict, request: Request) -> Mea
             **options,
         )
     values.metric = run
-    warnings = _zero_partner_warning(no_partner, "hydrogen_bonds", "the hydrogen-bond count")
+    warnings = _no_partner(values, no_partner, "hydrogen_bonds", "the hydrogen-bond count")
     if part in life:
         empty = _undefined(values, skipped)
         if empty:
@@ -1536,7 +1559,7 @@ def _measure_contacts(study: Any, settings: dict, request: Request) -> Measured:
             "n_events": (None, (0.0, None)),
             "censored_fraction": (None, (0.0, 1.0)),
         }[part]
-        warnings = _zero_partner_warning(no_polymer, "contacts", "the event count")
+        warnings = _no_partner(values, no_polymer, "contacts", "the event count")
         no_events = _undefined(values, skipped)
         if no_events:
             warnings.append(
@@ -1612,7 +1635,7 @@ def _measure_contacts(study: Any, settings: dict, request: Request) -> Measured:
     if [*totals, *residue_runs] != fraction_runs:
         raise RuntimeError("contacts: the planned results differ from the computed ones.")
     values = residue_runs[run] if run in residue_runs else totals[run]
-    warnings = _zero_partner_warning(no_polymer, "contacts", "contact")
+    warnings = _no_partner(values, no_polymer, "contacts", "contact")
     if unmeasured:
         warnings.append(
             f"contacts: {len(unmeasured)} residues of the protein selection have no maximum "
@@ -2067,13 +2090,15 @@ def _verdict(
         if not pair.testable:
             few = min(counts.get(pair.a, 0), counts.get(pair.b, 0)) < 2
             why = (
-                "needs at least two replicates per condition"
+                f", as {pair.reason}"
+                if pair.reason
+                else " needs at least two replicates per condition"
                 if few
-                else "has the same value in every replicate of both conditions, so no "
+                else " has the same value in every replicate of both conditions, so no "
                 "variance to test"
             )
             sentences.append(
-                f"{VERDICT_NOT_TESTABLE}: {metric} for {pair.a} vs {pair.b} {why} ({n_text})"
+                f"{VERDICT_NOT_TESTABLE}: {metric} for {pair.a} vs {pair.b}{why} ({n_text})"
             )
         elif pair.p_adjusted is None:
             sentences.append(

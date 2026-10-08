@@ -54,6 +54,7 @@ rows the JSON form holds; every one of them is kept there.
 | `n_effective` | `list[float]` | The effective sample size of each replicate's series, alongside `statistical_inefficiency`. |
 | `eq_detected_frame` | `list[int]` | Start of the equilibrated region that pymbar `detect_equilibration` finds in each checked replicate's production series, as a production frame index from 0. A diagnostic: it changes no value. |
 | `eq_detected_ns` | `list[float]` | The same start as simulation time in ns. |
+| `no_partner` | `str \| None` | The partner selection that matched no atoms in this condition, such as `polymer_selection` in a control without polymer, with the replicates. Its values are 0 by construction, so no comparison or trend with it is tested. Left out of the JSON otherwise. |
 
 ## PairwiseReport
 
@@ -74,7 +75,8 @@ rows the JSON form holds; every one of them is kept there.
 | `hedges_g` | `float \| None` | `cohens_d` with the Hedges small-sample correction, oriented like `cohens_d`. |
 | `direction` | `str` | `increased` or `decreased` for a significant row, otherwise `no significant change`. |
 | `significant` | `bool` | Whether `p_adjusted` is at most 0.05. Always `False` when `testable` is `False`. |
-| `testable` | `bool` | `False` when a condition has fewer than two replicates, or both conditions have the same value in every replicate, which makes the test undefined rather than non-significant. |
+| `testable` | `bool` | `False` when a condition has fewer than two replicates, or both conditions have the same value in every replicate, which makes the test undefined rather than non-significant, or when a condition has no partner (see `no_partner`). |
+| `reason` | `str \| None` | Why the row is not testable when a condition has no partner. Left out of the JSON otherwise. |
 
 ## TrendReport
 
@@ -116,7 +118,7 @@ branch on them without parsing the rest.
 | `no significant difference` | the test ran and `p_adjusted` did not clear alpha |
 | `no test recorded` | the row has no multiplicity-corrected p value, so it describes a difference without deciding it |
 | `changed` | the difference is significant but the two means are equal at the stored precision |
-| `not testable` | a condition has fewer than two replicates, so no test exists |
+| `not testable` | a condition has fewer than two replicates, has no variance in either condition, or has no partner, so no test exists |
 
 A single-condition report has no comparison, and its one sentence states the
 label, the metric, the mean with its unit, the interval and the replicate
