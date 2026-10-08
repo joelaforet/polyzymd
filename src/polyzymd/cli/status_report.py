@@ -135,6 +135,7 @@ VERDICT_DEAD = "dead"
 VERDICT_STOPPED = "stopped"
 VERDICT_NOT_STARTED = "not_started"
 VERDICT_NOT_FOUND = "not_found"
+VERDICT_CORRUPT = "corrupt"
 VERDICT_ORDER = (
     VERDICT_COMPLETED,
     VERDICT_RUNNING,
@@ -143,6 +144,7 @@ VERDICT_ORDER = (
     VERDICT_STOPPED,
     VERDICT_NOT_STARTED,
     VERDICT_NOT_FOUND,
+    VERDICT_CORRUPT,
 )
 
 
@@ -455,7 +457,6 @@ def build_system_report(
     jobs: Sequence[SlurmJob] | None,
     now: datetime | None = None,
     job_name_fn: Callable[[object, int], str] | None = None,
-    save_progress_fn: Callable[[Path, object], object] | None = None,
 ) -> SystemReport:
     """Assemble a :class:`SystemReport` for one loaded config.
 
@@ -474,7 +475,7 @@ def build_system_report(
         A job belongs to a replicate as decided by
         :func:`~polyzymd.workflow.daisy_chain.job_belongs_to_run`.
     """
-    from polyzymd.simulation.progress import SimulationStatus
+    from polyzymd.simulation.progress import SimulationStatus, unreadable_progress_reason
 
     if now is None:
         now = datetime.now(timezone.utc)
@@ -520,9 +521,24 @@ def build_system_report(
             continue
 
         engine_dir = engine_inst.resolve_engine_working_directory(rep_path)
+        corrupt = unreadable_progress_reason(engine_dir)
+        if corrupt is not None:
+            replicates.append(
+                ReplicateReport(
+                    replicate=rep_num,
+                    directory=str(rep_path),
+                    progress_status=VERDICT_CORRUPT,
+                    completed_ns=0.0,
+                    total_ns=total_ns,
+                    fraction=0.0,
+                    verdict=VERDICT_CORRUPT,
+                    jobs=rep_jobs,
+                    last_error=corrupt,
+                    note="slurm unavailable" if jobs is None else None,
+                )
+            )
+            continue
         progress = engine_inst.load_or_scan_progress(engine_dir, rep_num)
-        if save_progress_fn is not None:
-            save_progress_fn(engine_dir, progress)
 
         status_val = progress.status
         status_str = status_val.value if hasattr(status_val, "value") else str(status_val)
@@ -647,7 +663,9 @@ def render_replicate_line(rep: ReplicateReport, label_width: int) -> str:
     elif rep.verdict == VERDICT_NOT_FOUND:
         fields.append("no directory in scratch")
     else:
-        if rep.note:
+        if rep.jobs:
+            fields.extend(_fmt_job(j) for j in rep.jobs)
+        elif rep.note:
             fields.append(rep.note)
         else:
             fields.append("no job")

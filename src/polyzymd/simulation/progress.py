@@ -459,6 +459,31 @@ def load_progress(working_dir: str | Path) -> SimulationProgress | None:
         return None
 
 
+def unreadable_progress_reason(working_dir: str | Path) -> str | None:
+    """Say why ``progress.json`` in *working_dir* cannot be read.
+
+    Parameters
+    ----------
+    working_dir : str or Path
+        Simulation working directory.
+
+    Returns
+    -------
+    str or None
+        A short reason when the file exists but is not a valid progress
+        record (empty, truncated or of the wrong shape), otherwise ``None``.
+    """
+    path = _progress_path(Path(working_dir))
+    if not path.exists():
+        return None
+    try:
+        SimulationProgress.model_validate(json.loads(path.read_text()))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
+        reason = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+        return f"{path} is unreadable ({reason})"
+    return None
+
+
 def save_progress(working_dir: str | Path, progress: SimulationProgress) -> Path:
     """Save progress to ``progress.json`` atomically.
 
