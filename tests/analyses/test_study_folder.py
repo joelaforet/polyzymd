@@ -190,7 +190,7 @@ class TestData:
         root = _study(tmp_path, sources, git=False)
         before = {c.label: c.config_hash for c in pz.Study(root)}
         shutil.move(tmp_path / "scratch", tmp_path / "moved")
-        with pytest.raises(ProtocolError, match="no run directory"):
+        with pytest.raises(ProtocolError, match="no runs found"):
             pz.Study(root)["Polymer"]
         (root / "data.local.yaml").write_text(
             f"No polymer: {tmp_path / 'moved' / 'no_polymer'}\nPolymer: ../moved/polymer\n"

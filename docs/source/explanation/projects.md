@@ -57,12 +57,12 @@ conditions:
 
 ```yaml
 conditions:                    # control first
-  No polymer 300 K: {config: conditions/none_300, factors: {temperature_K: 300}}
-  No polymer 330 K: {config: conditions/none_330, factors: {temperature_K: 330}}
-  No polymer 360 K: {config: conditions/none_360, factors: {temperature_K: 360}}
-  SBMA 300 K: {config: conditions/sbma_300, factors: {temperature_K: 300, polymer: SBMA}}
-  SBMA 330 K: {config: conditions/sbma_330, factors: {temperature_K: 330, polymer: SBMA}}
-  SBMA 360 K: {config: conditions/sbma_360, factors: {temperature_K: 360, polymer: SBMA}}
+  No polymer 300 K: {config: conditions/no_polymer_300_k, factors: {temperature_K: 300}}
+  No polymer 330 K: {config: conditions/no_polymer_330_k, factors: {temperature_K: 330}}
+  No polymer 360 K: {config: conditions/no_polymer_360_k, factors: {temperature_K: 360}}
+  SBMA 300 K: {config: conditions/sbma_300_k, factors: {temperature_K: 300, polymer: SBMA}}
+  SBMA 330 K: {config: conditions/sbma_330_k, factors: {temperature_K: 330, polymer: SBMA}}
+  SBMA 360 K: {config: conditions/sbma_360_k, factors: {temperature_K: 360, polymer: SBMA}}
 ```
 
 By default, PolyzyMD compares each condition with the first condition, the
