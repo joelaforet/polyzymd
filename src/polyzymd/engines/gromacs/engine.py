@@ -109,6 +109,9 @@ class GromacsEngine(SimulationEngine):
     def prepare_submission(self, request: EngineSubmitRequest) -> Path:
         """Prepare scheduler artifacts for a GROMACS job.
 
+        The script is written to ``extra["script_path"]`` when given, and to
+        ``daisy_chain_scripts/run_rep<N>.sh`` otherwise.
+
         Parameters
         ----------
         request : EngineSubmitRequest
@@ -190,9 +193,12 @@ class GromacsEngine(SimulationEngine):
                 request.working_dir,
             )
 
-        script_dir = request.working_dir / "daisy_chain_scripts"
-        script_dir.mkdir(parents=True, exist_ok=True)
-        script_path = script_dir / f"run_rep{request.replicate}.sh"
+        script_path = Path(
+            request.extra.get(
+                "script_path",
+                request.working_dir / "daisy_chain_scripts" / f"run_rep{request.replicate}.sh",
+            )
+        )
 
         effective_slurm = self._resolve_slurm_config(request.slurm_config)
         effective_mdrun_flags = self._resolve_mdrun_flags(effective_slurm)

@@ -325,6 +325,9 @@ pixi run -e build polyzymd recover \
     --email you@university.edu
 ```
 
+The job script is written to `recovery_scripts/recover_rep<N>.sh`. The
+chain's own `daisy_chain_scripts/run_rep<N>.sh` is left as it was.
+
 ### How checkpoint resume works
 
 | Stage | Checkpoint | Resume behavior |
@@ -348,6 +351,8 @@ pixi run -e build polyzymd recover \
     --submit \
     --dry-run
 ```
+
+This prints the script path and the SLURM settings, and writes nothing.
 
 ---
 

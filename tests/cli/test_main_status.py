@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from polyzymd.cli.colors import TerminalColorSupport, set_color_support
@@ -859,3 +860,100 @@ class TestStatusCli:
         assert "interrupted" in result.output
         assert "need attention" in result.output
         assert "All 1 replicates completed" not in result.output
+
+
+def _write_run_without_progress(rep_dir: Path) -> None:
+    """Write an OpenMM run with a topology and one trajectory but no progress.json."""
+    import struct
+
+    segment = rep_dir / "production_0"
+    segment.mkdir(parents=True)
+    (rep_dir / "solvated_system.pdb").write_text("ATOM\nEND\n")
+    # A DCD header followed by frame data, so the file counts as holding frames.
+    header = struct.pack("<i", 84) + bytes(88) + struct.pack("<i", 0)
+    (segment / "production_0_trajectory.dcd").write_bytes(header + bytes(256))
+
+
+def _snapshot(directory: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(directory)): path.read_bytes()
+        for path in sorted(directory.rglob("*"))
+        if path.is_file()
+    }
+
+
+class TestStatusWritesNothing:
+    """``status`` and ``check-progress`` never create a progress record from a scan."""
+
+    def setup_method(self):
+        set_color_support(TerminalColorSupport.NONE)
+
+    def _run(self, tmp_path: Path, args: list[str]) -> tuple[Path, dict, object]:
+        scratch = tmp_path / "scratch"
+        rep_dir = scratch / "fnIII_apo_none_100ns_310K_run1"
+        _write_run_without_progress(rep_dir)
+        before = _snapshot(scratch)
+
+        mock_cfg = _mock_sim_config(scratch)
+        mock_cfg.discover_replicate_dirs.return_value = [(1, rep_dir)]
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("name: test\n")
+
+        runner = CliRunner()
+        with patch("polyzymd.config.schema.SimulationConfig.from_yaml", return_value=mock_cfg):
+            result = runner.invoke(cli, [args[0], "-c", str(config_path), *args[1:]])
+        return rep_dir, before, result
+
+    def _assert_unchanged_and_readable(self, rep_dir: Path, before: dict) -> None:
+        from polyzymd.engines.openmm.engine import OpenMMEngine
+
+        assert _snapshot(rep_dir.parent) == before
+        trajectories, _status, excluded, _empty = OpenMMEngine._find_openmm_trajectories(rep_dir)
+        assert [path.parent.name for path in trajectories] == ["production_0"]
+        assert excluded == []
+
+    def test_table_status_leaves_run_without_progress_unchanged(self, tmp_path):
+        rep_dir, before, result = self._run(tmp_path, ["status"])
+
+        assert result.exit_code == 0, result.output
+        self._assert_unchanged_and_readable(rep_dir, before)
+
+    def test_agent_status_leaves_run_without_progress_unchanged(self, tmp_path):
+        rep_dir, before, result = self._run(tmp_path, ["status", "--format", "agent", "--no-slurm"])
+
+        assert result.exit_code == 0, result.output
+        self._assert_unchanged_and_readable(rep_dir, before)
+
+    def test_check_progress_does_not_create_progress_from_a_scan(self, tmp_path):
+        rep_dir, before, result = self._run(tmp_path, ["check-progress", "-r", "1"])
+
+        assert result.exit_code in (0, 1), result.output
+        self._assert_unchanged_and_readable(rep_dir, before)
+
+
+@pytest.mark.parametrize("content", ["", '{"segments": [', "[]"])
+@pytest.mark.parametrize("output_format", ["table", "agent", "json"])
+def test_status_reports_an_unreadable_progress_record_and_keeps_it(
+    tmp_path, content, output_format
+):
+    set_color_support(TerminalColorSupport.NONE)
+    scratch = tmp_path / "scratch"
+    rep_dir = scratch / "fnIII_apo_none_100ns_310K_run1"
+    _write_run_without_progress(rep_dir)
+    (rep_dir / "progress.json").write_text(content)
+    before = _snapshot(scratch)
+
+    mock_cfg = _mock_sim_config(scratch)
+    mock_cfg.discover_replicate_dirs.return_value = [(1, rep_dir)]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("name: test\n")
+
+    with patch("polyzymd.config.schema.SimulationConfig.from_yaml", return_value=mock_cfg):
+        result = CliRunner().invoke(
+            cli, ["status", "-c", str(config_path), "--format", output_format, "--no-slurm"]
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "corrupt" in result.output.lower()
+    assert "progress.json" in result.output
+    assert _snapshot(scratch) == before

@@ -144,6 +144,7 @@ class TestCancelCommand:
     def test_marker_is_written_even_when_no_job_is_queued(self, tmp_path):
         """A chain with nothing in the queue can still be stopped in advance."""
         working_dir = tmp_path / "run_1"
+        working_dir.mkdir()
         config_path, sim_config = _config_and_mock(tmp_path, lambda r: working_dir)
 
         result, _, cancel_jobs = _invoke(config_path, sim_config, ["-r", "1"], job_ids=())
@@ -155,6 +156,7 @@ class TestCancelCommand:
 
     def test_stop_only_leaves_the_running_job_alone(self, tmp_path):
         working_dir = tmp_path / "run_1"
+        working_dir.mkdir()
         config_path, sim_config = _config_and_mock(tmp_path, lambda r: working_dir)
 
         result, lookup, cancel_jobs = _invoke(config_path, sim_config, ["-r", "1", "--stop-only"])
@@ -340,3 +342,19 @@ class TestCancelSlurmJobs:
         completed = MagicMock(returncode=1, stdout="", stderr="Invalid job id")
         with patch.object(daisy_chain.subprocess, "run", return_value=completed):
             assert daisy_chain.cancel_slurm_jobs(["1"]) == []
+
+
+class TestCancelNeverRun:
+    """A run that never started and has no job leaves nothing to cancel."""
+
+    def test_writes_nothing_when_no_folder_and_no_job(self, tmp_path):
+        working_dir = tmp_path / "scratch" / "run_1"
+        config_path, sim_config = _config_and_mock(tmp_path, lambda r: working_dir)
+
+        result, _, cancel_jobs = _invoke(config_path, sim_config, ["-r", "1"], job_ids=())
+
+        assert result.exit_code == 0, result.output
+        assert not working_dir.exists()
+        assert not (tmp_path / "scratch").exists()
+        assert "nothing to cancel" in result.output
+        cancel_jobs.assert_not_called()
