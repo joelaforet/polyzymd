@@ -398,8 +398,12 @@ class Condition:
         if not chosen or missing:
             where = self.config.output.effective_scratch_directory
             raise ProtocolError(
-                f"Condition {label!r}: replicates {missing or chosen} have no run directory "
-                f"under {where}; found {found}.",
+                f"Condition {label!r}: "
+                + (
+                    f"replicates {missing} have no run directory under {where}; found {found}."
+                    if missing
+                    else f"no runs found under {where}."
+                ),
                 hint="Pass replicates that exist on disk, run the simulations first, or say "
                 "where the runs are with data.local.yaml, polyzymd study locate DIR or --data.",
             )

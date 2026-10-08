@@ -228,6 +228,20 @@ directory of the config. Do one of these:
 - If the replicate folders are in another place, name the place in
   `data.local.yaml`, with `polyzymd study locate DIR`, or with `--data`.
 
+### `no runs found under ...`
+
+The condition has no replicate folder under the scratch directory of its
+config, for example a condition added with `polyzymd study add-condition --new`
+that is not simulated yet. With `--study`, the report holds the other
+conditions, marks itself `partial`, and a `problem:` line names the condition
+left out. Run its simulations, or name the place of its runs as above.
+
+When no condition of the study has runs on this machine and a stored report
+exists, `analyze --study` exits 2 with `error: no runs of study ... are on this
+machine.` It never prints the stored values as its result. Read them with
+`pz.Study("study.yaml").results(run)`, or give the runs with
+`polyzymd study locate DIR --verify` to analyse again.
+
 ### `the control ... has no replicate where every selection matches atoms`
 
 A selection of the analysis matched no atoms in any replicate of the control,
