@@ -227,17 +227,19 @@ Each analysis prints one line per condition, then one comparison line,
 `Water vs SBMA`. The comparison gives the difference of the means (`delta`)
 with its 95 % interval, the p value of Welch's t test, the p value after the
 {term}`Benjamini-Hochberg` correction (`p_adj`) and the effect size `d`. The
-last word says whether the difference is significant.
+last word says whether the difference is significant, or `not_testable` when
+no test can be made.
 
 - **rg and rmsf.** The radius of gyration and the fluctuation of Trp-cage
   show no significant difference here.
 - **contacts.** `coverage` is the fraction of protein residues that the
   polymer touches on at least one frame. In this run, the chains in `SBMA`
   touch a few percent of the residues in each replicate. `Water` has no
-  polymer, so its coverage is 0.
+  polymer, so its coverage is 0 and the comparison is `not_testable`.
 - **hydrogen_bonds.** In this run, the chains in `SBMA` form about one
   hydrogen bond with the protein per frame. In a run this short, one
-  replicate can show 0.
+  replicate can show 0. As for contacts, `Water` has no polymer, so the
+  comparison is `not_testable`.
 
 Read every `warning:` line. Each says what limits the result:
 
@@ -245,8 +247,8 @@ Read every `warning:` line. Each says what limits the result:
   value is 0 by definition. That 0 is not a measurement, so the comparison
   with `Water` is `not testable`. The warning asks you to check that this is
   expected. Here it is.
-- `the same ... in every replicate` says that `Water` has no variance. The
-  test then has little power, and the verdict says so.
+- `the same ... in every replicate` says that `Water` has no variance, so it
+  has no interval.
 - `extends past the bounds` says that a t interval does not suit the values,
   such as a fraction close to 0.
 - `fewer than 20 effective samples` comes from the four frames of each

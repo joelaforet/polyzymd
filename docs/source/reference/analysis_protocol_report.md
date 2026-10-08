@@ -54,7 +54,7 @@ rows the JSON form holds; every one of them is kept there.
 | `n_effective` | `list[float]` | The effective sample size of each replicate's series, alongside `statistical_inefficiency`. |
 | `eq_detected_frame` | `list[int]` | Start of the equilibrated region that pymbar `detect_equilibration` finds in each checked replicate's production series, as a production frame index from 0. A diagnostic: it changes no value. |
 | `eq_detected_ns` | `list[float]` | The same start as simulation time in ns. |
-| `no_partner` | `str \| None` | The partner selection that matched no atoms in this condition, such as `polymer_selection` in a control without polymer, with the replicates. Its values are 0 by construction, so no comparison or trend with it is tested. Left out of the JSON otherwise. |
+| `no_partner` | `str \| None` | The partner selection that matched no atoms in this condition, such as `polymer_selection` in a control without polymer, with the replicates. Its values are 0 by construction, so no comparison with it is tested, and a trend leaves it out. If the selection matches no atoms in even one replicate, the whole condition has no partner, and its other replicates are not compared either. Left out of the JSON otherwise. |
 
 ## PairwiseReport
 
@@ -92,7 +92,7 @@ rows the JSON form holds; every one of them is kept there.
 | `r_squared` | `float \| None` | Coefficient of determination of the fit. |
 | `significant` | `bool` | Whether `p_adjusted` is at most 0.05. |
 | `testable` | `bool` | `False` when a level is a number written as text (YAML reads `1e-3` as text), a replicate value is not finite, there are fewer than three factor levels, or the condition means all agree. |
-| `reason` | `str \| None` | Why the trend is not testable. |
+| `reason` | `str \| None` | Why the trend is not testable, and the conditions without partner (`no_partner`) left out of the fit, which a testable trend also names. |
 
 ## ProtocolProvenance
 

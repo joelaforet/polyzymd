@@ -181,7 +181,9 @@ class TrendReport(BaseModel):
     numeric factors (Benjamini-Hochberg). ``testable`` is ``False``, with the
     ``reason``, when a level is text such as ``"1e-3"``, a replicate value is not
     finite, there are fewer than three factor levels (two levels make the
-    trend a pairwise comparison), or the condition means all agree.
+    trend a pairwise comparison), or the condition means all agree. A
+    condition without partner (``ConditionReport.no_partner``) is no point
+    of the fit, and ``reason`` names it, also for a testable trend.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="strings")
@@ -2035,7 +2037,7 @@ def _difference_ci(
 def _trend_line(trend: TrendReport) -> str:
     """One report line per trend test."""
     if not trend.testable:
-        head = "no trend" if trend.reason == FLAT_TREND else VERDICT_NOT_TESTABLE
+        head = "no trend" if trend.reason.startswith(FLAT_TREND) else VERDICT_NOT_TESTABLE
         return (
             f"trend {trend.factor}  {head}: {trend.reason}"
             f"  condition_means {len(trend.conditions)}  replicates {trend.n_replicates}"
@@ -2044,6 +2046,7 @@ def _trend_line(trend: TrendReport) -> str:
         f"trend {trend.factor}  slope {_num(trend.slope)}  ci95 {_interval(trend.slope_ci95)}"
         f"  p {_num(trend.p)}  p_adj {_num(trend.p_adjusted)}  r2 {_num(trend.r_squared)}"
         f"  condition_means {len(trend.conditions)}  replicates {trend.n_replicates}"
+        + (f"  note {trend.reason}" if trend.reason else "")
     )
 
 
