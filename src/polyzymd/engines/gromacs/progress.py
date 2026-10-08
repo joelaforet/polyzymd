@@ -41,7 +41,8 @@ def scan_gromacs_progress(
 
     - Equilibration: presence of ``eq_NN.gro`` files
     - Production: the step of the last checkpoint that ``prod.log``
-      records, 0 without ``state.cpt``. The job script restarts production
+      records, 0 without its checkpoint file (``state.cpt``, or ``prod.cpt``
+      of a local run). The job script restarts production
       from ``state.cpt``, or from step 0 without it, so steps after the last
       checkpoint are not counted: a restart runs them again.
     - Completion: the last checkpoint is at the requested step count.
@@ -73,7 +74,8 @@ def scan_gromacs_progress(
 
     log_info = _parse_gromacs_log(working_dir / "prod.log")
     steps_completed = 0
-    if (working_dir / "state.cpt").is_file():
+    # The SLURM job script writes state.cpt, a local `polyzymd run` prod.cpt.
+    if any((working_dir / name).is_file() for name in ("state.cpt", "prod.cpt")):
         steps_completed = int(log_info["checkpoint_step"])
     nsteps_requested = int(log_info["nsteps_requested"])
 

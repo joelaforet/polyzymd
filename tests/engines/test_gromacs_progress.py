@@ -406,3 +406,11 @@ def test_a_production_restart_from_step_0_replaces_the_lost_segments(tmp_path: P
         (20000, SegmentStatus.COMPLETED)
     ]
     assert progress.status == SimulationStatus.COMPLETED
+
+
+def test_a_local_run_counts_up_to_its_prod_cpt(tmp_path: Path) -> None:
+    """A local `polyzymd run` writes prod.cpt instead of state.cpt; its checkpoints count."""
+    (tmp_path / "prod.cpt").write_text("cpt")
+    (tmp_path / "prod.log").write_text(_FINISHED_LOG)
+
+    assert scan_gromacs_progress(tmp_path).status == SimulationStatus.COMPLETED
