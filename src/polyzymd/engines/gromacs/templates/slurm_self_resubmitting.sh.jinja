@@ -25,6 +25,9 @@
 # Enable strict error handling
 set -e
 
+# Packages in ~/.local must not shadow the pixi environment.
+export PYTHONNOUSERSITE=1
+
 # Activate pixi environment
 eval "$(pixi shell-hook -e {{ pixi_env | shell_quote }} --manifest-path {{ manifest_path | shell_quote }})"
 
