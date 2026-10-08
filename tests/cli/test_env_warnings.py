@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from click.testing import CliRunner
@@ -23,6 +24,7 @@ def _make_submission_config(engine: str = "openmm") -> SimpleNamespace:
         output=SimpleNamespace(
             get_job_scripts_directory=lambda: "/tmp/polyzymd-job-scripts",
             slurm_logs_subdir="slurm_logs",
+            get_slurm_logs_directory=lambda: Path("/tmp/polyzymd-slurm-logs"),
         ),
         require_buildable=lambda engine=None, inputs=True: None,
     )

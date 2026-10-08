@@ -148,6 +148,63 @@ class TestRecoverStatusReport:
         assert result.exit_code == 0
         assert "nothing to recover" in result.output.lower()
 
+    @pytest.mark.parametrize(
+        ("extra", "expected"),
+        [
+            ([], "--submit --preset PRESET\n"),
+            (
+                ["--preset", "blanca-shirts", "--engine", "openmm"],
+                "--submit --preset blanca-shirts --engine openmm",
+            ),
+        ],
+    )
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_resume_hint_is_a_runnable_command(
+        self, mock_from_yaml, mock_load, mock_save, extra, expected, tmp_path
+    ):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+        mock_from_yaml.return_value = _mock_sim_config(working_dir)
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        result = CliRunner().invoke(cli, ["recover", "-c", str(config_file), "-r", "1", *extra])
+
+        assert result.exit_code == 0, result.output
+        assert f"polyzymd recover -c {config_file} -r 1 {expected}" in result.output
+        assert "<preset>" not in result.output
+        assert "[engine=" not in result.output
+
+    @patch("polyzymd.simulation.progress.save_progress")
+    @patch("polyzymd.simulation.progress.load_or_scan_progress")
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    def test_submit_refused_while_stop_file_present(
+        self, mock_from_yaml, mock_load, mock_save, tmp_path
+    ):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: test")
+        working_dir = tmp_path / "work"
+        working_dir.mkdir()
+        (working_dir / "STOP").write_text("stopped\n")
+        mock_from_yaml.return_value = _mock_sim_config(working_dir)
+        mock_load.return_value = _mock_progress(
+            total_steps=10000000, completed_steps=5000000, n_segments=1
+        )
+
+        with patch("subprocess.run") as sbatch:
+            result = CliRunner().invoke(
+                cli, ["recover", "-c", str(config_file), "-r", "1", "--submit"]
+            )
+
+        assert result.exit_code == 1
+        assert f"polyzymd cancel -c {config_file} -r 1 --resume" in result.output
+        sbatch.assert_not_called()
+
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
     def test_missing_working_dir_exits_with_error(self, mock_from_yaml, tmp_path):
         """recover should fail when working directory does not exist."""
@@ -331,6 +388,7 @@ def _mock_sim_config_for_submit(working_dir: Path):
     mock.simulation_phases.production.duration = 20.0
     mock.simulation_phases.production.samples = 250
     mock.output.slurm_logs_subdir = "slurm_logs"
+    mock.output.get_slurm_logs_directory.return_value = working_dir.parent / "slurm_logs"
     mock.enzyme.name = "CALB"
     mock.thermodynamics.temperature = 310
     mock.polymers = None  # no polymer info
@@ -1389,7 +1447,10 @@ class TestUpdateGromacsProgressCmd:
 
         working_dir = tmp_path / "gromacs"
         working_dir.mkdir()
-        (working_dir / "prod.log").write_text("nsteps = 5000\n1000 2.0\n")
+        (working_dir / "prod.log").write_text(
+            "nsteps = 5000\n1000 2.0\nWriting checkpoint, step 1000 at Thu Oct  8 00:23:40 2026\n"
+        )
+        (working_dir / "state.cpt").write_text("cpt")
 
         runner = CliRunner()
         result = runner.invoke(
@@ -1738,6 +1799,43 @@ class TestRunSegmentHardKillGuard:
         assert "empty or truncated" in result.output
         assert initial.called
         assert not continuation.called
+
+    def test_segment_killed_seconds_ago_is_resumed(self, tmp_path):
+        """A fresh checkpoint left by a killed job does not stop the chain.
+
+        The successor holds the replicate lock, so no other process runs the
+        segment, however recently its checkpoint was written.
+        """
+        import os
+        import time
+
+        from polyzymd.simulation.progress import (
+            SegmentRecord,
+            SegmentStatus,
+            SimulationProgress,
+            save_progress,
+        )
+
+        working_dir = tmp_path / "run_1"
+        seg_dir = _write_hard_killed_segment(working_dir)
+        (seg_dir / "restart_state.xml").write_text("<State/>")
+        now = time.time()
+        os.utime(seg_dir / "production_0_checkpoint.chk", (now, now))
+        save_progress(
+            working_dir,
+            SimulationProgress(
+                total_steps_requested=5_000_000,
+                total_samples_requested=250,
+                timestep_fs=2.0,
+                segments=[SegmentRecord(index=0, status=SegmentStatus.RUNNING)],
+            ),
+        )
+
+        result, initial, continuation = self._invoke(tmp_path, working_dir)
+
+        assert result.exit_code == 0, result.output
+        assert continuation.called
+        assert seg_dir.exists()
 
 
 class TestRunSegmentLockRelease:

@@ -362,7 +362,7 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--output-dir` | - | No | auto | Directory for job scripts |
-| `--time-limit` | - | No | from preset | Override SLURM time limit: minutes, M:SS, H:MM:SS or D-H:MM:SS; other values are refused |
+| `--time-limit` | - | No | from preset | Override SLURM time limit: minutes, M:SS, H:MM:SS or D-H:MM:SS; other values are refused. OpenMM refuses 5 minutes or less: SLURM tells the job to stop 5 minutes before the limit. |
 | `--memory` | - | No | 3G | Override SLURM memory allocation |
 | `--account` | - | No | - | Override SLURM account / allocation ID |
 | `--partition` | - | No | from preset | Override SLURM partition |
@@ -401,7 +401,7 @@ polyzymd submit -c config.yaml -r 1-5 --preset aa100 --generate-only
 polyzymd submit -c config.yaml -r 1-5 --preset aa100 --email you@university.edu
 
 # Quick test with short time limit
-polyzymd submit -c config.yaml -r 1 --preset testing --time-limit 0:05:00
+polyzymd submit -c config.yaml -r 1 --preset testing --time-limit 0:10:00
 
 # Custom directories for HPC
 polyzymd submit -c config.yaml -r 1-3 --preset aa100 \
@@ -667,7 +667,8 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | `RUNNING` | A SLURM job that works in this replicate's run directory is in state `R` (or completing/configuring) |
 | `QUEUED` | A matching job exists but is pending; the reason is shown in parentheses |
 | `DEAD` | Work remains and no matching job is queued or running. Nothing will restart it. The `last:` field is the most informative error line near the end of the newest SLURM log whose `Work dir:` line names this run directory, with the log filename in brackets. |
-| `NOT_STARTED` | Directory exists but production never began (typically a failed build; the build log is consulted). |
+| `STOPPED` | `polyzymd cancel` left a `STOP` file and no job is queued or running. The footer gives `polyzymd cancel --resume` and `polyzymd submit` to restart the chain. |
+| `NOT_STARTED` | Directory exists but no minimization, equilibration or production output was written (typically a failed build; the build log is consulted). A replicate whose job died during minimization or equilibration is `DEAD`. |
 | `NOT_FOUND` | Expected replicate directory is missing from scratch |
 | `CORRUPT` | `progress.json` exists but cannot be read (empty, truncated or of the wrong shape). The `last:` field says why. `status` leaves the file as it is; fix or remove it by hand. |
 

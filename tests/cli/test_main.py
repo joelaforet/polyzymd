@@ -1436,6 +1436,47 @@ class TestSubmitEngineAware:
         assert result.exit_code == 0
         mock_submit.assert_called_once()
 
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_submit_refuses_a_replicate_stopped_by_cancel(
+        self, mock_submit, mock_from_yaml, tmp_path: Path
+    ) -> None:
+        """A job submitted while STOP exists would exit at once, so submit says so instead."""
+        run_dir = tmp_path / "run_2"
+        run_dir.mkdir()
+        (run_dir / "STOP").write_text("stopped\n")
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "openmm"
+        mock_config.get_working_directory = lambda rep: tmp_path / f"run_{rep}"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["submit", "-c", str(config_path), "-r", "1-2"])
+
+        assert result.exit_code == 1
+        assert f"polyzymd cancel -c {config_path} -r 2 --resume" in result.output
+        mock_submit.assert_not_called()
+
+    @pytest.mark.parametrize("limit", ["0:05:00", "5", "0:04:30"])
+    @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
+    @patch("polyzymd.workflow.daisy_chain.submit_daisy_chain")
+    def test_submit_refuses_time_limit_within_the_stop_signal_margin(
+        self, mock_submit, mock_from_yaml, limit, tmp_path: Path
+    ) -> None:
+        """SLURM signals OpenMM jobs 5 minutes before the limit; a shorter limit never runs a step."""
+        mock_config = _make_dry_run_config()
+        mock_config.engine = "openmm"
+        mock_from_yaml.return_value = mock_config
+        config_path = tmp_path / "fake.yaml"
+        config_path.write_text("name: test\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["submit", "-c", str(config_path), "--time-limit", limit])
+
+        assert result.exit_code == 2
+        assert "--time-limit" in result.output
+        mock_submit.assert_not_called()
+
     @patch("polyzymd.engines.gromacs.engine.GromacsEngine.submit")
     @patch("polyzymd.engines.gromacs.binary.resolve_gromacs_binary", return_value="gmx")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")

@@ -167,6 +167,7 @@ class GromacsEngine(SimulationEngine):
             module_load=self._config.gromacs.module_load,
             env_exports=self._config.gromacs.env_exports,
             setup_commands=self._config.gromacs.setup_commands,
+            checkpoint_interval_s=self._config.simulation_phases.production.checkpoint_interval,
         )
         script = generator.generate_job_script(
             config_path=str(request.config_path),
@@ -175,6 +176,9 @@ class GromacsEngine(SimulationEngine):
             system_prefix=prefix,
             equilibration_mdps=eq_mdps,
             job_name=request.job_name,
+            output_file=str(
+                self._config.output.get_slurm_logs_directory() / f"{request.job_name}.%j.out"
+            ),
         )
         generator.save_script(script, script_path)
         return script_path

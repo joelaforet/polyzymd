@@ -381,7 +381,7 @@ class TestPrepareSubmissionPassThrough:
     def test_prepare_submission_passes_env_exports_and_setup_commands(
         self, mock_generator_cls, tmp_path
     ):
-        """prepare_submission should pass env_exports and setup_commands to generator."""
+        """prepare_submission should pass env_exports, setup_commands and checkpoint_interval."""
         config = _make_config()
         config.gromacs.env_exports = {
             "GMX_GPU_DD_COMMS": "true",
@@ -395,6 +395,7 @@ class TestPrepareSubmissionPassThrough:
         config.gromacs.mdrun_flags_production = None
         config.gromacs.command_prefix = None
         config.gromacs.mpi_launcher_flags = ""
+        config.simulation_phases.production.checkpoint_interval = 90.0
 
         engine = GromacsEngine(config=config, gmx_binary="gmx")
 
@@ -426,6 +427,7 @@ class TestPrepareSubmissionPassThrough:
         assert kwargs["pixi_env"] == "build"
         assert kwargs["env_exports"] == config.gromacs.env_exports
         assert kwargs["setup_commands"] == config.gromacs.setup_commands
+        assert kwargs["checkpoint_interval_s"] == 90.0
 
     @patch("polyzymd.engines.gromacs.engine.GromacsSlurmScriptGenerator")
     def test_prepare_submission_passes_stage_specific_mdrun_flags(
@@ -583,6 +585,32 @@ class TestFromConfigBinaryResolution:
         assert engine._gmx_binary == "gmx"
         assert not any("real-MPI binary" in r.message for r in caplog.records)
         mock_resolve.assert_not_called()
+
+
+def test_job_log_goes_to_the_configured_slurm_logs_folder(tmp_path, monkeypatch):
+    """`polyzymd status` reads logs from the config's logs folder, so the job writes there."""
+    config = _make_config()
+    config.output.get_slurm_logs_directory.return_value = tmp_path / "project" / "slurm_logs"
+    work = tmp_path / "run_1" / "gromacs"
+    work.mkdir(parents=True)
+    for name in ("sys.top", "sys.gro", "em.mdp", "prod.mdp"):
+        (work / name).write_text("")
+    monkeypatch.setattr("polyzymd.analyses.shared.gromacs.system_prefix", lambda _config: "sys")
+    monkeypatch.chdir(tmp_path)
+    engine = GromacsEngine(config=config, gmx_binary="gmx")
+    monkeypatch.setattr(engine, "_resolve_mdrun_flags", lambda _slurm: "")
+    monkeypatch.setattr(engine, "_resolve_stage_mdrun_flags", lambda _slurm: ("", ""))
+    request = EngineSubmitRequest(
+        replicate=1,
+        config_path=tmp_path / "config.yaml",
+        working_dir=work,
+        slurm_config=SlurmConfig.from_preset("testing"),
+        job_name="CALB_run_1",
+    )
+    with patch("polyzymd.engines.gromacs.engine.GromacsSlurmScriptGenerator") as generator:
+        engine.prepare_submission(request)
+    output_file = generator.return_value.generate_job_script.call_args.kwargs["output_file"]
+    assert output_file == str(tmp_path / "project" / "slurm_logs" / "CALB_run_1.%j.out")
 
 
 class TestPrepareSubmissionScriptPath:

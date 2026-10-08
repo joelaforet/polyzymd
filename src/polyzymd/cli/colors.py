@@ -387,6 +387,7 @@ _STATUS_COLORS: dict[str, tuple[tuple[int, int, int], int, str]] = {
     "completed": ((80, 200, 120), 78, "\033[92m"),  # green
     "running": ((100, 180, 255), 75, "\033[96m"),  # blue/cyan
     "interrupted": ((255, 200, 50), 220, "\033[93m"),  # amber
+    "stopped": ((255, 200, 50), 220, "\033[93m"),  # amber
     "failed": ((255, 80, 80), 196, "\033[91m"),  # red
     "not_started": ((128, 128, 128), 244, "\033[90m"),  # dim gray
     "not_found": ((128, 128, 128), 244, "\033[90m"),  # dim gray

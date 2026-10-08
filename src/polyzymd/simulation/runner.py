@@ -580,11 +580,6 @@ class SimulationRunner:
                         "the prepared structure must enter equilibration unchanged."
                     )
 
-        if is_interrupted():
-            # OpenMM minimization is not resumable.  Leave only ``started`` so
-            # the dependent successor deterministically reruns this phase.
-            raise GracefulExit(get_interrupt_signal())
-
         # Get final state (including box vectors for proper handoff to equilibration)
         state = simulation.context.getState(getEnergy=True, getPositions=True)
         energy = state.getPotentialEnergy().value_in_unit(omm_unit.kilojoule_per_mole)
@@ -605,6 +600,10 @@ class SimulationRunner:
         )
 
         LOGGER.info(f"Minimization complete: E = {energy:.2f} kJ/mol")
+        if is_interrupted():
+            # A signal that arrived during minimization is honoured only now,
+            # after the result is saved, so the next job does not redo it.
+            raise GracefulExit(get_interrupt_signal())
 
         return energy
 
@@ -871,9 +870,15 @@ class SimulationRunner:
         if self._simulation is None:
             raise RuntimeError("Equilibration simulation was not initialized")
 
-        from polyzymd.simulation.phase_state import write_phase_record
+        from functools import partial
+
+        from polyzymd.simulation.phase_state import load_phase_record
+        from polyzymd.simulation.phase_state import write_phase_record as _write_record
 
         phase_record_path = phase_dir / "phase.json"
+        earlier = load_phase_record(phase_record_path) if resume_from_step > 0 else None
+        seeds_by_attempt = [*(earlier.seeds_by_attempt if earlier else []), seeds]
+        write_phase_record = partial(_write_record, seeds_by_attempt=seeds_by_attempt)
         write_phase_record(
             phase_record_path,
             phase=stage_name,
@@ -1083,6 +1088,7 @@ class SimulationRunner:
             "started_at": started_at,
             "finished_at": _now_iso(),
             "seeds": seeds,
+            "seeds_by_attempt": seeds_by_attempt,
         }
 
         LOGGER.info(f"Equilibration stage '{stage.name}' complete")
