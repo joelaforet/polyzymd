@@ -849,9 +849,14 @@ platform and the property values it used under `openmm_platform` in
 :::
 
 The optional `gromacs:` block sets how PolyzyMD calls GROMACS and which SLURM
-resources a GROMACS job asks for. PolyzyMD uses it when the engine is
-GROMACS: `engine: gromacs` in the config, or `--engine gromacs` for `run`,
-`submit` or `recover`.
+resources a GROMACS job asks for. `analysis_topology` is read by the analyses
+and by freeze. Every other field is used only by the SLURM scripts that
+`polyzymd submit` and `polyzymd recover` write when the engine is GROMACS
+(`engine: gromacs` in the config, or `--engine gromacs`). A local
+`polyzymd run` and the `run_<prefix>_gromacs.sh` script that
+`build --format gromacs` writes do not read those fields: they call `gmx` (or
+`--gmx-path`) as `gmx mdrun -deffnm <stage> -v` with no extra flags. To use
+other flags locally, run the GROMACS commands yourself.
 
 ### Minimal Example
 
@@ -881,7 +886,7 @@ gromacs:
 |-------|------|---------|-------------|
 | `gmx_binary` | `str \| null` | `null` | GROMACS binary path or name. When null, resolved via `$GMX_BIN` environment variable or PATH discovery. |
 | `analysis_topology` | `str \| null` | `null` | File name of the run's `.top` in the run folder. Analyses read it when MDAnalysis cannot read `prod.tpr`, and freeze deposits it with the files it includes. When null, PolyzyMD uses `<prefix>.top`, the file it writes, so another `.top` in the folder does not matter. |
-| `mdrun_flags` | `str` | `""` | Extra flags passed to `gmx mdrun` for all stages. |
+| `mdrun_flags` | `str` | `""` | Extra flags passed to `gmx mdrun` for all stages of a SLURM job. |
 | `mdrun_flags_equilibration` | `str \| null` | `null` | Override `mdrun_flags` for equilibration stages only. Falls back to `mdrun_flags` when null. |
 | `mdrun_flags_production` | `str \| null` | `null` | Override `mdrun_flags` for production only. Falls back to `mdrun_flags` when null. |
 | `grompp_flags` | `str` | `""` | Extra flags passed to `gmx grompp`, such as `-maxwarn 1` to accept a warning you have read. By default every warning stops the run. |

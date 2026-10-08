@@ -1149,6 +1149,8 @@ def _run_gromacs_impl(
     config_path : str
         The config file, recorded in ``gromacs/progress.json``.
     """
+    from datetime import datetime, timezone
+
     from polyzymd.analyses.shared.gromacs import system_prefix
     from polyzymd.builders.system_builder import SystemBuilder
     from polyzymd.exporters.gromacs import GromacsError, GromacsExporter, GromacsRunner
@@ -1224,6 +1226,7 @@ def _run_gromacs_impl(
     colored_echo("\nStarting GROMACS simulation...", phase="export")
     colored_echo(f"Using GROMACS executable: {gmx_path}", phase="export")
 
+    run_start = datetime.now(timezone.utc).replace(microsecond=0)
     try:
         runner = GromacsRunner(
             working_dir=gromacs_dir,
@@ -1234,11 +1237,15 @@ def _run_gromacs_impl(
         runner.run_full_workflow()
 
         from polyzymd.engines import create_engine
+        from polyzymd.engines.gromacs.progress import record_run_provenance, started_since
         from polyzymd.simulation.progress import save_progress
 
         engine = create_engine(sim_config, override="gromacs", defer_binary=True)
         progress = engine.load_or_scan_progress(gromacs_dir, replicate)
         progress.config_path = config_path
+        record_run_provenance(
+            started_since([*progress.equilibration_stages, *progress.segments], run_start)
+        )
         save_progress(gromacs_dir, progress)
 
         colored_echo("\nGROMACS simulation completed successfully!", phase="export")
@@ -3977,11 +3984,17 @@ def _register_optional_command_groups() -> None:
     is_flag=True,
     help="Force completion status after post-processing",
 )
+@click.option(
+    "--since",
+    default="",
+    help="ISO time when the job started; records started since then ran in it",
+)
 def update_gromacs_progress_cmd(
     working_dir: str,
     config_path: str,
     replicate: int,
     mark_complete: bool,
+    since: str,
 ) -> None:
     """Update GROMACS progress.json from prod.log scan.
 
@@ -3995,6 +4008,7 @@ def update_gromacs_progress_cmd(
         config_path=config_path,
         replicate=replicate,
         mark_complete=mark_complete,
+        since=since,
     )
     pct = progress.fraction_complete() * 100
     click.echo(

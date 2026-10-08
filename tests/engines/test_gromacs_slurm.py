@@ -1778,6 +1778,22 @@ class TestGlobalTermHandling:
         assert post_idx != -1
         assert pre_idx < first_idx < post_idx
 
+    def test_progress_updates_pass_the_job_start(self, monkeypatch) -> None:
+        """Each progress update gets the time the job started, so it can record its version."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert script.index("JOB_START=") < script.index("_update-gromacs-progress")
+        assert script.count('--since "$JOB_START"') == script.count("_update-gromacs-progress") == 2
+
 
 def test_a_stop_file_stops_the_chain(tmp_path, monkeypatch) -> None:
     """A GROMACS job does no work and submits no successor once `polyzymd cancel` wrote STOP."""

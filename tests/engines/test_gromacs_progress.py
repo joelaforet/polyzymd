@@ -175,3 +175,107 @@ def test_unreadable_mdp_and_unlogged_random_seeds(tmp_path: Path) -> None:
     mdp = tmp_path / "prod.mdp"
     mdp.write_text("ld_seed = -1\ngen_vel = yes\ngen_seed = -1\n")
     assert _seeds(mdp, tmp_path / "prod.log") == {"ld_seed": None, "gen_seed": None}
+
+
+def test_stage_records_hold_the_ensemble_and_length_that_ran(tmp_path: Path) -> None:
+    """A stage with pressure coupling is NPT, and its length is the logged steps times dt."""
+    for idx, pcoupl in ((1, "no"), (2, "c-rescale")):
+        (tmp_path / f"eq_{idx:02d}.gro").write_text("eq")
+        (tmp_path / f"eq_{idx:02d}_stage.mdp").write_text(f"dt = 0.002\npcoupl = {pcoupl}\n")
+        (tmp_path / f"eq_{idx:02d}.log").write_text(" Step Time\n 0 0.0\n 5000 10.0\n")
+
+    nvt, npt = _scan_equilibration_gromacs(tmp_path)
+
+    assert (nvt.ensemble, npt.ensemble) == ("NVT", "NPT")
+    assert nvt.duration_ns == npt.duration_ns == 0.01
+
+
+def test_production_records_count_the_frames_written(tmp_path: Path) -> None:
+    """samples_written counts the prod.xtc frames, step 0 included, and a restart adds only new ones."""
+    (tmp_path / "prod.mdp").write_text("nstxout-compressed = 100\n")
+    (tmp_path / "prod.log").write_text("nsteps = 5000\n Step Time\n 2000 4.0\n")
+    first = update_gromacs_progress(tmp_path)
+    assert first.segments[-1].samples_written == 21
+
+    (tmp_path / "prod.log").write_text("nsteps = 5000\n Step Time\n 5000 10.0\nFinished mdrun\n")
+    second = update_gromacs_progress(tmp_path)
+    assert second.segments[-1].samples_written == 30
+    assert sum(segment.samples_written for segment in second.segments) == 51
+
+
+def test_records_keep_the_polyzymd_version_that_ran_mdrun(tmp_path: Path, monkeypatch) -> None:
+    """The process that ran mdrun records its version; a later scan by another version keeps it."""
+    from polyzymd.engines.gromacs.progress import load_or_scan_gromacs_progress
+
+    (tmp_path / "eq_01.gro").write_text("eq")
+    (tmp_path / "prod.log").write_text("nsteps = 100\n Step Time\n 100 0.2\nFinished mdrun\n")
+    monkeypatch.setattr("polyzymd.utils.version.get_polyzymd_version", lambda: "1.3.0")
+    progress = update_gromacs_progress(tmp_path)
+    assert [r.polyzymd_version for r in progress.equilibration_stages] == ["1.3.0"]
+    assert [r.polyzymd_version for r in progress.segments] == ["1.3.0"]
+    assert progress.segments[0].openmm_version is None
+
+    monkeypatch.setattr("polyzymd.utils.version.get_polyzymd_version", lambda: "9.9.9")
+    rescanned = load_or_scan_gromacs_progress(tmp_path)
+    assert rescanned.equilibration_stages[0].polyzymd_version == "1.3.0"
+    assert scan_gromacs_progress(tmp_path).segments[0].polyzymd_version is None
+
+
+def test_update_records_its_version_only_on_what_it_ran(tmp_path: Path, monkeypatch) -> None:
+    """Records saved earlier without a version stay without one; new and re-run ones get it."""
+    from polyzymd.engines.gromacs.progress import load_or_scan_gromacs_progress
+    from polyzymd.simulation.progress import save_progress
+
+    (tmp_path / "eq_01.gro").write_text("eq")
+    (tmp_path / "eq_01.log").write_text("Started mdrun on rank 0 Wed Oct  7 00:00:00 2026\n")
+    (tmp_path / "prod.log").write_text("nsteps = 200\n Step Time\n 100 0.2\n")
+    save_progress(tmp_path, load_or_scan_gromacs_progress(tmp_path))
+    monkeypatch.setattr("polyzymd.utils.version.get_polyzymd_version", lambda: "1.3.0")
+
+    (tmp_path / "prod.log").write_text("nsteps = 200\n Step Time\n 200 0.4\nFinished mdrun\n")
+    progress = update_gromacs_progress(tmp_path)
+    assert [r.polyzymd_version for r in progress.segments] == [None, "1.3.0"]
+    assert progress.equilibration_stages[0].polyzymd_version is None
+
+    progress.equilibration_stages[0].polyzymd_version = "1.2.0"
+    save_progress(tmp_path, progress)
+    (tmp_path / "eq_01.log").write_text(
+        "Started mdrun on rank 0 Wed Oct  7 02:00:00 2026\n"
+        "Finished mdrun on rank 0 Wed Oct  7 02:01:00 2026\n"
+    )
+    rerun = update_gromacs_progress(tmp_path)
+    assert rerun.equilibration_stages[0].polyzymd_version == "1.3.0"
+
+
+def test_unreadable_stage_log_does_not_stop_a_scan(tmp_path: Path) -> None:
+    """A stage log that cannot be read gives a stage record of length 0."""
+    (tmp_path / "eq_01.gro").write_text("eq")
+    (tmp_path / "eq_01.log").mkdir()
+
+    (stage,) = _scan_equilibration_gromacs(tmp_path)
+    assert stage.duration_ns == 0.0
+
+
+def test_update_records_its_version_on_what_status_saved_during_the_job(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Records that status saved during the job get its version; records of earlier jobs do not."""
+    from polyzymd.engines.gromacs.progress import load_or_scan_gromacs_progress
+    from polyzymd.simulation.progress import save_progress
+
+    for idx, hour in ((1, "01"), (2, "03")):
+        (tmp_path / f"eq_{idx:02d}.gro").write_text("eq")
+        (tmp_path / f"eq_{idx:02d}.log").write_text(
+            f"Started mdrun on rank 0 Wed Oct  7 {hour}:00:00 2026\n"
+            f"Finished mdrun on rank 0 Wed Oct  7 {hour}:30:00 2026\n"
+        )
+    (tmp_path / "prod.log").write_text(
+        "nsteps = 200\nStarted mdrun on rank 0 Wed Oct  7 04:00:00 2026\n Step Time\n 200 0.4\n"
+    )
+    save_progress(tmp_path, load_or_scan_gromacs_progress(tmp_path))
+    monkeypatch.setattr("polyzymd.utils.version.get_polyzymd_version", lambda: "1.3.0")
+
+    progress = update_gromacs_progress(tmp_path, since=_logged("Wed Oct  7 02:00:00 2026"))
+
+    assert [r.polyzymd_version for r in progress.equilibration_stages] == [None, "1.3.0"]
+    assert [r.polyzymd_version for r in progress.segments] == ["1.3.0"]
