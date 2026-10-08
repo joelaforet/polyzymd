@@ -483,6 +483,7 @@ def build(
         # A config for GROMACS builds GROMACS inputs unless --format says otherwise.
         if export_format is None and sim_config.engine == "gromacs":
             export_format = "gromacs"
+        sim_config.require_buildable(export_format or "openmm")
 
         if dry_run:
             colored_echo("=" * 60, phase="build")
@@ -1054,6 +1055,7 @@ def run(
         sim_config = SimulationConfig.from_yaml(config)
         colored_echo(f"Running local simulation: {sim_config.name}", phase="simulation")
         colored_echo(f"Engine: {engine}", phase="simulation")
+        sim_config.require_buildable(engine)
 
         # Override directories if provided via CLI
         if scratch_dir:
@@ -1630,7 +1632,8 @@ def _print_gromacs_dry_run_details(
 @click.option(
     "--skip-build",
     is_flag=True,
-    help="Skip system building in generated jobs (use pre-built system from 'polyzymd build')",
+    hidden=True,
+    help="No effect: jobs always load the build from 'polyzymd build'.",
 )
 @click.option(
     "--pixi-env",
@@ -1681,7 +1684,8 @@ def submit(
 
     Creates and optionally submits one self-resubmitting job per replicate.
     OpenMM submission uses the existing daisy-chain flow, while GROMACS
-    submission uses the engine submission interface.
+    submission uses the engine submission interface. Submit never builds:
+    each replicate needs a build from ``polyzymd build`` first.
 
     \b
     Directory structure:
@@ -1696,6 +1700,10 @@ def submit(
 
     sim_config = SimulationConfig.from_yaml(config)
     engine_name = _resolve_engine_name(sim_config, override=engine)
+    try:
+        sim_config.require_buildable(engine_name)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
     _warn_for_site_pixi_override(preset, engine_name, resolved_pixi_env, pixi_env)
     _warn_for_submission_pixi_env(
@@ -1728,8 +1736,7 @@ def submit(
             f"Excluded nodes override: {exclude_nodes or '(none)'}",
             phase="workflow",
         )
-    if skip_build:
-        colored_echo("Skip-build mode: using pre-built systems", phase="workflow")
+    _ = skip_build
 
     if dry_run:
         replicate_list = _resolve_replicates_option(replicates)
@@ -1826,6 +1833,7 @@ def submit(
 
         colored_echo("Using GROMACS submission backend", phase="workflow")
 
+        requests = []
         for rep in replicate_list:
             slurm_config = SlurmConfig.from_preset(preset)
             if email:
@@ -1867,27 +1875,33 @@ def submit(
                     )
                     continue
 
-            request = EngineSubmitRequest(
-                replicate=rep,
-                config_path=config_path_abs,
-                working_dir=working_dir,
-                slurm_config=slurm_config,
-                job_name=job_name,
-                extra={"pixi_env": resolved_pixi_env, "skip_build": skip_build},
+            requests.append(
+                EngineSubmitRequest(
+                    replicate=rep,
+                    config_path=config_path_abs,
+                    working_dir=working_dir,
+                    slurm_config=slurm_config,
+                    job_name=job_name,
+                    extra={"pixi_env": resolved_pixi_env},
+                )
             )
 
-            if generate_only:
-                script_path = engine_impl.prepare_submission(request)
-                colored_echo(f"  Rep {rep}: script at {script_path}", phase="workflow")
-            else:
-                result = engine_impl.submit(request)
-                if result.get("submitted"):
-                    colored_echo(f"  Rep {rep}: {result['stdout']}", phase="workflow")
-                else:
+        # Check every build before any script is written or submitted.
+        try:
+            for request in requests:
+                engine_impl.check_build(request)
+            for request in requests:
+                if generate_only:
+                    script_path = engine_impl.prepare_submission(request)
                     colored_echo(
-                        f"  Rep {rep}: script at {result['script_path']} (sbatch not available)",
-                        phase="workflow",
+                        f"  Rep {request.replicate}: script at {script_path}", phase="workflow"
                     )
+                else:
+                    result = engine_impl.submit(request)
+                    colored_echo(f"  Rep {request.replicate}: {result['stdout']}", phase="workflow")
+        except (FileNotFoundError, ValueError, RuntimeError) as e:
+            colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
 
         if not generate_only:
             colored_echo("\nGROMACS job submission complete!", phase="workflow")
@@ -1922,7 +1936,6 @@ def submit(
             nodelist=nodelist,
             exclude=exclude_nodes,
             openff_logs=submit_openff_logs,
-            skip_build=skip_build,
         )
 
         if not generate_only:
@@ -3349,6 +3362,7 @@ def validate(config: str) -> None:
 
     try:
         sim_config = SimulationConfig.from_yaml(config)
+        sim_config.require_buildable()
 
         click.echo(click.style("Configuration is valid!", fg="green"))
         colored_echo()
@@ -3482,7 +3496,12 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
     colored_echo(f"Cleaning PDB: {input_file}")
     colored_echo(f"  pH: {ph}")
 
-    fixer = PDBFixer(filename=str(input_file))
+    try:
+        fixer = PDBFixer(filename=str(input_file))
+    except IndexError:  # OpenMM's PDB reader finds no model in a file without atoms
+        click.echo(click.style(f"error: {input_file} has no atoms", fg="red"), err=True)
+        click.echo("fix: give a PDB file with ATOM or HETATM records", err=True)
+        sys.exit(1)
 
     fixer.findNonstandardResidues()
     n_nonstandard = len(fixer.nonstandardResidues)
@@ -3816,23 +3835,27 @@ def recover(
             job_name=job_name,
             extra={
                 "pixi_env": resolved_pixi_env,
-                "skip_build": gromacs_inputs_exist,
                 # The live chain's daisy_chain_scripts/ script stays as submitted.
                 "script_path": recovery_path,
             },
         )
 
         engine_impl = create_engine(sim_config, override="gromacs", defer_binary=True)
-        recovery_path = engine_impl.prepare_submission(request)
+        try:
+            recovery_path = engine_impl.prepare_submission(request)
+        except (FileNotFoundError, ValueError) as e:
+            colored_echo(f"Recovery failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
 
         colored_echo(f"Script: {recovery_path}", phase="workflow")
 
         from polyzymd.workflow.slurm_submit import run_sbatch
 
-        module_load = (
-            getattr(sim_config.gromacs, "module_load", None) if sim_config.gromacs else None
-        )
-        result = run_sbatch(recovery_path, module_load=module_load)
+        try:
+            result = run_sbatch(recovery_path)
+        except RuntimeError as e:
+            colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
         if result.returncode == 0:
             colored_echo(f"Submitted: {result.stdout.strip()}", phase="workflow")
             colored_echo("Monitor with: squeue -u $USER", phase="workflow")

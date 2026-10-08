@@ -228,3 +228,31 @@ def test_an_output_folder_with_dots_is_kept_as_written(tmp_path: Path) -> None:
 
     assert str(config.output.projects_directory) == str(tmp_path / "water" / ".." / "sims")
     assert str(config.output.scratch_directory) == str(tmp_path / "water" / ".." / "sims")
+
+
+def test_configs_of_existing_runs_load_with_values_new_builds_refuse(tmp_path: Path) -> None:
+    """Old spce, KCl and GROMACS-restraint configs load, so status and analysis still work."""
+    import yaml
+
+    from polyzymd.config.loader import load_config
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "water", scratch=tmp_path / "s")
+    data = yaml.safe_load(path.read_text())
+    data["engine"] = "gromacs"
+    data["solvent"] = {"primary": {"model": "spce"}, "ions": {"kcl_concentration": 0.15}}
+    data["restraints"] = [
+        {
+            "type": "flat_bottom",
+            "name": "site",
+            "atom1": {"selection": "resid 1 and name CA"},
+            "atom2": {"selection": "resid 2 and name CA"},
+            "distance": 3.5,
+        }
+    ]
+    path.write_text(yaml.safe_dump(data))
+
+    config = load_config(path)
+
+    assert config.solvent.primary.model.value == "spce"
+    assert config.solvent.ions.kcl_concentration == 0.15

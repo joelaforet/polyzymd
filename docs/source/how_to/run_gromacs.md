@@ -68,6 +68,16 @@ or replace them with your own GROMACS workflow.
 replicate. The script runs minimization, equilibration and production, and
 restarts each stage from its checkpoint.
 
+`submit` does not build. Build the GROMACS inputs of each replicate first, in
+a compute job (see {doc}`hpc_slurm`):
+
+```bash
+pixi run -e build polyzymd build -c config.yaml -r 1-3 --format gromacs
+```
+
+`--format gromacs` is the default for a config with `engine: gromacs`. Without
+the inputs, `submit` stops with an error and writes no script.
+
 ### CPU jobs
 
 Add a `gromacs:` block to `config.yaml` and submit:
@@ -91,7 +101,11 @@ pixi run -e build polyzymd submit \
 ### GPU jobs
 
 For GPU runs, set `gpu: true` and use the thread-MPI `gmx` binary (not
-`gmx_mpi`):
+`gmx_mpi`). `gpu: true` adds `-nb gpu -pme gpu -bonded gpu` to the `mdrun`
+flags that you do not set yourself. It does not add `-update gpu`: GROMACS
+updates on the GPU only with `integrator = md`, and the Langevin thermostats
+write `integrator = sd`. With `-update gpu` and `sd`, GROMACS 2024 stops with
+*"Only the md integrator is supported"*.
 
 ```yaml
 # config.yaml
@@ -102,7 +116,7 @@ gromacs:
   ntmpi: 1
   ntomp: 12
   module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
-  mdrun_flags: "-nb gpu -pme gpu -bonded gpu -update gpu -pin on"
+  mdrun_flags: "-pin on"
 ```
 
 ```bash
@@ -134,6 +148,12 @@ the CPU, CUDA, or ROCm runtime.
 The shared `--pixi-env auto` option maps to `build` for GROMACS. The generated
 script activates `build` for the PolyzyMD commands. It then runs the configured
 `module_load`, `env_exports`, and `setup_commands` before it starts GROMACS.
+`submit` starts the job with `sbatch --export=NONE`, so the job does not
+inherit the environment of the submitting shell. `module_load` runs only in
+the job, never on the login node.
+If your `module_load` loads the scheduler module, load that module in your
+shell before `submit` instead; without `sbatch` on `PATH`,
+`submit` stops with an error.
 
 Use these settings to move a job to another SLURM cluster:
 
@@ -427,6 +447,13 @@ gromacs:
 **Fix**: PolyzyMD removes `-pme gpu`, `-bonded gpu` and `-update gpu` from the
 minimization `mdrun` command. If you see this error, check that you use
 PolyzyMD 1.3.0 or later.
+
+### "Only the md integrator is supported"
+
+**Cause**: `-update gpu` in `mdrun_flags` with a Langevin thermostat, which
+GROMACS runs as `integrator = sd`.
+
+**Fix**: Remove `-update gpu` from `mdrun_flags`, or give `-update cpu`.
 
 ### "grompp stops with a warning"
 

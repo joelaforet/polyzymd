@@ -51,10 +51,23 @@ PAPER_STATUS = ("in-preparation", "submitted", "in-press", "preprint", "advance-
 ACCESS = ("open", "embargoed", "restricted", "closed")
 
 
+#: Placeholder parts of a DOI: ``NNNN`` or ``XXXX`` runs, ``...``, or a last part of zeros.
+_PLACEHOLDER_DOI = re.compile(r"N{4,}|X{4,}|\.\.\.|[./]0+$", re.IGNORECASE)
+
+
 def is_placeholder(doi: Any) -> bool:
-    """Return whether ``doi`` is missing or still a placeholder such as ``10.XXXX/...``."""
-    text = str(doi or "")
-    return not text or "XXXX" in text.upper() or "placeholder" in text.lower() or TODO in text
+    """Return whether ``doi`` is missing or still a placeholder such as ``10.5281/zenodo.NNNNNNN``.
+
+    Placeholders are ``XXXX`` or ``NNNN`` runs, ``...``, a last part of only
+    zeros (``zenodo.0000000``), ``placeholder`` and ``TODO``.
+    """
+    text = str(doi or "").strip()
+    return (
+        not text
+        or bool(_PLACEHOLDER_DOI.search(text))
+        or "placeholder" in text.lower()
+        or TODO in text
+    )
 
 
 def _known(raw: Mapping, keys: tuple[str, ...], where: str) -> None:
@@ -146,7 +159,11 @@ def check_metadata(raw: Any, what: str = "study") -> tuple[dict[str, Any], list[
     for index, grant in enumerate(_sequence(raw.get("funding"), "metadata.funding")):
         grant = _mapping(grant, f"metadata.funding[{index}]")
         _known(grant, _FUNDING, f"metadata.funding[{index}]")
-        funding.append({k: str(v) for k, v in grant.items() if v})
+        grant = {k: str(v) for k, v in grant.items() if v}
+        if "funder_doi" in grant and is_placeholder(grant["funder_doi"]):
+            warnings.append(f"metadata.funding[{index}].funder_doi is a placeholder; left out")
+            del grant["funder_doi"]
+        funding.append(grant)
     meta["funding"] = funding
 
     related = _mapping(raw.get("related"), "metadata.related")

@@ -1135,7 +1135,7 @@ class TestRecoverGromacsSubmit:
     @patch("polyzymd.engines.create_engine")
     @patch("polyzymd.simulation.progress.save_progress")
     @patch("polyzymd.config.schema.SimulationConfig.from_yaml")
-    def test_gromacs_recover_partial_inputs_do_not_enable_skip_build(
+    def test_gromacs_recover_without_a_build_fails_cleanly(
         self,
         mock_from_yaml,
         mock_save,
@@ -1143,7 +1143,7 @@ class TestRecoverGromacsSubmit:
         mock_squeue,
         tmp_path,
     ):
-        """Recover should only skip build when all required inputs exist."""
+        """Recover with missing GROMACS inputs prints the build command and exits 1."""
         _ = mock_save, mock_squeue
         config_file = tmp_path / "config.yaml"
         config_file.write_text("name: test")
@@ -1163,17 +1163,9 @@ class TestRecoverGromacsSubmit:
             total_steps=10000000, completed_steps=5000000, n_segments=1
         )
 
-        captured_request = {}
-
-        def _prepare_submission_side_effect(request):
-            captured_request["request"] = request
-            daisy_dir = request.working_dir / "daisy_chain_scripts"
-            daisy_dir.mkdir(parents=True, exist_ok=True)
-            script = daisy_dir / f"run_rep{request.replicate}.sh"
-            script.write_text("#!/bin/bash\n")
-            return script
-
-        engine_mock.prepare_submission.side_effect = _prepare_submission_side_effect
+        engine_mock.prepare_submission.side_effect = FileNotFoundError(
+            "No GROMACS build for replicate 1. Build it first: polyzymd build"
+        )
         mock_create_engine.return_value = engine_mock
 
         runner = CliRunner()
@@ -1193,9 +1185,10 @@ class TestRecoverGromacsSubmit:
             ],
         )
 
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert "No GROMACS build for replicate 1" in result.output
         assert "reuse" not in result.output.lower()
-        assert captured_request["request"].extra["skip_build"] is False
 
     @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])
     @patch("polyzymd.engines.create_engine")
@@ -1261,7 +1254,7 @@ class TestRecoverGromacsSubmit:
         )
 
         assert result.exit_code == 0, result.output
-        assert captured_request["request"].extra["skip_build"] is True
+        assert "skip_build" not in captured_request["request"].extra
         assert "no equilibration mdps" in result.output.lower()
 
     @patch("polyzymd.workflow.daisy_chain.check_existing_slurm_jobs", return_value=[])

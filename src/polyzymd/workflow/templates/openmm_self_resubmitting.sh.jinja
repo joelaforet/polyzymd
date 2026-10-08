@@ -173,7 +173,10 @@ else
     exit 1
 fi
 
-# The manifest path was resolved at submission time from `which polyzymd`.
+# Packages in ~/.local must not shadow the pixi environment.
+export PYTHONNOUSERSITE=1
+
+# The manifest path was resolved at submission time.
 eval "$(pixi shell-hook -e "$PIXI_ENV" --manifest-path {{ manifest_path | shell_quote }})"
 
 # Enable strict error handling after environment setup
