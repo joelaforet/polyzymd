@@ -1127,3 +1127,14 @@ def test_box_shape_refuses_truncated_octahedron():
 
     with pytest.raises(ValidationError, match="'cube' or 'rhombic_dodecahedron'"):
         BoxConfig(shape="truncated_octahedron")
+
+
+@pytest.mark.parametrize(("name", "residue_name"), [("glycine_betaine", None), ("my_mol", "HOH")])
+def test_cosolvent_residue_name_that_selections_take_for_protein_or_water_is_refused(
+    name: str, residue_name: str | None
+) -> None:
+    """A co-solvent residue name that is an amino-acid or water name is refused."""
+    from polyzymd.config.schema import CoSolventSpec
+
+    with pytest.raises(ValueError, match="residue_name"):
+        CoSolventSpec(name=name, smiles="CCO", count=1, residue_name=residue_name)

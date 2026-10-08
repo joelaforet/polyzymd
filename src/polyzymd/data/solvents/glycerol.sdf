@@ -31,7 +31,7 @@ glycerol
   6 14  1  0
 M  END
 >  <metadata>  (1) 
-{"0": {"residue_name": "GLY"}, "1": {"residue_name": "GLY"}, "2": {"residue_name": "GLY"}, "3": {"residue_name": "GLY"}, "4": {"residue_name": "GLY"}, "5": {"residue_name": "GLY"}, "6": {"residue_name": "GLY"}, "7": {"residue_name": "GLY"}, "8": {"residue_name": "GLY"}, "9": {"residue_name": "GLY"}, "10": {"residue_name": "GLY"}, "11": {"residue_name": "GLY"}, "12": {"residue_name": "GLY"}, "13": {"residue_name": "GLY"}}
+{"0": {"residue_name": "GOL"}, "1": {"residue_name": "GOL"}, "2": {"residue_name": "GOL"}, "3": {"residue_name": "GOL"}, "4": {"residue_name": "GOL"}, "5": {"residue_name": "GOL"}, "6": {"residue_name": "GOL"}, "7": {"residue_name": "GOL"}, "8": {"residue_name": "GOL"}, "9": {"residue_name": "GOL"}, "10": {"residue_name": "GOL"}, "11": {"residue_name": "GOL"}, "12": {"residue_name": "GOL"}, "13": {"residue_name": "GOL"}}
 
 >  <atom.dprop.PartialCharge>  (1) 
 0.10590000000000002 0.072100000000000025 0.10590000000000002 -0.58979999999999999 -0.59279999999999999 -0.58979999999999999 0.061200000000000018 0.061200000000000018 0.033700000000000022

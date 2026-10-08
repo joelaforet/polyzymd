@@ -664,7 +664,27 @@ class CoSolventSpec(_ConfigModel):
 
         # Set default residue name
         if self.residue_name is None:
-            object.__setattr__(self, "residue_name", self.name[:3].upper())
+            default = library_data.residue_name if library_data else self.name[:3].upper()
+            object.__setattr__(self, "residue_name", default)
+
+        from MDAnalysis.core.selection import NucleicSelection, ProteinSelection
+
+        from polyzymd.core.atom_groups import ION_RESIDUE_NAMES, WATER_RESIDUE_NAMES
+
+        reserved = (
+            set(ProteinSelection.prot_res)
+            | set(NucleicSelection.nucl_res)
+            | {"SOL", "H2O", "OH2", "TIP", "T3P", "T4P", "T5P"}
+            | WATER_RESIDUE_NAMES
+            | ION_RESIDUE_NAMES
+        )
+        if self.residue_name.upper() in reserved:
+            raise ValueError(
+                f"Co-solvent '{self.name}' has residue name '{self.residue_name}', which is an "
+                "amino-acid, nucleic-acid, water or ion name, so selections such as 'protein' "
+                "would include it. Set 'residue_name' to another 3-letter name, such as the "
+                "molecule's PDB chemical-component code."
+            )
 
         return self
 

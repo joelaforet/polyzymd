@@ -382,20 +382,22 @@ With `concentration` or `count`, the co-solvent molecules are added on top of th
 
 PolyzyMD includes a library of common co-solvents with pre-defined SMILES and densities. Density values are retained as metadata and are sourced from [PubChem](https://pubchem.ncbi.nlm.nih.gov/), a public database of chemical compounds. Each compound has a unique Compound Identification Number (CID) that can be used to look up detailed information including density, structure, and safety data.
 
-| Name | SMILES | Density (g/mL) | Reference |
-|------|--------|----------------|-----------|
-| `dmso` | `CS(=O)C` | 1.10 | [CID 679](https://pubchem.ncbi.nlm.nih.gov/compound/679) |
-| `dmf` | `CN(C)C=O` | 0.95 | [CID 6228](https://pubchem.ncbi.nlm.nih.gov/compound/6228) |
-| `acetonitrile` | `CC#N` | 0.786 | [CID 6342](https://pubchem.ncbi.nlm.nih.gov/compound/6342) |
-| `urea` | `C(=O)(N)N` | 1.32 | [CID 1176](https://pubchem.ncbi.nlm.nih.gov/compound/1176) |
-| `ethanol` | `CCO` | 0.789 | [CID 702](https://pubchem.ncbi.nlm.nih.gov/compound/702) |
-| `methanol` | `CO` | 0.792 | [CID 887](https://pubchem.ncbi.nlm.nih.gov/compound/887) |
-| `glycerol` | `C(C(CO)O)O` | 1.261 | [CID 753](https://pubchem.ncbi.nlm.nih.gov/compound/753) |
-| `isopropanol` | `CC(C)O` | 0.786 | [CID 3776](https://pubchem.ncbi.nlm.nih.gov/compound/3776) |
-| `acetone` | `CC(=O)C` | 0.784 | [CID 180](https://pubchem.ncbi.nlm.nih.gov/compound/180) |
-| `thf` | `C1CCOC1` | 0.883 | [CID 8028](https://pubchem.ncbi.nlm.nih.gov/compound/8028) |
-| `dioxane` | `C1COCCO1` | 1.033 | [CID 31275](https://pubchem.ncbi.nlm.nih.gov/compound/31275) |
-| `ethylene_glycol` | `C(CO)O` | 1.114 | [CID 174](https://pubchem.ncbi.nlm.nih.gov/compound/174) |
+| Name | SMILES | Density (g/mL) | Residue name | Reference |
+|------|--------|----------------|--------------|-----------|
+| `dmso` | `CS(=O)C` | 1.10 | `DMS` | [CID 679](https://pubchem.ncbi.nlm.nih.gov/compound/679) |
+| `dmf` | `CN(C)C=O` | 0.95 | `DMF` | [CID 6228](https://pubchem.ncbi.nlm.nih.gov/compound/6228) |
+| `acetonitrile` | `CC#N` | 0.786 | `CCN` | [CID 6342](https://pubchem.ncbi.nlm.nih.gov/compound/6342) |
+| `urea` | `C(=O)(N)N` | 1.32 | `URE` | [CID 1176](https://pubchem.ncbi.nlm.nih.gov/compound/1176) |
+| `ethanol` | `CCO` | 0.789 | `ETH` | [CID 702](https://pubchem.ncbi.nlm.nih.gov/compound/702) |
+| `methanol` | `CO` | 0.792 | `MOH` | [CID 887](https://pubchem.ncbi.nlm.nih.gov/compound/887) |
+| `glycerol` | `C(C(CO)O)O` | 1.261 | `GOL` | [CID 753](https://pubchem.ncbi.nlm.nih.gov/compound/753) |
+| `isopropanol` | `CC(C)O` | 0.786 | `ISO` | [CID 3776](https://pubchem.ncbi.nlm.nih.gov/compound/3776) |
+| `acetone` | `CC(=O)C` | 0.784 | `ACN` | [CID 180](https://pubchem.ncbi.nlm.nih.gov/compound/180) |
+| `thf` | `C1CCOC1` | 0.883 | `THF` | [CID 8028](https://pubchem.ncbi.nlm.nih.gov/compound/8028) |
+| `dioxane` | `C1COCCO1` | 1.033 | `DIO` | [CID 31275](https://pubchem.ncbi.nlm.nih.gov/compound/31275) |
+| `ethylene_glycol` | `C(CO)O` | 1.114 | `EDO` | [CID 174](https://pubchem.ncbi.nlm.nih.gov/compound/174) |
+
+A co-solvent's residue name must not be an amino-acid, nucleic-acid, water or ion name, because selections such as `protein` would then include it; `validate` refuses such a name. Library co-solvents whose short name clashed use the PDB chemical-component code (glycerol is `GOL`, not `GLY`). Topologies built before PolyzyMD 1.3 still have the old names (`GLY` glycerol, `MET` methanol, `ACE` acetone and acetonitrile, `ETH` ethylene glycol); an older build has the clash when one of these residues has no `CA` atom, which MDAnalysis shows with `[r for r in u.select_atoms("resname GLY MET").residues if "CA" not in r.atoms.names]`.
 
 For library co-solvents, you only need to specify the `name` and either `mole_fraction` or `concentration`:
 
