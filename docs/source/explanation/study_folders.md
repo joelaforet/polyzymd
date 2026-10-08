@@ -15,6 +15,18 @@ The trajectories go to Zenodo. A reader installs the PolyzyMD version that
 the manifest records. The reader can then make every figure from the folder
 alone, and every analysis from the folder and the trajectories.
 
+The figure follows a study from analysis to a reader's reanalysis.
+
+```{figure} ../_static/diagrams/analysis_deposit_flow.svg
+:alt: polyzymd analyze measures each replicate, reduces per condition, compares against the control and writes report.json; freeze hashes and tags the study and lays out the deposit; a reader verifies the trajectories and reruns the analyses.
+:width: 100%
+
+`polyzymd analyze` measures each replicate, reduces per condition and
+compares against the control. `polyzymd study freeze` records the SHA-256 of
+every file, tags the commit and lays out the deposit. A reader checks the
+downloaded trajectories against the manifest and recomputes the analyses.
+```
+
 The design follows the FAIR principles (Wilkinson et al. 2016; Barker et al.
 2022) and the TRUE principles for molecular simulation (Thompson et al.
 2020).
