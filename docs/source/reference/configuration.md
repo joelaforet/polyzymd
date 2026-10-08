@@ -717,7 +717,7 @@ stages continue to require an explicit `duration`.
 
 ## Output Configuration
 
-Environment variables (`$USER`, `$HOME`, `${VAR}`) and `~` are automatically expanded in path fields. `validate` refuses a path that names an unset variable.
+Environment variables (`$USER`, `$HOME`, `${VAR}`) and `~` are automatically expanded in path fields. `validate` refuses a path that names an unset variable. Earlier versions did not expand `~` in input and output paths and wrote runs to a folder named `~` beside the config; while `~/...` does not exist, that folder is used, with a warning.
 
 ```yaml
 output:

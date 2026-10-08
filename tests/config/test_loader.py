@@ -313,3 +313,33 @@ def test_home_and_variables_expand_in_paths(tmp_path: Path, monkeypatch) -> None
     assert str(config.output.projects_directory) == "$POLYZYMD_TEST_UNSET/projects"
     with pytest.raises(ValueError, match=r"\$POLYZYMD_TEST_UNSET, which is not set"):
         config.require_buildable()
+
+
+def test_yaml_merge_keys_load_and_may_be_overridden(tmp_path: Path) -> None:
+    """An anchor merged with '<<:' loads, and a key the mapping sets again overrides it."""
+    from polyzymd.config.loader import read_yaml_mapping
+
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "base: &base {ensemble: NVT, duration: 0.1}\n" "stage: {<<: *base, duration: 0.2}\n"
+    )
+    assert read_yaml_mapping(path)["stage"] == {"ensemble": "NVT", "duration": 0.2}
+
+
+def test_runs_written_under_a_literal_tilde_folder_are_still_found(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    """Earlier versions wrote '~/sims' runs to <config dir>/~/sims; that folder is kept."""
+    from polyzymd.config.loader import load_config
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    def edit(data):
+        data["output"]["scratch_directory"] = "~/sims"
+
+    path = _config_file(tmp_path, edit)
+    (tmp_path / "c" / "~" / "sims").mkdir(parents=True)
+    assert load_config(path).output.scratch_directory == tmp_path / "c" / "~" / "sims"
+    assert "earlier versions put the runs" in caplog.text
+    (tmp_path / "home" / "sims").mkdir(parents=True)
+    assert load_config(path).output.scratch_directory == tmp_path / "home" / "sims"

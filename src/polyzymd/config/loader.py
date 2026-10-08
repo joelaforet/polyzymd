@@ -8,6 +8,7 @@ environment variable expansion.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from collections.abc import Hashable
@@ -38,6 +39,8 @@ PATH_KEYS = frozenset(
 #: as the input files are, so a command finds the runs from any folder; they
 #: are never copied or hashed as inputs.
 OUTPUT_PATH_KEYS = frozenset({"projects_directory", "scratch_directory"})
+LOGGER = logging.getLogger(__name__)
+
 #: A ``$VAR`` or ``${VAR}`` left in a path after expansion: the variable is unset.
 UNSET_VARIABLE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
 
@@ -66,8 +69,12 @@ class _UniqueKeyLoader(yaml.SafeLoader):
     """Safe YAML loader that refuses a key given twice in one mapping."""
 
     def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> Dict[Any, Any]:
+        # Keys merged in with "<<:" may be overridden, so only the mapping's own
+        # keys, which flatten_mapping puts after the merged ones, are checked.
+        own = sum(1 for key_node, _ in node.value if key_node.tag != "tag:yaml.org,2002:merge")
+        self.flatten_mapping(node)
         seen: set[Any] = set()
-        for key_node, _ in node.value:
+        for key_node, _ in node.value[len(node.value) - own :]:
             key = self.construct_object(key_node, deep=deep)
             if not isinstance(key, Hashable):
                 break  # the parent reports the unhashable key
@@ -146,6 +153,19 @@ def _expand_paths(data: Dict[str, Any], base_path: Path) -> Dict[str, Any]:
             # Convert relative paths to absolute based on config file location
             if not path.is_absolute():
                 path = base_path / path
+            # Earlier versions did not expand "~" and wrote the runs under a
+            # folder named "~" beside the config; keep finding those runs.
+            old = base_path / value
+            if key in OUTPUT_PATH_KEYS and value.startswith("~") and not path.exists():
+                if old.is_dir():
+                    LOGGER.warning(
+                        "%s %r: using %s, where earlier versions put the runs; '~' now means "
+                        "the home folder. Move the runs and the config finds them there.",
+                        key,
+                        value,
+                        old,
+                    )
+                    return str(old)
             return str(path)
         elif isinstance(value, dict):
             return {k: expand_value(k, v) for k, v in value.items()}

@@ -66,7 +66,7 @@ def _make_dry_run_config() -> SimpleNamespace:
         ),
         restraints=[],
         get_working_directory=lambda rep: Path(f"/tmp/scratch/run_{rep}"),
-        require_buildable=lambda engine=None: None,
+        require_buildable=lambda engine=None, inputs=True: None,
     )
 
 
@@ -2541,3 +2541,11 @@ def test_submit_refuses_a_time_limit_slurm_cannot_read(tmp_path: Path) -> None:
     )
     assert result.exit_code == 2
     assert "is not a SLURM time" in result.output
+
+
+def test_submit_does_not_check_the_inputs_of_a_build_it_does_not_make(tmp_path: Path) -> None:
+    """submit runs existing builds, so a moved enzyme PDB does not stop it."""
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(_minimal_cli_config_data(tmp_path / "moved.pdb")))
+    result = CliRunner().invoke(cli, ["submit", "-c", str(path), "--dry-run"])
+    assert "moved.pdb does not exist" not in result.output, result.output

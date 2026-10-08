@@ -1714,7 +1714,7 @@ def submit(
     sim_config = SimulationConfig.from_yaml(config)
     engine_name = _resolve_engine_name(sim_config, override=engine)
     try:
-        sim_config.require_buildable(engine_name)
+        sim_config.require_buildable(engine_name, inputs=False)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)

@@ -1724,7 +1724,7 @@ class SimulationConfig(_ConfigModel):
             self.require_engine_barostats("openmm")
         return self
 
-    def require_buildable(self, engine: str | None = None) -> None:
+    def require_buildable(self, engine: str | None = None, *, inputs: bool = True) -> None:
         """Raise ``ValueError`` when a new system built from this config would be wrong.
 
         Loading a config does not run these checks, so the configs of existing
@@ -1736,6 +1736,9 @@ class SimulationConfig(_ConfigModel):
         ----------
         engine : str or None
             Engine that will run the system. Default: the config's engine.
+        inputs : bool
+            Check the input files too. ``submit`` passes False: it runs only
+            replicates that ``build`` has already built.
         """
         engine = engine or self.engine
         model = self.solvent.primary.model
@@ -1754,9 +1757,10 @@ class SimulationConfig(_ConfigModel):
         self._require_buildable_settings(engine)
         self.require_engine_restraints(engine)
         self.require_engine_barostats(engine)
-        from polyzymd.config.validation import require_inputs
+        if inputs:
+            from polyzymd.config.validation import require_inputs
 
-        require_inputs(self)
+            require_inputs(self)
 
     def _require_buildable_settings(self, engine: str) -> None:
         """Raise ``ValueError`` for settings a new build would not run as written."""
