@@ -448,6 +448,7 @@ class TestBuildFromConfigSharesOneBox:
         calls: dict = {}
         sentinel_box = Quantity(__import__("numpy").diag([9.0, 9.0, 9.0]), "nanometer")
 
+        monkeypatch.setattr("polyzymd.config.validation.require_inputs", lambda config: None)
         monkeypatch.setattr(SystemBuilder, "build_enzyme", lambda self, path, templates=None: None)
         monkeypatch.setattr(SystemBuilder, "combine_solutes", lambda self: None)
         monkeypatch.setattr(SystemBuilder, "build_polymers", lambda self, **kwargs: None)
@@ -498,3 +499,22 @@ class TestBuildFromConfigSharesOneBox:
         assert with_polymers["provenance"]["polymer_seed"] == 7
         assert "polymer_seed" not in without["provenance"]
         assert without["provenance"]["packmol_seed"] == 7
+
+
+@pytest.mark.parametrize(
+    ("solvent", "message"),
+    [
+        ({"primary": {"model": "spce"}}, "use model: tip3p for new systems"),
+        ({"ions": {"kcl_concentration": 0.15}}, "use nacl_concentration"),
+    ],
+)
+def test_build_from_config_refuses_what_it_cannot_build(solvent, message):
+    """The Python API refuses spce and KCl as the CLI does, before building anything."""
+    from polyzymd.config.schema import SimulationConfig
+
+    data = TestBuildFromConfigSharesOneBox._config(with_polymers=False).model_dump()
+    data["solvent"] = solvent
+    config = SimulationConfig(**data)
+
+    with pytest.raises(ValueError, match=message):
+        SystemBuilder().build_from_config(config, polymer_seed=1)

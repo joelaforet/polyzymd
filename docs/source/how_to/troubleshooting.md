@@ -12,7 +12,7 @@ of the command that fails:
 |------|------------------|
 | PDB preparation, `polyzymd validate`, `polyzymd build`, `polyzymd run` | `build` |
 | OpenMM `polyzymd submit` or `recover --submit` | `build`. The SLURM job activates the site environment |
-| OpenMM inside a SLURM job on an NVIDIA GPU | `sim-cuda-12-4` or `sim-cuda-12-6` |
+| OpenMM inside a SLURM job on an NVIDIA GPU | `sim-cuda-12-0`, `sim-cuda-12-4` or `sim-cuda-12-6` |
 | Trajectory analysis and plots, `polyzymd analyze ...` | `analysis` |
 
 Use `pixi shell -e <env>` to activate an environment, or put
@@ -81,13 +81,10 @@ The YAML syntax is wrong. Check these points:
 ### Several `Field required` errors for the items of a list
 
 ```
-Build failed: 3 validation errors for SimulationConfig
-solvent.co_solvents.0
-  Value error, Co-solvent 'dmso': Must specify either 'mole_fraction' or 'concentration'
-solvent.co_solvents.1.name
-  Field required [type=missing, input_value={'mole_fraction': 0.1}, input_type=dict]
-solvent.co_solvents.2.name
-  Field required [type=missing, input_value={'residue_name': 'DMS'}, input_type=dict]
+error: solvent.co_solvents.0: Value error, Co-solvent 'dmso': give exactly one of mole_fraction, concentration and count, not none
+error: solvent.co_solvents.1.name: Field required
+error: solvent.co_solvents.2.name: Field required
+fix: correct these keys in config.yaml and run polyzymd validate again.
 ```
 
 Each key was written as a separate list item. A `-` starts a new item. Put
@@ -182,11 +179,13 @@ they overlap their own periodic images. PACKMOL cannot see this, because it
 runs without periodic boundaries. Minimization cannot remove an overlap this
 close, so the build stops.
 
-1. If the solute is long along `z`, it may not fit in the brick of a rhombic
-   dodecahedron at the configured padding. The `z` clearance is
-   `0.707 * padding - 0.146 * bbox_z`. Raise `solvent.box.padding`, or set
-   `solvent.box.shape: cube`.
-2. A system built by PolyzyMD 1.2 must be built again. Do not edit it.
+1. A system built by PolyzyMD 1.2 or by an earlier 1.3 release candidate must
+   be built again. Do not edit it. Those versions could make a box whose brick
+   was too short for the solute.
+2. PolyzyMD sizes the box so that the solute fits inside the brick. The build
+   log line `Box: edge ...` gives the clearance to each brick face. If all
+   three clearances are at least the tolerance and the error still appears,
+   report it with that line.
 
 A contact between half the tolerance and the full tolerance gives only a
 warning. Minimization removes it.

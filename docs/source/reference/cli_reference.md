@@ -90,10 +90,13 @@ polyzymd validate -c <path>
 
 ### What It Checks
 
-- YAML syntax validity
-- Required fields are present
-- Referenced files (PDB, SDF, cached polymer SDFs, reaction templates) are reported as
-  warnings when missing
+- YAML syntax validity: the file is a mapping and gives each key once
+- Required fields are present, numbers are finite and not `true`/`false`
+- The enzyme PDB has atoms, the substrate SDF holds the conformer, SMILES parse
+  and the charge method can charge each molecule (errors, exit 1)
+- Cached polymer SDFs and reaction templates are reported as warnings when missing
+- Settings a new build would not run as written: `NVE`, Nose-Hoover or Andersen
+  on OpenMM, `samples` above the MD steps, unset `$VAR` in paths (errors)
 - Monomer probabilities sum to 1.0
 - Valid enum values (water model, ensemble, etc.)
 - Co-solvent specification (mole_fraction XOR concentration)
@@ -101,6 +104,7 @@ polyzymd validate -c <path>
 ### Example
 
 ```bash
+cd examples/quickstart
 polyzymd validate -c config.yaml
 ```
 
@@ -109,22 +113,28 @@ polyzymd validate -c config.yaml
 Validating configuration: config.yaml
 Configuration is valid!
 
+
 Summary:
-  Name: LipA_polymer_simulation
-  Enzyme: LipA
-  Substrate: ResorufinButyrate
-  Polymers: SBMA-EGPMA
-    Count: 2
-    Length: 5
-    Monomer A: 98.0%
-    Monomer B: 2.0%
+  Name: trpcage_water
+  Engine: openmm
+  Enzyme: trpcage
+  Substrate: None (apo simulation)
+  Polymers: Disabled
+  Co-solvents: none
   Temperature: 300.0 K
   Pressure: 1.0 atm
 
 Simulation phases:
-  Equilibration: 1.0 ns (NVT)
-  Production: 100.0 ns (NPT)
+  Equilibration: 0.002000 ns across 1 stage(s)
+    - equil: 0.002 ns (NVT)
+  Production: 0.004 ns (NPT)
 ```
+
+With polymers, the summary also lists `Count`, `Length` and one
+`Monomer <label>: <percent>` line per monomer. When a file that the config
+names is missing, such as the polymer SDF directory, a `Referenced file
+warnings:` block with one `Warning:` line per file prints between
+`Configuration is valid!` and `Summary:`.
 
 ---
 
@@ -306,8 +316,8 @@ On any failure, execution stops immediately and intermediate files are preserved
 - OpenFF force field defaults are used (rcoulomb=0.9, rvdw=0.9, PME) for 1:1 parity with OpenMM
 - Position restraints are automatically generated for equilibration stages
 - Post-processing creates `prod_nojump.xtc` and `prod_centered.xtc` trajectories
-- For OpenMM simulations, use `polyzymd run-segment` (for a single segment) or
-  `polyzymd submit` (to submit self-resubmitting SLURM jobs)
+- For OpenMM, use `polyzymd run` with `engine: openmm` in the config (or
+  `--engine openmm`) to run on this machine, or `polyzymd submit` to submit self-resubmitting SLURM jobs
 
 ### Output Files
 
@@ -320,9 +330,20 @@ of files, see {ref}`gromacs-output-files`.
 
 Submit self-resubmitting simulation jobs to SLURM for HPC execution.
 
-Each replicate gets one SLURM script that handles the full simulation
-lifecycle: building, equilibration, production segments, interruption
-recovery, and resubmission. See {doc}`../how_to/hpc_slurm` for details.
+Each replicate gets one SLURM script that handles the simulation lifecycle:
+equilibration, production segments, interruption recovery, and resubmission.
+See {doc}`../how_to/hpc_slurm` for details.
+
+`submit` does not build. Run `polyzymd build` for each replicate first, in a
+compute job. Before it writes any script, `submit` checks each replicate: an
+OpenMM build must match its `build_manifest.json` and the config, and a GROMACS
+build must have the `.top`, `.gro`, `em.mdp` and `prod.mdp` files. If a
+replicate fails the check, `submit` stops with an error that gives the
+`polyzymd build` command. `--generate-only` makes the same check.
+`--dry-run` does not.
+
+`submit` runs `sbatch --export=NONE`, so a job does not inherit the shell
+environment of the submitting host. GROMACS `module_load` runs in the job only.
 
 ```bash
 polyzymd submit --config <path> --replicates <range> [options]
@@ -341,7 +362,7 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--projects-dir` | - | No | from config | Override projects directory |
 | `--output-dir` | - | No | auto | Directory for job scripts |
-| `--time-limit` | - | No | from preset | Override SLURM time limit (HH:MM:SS) |
+| `--time-limit` | - | No | from preset | Override SLURM time limit: minutes, M:SS, H:MM:SS or D-H:MM:SS; other values are refused. OpenMM refuses 5 minutes or less: SLURM tells the job to stop 5 minutes before the limit. |
 | `--memory` | - | No | 3G | Override SLURM memory allocation |
 | `--account` | - | No | - | Override SLURM account / allocation ID |
 | `--partition` | - | No | from preset | Override SLURM partition |
@@ -351,7 +372,6 @@ polyzymd submit -c <path> -r 1-5 --preset aa100
 | `--nodelist` | - | No | - | SLURM `--nodelist` override (e.g., "gpu-node-001") |
 | `--exclude` | - | No | from preset | SLURM `--exclude` override (e.g., "node01,node02"). Replaces the preset list; pass `""` to exclude nothing |
 | `--pixi-env` | - | No | engine-specific | Runtime for generated Slurm jobs; OpenMM `auto` uses a fixed environment for known-site presets, and GROMACS uses `build` |
-| `--skip-build` | - | No | false | Skip system building (use pre-built system from `polyzymd build`) |
 | `--force` | - | No | false | Skip duplicate-job check |
 | `--openff-logs` | - | No | false | Enable verbose OpenFF logs in job scripts |
 | `--dry-run` | - | No | false | Preview submission plan only (no files written, no submission) |
@@ -381,14 +401,14 @@ polyzymd submit -c config.yaml -r 1-5 --preset aa100 --generate-only
 polyzymd submit -c config.yaml -r 1-5 --preset aa100 --email you@university.edu
 
 # Quick test with short time limit
-polyzymd submit -c config.yaml -r 1 --preset testing --time-limit 0:05:00
+polyzymd submit -c config.yaml -r 1 --preset testing --time-limit 0:10:00
 
 # Custom directories for HPC
 polyzymd submit -c config.yaml -r 1-3 --preset aa100 \
     --scratch-dir /scratch/alpine/$USER/sims \
     --projects-dir /projects/$USER/polyzymd
 
-# GROMACS GPU submission with constraint
+# GROMACS GPU submission with constraint (after polyzymd build ... --format gromacs)
 polyzymd submit -c config.yaml -r 1-3 \
     --engine gromacs \
     --preset blanca-shirts \
@@ -434,7 +454,9 @@ remains" and queues a successor within seconds. `polyzymd cancel` writes a
 `STOP` marker into each replicate working directory first — the wrapper
 refuses to submit a successor while it exists, and a successor that is
 already queued exits before starting a segment — and then cancels the
-queued and running jobs that work in that directory.
+queued and running jobs that work in that directory. A replicate whose
+working directory does not exist and that has no queued job has nothing to
+cancel: the command says so and writes nothing.
 
 ### Options
 
@@ -481,8 +503,10 @@ and `POLYZYMD_STOP_FILE=<path>` to relocate the marker.
   cancellation still sees it.
 - `--resume` only removes the marker; it does not resubmit. Use
   `polyzymd submit` afterwards.
-- Outside a SLURM environment (no `scancel`) the marker is still written and
-  the missing scheduler is reported as a warning.
+- Outside a SLURM environment (no `squeue` or `scancel`) the marker is still
+  written. `cancel` warns `squeue not found — skipping duplicate-job check`
+  and then prints `no queued or running job` for each replicate. That line
+  only means that no job could be listed; check the queue on the cluster.
 - A running chain keeps the job script that `submit` wrote. OpenMM and
   GROMACS job scripts check the marker. Job scripts of PolyzyMD 1.2 and
   earlier do not. Stop those chains with
@@ -507,6 +531,7 @@ polyzymd run-segment -c CONFIG [OPTIONS]
 | `--replicate` | `-r` | No | 1 | Replicate number |
 | `--scratch-dir` | - | No | from config | Override scratch directory |
 | `--skip-build` | - | No | false | Skip system building for initial segment |
+| `--allow-report-interval-change` | - | No | false | Continue even if the config now gives a different number of steps between trajectory frames than earlier segments used |
 
 ### Behavior
 
@@ -571,6 +596,9 @@ polyzymd check-progress -c config.yaml -r 1
 ### Notes
 
 - This command is called by the generated SLURM scripts, not typically by users directly
+- When the run has a `progress.json`, it updates it from the files on disk. It
+  never creates one, so a run without one (a legacy or downloaded run) is left
+  as it is
 - For a visual overview of all replicates, use `polyzymd status` instead
 
 ---
@@ -639,8 +667,10 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | `RUNNING` | A SLURM job that works in this replicate's run directory is in state `R` (or completing/configuring) |
 | `QUEUED` | A matching job exists but is pending; the reason is shown in parentheses |
 | `DEAD` | Work remains and no matching job is queued or running. Nothing will restart it. The `last:` field is the most informative error line near the end of the newest SLURM log whose `Work dir:` line names this run directory, with the log filename in brackets. |
-| `NOT_STARTED` | Directory exists but production never began (typically a failed build; the build log is consulted). |
+| `STOPPED` | `polyzymd cancel` left a `STOP` file and no job is queued or running. The footer gives `polyzymd cancel --resume` and `polyzymd submit` to restart the chain. |
+| `NOT_STARTED` | Directory exists but no minimization, equilibration or production output was written (typically a failed build; the build log is consulted). A replicate whose job died during minimization or equilibration is `DEAD`. |
 | `NOT_FOUND` | Expected replicate directory is missing from scratch |
+| `CORRUPT` | `progress.json` exists but cannot be read (empty, truncated or of the wrong shape). The `last:` field says why. `status` leaves the file as it is; fix or remove it by hand. |
 
 Throughput (`ns/d`) is measured from the newest segment with a known wall
 window (a finished or interrupted segment), falling back to the live segment
@@ -679,7 +709,8 @@ that case.
 
 ### Notes
 
-- This is a **read-only** command — it only reads `progress.json` files
+- This is a **read-only** command: it reads `progress.json` files and writes
+  nothing. A run without `progress.json` is shown from a scan of its files
 - Replicate directories are auto-detected via the naming template in the config
 - The command is a one-shot snapshot (prints and exits)
 - Use `polyzymd recover -c config.yaml -r <N> --submit` to resume interrupted replicates
@@ -708,7 +739,7 @@ polyzymd recover -c CONFIG [OPTIONS]
 | `--preset` | - | No | aa100 | SLURM preset for recovery job |
 | `--engine` | - | No | from config | Override simulation engine (`gromacs` or `openmm`) |
 | `--submit / --no-submit` | - | No | --no-submit | Submit a recovery job (default: status only) |
-| `--dry-run` | - | No | false | Show what would be submitted without submitting |
+| `--dry-run` | - | No | false | With `--submit`, print the script path and SLURM settings; write and submit nothing |
 | `--email` | - | No | "" | Email for job notifications |
 | `--memory` | - | No | 3G | Override SLURM memory allocation (e.g. '4G', '8G') |
 | `--partition` | - | No | from preset | Override SLURM partition |
@@ -762,7 +793,12 @@ To resume, run:
 - Without `--submit`, this is a read-only status report — useful for inspecting
   simulation health across replicates
 - With `--submit`, generates a self-resubmitting SLURM job in
-  `{working_dir}/recovery_scripts/` and submits it
+  `{working_dir}/recovery_scripts/` and submits it. The chain's own script in
+  `daisy_chain_scripts/` is left as it was. The job uses `--preset` (default
+  `aa100`), so pass the preset the chain was submitted with
+- `recover` never writes `progress.json`; the recovery job's runner does
+- If `progress.json` cannot be read, `recover` (and `check-progress` in a
+  running chain) stops with an error and leaves the file as it is
 - The recovery job is identical to a normal submission job — it uses `run-segment`
   to determine what work remains and continues from there
 
@@ -807,18 +843,24 @@ polyzymd info
 
 ### Example Output
 
+After a banner with the PolyzyMD logo:
+
 ```
-PolyzyMD - Molecular Dynamics for Enzyme-Polymer Systems
-Version: 0.1.0
+PolyzyMD - Molecular Dynamics of Proteins with Polymers, Ligands and Co-solvents
+Version: 1.3.0
 
 Dependencies:
-  OpenMM: 8.1.1
-  OpenFF Toolkit: 0.16.0
-  OpenFF Interchange: 0.3.25
-  Pydantic: 2.7.1
+  OpenMM: <version>
+  OpenFF Toolkit: <version>
+  OpenFF Interchange: <version>
+  Pydantic: <version>
+  packmol: /path/to/env/bin/packmol
+  gmx: NOT ON PATH
 
 Example configs: polyzymd/templates/examples/
 ```
+
+`packmol` and `gmx` show the executable found on `PATH`, or `NOT ON PATH`.
 
 ### Use Cases
 
@@ -958,7 +1000,7 @@ The verdict vocabulary is fixed so a caller can branch on it:
 | `no significant difference` | The test ran and the adjusted p value did not clear alpha |
 | `no test recorded` | The comparison stored no multiplicity-corrected p value, so the comparison describes a difference without deciding it |
 | `changed` | The difference is significant but the two means are equal at the stored precision |
-| `not testable` | A condition has fewer than two replicates, so the test is undefined |
+| `not testable` | A condition has fewer than two replicates, or every replicate of both conditions has the same value, so the test is undefined |
 
 `--format json` prints the full report. Every field is documented in
 {doc}`analysis_protocol_report`.
@@ -1097,7 +1139,7 @@ directory) without loading any trajectory, and prints:
 | condition | `control\|condition <label>: replicates <numbers> under <directory> (from data.local.yaml\|config)`, with `; production <ns>` (a range when the replicates differ) under `--production`, or `no replicates found under <directory> ...` |
 | analysis | `analysis <run>: <settings>; stored results in <folder>[ with its report]`, or `no stored results`; for the study's own function, `analysis <run> (<file>:<function>, <kind>)`, after importing it |
 | git | `git: commit <sha>; inputs committed`, `git: commit <sha>; <n> uncommitted inputs: <first five paths> and <m> more`, or `git: not a repository` |
-| metadata | `metadata: complete`, or `metadata: <n> gaps for publishing; ...` |
+| metadata | `metadata (<file>): complete`, or `metadata (<file>): <n> gaps for publishing: <gap>; <gap> ...` |
 | publish | `publish: follow <study>/deposit/UPLOAD.md` after a freeze, or `publish: when the analyses are final, run polyzymd study freeze` |
 | reproduce | In a downloaded frozen study (a `manifest.json` but no `deposit/`): how to point it at the trajectories and rerun or redraw |
 | citation | `cite: <how to cite PolyzyMD>` |
@@ -1175,8 +1217,10 @@ SHA-256), and prints `<label>: <n> files match manifest.json`. When two
 conditions name their runs alike, a folder named for the condition
 (`no_polymer/`) is chosen before file sizes, and one folder is never written
 for two such conditions. Conditions whose runs are named apart can share one
-folder. Prints `<label>: runs <numbers> under <folder>` per
-condition found. Writes nothing when no condition is found. Exits 2 when a
+folder. Prints `<label>: replicates [<numbers>] under <folder>` per
+condition found. Writes nothing when no condition is found. A condition
+with a missing or different file is not written, and its entry in
+`data.local.yaml` is removed (with a printed line) when it names that folder. Exits 2 when a
 condition is not found, two conditions with alike run names are found in one
 folder, or a file is
 missing or different. See
@@ -1291,6 +1335,7 @@ output:
 | 0 | Success |
 | 1 | Error (validation failure, build failure, etc.) |
 | 2 | Typed analysis error from {ref}`polyzymd analyze <cli-analyze>`, whose message and fix are printed on stderr, one line each |
+| 3 | `polyzymd check-progress`: error; the SLURM job does not resubmit |
 | 99 | Graceful shutdown — simulation was interrupted but interrupted state was saved (see {doc}`../how_to/hpc_slurm`) |
 
 ---

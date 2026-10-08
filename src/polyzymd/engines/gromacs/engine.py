@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -109,6 +108,9 @@ class GromacsEngine(SimulationEngine):
     def prepare_submission(self, request: EngineSubmitRequest) -> Path:
         """Prepare scheduler artifacts for a GROMACS job.
 
+        The script is written to ``extra["script_path"]`` when given, and to
+        ``daisy_chain_scripts/run_rep<N>.sh`` otherwise.
+
         Parameters
         ----------
         request : EngineSubmitRequest
@@ -118,69 +120,35 @@ class GromacsEngine(SimulationEngine):
         -------
         Path
             Path to the generated SLURM script.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the replicate has no GROMACS inputs from ``polyzymd build``.
         """
         if request.slurm_config is None:
             raise ValueError("GROMACS submission requires slurm_config")
 
         pixi_env = str(request.extra.get("pixi_env", "build"))
-        skip_build = bool(request.extra.get("skip_build", False))
-
-        request.working_dir.mkdir(parents=True, exist_ok=True)
-
-        # Build and export GROMACS inputs when not already present
+        self.check_build(request)
         from polyzymd.analyses.shared.gromacs import system_prefix
 
         prefix = system_prefix(self._config)
-        top_path = request.working_dir / f"{prefix}.top"
-        gro_path = request.working_dir / f"{prefix}.gro"
-        em_path = request.working_dir / "em.mdp"
-        prod_path = request.working_dir / "prod.mdp"
-
-        inputs_exist = (
-            top_path.exists() and gro_path.exists() and em_path.exists() and prod_path.exists()
-        )
-
-        if not inputs_exist and skip_build:
-            raise FileNotFoundError(
-                "skip_build=True but required GROMACS inputs are missing "
-                f"in {request.working_dir}. Expected: {top_path.name}, {gro_path.name}, "
-                f"{em_path.name}, {prod_path.name}."
-            )
-
-        if not inputs_exist:
-            from polyzymd.builders.system_builder import SystemBuilder
-            from polyzymd.exporters.gromacs import GromacsExporter
-
-            builder = SystemBuilder.from_config(self._config)
-            interchange = builder.build_from_config(
-                config=self._config,
-                working_dir=request.working_dir,
-                polymer_seed=request.replicate,
-            )
-            component_info = builder.get_component_info()
-            exporter = GromacsExporter(
-                interchange,
-                self._config,
-                component_info=component_info,
-                replicate=request.replicate,
-            )
-            exporter.export(
-                output_dir=request.working_dir,
-                prefix=prefix,
-                gmx_command=self._gmx_binary,
-            )
 
         eq_mdps = sorted(path.name for path in request.working_dir.glob("eq_*.mdp"))
-        if inputs_exist and not eq_mdps:
+        if not eq_mdps:
             logging.getLogger(__name__).warning(
                 "Core GROMACS inputs found in %s but no equilibration MDPs (eq_*.mdp). "
                 "The generated script will skip equilibration and run production from EM output.",
                 request.working_dir,
             )
 
-        script_dir = request.working_dir / "daisy_chain_scripts"
-        script_dir.mkdir(parents=True, exist_ok=True)
-        script_path = script_dir / f"run_rep{request.replicate}.sh"
+        script_path = Path(
+            request.extra.get(
+                "script_path",
+                request.working_dir / "daisy_chain_scripts" / f"run_rep{request.replicate}.sh",
+            )
+        )
 
         effective_slurm = self._resolve_slurm_config(request.slurm_config)
         effective_mdrun_flags = self._resolve_mdrun_flags(effective_slurm)
@@ -199,6 +167,7 @@ class GromacsEngine(SimulationEngine):
             module_load=self._config.gromacs.module_load,
             env_exports=self._config.gromacs.env_exports,
             setup_commands=self._config.gromacs.setup_commands,
+            checkpoint_interval_s=self._config.simulation_phases.production.checkpoint_interval,
         )
         script = generator.generate_job_script(
             config_path=str(request.config_path),
@@ -207,9 +176,36 @@ class GromacsEngine(SimulationEngine):
             system_prefix=prefix,
             equilibration_mdps=eq_mdps,
             job_name=request.job_name,
+            output_file=str(
+                self._config.output.get_slurm_logs_directory() / f"{request.job_name}.%j.out"
+            ),
         )
         generator.save_script(script, script_path)
         return script_path
+
+    def check_build(self, request: EngineSubmitRequest) -> None:
+        """Refuse a replicate without the GROMACS inputs from ``polyzymd build``.
+
+        Submission never builds: building runs OpenFF and Packmol, which do not
+        belong on a login node.
+
+        Raises
+        ------
+        FileNotFoundError
+            With the ``polyzymd build`` command to run.
+        """
+        from polyzymd.analyses.shared.gromacs import system_prefix
+
+        prefix = system_prefix(self._config)
+        required = [f"{prefix}.top", f"{prefix}.gro", "em.mdp", "prod.mdp"]
+        missing = [name for name in required if not (request.working_dir / name).exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"No GROMACS build for replicate {request.replicate} in {request.working_dir} "
+                f"(missing {', '.join(missing)}). Build it first, in a compute job: "
+                f"polyzymd build -c {request.config_path} -r {request.replicate} "
+                "--format gromacs. Then submit again."
+            )
 
     def _resolve_slurm_config(self, base: SlurmConfig) -> SlurmConfig:
         """Override base SLURM config with GROMACS-specific hardware settings.
@@ -256,10 +252,11 @@ class GromacsEngine(SimulationEngine):
         MPI launcher (``mpirun``/``srun``).
 
         When ``gpu`` is enabled in the GROMACS config, the offload flags
-        ``-nb gpu``, ``-pme gpu``, ``-bonded gpu``, and ``-update gpu`` are
-        appended automatically. Each flag is skipped if the user already
-        specified that flag key (e.g., ``-nb cpu`` prevents auto-adding
-        ``-nb gpu``).
+        ``-nb gpu``, ``-pme gpu`` and ``-bonded gpu`` are appended
+        automatically. Each flag is skipped if the user already specified that
+        flag key (e.g., ``-nb cpu`` prevents auto-adding ``-nb gpu``).
+        ``-update gpu`` is never added: GROMACS updates on the GPU only with
+        ``integrator = md``, and the Langevin thermostats export ``sd``.
 
         Parameters
         ----------
@@ -295,7 +292,6 @@ class GromacsEngine(SimulationEngine):
                 ("-nb", "gpu"),
                 ("-pme", "gpu"),
                 ("-bonded", "gpu"),
-                ("-update", "gpu"),
             ]
             for flag_key, flag_val in _GPU_OFFLOAD_FLAGS:
                 if flag_key not in token_set:
@@ -360,18 +356,10 @@ class GromacsEngine(SimulationEngine):
             Submission metadata with script path and optional SLURM job id.
         """
         script_path = self.prepare_submission(request)
-        module_load = self._config.gromacs.module_load
-
-        if not module_load and shutil.which("sbatch") is None:
-            return {
-                "submitted": False,
-                "script_path": script_path,
-                "reason": "sbatch_not_available",
-            }
 
         from polyzymd.workflow.slurm_submit import run_sbatch
 
-        result = run_sbatch(script_path, module_load=module_load)
+        result = run_sbatch(script_path)
         if result.returncode != 0:
             raise RuntimeError(f"sbatch submission failed: {result.stderr.strip()}")
 

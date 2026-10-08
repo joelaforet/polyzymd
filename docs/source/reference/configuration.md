@@ -7,18 +7,21 @@ This document describes all configuration options for PolyzyMD YAML files.
 A complete configuration file has these sections:
 
 ```yaml
-name: "simulation_name"
+name: "simulation_name"   # Required
+engine: "openmm"          # Required: openmm or gromacs
 description: "optional description"
 
 enzyme: { ... }           # Required
 substrate: { ... }        # Optional (null for apo)
 polymers: { ... }         # Optional (null to disable)
-solvent: { ... }          # Required
+solvent: { ... }          # Optional (default: TIP3P water, neutralizing ions)
 restraints: [ ... ]       # Optional
 thermodynamics: { ... }   # Required
 simulation_phases: { ... } # Required
-output: { ... }           # Required
+output: { ... }           # Optional (has defaults)
 force_field: { ... }      # Optional (has defaults)
+openmm: { ... }           # Optional (has defaults; read when engine is openmm)
+gromacs: { ... }          # Optional (has defaults; read when engine is gromacs)
 ```
 
 ---
@@ -34,8 +37,8 @@ enzyme:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Short identifier for the enzyme |
-| `pdb_path` | path | Yes | Path to prepared PDB file |
+| `name` | string | Yes | Short identifier for the enzyme. It names the run folder, so it must not be empty or hold `/` |
+| `pdb_path` | path | Yes | Path to prepared PDB file. `validate` refuses a missing file or one without ATOM/HETATM records |
 | `custom_substructures_path` | path | No | JSON file of residue templates for residues that OpenFF does not know, such as an N-terminal cystine. See {doc}`openff_pdb_ingestion` |
 | `description` | string | No | Human-readable description |
 
@@ -55,9 +58,9 @@ substrate:
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `name` | string | Yes | - | Substrate identifier |
-| `sdf_path` | path | Yes | - | Path to SDF with docked conformers |
-| `conformer_index` | int | No | 0 | Index of conformer to use (0-indexed) |
-| `charge_method` | string | No | "nagl" | Options: `nagl`, `espaloma`, `am1bcc` |
+| `sdf_path` | path | Yes | - | Path to SDF with docked conformers. To make it from a crystal ligand, see {ref}`ligand-sdf-from-crystal` |
+| `conformer_index` | int | No | 0 | Index of conformer to use (0-indexed). `validate` refuses an index the SDF does not hold |
+| `charge_method` | string | No | "nagl" | Options: `nagl`, `espaloma`, `am1bcc`. `validate` refuses `nagl` for elements other than H, C, N, O, F, P, S, Cl, Br, I, and a method whose software is not installed |
 | `residue_name` | string | No | "LIG" | 3-letter code for topology |
 
 ### Charge Methods
@@ -111,7 +114,7 @@ polymers:
   length: 5                              # Monomers per chain
   count: 2                               # Number of polymer chains
   
-  sdf_directory: null                    # Pre-built polymer SDFs (optional)
+  sdf_directory: "polymer_sdfs/SBMA-EGPMA" # Pre-built polymer SDFs (required in cached mode)
   cache_directory: ".polymer_cache"      # Cache for generated polymers
 ```
 
@@ -160,7 +163,7 @@ polymers:
 | `monomers` | list | Yes | - | Monomer specifications |
 | `length` | int | Yes | - | Chain length (number of monomers) |
 | `count` | int | Yes | - | Number of chains to add |
-| `sdf_directory` | path | No | null | Directory with pre-built polymer SDFs |
+| `sdf_directory` | path | In cached mode | null | Directory with pre-built polymer SDFs |
 | `cache_directory` | path | No | ".polymer_cache" | Cache directory |
 | `reactions` | object | No | all "default" | ATRP reaction templates (dynamic mode) |
 | `charger` | string | No | "nagl" | Charge method for dynamic generation |
@@ -188,8 +191,8 @@ The periodic cell is computed **before** anything is packed, from the protein
 and substrate alone:
 
 ```
-box vectors = shape_matrix @ diag(solute bbox + 2 * (polymers.packing.padding
-                                                     + solvent.box.padding))
+edge = solute diameter + 2 * (polymers.packing.padding + solvent.box.padding)
+box vectors = edge * shape_matrix
 ```
 
 Chains are then packed inside the rectangular *brick* of that cell (shrunk by
@@ -202,14 +205,12 @@ sphere radius are recorded under `provenance` in `build_manifest.json`
 be compared by diffing their manifests.
 
 ```{note}
-A rhombic-dodecahedron brick is not the padded extent. Along `x` and `y` the
-brick equals `bbox + 2 * padding`, but along `z` it is `sqrt(2)/2` (0.707)
-times that, so the clearance between the solute and the `z` faces is
-`0.707 * padding - 0.146 * bbox_z`, not `padding`. That is the geometry of the
-cell, not a defect: the missing corners are supplied by the periodic images.
-The build logs the clearance to each brick face and warns when the solute does
-not fit inside the brick at all, in which case you should raise the padding or
-use `shape: cube`.
+A rhombic-dodecahedron brick is one edge long along `x` and `y`, but only
+`sqrt(2)/2` (0.707) edges tall along `z`. The missing corners are supplied by
+the periodic images. If the solute's bounding box would come closer than
+`solvent.box.tolerance` to a brick face, the edge grows until it fits. The
+build log and `build --dry-run` print the edge, the brick and the clearance to
+each brick face.
 ```
 
 ### Monomer Specification
@@ -243,10 +244,11 @@ platform.
 
 ```yaml
 polymers: null
-# or
-polymers:
-  enabled: false
 ```
+
+You can also leave out the `polymers:` section. A section with
+`enabled: false` must still contain `type_prefix`, `monomers`, `length` and
+`count`, because the schema requires them.
 
 ---
 
@@ -255,7 +257,7 @@ polymers:
 ```yaml
 solvent:
   primary:
-    type: "water"
+    type: "water"                        # The only type the build makes
     model: "tip3p"                       # Water model
   
   co_solvents: []                        # List of co-solvents (optional)
@@ -265,7 +267,7 @@ solvent:
     nacl_concentration: 0.15             # NaCl salt concentration (M)
   
   box:
-    padding: 1.2                         # nm from solute to box edge
+    padding: 1.2                         # nm from solute to box edge (see below)
     shape: "rhombic_dodecahedron"        # Box shape
     target_density: 1.0                  # g/mL
     tolerance: 2.0                       # PACKMOL tolerance (Angstrom)
@@ -274,8 +276,15 @@ solvent:
 `nacl_concentration` sets the number of NaCl pairs. With `neutralize: true`,
 the Na+ or Cl- ions that cancel the charge of the solute and co-solvents are
 added on top of the salt, as OpenMM `Modeller` and `gmx genion -neutral` do.
+NaCl is the only salt the build adds: `validate`, `build`, `run` and `submit`
+refuse a non-zero `kcl_concentration` or `mgcl2_concentration`.
 
-`box.padding` is the clearance between the **solute** and the box edge. When
+`box.padding` is the distance from the **solute** to the box edge. The edge of
+the cell is the solute diameter (its largest atom-to-atom distance) plus
+`2 * padding`, as in `gmx editconf -d`. Every lattice vector of a cube or a
+rhombic dodecahedron is at least one edge long. The solute
+therefore starts at least `2 * padding` from each of its periodic copies, in
+any orientation. The solute's bounding box is centred in the brick. When
 polymers are configured, `polymers.packing.padding` is added to it and the
 resulting cell is computed from the protein and substrate before any packing
 happens, so it is identical across replicates of a condition; the packed
@@ -286,20 +295,20 @@ solvent counts.
 
 ### Water Models
 
-| Model | Description |
-|-------|-------------|
-| `tip3p` | TIP3P (default, fast) |
-| `spce` | SPC/E |
-| `tip4pew` | TIP4P-Ew |
-| `opc` | OPC (accurate, slower) |
+`tip3p` (TIP3P) is the only water model PolyzyMD builds. The force fields it
+loads carry the TIP3P water parameters, so `validate`, `build`, `run` and
+`submit` refuse any other `model`. A config of an existing run with another
+model still loads for `status` and analysis.
 
 ### Box Shapes
 
 | Shape | Description |
 |-------|-------------|
-| `cube` | Cubic box |
-| `rhombic_dodecahedron` | Space-efficient (default) |
-| `truncated_octahedron` | Alternative space-efficient |
+| `cube` | Cube: three equal edges at right angles |
+| `rhombic_dodecahedron` | Same edge, 71 % of the cube volume (default) |
+
+Both shapes use the same edge, so they keep the solute equally far from its
+periodic copies. The rhombic dodecahedron needs fewer waters.
 
 ### Co-solvents
 
@@ -310,8 +319,8 @@ PolyzyMD supports adding co-solvents to a water primary solvent. Give the amount
 | Method | Field | Description | Effect on Water |
 |--------|-------|-------------|-----------------|
 | Mole Fraction | `mole_fraction` | Fraction of neutral solvent molecules (0-1) | Replaces water in the neutral solvent mixture |
-| Concentration | `concentration` | Molar concentration (mol/L) | Additive (water unchanged) |
-| Count | `count` | Number of molecules in the box | Additive (water unchanged) |
+| Concentration | `concentration` | Molar concentration (mol/L) | Added on top of the water; only the ions of a charged co-solvent reduce the water (see below) |
+| Count | `count` | Number of molecules in the box | Added on top of the water; only the ions of a charged co-solvent reduce the water (see below) |
 
 **Important:** Use exactly ONE method per co-solvent. The previous `volume_fraction` key has been removed and is rejected instead of converted automatically. Existing configs that used `volume_fraction` must be updated explicitly to either `mole_fraction` or `concentration`; PolyzyMD does not infer mole fractions from volume fractions.
 
@@ -367,26 +376,28 @@ Where:
 
 **Source:** [`src/polyzymd/builders/solvent.py`](https://github.com/joelaforet/polyzymd/blob/main/src/polyzymd/builders/solvent.py)
 
-The water count is NOT reduced when using concentration. The co-solvent molecules are added to the existing water, which may slightly increase the effective density.
+With `concentration` or `count`, the co-solvent molecules are added on top of the water, which slightly increases the density. Their mass does not reduce the water count. Ions do: the water fills the solvent mass that is left after all Na+ and Cl- ions. So a charged co-solvent, whose counter-ions or neutralizing ions are added as Na+ or Cl-, also reduces the water. For example, 8 dodecyl sulfate anions by `count` add 8 Na+ and give about 10 fewer waters than the same box without them.
 
 #### Built-in Co-solvent Library
 
 PolyzyMD includes a library of common co-solvents with pre-defined SMILES and densities. Density values are retained as metadata and are sourced from [PubChem](https://pubchem.ncbi.nlm.nih.gov/), a public database of chemical compounds. Each compound has a unique Compound Identification Number (CID) that can be used to look up detailed information including density, structure, and safety data.
 
-| Name | SMILES | Density (g/mL) | Reference |
-|------|--------|----------------|-----------|
-| `dmso` | `CS(=O)C` | 1.10 | [CID 679](https://pubchem.ncbi.nlm.nih.gov/compound/679) |
-| `dmf` | `CN(C)C=O` | 0.95 | [CID 6228](https://pubchem.ncbi.nlm.nih.gov/compound/6228) |
-| `acetonitrile` | `CC#N` | 0.786 | [CID 6342](https://pubchem.ncbi.nlm.nih.gov/compound/6342) |
-| `urea` | `C(=O)(N)N` | 1.32 | [CID 1176](https://pubchem.ncbi.nlm.nih.gov/compound/1176) |
-| `ethanol` | `CCO` | 0.789 | [CID 702](https://pubchem.ncbi.nlm.nih.gov/compound/702) |
-| `methanol` | `CO` | 0.792 | [CID 887](https://pubchem.ncbi.nlm.nih.gov/compound/887) |
-| `glycerol` | `C(C(CO)O)O` | 1.261 | [CID 753](https://pubchem.ncbi.nlm.nih.gov/compound/753) |
-| `isopropanol` | `CC(C)O` | 0.786 | [CID 3776](https://pubchem.ncbi.nlm.nih.gov/compound/3776) |
-| `acetone` | `CC(=O)C` | 0.784 | [CID 180](https://pubchem.ncbi.nlm.nih.gov/compound/180) |
-| `thf` | `C1CCOC1` | 0.883 | [CID 8028](https://pubchem.ncbi.nlm.nih.gov/compound/8028) |
-| `dioxane` | `C1COCCO1` | 1.033 | [CID 31275](https://pubchem.ncbi.nlm.nih.gov/compound/31275) |
-| `ethylene_glycol` | `C(CO)O` | 1.114 | [CID 174](https://pubchem.ncbi.nlm.nih.gov/compound/174) |
+| Name | SMILES | Density (g/mL) | Residue name | Reference |
+|------|--------|----------------|--------------|-----------|
+| `dmso` | `CS(=O)C` | 1.10 | `DMS` | [CID 679](https://pubchem.ncbi.nlm.nih.gov/compound/679) |
+| `dmf` | `CN(C)C=O` | 0.95 | `DMF` | [CID 6228](https://pubchem.ncbi.nlm.nih.gov/compound/6228) |
+| `acetonitrile` | `CC#N` | 0.786 | `CCN` | [CID 6342](https://pubchem.ncbi.nlm.nih.gov/compound/6342) |
+| `urea` | `C(=O)(N)N` | 1.32 | `URE` | [CID 1176](https://pubchem.ncbi.nlm.nih.gov/compound/1176) |
+| `ethanol` | `CCO` | 0.789 | `ETH` | [CID 702](https://pubchem.ncbi.nlm.nih.gov/compound/702) |
+| `methanol` | `CO` | 0.792 | `MOH` | [CID 887](https://pubchem.ncbi.nlm.nih.gov/compound/887) |
+| `glycerol` | `C(C(CO)O)O` | 1.261 | `GOL` | [CID 753](https://pubchem.ncbi.nlm.nih.gov/compound/753) |
+| `isopropanol` | `CC(C)O` | 0.786 | `ISO` | [CID 3776](https://pubchem.ncbi.nlm.nih.gov/compound/3776) |
+| `acetone` | `CC(=O)C` | 0.784 | `ACN` | [CID 180](https://pubchem.ncbi.nlm.nih.gov/compound/180) |
+| `thf` | `C1CCOC1` | 0.883 | `THF` | [CID 8028](https://pubchem.ncbi.nlm.nih.gov/compound/8028) |
+| `dioxane` | `C1COCCO1` | 1.033 | `DIO` | [CID 31275](https://pubchem.ncbi.nlm.nih.gov/compound/31275) |
+| `ethylene_glycol` | `C(CO)O` | 1.114 | `EDO` | [CID 174](https://pubchem.ncbi.nlm.nih.gov/compound/174) |
+
+A co-solvent's residue name must not be an amino-acid, nucleic-acid, water or ion name, because selections such as `protein` would then include it. Without `residue_name`, a custom co-solvent gets the first three letters of its name, or, when those clash, the first two letters and the next letter or digit that does not clash (`methylurea` becomes `MEH`, not `MET`); the dry run prints it. `validate` and `build` refuse a `residue_name` you set that clashes. Library co-solvents whose short name clashed use the PDB chemical-component code (glycerol is `GOL`, not `GLY`). Topologies built before PolyzyMD 1.3 still have the old names (`GLY` glycerol, `MET` methanol, `ACE` acetone and acetonitrile, `ETH` ethylene glycol); an older build has the clash when one of these residues has no `CA` atom, which MDAnalysis shows with `[r for r in u.select_atoms("resname GLY MET").residues if "CA" not in r.atoms.names]`.
 
 For library co-solvents, you only need to specify the `name` and either `mole_fraction` or `concentration`:
 
@@ -483,7 +494,7 @@ PolyzyMD solves this by computing charges **once** and reusing them:
 1. Check in-memory cache (fastest)
 2. Check bundled library: src/polyzymd/data/solvents/dmso.sdf (used when no SMILES or the library SMILES is given)
 3. Check user cache: ~/.polyzymd/solvent_cache/<name>.<charge method>.<SMILES hash>.sdf
-4. Generate from SMILES + AM1BCC, save to user cache
+4. Generate from SMILES, charge with charge_method (default nagl), save to user cache
 ```
 
 #### Available Pre-computed Solvents
@@ -544,10 +555,11 @@ You can inspect and manage the solvent cache programmatically:
 ```python
 from polyzymd.data import list_available_solvents, clear_cache
 
-# List all available solvents (bundled + cached)
+# Map each available solvent name to its source
 solvents = list_available_solvents()
 print(solvents)
-# {'bundled': ['dmso', 'ethanol', ...], 'cached': ['my_custom_solvent']}
+# {'tip3p': 'library', 'spce': 'built-in', 'dmso': 'library', ...,
+#  'my_custom_solvent.nagl.9a7ebe92ac51': 'user_cache'}
 
 # Clear the user cache (does not affect bundled solvents)
 clear_cache()
@@ -575,6 +587,17 @@ restraints:
 ```
 
 See {doc}`../how_to/restraints` for detailed selection syntax.
+
+Only the OpenMM engine applies distance restraints. With `engine: gromacs`,
+`validate` refuses an enabled restraint, and `build --format gromacs`,
+`run --engine gromacs` and `submit --engine gromacs` refuse it too. Position
+restraints in equilibration stages (`position_restraints:`) work on both
+engines. On GROMACS they work for `protein_heavy`, `protein_backbone`,
+`protein_calpha`, `ligand_heavy` and `polymer_heavy`; each group must have
+the same `force_constant` in every stage, and all stages must use the same
+protein group. `validate` refuses other position restraints on GROMACS, and
+refuses `ligand_heavy` without a substrate or `polymer_heavy` without polymers
+on both engines.
 
 ### Restraint Types
 
@@ -659,6 +682,8 @@ See {doc}`../explanation/simulation_safeguards` for why the solute is frozen.
 ```{note}
 The trajectory frame interval is derived from `production.duration` and
 `production.samples`. A config with `production.report_interval` is refused.
+`validate` refuses a phase with more `samples` than MD steps, or shorter than
+one time step.
 ```
 
 For a temperature ramp, omit `duration`. Set `temperature_increment` in K and
@@ -672,7 +697,7 @@ stages continue to require an explicit `duration`.
 |----------|-------------|
 | `NVT` | Constant volume, temperature |
 | `NPT` | Constant pressure, temperature |
-| `NVE` | Microcanonical (no thermostat) |
+| `NVE` | Not run: both engines keep the thermostat on, so `validate` refuses it |
 
 ### Thermostats
 
@@ -680,8 +705,8 @@ stages continue to require an explicit `duration`.
 |------------|-------------|
 | `LangevinMiddle` | Langevin integrator (recommended) |
 | `Langevin` | Standard Langevin |
-| `Andersen` | Andersen thermostat |
-| `NoseHoover` | Nosé-Hoover chain |
+| `Andersen` | Andersen thermostat. Only with `engine: gromacs`; `validate` refuses it with `engine: openmm`. |
+| `NoseHoover` | Nosé-Hoover chain. Only with `engine: gromacs`; `validate` refuses it with `engine: openmm`. |
 
 ### Barostats
 
@@ -694,7 +719,7 @@ stages continue to require an explicit `duration`.
 
 ## Output Configuration
 
-Environment variables (`$USER`, `$HOME`, `${VAR}`) and `~` are automatically expanded in path fields.
+Environment variables (`$USER`, `$HOME`, `${VAR}`) and `~` are automatically expanded in path fields. `validate` refuses a path that names an unset variable. Earlier versions did not expand `~` in input and output paths and wrote runs to a folder named `~` beside the config; while `~/...` does not exist, that folder is used, with a warning.
 
 ```yaml
 output:
@@ -712,13 +737,16 @@ output:
   # Naming
   naming_template: "{enzyme}_{substrate}_{polymer_type}_{temperature}K_run{replicate}"
   
-  # Output options
-  save_checkpoint: true                  # Save restart files
-  save_state_data: true                  # Save energy/temperature CSV
-  trajectory_format: "dcd"               # dcd or xtc
 ```
 
+The schema also accepts `save_checkpoint`, `save_state_data` and
+`trajectory_format`, but no code reads them. The OpenMM engine always writes
+DCD trajectories and checkpoints; the GROMACS engine always writes XTC.
+
 ### Naming Template Variables
+
+A config with another placeholder is refused, and `validate` refuses a
+template without `{replicate}`, since the replicates would share one folder.
 
 | Variable | Description | Example |
 |----------|-------------|---------|
@@ -747,6 +775,8 @@ force_field:
 ```
 
 ### Available Force Fields
+
+`validate` refuses a name that is not an installed force field or an `.offxml` file.
 
 **Protein:**
 - `ff14sb_off_impropers_0.0.4.offxml` - Amber ff14SB (recommended)
@@ -823,9 +853,9 @@ The optional `openmm:` block selects the OpenMM platform. It is used when
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `platform` | `str` | `"CUDA"` | OpenMM platform: `CUDA`, `OpenCL`, `CPU` or `Reference`. PolyzyMD never falls back to another platform. |
+| `platform` | `str` | `"CUDA"` | OpenMM platform: `CUDA`, `OpenCL`, `CPU`, `Reference` or `HIP`; `validate` refuses other names. PolyzyMD never falls back to another platform. |
 | `device_index` | `str \| null` | `null` | GPU device index. |
-| `precision` | `str` | `"mixed"` | Floating-point precision on CUDA. |
+| `precision` | `str` | `"mixed"` | Floating-point precision on CUDA: `single`, `mixed` or `double`. |
 
 The replicate number fixes the starting structure and every random seed. On
 the CPU, OpenCL and CUDA platforms, CPU threads, PME and GPUs add up forces in
@@ -844,9 +874,14 @@ platform and the property values it used under `openmm_platform` in
 :::
 
 The optional `gromacs:` block sets how PolyzyMD calls GROMACS and which SLURM
-resources a GROMACS job asks for. PolyzyMD uses it when the engine is
-GROMACS: `engine: gromacs` in the config, or `--engine gromacs` for `run`,
-`submit` or `recover`.
+resources a GROMACS job asks for. `analysis_topology` is read by the analyses
+and by freeze. Every other field is used only by the SLURM scripts that
+`polyzymd submit` and `polyzymd recover` write when the engine is GROMACS
+(`engine: gromacs` in the config, or `--engine gromacs`). A local
+`polyzymd run` and the `run_<prefix>_gromacs.sh` script that
+`build --format gromacs` writes do not read those fields: they call `gmx` (or
+`--gmx-path`) as `gmx mdrun -deffnm <stage> -v` with no extra flags. To use
+other flags locally, run the GROMACS commands yourself.
 
 ### Minimal Example
 
@@ -867,8 +902,11 @@ gromacs:
   ntmpi: 1
   ntomp: 12
   module_load: "module load gcc/11.2.0 gromacs/2024.2"
-  mdrun_flags: "-nb gpu -pme gpu -bonded gpu -update gpu -pin on"
+  mdrun_flags: "-pin on"
 ```
+
+`gpu: true` adds `-nb gpu`, `-pme gpu` and `-bonded gpu` unless
+`mdrun_flags` sets those flags. It never adds `-update gpu`. See the notes.
 
 ### Full Field Reference
 
@@ -876,13 +914,13 @@ gromacs:
 |-------|------|---------|-------------|
 | `gmx_binary` | `str \| null` | `null` | GROMACS binary path or name. When null, resolved via `$GMX_BIN` environment variable or PATH discovery. |
 | `analysis_topology` | `str \| null` | `null` | File name of the run's `.top` in the run folder. Analyses read it when MDAnalysis cannot read `prod.tpr`, and freeze deposits it with the files it includes. When null, PolyzyMD uses `<prefix>.top`, the file it writes, so another `.top` in the folder does not matter. |
-| `mdrun_flags` | `str` | `""` | Extra flags passed to `gmx mdrun` for all stages. |
+| `mdrun_flags` | `str` | `""` | Extra flags passed to `gmx mdrun` for all stages of a SLURM job. |
 | `mdrun_flags_equilibration` | `str \| null` | `null` | Override `mdrun_flags` for equilibration stages only. Falls back to `mdrun_flags` when null. |
 | `mdrun_flags_production` | `str \| null` | `null` | Override `mdrun_flags` for production only. Falls back to `mdrun_flags` when null. |
 | `grompp_flags` | `str` | `""` | Extra flags passed to `gmx grompp`, such as `-maxwarn 1` to accept a warning you have read. By default every warning stops the run. |
 | `command_prefix` | `str \| null` | `null` | Prefix prepended to all GROMACS commands. Use for container wrappers (e.g., `singularity exec ...`). When set with a real-MPI binary, automatic `mpirun` wrapping is skipped. |
 | `mpi_launcher_flags` | `str` | `""` | Extra flags for the MPI launcher (`mpirun`). Only used with real-MPI builds (`gmx_mpi`). |
-| `module_load` | `str \| null` | `null` | Module load command inserted verbatim into SLURM scripts. List prerequisites before the GROMACS module. |
+| `module_load` | `str \| null` | `null` | Module load command inserted verbatim into SLURM scripts. The job runs it; the submitting host does not, so load the scheduler module in your shell before `submit`. List prerequisites before the GROMACS module. |
 | `env_exports` | `dict[str, str]` | `{}` | Environment variables exported before GROMACS commands. Keys must be valid shell variable names. |
 | `setup_commands` | `list[str]` | `[]` | Shell commands run after `module_load` and before GROMACS commands. |
 | `ntmpi` | `int` | `1` | Number of MPI ranks for `gmx mdrun -ntmpi`. Also sets SLURM `--ntasks` unless `slurm_ntasks` overrides it. Must be >= 1. |
@@ -890,12 +928,16 @@ gromacs:
 | `ntomp` | `int` | `8` | OpenMP threads per rank for `gmx mdrun -ntomp`. Sets SLURM `--cpus-per-task`. Must be >= 1. |
 | `gpu` | `bool` | `false` | Request GPU via SLURM. When false, the `--gres=gpu` directive is omitted entirely. |
 | `gpus` | `int` | `1` | Number of GPUs to request when `gpu` is true. Ignored when `gpu` is false. Must be >= 1. |
-| `memory` | `str` | `"16G"` | SLURM `--mem` allocation for GROMACS jobs. |
+| `memory` | `str` | `"16G"` | SLURM `--mem` allocation for GROMACS jobs: a number with an optional `K`, `M`, `G` or `T`. |
 
 ### Notes
 
 - Unsafe GPU flags (`-pme gpu`, `-bonded gpu`, `-update gpu`) are automatically
   stripped during energy minimization stages. Only `-nb gpu` is safe for EM.
+- GROMACS updates on the GPU (`-update gpu`) only with `integrator = md`.
+  The Langevin thermostats (the default) run as `integrator = sd`, and
+  GROMACS then stops with *"Only the md integrator is supported"*. The GROMACS
+  documentation lists the other conditions.
 - When `gpu` is true and `ntmpi` > 1, a warning is emitted about GPU sharing.
 - Set `slurm_ntasks` above `ntmpi` when the scheduler must reserve more tasks
   than GROMACS runs ranks, for example for a container or a multi-GPU allocation.
@@ -912,7 +954,7 @@ gromacs:
 gromacs:
   mdrun_flags: "-pin on"                      # all stages
   mdrun_flags_equilibration: "-pin on -dlb yes"
-  mdrun_flags_production: "-pin on -dlb auto -nb gpu -pme gpu -bonded gpu -update gpu"
+  mdrun_flags_production: "-pin on -dlb auto -nb gpu -pme gpu -bonded gpu"
 ```
 
 ### `command_prefix` and `mpi_launcher_flags`
@@ -921,7 +963,8 @@ Use one of the two, not both.
 
 - `command_prefix` goes before every GROMACS command. Use it for a container
   or a site launcher:
-  `command_prefix: "singularity exec --rocm --bind $PWD /path/to/gromacs.sif"`.
+  `command_prefix: "singularity exec --rocm /path/to/gromacs.sif"`. The value
+  cannot hold shell variables such as `$PWD`; `validate` refuses them.
 - `mpi_launcher_flags` goes after the `mpirun` that PolyzyMD writes for a
   real-MPI binary: `mpi_launcher_flags: "-genv I_MPI_FABRICS shm:tcp"` gives
   `mpirun -genv I_MPI_FABRICS shm:tcp gmx_mpi mdrun ...`.
@@ -957,7 +1000,7 @@ These `gmx mdrun` flags go in `mdrun_flags`, `mdrun_flags_equilibration` or
 | `-nb gpu` | Nonbonded forces on the GPU. Allowed in minimization. |
 | `-pme gpu` | PME electrostatics on the GPU. Removed in minimization. |
 | `-bonded gpu` | Bonded forces on the GPU. Removed in minimization. |
-| `-update gpu` | Integration and constraints on the GPU. Removed in minimization. |
+| `-update gpu` | Integration and constraints on the GPU. Needs `integrator = md`, so not with the Langevin thermostats. Removed in minimization. |
 | `-pin on` | Pin threads to CPU cores. |
 | `-pinstride N` | Stride between pinned threads. |
 | `-dlb yes\|auto` | Dynamic load balancing. |
@@ -971,11 +1014,19 @@ jobs, see {doc}`../how_to/run_gromacs`.
 
 ## Complete Example
 
-See the example configurations in `src/polyzymd/templates/examples/`:
+Start from one of these complete configs:
 
-- `enzyme_only.yaml` - Enzyme + substrate, no polymers
-- `enzyme_polymer.yaml` - Full enzyme + polymer simulation
-- `enzyme_cosolvent.yaml` - Enzyme with DMSO co-solvent
+- `polyzymd study add-condition "<label>" --new`, run in a study folder,
+  writes `conditions/<label>/config.yaml`. This template has every section.
+  The substrate, co-solvent, polymer and restraint sections are commented
+  out, with a comment on each key.
+- `examples/quickstart/config.yaml` (OpenMM) and
+  `examples/quickstart/config_gromacs.yaml` (GROMACS), in the PolyzyMD
+  repository, are a protein in water with NaCl. See
+  {doc}`../get_started/quickstart`.
+
+To add a substrate, co-solvents or polymers, copy the blocks of this page
+into one of these configs.
 
 ---
 

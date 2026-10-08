@@ -105,11 +105,11 @@ and `count`, because the schema requires them.
 
 The builder does these steps:
 
-1. It computes the periodic cell from the bounding box of the protein and
-   substrate. Each side gets `polymers.packing.padding` plus
-   `solvent.box.padding`.
-2. It centers the protein and substrate in the rectangular brick of that cell.
-   It holds them fixed.
+1. It computes the periodic cell from the protein and substrate. The edge is
+   their diameter plus 2 x (`polymers.packing.padding` +
+   `solvent.box.padding`).
+2. It centers the bounding box of the protein and substrate in the rectangular
+   brick of that cell. It holds them fixed.
 3. It packs the chains inside the brick and inside a sphere around the solute.
    PACKMOL keeps each polymer atom at least `polymers.packing.tolerance`
    (default 2.0 Å) from the solute and from other chains.

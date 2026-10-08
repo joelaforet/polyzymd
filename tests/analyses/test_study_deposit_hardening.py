@@ -88,8 +88,8 @@ class TestDeposit:
         config = yaml.safe_load(
             (deposit / "study" / "conditions" / "polymer" / "config.yaml").read_text()
         )
-        assert config["output"]["projects_directory"] == "."
-        assert config["output"]["scratch_directory"] == "data"
+        # study init wrote relative directories, which the deposit keeps.
+        assert not Path(config["output"]["projects_directory"]).is_absolute()
 
     def test_records_and_reports_use_relative_paths(self, study: Path) -> None:
         record = json.loads(

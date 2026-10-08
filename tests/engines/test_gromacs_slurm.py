@@ -321,9 +321,9 @@ def test_mdrun_flags_in_all_stages(monkeypatch) -> None:
     )
 
     assert "$MDRUN -deffnm em -cpo em.cpt $MDRUN_FLAGS_EM -v" in script
-    assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS_EQ -v" in script
-    assert "$MDRUN -deffnm eq_02 -cpo eq_02.cpt $MDRUN_FLAGS_EQ -v" in script
-    assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS_PROD -v" in script
+    assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt -cpt $CPT $MDRUN_FLAGS_EQ -v" in script
+    assert "$MDRUN -deffnm eq_02 -cpo eq_02.cpt -cpt $CPT $MDRUN_FLAGS_EQ -v" in script
+    assert "$MDRUN -deffnm prod -cpo state.cpt -cpt $CPT -maxh $MAXH $MDRUN_FLAGS_PROD -v" in script
     assert script.count("$MDRUN_FLAGS") >= 1
 
 
@@ -381,8 +381,8 @@ def test_stage_specific_mdrun_flags_override(monkeypatch) -> None:
     )
     assert 'MDRUN_FLAGS_EQ="-ntomp 4"' in script
     assert 'MDRUN_FLAGS_PROD="-ntomp 8 -plumed plumed_setup.dat"' in script
-    assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS_EQ -v" in script
-    assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS_PROD -v" in script
+    assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt -cpt $CPT $MDRUN_FLAGS_EQ -v" in script
+    assert "$MDRUN -deffnm prod -cpo state.cpt -cpt $CPT -maxh $MAXH $MDRUN_FLAGS_PROD -v" in script
 
 
 def test_mdrun_variable_uses_mpirun_for_mpi_binary(monkeypatch) -> None:
@@ -421,8 +421,8 @@ def test_mdrun_variable_uses_mpirun_for_mpi_binary(monkeypatch) -> None:
 
     assert 'MDRUN="mpirun $GMX mdrun"' in script
     assert "$MDRUN -deffnm em -cpo em.cpt $MDRUN_FLAGS_EM -v" in script
-    assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS_EQ -v" in script
-    assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS_PROD -v" in script
+    assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt -cpt $CPT $MDRUN_FLAGS_EQ -v" in script
+    assert "$MDRUN -deffnm prod -cpo state.cpt -cpt $CPT -maxh $MAXH $MDRUN_FLAGS_PROD -v" in script
 
 
 def test_mpirun_uses_launcher_flags_when_configured(monkeypatch) -> None:
@@ -1449,9 +1449,12 @@ class TestGPUSlurmScripts:
         )
 
         assert "$MDRUN -deffnm em -cpo em.cpt $MDRUN_FLAGS_EM -v" in script
-        assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt $MDRUN_FLAGS_EQ -v" in script
-        assert "$MDRUN -deffnm eq_02 -cpo eq_02.cpt $MDRUN_FLAGS_EQ -v" in script
-        assert "$MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS_PROD -v" in script
+        assert "$MDRUN -deffnm eq_01 -cpo eq_01.cpt -cpt $CPT $MDRUN_FLAGS_EQ -v" in script
+        assert "$MDRUN -deffnm eq_02 -cpo eq_02.cpt -cpt $CPT $MDRUN_FLAGS_EQ -v" in script
+        assert (
+            "$MDRUN -deffnm prod -cpo state.cpt -cpt $CPT -maxh $MAXH $MDRUN_FLAGS_PROD -v"
+            in script
+        )
         assert "MDRUN_FLAGS_EM=" in script
         assert "-pme" in script
         assert "-update" in script
@@ -1778,6 +1781,22 @@ class TestGlobalTermHandling:
         assert post_idx != -1
         assert pre_idx < first_idx < post_idx
 
+    def test_progress_updates_pass_the_job_start(self, monkeypatch) -> None:
+        """Each progress update gets the time the job started, so it can record its version."""
+        monkeypatch.setattr(
+            "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+            lambda: "/tmp/pixi.toml",
+        )
+        script = _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        assert script.index("JOB_START=") < script.index("_update-gromacs-progress")
+        assert script.count('--since "$JOB_START"') == script.count("_update-gromacs-progress") == 2
+
 
 def test_a_stop_file_stops_the_chain(tmp_path, monkeypatch) -> None:
     """A GROMACS job does no work and submits no successor once `polyzymd cancel` wrote STOP."""
@@ -1827,3 +1846,153 @@ def test_a_stop_file_stops_the_chain(tmp_path, monkeypatch) -> None:
     assert "STOP: not starting replicate 1" in result.stdout
     calls = (tmp_path / "calls").read_text().split() if (tmp_path / "calls").exists() else []
     assert "gmx" not in calls and "sbatch" not in calls, calls
+
+
+def test_job_ignores_user_site_packages_and_loads_modules_itself(monkeypatch) -> None:
+    """The job sets PYTHONNOUSERSITE before Python starts and runs module_load itself."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+    lines = (
+        _generator()
+        .generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir="/scratch/run1/gromacs",
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+        .splitlines()
+    )
+
+    nousersite = lines.index("export PYTHONNOUSERSITE=1")
+    activation = next(i for i, line in enumerate(lines) if "pixi shell-hook" in line)
+    assert nousersite < activation < lines.index("module load gromacs/2024")
+
+
+#: prod.log of a production run that ``-maxh`` stopped (GROMACS 2024.2 on Blanca).
+_MAXH_STOPPED_LOG = """\
+   nsteps                         = 10000000
+Started mdrun on rank 0 Thu Oct  8 00:20:42 2026
+           Step           Time
+        1700000     3400.00000
+
+Step 1703100: Run time exceeded 0.050 hours, will terminate the run within 200 steps
+
+Writing checkpoint, step 1703150 at Thu Oct  8 00:23:40 2026
+
+Finished mdrun on rank 0 Thu Oct  8 00:23:40 2026
+"""
+
+#: prod.log of a production run that reached nsteps.
+_FINISHED_LOG = """\
+   nsteps                         = 10000000
+Started mdrun on rank 0 Thu Oct  8 00:32:30 2026
+           Step           Time
+       10000000    20000.00000
+
+Writing checkpoint, step 10000000 at Thu Oct  8 00:54:26 2026
+
+Finished mdrun on rank 0 Thu Oct  8 00:54:26 2026
+"""
+
+
+@pytest.mark.parametrize(("log", "complete"), [(_MAXH_STOPPED_LOG, False), (_FINISHED_LOG, True)])
+def test_job_resubmits_until_the_last_checkpoint_reaches_nsteps(
+    tmp_path, monkeypatch, log: str, complete: bool
+) -> None:
+    """A run that -maxh stopped submits a successor; only a run at nsteps post-processes and ends."""
+    import os
+    import subprocess
+
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+    run = tmp_path / "run" / "gromacs"
+    run.mkdir(parents=True)
+    for name in ("em.gro", "eq_01.gro", "eq_01.cpt", "state.cpt"):
+        (run / name).write_text("x")
+    (run / "prod.log").write_text(log)
+    script = tmp_path / "job.sh"
+    script.write_text(
+        _generator().generate_job_script(
+            config_path="/path/config.yaml",
+            replicate=1,
+            working_dir=str(run),
+            system_prefix="enzyme_polymer",
+            equilibration_mdps=["eq_01_nvt.mdp"],
+        )
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool in ("sbatch", "module", "gmx", "pixi", "nvidia-smi", "polyzymd"):
+        stub = bin_dir / tool
+        stub.write_text(f'#!/bin/sh\necho {tool} "$@" >> "{tmp_path}/calls"\n')
+        stub.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "--noprofile", "--norc", str(script)],
+        env={
+            **{
+                k: v
+                for k, v in os.environ.items()
+                if not k.startswith("BASH_FUNC_") and k != "BASH_ENV"
+            },
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = (tmp_path / "calls").read_text().splitlines()
+    submitted = any(call.startswith("sbatch") for call in calls)
+    marked = any("--mark-complete" in call for call in calls)
+    assert submitted is not complete, result.stdout
+    assert marked is complete, result.stdout
+    if not complete:
+        assert "last checkpoint at step 1703150 of 10000000" in result.stdout
+
+
+def test_equilibration_and_production_checkpoint_at_checkpoint_interval(monkeypatch) -> None:
+    """mdrun gets -cpt in minutes from checkpoint_interval for every stage that resumes."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+    generator = _generator()
+    generator._checkpoint_interval_s = 90.0
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=["eq_01_nvt.mdp"],
+    )
+
+    assert "\nCPT=1.5\n" in script
+    mdruns = [line for line in script.splitlines() if "$MDRUN -deffnm" in line]
+    stages = [line for line in mdruns if "-deffnm eq_01" in line or "-deffnm prod" in line]
+    assert len(stages) == 4
+    assert all("-cpt $CPT" in line for line in stages)
+
+
+def test_maxh_keeps_its_safety_margin_for_short_wall_times(monkeypatch) -> None:
+    """-maxh is 90 % of the wall time, not rounded up to the whole of a short one."""
+    monkeypatch.setattr(
+        "polyzymd.engines.gromacs.slurm._discover_manifest_path",
+        lambda: "/tmp/pixi.toml",
+    )
+    generator = _generator()
+    generator._config.time_limit = "00:03:00"
+    script = generator.generate_job_script(
+        config_path="/path/config.yaml",
+        replicate=1,
+        working_dir="/scratch/run1/gromacs",
+        system_prefix="enzyme_polymer",
+        equilibration_mdps=[],
+    )
+
+    (maxh,) = re.findall(r"^MAXH=(\S+)$", script, flags=re.MULTILINE)
+    assert float(maxh) == pytest.approx(0.045)

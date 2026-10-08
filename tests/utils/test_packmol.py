@@ -255,7 +255,6 @@ class TestSolvateAssemblyCoordinates:
         mock_load_positions = MagicMock(return_value=np.asarray(loaded_positions, dtype=float))
 
         packmol_mod = types.ModuleType("openff.packmol._packmol")
-        packmol_mod._center_topology_at = mock_center
         packmol_mod._compute_brick_from_box_vectors = mock_compute_brick
         packmol_mod._create_molecule_pdbs = mock_create_molecule_pdbs
         packmol_mod._create_solute_pdb = mock_create_solute_pdb
@@ -284,6 +283,7 @@ class TestSolvateAssemblyCoordinates:
         monkeypatch.setitem(sys.modules, "openff.packmol._packmol", packmol_mod)
         monkeypatch.setitem(sys.modules, "openff.toolkit", toolkit_mod)
         monkeypatch.setitem(sys.modules, "openff.units", units_mod)
+        monkeypatch.setattr("polyzymd.utils.packmol.center_in_brick", mock_center)
 
         return {
             "center": mock_center,
@@ -780,7 +780,7 @@ class TestInsideSphereConstraint:
             )
 
     def test_constraint_from_solute_topology(self):
-        """Radius = bounding-box circumradius + padding, centre = centre of geometry."""
+        """Radius = bounding-box circumradius + padding, centre = bounding-box centre."""
         from polyzymd.utils.packmol import solute_sphere_constraint
 
         solute = _MockTopology(np.array([[0.0, 0.0, 0.0], [6.0, 8.0, 0.0], [3.0, 4.0, 0.0]]))
@@ -797,6 +797,36 @@ class TestInsideSphereConstraint:
         here = solute_sphere_constraint(_MockTopology(coords), padding_angstrom=5.0)
         there = solute_sphere_constraint(_MockTopology(coords + 137.0), padding_angstrom=5.0)
         assert here[3] == pytest.approx(there[3])
+
+    def test_sphere_is_centred_on_the_bounding_box(self):
+        """An uneven atom distribution does not pull the sphere off the bounding box."""
+        from polyzymd.utils.packmol import solute_sphere_constraint
+
+        coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [6.0, 8.0, 4.0]])
+        sphere = solute_sphere_constraint(_MockTopology(coords), padding_angstrom=5.0)
+        np.testing.assert_allclose(sphere[:3], [3.0, 4.0, 2.0])
+
+
+class TestCenterInBrick:
+    """The solute is centred in the brick by its bounding box."""
+
+    def test_bounding_box_is_centred(self):
+        """Opposite brick faces get the same clearance, whatever the atom distribution."""
+        from openff.toolkit import Molecule, Topology
+
+        from polyzymd.utils.packmol import center_in_brick
+
+        molecule = Molecule.from_smiles("CCCCCCCCO")
+        molecule.generate_conformers(n_conformers=1)
+        topology = Topology.from_molecules([molecule])
+        brick = np.array([30.0, 40.0, 50.0])
+
+        positions = center_in_brick(topology, brick).get_positions().m_as("angstrom")
+        low = positions.min(axis=0)
+        high = brick - positions.max(axis=0)
+        np.testing.assert_allclose(low, high, atol=1e-6)
+        # the input topology is not moved
+        assert not np.allclose(topology.get_positions().m_as("angstrom"), positions)
 
 
 # ---------------------------------------------------------------------------

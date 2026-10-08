@@ -120,7 +120,7 @@ polyzymd study freeze lipase_363K
 
 ```
 froze /home/me/lipase_363K as study-v1 (dc94243466cf)
-manifest: 21 study files, 2 conditions, 10 replicates hashed
+manifest: 21 study files, 2 conditions, 10 replicates' files hashed for the manifest
 deposit: /home/me/lipase_363K/deposit; files to upload in /home/me/lipase_363K/deposit/upload
 warning: metadata.doi is not set: reserve a DOI for the study in Zenodo, add it here and refreeze
 next: follow /home/me/lipase_363K/deposit/UPLOAD.md, which says how to reserve the DOI, upload and publish on Zenodo; PolyzyMD uploads nothing
@@ -167,7 +167,7 @@ Otherwise, freeze does these steps:
 
    | File | Holds |
    |---|---|
-   | `manifest.json` | Each study file, trajectory, engine input and final frame, by size and SHA-256. The package versions (`null` when a package reports none) and the SHA-256 of `environment/pixi.lock`. The full config of each condition. The production length of each replicate. The parent of the tagged commit (`git.parent_commit`; the tag names the frozen commit). The warnings |
+   | `manifest.json` | Each study file, trajectory, engine input and final frame, by size and SHA-256, as deposited; this includes the other files in this table. The package versions (`null` when a package reports none) and the SHA-256 of `environment/pixi.lock`, or, without that file, of the `pixi.lock` of the pixi workspace that runs freeze, which is not deposited; `pixi.lock_file` says which one. The full config of each condition. The production length of each replicate. The parent of the tagged commit (`git.parent_commit`; the tag names the frozen commit). The warnings |
    | `CITATION.cff` | Citation File Format 1.2.0: the paper as `preferred-citation`, and PolyzyMD and the trajectory deposits under `references` |
    | `.zenodo.json` | Zenodo deposit metadata: `isSupplementTo` the paper, `requires` PolyzyMD, `references` the trajectories |
    | `md_checklist.yaml` | The reliability and reproducibility checklist of Communications Biology (2023), filled in from the manifest. Review each answer |
@@ -180,9 +180,12 @@ Otherwise, freeze does these steps:
 
 More about the manifest and the checklist:
 
-- The manifest records, for each replicate, the PolyzyMD and OpenMM versions
-  that built and ran it (`simulated_with`, from `build_manifest.json` and
-  `progress.json`).
+- The manifest records, for each replicate, the PolyzyMD, OpenMM and OpenFF
+  versions that built it, the OpenMM or GROMACS version that ran it, and the
+  random seeds of each equilibration stage and production segment
+  (`simulated_with`, from `build_manifest.json`, `progress.json` and the
+  GROMACS log). The deposited `build_manifest.json` of each replicate, in
+  `engine_inputs/`, also gives the Packmol seeds and the box the build made.
 - The manifest follows the JSON Schema `manifest-1.schema.json`. The schema
   ships with PolyzyMD, and freeze writes it into the deposit. `study.yaml`
   has its own schema, `study-1.schema.json`.
@@ -201,7 +204,7 @@ which git ignores:
 |---|---|
 | `UPLOAD.md` | The steps for this study: reserve its DOI, add the files, fill in each Zenodo form field, review, publish, and make new versions |
 | `upload/` | The files to add to the Zenodo upload, no more and no less. See below |
-| `trajectories.csv` | Each trajectory and topology file by size and SHA-256, in batches that each fit one Zenodo record |
+| `trajectories.csv` | Each trajectory and topology file by size and SHA-256, in batches that each fit one Zenodo record. It also lists the files the analyses read beside them: the build's `solvated_system.pdb`, which gives a GROMACS or `system.prmtop` topology its chain IDs, and the GROMACS `.top` and `.itp` files when MDAnalysis could not read `prod.tpr` |
 | `README.md` | Made from `metadata:`: what the study is and why, its authors, how to cite the paper, the dataset and PolyzyMD, its contents, how to reproduce it, and the verdict of each run. Your own `README.md` of the study stays in `study/` as you wrote it |
 | `study/`, `engine_inputs/`, `final_frames/`, and the top-level files | The same content, not zipped, for inspection |
 
@@ -214,10 +217,16 @@ which git ignores:
 
 No file in the deposit names a path of your machine. Records and reports name
 files relative to the study, or to the folder of the replicate folders. The
-deposited configs say `projects_directory: .` and `scratch_directory: data`.
-A comment in them tells a reader how to point the study at a copy of the
-trajectories. The config hash leaves out both directories, so stored results
-still match.
+manifest names each engine input and final frame by its path in `deposit/`,
+which is also its name in `engine_inputs.zip` or `final_frames.zip`: for
+example `engine_inputs/water/replicate_1/prod.tpr.gz`. In a project's deposit,
+that path starts with the study's label in `project.yaml`: `engine_inputs/<label>/water/...`. In
+the deposited configs, a `projects_directory` that is absolute, starts with
+`~` or names a `$VARIABLE` becomes `.`, and such a `scratch_directory`
+becomes `data`; relative ones stay. A comment
+tells a reader how to point the study at a copy of the trajectories. The
+config hash leaves out both directories, so stored results still match. The
+manifest gives the size and SHA-256 of the deposited config.
 
 Do these steps, which `UPLOAD.md` gives in full:
 
@@ -265,10 +274,12 @@ Each replicate stays in one batch. The file names any single file over the
 
 ## Reproduce a published study
 
-A reader downloads `study/` and the trajectories, and runs:
+A reader downloads the study zip and the trajectories. In the unzipped
+`study/` folder, which holds `study.yaml`, the reader runs `study locate`.
+Its argument is the folder that holds the downloaded condition folders:
 
 ```bash
-polyzymd study locate ~/Downloads/zenodo_1234567 --study lipase_363K --verify
+polyzymd study locate ~/Downloads/zenodo_1234567 --verify
 ```
 
 ```
@@ -278,10 +289,26 @@ No polymer: 10 files match manifest.json (SHA-256)
 
 `--verify` checks the SHA-256 of each located file against `manifest.json`.
 Without it, `locate` checks only the sizes. A changed or missing file is
-named, and the command exits with code 2.
+named, that condition is not written to `data.local.yaml`, and the command
+exits with code 2.
+
+Then the reader recomputes each analysis from the trajectories:
+
+```bash
+polyzymd analyze --study study.yaml --recompute
+```
+
+Without `--recompute`, `analyze` reads the stored results in `results/` and
+does not read the trajectories.
 
 The reader can make the figures without the trajectories, from
 `pz.Study("study.yaml").results(run)`. See {doc}`study_yaml`.
+
+In a frozen project, `study/` holds `project.yaml` and one folder per study.
+The reader runs `polyzymd study locate DOWNLOAD_DIR --verify --study <study>`
+for each study whose trajectories they downloaded. `polyzymd analyze --project . --recompute`
+needs the trajectories of every study. With the trajectories of one study only,
+run `polyzymd analyze --study <study> --recompute`.
 
 ## Cite PolyzyMD
 

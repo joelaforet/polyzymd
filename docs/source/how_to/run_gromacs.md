@@ -21,7 +21,9 @@ activated the environment with `pixi shell -e build`.
 
 ## Run locally
 
-Set `engine: gromacs` in `config.yaml`. Then run one replicate:
+Set `engine: gromacs` in `config.yaml`. GROMACS does not read the `openmm:`
+block of the template, and it writes `.xtc` trajectories whatever
+`output.trajectory_format` says. Then run one replicate:
 
 ```bash
 pixi run -e build polyzymd run -c config.yaml -r 1
@@ -30,6 +32,12 @@ pixi run -e build polyzymd run -c config.yaml -r 1
 The run calls `gmx` from `PATH`. To use another GROMACS binary, give
 `--gmx-path /path/to/gmx`. To run GROMACS for a config whose `engine` is
 `openmm`, give `--engine gromacs`.
+
+The run calls `gmx mdrun -deffnm <stage> -v` for each stage. It does not read
+the run settings in the `gromacs:` block of `config.yaml` (`mdrun_flags`,
+`ntmpi`, `ntomp` and the other fields except `analysis_topology`); only
+[SLURM jobs](#submit-to-a-slurm-cluster) use them. GROMACS then chooses its own
+thread counts and GPU use.
 
 PolyzyMD builds the system, writes the GROMACS files to
 `<replicate folder>/gromacs/` and runs each stage in order. It prints the
@@ -60,6 +68,16 @@ or replace them with your own GROMACS workflow.
 replicate. The script runs minimization, equilibration and production, and
 restarts each stage from its checkpoint.
 
+`submit` does not build. Build the GROMACS inputs of each replicate first, in
+a compute job (see {doc}`hpc_slurm`):
+
+```bash
+pixi run -e build polyzymd build -c config.yaml -r 1-3 --format gromacs
+```
+
+`--format gromacs` is the default for a config with `engine: gromacs`. Without
+the inputs, `submit` stops with an error and writes no script.
+
 ### CPU jobs
 
 Add a `gromacs:` block to `config.yaml` and submit:
@@ -83,7 +101,11 @@ pixi run -e build polyzymd submit \
 ### GPU jobs
 
 For GPU runs, set `gpu: true` and use the thread-MPI `gmx` binary (not
-`gmx_mpi`):
+`gmx_mpi`). `gpu: true` adds `-nb gpu -pme gpu -bonded gpu` to the `mdrun`
+flags that you do not set yourself. It does not add `-update gpu`: GROMACS
+updates on the GPU only with `integrator = md`, and the Langevin thermostats
+write `integrator = sd`. With `-update gpu` and `sd`, GROMACS 2024 stops with
+*"Only the md integrator is supported"*.
 
 ```yaml
 # config.yaml
@@ -94,7 +116,7 @@ gromacs:
   ntmpi: 1
   ntomp: 12
   module_load: "module load gcc/11.2.0 openmpi/4.1.1 gromacs/2024.2"
-  mdrun_flags: "-nb gpu -pme gpu -bonded gpu -update gpu -pin on"
+  mdrun_flags: "-pin on"
 ```
 
 ```bash
@@ -126,6 +148,12 @@ the CPU, CUDA, or ROCm runtime.
 The shared `--pixi-env auto` option maps to `build` for GROMACS. The generated
 script activates `build` for the PolyzyMD commands. It then runs the configured
 `module_load`, `env_exports`, and `setup_commands` before it starts GROMACS.
+`submit` starts the job with `sbatch --export=NONE`, so the job does not
+inherit the environment of the submitting shell. `module_load` runs only in
+the job, never on the login node.
+If your `module_load` loads the scheduler module, load that module in your
+shell before `submit` instead; without `sbatch` on `PATH`,
+`submit` stops with an error.
 
 Use these settings to move a job to another SLURM cluster:
 
@@ -160,7 +188,8 @@ pixi run -e build polyzymd submit \
 
 The CPU and GPU scripts use the same restart process:
 
-1. GROMACS writes a checkpoint during `mdrun`.
+1. GROMACS writes a checkpoint during `mdrun`, every
+   `simulation_phases.production.checkpoint_interval` seconds (`mdrun -cpt`).
 2. The script passes `-cpi` and `-append` when it restarts production.
 3. The script forwards `SIGTERM` to `mdrun` so GROMACS can write a checkpoint.
 4. The script submits one successor when work remains.
@@ -279,7 +308,11 @@ preempts a job. When the trap fires:
 With `--constraint`, the next job also lands on a compatible GPU. This
 matters most with a preemptable QoS.
 
-The script sets `-maxh`, so GROMACS stops before the SLURM wall-time limit.
+The script sets `-maxh` to 90 % of the wall time, so GROMACS stops before
+the SLURM wall-time limit. Production is complete when the last checkpoint
+in `prod.log` is at `nsteps`; until then the script submits a successor.
+Progress counts only the steps up to the last checkpoint, because a restart
+runs the later steps again.
 
 ```{note}
 **Stop a GROMACS chain.**
@@ -319,6 +352,9 @@ pixi run -e build polyzymd recover \
     --email you@university.edu
 ```
 
+The job script is written to `recovery_scripts/recover_rep<N>.sh`. The
+chain's own `daisy_chain_scripts/run_rep<N>.sh` is left as it was.
+
 ### How checkpoint resume works
 
 | Stage | Checkpoint | Resume behavior |
@@ -342,6 +378,8 @@ pixi run -e build polyzymd recover \
     --submit \
     --dry-run
 ```
+
+This prints the script path and the SLURM settings, and writes nothing.
 
 ---
 
@@ -378,12 +416,14 @@ gromacs/
 ├── prod.cpt                  # Checkpoint for restart (state.cpt in a SLURM job)
 │
 ├── prod_nojump.xtc           # Trajectory with PBC jumps removed
-└── prod_centered.xtc         # Centered trajectory for visualization
+├── prod_centered.xtc         # Centered trajectory for visualization
+└── progress.json             # Stage and segment records: times, seeds
 ```
 
 Each `mdrun` stage also writes a `.log` file, and a `.trr` file when the stage
-writes full-precision coordinates. `solvated_system.pdb` is in the replicate
-folder, beside `gromacs/`.
+writes full-precision coordinates. `solvated_system.pdb` and
+`build_manifest.json` (PACKMOL seeds, box and the SHA-256 of each input file)
+are in the replicate folder, beside `gromacs/`.
 
 Position restraints are appended as `#ifdef POSRES_*` blocks inside the
 molecule `.itp` files. MDP files use `-DPOSRES_PROTEIN`, `-DPOSRES_POLYMER`,
@@ -413,6 +453,13 @@ gromacs:
 minimization `mdrun` command. If you see this error, check that you use
 PolyzyMD 1.3.0 or later.
 
+### "Only the md integrator is supported"
+
+**Cause**: `-update gpu` in `mdrun_flags` with a Langevin thermostat, which
+GROMACS runs as `integrator = sd`.
+
+**Fix**: Remove `-update gpu` from `mdrun_flags`, or give `-update cpu`.
+
 ### "grompp stops with a warning"
 
 **Cause**: PolyzyMD passes no `-maxwarn`, so every `grompp` warning stops the
@@ -421,7 +468,9 @@ using Ewald electrostatics in a system with net charge": the system is not
 neutral.
 
 **Fix**: Read the warning. For a net charge, set `solvent.ions.neutralize:
-true`. To accept a warning on purpose, set `grompp_flags: "-maxwarn 1"`. See
+true`. To accept a warning on purpose, set `grompp_flags: "-maxwarn 1"`.
+Only the SLURM job scripts from `polyzymd submit` pass `grompp_flags`; a
+local `polyzymd run` calls `grompp` without them. See
 {doc}`../reference/gromacs_openmm`.
 
 ### "Fatal error: Number of atoms does not match"

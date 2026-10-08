@@ -74,9 +74,17 @@ def hash_trajectories_command(
 
     targets: list[tuple[str, SimulationConfig]] = []
     if study_path is not None:
+        from polyzymd.analyses.exceptions import ProtocolError
         from polyzymd.analyses.study_file import load_study_file
+        from polyzymd.cli.study import EXIT_STUDY_ERROR
 
-        protocol = load_study_file(study_path)
+        try:
+            protocol = load_study_file(study_path)
+        except ProtocolError as exc:
+            click.echo(f"error: {' '.join(str(exc).split())}", err=True)
+            if exc.hint:
+                click.echo(f"fix: {' '.join(exc.hint.split())}", err=True)
+            sys.exit(EXIT_STUDY_ERROR)
         for label, path in protocol.conditions.items():
             targets.append(
                 (label, with_data_dir(SimulationConfig.from_yaml(path), protocol.data.get(label)))

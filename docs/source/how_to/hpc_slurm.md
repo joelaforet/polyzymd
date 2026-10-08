@@ -8,23 +8,39 @@ without manual job dependencies.
 ## Before you start
 
 - Validate your config with `polyzymd validate -c config.yaml`.
-- Choose a SLURM preset (see Step 2).
+- Choose a SLURM preset (see Step 3).
 
 If you do not have a config yet, do {doc}`../get_started/quickstart` first.
 
 :::{admonition} Use compute resources, not login nodes
 :class: important
 
-Validation and script generation are light. A system build or a local
-simulation needs a lot of memory, CPU or GPU time, and scratch I/O. On a shared
-cluster, run these commands in a batch job or an interactive compute
-allocation. Do not run them on a login node.
+Validation and script generation are light. `polyzymd submit` does not
+build. A system build or a local simulation needs a lot of memory, CPU or GPU
+time, and scratch I/O. On a shared cluster, run these commands in a batch job
+or an interactive compute allocation. Do not run them on a login node.
 :::
 
 Run `polyzymd submit` from the `build` environment. Prefix each command with
 `pixi run -e build`, or activate the environment once with `pixi shell -e build`.
 
-## Step 1: write the job script and read it
+## Step 1: build the systems in a compute job
+
+The SLURM jobs run in a simulation environment without OpenFF, so they cannot
+build. Build each replicate first, on a compute node:
+
+```bash
+srun --partition=<cpu-partition> --account=<account> \
+    --ntasks=1 --cpus-per-task=8 --mem=32G --time=01:00:00 \
+    pixi run -e build polyzymd build -c config.yaml -r 1-5
+```
+
+For a config with `engine: gromacs`, the build writes the GROMACS inputs.
+`submit` checks the build of each replicate before it writes any script. A
+replicate without a complete build stops the command with an error that gives
+the `polyzymd build` command to run. For Blanca, see {doc}`site_cu_boulder`.
+
+## Step 2: write the job script and read it
 
 ```bash
 pixi run -e build polyzymd validate -c config.yaml
@@ -42,7 +58,7 @@ Read the `#SBATCH` lines before you submit real jobs.
 `--dry-run` prints the submission plan. It writes no file and submits nothing.
 You cannot use `--dry-run` and `--generate-only` together.
 
-## Step 2: choose a preset
+## Step 3: choose a preset
 
 A preset sets the partition, QoS, account and time limit of each job.
 
@@ -64,7 +80,7 @@ with `--partition`, `--account`, `--qos` and `--gpu-type`. See
 
 Use `testing` first when you try a new system or a new workflow.
 
-## Step 3: submit one short test job
+## Step 4: submit one short test job
 
 Run a short job before you submit many replicates:
 
@@ -73,14 +89,14 @@ pixi run -e build polyzymd submit \
     -c config.yaml \
     --preset testing \
     --pixi-env auto \
-    --time-limit 0:05:00 \
+    --time-limit 0:10:00 \
     --replicates 1
 ```
 
 A short job finds a wrong path, a scheduler problem or a broken environment
 in minutes.
 
-## Step 4: submit the production replicates
+## Step 5: submit the production replicates
 
 ```bash
 pixi run -e build polyzymd submit \
@@ -218,8 +234,8 @@ replicate folder:
 - `system.xml`
 - `build_manifest.json`
 
-The build writes `build_manifest.json` last. Before OpenMM makes a simulation,
-`--skip-build` checks the manifest's config hash, its file hashes and its
+The build writes `build_manifest.json` last. `submit`, and the job before OpenMM
+makes a simulation, check the manifest's config hash, its file hashes and its
 particle count. A missing or damaged manifest means that the build did not
 finish. A replicate folder without a manifest can still continue when the
 particle counts of the topology and the System agree. PolyzyMD then logs a
@@ -332,14 +348,21 @@ The GROMACS job scripts do these steps:
 - They run minimization, the equilibration stages and production, and restart
   each from its checkpoint.
 - They pass `-maxh` to `gmx mdrun`, so GROMACS stops before the wall-time
-  limit.
+  limit, and `-cpt`, so it writes a checkpoint every `checkpoint_interval`.
 - They pass `SIGTERM` to `gmx mdrun`, which then writes a checkpoint.
 - They submit themselves again until production is complete.
+
+`submit` starts every job with `sbatch --export=NONE`. A job therefore does
+not inherit the environment of the submitting shell, and a GROMACS job runs
+its `module_load` itself. Both job scripts set `PYTHONNOUSERSITE=1`, so a
+package in `~/.local` cannot replace the PolyzyMD of the pixi environment.
 
 ## Submit GROMACS jobs
 
 Set `engine: gromacs` in the config. `submit` then writes GROMACS scripts.
-The `--engine` option overrides the config.
+The `--engine` option overrides the config. Build the GROMACS inputs first
+(Step 1). With `--engine gromacs` and an OpenMM config, build with
+`polyzymd build -c config.yaml -r 1-3 --format gromacs`.
 
 On CPU nodes:
 
@@ -370,6 +393,21 @@ names. For CPU and GPU settings, MPI, constraints and recovery, see
 
 Make `pixi` available in non-interactive shells. A setting in your login shell
 files alone is not enough.
+
+### `sbatch not found`
+
+`submit` needs `sbatch` on `PATH`. Load the scheduler module in your shell
+first (for CU Boulder, see {doc}`site_cu_boulder`). A GROMACS
+`module_load` does not run on the submitting host. The error names the job
+script that was written.
+
+### `Cannot auto-detect pixi manifest`
+
+`submit` writes the path of `pixi.toml` into the job script. It takes the path
+from `PIXI_PROJECT_MANIFEST`, which `pixi run` and `pixi shell` set, when that
+environment runs `submit`. Otherwise it walks up from the `polyzymd` on `PATH`. Run `submit` with
+`pixi run -e build` when the environments are outside the workspace, for
+example with `detached-environments`.
 
 ### The job stops with an out-of-memory error
 

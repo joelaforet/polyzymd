@@ -163,7 +163,7 @@ In the `build` environment, these commands should work directly:
 | `polyzymd info` | Yes | Version/dependency summary |
 | `polyzymd submit --engine openmm` | Yes | The generated Slurm job activates the selected `sim-cuda-*` runtime |
 | `polyzymd submit --engine gromacs` | Yes | GROMACS submission can run from `build`; SLURM runs GROMACS in the external cluster environment |
-| `polyzymd run` | Yes | Builds and runs a simulation on this machine, on the OpenMM platform of the config, such as `CPU` |
+| `polyzymd run` | Yes | Builds and runs a simulation on this machine, on the OpenMM platform of the config, such as `CPU`. For a local NVIDIA GPU, build here and run in a `sim-cuda-*` environment: see {doc}`../how_to/hardware_platforms` |
 | `polyzymd run-segment` | No | Runs one segment of a SLURM chain. The job scripts run it in a `sim-cuda-*` environment |
 
 `polyzymd analyze` runs in the `build` environment, which includes the

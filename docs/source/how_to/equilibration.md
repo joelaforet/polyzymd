@@ -118,7 +118,8 @@ Available groups include:
 - `protein_heavy`
 - `protein_backbone`
 - `protein_calpha`
-- `ligand_heavy`
+- `ligand_heavy` (the substrate heavy atoms: list it in one stage to hold the
+  substrate in that stage only)
 - `polymer_heavy`
 - `solute` (protein + substrate, hydrogens included), `solute_heavy` (the same
   without hydrogens: the set frozen during minimization)
@@ -152,6 +153,12 @@ simulation_phases:
 ```
 
 ### Gradual restraint release
+
+This schedule runs on OpenMM only. On GROMACS a position restraint group has
+one force constant in every stage, and all stages must use the same protein
+group, so `validate` refuses it with `engine: gromacs`. On GROMACS, keep
+`protein_heavy` at one `force_constant` in each restrained stage and release
+it by leaving `position_restraints` out of the later stages.
 
 ```yaml
 simulation_phases:

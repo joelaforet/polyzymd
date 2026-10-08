@@ -1,8 +1,17 @@
 # Add Distance Restraints
 
 Use this guide when you want to keep two atoms near a target distance during a
-simulation, such as holding a substrate near an active site during early
-equilibration or production.
+simulation, such as holding a substrate near an active site.
+
+A distance restraint acts in every phase of the run, production included. It
+has no per-stage setting. To hold a substrate in one equilibration stage only,
+use a position restraint in that stage instead: see
+{ref}`restrain-substrate-one-stage`.
+
+Distance restraints need `engine: openmm`: the GROMACS engine does not apply
+them, so `validate` refuses an enabled restraint with `engine: gromacs`.
+Position restraints work on both engines. On GROMACS, see
+{doc}`../reference/configuration` for the groups it can restrain.
 
 ## Step 1: choose the restraint type
 
@@ -127,6 +136,31 @@ restraints:
     force_constant: 10000.0
     enabled: true
 ```
+
+(restrain-substrate-one-stage)=
+### Hold a substrate during the first equilibration stage only
+
+Position restraints are set per equilibration stage. The `ligand_heavy` group
+holds the substrate heavy atoms at their starting coordinates. List it in the
+first stage only, and leave it out of the later stages:
+
+```yaml
+simulation_phases:
+  equilibration_stages:
+    - name: "restrained"
+      # ... duration, ensemble and temperature of the stage
+      position_restraints:
+        - group: "protein_heavy"
+          force_constant: 4184.0
+        - group: "ligand_heavy"
+          force_constant: 4184.0
+    - name: "free"
+      # ... no position_restraints: the substrate moves freely
+```
+
+Production has no position restraints. The OpenMM run log prints
+`Removing N position restraint force(s) for next stage` when a stage ends.
+See {doc}`equilibration` for the other groups.
 
 ### Restrain a protein-protein distance
 

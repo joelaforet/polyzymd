@@ -105,10 +105,11 @@ def check_command(path: Path, production: bool = False) -> None:
             )
         try:
             config = SimulationConfig.from_yaml(config_path)
-        except (OSError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 - any unreadable config is reported the same way
             click.echo(
                 f"error: {role} {label}: cannot read {config_path}: {' '.join(str(exc).split())}"
             )
+            click.echo(f"fix: correct it until polyzymd validate -c {config_path} passes")
             failed = True
             continue
         source = "data.local.yaml" if label in protocol.data else "config"
@@ -140,6 +141,10 @@ def check_command(path: Path, production: bool = False) -> None:
                 load_function(user.file, user.qualname)
             except ProtocolError as exc:
                 click.echo(f"error: analysis {run}: {' '.join(str(exc).split())}")
+                click.echo(
+                    f"fix: define {user.qualname} in {user.file} so that the file imports "
+                    f"without error; python {user.file} shows the full error"
+                )
                 failed = True
                 continue
             relative = (
@@ -205,7 +210,7 @@ def check_command(path: Path, production: bool = False) -> None:
         click.echo(
             "reproduce: this study was frozen (manifest.json); point it at downloaded "
             "trajectories with polyzymd study locate DIR --verify, then rerun polyzymd analyze "
-            "--study, or redraw figures from results/ without trajectories"
+            "--study --recompute, or redraw figures from results/ without trajectories"
         )
     elif protocol.analyses:
         command = "project freeze" if protocol.project is not None else "study freeze"
@@ -267,7 +272,8 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
     (named by its config's naming_template), preferring one whose files have the sizes
     manifest.json records, is written to data.local.yaml
     beside study.yaml, which is never committed or published; entries for
-    conditions not found are kept as they were. Runs named alike go to the
+    conditions not found are kept as they were, and an entry naming a folder
+    whose files differ from manifest.json is removed. Runs named alike go to the
     folder named for the condition (no_polymer/), and one folder is never
     written for two conditions. Moving data never changes the study or its
     stored results' config hashes.
@@ -290,12 +296,14 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
 
     located: dict[str, Path] = {}
     missing = []
+    changed: dict[str, Path] = {}
     configs = {}
     for label, config_path in protocol.conditions.items():
         try:
             configs[label] = SimulationConfig.from_yaml(config_path)
-        except (OSError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 - any unreadable config is reported the same way
             click.echo(f"error: {label}: cannot read {config_path}: {' '.join(str(exc).split())}")
+            click.echo(f"fix: correct it until polyzymd validate -c {config_path} passes")
             missing.append(label)
     # Run directories are found by name only, so two conditions whose configs
     # name their runs alike cannot be told apart, except by manifest.json.
@@ -335,13 +343,19 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
         best = max(
             matching or candidates, key=lambda parent: (len(parents[parent]), -len(parent.parts))
         )
-        located[label] = best
         others = f" ({len(parents) - 1} other folders also hold some)" if len(parents) > 1 else ""
         click.echo(f"{label}: replicates {parents[best]} under {best}{others}")
-        for line in _check_against_manifest(protocol.root, label, best, verify):
+        checks = _check_against_manifest(protocol.root, label, best, verify)
+        for line in checks:
             click.echo(line)
-            if line.startswith("error"):
-                missing.append(label)
+        # Runs that differ from manifest.json are not written, and an earlier
+        # entry for them is removed, so analyze does not read them as the runs
+        # the stored results came from.
+        if any(line.startswith("error") for line in checks):
+            missing.append(label)
+            changed[label] = best
+        else:
+            located[label] = best
     # One folder may hold the runs of several conditions when their runs are
     # named apart. Conditions whose runs are named alike and land in one
     # folder would read the same runs, so neither is written.
@@ -365,11 +379,23 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
             missing.extend(shared)
             for label in shared:
                 del located[label]
-    if located:
-        # Entries this run did not locate are kept as written, hand-written ones included.
-        target = protocol.root / DATA_FILE
+    target = protocol.root / DATA_FILE
+    # load_study_file has checked data.local.yaml. An entry is removed only
+    # when it names the folder whose runs differ.
+    stale = [
+        label for label, folder in changed.items() if protocol.data.get(label) == folder.resolve()
+    ]
+    if located or stale:
         written = (yaml.safe_load(target.read_text()) if target.is_file() else None) or {}
+        # Entries this run did not locate are kept as written, hand-written ones
+        # included, except those of runs that differ from manifest.json.
         written.update({label: str(folder) for label, folder in located.items()})
+        for label in stale:
+            written.pop(label, None)
+            click.echo(
+                f"removed {label} from {target}: its runs under {changed[label]} differ "
+                "from manifest.json"
+            )
         target.write_text(
             "# Where this machine keeps each condition's runs. Written by polyzymd study locate;\n"
             "# never commit or publish it.\n" + yaml.safe_dump(written, sort_keys=False)
@@ -552,14 +578,20 @@ def _production_summary(label: str, config_path: Path, protocol: Any) -> str:
 
 
 def _study_logging(path: Path, command: str) -> None:
-    """Keep the console to warnings and log everything to ``<study>/logs/``; see analysis_logging."""
+    """Keep the console to warnings and log everything to ``<study>/logs/``; see analysis_logging.
+
+    Nothing is logged for a path that does not exist, so no folder is made
+    beside it; the command then says the path is missing.
+    """
     import logging
 
     from polyzymd.cli.logging_utils import analysis_logging
 
-    if any(isinstance(h, logging.FileHandler) for h in logging.getLogger().handlers):
-        return
     root = Path(path)
+    if not root.exists() or any(
+        isinstance(h, logging.FileHandler) for h in logging.getLogger().handlers
+    ):
+        return
     root = root if root.is_dir() else root.parent
     context = click.get_current_context(silent=True)
     verbose = bool(context and context.find_root().params.get("verbose"))

@@ -23,7 +23,7 @@ acetone
   4 10  1  0
 M  END
 >  <metadata>  (1) 
-{"0": {"residue_name": "ACE"}, "1": {"residue_name": "ACE"}, "2": {"residue_name": "ACE"}, "3": {"residue_name": "ACE"}, "4": {"residue_name": "ACE"}, "5": {"residue_name": "ACE"}, "6": {"residue_name": "ACE"}, "7": {"residue_name": "ACE"}, "8": {"residue_name": "ACE"}, "9": {"residue_name": "ACE"}}
+{"0": {"residue_name": "ACN"}, "1": {"residue_name": "ACN"}, "2": {"residue_name": "ACN"}, "3": {"residue_name": "ACN"}, "4": {"residue_name": "ACN"}, "5": {"residue_name": "ACN"}, "6": {"residue_name": "ACN"}, "7": {"residue_name": "ACN"}, "8": {"residue_name": "ACN"}, "9": {"residue_name": "ACN"}}
 
 >  <atom.dprop.PartialCharge>  (1) 
 -0.2041 0.56310000000000004 -0.53110000000000002 -0.2041 0.062700000000000006 0.062700000000000006 0.062700000000000006 0.062700000000000006 0.062700000000000006 0.062700000000000006

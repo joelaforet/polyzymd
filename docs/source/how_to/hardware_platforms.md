@@ -29,6 +29,7 @@ driver probe and the explicit CUDA Context preflight.
 | NVIDIA GPU with `polyzymd submit` | Supported when the driver is compatible with a checked-in CUDA environment |
 | NVIDIA GPU on a SLURM cluster without a preset | Supported with a suitable preset or CLI resource overrides |
 | Bridges-2 NVIDIA GPU | The scheduler preset is included; test the selected GPU type and current driver before a campaign |
+| NVIDIA GPU on this machine with `polyzymd run` | Supported: build in `build`, then run in a `sim-cuda-*` environment |
 | CPU with `polyzymd run` | Supported when `openmm.platform` is `CPU` |
 | AMD GPU with `polyzymd run` | Possible through OpenMM `OpenCL` when the site supplies a working OpenCL runtime; not tested by PolyzyMD CI |
 | CPU or AMD GPU with generated OpenMM SLURM scripts | Not supported in version 1.3; the generated script requires `nvidia-smi` and performs a CUDA preflight |
@@ -97,6 +98,42 @@ pixi run -e build polyzymd submit \
 
 The allocated node must pass the driver probe and CUDA execution test. A newer
 driver does not cause PolyzyMD to select another environment.
+
+## Run on a local NVIDIA GPU
+
+Run on the GPU of a workstation or a laptop in two steps. Build in the `build`
+environment, then run in a `sim-cuda-*` environment.
+
+The `build` environment holds OpenFF, so only it can build. Its OpenMM uses a
+recent CUDA version. An older NVIDIA driver cannot run that version, and the
+run fails with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`. A `sim-cuda-*`
+environment cannot build, because it has no OpenFF, but its OpenMM uses an
+older CUDA version.
+
+1. Find the highest CUDA version of your driver. `nvidia-smi` prints it as
+   `CUDA Version` in its first lines.
+2. Pick the newest `sim-cuda-*` environment that does not exceed that
+   version: `sim-cuda-12-6`, `sim-cuda-12-4` or `sim-cuda-12-0`.
+3. Set the CUDA platform in the simulation configuration:
+
+   ```yaml
+   openmm:
+     platform: CUDA
+     precision: mixed
+   ```
+
+4. Build in `build`, then run in the CUDA environment:
+
+   ```bash
+   pixi run -e build polyzymd build -c config.yaml -r 1
+   pixi run -e sim-cuda-12-6 polyzymd run -c config.yaml -r 1
+   ```
+
+`polyzymd run` finds the finished build and prints
+`Reusing the build in <replicate folder>`. It then minimizes, equilibrates
+and runs production on the GPU. Give the same `-r` replicates to both
+commands. Without a build, `polyzymd run` in a `sim-cuda-*` environment tries
+to build and fails, because OpenFF is missing.
 
 ## Run on a CPU
 

@@ -15,6 +15,18 @@ The trajectories go to Zenodo. A reader installs the PolyzyMD version that
 the manifest records. The reader can then make every figure from the folder
 alone, and every analysis from the folder and the trajectories.
 
+The figure follows a study from analysis to a reader's reanalysis.
+
+```{figure} ../_static/diagrams/analysis_deposit_flow.svg
+:alt: polyzymd analyze measures each replicate, reduces per condition, compares against the control and writes report.json; freeze hashes and tags the study and lays out the deposit; a reader verifies the trajectories and reruns the analyses.
+:width: 100%
+
+`polyzymd analyze` measures each replicate, reduces per condition and
+compares against the control. `polyzymd study freeze` records the SHA-256 of
+every file, tags the commit and lays out the deposit. A reader checks the
+downloaded trajectories against the manifest and recomputes the analyses.
+```
+
 The design follows the FAIR principles (Wilkinson et al. 2016; Barker et al.
 2022) and the TRUE principles for molecular simulation (Thompson et al.
 2020).
@@ -26,7 +38,7 @@ To make a study folder, see {doc}`../how_to/study_folder`.
 | Level | The reader has | The reader runs |
 |---|---|---|
 | 1. Figures | The study folder only | The scripts in `figures/`. They read stored results with `pz.Study("study.yaml").results(name)` and need no trajectories |
-| 2. Analyses | The folder and the trajectories | `polyzymd study locate DIR`, then `polyzymd analyze --study study.yaml` |
+| 2. Analyses | The folder and the trajectories | `polyzymd study locate DIR --verify`, then `polyzymd analyze --study study.yaml --recompute`. Without `--recompute`, analyze reads the stored results |
 | 3. Simulations | The folder and compute time | Each `conditions/<label>/config.yaml`. The replicate number seeds the starting structure and the dynamics |
 
 Level 3 gives the same results within the statistical noise of MD, not bit
@@ -81,7 +93,7 @@ stride: 1                       # optional
 replicates: [1, 2, 3, 4, 5]     # optional; default: every replicate found
 conditions:                     # control first; paths relative to this file
   No polymer: conditions/no_polymer/config.yaml
-  SBMA 50%: conditions/sbma50/config.yaml
+  SBMA 50%: conditions/sbma_50/config.yaml
 analyses:
   contacts:                     # a shipped analysis, named by its key
     method: occlusion

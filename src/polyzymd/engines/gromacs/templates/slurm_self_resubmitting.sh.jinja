@@ -25,6 +25,9 @@
 # Enable strict error handling
 set -e
 
+# Packages in ~/.local must not shadow the pixi environment.
+export PYTHONNOUSERSITE=1
+
 # Activate pixi environment
 eval "$(pixi shell-hook -e {{ pixi_env | shell_quote }} --manifest-path {{ manifest_path | shell_quote }})"
 
@@ -42,6 +45,8 @@ WORKING_DIR="{{ working_dir }}"
 GMX="{{ gmx_binary }}"
 PREFIX="{{ system_prefix }}"
 MAXH={{ maxh_hours }}
+# Minutes between checkpoints (mdrun -cpt), from checkpoint_interval
+CPT={{ checkpoint_minutes }}
 MDRUN_FLAGS="{{ mdrun_flags }}"
 MDRUN_FLAGS_EQ="{{ mdrun_flags_eq }}"
 MDRUN_FLAGS_PROD="{{ mdrun_flags_prod }}"
@@ -50,6 +55,8 @@ if [ -z "$MDRUN_FLAGS_PROD" ]; then MDRUN_FLAGS_PROD="$MDRUN_FLAGS"; fi
 # EM-safe flags: strip GPU offload flags incompatible with non-dynamical integrators
 MDRUN_FLAGS_EM=$(echo "$MDRUN_FLAGS" | sed 's/-pme  *gpu//g; s/-update  *gpu//g; s/-bonded  *gpu//g' | xargs)
 MDRUN="{{ mdrun_command }}"
+# Records of stages that start after this time ran in this job.
+JOB_START="$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
 # `polyzymd cancel` writes STOP into the replicate folder, the parent of
 # WORKING_DIR (<replicate>/gromacs); a STOP in WORKING_DIR also counts.
 if [ -n "${POLYZYMD_STOP_FILE:-}" ]; then
@@ -230,10 +237,10 @@ fi
 # -maxh limits wall time so we can cleanly resubmit
 if [ -f state.cpt ]; then
     echo "Resuming from checkpoint: state.cpt"
-    run_mdrun_stage "production" $MDRUN -deffnm prod -cpi state.cpt -cpo state.cpt -append -maxh $MAXH $MDRUN_FLAGS_PROD -v
+    run_mdrun_stage "production" $MDRUN -deffnm prod -cpi state.cpt -cpo state.cpt -append -cpt $CPT -maxh $MAXH $MDRUN_FLAGS_PROD -v
 else
     echo "Starting fresh production run"
-    run_mdrun_stage "production" $MDRUN -deffnm prod -cpo state.cpt -maxh $MAXH $MDRUN_FLAGS_PROD -v
+    run_mdrun_stage "production" $MDRUN -deffnm prod -cpo state.cpt -cpt $CPT -maxh $MAXH $MDRUN_FLAGS_PROD -v
 fi
 
 # =========================================================================
@@ -244,7 +251,8 @@ set +e
 polyzymd _update-gromacs-progress \
     --working-dir "$WORKING_DIR" \
     --config-path "$CONFIG_PATH" \
-    --replicate "$REPLICATE"
+    --replicate "$REPLICATE" \
+    --since "$JOB_START"
 PROGRESS_RC=$?
 set -e
 CURRENT_PHASE="idle"
@@ -256,8 +264,12 @@ fi
 # =========================================================================
 # Step 5: Check completion and resubmit if needed
 # =========================================================================
-if [ -f prod.log ]; then
-    if grep -q "Finished mdrun" prod.log; then
+# mdrun writes "Finished mdrun" also when -maxh or a signal stops it.
+# Production is complete when the last checkpoint is at nsteps.
+NSTEPS=$(grep -m1 -E '^\s*nsteps\s*=' prod.log 2>/dev/null | awk '{print $3}')
+LAST_CPT_STEP=$(grep -E '^Writing checkpoint, step [0-9]+' prod.log 2>/dev/null | tail -n1 | awk '{print $4}')
+if [ -f state.cpt ] && [ -n "$NSTEPS" ] && [ -n "$LAST_CPT_STEP" ]; then
+    if [ "$LAST_CPT_STEP" -ge "$NSTEPS" ]; then
         echo "Production simulation complete — no resubmission needed."
 
         # Run post-processing (trajectory centering)
@@ -279,6 +291,7 @@ if [ -f prod.log ]; then
             --working-dir "$WORKING_DIR" \
             --config-path "$CONFIG_PATH" \
             --replicate "$REPLICATE" \
+            --since "$JOB_START" \
             --mark-complete || true
         CURRENT_PHASE="idle"
 
@@ -288,7 +301,7 @@ if [ -f prod.log ]; then
     fi
 fi
 
-echo "Production incomplete (wall-time limit reached) — resubmitting..."
+echo "Production incomplete (last checkpoint at step ${LAST_CPT_STEP:-0} of ${NSTEPS:-?}) — resubmitting..."
 resubmit_once || exit 1
 
 exit 0

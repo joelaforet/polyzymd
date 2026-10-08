@@ -63,7 +63,8 @@ that GROMACS computes the same energies as OpenMM through Interchange.
 | What | OpenMM | GROMACS | Match |
 |---|---|---|---|
 | Minimization with `freeze_solute: true` (the default) | protein and substrate heavy atoms held fixed | `em.mdp` sets `define = -DPOSRES_EM`: position restraints of 1e5 kJ/mol/nm² on the protein and ligand heavy atoms, whatever the equilibration stages restrain | approximate. The same atoms are held; in GROMACS they can move by about 0.01 nm. |
-| Position restraints | a harmonic force on the selected atoms | `define = -DPOSRES_...` with restraint `.itp` files | 1:1 |
+| Position restraints | a harmonic force on the selected atoms | `define = -DPOSRES_...` with restraint `.itp` files | 1:1 for the protein, ligand and polymer groups, with one force constant per group and one protein group; `validate` refuses other position restraints on GROMACS |
+| Distance restraints (`restraints:`) | applied in every phase | not applied | `validate` refuses enabled distance restraints with `engine: gromacs` |
 | Temperature ramp | the target changes every `temperature_interval_steps` steps | `annealing`, a piecewise-linear schedule that changes the target over one step at each boundary | 1:1: the same target at every step |
 
 ## Output

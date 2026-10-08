@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DYNAMIC_CACHE_SCHEMA_VERSION = 3
+DYNAMIC_CACHE_SCHEMA_VERSION = 4
 
 
 def _build_linear_polymer(**kwargs: Any) -> Any:
@@ -195,6 +196,21 @@ class PolymerGenerationError(Exception):
     """Raised when polymer generation fails after all retries."""
 
 
+def _name_residues(topology: "OFFTopology", residue_names: dict[str, str] | None) -> None:
+    """Rename each residue from its fragment name (``EGPMA_2-site``) to its monomer's residue name.
+
+    A monomer without a configured residue name gets the first three letters
+    of its fragment name. The fragment name is kept as ``extended_name``.
+    """
+    for mol in topology.molecules:
+        for atom in mol.atoms:
+            if "residue_name" in atom.metadata:
+                fragment = atom.metadata["residue_name"]
+                monomer = fragment.rsplit("_", 1)[0]
+                atom.metadata["extended_name"] = fragment
+                atom.metadata["residue_name"] = (residue_names or {}).get(monomer, fragment[:3])
+
+
 def _validate_dynamic_sequence_labels(sequence: str, monomer_names: dict[str, str]) -> list[str]:
     """Validate labels used by a dynamic polymer sequence.
 
@@ -243,6 +259,7 @@ class PolymerGenerator:
         cache_directory: Path,
         max_retries: int = 10,
         charger_type: str = "nagl",
+        type_prefix: str | None = None,
     ):
         """Initialize the polymer generator.
 
@@ -256,8 +273,13 @@ class PolymerGenerator:
             Maximum attempts for building after ring-piercing failures, by default 10.
         charger_type : str, optional
             Charge method, by default "nagl".
+        type_prefix : str | None, optional
+            Filename prefix of every chain, the config's ``type_prefix``, so
+            cached mode finds the files. Without it the prefix is the names of
+            the monomers in the sequence.
         """
         self.monomer_group = monomer_group
+        self.type_prefix = type_prefix
         self.cache_directory = Path(cache_directory)
         self.max_retries = max_retries
         self.charger_type = charger_type.lower()
@@ -921,7 +943,38 @@ class PolymerGenerator:
         logger.debug(f"Middle sequence (block identifiers): {middle_sequence}")
         logger.debug(f"Middle sequence map: {sequence_map}")
 
-        # Attempt building with retries for ring-piercing
+        # mBuild's energy minimization kicks atoms with NumPy's global random
+        # state. Seeding it from the sequence makes the conformer a function of
+        # the sequence, as a cached chain is, so identical builds match.
+        import numpy as np
+
+        random_state = np.random.get_state()
+        np.random.seed(zlib.crc32(sequence.encode()))
+        try:
+            chain = self._build_chain_without_ring_piercing(
+                monogrp_local, sequence, middle_sequence, sequence_map
+            )
+        finally:
+            np.random.set_state(random_state)
+
+        # Save PDB
+        pdb_filename = self._make_polymer_filename(sequence, monomer_names, charged=False)
+        pdb_path = self.cache_directory / f"{pdb_filename}.pdb"
+
+        resname_map = self._build_resname_map(monomer_names, residue_names)
+        _mbmol_to_openmm_pdb(pdb_path, chain, resname_map=resname_map)
+        logger.info(f"Saved polymer PDB: {pdb_path}")
+
+        return chain, pdb_path
+
+    def _build_chain_without_ring_piercing(
+        self,
+        monogrp_local: "MonomerGroup",
+        sequence: str,
+        middle_sequence: str,
+        sequence_map: dict[str, str],
+    ) -> Any:
+        """Build the chain, retrying up to ``max_retries`` times while a ring is pierced."""
         for attempt in range(self.max_retries):
             logger.debug(f"Building polymer attempt {attempt + 1}/{self.max_retries}")
 
@@ -950,16 +1003,7 @@ class PolymerGenerator:
             raise PolymerGenerationError(
                 f"Failed to build polymer after {self.max_retries} attempts due to ring-piercing"
             )
-
-        # Save PDB
-        pdb_filename = self._make_polymer_filename(sequence, monomer_names, charged=False)
-        pdb_path = self.cache_directory / f"{pdb_filename}.pdb"
-
-        resname_map = self._build_resname_map(monomer_names, residue_names)
-        _mbmol_to_openmm_pdb(pdb_path, chain, resname_map=resname_map)
-        logger.info(f"Saved polymer PDB: {pdb_path}")
-
-        return chain, pdb_path
+        return chain
 
     def _build_resname_map(
         self,
@@ -1024,7 +1068,7 @@ class PolymerGenerator:
 
         # Build monomer prefix
         monomers_used = [monomer_names[label] for label in unique_labels]
-        monomer_prefix = "-".join(monomers_used) if monomers_used else "NO_MONOMERS"
+        monomer_prefix = self.type_prefix or "-".join(monomers_used)
 
         length = len(sequence)
         filename = f"{monomer_prefix}_seq={sequence}_{length}-mer"
@@ -1109,12 +1153,7 @@ class PolymerGenerator:
         if not was_partitioned:
             raise PolymerGenerationError("Failed to partition polymer topology")
 
-        # Fix residue names (truncate to 3 chars)
-        for mol in off_top.molecules:
-            for atom in mol.atoms:
-                if "residue_name" in atom.metadata:
-                    atom.metadata["extended_name"] = atom.metadata["residue_name"]
-                    atom.metadata["residue_name"] = atom.metadata["residue_name"][:3]
+        _name_residues(off_top, residue_names)
 
         # Save uncharged SDF
         _topology_to_sdf(uncharged_sdf_path, off_top)

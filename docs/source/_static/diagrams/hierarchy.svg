@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 536" role="img" aria-labelledby="t d">
+  <title id="t">Project, study, condition, replicate</title>
+  <desc id="d">A project holds studies, a study holds conditions, and a condition runs replicates; on disk the replicate folders sit in the project's git-ignored runs/&lt;study&gt;/&lt;condition&gt;/ folder, and data.local.yaml points the study at them.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0,1 L10,5 L0,9 z" fill="#1f2933"/>
+    </marker>
+  </defs>
+  <rect width="1040" height="536" fill="#ffffff"/>
+
+  <g font-family="Helvetica, Arial, sans-serif">
+    <!-- Project -->
+    <rect x="24" y="24" width="992" height="456" rx="6" fill="#ffffff" stroke="#9aa5b1" stroke-width="1.5"/>
+    <text x="48" y="56" font-size="16" font-weight="bold" fill="#1f2933">Project</text>
+    <text x="128" y="56" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">project.yaml</text>
+    <text x="48" y="80" font-size="14" fill="#1f2933">shared analyses · publishing metadata</text>
+
+    <!-- Study -->
+    <rect x="48" y="104" width="512" height="352" rx="6" fill="#ffffff" stroke="#9aa5b1" stroke-width="1.5"/>
+    <text x="72" y="136" font-size="16" font-weight="bold" fill="#1f2933">Study</text>
+    <text x="144" y="136" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">study.yaml</text>
+    <text x="72" y="160" font-size="14" fill="#1f2933">conditions · comparison and control · analyses</text>
+
+    <!-- Condition -->
+    <rect x="72" y="184" width="464" height="128" rx="6" fill="#ffffff" stroke="#9aa5b1" stroke-width="1.5"/>
+    <text x="96" y="216" font-size="16" font-weight="bold" fill="#1f2933">Condition</text>
+    <text x="200" y="216" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">conditions/&lt;c&gt;/config.yaml</text>
+    <text x="96" y="240" font-size="14" fill="#1f2933">engine + system</text>
+    <text x="96" y="262" font-size="12" fill="#52606d">enzyme, ligand, polymers, solvent</text>
+    <text x="96" y="292" font-size="12" fill="#52606d">its replicates run in the project's runs/</text>
+
+    <!-- data.local.yaml -->
+    <rect x="72" y="344" width="200" height="64" rx="6" fill="#f0f2f4" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="88" y="372" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">data.local.yaml</text>
+    <text x="88" y="392" font-size="12" fill="#52606d">condition → folder</text>
+
+    <!-- runs/ at project level (git-ignored) -->
+    <rect x="600" y="104" width="392" height="352" rx="6" fill="#f0f2f4" stroke="#9aa5b1" stroke-width="1.5"/>
+    <text x="624" y="136" font-size="13" font-weight="bold" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">runs/</text>
+    <text x="672" y="136" font-size="12" fill="#52606d">git-ignored</text>
+
+    <rect x="624" y="152" width="344" height="288" rx="6" fill="#ffffff" stroke="#9aa5b1" stroke-width="1.5"/>
+    <text x="640" y="178" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">&lt;study&gt;/&lt;condition&gt;/</text>
+
+    <rect x="640" y="200" width="312" height="64" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="656" y="226" font-size="14" font-weight="bold" fill="#1f2933">Replicate 1</text>
+    <text x="784" y="226" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">…_run1/</text>
+    <text x="656" y="248" font-size="12" fill="#52606d">seed 1 · trajectory</text>
+
+    <rect x="640" y="280" width="312" height="64" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="656" y="306" font-size="14" font-weight="bold" fill="#1f2933">Replicate 2</text>
+    <text x="784" y="306" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">…_run2/</text>
+    <text x="656" y="328" font-size="12" fill="#52606d">seed 2 · trajectory</text>
+
+    <rect x="640" y="360" width="312" height="64" rx="6" fill="#f5f7fa" stroke="#1f2933" stroke-width="1.5"/>
+    <text x="656" y="386" font-size="14" font-weight="bold" fill="#1f2933">Replicate 3</text>
+    <text x="784" y="386" font-size="13" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" fill="#1f2933">…_run3/</text>
+    <text x="656" y="408" font-size="12" fill="#52606d">seed 3 · trajectory</text>
+
+    <!-- arrows -->
+    <g stroke="#1f2933" stroke-width="1.5" fill="none">
+      <line x1="536" y1="232" x2="624" y2="232" marker-end="url(#arrow)"/>
+      <line x1="272" y1="376" x2="624" y2="376" marker-end="url(#arrow)"/>
+    </g>
+    <g font-size="12" fill="#52606d" text-anchor="middle">
+      <text x="580" y="224">runs</text>
+      <text x="448" y="368">locates</text>
+    </g>
+
+    <!-- Legend -->
+    <rect x="24" y="500" width="24" height="16" rx="3" fill="#f0f2f4" stroke="#9aa5b1" stroke-width="1.5"/>
+    <text x="56" y="513" font-size="12" fill="#52606d">grey: outside git (machine-specific, not committed)</text>
+  </g>
+</svg>
