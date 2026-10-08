@@ -18,6 +18,7 @@ import logging
 import os
 import re as _re
 import shutil
+import sys
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
@@ -224,7 +225,8 @@ def _discover_manifest_path() -> str:
     """Auto-detect the pixi workspace manifest (``pixi.toml``).
 
     Uses ``PIXI_PROJECT_MANIFEST``, which pixi sets in an activated
-    environment. Otherwise walks up from the ``polyzymd`` executable on
+    environment, when that environment (``CONDA_PREFIX``) is the one running
+    this Python. Otherwise walks up from the ``polyzymd`` executable on
     ``$PATH`` (``<workspace>/.pixi/envs/<name>/bin/``), first along the path
     as found, so a symlinked ``.pixi`` folder still leads to the workspace,
     then along the resolved path.
@@ -240,7 +242,13 @@ def _discover_manifest_path() -> str:
         If the manifest cannot be found.
     """
     active = os.environ.get("PIXI_PROJECT_MANIFEST")
-    if active and Path(active).is_file():
+    prefix = os.environ.get("CONDA_PREFIX")
+    if (
+        active
+        and prefix
+        and Path(active).is_file()
+        and Path(prefix).resolve() == Path(sys.prefix).resolve()
+    ):
         return str(Path(active).absolute())
     exe = shutil.which("polyzymd")
     if exe is None:

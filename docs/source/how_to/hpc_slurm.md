@@ -394,11 +394,18 @@ names. For CPU and GPU settings, MPI, constraints and recovery, see
 Make `pixi` available in non-interactive shells. A setting in your login shell
 files alone is not enough.
 
+### `sbatch not found`
+
+`submit` needs `sbatch` on `PATH`. Load the scheduler module in your shell
+first (for CU Boulder, see {doc}`site_cu_boulder`). A GROMACS
+`module_load` does not run on the submitting host. The error names the job
+script that was written.
+
 ### `Cannot auto-detect pixi manifest`
 
 `submit` writes the path of `pixi.toml` into the job script. It takes the path
-from `PIXI_PROJECT_MANIFEST`, which `pixi run` and `pixi shell` set. Without
-it, it walks up from the `polyzymd` on `PATH`. Run `submit` with
+from `PIXI_PROJECT_MANIFEST`, which `pixi run` and `pixi shell` set, when that
+environment runs `submit`. Otherwise it walks up from the `polyzymd` on `PATH`. Run `submit` with
 `pixi run -e build` when the environments are outside the workspace, for
 example with `detached-environments`.
 

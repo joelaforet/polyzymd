@@ -31,7 +31,7 @@ from polyzymd.workflow.slurm import (
     SlurmConfig,
     SlurmScriptGenerator,
 )
-from polyzymd.workflow.slurm_submit import make_log_folder
+from polyzymd.workflow.slurm_submit import make_log_folder, require_sbatch
 
 LOGGER = logging.getLogger(__name__)
 
@@ -576,6 +576,7 @@ class DaisyChainSubmitter:
                 is_generated_only=False,
             )
 
+        require_sbatch(script_path)
         # The job starts in its run directory (``#SBATCH --chdir``), and sbatch
         # does not create the folder of its log.
         Path(self._get_scratch_dir(replicate)).mkdir(parents=True, exist_ok=True)
@@ -759,6 +760,58 @@ class DaisyChainSubmitter:
             )
 
 
+def _check_build(
+    working_dir: Path, sim_config: SimulationConfig, config_path: Any, replicate: int
+) -> None:
+    """Refuse a replicate whose job could not run from the files in ``working_dir``.
+
+    A replicate that has not started needs a build that matches its manifest
+    and the config. A started replicate continues from its own run files, so
+    it needs only the build files and a readable ``progress.json``; a changed
+    production length or segment setting is then allowed.
+
+    Raises
+    ------
+    FileNotFoundError
+        With the ``polyzymd build`` command to run.
+    """
+    from polyzymd.simulation.artifact_integrity import validate_build_bundle
+    from polyzymd.simulation.progress import PROGRESS_FILENAME, load_progress
+
+    progress_file = working_dir / PROGRESS_FILENAME
+    started = progress_file.exists() or any(
+        any(working_dir.glob(pattern))
+        for pattern in ("minimization*", "equilibration_*", "production*")
+    )
+    if started:
+        missing = [
+            name
+            for name in ("solvated_system.pdb", "system.xml")
+            if not (working_dir / name).is_file()
+        ]
+        if missing:
+            raise FileNotFoundError(
+                f"Replicate {replicate} has started in {working_dir}, but its build files "
+                f"{', '.join(missing)} are missing. Restore them from the same build; "
+                "a new build needs a new output directory."
+            )
+        if progress_file.exists() and load_progress(working_dir) is None:
+            raise FileNotFoundError(
+                f"Replicate {replicate}: {progress_file} cannot be read. Check it with "
+                f"polyzymd recover -c {config_path} -r {replicate}."
+            )
+        return
+    try:
+        validate_build_bundle(working_dir, sim_config)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise FileNotFoundError(
+            f"Replicate {replicate} has no usable build in {working_dir}: {exc}\n"
+            f"Fix: build it, in a compute job: polyzymd build -c {config_path} "
+            f"-r {replicate}. The replicate has not started, so the build replaces the "
+            "old files. Then submit again."
+        ) from exc
+
+
 def submit_daisy_chain(
     config_path: Union[str, Path],
     slurm_preset: str = "aa100",
@@ -918,18 +971,10 @@ def submit_daisy_chain(
     # Jobs run in a simulation environment without OpenFF, so they cannot
     # build. Check every replicate before any job is written or submitted.
     if not dry_run:
-        from polyzymd.simulation.artifact_integrity import validate_build_bundle
-
         for replicate in dc_config.replicates:
-            working_dir = sim_config.get_working_directory(replicate)
-            try:
-                validate_build_bundle(working_dir, sim_config)
-            except (OSError, RuntimeError, ValueError) as exc:
-                raise FileNotFoundError(
-                    f"Replicate {replicate} has no usable build in {working_dir}: {exc}\n"
-                    f"Build it first, in a compute job: polyzymd build -c {config_path} "
-                    f"-r {replicate}. Then submit again."
-                ) from exc
+            _check_build(
+                sim_config.get_working_directory(replicate), sim_config, config_path, replicate
+            )
 
     # Create submitter and submit
     submitter = DaisyChainSubmitter(

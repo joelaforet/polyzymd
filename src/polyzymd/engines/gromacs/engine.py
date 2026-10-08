@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -128,21 +127,10 @@ class GromacsEngine(SimulationEngine):
             raise ValueError("GROMACS submission requires slurm_config")
 
         pixi_env = str(request.extra.get("pixi_env", "build"))
-
-        # Submission never builds: building runs OpenFF and Packmol, which do not
-        # belong on a login node, and the job environment may lack them.
+        self.check_build(request)
         from polyzymd.analyses.shared.gromacs import system_prefix
 
         prefix = system_prefix(self._config)
-        required = [f"{prefix}.top", f"{prefix}.gro", "em.mdp", "prod.mdp"]
-        missing = [name for name in required if not (request.working_dir / name).exists()]
-        if missing:
-            raise FileNotFoundError(
-                f"No GROMACS build for replicate {request.replicate} in {request.working_dir} "
-                f"(missing {', '.join(missing)}). Build it first, in a compute job: "
-                f"polyzymd build -c {request.config_path} -r {request.replicate} "
-                "--format gromacs. Then submit again."
-            )
 
         eq_mdps = sorted(path.name for path in request.working_dir.glob("eq_*.mdp"))
         if not eq_mdps:
@@ -184,6 +172,30 @@ class GromacsEngine(SimulationEngine):
         )
         generator.save_script(script, script_path)
         return script_path
+
+    def check_build(self, request: EngineSubmitRequest) -> None:
+        """Refuse a replicate without the GROMACS inputs from ``polyzymd build``.
+
+        Submission never builds: building runs OpenFF and Packmol, which do not
+        belong on a login node.
+
+        Raises
+        ------
+        FileNotFoundError
+            With the ``polyzymd build`` command to run.
+        """
+        from polyzymd.analyses.shared.gromacs import system_prefix
+
+        prefix = system_prefix(self._config)
+        required = [f"{prefix}.top", f"{prefix}.gro", "em.mdp", "prod.mdp"]
+        missing = [name for name in required if not (request.working_dir / name).exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"No GROMACS build for replicate {request.replicate} in {request.working_dir} "
+                f"(missing {', '.join(missing)}). Build it first, in a compute job: "
+                f"polyzymd build -c {request.config_path} -r {request.replicate} "
+                "--format gromacs. Then submit again."
+            )
 
     def _resolve_slurm_config(self, base: SlurmConfig) -> SlurmConfig:
         """Override base SLURM config with GROMACS-specific hardware settings.
@@ -334,13 +346,6 @@ class GromacsEngine(SimulationEngine):
             Submission metadata with script path and optional SLURM job id.
         """
         script_path = self.prepare_submission(request)
-
-        if shutil.which("sbatch") is None:
-            return {
-                "submitted": False,
-                "script_path": script_path,
-                "reason": "sbatch_not_available",
-            }
 
         from polyzymd.workflow.slurm_submit import run_sbatch
 

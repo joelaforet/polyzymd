@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -17,6 +18,16 @@ def make_log_folder(script_path: Path | str) -> None:
         match = re.match(r"^#SBATCH\s+--output[=\s]\s*\"?([^\"]+?)\"?\s*$", line)
         if match and Path(match.group(1)).is_absolute():
             Path(match.group(1)).parent.mkdir(parents=True, exist_ok=True)
+
+
+def require_sbatch(script_path: Path | str) -> None:
+    """Raise when ``sbatch`` is not on ``PATH``, naming the script that was written."""
+    if shutil.which("sbatch") is None:
+        raise RuntimeError(
+            "sbatch not found. Load your scheduler module first, for example "
+            f"`ml slurm/blanca` on CU Boulder Blanca. The job script was written to {script_path}; "
+            f"submit it with `sbatch --export=NONE {script_path}` or run submit again."
+        )
 
 
 def run_sbatch(script_path: Path | str) -> subprocess.CompletedProcess[str]:
@@ -35,7 +46,13 @@ def run_sbatch(script_path: Path | str) -> subprocess.CompletedProcess[str]:
     -------
     subprocess.CompletedProcess[str]
         Result of the ``sbatch`` invocation.
+
+    Raises
+    ------
+    RuntimeError
+        If ``sbatch`` is not on ``PATH``.
     """
+    require_sbatch(script_path)
     make_log_folder(script_path)
     return subprocess.run(
         ["sbatch", "--export=NONE", str(script_path)], capture_output=True, text=True, check=False

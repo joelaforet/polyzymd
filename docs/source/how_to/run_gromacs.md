@@ -151,6 +151,9 @@ script activates `build` for the PolyzyMD commands. It then runs the configured
 `submit` starts the job with `sbatch --export=NONE`, so the job does not
 inherit the environment of the submitting shell. `module_load` runs only in
 the job, never on the login node.
+If your `module_load` loads the scheduler module, load that module in your
+shell before `submit` instead; without `sbatch` on `PATH`,
+`submit` stops with an error.
 
 Use these settings to move a job to another SLURM cluster:
 

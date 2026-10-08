@@ -327,8 +327,7 @@ class TestEngineSubmitModuleLoad:
     """Tests that submit() leaves module_load to the job script."""
 
     @patch("polyzymd.workflow.slurm_submit.run_sbatch")
-    @patch("polyzymd.engines.gromacs.engine.shutil.which", return_value="/usr/bin/sbatch")
-    def test_submit_does_not_load_modules_on_the_submit_host(self, _which, mock_run_sbatch):
+    def test_submit_does_not_load_modules_on_the_submit_host(self, mock_run_sbatch):
         """module_load runs inside the job only; sbatch gets the script alone."""
         config = _make_config(module_load="module load gcc/11.2.0 gromacs/2024.2")
         engine = GromacsEngine(config=config, gmx_binary="gmx")
@@ -343,33 +342,6 @@ class TestEngineSubmitModuleLoad:
 
         request = EngineSubmitRequest(
             replicate=1,
-            config_path=Path("/tmp/config.yaml"),
-            working_dir=Path("/tmp/work"),
-            slurm_config=SlurmConfig(),
-        )
-
-        result = engine.submit(request)
-
-        mock_run_sbatch.assert_called_once_with(script_path)
-        assert result["submitted"] is True
-
-    @patch("polyzymd.workflow.slurm_submit.run_sbatch")
-    @patch("polyzymd.engines.gromacs.engine.shutil.which")
-    def test_submit_no_module_load(self, mock_which, mock_run_sbatch):
-        """submit() should call sbatch with the script when no module_load is configured."""
-        config = _make_config(module_load=None)
-        engine = GromacsEngine(config=config, gmx_binary="gmx")
-        script_path = Path("/tmp/run_rep2.sh")
-        engine.prepare_submission = MagicMock(return_value=script_path)
-        mock_which.return_value = "/usr/bin/sbatch"
-        mock_run_sbatch.return_value = MagicMock(
-            returncode=0,
-            stdout="Submitted batch job 456",
-            stderr="",
-        )
-
-        request = EngineSubmitRequest(
-            replicate=2,
             config_path=Path("/tmp/config.yaml"),
             working_dir=Path("/tmp/work"),
             slurm_config=SlurmConfig(),

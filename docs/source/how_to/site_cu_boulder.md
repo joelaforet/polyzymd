@@ -26,7 +26,8 @@ ml slurm/blanca   # condo nodes owned by research groups
 
 :::{important}
 Run `ml slurm/blanca` before `sbatch`, `polyzymd submit` or
-`polyzymd analyze --submit` to use Blanca. If you do not, SLURM does not show
+`polyzymd analyze --submit` to use Blanca. A GROMACS `module_load` runs only
+in the job, so it cannot load the scheduler module for `submit`. If you do not, SLURM does not show
 the Blanca partitions. `polyzymd status` and `polyzymd cancel` also need the
 module of the cluster that runs the jobs.
 :::

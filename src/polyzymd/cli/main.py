@@ -1827,6 +1827,7 @@ def submit(
 
         colored_echo("Using GROMACS submission backend", phase="workflow")
 
+        requests = []
         for rep in replicate_list:
             slurm_config = SlurmConfig.from_preset(preset)
             if email:
@@ -1868,31 +1869,33 @@ def submit(
                     )
                     continue
 
-            request = EngineSubmitRequest(
-                replicate=rep,
-                config_path=config_path_abs,
-                working_dir=working_dir,
-                slurm_config=slurm_config,
-                job_name=job_name,
-                extra={"pixi_env": resolved_pixi_env},
+            requests.append(
+                EngineSubmitRequest(
+                    replicate=rep,
+                    config_path=config_path_abs,
+                    working_dir=working_dir,
+                    slurm_config=slurm_config,
+                    job_name=job_name,
+                    extra={"pixi_env": resolved_pixi_env},
+                )
             )
 
-            try:
+        # Check every build before any script is written or submitted.
+        try:
+            for request in requests:
+                engine_impl.check_build(request)
+            for request in requests:
                 if generate_only:
                     script_path = engine_impl.prepare_submission(request)
-                    colored_echo(f"  Rep {rep}: script at {script_path}", phase="workflow")
-                    continue
-                result = engine_impl.submit(request)
-            except (FileNotFoundError, ValueError, RuntimeError) as e:
-                colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
-                sys.exit(1)
-            if result.get("submitted"):
-                colored_echo(f"  Rep {rep}: {result['stdout']}", phase="workflow")
-            else:
-                colored_echo(
-                    f"  Rep {rep}: script at {result['script_path']} (sbatch not available)",
-                    phase="workflow",
-                )
+                    colored_echo(
+                        f"  Rep {request.replicate}: script at {script_path}", phase="workflow"
+                    )
+                else:
+                    result = engine_impl.submit(request)
+                    colored_echo(f"  Rep {request.replicate}: {result['stdout']}", phase="workflow")
+        except (FileNotFoundError, ValueError, RuntimeError) as e:
+            colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
 
         if not generate_only:
             colored_echo("\nGROMACS job submission complete!", phase="workflow")
@@ -3761,11 +3764,15 @@ def recover(
             working_dir=working_dir,
             slurm_config=slurm_config,
             job_name=job_name,
-            extra={"pixi_env": resolved_pixi_env, "skip_build": gromacs_inputs_exist},
+            extra={"pixi_env": resolved_pixi_env},
         )
 
         engine_impl = create_engine(sim_config, override="gromacs", defer_binary=True)
-        script_path = engine_impl.prepare_submission(request)
+        try:
+            script_path = engine_impl.prepare_submission(request)
+        except (FileNotFoundError, ValueError) as e:
+            colored_echo(f"Recovery failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
 
         recovery_dir = working_dir / "recovery_scripts"
         recovery_dir.mkdir(exist_ok=True)
@@ -3782,7 +3789,11 @@ def recover(
 
         from polyzymd.workflow.slurm_submit import run_sbatch
 
-        result = run_sbatch(recovery_path)
+        try:
+            result = run_sbatch(recovery_path)
+        except RuntimeError as e:
+            colored_echo(f"Submission failed: {e}", err=True, level=logging.ERROR)
+            sys.exit(1)
         if result.returncode == 0:
             colored_echo(f"Submitted: {result.stdout.strip()}", phase="workflow")
             colored_echo("Monitor with: squeue -u $USER", phase="workflow")

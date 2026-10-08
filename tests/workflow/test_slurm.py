@@ -12,6 +12,7 @@ Covers:
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -1230,9 +1231,25 @@ class TestDiscoverManifestPath:
         manifest.parent.mkdir()
         manifest.write_text("")
         monkeypatch.setenv("PIXI_PROJECT_MANIFEST", str(manifest))
+        monkeypatch.setenv("CONDA_PREFIX", sys.prefix)
         monkeypatch.setattr(slurm_module.shutil, "which", lambda name: "/opt/elsewhere/polyzymd")
 
         assert slurm_module._discover_manifest_path() == str(manifest)
+
+    def test_ignores_the_manifest_of_another_active_environment(self, monkeypatch, tmp_path):
+        other = tmp_path / "other" / "pixi.toml"
+        other.parent.mkdir()
+        other.write_text("")
+        workspace = tmp_path / "ws"
+        (workspace / ".pixi" / "envs" / "build" / "bin").mkdir(parents=True)
+        (workspace / "pixi.toml").write_text("")
+        exe = workspace / ".pixi" / "envs" / "build" / "bin" / "polyzymd"
+        exe.write_text("")
+        monkeypatch.setenv("PIXI_PROJECT_MANIFEST", str(other))
+        monkeypatch.setenv("CONDA_PREFIX", str(tmp_path / "other" / ".pixi" / "envs" / "x"))
+        monkeypatch.setattr(slurm_module.shutil, "which", lambda name: str(exe))
+
+        assert slurm_module._discover_manifest_path() == str(workspace / "pixi.toml")
 
     def test_finds_the_workspace_through_a_symlinked_pixi_folder(self, monkeypatch, tmp_path):
         workspace = tmp_path / "ws"

@@ -207,6 +207,7 @@ class TestJobsMatchedByRunDirectory:
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
 
         monkeypatch.setattr("polyzymd.workflow.daisy_chain.subprocess.run", fake_run)
+        monkeypatch.setattr("polyzymd.workflow.daisy_chain.require_sbatch", lambda path: None)
         return calls
 
     def test_check_matches_the_run_directory_and_folders_inside_it(self, tmp_path, monkeypatch):
@@ -332,6 +333,9 @@ class TestSubmissionResultStateSemantics:
         script_path = tmp_path / "run_rep1.sh"
         script_path.write_text(f"#!/bin/bash\n#SBATCH --output={logs}/r1.%j.out\n")
         made = []
+        monkeypatch.setattr(
+            "polyzymd.workflow.slurm_submit.shutil.which", lambda name: "/usr/bin/sbatch"
+        )
         monkeypatch.setattr(
             "polyzymd.workflow.daisy_chain.subprocess.run",
             lambda *a, **kw: made.append(logs.is_dir()) or MagicMock(stdout="Submitted 7\n"),
@@ -554,3 +558,56 @@ class TestSubmitNeedsABuild:
 
         assert len(validated) == 1
         assert "--skip-build" in results[1][0].script_path.read_text()
+
+    def test_started_replicate_is_not_checked_against_the_edited_config(
+        self, tmp_path, monkeypatch
+    ):
+        """A started run continues from its own files after the config changes."""
+        from polyzymd.config.schema import SimulationConfig
+        from polyzymd.simulation.artifact_integrity import ArtifactIntegrityError
+        from polyzymd.workflow import daisy_chain
+
+        monkeypatch.setattr(
+            "polyzymd.workflow.slurm._discover_manifest_path", lambda: "/ws/pixi.toml"
+        )
+
+        def mismatch(working_dir, config):
+            raise ArtifactIntegrityError("Configuration does not match")
+
+        monkeypatch.setattr(
+            "polyzymd.simulation.artifact_integrity.validate_build_bundle", mismatch
+        )
+        config = self._config_file(tmp_path)
+        run_dir = SimulationConfig.from_yaml(config).get_working_directory(1)
+        (run_dir / "production_0").mkdir(parents=True)
+        for name in ("solvated_system.pdb", "system.xml"):
+            (run_dir / name).write_text("")
+
+        results = daisy_chain.submit_daisy_chain(
+            config, "testing", replicates="1", generate_only=True
+        )
+        assert results[1][0].script_path.is_file()
+
+        (run_dir / "system.xml").unlink()
+        with pytest.raises(FileNotFoundError, match="system.xml are missing"):
+            daisy_chain.submit_daisy_chain(config, "testing", replicates="1", generate_only=True)
+
+    def test_submit_without_sbatch_is_an_error(self, tmp_path, monkeypatch):
+        """A real submit without sbatch on PATH fails instead of reporting success."""
+        from unittest.mock import MagicMock
+
+        from polyzymd.workflow.daisy_chain import DaisyChainConfig, DaisyChainSubmitter
+
+        monkeypatch.setattr("polyzymd.workflow.slurm_submit.shutil.which", lambda name: None)
+        sim_config = MagicMock()
+        sim_config.get_working_directory.return_value = tmp_path / "run1"
+        dc_config = MagicMock(spec=DaisyChainConfig)
+        dc_config.generate_only = False
+        dc_config.dry_run = False
+        dc_config.slurm_config = MagicMock()
+        script_path = tmp_path / "run_rep1.sh"
+        script_path.write_text("#!/bin/bash\n")
+
+        submitter = DaisyChainSubmitter(sim_config=sim_config, dc_config=dc_config)
+        with pytest.raises(RuntimeError, match="ml slurm/blanca"):
+            submitter._submit_job(script_path=script_path, replicate=1)
