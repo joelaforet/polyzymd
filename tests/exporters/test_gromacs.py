@@ -1410,3 +1410,68 @@ def test_every_stage_passes_grompp_for_any_steps_per_frame(
             text=True,
         )
         assert result.returncode == 0, f"{name}: {result.stderr[-2000:]}"
+
+
+def test_restrained_npt_stage_scales_reference_coordinates() -> None:
+    """A stage with a barostat and position restraints writes refcoord-scaling = com."""
+    from polyzymd.exporters.gromacs import MDPParameters
+
+    npt = MDPParameters(pcoupl="C-rescale", define="-DPOSRES_PROTEIN").to_mdp_string()
+    assert "refcoord-scaling = com" in npt
+    assert "refcoord-scaling" not in MDPParameters(define="-DPOSRES_PROTEIN").to_mdp_string()
+    assert "refcoord-scaling" not in MDPParameters(pcoupl="C-rescale").to_mdp_string()
+
+
+@pytest.mark.skipif(shutil.which("gmx") is None, reason="GROMACS is not installed")
+def test_restrained_npt_stage_passes_grompp(tmp_path: Path) -> None:
+    """grompp accepts an NPT stage with position restraints without warnings."""
+    import subprocess
+
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    gmx = shutil.which("gmx")
+    subprocess.run(
+        [gmx, "solvate", "-cs", "spc216.gro", "-box", "2.5", "-o", str(tmp_path / "w.gro")],
+        check=True,
+        capture_output=True,
+    )
+    n_water = int((tmp_path / "w.gro").read_text().splitlines()[1]) // 3
+    (tmp_path / "w.top").write_text(
+        '#include "oplsaa.ff/forcefield.itp"\n#include "oplsaa.ff/spc.itp"\n'
+        "#ifdef POSRES_WATER\n[ position_restraints ]\n1 1 1000 1000 1000\n#endif\n"
+        f"[ system ]\nwater\n[ molecules ]\nSOL {n_water}\n"
+    )
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    data["simulation_phases"]["equilibration_stages"] = [
+        {
+            "name": "npt",
+            "ensemble": "NPT",
+            "duration": 0.001,
+            "temperature": 300.0,
+            "samples": 4,
+            "position_restraints": [{"group": "protein_backbone", "force_constant": 1000.0}],
+        }
+    ]
+    path.write_text(yaml.safe_dump(data))
+    generator = MDPGenerator(SimulationConfig.from_yaml(path), replicate=1)
+    ((_, params),) = generator.generate_equilibration_stages()
+    assert params.pcoupl != "no" and params.define
+    # The toy topology is water, whose restraints sit behind POSRES_WATER.
+    params.define = "-DPOSRES_WATER"
+    mdp = tmp_path / "npt.mdp"
+    mdp.write_text(params.to_mdp_string())
+    result = subprocess.run(
+        [gmx, "grompp", "-f", str(mdp), "-c", str(tmp_path / "w.gro")]
+        + ["-r", str(tmp_path / "w.gro"), "-p", str(tmp_path / "w.top")]
+        + ["-o", str(tmp_path / "npt.tpr"), "-po", str(tmp_path / "npt_out.mdp")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
