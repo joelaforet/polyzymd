@@ -2720,7 +2720,11 @@ def check_progress(
     """
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.engines import create_engine
-    from polyzymd.simulation.progress import save_progress
+    from polyzymd.simulation.progress import (
+        PROGRESS_FILENAME,
+        save_progress,
+        unreadable_progress_reason,
+    )
     from polyzymd.simulation.signals import EXIT_CODE_CHECK_ERROR
 
     try:
@@ -2740,8 +2744,15 @@ def check_progress(
     prod = sim_config.simulation_phases.production
     timestep_fs = prod.time_step
     try:
+        corrupt = unreadable_progress_reason(working_dir)
+        if corrupt is not None:
+            raise ValueError(f"{corrupt}; fix or remove it by hand")
+        # Only the runner creates progress.json; a scan of a run without one
+        # (a legacy or downloaded run) is never written back.
+        has_record = (working_dir / PROGRESS_FILENAME).exists()
         progress = engine_inst.load_or_scan_progress(working_dir, replicate)
-        save_progress(working_dir, progress)
+        if has_record:
+            save_progress(working_dir, progress)
     except (FileNotFoundError, ValueError, OSError) as e:
         colored_echo(f"Failed to load progress: {e}", err=True, level=logging.ERROR)
         sys.exit(EXIT_CODE_CHECK_ERROR)
@@ -2955,9 +2966,16 @@ def cancel(
 
         job_ids = (
             []
-            if stop_only
+            if stop_only and working_dir.exists()
             else check_existing_slurm_jobs(working_dir, create_job_name(sim_config, replicate))
         )
+        if not working_dir.exists() and not job_ids:
+            colored_echo(
+                f"Replicate {replicate}: {working_dir} does not exist and no job is queued "
+                f"for it — nothing to cancel",
+                phase="simulation",
+            )
+            continue
 
         if dry_run:
             queued = ", ".join(job_ids) if job_ids else "none"
@@ -3071,7 +3089,7 @@ def status(
     for a single config. The ``agent`` format is built for scripted or LLM
     consumers: it accepts many configs, makes one ``squeue`` call, and prints
     one line per replicate with a fixed verdict vocabulary (COMPLETED,
-    RUNNING, QUEUED, DEAD, NOT_STARTED, NOT_FOUND), the live SLURM job,
+    RUNNING, QUEUED, DEAD, NOT_STARTED, NOT_FOUND, CORRUPT), the live SLURM job,
     throughput in ns/day, an ETA, and for DEAD chains the last FATAL line of
     the newest SLURM log plus a ready-to-run ``polyzymd submit`` command.
 
@@ -3129,7 +3147,6 @@ def _status_report(
     )
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.engines import create_engine
-    from polyzymd.simulation.progress import save_progress
 
     warn_if_wrong_pixi_env("status", "build", accepted=KNOWN_SPLIT_PIXI_ENVS)
     logging.getLogger("polyzymd.simulation.progress").setLevel(logging.ERROR)
@@ -3162,7 +3179,6 @@ def _status_report(
                 engine_inst=engine_inst,
                 jobs=jobs,
                 now=now,
-                save_progress_fn=save_progress,
             )
         )
 
@@ -3193,7 +3209,7 @@ def _status_table(config: str) -> None:
     from polyzymd.cli.colors import render_progress_bar
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.engines import create_engine
-    from polyzymd.simulation.progress import SimulationStatus, save_progress
+    from polyzymd.simulation.progress import SimulationStatus, unreadable_progress_reason
 
     warn_if_wrong_pixi_env("status", "build", accepted=KNOWN_SPLIT_PIXI_ENVS)
 
@@ -3247,20 +3263,28 @@ def _status_table(config: str) -> None:
     need_attention = 0
     completed_count = 0
     running_count = 0
+    corrupt_count = 0
 
     for rep_num, rep_path in sorted(rep_map.items()):
         label = f"run{rep_num}"
+        corrupt = None
+        if rep_path is not None:
+            engine_dir = engine_inst.resolve_engine_working_directory(rep_path)
+            corrupt = unreadable_progress_reason(engine_dir)
 
-        if rep_path is None:
+        if corrupt is not None:
+            frac = 0.0
+            completed_ns = 0.0
+            status_str = "failed"
+            status_display = f"corrupt: {corrupt}"
+        elif rep_path is None:
             # Directory not found on disk
             frac = 0.0
             completed_ns = 0.0
             status_str = "not_found"
             status_display = "not found"
         else:
-            engine_dir = engine_inst.resolve_engine_working_directory(rep_path)
             progress = engine_inst.load_or_scan_progress(engine_dir, rep_num)
-            save_progress(engine_dir, progress)
 
             status_val = progress.status
             status_str = status_val.value
@@ -3284,7 +3308,9 @@ def _status_table(config: str) -> None:
         pct = frac * 100
 
         # Count replicates by category
-        if status_str == "completed":
+        if corrupt is not None:
+            corrupt_count += 1
+        elif status_str == "completed":
             completed_count += 1
         elif status_str == "running":
             running_count += 1
@@ -3309,9 +3335,15 @@ def _status_table(config: str) -> None:
                 f"  {need_attention}/{total_reps} need attention "
                 f"(recover with: polyzymd recover -c {config} -r <N> --submit)"
             )
+        if corrupt_count > 0:
+            click.echo(
+                f"  {corrupt_count}/{total_reps} have an unreadable progress.json: inspect it, "
+                f"then fix it or move it aside. recover refuses to run until it can read "
+                f"the file or the file is gone."
+            )
         if running_count > 0:
             click.echo(f"  {completed_count}/{total_reps} completed, {running_count} still running")
-        if need_attention == 0 and running_count == 0:
+        if need_attention == 0 and running_count == 0 and corrupt_count == 0:
             click.echo(f"  {completed_count}/{total_reps} completed")
     click.echo()
 
@@ -3511,6 +3543,17 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 # =============================================================================
 
 
+def _print_recover_dry_run(script_path: Path, slurm_config) -> None:
+    """Print what ``recover --submit`` would write and submit, writing nothing."""
+    colored_echo("\n[DRY RUN] Would write and submit:", phase="workflow")
+    colored_echo(f"  sbatch {script_path}", phase="workflow")
+    colored_echo(
+        f"  SLURM: partition {slurm_config.partition}, qos {slurm_config.qos or '(none)'}, "
+        f"time {slurm_config.time_limit}, account {slurm_config.account or '(none)'}",
+        phase="workflow",
+    )
+
+
 @cli.command()
 @click.option(
     "-c",
@@ -3598,6 +3641,7 @@ def clean_pdb(input_path: str, output_path: str | None, ph: float) -> None:
 @click.option(
     "--engine",
     default=None,
+    type=click.Choice(["gromacs", "openmm"], case_sensitive=False),
     help="Override simulation engine",
 )
 def recover(
@@ -3637,7 +3681,6 @@ def recover(
     """
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.engines import create_engine
-    from polyzymd.simulation.progress import save_progress
 
     _echo_branding()
 
@@ -3671,9 +3714,20 @@ def recover(
     prod = sim_config.simulation_phases.production
     timestep_fs = prod.time_step
 
+    from polyzymd.simulation.progress import unreadable_progress_reason
+
+    corrupt = unreadable_progress_reason(working_dir)
+    if corrupt is not None:
+        colored_echo(
+            f"{corrupt}. Fix or remove it by hand; recover does not overwrite it.",
+            err=True,
+            phase="workflow",
+            level=logging.ERROR,
+        )
+        sys.exit(1)
+
     # Load progress
     progress = engine_impl.load_or_scan_progress(working_dir, replicate)
-    save_progress(working_dir, progress)
 
     # Report status
     pct = progress.fraction_complete() * 100
@@ -3748,8 +3802,6 @@ def recover(
             sys.exit(1)
 
     if engine_name == "gromacs":
-        import shutil
-
         from polyzymd.engines import create_engine
         from polyzymd.engines.base import EngineSubmitRequest
 
@@ -3788,6 +3840,11 @@ def recover(
                     level=logging.WARNING,
                 )
 
+        recovery_path = working_dir / "recovery_scripts" / f"recover_rep{replicate}.sh"
+        if dry_run:
+            _print_recover_dry_run(recovery_path, slurm_config)
+            return
+
         config_path_abs = str(Path(config).resolve())
         request = EngineSubmitRequest(
             replicate=replicate,
@@ -3795,28 +3852,21 @@ def recover(
             working_dir=working_dir,
             slurm_config=slurm_config,
             job_name=job_name,
-            extra={"pixi_env": resolved_pixi_env},
+            extra={
+                "pixi_env": resolved_pixi_env,
+                # The live chain's daisy_chain_scripts/ script stays as submitted.
+                "script_path": recovery_path,
+            },
         )
 
         engine_impl = create_engine(sim_config, override="gromacs", defer_binary=True)
         try:
-            script_path = engine_impl.prepare_submission(request)
+            recovery_path = engine_impl.prepare_submission(request)
         except (FileNotFoundError, ValueError) as e:
             colored_echo(f"Recovery failed: {e}", err=True, level=logging.ERROR)
             sys.exit(1)
 
-        recovery_dir = working_dir / "recovery_scripts"
-        recovery_dir.mkdir(exist_ok=True)
-        recovery_path = recovery_dir / f"recover_rep{replicate}.sh"
-        shutil.copy2(script_path, recovery_path)
-        recovery_path.chmod(0o755)
-
         colored_echo(f"Script: {recovery_path}", phase="workflow")
-
-        if dry_run:
-            colored_echo("\n[DRY RUN] Would submit:", phase="workflow")
-            colored_echo(f"  sbatch {recovery_path}", phase="workflow")
-            return
 
         from polyzymd.workflow.slurm_submit import run_sbatch
 
@@ -3880,19 +3930,17 @@ def recover(
             output_file=output_file,
         )
 
-        # Write script
         script_dir = working_dir / "recovery_scripts"
-        script_dir.mkdir(exist_ok=True)
         script_path = script_dir / f"recover_rep{replicate}.sh"
+        if dry_run:
+            _print_recover_dry_run(script_path, slurm_config)
+            return
+
+        script_dir.mkdir(exist_ok=True)
         script_path.write_text(script_content)
         script_path.chmod(0o755)
 
         colored_echo(f"Script: {script_path}", phase="workflow")
-
-        if dry_run:
-            colored_echo("\n[DRY RUN] Would submit:", phase="workflow")
-            colored_echo(f"  sbatch {script_path}", phase="workflow")
-            return
 
         # Submit
         import subprocess

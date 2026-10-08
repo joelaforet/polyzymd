@@ -583,3 +583,46 @@ class TestFromConfigBinaryResolution:
         assert engine._gmx_binary == "gmx"
         assert not any("real-MPI binary" in r.message for r in caplog.records)
         mock_resolve.assert_not_called()
+
+
+class TestPrepareSubmissionScriptPath:
+    """A requested script path keeps the live chain script untouched."""
+
+    @patch("polyzymd.engines.gromacs.engine.GromacsSlurmScriptGenerator")
+    def test_script_path_is_honoured(self, mock_generator_cls, tmp_path):
+        config = _make_config()
+        config.gromacs.mdrun_flags_equilibration = None
+        config.gromacs.mdrun_flags_production = None
+        config.gromacs.command_prefix = None
+        config.gromacs.mpi_launcher_flags = ""
+        config.gromacs.env_exports = {}
+        config.gromacs.setup_commands = []
+        engine = GromacsEngine(config=config, gmx_binary="gmx")
+
+        working_dir = tmp_path / "gromacs"
+        working_dir.mkdir(parents=True)
+        for name in ("CALB_PEG.top", "CALB_PEG.gro", "em.mdp", "prod.mdp"):
+            (working_dir / name).write_text("x\n")
+        live = working_dir / "daisy_chain_scripts" / "run_rep1.sh"
+        live.parent.mkdir()
+        live.write_text("live chain\n")
+
+        mock_generator = MagicMock()
+        mock_generator.generate_job_script.return_value = "recovery\n"
+        mock_generator.save_script.side_effect = lambda text, path: (
+            path.parent.mkdir(parents=True, exist_ok=True) or path.write_text(text) or path
+        )
+        mock_generator_cls.return_value = mock_generator
+
+        target = working_dir / "recovery_scripts" / "recover_rep1.sh"
+        request = EngineSubmitRequest(
+            replicate=1,
+            config_path=tmp_path / "config.yaml",
+            working_dir=working_dir,
+            slurm_config=SlurmConfig(),
+            extra={"skip_build": True, "script_path": target},
+        )
+
+        assert engine.prepare_submission(request) == target
+        assert target.read_text() == "recovery\n"
+        assert live.read_text() == "live chain\n"

@@ -589,3 +589,25 @@ def test_query_end_states_parses_sacct():
             "556": "CANCELLED exit 0:15",
         }
     assert query_end_states([]) == {}
+
+
+def test_corrupt_row_shows_the_live_job():
+    from polyzymd.cli.status_report import ReplicateReport, render_replicate_line
+
+    rep = ReplicateReport(
+        replicate=1,
+        directory="/scratch/SYS_run1",
+        progress_status="corrupt",
+        completed_ns=0.0,
+        total_ns=100.0,
+        fraction=0.0,
+        verdict="corrupt",
+        jobs=[SlurmJob("555", "SYS_run1", "R", "2:00:00", "nodeA")],
+        last_error="progress.json is unreadable (empty)",
+    )
+
+    line = render_replicate_line(rep, 4)
+
+    assert "job 555 R 2:00:00 nodeA" in line
+    assert "no job" not in line
+    assert "last: progress.json is unreadable" in line
