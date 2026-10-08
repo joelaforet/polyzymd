@@ -720,7 +720,7 @@ output:
   # Output options
   save_checkpoint: true                  # Save restart files
   save_state_data: true                  # Save energy/temperature CSV
-  trajectory_format: "dcd"               # dcd or xtc
+  trajectory_format: "dcd"               # not read: OpenMM writes dcd, GROMACS xtc
 ```
 
 ### Naming Template Variables

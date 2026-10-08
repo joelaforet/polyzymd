@@ -116,8 +116,9 @@ The command does these steps:
 5. It compares each condition with the control by Welch's t test. It corrects
    the p values with the {term}`Benjamini-Hochberg` method.
 
-A condition without polymer can be the control. Its replicates report 0
-hydrogen bonds and stay in the statistics.
+A condition without polymer reports 0 hydrogen bonds with the polymer in each
+replicate. Its rows stay in the report, but that 0 is not a measurement, so
+every comparison with it is `not testable`, with the reason.
 
 Without `--label`, each condition takes the name of the folder that holds its
 config. For the meaning of each output line, see {doc}`analysis_agent_protocol`.
