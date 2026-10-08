@@ -810,6 +810,15 @@ class TestEngineConfig:
 class TestGromacsEngineConfigWarnings:
     """Tests for GROMACS config warning validators."""
 
+    @pytest.mark.parametrize(
+        "field", ["mdrun_flags", "mdrun_flags_equilibration", "mdrun_flags_production"]
+    )
+    def test_noconfout_is_refused(self, minimal_config_data, field):
+        """-noconfout stops mdrun writing the final checkpoint that marks a run finished."""
+        minimal_config_data["gromacs"] = {field: "-nb gpu -noconfout"}
+        with pytest.raises(ValidationError, match="-noconfout"):
+            SimulationConfig(**minimal_config_data)
+
     def test_gpu_ntmpi_warning(self, minimal_config_data, caplog):
         """gpu=True + ntmpi>1 should log a warning."""
         import logging

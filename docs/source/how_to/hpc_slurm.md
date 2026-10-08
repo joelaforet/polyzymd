@@ -348,7 +348,7 @@ The GROMACS job scripts do these steps:
 - They run minimization, the equilibration stages and production, and restart
   each from its checkpoint.
 - They pass `-maxh` to `gmx mdrun`, so GROMACS stops before the wall-time
-  limit.
+  limit, and `-cpt`, so it writes a checkpoint every `checkpoint_interval`.
 - They pass `SIGTERM` to `gmx mdrun`, which then writes a checkpoint.
 - They submit themselves again until production is complete.
 
