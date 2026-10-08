@@ -38,7 +38,7 @@ polymers: null  # No polymers in this simulation
 solvent:
   primary:
     type: "water"
-    model: "tip3p"  # Options: tip3p, spce, tip4pew, opc
+    model: "tip3p"  # The only supported water model
   
   co_solvents: []  # No co-solvents
   

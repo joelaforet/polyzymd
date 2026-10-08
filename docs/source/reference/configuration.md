@@ -289,12 +289,8 @@ solvent counts.
 
 ### Water Models
 
-| Model | Description |
-|-------|-------------|
-| `tip3p` | TIP3P (default, fast) |
-| `spce` | SPC/E |
-| `tip4pew` | TIP4P-Ew |
-| `opc` | OPC (accurate, slower) |
+`tip3p` (TIP3P) is the only water model. The force fields PolyzyMD loads carry
+the TIP3P water parameters, so `validate` refuses any other `model`.
 
 ### Box Shapes
 
@@ -580,6 +576,15 @@ restraints:
 ```
 
 See {doc}`../how_to/restraints` for detailed selection syntax.
+
+Only the OpenMM engine applies distance restraints. With `engine: gromacs`,
+`validate` refuses an enabled restraint, and `build --format gromacs`,
+`run --engine gromacs` and `submit --engine gromacs` refuse it too. Position
+restraints in equilibration stages (`position_restraints:`) work on both
+engines. On GROMACS they work for `protein_heavy`, `protein_backbone`,
+`protein_calpha`, `ligand_heavy` and `polymer_heavy`; each group must have
+the same `force_constant` in every stage, and all stages must use the same
+protein group. `validate` refuses other position restraints on GROMACS.
 
 ### Restraint Types
 

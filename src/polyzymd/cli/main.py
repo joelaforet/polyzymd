@@ -483,6 +483,8 @@ def build(
         # A config for GROMACS builds GROMACS inputs unless --format says otherwise.
         if export_format is None and sim_config.engine == "gromacs":
             export_format = "gromacs"
+        if export_format:
+            sim_config.require_engine_restraints(export_format)
 
         if dry_run:
             colored_echo("=" * 60, phase="build")
@@ -1054,6 +1056,8 @@ def run(
         sim_config = SimulationConfig.from_yaml(config)
         colored_echo(f"Running local simulation: {sim_config.name}", phase="simulation")
         colored_echo(f"Engine: {engine}", phase="simulation")
+        if engine == "gromacs":
+            sim_config.require_engine_restraints(engine)
 
         # Override directories if provided via CLI
         if scratch_dir:
@@ -1696,6 +1700,11 @@ def submit(
 
     sim_config = SimulationConfig.from_yaml(config)
     engine_name = _resolve_engine_name(sim_config, override=engine)
+    if engine_name == "gromacs":
+        try:
+            sim_config.require_engine_restraints(engine_name)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
     resolved_pixi_env = _resolve_submission_pixi_env(preset, engine_name, pixi_env)
     _warn_for_site_pixi_override(preset, engine_name, resolved_pixi_env, pixi_env)
     _warn_for_submission_pixi_env(

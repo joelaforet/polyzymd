@@ -78,13 +78,14 @@ class ChargeMethod(str, Enum):
 
 
 class WaterModel(str, Enum):
-    """Supported water models."""
+    """Supported water models.
+
+    Only TIP3P: the force fields PolyzyMD loads carry the TIP3P water
+    parameters, so another 3-site model would get TIP3P Lennard-Jones terms
+    and geometry, and 4-site models need virtual sites the build does not make.
+    """
 
     TIP3P = "tip3p"
-    SPCE = "spce"
-    TIP4P = "tip4p"
-    TIP4PEW = "tip4pew"
-    OPC = "opc"
 
 
 class BoxShape(str, Enum):
@@ -679,6 +680,17 @@ class PrimarySolventConfig(_ConfigModel):
 
     type: str = Field("water", description="Primary solvent type")
     model: WaterModel = Field(WaterModel.TIP3P, description="Water model")
+
+    @field_validator("model", mode="before")
+    @classmethod
+    def refuse_unbuilt_water_models(cls, v: Any) -> Any:
+        """Refuse water models other than TIP3P and say how to fix the config."""
+        if isinstance(v, str) and v.lower().strip() != WaterModel.TIP3P.value:
+            raise ValueError(
+                f"Water model '{v}' is not supported: PolyzyMD builds only TIP3P water, "
+                "the water model of the force fields it loads. Set solvent.primary.model: tip3p."
+            )
+        return v
 
 
 class IonConfig(_ConfigModel):
@@ -1668,6 +1680,63 @@ class SimulationConfig(_ConfigModel):
         if self.engine == "openmm":
             self.require_engine_barostats("openmm")
         return self
+
+    @model_validator(mode="after")
+    def validate_restraints_for_engine(self) -> "SimulationConfig":
+        """Refuse restraints that engine gromacs would drop."""
+        if self.engine == "gromacs":
+            self.require_engine_restraints("gromacs")
+        return self
+
+    def require_engine_restraints(self, engine: str) -> None:
+        """Raise ``ValueError`` when ``engine`` would drop a restraint this config names.
+
+        Only the OpenMM engine applies distance restraints (``restraints:``).
+        The GROMACS export writes position restraints for the protein, ligand
+        and polymer groups only. Commands that build or run GROMACS inputs call
+        this, so ``build --format gromacs`` and ``run --engine gromacs`` on an
+        OpenMM config are refused too.
+        """
+        if engine != "gromacs":
+            return
+        enabled = [r.name for r in self.restraints if r.enabled]
+        if enabled:
+            raise ValueError(
+                f"Distance restraints ({', '.join(enabled)}) are applied only by the OpenMM "
+                "engine; GROMACS runs would drop them. To keep them, set engine: openmm. "
+                "To run on GROMACS, remove them or set enabled: false. Position restraints "
+                "in equilibration stages work on both engines."
+            )
+        from polyzymd.exporters.gromacs import PositionRestraintGenerator
+
+        mapping = PositionRestraintGenerator.GROUP_MAPPING
+        force_constants: dict[str, set[float]] = {}
+        for stage in self.simulation_phases.equilibration_stages or []:
+            for posres in stage.position_restraints:
+                force_constants.setdefault(posres.group, set()).add(posres.force_constant)
+        unknown = sorted(group for group in force_constants if group not in mapping)
+        if unknown:
+            raise ValueError(
+                f"GROMACS cannot apply position restraints on {', '.join(unknown)}: it restrains "
+                f"only {', '.join(mapping)}. Remove those groups from position_restraints, "
+                "or set engine: openmm."
+            )
+        # The GROMACS export writes one restraint block per group, with one
+        # force constant, and the protein groups share the POSRES_PROTEIN define.
+        varying = sorted(group for group, values in force_constants.items() if len(values) > 1)
+        if varying:
+            raise ValueError(
+                f"On GROMACS a position restraint group has one force constant in every stage, "
+                f"but {', '.join(varying)} has several. Give it the same force_constant in "
+                "each stage, or set engine: openmm."
+            )
+        protein = sorted(group for group in force_constants if mapping[group][0] == "protein")
+        if len(protein) > 1:
+            raise ValueError(
+                f"On GROMACS the protein groups share one restraint switch, so {', '.join(protein)} "
+                "would all be on in every stage that names one of them. Use one protein group "
+                "in all stages, or set engine: openmm."
+            )
 
     def require_engine_barostats(self, engine: str) -> None:
         """Raise ``ValueError`` when ``engine`` cannot run a barostat this config names.

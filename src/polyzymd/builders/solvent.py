@@ -42,7 +42,7 @@ AVOGADRO_CONSTANT = 6.02214076e23
 ION_CHARGE_TOLERANCE = 1.0e-5
 
 # Water model type
-WaterModelType = Literal["tip3p", "spce", "tip4p", "tip4pew", "opc"]
+WaterModelType = Literal["tip3p"]
 
 # Box shape type
 BoxShapeType = Literal["cube", "rhombic_dodecahedron"]
@@ -864,8 +864,6 @@ class SolventBuilder:
         """
         from polyzymd.data.solvent_molecules import get_solvent_molecule
 
-        # Map water model name to canonical form
-        # get_solvent_molecule handles: tip3p, spce, tip4pew, opc, etc.
         return get_solvent_molecule(model)
 
     def _center_topology_in_box(self, topology: Topology, box_vecs: NDArray) -> None:
