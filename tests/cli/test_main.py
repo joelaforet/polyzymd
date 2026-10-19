@@ -2590,3 +2590,50 @@ def test_submit_does_not_check_the_inputs_of_a_build_it_does_not_make(tmp_path: 
     path.write_text(yaml.safe_dump(_minimal_cli_config_data(tmp_path / "moved.pdb")))
     result = CliRunner().invoke(cli, ["submit", "-c", str(path), "--dry-run"])
     assert "moved.pdb does not exist" not in result.output, result.output
+
+
+def _remove_thermodynamics(data: dict) -> None:
+    del data["thermodynamics"]
+
+
+@pytest.mark.parametrize("command", ["validate", "build", "run"])
+@pytest.mark.parametrize(
+    ("edit", "expected"),
+    [
+        (
+            lambda data: data.update(pdb=data["enzyme"].pop("pdb_path")),
+            ["error: pdb: unknown key; did you mean enzyme.pdb_path?"],
+        ),
+        (
+            _remove_thermodynamics,
+            [
+                "error: thermodynamics: required section missing; expected a mapping with "
+                "temperature and pressure",
+                "fix: start from the complete commented config that polyzymd study "
+                "add-condition LABEL --new writes",
+            ],
+        ),
+        (
+            lambda data: data.update(simulation_phases="10 ns production"),
+            [
+                "error: simulation_phases: expected a mapping with minimization, "
+                "equilibration_stages and production, not text"
+            ],
+        ),
+    ],
+    ids=["unknown key", "missing section", "wrong type"],
+)
+def test_config_errors_say_how_to_fix_them(tmp_path: Path, command, edit, expected) -> None:
+    """validate, build and run print the same error and fix lines for a bad config."""
+    data = _config_with_pdb(tmp_path)
+    edit(data)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(data))
+
+    result = CliRunner().invoke(cli, [command, "-c", str(config_path)])
+
+    assert result.exit_code == 1, result.output
+    for line in expected:
+        assert line in result.stderr
+    assert f"fix: correct these keys in {config_path}" in result.stderr
+    assert "Configuration error:" not in result.output
