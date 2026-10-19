@@ -153,7 +153,8 @@ class _ConfigModel(BaseModel):
 
     #: Keys a section still accepts only so the configs of existing runs load.
     #: No code reads them. Giving one prints its warning once per process, and
-    #: ``save_config`` leaves them out; the config hash still includes them.
+    #: ``save_config`` leaves out those at their default value; the config hash
+    #: still includes them, so a saved config keeps its hash.
     UNREAD_FIELDS: ClassVar[dict[str, str]] = {}
 
     @model_validator(mode="after")
@@ -1335,15 +1336,15 @@ class OutputConfig(_ConfigModel):
     UNREAD_FIELDS: ClassVar[dict[str, str]] = {
         "save_checkpoint": (
             "output.save_checkpoint is not read: both engines always write checkpoints. "
-            "Remove it from the config."
+            "Leave it out of new configs."
         ),
         "save_state_data": (
             "output.save_state_data is not read: both engines always write energies. "
-            "Remove it from the config."
+            "Leave it out of new configs."
         ),
         "trajectory_format": (
             "output.trajectory_format is not read: OpenMM writes dcd and GROMACS writes xtc. "
-            "Remove it from the config."
+            "Leave it out of new configs."
         ),
     }
 

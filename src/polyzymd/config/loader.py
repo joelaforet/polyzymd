@@ -484,9 +484,15 @@ def load_config(path: Union[str, Path]) -> SimulationConfig:
 
 
 def _without_unread_fields(model: BaseModel, data: Dict[str, Any]) -> Dict[str, Any]:
-    """Drop the keys no code reads (``UNREAD_FIELDS``) from a dumped config, at every level."""
+    """Drop the keys no code reads (``UNREAD_FIELDS``) from a dumped config, at every level.
+
+    Only keys at their default value are dropped, so the saved config loads
+    with the same values and keeps its hash.
+    """
     for name in getattr(model, "UNREAD_FIELDS", {}):
-        data.pop(name, None)
+        field = type(model).model_fields.get(name)
+        if field is not None and getattr(model, name, None) == field.get_default():
+            data.pop(name, None)
     for name in type(model).model_fields:
         value, dumped = getattr(model, name, None), data.get(name)
         if isinstance(value, BaseModel) and isinstance(dumped, dict):

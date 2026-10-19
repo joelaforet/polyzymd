@@ -963,9 +963,9 @@ class TestUnreadFields:
         warnings = [r.getMessage() for r in caplog.records if "is not read" in r.getMessage()]
         assert warnings == [
             "output.save_checkpoint is not read: both engines always write checkpoints. "
-            "Remove it from the config.",
+            "Leave it out of new configs.",
             "output.trajectory_format is not read: OpenMM writes dcd and GROMACS writes xtc. "
-            "Remove it from the config.",
+            "Leave it out of new configs.",
         ]
 
     def test_a_config_without_unread_keys_does_not_warn(
