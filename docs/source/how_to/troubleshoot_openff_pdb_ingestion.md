@@ -24,8 +24,8 @@ graph. Fix or curate the structure first.
 ## Check the structure first
 
 Use a small script or text inspection to answer these questions. Some checks are
-OpenFF chemistry checks; chain-ID checks are PolyzyMD input conventions that keep
-protein, substrate, polymer, and solvent roles unambiguous later in the build.
+OpenFF chemistry checks; chain checks keep protein, substrate, polymer, and
+solvent roles unambiguous later in the build.
 
 - Are the protein chains kept as they are? The build puts every protein
   molecule on PolyzyMD chain `A`; do not join chains into one by editing the
