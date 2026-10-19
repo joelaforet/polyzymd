@@ -549,7 +549,9 @@ class SystemBuilder:
             topology: Topology to modify.
         """
         for i, mol in enumerate(topology.molecules):
-            for atom in mol.atoms:
+            for atom_index, atom in enumerate(mol.atoms):
+                # Record the input residue, chain included, before the chain is replaced.
+                self._get_original_residue_token(atom, atom_index)
                 atom.metadata["chain_id"] = str(i + 1)
 
     def _assign_pdb_identifiers(self) -> None:
@@ -709,13 +711,15 @@ class SystemBuilder:
         if residue_token is not None:
             return str(residue_token)
 
+        chain_id = metadata.get("chain_id") or ""
         residue_number = metadata.get("residue_number")
         residue_name = metadata.get("residue_name") or metadata.get("residue_name_3") or ""
         insertion_code = metadata.get("insertion_code") or ""
         if residue_number is None:
             residue_token = f"missing-residue-metadata:{atom_index}"
         else:
-            residue_token = f"{residue_number!s}|{residue_name!s}|{insertion_code!s}"
+            # Chains joined by a disulfide are one molecule; A7 and B7 are two residues.
+            residue_token = f"{chain_id!s}|{residue_number!s}|{residue_name!s}|{insertion_code!s}"
 
         metadata[_ORIGINAL_RESIDUE_TOKEN_KEY] = residue_token
         return residue_token
