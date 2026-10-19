@@ -24,7 +24,11 @@ import yaml
 from pydantic import ValidationError
 
 from polyzymd.cli.colors import colored_echo, echo_logo, setup_colored_logging
-from polyzymd.cli.env_warnings import warn_if_wrong_pixi_env
+from polyzymd.cli.env_warnings import (
+    polyzymd_import_path,
+    warn_if_user_site_install,
+    warn_if_wrong_pixi_env,
+)
 
 # Bootstrap a minimal root handler so suppress_openff_logs() works at import
 # time.  setup_colored_logging() replaces this handler when the CLI runs.
@@ -372,6 +376,7 @@ def cli(verbose: bool, openff_logs: bool, no_color: bool) -> None:
     """
     # Replace the bootstrap handler with the colored formatter
     setup_colored_logging(verbose=verbose, no_color=no_color)
+    warn_if_user_site_install()
 
     if openff_logs:
         enable_openff_logs()
@@ -4050,6 +4055,7 @@ def info() -> None:
         phase="cli",
     )
     colored_echo(f"Version: {__version__}", phase="cli")
+    colored_echo(f"Imported from: {polyzymd_import_path()}", phase="cli")
     colored_echo("", phase="cli")
 
     # Check dependencies

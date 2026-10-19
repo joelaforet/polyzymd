@@ -141,6 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A user install of PolyzyMD shadowing the environment's.**  `polyzymd info` prints the folder `polyzymd` was imported from. Every command warns when that folder is a `pip install --user` copy (in `site.getusersitepackages()`, or put on `sys.path` by a `.pth` file there, as an editable user install does), which Python loads ahead of the pixi environment's own, and gives the fix: run with `PYTHONNOUSERSITE=1`, or `pip uninstall --user polyzymd`.
+
 - **Stray files in study and project folders.** PolyzyMD reads, hashes and deposits only files whose names it chooses in advance:
   - A function's stored results depend on the Python files of its folder and the files of `data/` beside it. Notes, figures or a copied trajectory in `analyses/` recompute nothing; the analysis log names the files it leaves out.
   - `freeze` deposits only `study.yaml`, `project.yaml`, `README*`, `LICENSE*`, the files it writes, and the folders `study init` and `project init` make (`conditions/`, `structures/`, `analyses/`, `stats/`, `figures/`, `results/`, `environment/`), with or without git, and prints one `not deposited:` warning for the rest.

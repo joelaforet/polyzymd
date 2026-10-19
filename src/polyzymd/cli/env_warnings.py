@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import site
 from collections.abc import Iterable
+from pathlib import Path
 
 import click
 
@@ -83,6 +85,69 @@ def warn_if_wrong_pixi_env(
         suggestion = f"Use 'pixi run -e {first_env} polyzymd {command} ...' or switch shells."
     message = f"{message}\n{suggestion}\nSet POLYZYMD_DISABLE_ENV_WARNINGS=1 to hide this advisory warning."
     click.secho(message, fg="yellow", err=True)
+
+
+def polyzymd_import_path() -> Path:
+    """Return the folder the running ``polyzymd`` package was imported from."""
+    import polyzymd
+
+    return Path(polyzymd.__file__).resolve().parent
+
+
+def is_user_site_install(package_dir: Path) -> bool:
+    """Return whether ``package_dir`` comes from the user site-packages.
+
+    Python puts the user site-packages (``pip install --user``) ahead of the
+    environment's own, so a copy there shadows the one in the active pixi
+    environment. The package is a user install when its folder is inside
+    ``site.getusersitepackages()``, or when a ``.pth`` file there puts the
+    folder holding it on ``sys.path`` (an editable ``pip install --user -e``).
+
+    Parameters
+    ----------
+    package_dir : Path
+        Folder of the imported ``polyzymd`` package.
+
+    Returns
+    -------
+    bool
+        ``False`` for a normal or editable install in the active environment,
+        and whenever the user site-packages is disabled (``PYTHONNOUSERSITE``).
+    """
+    if not site.ENABLE_USER_SITE:
+        return False
+    try:
+        user_site = Path(site.getusersitepackages()).resolve()
+        if package_dir.is_relative_to(user_site):
+            return True
+        for pth in user_site.glob("*.pth"):
+            for line in pth.read_text(errors="replace").splitlines():
+                line = line.strip()
+                if not line or line.startswith(("#", "import ", "import\t")):
+                    continue
+                if Path(line).resolve() == package_dir.parent:
+                    return True
+    except (OSError, ValueError):
+        return False
+    return False
+
+
+def warn_if_user_site_install() -> None:
+    """Warn when ``polyzymd`` is imported from the user site-packages.
+
+    The warning never raises or changes the exit code.
+    """
+    package_dir = polyzymd_import_path()
+    if not is_user_site_install(package_dir):
+        return
+    click.secho(
+        f"warning: polyzymd is imported from {package_dir}, a user install "
+        f"({site.getusersitepackages()}) that shadows the copy in this environment.\n"
+        "fix: run with PYTHONNOUSERSITE=1, or remove the user install: "
+        "pip uninstall --user polyzymd",
+        fg="yellow",
+        err=True,
+    )
 
 
 def _as_tuple(values: str | Iterable[str]) -> tuple[str, ...]:
