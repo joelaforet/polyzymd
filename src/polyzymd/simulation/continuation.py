@@ -606,6 +606,21 @@ class ContinuationManager:
             )
         return integrator
 
+    def saved_dynamics(self) -> Dict[str, Any]:
+        """Return the ensemble, thermostat and friction (1/ps) that segment 0 ran with.
+
+        A chain continues with these, whatever the config says now.
+        """
+        if self._param_dict is None:
+            raise RuntimeError("Parameters not loaded. Call load_previous_state first.")
+        thermo = self._param_dict["__values__"]["thermo_params"]["__values__"]
+        thermostat = thermo["thermostat_params"]["__values__"]
+        return {
+            "ensemble": "NPT" if "barostat_params" in thermo else "NVT",
+            "thermostat": thermostat.get("thermostat", "LangevinMiddle"),
+            "friction": float(thermostat["timescale"]["__values__"]["value"]),
+        }
+
     def _add_barostat_if_needed(self) -> None:
         """Add barostat to the system if parameters specify NPT, and seed it from the replicate."""
         if self._system is None or self._param_dict is None:

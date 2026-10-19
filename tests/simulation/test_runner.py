@@ -1267,3 +1267,19 @@ def test_an_equilibration_stage_runs_its_thermostat(tmp_path):
         stage_index=0,
     )
     assert type(runner.simulation.integrator) is openmm.LangevinIntegrator
+
+
+def test_production_refuses_a_thermostat_openmm_does_not_run(tmp_path):
+    """The parameters record the thermostat, so production must not run another one."""
+    pytest.importorskip("openmm")
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    with pytest.raises(ValueError, match="not 'NoseHoover'"):
+        runner.run_production(
+            temperature=300.0,
+            duration_ns=1e-5,
+            num_samples=2,
+            timestep_fs=1.0,
+            report_interval=5,
+            checkpoint_interval_s=3600.0,
+            thermostat="NoseHoover",
+        )

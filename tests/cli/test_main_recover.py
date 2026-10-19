@@ -632,6 +632,15 @@ class TestRunInitialSegmentEquilibrationSkip:
             s.name = name
             stages.append(s)
         sim_config.simulation_phases.equilibration_stages = stages
+        from polyzymd.config.schema import SimulationPhaseConfig
+
+        sim_config.simulation_phases.production = SimulationPhaseConfig(
+            ensemble="NVT",
+            duration=20.0,
+            samples=10,
+            thermostat="Langevin",
+            thermostat_timescale=2.0,
+        )
         return sim_config
 
     @patch("polyzymd.simulation.artifact_integrity.validate_build_bundle")
@@ -694,6 +703,8 @@ class TestRunInitialSegmentEquilibrationSkip:
         mock_runner.run_production.assert_called_once()
         call_kwargs = mock_runner.run_production.call_args[1]
         assert call_kwargs["segment_index"] == 0
+        assert (call_kwargs["ensemble"], call_kwargs["thermostat"]) == ("NVT", "Langevin")
+        assert call_kwargs["friction"] == pytest.approx(0.5)
         assert call_kwargs["temperature"] == 310.0
         assert call_kwargs["duration_ns"] == 20.0
 
@@ -761,6 +772,9 @@ class TestRunInitialSegmentEquilibrationSkip:
         mock_runner.minimize.assert_called_once()
         mock_runner.run_equilibration.assert_called_once()
         mock_runner.run_production.assert_called_once()
+        call_kwargs = mock_runner.run_production.call_args[1]
+        assert (call_kwargs["ensemble"], call_kwargs["thermostat"]) == ("NVT", "Langevin")
+        assert call_kwargs["friction"] == pytest.approx(0.5)
 
         # Should NOT have used the fast path
         mock_runner._load_eq_stage_state.assert_not_called()
@@ -2086,3 +2100,43 @@ def test_recover_rejects_an_unknown_engine(tmp_path):
     assert result.exit_code == 2
     assert "gromax" in result.output
     assert not isinstance(result.exception, ValueError)
+
+
+def test_a_continuation_with_other_dynamics_than_the_config_warns(tmp_path, monkeypatch, capsys):
+    """A chain keeps the dynamics it started with; a segment says so when the config differs."""
+    from polyzymd.cli.main import _run_continuation_segment
+    from polyzymd.config.schema import SimulationPhaseConfig
+    from polyzymd.simulation import continuation
+
+    class FakeManager:
+        def __init__(self, **kwargs):
+            pass
+
+        def load_previous_state(self):
+            pass
+
+        def saved_dynamics(self):
+            return {"ensemble": "NPT", "thermostat": "LangevinMiddle", "friction": 1.0}
+
+        def run_segment(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(continuation, "ContinuationManager", FakeManager)
+    sim_config = MagicMock()
+    sim_config.simulation_phases.production = SimulationPhaseConfig(
+        ensemble="NVT", duration=1.0, samples=2, thermostat="Langevin", thermostat_timescale=2.0
+    )
+    _run_continuation_segment(
+        sim_config=sim_config,
+        working_dir=tmp_path,
+        segment_index=1,
+        duration_ns=1.0,
+        num_samples=2,
+        timestep_fs=2.0,
+        replicate=1,
+        report_interval=10,
+        checkpoint_interval_s=60.0,
+    )
+    err = capsys.readouterr().err
+    assert "segment 1 continues the dynamics the chain started with (NPT, LangevinMiddle" in err
+    assert "not the config's production (NVT, Langevin, friction 0.5/ps)" in err

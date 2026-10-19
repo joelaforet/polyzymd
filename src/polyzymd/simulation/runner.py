@@ -1516,6 +1516,11 @@ class SimulationRunner:
         """
         if ensemble not in ("NPT", "NVT"):
             raise ValueError(f"production ensemble must be NPT or NVT, got {ensemble!r}")
+        if thermostat not in ("LangevinMiddle", "Langevin"):
+            # The parameters record the thermostat, so it must be the one that runs.
+            raise ValueError(
+                f"OpenMM production runs LangevinMiddle or Langevin, not {thermostat!r}"
+            )
         npt = ensemble == "NPT"
         LOGGER.info(
             f"Starting production: {duration_ns} ns at {temperature} K"
@@ -1904,7 +1909,7 @@ class SimulationRunner:
             "segment": segment_index,
             "ensemble": ensemble,
             "temperature_K": temperature,
-            "pressure_atm": pressure,
+            "pressure_atm": pressure if npt else None,
             "duration_ns": duration_ns,
             "total_steps": total_steps,
             "final_energy_kJ_mol": state.getPotentialEnergy().value_in_unit(
