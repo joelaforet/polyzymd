@@ -1506,3 +1506,68 @@ def test_gromacs_export_refuses_distance_restraints_it_would_drop(tmp_path):
     with pytest.raises(ValueError, match="set engine: openmm"):
         GromacsExporter(interchange=None, config=config).export(tmp_path)
     assert not any(tmp_path.iterdir())
+
+
+def _phase_generator(tmp_path: Path, production: dict, stages: list | None = None):
+    """Return an MDPGenerator of the test config with the given production and stages."""
+    import yaml
+
+    from polyzymd.config.schema import SimulationConfig
+    from polyzymd.exporters.gromacs import MDPGenerator
+    from tests._support.analysis_testkit import write_simulation_config
+
+    path = write_simulation_config(tmp_path / "c", scratch=tmp_path / "s")
+    (tmp_path / "c" / "test.pdb").write_text("END\n")
+    data = yaml.safe_load(path.read_text())
+    data["simulation_phases"]["production"].update(production)
+    if stages is not None:
+        data["simulation_phases"]["equilibration_stages"] = stages
+    path.write_text(yaml.safe_dump(data))
+    config = SimulationConfig.from_yaml(path)
+    return config, MDPGenerator(config)
+
+
+def test_an_npt_phase_without_a_barostat_couples_pressure(tmp_path: Path) -> None:
+    """NPT without a barostat key means MC (the schema fills it in), so GROMACS couples pressure."""
+    stage = {
+        "name": "npt",
+        "ensemble": "NPT",
+        "temperature": 300.0,
+        "duration": 0.001,
+        "samples": 2,
+    }
+    _, generator = _phase_generator(tmp_path, {"ensemble": "NPT", "barostat": None}, stages=[stage])
+    ((_, stage_params),) = generator.generate_equilibration_stages()
+    assert stage_params.pcoupl == "c-rescale"
+    assert generator.generate_production().pcoupl == "c-rescale"
+
+
+def test_both_engines_run_the_production_dynamics_of_the_config(tmp_path: Path) -> None:
+    """One config gives the same ensemble and thermostat coupling on OpenMM and GROMACS."""
+    from polyzymd.simulation.runner import production_dynamics
+
+    for settings, npt in [
+        ({"ensemble": "NVT", "thermostat": "Langevin", "thermostat_timescale": 2.0}, False),
+        ({"ensemble": "NPT", "barostat": "MC", "thermostat_timescale": 0.5}, True),
+    ]:
+        config, generator = _phase_generator(tmp_path / str(npt), settings)
+        openmm = production_dynamics(config.simulation_phases.production)
+        gromacs = generator.generate_production()
+        assert openmm["ensemble"] == settings["ensemble"]
+        assert gromacs.tau_t == pytest.approx(1.0 / openmm["friction"])
+        assert (gromacs.pcoupl != "no") is npt
+        assert gromacs.integrator == "sd"
+
+
+def test_a_barostat_frequency_gromacs_does_not_use_is_named_once(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """GROMACS's c-rescale keeps its own coupling interval, so a set frequency gives a warning."""
+    from polyzymd.exporters import gromacs
+
+    messages = []
+    monkeypatch.setattr(gromacs.logger, "warning", lambda text, *a: messages.append(text % a))
+    _, generator = _phase_generator(tmp_path, {"barostat": "MC", "barostat_frequency": 50})
+    generator.generate_production()
+    generator.generate_production()
+    assert sum("barostat_frequency 50" in text for text in messages) == 1

@@ -489,8 +489,20 @@ class MDPGenerator:
             )
         return THERMOSTAT_MAP.get(thermostat, THERMOSTAT_MAP["LangevinMiddle"])
 
-    def _barostat(self, barostat: str) -> tuple[str, str]:
-        """Return GROMACS's pcoupl and pcoupltype for a PolyzyMD barostat, warning once that it is approximate."""
+    def _barostat(self, barostat: str, frequency: int | None = None) -> tuple[str, str]:
+        """Return GROMACS's pcoupl and pcoupltype for a PolyzyMD barostat, warning once that it is approximate.
+
+        ``barostat_frequency`` sets how often OpenMM's MC barostat tries a volume
+        move; c-rescale keeps GROMACS's own coupling interval, so a value other
+        than the default 25 gives a warning once.
+        """
+        if frequency not in (None, 25) and "barostat_frequency" not in self._warned:
+            self._warned.add("barostat_frequency")
+            logger.warning(
+                "barostat_frequency %d sets how often OpenMM's MC barostat moves the volume; "
+                "GROMACS's c-rescale barostat keeps its own coupling interval (nstpcouple).",
+                frequency,
+            )
         if "barostat" not in self._warned:
             self._warned.add("barostat")
             logger.warning(
@@ -587,6 +599,7 @@ class MDPGenerator:
                     thermostat=(stage.thermostat.value if stage.thermostat else "LangevinMiddle"),
                     thermostat_timescale=stage.thermostat_timescale or 1.0,
                     barostat=stage.barostat.value if stage.barostat else None,
+                    barostat_frequency=stage.barostat_frequency,
                     is_first_stage=is_first,
                     continuation=not is_first,
                     posres_defines=posres_defines,
@@ -612,6 +625,7 @@ class MDPGenerator:
         is_first_stage: bool,
         continuation: bool,
         posres_defines: str = "",
+        barostat_frequency: int | None = None,
     ) -> MDPParameters:
         """Create MDPParameters for an equilibration stage.
 
@@ -628,6 +642,8 @@ class MDPGenerator:
             is_first_stage: Whether this is the first equilibration stage.
             continuation: Whether continuing from previous simulation.
             posres_defines: Position restraint defines string.
+            barostat_frequency: The stage's barostat_frequency, for the warning
+                that GROMACS keeps its own coupling interval.
 
         Returns:
             Configured MDPParameters object.
@@ -642,7 +658,7 @@ class MDPGenerator:
         # Map barostat
         is_npt = ensemble == "NPT"
         if is_npt and barostat:
-            pcoupl, pcoupltype = self._barostat(barostat)
+            pcoupl, pcoupltype = self._barostat(barostat, barostat_frequency)
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 
@@ -718,7 +734,7 @@ class MDPGenerator:
         is_npt = stage.ensemble.value == "NPT"
         barostat = stage.barostat.value if stage.barostat else None
         if is_npt and barostat:
-            pcoupl, pcoupltype = self._barostat(barostat)
+            pcoupl, pcoupltype = self._barostat(barostat, stage.barostat_frequency)
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 
@@ -834,7 +850,7 @@ class MDPGenerator:
         is_npt = prod.ensemble.value == "NPT"
         barostat = prod.barostat.value if prod.barostat else None
         if is_npt and barostat:
-            pcoupl, pcoupltype = self._barostat(barostat)
+            pcoupl, pcoupltype = self._barostat(barostat, prod.barostat_frequency)
         else:
             pcoupl, pcoupltype = "no", "isotropic"
 

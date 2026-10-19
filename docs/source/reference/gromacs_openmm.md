@@ -9,16 +9,22 @@ the same way on both engines, and PolyzyMD writes a warning.
 
 ## Dynamics
 
+The rows hold for every equilibration stage and for production, including
+the later production segments of a chain, which continue with the
+thermostat, friction and barostat of the first segment.
+
 | Setting | OpenMM | GROMACS (`.mdp`) | Match |
 |---|---|---|---|
 | `thermostat: LangevinMiddle` | `LangevinMiddleIntegrator(T, 1/τ, dt)` | `integrator = sd`, `tau-t = τ`, `ref-t = T`, `tcoupl = no` | 1:1. Both integrate the Langevin equation with friction 1/τ. The splitting schemes differ (BAOAB in OpenMM, leap-frog in GROMACS), at order dt². |
 | `thermostat: Langevin` | `LangevinIntegrator(T, 1/τ, dt)` | as above | 1:1, as above |
-| `thermostat: NoseHoover` | not supported: runs `LangevinMiddle`, with a warning | `integrator = md`, `tcoupl = nose-hoover` | differs |
-| `thermostat: Andersen` | not supported: runs `LangevinMiddle`, with a warning | `integrator = md-vv`, `tcoupl = andersen` | differs |
+| `thermostat: NoseHoover` | not supported: `validate` refuses it | `integrator = md`, `tcoupl = nose-hoover` | differs: runs only on GROMACS |
+| `thermostat: Andersen` | not supported: `validate` refuses it | `integrator = md-vv`, `tcoupl = andersen` | differs: runs only on GROMACS |
 | `thermostat_timescale` τ (ps) | friction = 1/τ | `tau-t` = τ | 1:1 |
 | `time_step` (fs) | integrator step | `dt` (ps) | 1:1 |
 | `barostat: MC` | `MonteCarloBarostat(P, T, barostat_frequency)` | `pcoupl = c-rescale`, `pcoupltype = isotropic`, `tau-p = 5 ps`, compressibility 4.5e-5 bar⁻¹ | approximate. GROMACS has no Monte Carlo barostat. Stochastic cell rescaling samples the same NPT ensemble. |
 | `barostat: MCA` | not supported: `validate` refuses it | `pcoupl = c-rescale`, `pcoupltype = anisotropic` | differs: runs only on GROMACS |
+| `ensemble: NPT` / `NVT` | a barostat in NPT, none in NVT | `pcoupl` as above in NPT, `pcoupl = no` in NVT | 1:1. An NPT phase without `barostat:` runs `MC`. |
+| `barostat_frequency` (steps) | steps between Monte Carlo volume moves | not used: c-rescale keeps GROMACS's coupling interval (`nstpcouple`), with a warning when the value is not 25 | differs |
 | `pressure` (atm) | atm | `ref-p` in bar (× 1.01325) | 1:1 |
 
 ## Seeds

@@ -2453,7 +2453,7 @@ def _run_initial_segment(
     checkpoint_interval_s : float
         Wall-time interval in seconds between restart checkpoints.
     """
-    from polyzymd.simulation.runner import SimulationRunner
+    from polyzymd.simulation.runner import SimulationRunner, production_dynamics
 
     if report_interval <= 0:
         raise ValueError("report_interval must be a positive integer")
@@ -2582,6 +2582,7 @@ def _run_initial_segment(
                 segment_index=0,
                 report_interval=report_interval,
                 checkpoint_interval_s=checkpoint_interval_s,
+                **production_dynamics(sim_config.simulation_phases.production),
             )
             return
 
@@ -2626,6 +2627,7 @@ def _run_initial_segment(
         segment_index=0,
         report_interval=report_interval,
         checkpoint_interval_s=checkpoint_interval_s,
+        **production_dynamics(sim_config.simulation_phases.production),
     )
 
 

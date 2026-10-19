@@ -573,8 +573,10 @@ class ContinuationManager:
         Returns
         -------
         openmm.Integrator
-            OpenMM LangevinMiddleIntegrator.
+            The production thermostat: OpenMM LangevinMiddleIntegrator or
+            LangevinIntegrator.
         """
+
         if self._param_dict is None:
             raise RuntimeError("Parameters not loaded. Call load_previous_state first.")
 
@@ -588,8 +590,14 @@ class ContinuationManager:
 
         temperature = quantity_from_dict(thermostat_raw["temperature"])
         friction_coeff = quantity_from_dict(thermostat_raw["timescale"])
-
-        integrator = openmm.LangevinMiddleIntegrator(temperature, friction_coeff, time_step)
+        # Parameters written before the thermostat was recorded ran LangevinMiddle.
+        thermostat = thermostat_raw.get("thermostat", "LangevinMiddle")
+        if thermostat == "Langevin":
+            integrator = openmm.LangevinIntegrator(temperature, friction_coeff, time_step)
+        elif thermostat == "LangevinMiddle":
+            integrator = openmm.LangevinMiddleIntegrator(temperature, friction_coeff, time_step)
+        else:
+            raise ValueError(f"OpenMM production cannot continue with thermostat {thermostat!r}")
         if self._replicate is not None:
             from polyzymd.simulation.seeds import dynamics_seed
 
@@ -622,7 +630,8 @@ class ContinuationManager:
             barostat_raw = thermo_raw["barostat_params"]["__values__"]
             temperature = quantity_from_dict(barostat_raw["temperature"])
             pressure = quantity_from_dict(barostat_raw["pressure"])
-            frequency = barostat_raw.get("update_frequency", 25)
+            # The runner writes "frequency"; parameters written before that read as 25.
+            frequency = barostat_raw.get("frequency", barostat_raw.get("update_frequency", 25))
 
             barostat = openmm.MonteCarloBarostat(pressure, temperature, frequency)
             self._system.addForce(barostat)
