@@ -549,7 +549,9 @@ class SystemBuilder:
             topology: Topology to modify.
         """
         for i, mol in enumerate(topology.molecules):
-            for atom in mol.atoms:
+            for atom_index, atom in enumerate(mol.atoms):
+                # Record the input residue, chain included, before the chain is replaced.
+                self._get_original_residue_token(atom, atom_index)
                 atom.metadata["chain_id"] = str(i + 1)
 
     def _assign_pdb_identifiers(self) -> None:
@@ -602,22 +604,18 @@ class SystemBuilder:
 
             protein_residue_num = 1
 
-            # Sometimes, we have more than one unique protein molecule in the loaded pdb file
-            # such as in loading a homodimer enzyme, as in https://www.rcsb.org/structure/1HXW
-            # We must ensure all of the protein loads into polyzymd.
-            # Here, we enforce that unique protein chains
-            # monomer 1 == Chain A, monomer 2 == Chain B
-            # have unique residue labels.
-            # So if the chains are 100 AA long, monomer 1 will be
-            # residues 1-101, and then monomer 2 will be RENUMBERED
-            # to residues 102-202. Adjust your downstream analysis accordingly!!!
+            # A PDB can hold several protein molecules (a homodimer such as
+            # https://www.rcsb.org/structure/1HXW), or several chains joined into one
+            # molecule by disulfides (insulin). All of them go on chain A, numbered one
+            # after the other: two 100-residue chains become residues 1-100 and
+            # 101-200. Adjust your downstream analysis accordingly!!!
 
             for _ in range(self._n_enzyme_molecules):
                 mol = self._solvated_topology.molecule(mol_idx)
                 residue_map: dict[str, int] = {}
                 for atom_index, atom in enumerate(mol.atoms):
-                    atom.metadata["chain_id"] = PROTEIN_CHAIN
                     residue_token = self._get_original_residue_token(atom, atom_index)
+                    atom.metadata["chain_id"] = PROTEIN_CHAIN
                     if residue_token not in residue_map:
                         residue_map[residue_token] = protein_residue_num
                         protein_residue_num += 1
@@ -709,13 +707,15 @@ class SystemBuilder:
         if residue_token is not None:
             return str(residue_token)
 
+        chain_id = metadata.get("chain_id") or ""
         residue_number = metadata.get("residue_number")
         residue_name = metadata.get("residue_name") or metadata.get("residue_name_3") or ""
         insertion_code = metadata.get("insertion_code") or ""
         if residue_number is None:
             residue_token = f"missing-residue-metadata:{atom_index}"
         else:
-            residue_token = f"{residue_number!s}|{residue_name!s}|{insertion_code!s}"
+            # Chains joined by a disulfide are one molecule; A7 and B7 are two residues.
+            residue_token = f"{chain_id!s}|{residue_number!s}|{residue_name!s}|{insertion_code!s}"
 
         metadata[_ORIGINAL_RESIDUE_TOKEN_KEY] = residue_token
         return residue_token

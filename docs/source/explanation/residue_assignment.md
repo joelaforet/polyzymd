@@ -53,6 +53,14 @@ numbering continues from one molecule to the next. If each monomer has 100
 residues, the first monomer has residues 1 to 100 and the second has 101 to
 200.
 
+Chains joined into one molecule by disulfide bonds are numbered the same way,
+one chain after the other. Insulin's chain A has residues 1 to 21 and its
+chain B 1 to 30; in the built system they are chain A residues 1 to 21 and 22
+to 51.
+The build tells such chains apart by their input chain IDs, so keep them. If
+the input already puts both chains on one chain ID and their residue numbers
+overlap, residues of equal number and name merge into one.
+
 Use the built numbers in restraints, `core:` and `regions:` selections and
 residue lists. To compare with the input numbering, add the offset back. See
 {doc}`../how_to/restraints`.

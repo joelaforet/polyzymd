@@ -236,6 +236,28 @@ class TestSystemBuilderHomodimerRetention:
         assert {atom.metadata["chain_id"] for atom in enzyme_1.atoms + enzyme_2.atoms} == {"A"}
         assert {atom.metadata["residue_number"] for atom in substrate.atoms} == {"1"}
 
+    def test_chains_joined_in_one_molecule_are_numbered_one_after_the_other(
+        self,
+        fake_openff_topology: type[FakeTopology],
+    ) -> None:
+        """Insulin A and B chains, joined by disulfides, keep apart residues of equal number."""
+        del fake_openff_topology
+        builder = SystemBuilder()
+        insulin = FakeMolecule("insulin", residue_numbers=["6", "7", "7", "6", "7", "7"])
+        for atom, chain in zip(insulin.atoms, ["A", "A", "A", "B", "B", "B"], strict=True):
+            atom.metadata["chain_id"] = chain
+            atom.metadata["residue_name"] = "CYS"
+        builder._enzyme_topology = FakeTopology([insulin])
+        builder._n_enzyme_molecules = 1
+        builder._solvated_topology = builder.combine_solutes()
+
+        builder._assign_pdb_identifiers()
+        builder._assign_pdb_identifiers()
+
+        resids = [atom.metadata["residue_number"] for atom in insulin.atoms]
+        assert resids == ["1", "2", "2", "3", "4", "4"]
+        assert {atom.metadata["chain_id"] for atom in insulin.atoms} == {"A"}
+
     def test_protein_residue_numbering_is_idempotent(
         self,
         fake_openff_topology: type[FakeTopology],
