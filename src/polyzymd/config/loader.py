@@ -251,20 +251,34 @@ def _models_in(annotation: Any) -> list[type[BaseModel]]:
     return [model for arg in get_args(annotation) for model in _models_in(arg)]
 
 
-@lru_cache(maxsize=1)
-def _schema_paths() -> tuple[tuple[str, ...], ...]:
-    """Return the path of every field of :class:`SimulationConfig`, nested ones included."""
-    paths: list[tuple[str, ...]] = []
+def _is_list(annotation: Any) -> bool:
+    """Return whether an annotation is a list, optional or not (``list[X] | None``)."""
+    if getattr(annotation, "__origin__", None) is list:
+        return True
+    return any(getattr(arg, "__origin__", None) is list for arg in get_args(annotation))
 
-    def walk(model: type[BaseModel], prefix: tuple[str, ...], seen: tuple[type, ...]) -> None:
+
+@lru_cache(maxsize=1)
+def _schema_fields() -> dict[tuple[str, ...], bool]:
+    """Map the path of every field of :class:`SimulationConfig` to whether it is in a list."""
+    fields: dict[tuple[str, ...], bool] = {}
+
+    def walk(
+        model: type[BaseModel], prefix: tuple[str, ...], seen: tuple[type, ...], in_list: bool
+    ) -> None:
         for name, field in model.model_fields.items():
-            paths.append((*prefix, name))
+            fields[(*prefix, name)] = in_list
             for sub in _models_in(field.annotation):
                 if sub not in seen:
-                    walk(sub, (*prefix, name), (*seen, sub))
+                    walk(sub, (*prefix, name), (*seen, sub), in_list or _is_list(field.annotation))
 
-    walk(SimulationConfig, (), (SimulationConfig,))
-    return tuple(paths)
+    walk(SimulationConfig, (), (SimulationConfig,), False)
+    return fields
+
+
+def _schema_paths() -> tuple[tuple[str, ...], ...]:
+    """Return the path of every field of :class:`SimulationConfig`, nested ones included."""
+    return tuple(_schema_fields())
 
 
 def _annotation_at(keys: tuple[str, ...]) -> Any:
@@ -287,7 +301,7 @@ def _shape(annotation: Any) -> str | None:
         return None
     names = list(models[0].model_fields)
     keys = " and ".join([", ".join(names[:-1]), names[-1]]) if len(names) > 1 else names[0]
-    many = getattr(annotation, "__origin__", None) is list
+    many = _is_list(annotation)
     return f"a list of mappings with {keys}" if many else f"a mapping with {keys}"
 
 
@@ -302,14 +316,28 @@ def _key_score(key: str, name: str) -> float:
     return score
 
 
-def _closest_path(parent: tuple[str, ...], key: str) -> tuple[str, ...] | None:
-    """Return the field path closest to the unknown ``key`` under ``parent``, or None."""
+def _closest_path(
+    parent: tuple[str, ...] | None, key: str, sections: bool = False
+) -> tuple[str, ...] | None:
+    """Return the field path closest to the unknown ``key`` under ``parent``, or None.
+
+    A field of the same section, then of a nearby one, wins over an equally
+    close name elsewhere, and a field outside any list wins a tie. ``parent``
+    None ranks every section alike; ``sections`` keeps only fields that hold
+    a mapping.
+    """
     best, best_rank = None, None
-    for path in _schema_paths():
+    for path, in_list in _schema_fields().items():
         score = _key_score(key, path[-1])
-        if score < 0.75:
+        if score < 0.75 or (sections and not _models_in(_annotation_at(path))):
             continue
-        rank = (score + (0.05 if path[:-1] == parent else 0.0), -len(path))
+        shared = 0
+        for mine, theirs in zip(parent or (), path[:-1]):
+            if mine != theirs:
+                break
+            shared += 1
+        same = parent is not None and path[:-1] == parent
+        rank = (score + 0.25 * same + 0.05 * shared, not in_list, -len(path))
         if best_rank is None or rank > best_rank:
             best, best_rank = path, rank
     return best
@@ -331,7 +359,14 @@ def _unknown_key_messages(loc: tuple[Any, ...], value: Any) -> list[str]:
         return ".".join(path)
 
     if isinstance(value, dict) and value:
-        inner = {str(k): _closest_path((), str(k)) for k in value}
+        # A misspelled section (enzym:) whose keys belong to the section it names.
+        section = _closest_path(parent, str(loc[-1]), sections=True)
+        if section is not None:
+            fields = [p[-1] for p in _schema_paths() if p[:-1] == section]
+            known = [k for k in value if any(_key_score(str(k), f) >= 0.75 for f in fields)]
+            if 2 * len(known) >= len(value):
+                return [f"{where}: unknown key; did you mean {mean(section)}?"]
+        inner = {str(k): _closest_path(None, str(k)) for k in value}
         if any(inner.values()):
             return [
                 f"{where}.{k}: unknown key" + (f"; did you mean {mean(p)}?" if p else "")
@@ -348,6 +383,11 @@ def _unknown_key_messages(loc: tuple[Any, ...], value: Any) -> list[str]:
             else f"{where}: unknown key"
         )
     ]
+
+
+def _is_suggested(section: str, lines: list[tuple[str, str]]) -> bool:
+    """Return whether an unknown-key line already points to the top-level ``section``."""
+    return any(text.endswith(f"; did you mean {section}?") for _, text in lines)
 
 
 def config_error_lines(error: ValidationError, path: Union[str, Path]) -> list[tuple[str, str]]:
@@ -372,6 +412,7 @@ def config_error_lines(error: ValidationError, path: Union[str, Path]) -> list[t
     """
     lines: list[tuple[str, str]] = []
     fixes: list[str] = []
+    missing_sections: set[str] = set()
     ours = error.title == SimulationConfig.__name__
     for item in error.errors():
         loc = tuple(item["loc"])
@@ -385,8 +426,8 @@ def config_error_lines(error: ValidationError, path: Union[str, Path]) -> list[t
         elif ours and kind == "missing":
             what = "required section missing" if shape else "required key missing"
             lines.append(("error", f"{where}: {what}" + (f"; expected {shape}" if shape else "")))
-            if len(keys) == 1 and shape and TEMPLATE_FIX not in fixes:
-                fixes.append(TEMPLATE_FIX)
+            if len(keys) == 1 and shape:
+                missing_sections.add(keys[0])
         elif shape and kind in ("model_type", "dict_type", "model_attributes_type", "list_type"):
             got = _YAML_TYPE_NAMES.get(type(item.get("input")), type(item.get("input")).__name__)
             lines.append(("error", f"{where}: expected {shape}, not {got}"))
@@ -395,6 +436,9 @@ def config_error_lines(error: ValidationError, path: Union[str, Path]) -> list[t
             lines.append(("error", f"{where}: {message}"))
             if fix and fix not in fixes:
                 fixes.append(fix)
+    # A missing section that an unknown key misspells needs no template.
+    if any(not _is_suggested(section, lines) for section in missing_sections):
+        fixes.insert(0, TEMPLATE_FIX)
     fixes.append(f"correct these keys in {path} and run polyzymd validate again.")
     return lines + [("fix", text) for text in fixes]
 

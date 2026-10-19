@@ -411,3 +411,26 @@ def test_a_value_of_the_wrong_type_names_the_expected_shape(tmp_path: Path) -> N
         "production, not text",
     ) in lines
     assert lines[-1][0] == "fix"
+
+
+def test_a_misspelled_section_names_the_section(tmp_path: Path) -> None:
+    from polyzymd.config.loader import TEMPLATE_FIX
+
+    lines = _error_lines(tmp_path, lambda data: data.update(enzym=data.pop("enzyme")))
+
+    assert ("error", "enzym: unknown key; did you mean enzyme?") in lines
+    assert ("fix", TEMPLATE_FIX) not in lines
+
+
+def test_a_mapping_given_for_a_list_names_the_list(tmp_path: Path) -> None:
+    def edit(data):
+        phases = data["simulation_phases"]
+        phases["equilibration_stages"] = phases["equilibration_stages"][0]
+
+    lines = _error_lines(tmp_path, edit)
+
+    assert any(
+        text.startswith("simulation_phases.equilibration_stages: expected a list of mappings with")
+        and text.endswith("not a mapping")
+        for _, text in lines
+    ), lines
