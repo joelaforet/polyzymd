@@ -52,14 +52,17 @@ hardware and software.
      waters (`HOH`), ions, crystallization additives and ligands. A ligand
      you want goes in a `substrate:` block as its own SDF. If nothing else is
      listed, `grep -v "^HETATM" raw.pdb > protein.pdb` does this step.
-     Modified amino acids are also `HETATM` records; keep them, and decide
-     each one on purpose:
-     - clean-pdb replaces a modified residue with its parent residue
-       (phosphoserine `SEP` becomes serine), which changes the chemistry.
-     - Selenomethionine (`MSE`) must be converted by hand first: clean-pdb
-       drops its selenium without adding a sulfur, and the build then fails.
-       Change the records to `ATOM`, the residue name `MSE` to `MET`, the
-       atom name `SE` to `SD` and its element `SE` to `S`.
+     Modified amino acids are also `HETATM` records. PolyzyMD cannot yet
+     parameterize them (issue #228), so keep them and decide each one on
+     purpose:
+     - Selenomethionine (`MSE`) is usually a phasing substitution for the
+       native methionine. Convert it to `MET` by hand before clean-pdb,
+       which would drop the selenium without adding a sulfur: change the
+       records to `ATOM`, the residue name `MSE` to `MET`, the atom name
+       `SE` to `SD` and its element `SE` to `S`.
+     - clean-pdb replaces any other modified residue with its parent
+       residue (phosphoserine `SEP` becomes serine), which changes the
+       chemistry. Tell the user before you simulate it that way.
   3. Run `polyzymd clean-pdb -i protein.pdb -o clean.pdb`. It replaces
      nonstandard residues and adds hydrogens (pH 7.4 unless you give `--ph`).
      It does not model missing residues or atoms; if `REMARK 465` or
