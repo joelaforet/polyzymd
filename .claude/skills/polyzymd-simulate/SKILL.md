@@ -44,13 +44,25 @@ hardware and software.
 
 ## 2. Change the system
 
-- **Protein:** `enzyme.pdb_path`. Remove waters, ions and other `HETATM`
-  records from a raw PDB, then clean it with
-  `polyzymd clean-pdb -i raw.pdb -o clean.pdb`. Keep the chains as they are:
-  a protein of several chains (an insulin dimer, a hemoglobin tetramer) loads
-  as several protein molecules, and the build keeps them all and puts them on
-  chain A. Do not join chains into one by editing the PDB; that adds peptide
-  bonds that do not exist.
+- **Protein:** `enzyme.pdb_path`. Prepare a raw PDB entry in this order:
+  1. Keep the protein you mean to simulate. If the file holds several copies
+     of it, keep one copy (or the assembly you want).
+  2. Delete the waters (`HOH`), ions, crystallization additives and ligands.
+     A ligand you want goes in a `substrate:` block as its own SDF. Keep
+     modified amino acids written as `HETATM`, such as selenomethionine
+     (`MSE`); clean-pdb turns them into standard residues. When
+     `grep "^HETATM" raw.pdb` lists no such residue,
+     `grep -v "^HETATM" raw.pdb > protein.pdb` does this step.
+  3. Run `polyzymd clean-pdb -i protein.pdb -o clean.pdb`. It replaces
+     nonstandard residues and adds hydrogens (pH 7.4 unless you give `--ph`).
+     It does not model missing residues or atoms; if `REMARK 465` or
+     `REMARK 470` lists any, see
+     `docs/source/how_to/troubleshoot_openff_pdb_ingestion.md`.
+  4. Keep the chain IDs and the `TER` records as they are. Each chain, or
+     each group of chains joined by disulfide bonds, loads as one protein
+     molecule; the build keeps every protein molecule and puts them all on
+     chain A. Do not merge chains into one by editing the PDB: a merged
+     chain gets peptide bonds that do not exist.
 - **Ligand:** a `substrate:` block with a docked, protonated SDF
   (`sdf_path`, `charge_method: nagl`, `residue_name`). One ligand only.
 - **Co-solvent from a SMILES:** under `solvent.co_solvents`, give `name`,
