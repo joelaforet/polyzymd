@@ -27,7 +27,9 @@ Use a small script or text inspection to answer these questions. Some checks are
 OpenFF chemistry checks; chain-ID checks are PolyzyMD input conventions that keep
 protein, substrate, polymer, and solvent roles unambiguous later in the build.
 
-- Do protein atom records use PolyzyMD chain `A`?
+- Are the protein chains kept as they are? The build puts every protein
+  molecule on PolyzyMD chain `A`; do not join chains into one by editing the
+  PDB.
 - Are substrate, polymer, and solvent chains kept out of the enzyme PDB or placed
   on the expected chains `B`, `C`, and `D+` when relevant?
 - Are TER records present between disconnected protein fragments?
@@ -257,9 +259,10 @@ items:
 
 Tools for this work are PyMOL or ChimeraX for manual editing, PDBFixer with
 a review of each added atom, `pdb4amber`, and MODELLER, AlphaFold or
-SWISS-MODEL to rebuild missing regions. After you curate the file, keep the
-PolyzyMD conventions: all protein atoms on chain `A`, and TER records between
-disconnected fragments. Then validate again with `Topology.from_pdb()`.
+SWISS-MODEL to rebuild missing regions. After you curate the file, keep TER
+records between disconnected fragments and do not join chains into one; the
+build puts every protein molecule on chain `A`. Then validate again with
+`Topology.from_pdb()`.
 
 `polyzymd clean-pdb` only replaces nonstandard residues and adds hydrogens.
 It does not select a copy, remove molecules, set chain IDs or model missing
