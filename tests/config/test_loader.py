@@ -434,3 +434,23 @@ def test_a_mapping_given_for_a_list_names_the_list(tmp_path: Path) -> None:
         and text.endswith("not a mapping")
         for _, text in lines
     ), lines
+
+
+def test_save_config_leaves_out_keys_no_code_reads(tmp_path: Path) -> None:
+    """A saved config never makes the unread-key warning appear when loaded again."""
+    import yaml
+
+    from polyzymd.config.loader import load_config, save_config
+
+    path = _config_file(
+        tmp_path,
+        lambda data: data.setdefault("output", {}).update(
+            trajectory_format="xtc", save_checkpoint=True
+        ),
+    )
+    out = tmp_path / "saved.yaml"
+    save_config(load_config(path), out)
+
+    output = yaml.safe_load(out.read_text())["output"]
+    assert not {"trajectory_format", "save_checkpoint", "save_state_data"} & set(output)
+    assert "naming_template" in output

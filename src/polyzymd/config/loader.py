@@ -483,6 +483,21 @@ def load_config(path: Union[str, Path]) -> SimulationConfig:
     return SimulationConfig.model_validate(data)
 
 
+def _without_unread_fields(model: BaseModel, data: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop the keys no code reads (``UNREAD_FIELDS``) from a dumped config, at every level."""
+    for name in getattr(model, "UNREAD_FIELDS", {}):
+        data.pop(name, None)
+    for name in type(model).model_fields:
+        value, dumped = getattr(model, name, None), data.get(name)
+        if isinstance(value, BaseModel) and isinstance(dumped, dict):
+            _without_unread_fields(value, dumped)
+        elif isinstance(value, list) and isinstance(dumped, list):
+            for item, item_data in zip(value, dumped):
+                if isinstance(item, BaseModel) and isinstance(item_data, dict):
+                    _without_unread_fields(item, item_data)
+    return data
+
+
 def save_config(
     config: SimulationConfig, path: Union[str, Path], relative_paths: bool = True
 ) -> None:
@@ -508,7 +523,7 @@ def save_config(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     # Convert to dict, handling Path objects
-    data = config.model_dump(mode="json")
+    data = _without_unread_fields(config, config.model_dump(mode="json"))
 
     if relative_paths:
         data = _convert_paths_to_relative(data, path.parent.absolute())

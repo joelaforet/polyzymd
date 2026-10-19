@@ -224,6 +224,10 @@ PolyzyMD never uploads or publishes: that is the author's step. The design of st
 - **ABC + Strategy:** `MoleculeCharger`
 - **Analyses are functions:** a measurement is a function of an MDAnalysis `Universe`; `Study` supplies the replicate universes, records and cross-replicate statistics
 - **Config:** Pydantic v2 `BaseModel` subclasses with `model_validator`
+- **Unread config keys:** A key kept in the schema only so the configs of
+  existing runs load, and read by no code, goes in its section's
+  `UNREAD_FIELDS` with a warning that says what happens instead. Loading still
+  works; the warning prints once. Templates, examples and docs do not use it.
 
 ### Contributor Entry Points for Analysis
 

@@ -739,9 +739,11 @@ output:
   
 ```
 
-The schema also accepts `save_checkpoint`, `save_state_data` and
-`trajectory_format`, but no code reads them. The OpenMM engine always writes
-DCD trajectories and checkpoints; the GROMACS engine always writes XTC.
+The schema still accepts `save_checkpoint`, `save_state_data` and
+`trajectory_format` so the configs of existing runs load, but no code reads
+them, and a config that gives one prints a warning. Both engines always write
+checkpoints and energies; OpenMM writes DCD trajectories and GROMACS writes
+XTC.
 
 ### Naming Template Variables
 

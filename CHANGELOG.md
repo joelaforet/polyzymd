@@ -479,6 +479,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged; `freeze` uses the same cache.  **Every stored result recomputes
   once** after upgrading, because the record identity changed.
 
+- **Unread config keys warn.**  `output.save_checkpoint`, `output.save_state_data` and `output.trajectory_format` are read by no code (both engines always write checkpoints and energies; OpenMM writes dcd, GROMACS xtc). Configs that give them still load, with one warning per key, and the templates and examples no longer list them. Config sections name such keys in `UNREAD_FIELDS`; `save_config` leaves them out.
+
 - **The periodic box is computed first, from the protein and substrate alone.**
   `SolventBuilder.compute_box_vectors()` derives the cell from the solute
   bounding box plus `2 * (polymers.packing.padding + solvent.box.padding)`

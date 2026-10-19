@@ -97,8 +97,8 @@ explain its keys. Change these fields:
 | `openmm.platform` | `CUDA` for a GPU, as `polyzymd submit` needs. `CPU` to run with `polyzymd run` on a laptop |
 
 The template is set up for OpenMM. To run GROMACS, change `engine` to
-`gromacs`. GROMACS does not read the `openmm:` block, and it writes `.xtc`
-trajectories whatever `output.trajectory_format` says, so you can leave both.
+`gromacs`. GROMACS does not read the `openmm:` block, so you can leave it, and
+it writes `.xtc` trajectories.
 
 The optional sections, such as `substrate:`, `polymers:` and `restraints:`,
 are commented out. Remove the leading `# ` of a section to use it. For every
