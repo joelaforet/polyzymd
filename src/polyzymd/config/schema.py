@@ -1759,6 +1759,31 @@ class SimulationConfig(_ConfigModel):
         default_factory=GromacsEngineConfig, description="GROMACS engine settings"
     )
 
+    @field_validator("polymers", mode="before")
+    @classmethod
+    def _disabled_polymers_need_no_fields(cls, value: Any) -> Any:
+        """Read ``polymers: {enabled: false}`` as no polymers.
+
+        A disabled section that lacks the fields a polymer build needs is
+        ``None``, as ``polymers: null`` is; its other keys are not read, and a
+        warning names them. A disabled section with every required field is
+        kept as written, so the configs and hashes of existing runs do not change.
+        """
+        if not isinstance(value, dict) or value.get("enabled", True) is not False:
+            return value
+        required = [
+            name for name, field in PolymerConfig.model_fields.items() if field.is_required()
+        ]
+        if all(name in value for name in required):
+            return value
+        ignored = sorted(str(key) for key in value if key != "enabled")
+        if ignored:
+            LOGGER.warning(
+                "polymers.enabled is false, so these polymer keys are not read: %s",
+                ", ".join(ignored),
+            )
+        return None
+
     @model_validator(mode="after")
     def validate_barostat_for_engine(self) -> "SimulationConfig":
         """Refuse barostat MCA with engine openmm, which runs only the isotropic barostat."""

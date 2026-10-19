@@ -97,9 +97,15 @@ The replicate number still seeds the PACKMOL placement.
 
 ## Build a system without polymers
 
-For a control without polymer, leave out the `polymers:` section. A section
-with `enabled: false` must still contain `type_prefix`, `monomers`, `length`
-and `count`, because the schema requires them.
+For a control without polymer, say so in the config:
+
+```yaml
+polymers:
+  enabled: false
+```
+
+`polymers: null`, or leaving out the `polymers:` section, does the same. A
+disabled section needs no other keys; a warning names any it does not read.
 
 ## How the builder places the chains
 
