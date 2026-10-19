@@ -287,6 +287,8 @@ class TestAnalysisLogging:
         # autocorrelation silences pymbar's logger on first use; emit as pymbar would before that.
         pymbar_level = logging.getLogger("pymbar").level
         logging.getLogger("pymbar").setLevel(logging.NOTSET)
+        # An earlier analyze run left capture on; pytest has since restored showwarning.
+        logging.captureWarnings(False)
         try:
             path = analysis_logging(tmp_path / "logs", "analyze")
             logging.getLogger("polyzymd.test").info("an info line")

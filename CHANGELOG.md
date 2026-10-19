@@ -141,6 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A user install of PolyzyMD shadowing the environment's.**  `polyzymd info` prints the folder `polyzymd` was imported from. Every command warns when that folder is a `pip install --user` copy (in `site.getusersitepackages()`, or put on `sys.path` by a `.pth` file there, as an editable user install does), which Python loads ahead of the pixi environment's own, and gives the fix: run with `PYTHONNOUSERSITE=1`, or `pip uninstall --user polyzymd`.
+
 - **Residue numbers of chains joined by disulfides.**  Chains linked by a disulfide load as one protein molecule (insulin A and B). The build numbered their residues by input number and name only, so residues of equal number and name in the two chains (insulin A7 and B7 CYS, A9 and B9 SER) became one residue in `solvated_system.pdb`: 51 residues got 49 numbers. The input chain is now part of the residue identity, so chain B follows chain A (insulin: 1-21, then 22-51), as for separate molecules.
 
 - **Stray files in study and project folders.** PolyzyMD reads, hashes and deposits only files whose names it chooses in advance:

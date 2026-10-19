@@ -24,12 +24,12 @@ analysis. These are project conventions, not OpenFF parser requirements.
 
 | Role | PolyzyMD chain convention | Notes |
 |---|---|---|
-| Protein/enzyme | `A` | The enzyme PDB passed to OpenFF is usually protein-only on chain `A`; multiple OpenFF enzyme molecules are all retained on chain `A` with continuous output residue numbering |
+| Protein/enzyme | `A` | The enzyme PDB passed to OpenFF is usually protein-only and keeps its own chain IDs; the build retains every OpenFF enzyme molecule and puts them all on chain `A` with continuous output residue numbering |
 | Substrate | `B` | Usually kept separate from the enzyme PDB and configured as substrate input |
 | Polymer | `C` | Used for conjugates and polymer-specific selections |
 | Solvent/ions/other | `D` and later | Usually generated or handled outside the enzyme PDB |
 
-An enzyme PDB can satisfy PolyzyMD chain conventions and still fail OpenFF
+An enzyme PDB can be protein-only and still fail OpenFF
 ingestion if the residue graph, hydrogens, termini, or disulfide connectivity do
 not match supported chemistry.
 
