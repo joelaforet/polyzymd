@@ -1361,6 +1361,9 @@ class TestDisabledPolymers:
         config = SimulationConfig(**disabled)
 
         assert config.polymers is None
+        for written in ("false", "no", 0):
+            disabled["polymers"] = {"enabled": written}
+            assert SimulationConfig(**copy.deepcopy(disabled)).polymers is None
         control = SimulationConfig(**copy.deepcopy(minimal_config_data))
         assert config_hash(config) == config_hash(control)
 

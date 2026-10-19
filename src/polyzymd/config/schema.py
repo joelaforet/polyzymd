@@ -1769,7 +1769,15 @@ class SimulationConfig(_ConfigModel):
         warning names them. A disabled section with every required field is
         kept as written, so the configs and hashes of existing runs do not change.
         """
-        if not isinstance(value, dict) or value.get("enabled", True) is not False:
+        from pydantic import TypeAdapter, ValidationError
+
+        if not isinstance(value, dict) or "enabled" not in value:
+            return value
+        try:
+            # The same values pydantic reads as false: false, "false", "no", 0, ...
+            if TypeAdapter(bool).validate_python(value["enabled"]):
+                return value
+        except ValidationError:
             return value
         required = [
             name for name, field in PolymerConfig.model_fields.items() if field.is_required()

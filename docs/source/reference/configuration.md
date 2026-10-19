@@ -250,7 +250,9 @@ polymers:
 `polymers: null`, or leaving out the `polymers:` section, does the same. A
 disabled section needs no other keys; a warning names any it does not read. A
 disabled section that still has every required polymer key is kept as
-written, so the configs of existing runs keep their hash.
+written, so the configs of existing runs keep their hash. Do not shorten the
+section of a run that is already built: its config would change hash, and the
+build would no longer match it.
 
 ---
 
