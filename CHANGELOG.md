@@ -141,6 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Config errors that say how to fix them.**  `polyzymd validate`, `build` and `run` print the same `error:` and `fix:` lines for an invalid config (`build` and `run` printed a bare `Configuration error:` list). An unknown key names the closest field anywhere in the schema (`pdb: unknown key; did you mean enzyme.pdb_path?`, and key by key under an unknown section such as `system:`), or lists the keys of its section when none is close. A missing section says what it holds and points to the commented template of `polyzymd study add-condition LABEL --new`. A value of the wrong type names the shape the field expects (`simulation_phases: expected a mapping with minimization, equilibration_stages and production, not text`). Validation itself is unchanged.
+
 - **Stray files in study and project folders.** PolyzyMD reads, hashes and deposits only files whose names it chooses in advance:
   - A function's stored results depend on the Python files of its folder and the files of `data/` beside it. Notes, figures or a copied trajectory in `analyses/` recompute nothing; the analysis log names the files it leaves out.
   - `freeze` deposits only `study.yaml`, `project.yaml`, `README*`, `LICENSE*`, the files it writes, and the folders `study init` and `project init` make (`conditions/`, `structures/`, `analyses/`, `stats/`, `figures/`, `results/`, `environment/`), with or without git, and prints one `not deposited:` warning for the rest.

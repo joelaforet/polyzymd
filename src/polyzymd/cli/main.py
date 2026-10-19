@@ -351,6 +351,15 @@ def _remove_empty_run_dir(run_dir: Path) -> None:
         pass
 
 
+def _echo_config_errors(error: ValidationError, config: object) -> None:
+    """Print the ``error:`` and ``fix:`` lines of an invalid config."""
+    from polyzymd.config.loader import config_error_lines
+
+    for kind, text in config_error_lines(error, config):
+        line = f"{kind}: {text}"
+        click.echo(click.style(line, fg="red") if kind == "error" else line, err=True)
+
+
 @click.group()
 @click.version_option(prog_name="polyzymd")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
@@ -850,10 +859,7 @@ def build(
             new_run_dir = None
 
     except PydanticValidationError as e:
-        colored_echo("Configuration error:", err=True, level=logging.ERROR)
-        for error in e.errors():
-            loc = " → ".join(str(x) for x in error["loc"])
-            colored_echo(f"  {loc}: {error['msg']}", err=True, level=logging.ERROR)
+        _echo_config_errors(e, config)
         sys.exit(1)
 
     except FileNotFoundError as e:
@@ -1116,10 +1122,7 @@ def run(
             )
 
     except PydanticValidationError as e:
-        colored_echo("Configuration error:", err=True, level=logging.ERROR)
-        for error in e.errors():
-            loc = " → ".join(str(x) for x in error["loc"])
-            colored_echo(f"  {loc}: {error['msg']}", err=True, level=logging.ERROR)
+        _echo_config_errors(e, config)
         sys.exit(1)
 
     except FileNotFoundError as e:
@@ -3497,12 +3500,7 @@ def validate(config: str) -> None:
         click.echo(click.style(f"error: {e}", fg="red"), err=True)
         sys.exit(1)
     except ValidationError as e:
-        for error in e.errors():
-            where = ".".join(str(part) for part in error["loc"]) or "config"
-            click.echo(click.style(f"error: {where}: {error['msg']}", fg="red"), err=True)
-        click.echo(
-            f"fix: correct these keys in {config} and run polyzymd validate again.", err=True
-        )
+        _echo_config_errors(e, config)
         sys.exit(1)
     except ValueError as e:
         message, _, fix = str(e).partition("\nfix: ")
