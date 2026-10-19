@@ -68,6 +68,8 @@ def hash_trajectories_command(
         polyzymd hash-trajectories --study lipase_363K --dry-run
     """
     from polyzymd.analyses.study import with_data_dir
+    from polyzymd.cli.config_errors import load_config_or_exit
+    from polyzymd.cli.study import EXIT_STUDY_ERROR
     from polyzymd.config.schema import SimulationConfig
     from polyzymd.engines import create_engine
     from polyzymd.utils.replicates import parse_replicate_range
@@ -76,7 +78,6 @@ def hash_trajectories_command(
     if study_path is not None:
         from polyzymd.analyses.exceptions import ProtocolError
         from polyzymd.analyses.study_file import load_study_file
-        from polyzymd.cli.study import EXIT_STUDY_ERROR
 
         try:
             protocol = load_study_file(study_path)
@@ -87,10 +88,18 @@ def hash_trajectories_command(
             sys.exit(EXIT_STUDY_ERROR)
         for label, path in protocol.conditions.items():
             targets.append(
-                (label, with_data_dir(SimulationConfig.from_yaml(path), protocol.data.get(label)))
+                (
+                    label,
+                    with_data_dir(
+                        load_config_or_exit(path, exit_code=EXIT_STUDY_ERROR),
+                        protocol.data.get(label),
+                    ),
+                )
             )
     for path in configs:
-        targets.append((path.resolve().parent.name, SimulationConfig.from_yaml(path)))
+        targets.append(
+            (path.resolve().parent.name, load_config_or_exit(path, exit_code=EXIT_STUDY_ERROR))
+        )
     if not targets:
         raise click.UsageError("give -c config.yaml or --study.")
     wanted = set(parse_replicate_range(replicate_spec)) if replicate_spec else None

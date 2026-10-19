@@ -24,6 +24,12 @@ import yaml
 from pydantic import ValidationError
 
 from polyzymd.cli.colors import colored_echo, echo_logo, setup_colored_logging
+from polyzymd.cli.config_errors import (
+    CONFIG_LOAD_ERRORS,
+    config_load_lines,
+    load_config_or_exit,
+    report_config_error,
+)
 from polyzymd.cli.env_warnings import warn_if_wrong_pixi_env
 
 # Bootstrap a minimal root handler so suppress_openff_logs() works at import
@@ -351,15 +357,6 @@ def _remove_empty_run_dir(run_dir: Path) -> None:
         pass
 
 
-def _echo_config_errors(error: ValidationError, config: object) -> None:
-    """Print the ``error:`` and ``fix:`` lines of an invalid config."""
-    from polyzymd.config.loader import config_error_lines
-
-    for kind, text in config_error_lines(error, config):
-        line = f"{kind}: {text}"
-        click.echo(click.style(line, fg="red") if kind == "error" else line, err=True)
-
-
 @click.group()
 @click.version_option(prog_name="polyzymd")
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
@@ -492,7 +489,7 @@ def build(
     # empty, so a failed build leaves no empty folder behind.
     new_run_dir: Path | None = None
     try:
-        sim_config = SimulationConfig.from_yaml(config)
+        sim_config = load_config_or_exit(config)
         colored_echo(f"Configuration validated: {sim_config.name}", phase="build")
 
         # Override directories if provided via CLI
@@ -859,7 +856,7 @@ def build(
             new_run_dir = None
 
     except PydanticValidationError as e:
-        _echo_config_errors(e, config)
+        report_config_error(e, config)
         sys.exit(1)
 
     except FileNotFoundError as e:
@@ -1070,7 +1067,7 @@ def run(
     colored_echo(f"Loading configuration from: {config}", phase="simulation")
 
     try:
-        sim_config = SimulationConfig.from_yaml(config)
+        sim_config = load_config_or_exit(config)
         colored_echo(f"Running local simulation: {sim_config.name}", phase="simulation")
         colored_echo(f"Engine: {engine}", phase="simulation")
         sim_config.require_buildable(engine)
@@ -1122,7 +1119,7 @@ def run(
             )
 
     except PydanticValidationError as e:
-        _echo_config_errors(e, config)
+        report_config_error(e, config)
         sys.exit(1)
 
     except FileNotFoundError as e:
@@ -1717,7 +1714,7 @@ def submit(
     if dry_run and generate_only:
         raise click.UsageError("Cannot use both --dry-run and --generate-only")
 
-    sim_config = SimulationConfig.from_yaml(config)
+    sim_config = load_config_or_exit(config)
     engine_name = _resolve_engine_name(sim_config, override=engine)
     if time_limit and engine_name == "openmm":
         from polyzymd.simulation.signals import WALLTIME_WARNING_SECONDS, slurm_time_limit_seconds
@@ -2065,11 +2062,7 @@ def run_segment(
 
     colored_echo(f"Loading configuration from: {config}", phase="simulation")
 
-    try:
-        sim_config = SimulationConfig.from_yaml(config)
-    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
-        colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
-        sys.exit(1)
+    sim_config = load_config_or_exit(config)
     engine_name = str(getattr(sim_config, "engine", "openmm") or "openmm").lower()
     if engine_name == "gromacs":
         warn_if_wrong_pixi_env(
@@ -2751,11 +2744,7 @@ def check_progress(
     )
     from polyzymd.simulation.signals import EXIT_CODE_CHECK_ERROR
 
-    try:
-        sim_config = SimulationConfig.from_yaml(config)
-    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
-        colored_echo(f"Failed to load config: {e}", err=True, level=logging.ERROR)
-        sys.exit(EXIT_CODE_CHECK_ERROR)
+    sim_config = load_config_or_exit(config, exit_code=EXIT_CODE_CHECK_ERROR)
 
     engine_name = _resolve_engine_name(sim_config, override=engine)
     engine_inst = create_engine(sim_config, override=engine_name, defer_binary=True)
@@ -2965,11 +2954,7 @@ def cancel(
         create_job_name,
     )
 
-    try:
-        sim_config = SimulationConfig.from_yaml(config)
-    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as exc:
-        colored_echo(f"Failed to load config: {exc}", err=True, level=logging.ERROR)
-        sys.exit(1)
+    sim_config = load_config_or_exit(config)
 
     replicate_numbers = _resolve_replicates_option(replicates)
     config_path = str(Path(config).resolve())
@@ -3205,14 +3190,15 @@ def _status_report(
     for config_path in config_paths:
         try:
             sim_config = SimulationConfig.from_yaml(config_path)
-        except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
+        except CONFIG_LOAD_ERRORS as e:
+            first = config_load_lines(e, config_path)[0][1]
             reports.append(
                 SystemReport(
                     name=Path(config_path).parent.name,
                     config_path=config_path,
                     scratch_directory="",
                     replicates=[],
-                    error="failed to load config: " + str(e).splitlines()[0][:200],
+                    error="failed to load config: " + first[:200],
                 )
             )
             continue
@@ -3262,11 +3248,7 @@ def _status_table(config: str) -> None:
 
     logging.getLogger("polyzymd.simulation.progress").setLevel(logging.ERROR)
 
-    try:
-        sim_config = SimulationConfig.from_yaml(config)
-    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
-        click.echo(click.style(f"Error: Failed to load config: {e}", fg="red"), err=True)
-        sys.exit(1)
+    sim_config = load_config_or_exit(config)
 
     engine_name = _resolve_engine_name(sim_config, override=None)
     engine_inst = create_engine(sim_config, override=engine_name, defer_binary=True)
@@ -3496,16 +3478,8 @@ def validate(config: str) -> None:
                 status = "enabled" if r.enabled else "disabled"
                 colored_echo(f"  - {r.name} ({r.type.value}): {status}")
 
-    except FileNotFoundError as e:
-        click.echo(click.style(f"error: {e}", fg="red"), err=True)
-        sys.exit(1)
-    except ValidationError as e:
-        _echo_config_errors(e, config)
-        sys.exit(1)
-    except ValueError as e:
-        message, _, fix = str(e).partition("\nfix: ")
-        click.echo(click.style(f"error: {message}", fg="red"), err=True)
-        click.echo(f"fix: {fix or f'correct {config} and run polyzymd validate again.'}", err=True)
+    except CONFIG_LOAD_ERRORS as e:
+        report_config_error(e, config)
         sys.exit(1)
 
 
@@ -3740,11 +3714,7 @@ def recover(
 
     _echo_branding()
 
-    try:
-        sim_config = SimulationConfig.from_yaml(config)
-    except (FileNotFoundError, yaml.YAMLError, ValidationError, ValueError) as e:
-        colored_echo(f"Failed to load config: {e}", err=True, phase="workflow", level=logging.ERROR)
-        sys.exit(1)
+    sim_config = load_config_or_exit(config)
 
     engine_name = _resolve_engine_name(sim_config, override=engine)
     engine_impl = create_engine(sim_config, override=engine_name, defer_binary=True)
