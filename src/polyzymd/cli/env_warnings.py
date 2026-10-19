@@ -91,7 +91,7 @@ def polyzymd_import_path() -> Path:
     """Return the folder the running ``polyzymd`` package was imported from."""
     import polyzymd
 
-    return Path(polyzymd.__file__).resolve().parent
+    return Path(polyzymd.__file__ or ".").resolve().parent
 
 
 def is_user_site_install(package_dir: Path) -> bool:
@@ -125,7 +125,8 @@ def is_user_site_install(package_dir: Path) -> bool:
                 line = line.strip()
                 if not line or line.startswith(("#", "import ", "import\t")):
                     continue
-                if Path(line).resolve() == package_dir.parent:
+                # site.addpackage reads a relative line from the .pth's folder.
+                if (pth.parent / line).resolve() == package_dir.parent:
                     return True
     except (OSError, ValueError):
         return False
@@ -142,7 +143,7 @@ def warn_if_user_site_install() -> None:
         return
     click.secho(
         f"warning: polyzymd is imported from {package_dir}, a user install "
-        f"({site.getusersitepackages()}) that shadows the copy in this environment.\n"
+        f"({Path(site.getusersitepackages()).resolve()}) that shadows the copy in this environment.\n"
         "fix: run with PYTHONNOUSERSITE=1, or remove the user install: "
         "pip uninstall --user polyzymd",
         fg="yellow",

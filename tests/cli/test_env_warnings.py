@@ -258,6 +258,21 @@ def test_info_warns_for_an_editable_install_in_user_site_packages(
     assert "fix: run with PYTHONNOUSERSITE=1" in result.stderr
 
 
+def test_a_relative_pth_line_is_read_from_the_user_site(monkeypatch, tmp_path: Path) -> None:
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    user_site.mkdir(parents=True)
+    old_checkout = tmp_path / "old_polyzymd" / "src"
+    (old_checkout / "polyzymd").mkdir(parents=True)
+    (user_site / "_polyzymd.pth").write_text("../../../../old_polyzymd/src\n")
+    _import_polyzymd_from(monkeypatch, old_checkout / "polyzymd", user_site)
+    monkeypatch.chdir(tmp_path / "old_polyzymd")
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert "warning: polyzymd is imported from" in result.stderr
+
+
 def test_info_does_not_warn_for_an_install_in_the_environment(monkeypatch, tmp_path: Path) -> None:
     user_site = tmp_path / ".local/lib/python3.12/site-packages"
     user_site.mkdir(parents=True)
