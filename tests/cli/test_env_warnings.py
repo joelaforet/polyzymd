@@ -210,3 +210,94 @@ def test_recover_submit_openmm_accepts_build_environment(monkeypatch, tmp_path) 
     assert result.exit_code == 0
     assert "Warning: polyzymd recover --submit --engine openmm" not in result.stdout
     assert "Warning: polyzymd recover --submit --engine openmm" not in result.stderr
+
+
+def _import_polyzymd_from(monkeypatch, package_dir: Path, user_site: Path) -> None:
+    """Make the CLI see ``polyzymd`` imported from ``package_dir``."""
+    import site
+
+    import polyzymd
+
+    monkeypatch.setattr(polyzymd, "__file__", str(package_dir / "__init__.py"))
+    monkeypatch.setattr(site, "getusersitepackages", lambda: str(user_site))
+    monkeypatch.setattr(site, "ENABLE_USER_SITE", True)
+
+
+def test_info_warns_for_a_copy_in_user_site_packages(monkeypatch, tmp_path: Path) -> None:
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    package_dir = user_site / "polyzymd"
+    package_dir.mkdir(parents=True)
+    _import_polyzymd_from(monkeypatch, package_dir, user_site)
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert f"Imported from: {package_dir}" in result.stdout
+    assert f"warning: polyzymd is imported from {package_dir}" in result.stderr
+    assert (
+        "fix: run with PYTHONNOUSERSITE=1, or remove the user install: "
+        "pip uninstall --user polyzymd"
+    ) in result.stderr
+
+
+def test_info_warns_for_an_editable_install_in_user_site_packages(
+    monkeypatch, tmp_path: Path
+) -> None:
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    user_site.mkdir(parents=True)
+    old_checkout = tmp_path / "old_polyzymd" / "src"
+    (old_checkout / "polyzymd").mkdir(parents=True)
+    (user_site / "_polyzymd.pth").write_text(f"{old_checkout}\n")
+    _import_polyzymd_from(monkeypatch, old_checkout / "polyzymd", user_site)
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert f"Imported from: {old_checkout / 'polyzymd'}" in result.stdout
+    assert "warning: polyzymd is imported from" in result.stderr
+    assert "fix: run with PYTHONNOUSERSITE=1" in result.stderr
+
+
+def test_a_relative_pth_line_is_read_from_the_user_site(monkeypatch, tmp_path: Path) -> None:
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    user_site.mkdir(parents=True)
+    old_checkout = tmp_path / "old_polyzymd" / "src"
+    (old_checkout / "polyzymd").mkdir(parents=True)
+    (user_site / "_polyzymd.pth").write_text("../../../../old_polyzymd/src\n")
+    _import_polyzymd_from(monkeypatch, old_checkout / "polyzymd", user_site)
+    monkeypatch.chdir(tmp_path / "old_polyzymd")
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert "warning: polyzymd is imported from" in result.stderr
+
+
+def test_info_does_not_warn_for_an_install_in_the_environment(monkeypatch, tmp_path: Path) -> None:
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    user_site.mkdir(parents=True)
+    (user_site / "other.pth").write_text(f"{tmp_path / 'other' / 'src'}\nimport other\n")
+    checkout = tmp_path / "polyzymd" / "src"
+    (checkout / "polyzymd").mkdir(parents=True)
+    _import_polyzymd_from(monkeypatch, checkout / "polyzymd", user_site)
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert f"Imported from: {checkout / 'polyzymd'}" in result.stdout
+    assert "user install" not in result.stderr
+
+
+def test_no_warning_when_the_user_site_packages_is_disabled(monkeypatch, tmp_path: Path) -> None:
+    import site
+
+    user_site = tmp_path / ".local/lib/python3.12/site-packages"
+    package_dir = user_site / "polyzymd"
+    package_dir.mkdir(parents=True)
+    _import_polyzymd_from(monkeypatch, package_dir, user_site)
+    monkeypatch.setattr(site, "ENABLE_USER_SITE", False)
+
+    result = CliRunner().invoke(cli, ["info"])
+
+    assert result.exit_code == 0, result.output
+    assert "user install" not in result.stderr
