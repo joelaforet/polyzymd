@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 from polyzymd.core.branding import FULL_CREDIT_LINE
-from polyzymd.utils.templates import render_package_template
+from polyzymd.utils.templates import render_package_template, shell_quote
 from polyzymd.workflow.slurm import (
     SlurmConfig,
     _discover_manifest_path,
@@ -16,6 +16,7 @@ from polyzymd.workflow.slurm import (
     _validate_gpu_type_value,
     _validate_nodelist_value,
     _validate_script_value,
+    pixi_activation_block,
     sbatch_lines,
 )
 
@@ -448,6 +449,9 @@ class GromacsSlurmScriptGenerator:
                 "time_limit": self._config.time_limit,
                 "pixi_env": self._pixi_env,
                 "manifest_path": manifest_path,
+                "pixi_activation": pixi_activation_block(
+                    shell_quote(self._pixi_env), manifest_path
+                ),
                 "config_path": config_path,
                 "replicate": replicate,
                 "working_dir": working_dir,

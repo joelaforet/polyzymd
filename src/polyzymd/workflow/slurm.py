@@ -221,6 +221,43 @@ def _validate_positive_replicate(value: object) -> int:
     return value
 
 
+def pixi_activation_block(env_word: str, manifest_path: str) -> str:
+    """Return the bash lines that activate a job's pixi environment, or stop the job.
+
+    ``eval "$(pixi shell-hook ...)"`` hides a failed hook: the job then runs
+    without the environment, and ``set -e`` does not see it. A job that starts
+    while another job updates the same environment can see such a failure
+    once, so the hook is tried three times, ten seconds apart, before the job
+    stops with an error.
+
+    Parameters
+    ----------
+    env_word : str
+        The environment as one shell word, already quoted (``"$PIXI_ENV"``
+        or a quoted name).
+    manifest_path : str
+        Path of the ``pixi.toml`` the job uses.
+    """
+    from polyzymd.utils.templates import shell_quote
+
+    manifest = shell_quote(manifest_path)
+    return f"""_pixi_active=0
+for _attempt in 1 2 3; do
+    if _pixi_hook="$(pixi shell-hook -e {env_word} --manifest-path {manifest})"; then
+        _pixi_active=1
+        break
+    fi
+    echo "WARNING: pixi shell-hook failed (attempt $_attempt of 3)" >&2
+    [ "$_attempt" -lt 3 ] && sleep "${{POLYZYMD_PIXI_RETRY_SLEEP:-10}}"
+done
+if [ "$_pixi_active" -ne 1 ]; then
+    echo "FATAL: cannot activate the pixi environment of" {manifest} >&2
+    exit 1
+fi
+eval "$_pixi_hook"
+unset _pixi_hook _pixi_active _attempt"""
+
+
 def _discover_manifest_path() -> str:
     """Auto-detect the pixi workspace manifest (``pixi.toml``).
 
@@ -629,6 +666,7 @@ class SlurmScriptGenerator:
                 "configured_exclude": self._config.exclude or "",
                 "pixi_env": self._pixi_env,
                 "manifest_path": manifest_path,
+                "pixi_activation": pixi_activation_block('"$PIXI_ENV"', manifest_path),
                 "config_path": config_path,
                 "replicate": replicate,
                 "working_dir": working_dir,

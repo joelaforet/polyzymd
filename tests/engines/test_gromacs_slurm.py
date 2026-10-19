@@ -174,7 +174,7 @@ def test_pixi_activation_quotes_env_and_manifest_as_single_arguments(monkeypatch
         equilibration_mdps=["eq_01_nvt.mdp"],
     )
     activation_line = next(line for line in script.splitlines() if "pixi shell-hook" in line)
-    command = activation_line.removeprefix('eval "$(').removesuffix(')"')
+    command = activation_line.split('="$(', 1)[1].rsplit(')"', 1)[0]
 
     assert shlex.split(command) == [
         "pixi",
