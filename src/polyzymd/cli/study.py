@@ -8,6 +8,8 @@ from typing import Any
 
 import click
 
+from polyzymd.cli.config_errors import report_config_error
+
 EXIT_STUDY_ERROR = 2
 #: Context ``meta`` key set by project check, which prints the git and metadata lines once.
 PROJECT_CHECK = "polyzymd.project_check"
@@ -106,10 +108,9 @@ def check_command(path: Path, production: bool = False) -> None:
         try:
             config = SimulationConfig.from_yaml(config_path)
         except Exception as exc:  # noqa: BLE001 - any unreadable config is reported the same way
-            click.echo(
-                f"error: {role} {label}: cannot read {config_path}: {' '.join(str(exc).split())}"
+            report_config_error(
+                exc, config_path, prefix=f"{role} {label}: cannot read {config_path}: ", err=False
             )
-            click.echo(f"fix: correct it until polyzymd validate -c {config_path} passes")
             failed = True
             continue
         source = "data.local.yaml" if label in protocol.data else "config"
@@ -302,8 +303,9 @@ def locate_command(directory: Path, study_path: Path, verify: bool) -> None:
         try:
             configs[label] = SimulationConfig.from_yaml(config_path)
         except Exception as exc:  # noqa: BLE001 - any unreadable config is reported the same way
-            click.echo(f"error: {label}: cannot read {config_path}: {' '.join(str(exc).split())}")
-            click.echo(f"fix: correct it until polyzymd validate -c {config_path} passes")
+            report_config_error(
+                exc, config_path, prefix=f"{label}: cannot read {config_path}: ", err=False
+            )
             missing.append(label)
     # Run directories are found by name only, so two conditions whose configs
     # name their runs alike cannot be told apart, except by manifest.json.

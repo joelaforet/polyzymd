@@ -343,3 +343,94 @@ def test_runs_written_under_a_literal_tilde_folder_are_still_found(
     assert "earlier versions put the runs" in caplog.text
     (tmp_path / "home" / "sims").mkdir(parents=True)
     assert load_config(path).output.scratch_directory == tmp_path / "home" / "sims"
+
+
+def _error_lines(tmp_path: Path, edit) -> list[tuple[str, str]]:
+    """Return the error and fix lines of the minimal config changed by ``edit``."""
+    from pydantic import ValidationError
+
+    from polyzymd.config.loader import config_error_lines, load_config
+
+    path = _config_file(tmp_path, edit)
+    with pytest.raises(ValidationError) as error:
+        load_config(path)
+    return config_error_lines(error.value, path)
+
+
+def test_an_unknown_key_names_the_closest_field_in_any_section(tmp_path: Path) -> None:
+    def edit(data):
+        data["pdb"] = data["enzyme"].pop("pdb_path")
+        data["system"] = {"pdb": "x.pdb", "water": "tip3p"}
+        data["thermodynamics"]["temprature"] = 300.0
+
+    lines = _error_lines(tmp_path, edit)
+
+    assert ("error", "pdb: unknown key; did you mean enzyme.pdb_path?") in lines
+    assert ("error", "system.pdb: unknown key; did you mean enzyme.pdb_path?") in lines
+    assert ("error", "system.water: unknown key") in lines
+    assert (
+        "error",
+        "thermodynamics.temprature: unknown key; did you mean thermodynamics.temperature?",
+    ) in lines
+
+
+def test_an_unknown_key_without_a_close_field_lists_the_keys_of_its_section(
+    tmp_path: Path,
+) -> None:
+    lines = _error_lines(tmp_path, lambda data: data["thermodynamics"].update(zzz=1))
+
+    assert ("error", "thermodynamics.zzz: unknown key; valid keys here: temperature, pressure") in (
+        lines
+    )
+
+
+def test_a_missing_section_points_to_the_commented_template(tmp_path: Path) -> None:
+    from polyzymd.config.loader import TEMPLATE_FIX
+
+    def edit(data):
+        del data["thermodynamics"]
+        del data["simulation_phases"]
+
+    lines = _error_lines(tmp_path, edit)
+
+    assert (
+        "error",
+        "thermodynamics: required section missing; expected a mapping with temperature and "
+        "pressure",
+    ) in lines
+    assert [line for line in lines if line == ("fix", TEMPLATE_FIX)] == [("fix", TEMPLATE_FIX)]
+    assert "polyzymd study add-condition LABEL --new" in TEMPLATE_FIX
+
+
+def test_a_value_of_the_wrong_type_names_the_expected_shape(tmp_path: Path) -> None:
+    lines = _error_lines(tmp_path, lambda data: data.update(simulation_phases="10 ns production"))
+
+    assert (
+        "error",
+        "simulation_phases: expected a mapping with minimization, equilibration_stages and "
+        "production, not text",
+    ) in lines
+    assert lines[-1][0] == "fix"
+
+
+def test_a_misspelled_section_names_the_section(tmp_path: Path) -> None:
+    from polyzymd.config.loader import TEMPLATE_FIX
+
+    lines = _error_lines(tmp_path, lambda data: data.update(enzym=data.pop("enzyme")))
+
+    assert ("error", "enzym: unknown key; did you mean enzyme?") in lines
+    assert ("fix", TEMPLATE_FIX) not in lines
+
+
+def test_a_mapping_given_for_a_list_names_the_list(tmp_path: Path) -> None:
+    def edit(data):
+        phases = data["simulation_phases"]
+        phases["equilibration_stages"] = phases["equilibration_stages"][0]
+
+    lines = _error_lines(tmp_path, edit)
+
+    assert any(
+        text.startswith("simulation_phases.equilibration_stages: expected a list of mappings with")
+        and text.endswith("not a mapping")
+        for _, text in lines
+    ), lines

@@ -692,7 +692,8 @@ class TestStatusCli:
             result = runner.invoke(cli, ["status", "-c", str(bad_config)])
 
         assert result.exit_code != 0
-        assert "Error" in result.output
+        assert "error: bad config" in result.output
+        assert "fix: " in result.output
 
     def test_status_header_shows_system_name(self, tmp_path):
         scratch = tmp_path / "scratch"

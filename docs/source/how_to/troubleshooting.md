@@ -43,21 +43,27 @@ pixi install -e build
 
 ## Configuration
 
-### `Field required`
+### `required key missing` or `required section missing`
 
 ```
-enzyme.pdb_path
-  Field required [type=missing, ...]
+error: enzyme.pdb_path: required key missing
+error: thermodynamics: required section missing; expected a mapping with temperature and pressure
+fix: start from the complete commented config that polyzymd study add-condition LABEL --new writes in a study folder (polyzymd study init DIR makes one), and copy your values into it.
 ```
 
-A required key is missing. Add it. For the required keys of each section, see
-{doc}`../reference/configuration`.
+A required key or a whole section is missing. Add it. For the required keys
+of each section, see {doc}`../reference/configuration`.
 
 ### An unknown key
 
+```
+error: pdb: unknown key; did you mean enzyme.pdb_path?
+```
+
 Every section of the config refuses a key that it does not define. A
-misspelled key is therefore an error, not a silent default. Correct the
-spelling. The error names the key and its section.
+misspelled or misplaced key is therefore an error, not a silent default. The
+error names the closest valid key, in its own section or another one, or
+lists the keys of the section when none is close.
 
 ### `FileNotFoundError` for an input file
 
@@ -78,13 +84,13 @@ The YAML syntax is wrong. Check these points:
 - Put a space after each colon.
 - Put quotes around values with special characters, such as `:` or `#`.
 
-### Several `Field required` errors for the items of a list
+### Several `required key missing` errors for the items of a list
 
 ```
 error: solvent.co_solvents.0: Value error, Co-solvent 'dmso': give exactly one of mole_fraction, concentration and count, not none
-error: solvent.co_solvents.1.name: Field required
-error: solvent.co_solvents.2.name: Field required
-fix: correct these keys in config.yaml and run polyzymd validate again.
+error: solvent.co_solvents.1.name: required key missing
+error: solvent.co_solvents.2.name: required key missing
+fix: correct these keys in config.yaml and run polyzymd validate -c config.yaml again.
 ```
 
 Each key was written as a separate list item. A `-` starts a new item. Put
