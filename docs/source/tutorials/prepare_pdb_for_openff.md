@@ -109,8 +109,9 @@ Cleaning PDB: structures/1UBQ_protein.pdb
 Cleaned PDB written to: structures/ubq_clean.pdb
 ```
 
-Check the result. Every protein atom must be on chain `A`, the PolyzyMD
-chain of the protein:
+Check the result. 1UBQ has one chain, so every protein atom is on chain `A`.
+A protein of several chains keeps its chain IDs here; the build puts all of
+them on chain `A`, the PolyzyMD chain of the protein:
 
 ```bash
 grep -c "^ATOM" structures/ubq_clean.pdb

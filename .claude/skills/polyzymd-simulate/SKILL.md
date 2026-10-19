@@ -44,9 +44,13 @@ hardware and software.
 
 ## 2. Change the system
 
-- **Protein:** `enzyme.pdb_path`. Clean a raw PDB first with
-  `polyzymd clean-pdb -i raw.pdb -o clean.pdb`. All protein residues must be
-  in chain A.
+- **Protein:** `enzyme.pdb_path`. Remove waters, ions and other `HETATM`
+  records from a raw PDB, then clean it with
+  `polyzymd clean-pdb -i raw.pdb -o clean.pdb`. Keep the chains as they are:
+  a protein of several chains (an insulin dimer, a hemoglobin tetramer) loads
+  as several protein molecules, and the build keeps them all and puts them on
+  chain A. Do not join chains into one by editing the PDB; that adds peptide
+  bonds that do not exist.
 - **Ligand:** a `substrate:` block with a docked, protonated SDF
   (`sdf_path`, `charge_method: nagl`, `residue_name`). One ligand only.
 - **Co-solvent from a SMILES:** under `solvent.co_solvents`, give `name`,
