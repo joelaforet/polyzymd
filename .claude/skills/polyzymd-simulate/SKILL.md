@@ -71,9 +71,11 @@ hardware and software.
      that only ends early, follow "Add the terminal oxygen of a chain
      that ends early" in
      `docs/source/tutorials/prepare_pdb_for_openff.md`.
-  4. Keep a `TER` record between chains and between disconnected fragments.
-     Do not merge chains into one by editing the PDB: a merged chain gets
-     peptide bonds that do not exist. Each chain, or each group of chains
+  4. Keep the chain IDs as they are, and a `TER` record between chains and
+     between disconnected fragments. Do not merge chains into one or give
+     them one chain ID by editing the PDB: a merged chain gets peptide bonds
+     that do not exist, and chains joined by disulfides need distinct IDs
+     for the build to number them apart. Each chain, or each group of chains
      joined by disulfide bonds, loads as one protein molecule; the build
      keeps every protein molecule, puts them all on chain A and numbers
      their residues on from one molecule to the next (see
