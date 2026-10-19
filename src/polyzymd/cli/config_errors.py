@@ -50,7 +50,7 @@ def config_load_lines(error: BaseException, path: str | Path) -> list[tuple[str,
     if fix:
         lines.append(("fix", " ".join(fix.split())))
     if "polyzymd validate" not in fix:
-        lines.append(("fix", f"correct {path} and run polyzymd validate again."))
+        lines.append(("fix", f"correct {path} and run polyzymd validate -c {path} again."))
     return lines
 
 

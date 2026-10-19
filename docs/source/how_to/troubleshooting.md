@@ -90,7 +90,7 @@ The YAML syntax is wrong. Check these points:
 error: solvent.co_solvents.0: Value error, Co-solvent 'dmso': give exactly one of mole_fraction, concentration and count, not none
 error: solvent.co_solvents.1.name: required key missing
 error: solvent.co_solvents.2.name: required key missing
-fix: correct these keys in config.yaml and run polyzymd validate again.
+fix: correct these keys in config.yaml and run polyzymd validate -c config.yaml again.
 ```
 
 Each key was written as a separate list item. A `-` starts a new item. Put

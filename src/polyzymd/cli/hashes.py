@@ -59,8 +59,9 @@ def hash_trajectories_command(
     working directory, never progress.json. Running it again changes
     nothing: files with a recorded hash are skipped without being read, and
     a recorded hash is never overwritten; a disagreement is printed as a
-    conflict and exits 2. Reading the trajectories takes about a second per
-    gigabyte, so on a cluster run it in a batch job.
+    conflict and exits 2, as an unreadable config or study does. Reading the
+    trajectories takes about a second per gigabyte, so on a cluster run it in
+    a batch job.
 
     \b
     Examples:

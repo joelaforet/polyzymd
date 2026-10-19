@@ -439,7 +439,7 @@ def config_error_lines(error: ValidationError, path: Union[str, Path]) -> list[t
     # A missing section that an unknown key misspells needs no template.
     if any(not _is_suggested(section, lines) for section in missing_sections):
         fixes.insert(0, TEMPLATE_FIX)
-    fixes.append(f"correct these keys in {path} and run polyzymd validate again.")
+    fixes.append(f"correct these keys in {path} and run polyzymd validate -c {path} again.")
     return lines + [("fix", text) for text in fixes]
 
 

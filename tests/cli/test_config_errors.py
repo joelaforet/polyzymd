@@ -50,7 +50,7 @@ def test_every_command_reports_a_bad_config_the_same_way(
     assert result.exit_code == exit_code, result.output
     assert isinstance(result.exception, SystemExit), result.exception
     assert UNKNOWN_PDB in result.stderr
-    assert f"fix: correct these keys in {config} and run polyzymd validate again." in (
+    assert f"fix: correct these keys in {config} and run polyzymd validate -c {config} again." in (
         result.stderr
     )
     assert "Failed to load config" not in result.output
@@ -71,7 +71,9 @@ def test_study_check_reports_a_bad_condition_config_with_its_label(tmp_path: Pat
         f"error: condition B: cannot read {path}: pdb: unknown key; "
         "did you mean enzyme.pdb_path?"
     ) in result.output
-    assert f"fix: correct these keys in {path} and run polyzymd validate again." in (result.output)
+    assert f"fix: correct these keys in {path} and run polyzymd validate -c {path} again." in (
+        result.output
+    )
 
 
 def test_a_file_error_keeps_its_fix_and_says_to_validate_again(tmp_path: Path) -> None:
@@ -82,7 +84,7 @@ def test_a_file_error_keeps_its_fix_and_says_to_validate_again(tmp_path: Path) -
     assert config_load_lines(error, "c.yaml") == [
         ("error", f"{tmp_path / 'c.yaml'}: not valid YAML"),
         ("fix", "Correct the YAML."),
-        ("fix", "correct c.yaml and run polyzymd validate again."),
+        ("fix", "correct c.yaml and run polyzymd validate -c c.yaml again."),
     ]
 
 
@@ -92,5 +94,5 @@ def test_a_value_error_with_its_own_fix_keeps_it() -> None:
     assert config_load_lines(error, "c.yaml") == [
         ("error", "production: ensemble NVE is not run."),
         ("fix", "use ensemble NVT or NPT."),
-        ("fix", "correct c.yaml and run polyzymd validate again."),
+        ("fix", "correct c.yaml and run polyzymd validate -c c.yaml again."),
     ]
