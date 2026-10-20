@@ -177,7 +177,7 @@ fi
 export PYTHONNOUSERSITE=1
 
 # The manifest path was resolved at submission time.
-eval "$(pixi shell-hook -e "$PIXI_ENV" --manifest-path {{ manifest_path | shell_quote }})"
+{{ pixi_activation }}
 
 # Enable strict error handling after environment setup
 set -e

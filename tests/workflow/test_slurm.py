@@ -502,9 +502,10 @@ class TestGeneratedOpenMMScript:
         assert '#SBATCH --chdir="/scratch/user/run_3"' in script
         assert "REQUESTED_PIXI_ENV=sim-cuda-12-4" in script
         assert (
-            'eval "$(pixi shell-hook -e "$PIXI_ENV" '
+            '_pixi_hook="$(pixi shell-hook -e "$PIXI_ENV" '
             '--manifest-path /projects/user/polyzymd/pixi.toml)"' in script
         )
+        assert 'eval "$_pixi_hook"' in script
         assert "nvidia-smi --query-gpu=driver_version,compute_cap" in script
         assert 'openmm.Platform.getPlatformByName("CUDA")' in script
         assert "openmm.NonbondedForce()" in script
@@ -1264,3 +1265,67 @@ class TestDiscoverManifestPath:
         monkeypatch.setattr(slurm_module.shutil, "which", lambda name: str(exe))
 
         assert slurm_module._discover_manifest_path() == str(workspace / "pixi.toml")
+
+
+def _activation(tmp_path, pixi_body: str) -> subprocess.CompletedProcess:
+    """Run the pixi activation block with a fake ``pixi`` and report what follows it."""
+    from polyzymd.workflow.slurm import pixi_activation_block
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "pixi").write_text("#!/bin/bash\n" + pixi_body)
+    (bin_dir / "pixi").chmod(0o755)
+    script = tmp_path / "activate.sh"
+    script.write_text(
+        "set -e\n"
+        + pixi_activation_block('"sim-cuda-12-4"', "/projects/user/polyzymd/pixi.toml")
+        + '\necho "after activation: ${POLYZYMD_ENV_ACTIVE:-no}"\n'
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "POLYZYMD_PIXI_RETRY_SLEEP": "0",
+        "COUNT_FILE": str(tmp_path / "count"),
+    }
+    return subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True)
+
+
+def test_a_failing_pixi_shell_hook_is_tried_again(tmp_path):
+    """A hook that fails while another job updates the environment is retried."""
+    result = _activation(
+        tmp_path,
+        'n=$(cat "$COUNT_FILE" 2>/dev/null || echo 0); echo $((n + 1)) > "$COUNT_FILE"\n'
+        'if [ "$n" -lt 2 ]; then exit 1; fi\n'
+        'echo "export POLYZYMD_ENV_ACTIVE=yes"\n',
+    )
+    assert result.returncode == 0, result.stderr
+    assert "after activation: yes" in result.stdout
+    assert result.stderr.count("pixi shell-hook failed") == 2
+
+
+def test_a_job_whose_environment_never_activates_stops(tmp_path):
+    """The job stops with an error instead of running without its environment."""
+    result = _activation(tmp_path, "exit 1\n")
+    assert result.returncode == 1
+    assert "FATAL: cannot activate the pixi environment of /projects/user/polyzymd/pixi.toml" in (
+        result.stderr
+    )
+    assert "after activation" not in result.stdout
+
+
+def test_an_openmm_job_without_its_environment_does_not_run(monkeypatch, tmp_path):
+    """The rendered OpenMM job stops before any PolyzyMD command when pixi cannot activate."""
+    working_dir = tmp_path / "run_3"
+    working_dir.mkdir()
+    script_path = TestGeneratedOpenMMScript._render_to(monkeypatch, tmp_path, working_dir)
+    bin_dir = TestGeneratedOpenMMScript._fake_cluster_bin(tmp_path)
+    (bin_dir / "pixi").write_text("#!/bin/bash\nexit 1\n")
+    (bin_dir / "polyzymd").write_text('#!/bin/bash\necho "polyzymd ran $1"\n')
+
+    result, log = TestGeneratedOpenMMScript._run_script(
+        script_path, bin_dir, tmp_path, POLYZYMD_PIXI_RETRY_SLEEP="0"
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "polyzymd ran" not in result.stdout
+    assert log == ""
