@@ -122,9 +122,12 @@ environment has no OpenFF, so the job loads the build and cannot make one.
 ### Blanca GPU features
 
 `--constraint` takes the feature names of the Blanca GPU nodes: `A40`,
-`A100`, `L40`, `h100` (lower case), `V100` and `rtx6000`. The L40S nodes have
-no feature name, and `--constraint L40S` fails with
-*"Invalid feature specification"*. For example, `--constraint "A40|A100|L40"`.
+`A100`, `L40`, `h100` (lower case), `V100` and `rtx6000`. `L40` also selects
+some nodes whose GPUs are L40S. There is no `L40S` feature: an L40S node
+without the `L40` feature cannot be selected by name, and
+`--constraint L40S` fails with *"Invalid feature specification"*. For
+example, `--constraint "A40|A100|L40"`. `sinfo -N -o "%N %f %G"` lists each
+node's features and GPUs.
 
 (excluded-blanca-gpu-nodes)=
 ## Excluded Blanca GPU nodes
@@ -195,8 +198,10 @@ Blanca has mixed GPU types, so give `--constraint` for GPU jobs. See
 {doc}`run_gromacs` for the reason.
 
 **Blanca, 1 GPU, site module.** The equivalent of the 7 October test, with
-`module_load` in place of the wrapper. The job loads the module; this exact
-block has not run on Blanca yet.
+`module_load` in place of the wrapper. The job loads the module. This exact
+block and command ran the GROMACS quickstart on Blanca on 19 October 2026:
+six replicates on A100 and L40S nodes, with nonbonded, PME and bonded work
+on the GPU.
 
 ```yaml
 gromacs:
