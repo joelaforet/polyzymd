@@ -106,6 +106,28 @@ def _ensure_openmm_loaded() -> None:
     StateDataReporter = _StateDataReporter
 
 
+def production_dynamics(production: Any) -> Dict[str, Any]:
+    """Return the ``run_production`` arguments the config's production phase sets.
+
+    Parameters
+    ----------
+    production : SimulationPhaseConfig
+        ``simulation_phases.production`` of the config.
+
+    Returns
+    -------
+    dict
+        ``ensemble``, ``thermostat``, ``friction`` (1/ps, the inverse of
+        ``thermostat_timescale``) and ``barostat_frequency``.
+    """
+    return {
+        "ensemble": production.ensemble.value,
+        "thermostat": production.thermostat.value if production.thermostat else "LangevinMiddle",
+        "friction": 1.0 / production.thermostat_timescale,
+        "barostat_frequency": production.barostat_frequency,
+    }
+
+
 class SimulationRunner:
     """Runner for executing OpenMM molecular dynamics simulations.
 
@@ -769,6 +791,7 @@ class SimulationRunner:
             temperature=start_temp,
             friction=friction,
             timestep=timestep_fs,
+            thermostat=stage.thermostat.value if stage.thermostat else "LangevinMiddle",
             # A resumed stage draws new noise, not a repeat of its start.
             phase=f"equilibration:{stage_index}:{resume_from_step}",
         )
@@ -1465,8 +1488,13 @@ class SimulationRunner:
         *,
         report_interval: int,
         checkpoint_interval_s: float,
+        ensemble: str = "NPT",
+        thermostat: str = "LangevinMiddle",
     ) -> Dict[str, Any]:
-        """Run NPT production simulation.
+        """Run production in the configured ensemble (NPT or NVT).
+
+        :func:`production_dynamics` gives ``friction``, ``barostat_frequency``,
+        ``ensemble`` and ``thermostat`` from the config's production phase.
 
         Args:
             temperature: Temperature in Kelvin.
@@ -1475,7 +1503,7 @@ class SimulationRunner:
             timestep_fs: Time step in femtoseconds.
             friction: Friction coefficient in 1/ps.
             pressure: Pressure in atmospheres.
-            barostat_frequency: Barostat update frequency.
+            barostat_frequency: Barostat update frequency (NPT only).
             output_prefix: Prefix for output files.
             segment_index: Segment index for multi-segment production.
             report_interval: Explicit reporter interval in steps.
@@ -1486,18 +1514,29 @@ class SimulationRunner:
         Returns:
             Dictionary with phase results.
         """
+        if ensemble not in ("NPT", "NVT"):
+            raise ValueError(f"production ensemble must be NPT or NVT, got {ensemble!r}")
+        if thermostat not in ("LangevinMiddle", "Langevin"):
+            # The parameters record the thermostat, so it must be the one that runs.
+            raise ValueError(
+                f"OpenMM production runs LangevinMiddle or Langevin, not {thermostat!r}"
+            )
+        npt = ensemble == "NPT"
         LOGGER.info(
-            f"Starting production: {duration_ns} ns at {temperature} K, {pressure} atm (NPT)"
+            f"Starting production: {duration_ns} ns at {temperature} K"
+            + (f", {pressure} atm" if npt else "")
+            + f" ({ensemble}, {thermostat}, friction {friction:g}/ps"
+            + (f", barostat every {barostat_frequency} steps)" if npt else ")")
         )
 
-        # Add barostat for NPT
         self._remove_barostat()
-        self._add_barostat(
-            pressure=pressure,
-            temperature=temperature,
-            frequency=barostat_frequency,
-            phase=f"production:{segment_index}",
-        )
+        if npt:
+            self._add_barostat(
+                pressure=pressure,
+                temperature=temperature,
+                frequency=barostat_frequency,
+                phase=f"production:{segment_index}",
+            )
 
         # Create output directory
         phase_name = f"{output_prefix}_{segment_index}"
@@ -1517,6 +1556,7 @@ class SimulationRunner:
             temperature=temperature,
             friction=friction,
             timestep=timestep_fs,
+            thermostat=thermostat,
             phase=f"production:{segment_index}",
         )
         self._simulation = self._create_simulation(integrator)
@@ -1631,6 +1671,7 @@ class SimulationRunner:
                                     "__class__": "Quantity",
                                     "__values__": {"value": friction, "unit": "/picosecond"},
                                 },
+                                "thermostat": thermostat,
                             },
                         },
                         "barostat_params": {
@@ -1673,6 +1714,9 @@ class SimulationRunner:
                 },
             },
         }
+        if not npt:
+            # Continuation adds a barostat only when these parameters name one.
+            del params_dict["__values__"]["thermo_params"]["__values__"]["barostat_params"]
         params_path = phase_dir / f"{phase_name}_parameters.json"
         with open(params_path, "w") as f:
             json.dump(params_dict, f, indent=2)
@@ -1863,9 +1907,9 @@ class SimulationRunner:
         results = {
             "phase": "production",
             "segment": segment_index,
-            "ensemble": "NPT",
+            "ensemble": ensemble,
             "temperature_K": temperature,
-            "pressure_atm": pressure,
+            "pressure_atm": pressure if npt else None,
             "duration_ns": duration_ns,
             "total_steps": total_steps,
             "final_energy_kJ_mol": state.getPotentialEnergy().value_in_unit(

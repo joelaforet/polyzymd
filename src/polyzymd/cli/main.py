@@ -2453,7 +2453,7 @@ def _run_initial_segment(
     checkpoint_interval_s : float
         Wall-time interval in seconds between restart checkpoints.
     """
-    from polyzymd.simulation.runner import SimulationRunner
+    from polyzymd.simulation.runner import SimulationRunner, production_dynamics
 
     if report_interval <= 0:
         raise ValueError("report_interval must be a positive integer")
@@ -2582,6 +2582,7 @@ def _run_initial_segment(
                 segment_index=0,
                 report_interval=report_interval,
                 checkpoint_interval_s=checkpoint_interval_s,
+                **production_dynamics(sim_config.simulation_phases.production),
             )
             return
 
@@ -2626,6 +2627,7 @@ def _run_initial_segment(
         segment_index=0,
         report_interval=report_interval,
         checkpoint_interval_s=checkpoint_interval_s,
+        **production_dynamics(sim_config.simulation_phases.production),
     )
 
 
@@ -2660,6 +2662,7 @@ def _run_continuation_segment(
         Wall-time interval in seconds between restart checkpoints.
     """
     from polyzymd.simulation.continuation import ContinuationManager
+    from polyzymd.simulation.runner import production_dynamics
 
     if report_interval <= 0:
         raise ValueError("report_interval must be a positive integer")
@@ -2676,6 +2679,22 @@ def _run_continuation_segment(
         replicate=replicate,
     )
     manager.load_previous_state()
+    saved = manager.saved_dynamics()
+    configured = production_dynamics(sim_config.simulation_phases.production)
+    if (saved["ensemble"], saved["thermostat"]) != (
+        configured["ensemble"],
+        configured["thermostat"],
+    ) or abs(saved["friction"] - configured["friction"]) > 1e-9 * configured["friction"]:
+        colored_echo(
+            f"warning: segment {segment_index} continues the dynamics the chain started with "
+            f"({saved['ensemble']}, {saved['thermostat']}, friction {saved['friction']:g}/ps), "
+            f"not the config's production ({configured['ensemble']}, "
+            f"{configured['thermostat']}, friction {configured['friction']:g}/ps). Start the "
+            "replicate again to run the config's dynamics.",
+            phase="simulation",
+            err=True,
+            level=logging.WARNING,
+        )
 
     colored_echo(
         f"Running segment {segment_index}: {duration_ns:.3f} ns, {num_samples} frames...",

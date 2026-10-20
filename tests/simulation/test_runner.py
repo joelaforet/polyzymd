@@ -6,6 +6,7 @@ OpenMM simulation setup (GPU, topology, system, etc.).
 
 import gc
 import inspect
+import json
 import struct
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -1165,3 +1166,120 @@ def test_production_segment_records_its_seeds(tmp_path):
         "velocities": dynamics_seed(3, "velocities:production"),
     }
     assert segment.started_at <= segment.finished_at
+
+
+def _production_phase(**settings):
+    """Return a production phase config with the given settings."""
+    from polyzymd.config.schema import SimulationPhaseConfig
+
+    return SimulationPhaseConfig(
+        **{"ensemble": "NPT", "duration": 1e-5, "samples": 2, "time_step": 1.0, **settings}
+    )
+
+
+def _run_production(tmp_path, production):
+    """Run a one-step-scale production of one atom with ``production``'s settings."""
+    from polyzymd.simulation.progress import load_or_scan_progress, save_progress
+    from polyzymd.simulation.runner import production_dynamics
+
+    save_progress(
+        tmp_path, load_or_scan_progress(tmp_path, total_steps=10, total_samples=2, timestep_fs=1.0)
+    )
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    result = runner.run_production(
+        temperature=300.0,
+        duration_ns=1e-5,
+        num_samples=2,
+        timestep_fs=1.0,
+        segment_index=0,
+        report_interval=5,
+        checkpoint_interval_s=3600.0,
+        **production_dynamics(production),
+    )
+    params = json.loads((tmp_path / "production_0" / "production_0_parameters.json").read_text())[
+        "__values__"
+    ]["thermo_params"]["__values__"]
+    return runner, result, params
+
+
+def test_production_runs_the_ensemble_and_thermostat_of_the_config(tmp_path):
+    """An NVT production with Langevin at 2 ps has no barostat and friction 0.5/ps."""
+    openmm = pytest.importorskip("openmm")
+    from openmm import unit
+
+    runner, result, params = _run_production(
+        tmp_path,
+        _production_phase(
+            ensemble="NVT", thermostat="Langevin", thermostat_timescale=2.0, barostat="MC"
+        ),
+    )
+    integrator = runner.simulation.integrator
+    assert type(integrator) is openmm.LangevinIntegrator
+    assert integrator.getFriction().value_in_unit(unit.picosecond**-1) == pytest.approx(0.5)
+    forces = runner.simulation.system.getForces()
+    assert not any(isinstance(force, openmm.MonteCarloBarostat) for force in forces)
+    assert result["ensemble"] == "NVT"
+    assert "barostat_params" not in params
+    assert params["thermostat_params"]["__values__"]["thermostat"] == "Langevin"
+
+
+def test_npt_production_moves_the_volume_at_the_configured_frequency(tmp_path):
+    """barostat_frequency of the production phase reaches OpenMM's Monte Carlo barostat."""
+    openmm = pytest.importorskip("openmm")
+
+    runner, result, params = _run_production(
+        tmp_path, _production_phase(barostat="MC", barostat_frequency=50)
+    )
+    (barostat,) = [
+        force
+        for force in runner.simulation.system.getForces()
+        if isinstance(force, openmm.MonteCarloBarostat)
+    ]
+    assert barostat.getFrequency() == 50
+    assert type(runner.simulation.integrator) is openmm.LangevinMiddleIntegrator
+    assert result["ensemble"] == "NPT"
+    assert params["barostat_params"]["__values__"]["frequency"] == 50
+
+
+def test_an_equilibration_stage_runs_its_thermostat(tmp_path):
+    """A stage with thermostat Langevin runs OpenMM's LangevinIntegrator, not LangevinMiddle."""
+    openmm = pytest.importorskip("openmm")
+    from polyzymd.config.schema import EquilibrationStageConfig
+
+    class EmptyResolver:
+        @staticmethod
+        def resolve(_group):
+            return []
+
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    stage = EquilibrationStageConfig(
+        name="nvt",
+        ensemble="NVT",
+        temperature=300.0,
+        duration=0.00001,
+        samples=2,
+        thermostat="Langevin",
+    )
+    runner.run_equilibration_stage(
+        stage=stage,
+        reference_positions=runner._current_positions,
+        atom_group_resolver=EmptyResolver(),
+        stage_index=0,
+    )
+    assert type(runner.simulation.integrator) is openmm.LangevinIntegrator
+
+
+def test_production_refuses_a_thermostat_openmm_does_not_run(tmp_path):
+    """The parameters record the thermostat, so production must not run another one."""
+    pytest.importorskip("openmm")
+    runner = _one_atom_runner(tmp_path, replicate=3)
+    with pytest.raises(ValueError, match="not 'NoseHoover'"):
+        runner.run_production(
+            temperature=300.0,
+            duration_ns=1e-5,
+            num_samples=2,
+            timestep_fs=1.0,
+            report_interval=5,
+            checkpoint_interval_s=3600.0,
+            thermostat="NoseHoover",
+        )
