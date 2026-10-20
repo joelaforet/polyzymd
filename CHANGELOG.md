@@ -469,6 +469,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`polymers: {enabled: false}` alone turns polymers off.**  A disabled `polymers:` section no longer needs `type_prefix`, `monomers`, `length` and `count`; it means the same as `polymers: null`, and a warning names any other key it does not read. A disabled section with every required key is kept as written, so existing configs keep their hash.
+
 - **Stored analysis results identify their inputs by content.**  Records name
   trajectory and topology files by path relative to the runs folder, size and
   SHA-256, with no modification time, so moved, copied or downloaded data

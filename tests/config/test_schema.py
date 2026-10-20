@@ -1,6 +1,7 @@
 """Test that all public modules can be imported."""
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -1345,3 +1346,46 @@ def test_new_openmm_builds_of_a_gromacs_config_refuse_the_anisotropic_barostat(
     config.require_buildable()
     with pytest.raises(ValueError, match="MCA"):
         config.require_buildable("openmm")
+
+
+class TestDisabledPolymers:
+    """``polymers: {enabled: false}`` turns polymers off without the polymer fields."""
+
+    def test_enabled_false_alone_means_no_polymers(self, minimal_config_data):
+        import copy
+
+        from polyzymd.simulation.artifact_integrity import config_hash
+
+        disabled = copy.deepcopy(minimal_config_data)
+        disabled["polymers"] = {"enabled": False}
+        config = SimulationConfig(**disabled)
+
+        assert config.polymers is None
+        for written in ("false", "no", 0):
+            disabled["polymers"] = {"enabled": written}
+            assert SimulationConfig(**copy.deepcopy(disabled)).polymers is None
+        control = SimulationConfig(**copy.deepcopy(minimal_config_data))
+        assert config_hash(config) == config_hash(control)
+
+    def test_keys_of_a_disabled_section_are_named_as_not_read(self, minimal_config_data, caplog):
+        import copy
+
+        disabled = copy.deepcopy(minimal_config_data)
+        disabled["polymers"] = {"enabled": False, "length": 5, "count": 2}
+        with caplog.at_level(logging.WARNING, logger="polyzymd.config.schema"):
+            config = SimulationConfig(**disabled)
+
+        assert config.polymers is None
+        assert "polymers.enabled is false, so these polymer keys are not read: count, length" in (
+            caplog.text
+        )
+
+    def test_a_complete_disabled_section_is_kept_as_written(self, minimal_config_data):
+        import copy
+
+        disabled = copy.deepcopy(minimal_config_data)
+        disabled["polymers"] = {**TestPolymerPackingSphereConfinement._polymer_block()}
+        disabled["polymers"]["enabled"] = False
+        config = SimulationConfig(**disabled)
+
+        assert config.polymers is not None and config.polymers.enabled is False
