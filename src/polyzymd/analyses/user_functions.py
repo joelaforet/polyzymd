@@ -104,7 +104,7 @@ def load_module(file: Path) -> types.ModuleType:
     # .pixi environment or a source checkout, is left alone.
     _FOLDERS.add(file.parent)
     for name, loaded in list(sys.modules.items()):
-        if any(_imported_from(loaded, name, folder) for folder in _FOLDERS):
+        if _imported_through(loaded, name, _FOLDERS):
             del sys.modules[name]
     sys.path.insert(0, str(file.parent))
     # Helpers it imports are compiled into a fresh cache: a .pyc beside them is
@@ -128,23 +128,26 @@ def load_module(file: Path) -> types.ModuleType:
     return module
 
 
-def _imported_from(module: Any, name: str, folder: Path) -> bool:
-    """Return whether ``module`` was imported through ``folder`` on ``sys.path``.
+def _imported_through(module: Any, name: str, folders: set[Path]) -> bool:
+    """Return whether ``module`` was imported through one of ``folders`` on ``sys.path``.
 
-    True when its top-level name is a file or package directly in ``folder``
-    and its file lies there: ``helper`` from ``folder/helper.py``, or
-    ``util.k`` from ``folder/util/k.py``.
+    True when its top-level name is a file or package directly in such a
+    folder and its file lies there: ``helper`` from ``folder/helper.py``, or
+    ``util.k`` from ``folder/util/k.py``. The file is resolved once and its
+    parents are looked up in ``folders``, so the cost does not grow with the
+    number of study folders imported in this process.
     """
     origin = getattr(module, "__file__", None)
     if not origin:
         return False
-    try:
-        relative = Path(origin).resolve().relative_to(folder)
-    except ValueError:
-        return False
+    path = Path(origin).resolve()
     top = name.split(".")[0]
-    first = relative.parts[0]
-    return first == top or first == f"{top}.py"
+    for depth, parent in enumerate(reversed(path.parents)):
+        if parent in folders:
+            first = path.parts[depth + 1]
+            if first == top or first == f"{top}.py":
+                return True
+    return False
 
 
 def run_user_analysis(
