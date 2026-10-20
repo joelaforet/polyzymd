@@ -945,6 +945,61 @@ class TestMinimizationConfig:
         assert "minimization" not in without.model_dump(mode="json")["simulation_phases"]
 
 
+class TestUnreadFields:
+    """Keys kept only so old configs load warn once and stay out of shipped configs."""
+
+    def test_an_unread_key_warns_once(self, minimal_config_data, monkeypatch, caplog):
+        import copy
+        import logging
+
+        from polyzymd.config import schema
+
+        monkeypatch.setattr(schema, "_WARNED_UNREAD", set())
+        data = copy.deepcopy(minimal_config_data)
+        data["output"] = {"trajectory_format": "xtc", "save_checkpoint": False}
+        with caplog.at_level(logging.WARNING, logger="polyzymd.config.schema"):
+            SimulationConfig(**data)
+            SimulationConfig(**copy.deepcopy(data))
+
+        warnings = [r.getMessage() for r in caplog.records if "is not read" in r.getMessage()]
+        assert warnings == [
+            "output.save_checkpoint is not read: both engines always write checkpoints. "
+            "Leave it out of new configs.",
+            "output.trajectory_format is not read: OpenMM writes dcd and GROMACS writes xtc. "
+            "Leave it out of new configs.",
+        ]
+
+    def test_a_config_without_unread_keys_does_not_warn(
+        self, minimal_config_data, monkeypatch, caplog
+    ):
+        import logging
+
+        from polyzymd.config import schema
+
+        monkeypatch.setattr(schema, "_WARNED_UNREAD", set())
+        with caplog.at_level(logging.WARNING, logger="polyzymd.config.schema"):
+            SimulationConfig(**minimal_config_data)
+
+        assert "is not read" not in caplog.text
+
+    def test_shipped_configs_give_no_unread_key(self):
+        """Templates and examples (some are Jinja, so the text is searched) list no unread key."""
+        import re
+
+        from polyzymd.config.schema import OutputConfig
+
+        root = Path(__file__).resolve().parents[2]
+        shipped = [
+            *(root / "src/polyzymd/templates").rglob("*.yaml"),
+            *(root / "src/polyzymd/templates").rglob("*.jinja"),
+            *(root / "examples").rglob("*.yaml"),
+        ]
+        keys = "|".join(OutputConfig.UNREAD_FIELDS)
+        assert shipped
+        for path in shipped:
+            assert not re.search(rf"^\s*({keys}):", path.read_text(), re.M), path
+
+
 class TestPolymerPackingSphereConfinement:
     """``polymers.packing.confine_to_sphere`` and its effect on the build hash."""
 

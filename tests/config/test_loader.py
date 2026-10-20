@@ -434,3 +434,26 @@ def test_a_mapping_given_for_a_list_names_the_list(tmp_path: Path) -> None:
         and text.endswith("not a mapping")
         for _, text in lines
     ), lines
+
+
+def test_save_config_leaves_out_keys_no_code_reads(tmp_path: Path) -> None:
+    """Unread keys at their default are not saved; any other value is kept, so the hash holds."""
+    import yaml
+
+    from polyzymd.config.loader import load_config, save_config
+    from polyzymd.simulation.artifact_integrity import config_hash
+
+    path = _config_file(
+        tmp_path,
+        lambda data: data.setdefault("output", {}).update(
+            trajectory_format="xtc", save_checkpoint=True
+        ),
+    )
+    out = tmp_path / "saved.yaml"
+    loaded = load_config(path)
+    save_config(loaded, out)
+
+    output = yaml.safe_load(out.read_text())["output"]
+    assert not {"save_checkpoint", "save_state_data"} & set(output)
+    assert output["trajectory_format"] == "xtc"
+    assert config_hash(load_config(out)) == config_hash(loaded)

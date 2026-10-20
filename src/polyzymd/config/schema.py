@@ -16,7 +16,7 @@ import warnings
 from enum import Enum
 from pathlib import Path
 from string import Formatter
-from typing import Any, Literal, Self, get_args
+from typing import Any, ClassVar, Literal, Self, get_args
 
 from pydantic import (
     BaseModel,
@@ -29,6 +29,8 @@ from pydantic import (
 )
 
 LOGGER = logging.getLogger(__name__)
+#: Warnings about unread keys printed in this process, so each prints once.
+_WARNED_UNREAD: set[str] = set()
 
 _TOKEN_UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
 _TOKEN_UNDERSCORES = re.compile(r"_+")
@@ -148,6 +150,22 @@ class _ConfigModel(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    #: Keys a section still accepts only so the configs of existing runs load.
+    #: No code reads them. Giving one prints its warning once per process, and
+    #: ``save_config`` leaves out those at their default value; the config hash
+    #: still includes them, so a saved config keeps its hash.
+    UNREAD_FIELDS: ClassVar[dict[str, str]] = {}
+
+    @model_validator(mode="after")
+    def _warn_unread_fields(self) -> Self:
+        """Warn once for each unread key the config gives."""
+        for name in sorted(self.model_fields_set & self.UNREAD_FIELDS.keys()):
+            message = self.UNREAD_FIELDS[name]
+            if message not in _WARNED_UNREAD:
+                _WARNED_UNREAD.add(message)
+                LOGGER.warning(message)
+        return self
 
     @field_validator("*", mode="before")
     @classmethod
@@ -1302,8 +1320,8 @@ class OutputConfig(_ConfigModel):
         naming_template: Template for naming working directories
         job_scripts_subdir: Subdirectory name for job scripts within projects
         slurm_logs_subdir: Subdirectory name for SLURM logs within projects
-        save_checkpoint: Whether to save checkpoint files
-        save_state_data: Whether to save thermodynamic state data
+        save_checkpoint: Not read; kept so the configs of existing runs load
+        save_state_data: Not read; kept so the configs of existing runs load
         trajectory_format: Not read; the engine picks the format (OpenMM dcd, GROMACS xtc)
 
     Example YAML:
@@ -1314,6 +1332,21 @@ class OutputConfig(_ConfigModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    UNREAD_FIELDS: ClassVar[dict[str, str]] = {
+        "save_checkpoint": (
+            "output.save_checkpoint is not read: both engines always write checkpoints. "
+            "Leave it out of new configs."
+        ),
+        "save_state_data": (
+            "output.save_state_data is not read: both engines always write energies. "
+            "Leave it out of new configs."
+        ),
+        "trajectory_format": (
+            "output.trajectory_format is not read: OpenMM writes dcd and GROMACS writes xtc. "
+            "Leave it out of new configs."
+        ),
+    }
 
     # Directory configuration
     projects_directory: Path = Field(
@@ -1340,8 +1373,8 @@ class OutputConfig(_ConfigModel):
     )
 
     # Output options
-    save_checkpoint: bool = Field(True, description="Save checkpoint files")
-    save_state_data: bool = Field(True, description="Save state data CSV")
+    save_checkpoint: bool = Field(True, description="Not read: checkpoints are always written")
+    save_state_data: bool = Field(True, description="Not read: energies are always written")
     trajectory_format: str = Field(
         "dcd", description="Not read: OpenMM writes dcd and GROMACS writes xtc trajectories"
     )

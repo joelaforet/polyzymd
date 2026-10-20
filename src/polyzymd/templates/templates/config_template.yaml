@@ -304,11 +304,6 @@ output:
   # polymer_type format: {type_prefix}_{label1}{pct1}_{label2}{pct2} (e.g., SBMA-EGMA_A75_B25),
   #   or "none" without polymers
   naming_template: "{enzyme}_{substrate}_{polymer_type}_{duration}ns_{temperature}K_run{replicate}"
-  
-  # Output options
-  save_checkpoint: true
-  save_state_data: true
-  trajectory_format: "dcd"              # Not read: OpenMM writes dcd, GROMACS xtc
 
 # ============================================================================
 # OpenMM Platform (REQUIRED for the OpenMM engine; not read by GROMACS)
