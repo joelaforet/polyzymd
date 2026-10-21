@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.0] - 2026-10-21
 
 ### Added
 
@@ -138,6 +138,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POLYZYMD_STOP_FILE`.  `--stop-only` leaves the running job alone so the
   chain stops after the current segment, `--dry-run` reports without acting,
   and `--resume` removes the marker.
+
+- **`polyzymd submit --exclude <nodelist>`** overrides the preset's SLURM
+  `--exclude` value (replacing it, not appending), so a node can be re-tested
+  without editing the preset.  Omitting the flag keeps the preset default; pass
+  an empty string to exclude nothing.
+- **Frozen-solute energy minimisation.**  `SimulationRunner.minimize()` now holds
+  every protein and substrate atom fixed (new `solute` atom group) and relaxes only
+  solvent and polymers, so the prepared structure enters equilibration with its
+  coordinates unchanged; the runner verifies a zero solute displacement and records
+  it in `minimization/phase.json`.  Implemented by minimising on a copy of the
+  System with massless solute atoms and their constraints removed (OpenMM fixes
+  massless particles but forbids constraints on them); the real System is untouched.
+  Configurable via `simulation_phases.minimization` (`freeze_solute`, default
+  `true`; `max_iterations`; `tolerance`), a runtime-only block that is excluded
+  from the build-manifest config hash so existing bundles remain valid.
+  Motivation: waters packed inside the protein by the pre-d96b1fcd builds were
+  "accommodated" by protein inflation during minimisation before heating.
+- **Packmol seeding by replicate.**  `build_packmol_input()`,
+  `solvate_with_packmol()`, `pack_polymers()`, `SolventBuilder.solvate()` and
+  `SystemBuilder.pack_polymers()` accept `seed`; `build_from_config()` passes
+  the replicate index to both packing stages so replicates start from
+  independent coordinates (Packmol is deterministic for identical inputs).
+  The seeds are recorded under `provenance` in `build_manifest.json`, which
+  also gains `polyzymd_version`.
+- **Per-segment runtime provenance.**  `SegmentRecord` and
+  `EquilibrationStageRecord` carry optional `polyzymd_version`,
+  `openmm_version` and `pixi_environment` fields (older `progress.json` files
+  still load), and `production_N_parameters.json` gains a `provenance` block
+  with those values plus hostname and SLURM job id.  New helpers
+  `polyzymd.utils.version.runtime_provenance()` / `record_provenance()`;
+  `get_polyzymd_version()` moved there.
 
 ### Fixed
 
@@ -528,41 +559,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (default 200).  Note: this changes the build-manifest config hash of polymer
   configs, so polymer systems built earlier must be rebuilt before `submit`.
 
-### Added
-
-- **`polyzymd submit --exclude <nodelist>`** overrides the preset's SLURM
-  `--exclude` value (replacing it, not appending), so a node can be re-tested
-  without editing the preset.  Omitting the flag keeps the preset default; pass
-  an empty string to exclude nothing.
-- **Frozen-solute energy minimisation.**  `SimulationRunner.minimize()` now holds
-  every protein and substrate atom fixed (new `solute` atom group) and relaxes only
-  solvent and polymers, so the prepared structure enters equilibration with its
-  coordinates unchanged; the runner verifies a zero solute displacement and records
-  it in `minimization/phase.json`.  Implemented by minimising on a copy of the
-  System with massless solute atoms and their constraints removed (OpenMM fixes
-  massless particles but forbids constraints on them); the real System is untouched.
-  Configurable via `simulation_phases.minimization` (`freeze_solute`, default
-  `true`; `max_iterations`; `tolerance`), a runtime-only block that is excluded
-  from the build-manifest config hash so existing bundles remain valid.
-  Motivation: waters packed inside the protein by the pre-d96b1fcd builds were
-  "accommodated" by protein inflation during minimisation before heating.
-- **Packmol seeding by replicate.**  `build_packmol_input()`,
-  `solvate_with_packmol()`, `pack_polymers()`, `SolventBuilder.solvate()` and
-  `SystemBuilder.pack_polymers()` accept `seed`; `build_from_config()` passes
-  the replicate index to both packing stages so replicates start from
-  independent coordinates (Packmol is deterministic for identical inputs).
-  The seeds are recorded under `provenance` in `build_manifest.json`, which
-  also gains `polyzymd_version`.
-- **Per-segment runtime provenance.**  `SegmentRecord` and
-  `EquilibrationStageRecord` carry optional `polyzymd_version`,
-  `openmm_version` and `pixi_environment` fields (older `progress.json` files
-  still load), and `production_N_parameters.json` gains a `provenance` block
-  with those values plus hostname and SLURM job id.  New helpers
-  `polyzymd.utils.version.runtime_provenance()` / `record_provenance()`;
-  `get_polyzymd_version()` moved there.
-
-### Changed
-
 - **Modules moved out of the plugin framework.**  `UniverseProvider`,
   `UniverseProvenance` and `FileIdentity` are in `polyzymd.analyses.universe`;
   `compute_config_hash` is in `polyzymd.analyses.identity`, with the same
@@ -687,13 +683,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and to `.claude/skills/polyzymd-analyze/SKILL.md` for an agent.  It reads
   only the file's `conditions` and `defaults.equilibration_time`.
 
-## [1.3.0] - 2026-04-09 — Analysis Plugin System & OCP Compliance
+### Release-candidate history (v1.3.0-rc.1 to rc.4, April 2026)
+
+These notes were written for the April 2026 release candidates, which were tagged `v1.3.0-rc.1` to `v1.3.0-rc.4` but never released. Where they describe the analysis plugin framework (`polyzymd.analyses.base`, discovery, the orchestrator, `polyzymd compare` and `polyzymd new-analysis`), that framework was later replaced: see "Removed" above. They are kept for the history of the release candidates.
 
 Large-scale refactoring of the analysis and comparison subsystems to achieve
 Open-Closed Principle compliance.  New analysis types can now be added by
 dropping a module or package in `analyses/` with no modifications to core code.
 
-### Breaking Changes
+#### Breaking Changes
 
 - **Python 3.12 is now required.**  Python 3.10 and 3.11 support has been
   dropped for v1.3 and later.  Project metadata, CI, Read the Docs, legacy conda
@@ -731,7 +729,7 @@ dropping a module or package in `analyses/` with no modifications to core code.
   details now remain private to the contacts plugin, while cross-plugin helpers
   live only in the documented shared utility modules.
 
-### Added
+#### Added
 
 - **`polyzymd new-analysis <name>` scaffold CLI command.**  Generates a complete
   single-file MDAnalysis-native plugin at `src/polyzymd/analyses/<name>.py` and
@@ -856,7 +854,7 @@ dropping a module or package in `analyses/` with no modifications to core code.
   `PluginContractError` in `analyses/exceptions.py` replace generic
   `Exception` raises throughout the orchestrator.
 
-### Changed
+#### Changed
 
 - **Scientific dependency stack updated for NumPy 2.**  Runtime metadata now
   requires `numpy>=2,<3` with Python 3.12-compatible lower bounds for SciPy,
@@ -957,7 +955,7 @@ dropping a module or package in `analyses/` with no modifications to core code.
   `find_enzyme_pdb()` sorts glob results and warns on ambiguity.
   (`analyses/contacts/_paths.py`)
 
-### Removed
+#### Removed
 
 - **Welch ANOVA removed entirely.**  Only classical one-way ANOVA
   (`scipy.stats.f_oneway`) remains.  The `anova_method` field was removed
@@ -967,7 +965,7 @@ dropping a module or package in `analyses/` with no modifications to core code.
 - **`run-gromacs` command.**  Replaced by `polyzymd run --engine gromacs`.  All
   references updated across CLI, docs, and configuration.  (`cli/main.py`)
 
-### Fixed
+#### Fixed
 
 - **Co-solvent mole-fraction naming no longer uses stale volume-fraction
   access.**  Solvent composition placeholders now render DMSO mole fractions
@@ -1041,7 +1039,7 @@ dropping a module or package in `analyses/` with no modifications to core code.
   and `"tukey_hsd"`, raising `ValueError` on invalid input.
   (`analyses/stats.py`)
 
-### Documentation
+#### Documentation
 
 - Corrected `posthoc_testing.md` — Tukey HSD significance now documented as
   using `fdr_alpha` (not hardcoded 0.05); `p_value_adjusted` accurately
@@ -1079,7 +1077,7 @@ dropping a module or package in `analyses/` with no modifications to core code.
 - Added `scancel --signal=KILL` warning to both `gromacs_export.md` and
   `hpc_slurm.md` for stopping preemption-resilient jobs permanently.
 
-### Tests
+#### Tests
 
 - Expanded regression coverage substantially from the branch baseline.
 - Added GROMACS engine tests: binary resolution (`test_gromacs_binary.py`),
@@ -1113,7 +1111,7 @@ dropping a module or package in `analyses/` with no modifications to core code.
   `tests/analyses/shared/`, `tests/cli/`, etc.).
 - Removed obsolete registry and smoke tests.
 
-### Known Limitations
+#### Known Limitations
 
 - **Config hash mismatch warning prints 66+ times.**  The warning should print
   once per analysis run but currently fires per-frame.  Does not affect results.
