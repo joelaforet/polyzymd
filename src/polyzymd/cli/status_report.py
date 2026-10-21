@@ -39,20 +39,51 @@ LOGGER = logging.getLogger(__name__)
 
 # Minimum wall time a segment must have run before its throughput is trusted.
 _MIN_RATE_WINDOW = timedelta(minutes=10)
+# A live segment's rate is noisy until it has run this long.
+_MIN_LIVE_WINDOW = timedelta(hours=1)
 # Minimum steps a segment must have advanced before its throughput is trusted.
 _MIN_RATE_STEPS = 1_000
 
 # Lines in a SLURM log that explain why a chain stopped. Ordered so that the
 # most specific wrapper verdicts win over generic Python tracebacks.
+# "FATAL: run-segment failed" only says the Python step exited non-zero, so it
+# ranks below the "Segment N failed: <cause>" line that names the cause.
 _ERROR_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"^FATAL:.*"),
+    re.compile(r"^FATAL: (?!run-segment failed).*"),
     re.compile(r"^CONCURRENT:.*"),
     re.compile(r"^STOP:.*"),
     re.compile(r"^Segment \d+ failed:.*"),
     re.compile(r"^Validation error:.*"),
     re.compile(r"^slurmstepd: error:.*"),
     re.compile(r"^\w*Error: .*"),
+    re.compile(r"^FATAL:.*"),
 )
+
+# What to do about a dead chain, decided from its last error line.
+ACTION_RESUBMIT = "resubmit"
+ACTION_INSPECT = "inspect"
+# Causes that leave a valid checkpoint behind: node, scheduler or GPU faults.
+_TRANSIENT_MARKERS = (
+    "CUDA routing failed",
+    "resubmit manually with --exclude=",
+    "cannot activate the pixi environment",
+    "dependent successor submission failed",
+    "CONCURRENT:",
+    "CUDA_ERROR",
+    "Stale file handle",
+    "Invalid input string",
+    "DUE TO PREEMPTION",
+    "DUE TO NODE FAILURE",
+)
+_RESUBMIT_SLURM_STATES = {
+    "NODE_FAIL",
+    "PREEMPTED",
+    "CANCELLED",
+    "TIMEOUT",
+    "COMPLETED",
+    "BOOT_FAIL",
+}
+_EXCLUDE = re.compile(r"--exclude=(\S+)")
 _LOG_TAIL_LINES = 80
 _LOG_HEAD_LINES = 200
 _ERROR_MAX_CHARS = 160
@@ -93,6 +124,7 @@ class ReplicateReport:
     last_error: str | None = None
     last_log: str | None = None
     note: str | None = None
+    action: str | None = None
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -234,6 +266,32 @@ def query_end_states(job_ids: Sequence[str], timeout: int = 20) -> dict[str, str
     return out
 
 
+def death_action(last_error: str | None, directory: str | None) -> str:
+    """Map a dead chain's last error line to resubmit or inspect.
+
+    Only causes known to leave a valid checkpoint get ``resubmit``: node,
+    scheduler, GPU-routing and environment-activation faults. Physics
+    blow-ups, build refusals, a missing package and anything unrecognised
+    need a person. ``directory`` is kept for callers; the action does not
+    depend on it.
+    """
+    err = last_error or ""
+    if err.startswith("slurm: "):
+        state = err.split()[1]
+        return ACTION_RESUBMIT if state in _RESUBMIT_SLURM_STATES else ACTION_INSPECT
+    if any(marker in err for marker in _TRANSIENT_MARKERS):
+        return ACTION_RESUBMIT
+    return ACTION_INSPECT
+
+
+def assign_actions(reports: Sequence["SystemReport"]) -> None:
+    """Set ``action`` on every dead replicate. Run after :func:`fill_end_states`."""
+    for report in reports:
+        for rep in report.replicates:
+            if rep.verdict == VERDICT_DEAD:
+                rep.action = death_action(rep.last_error, rep.directory)
+
+
 def fill_end_states(
     reports: Sequence["SystemReport"],
     query_fn: Callable[[Sequence[str]], dict[str, str]] = query_end_states,
@@ -271,15 +329,41 @@ def _parse_iso(value: str | None) -> datetime | None:
     return parsed
 
 
-def estimate_rate_ns_per_day(progress, now: datetime, *, live: bool) -> float | None:
+def segment_window(engine_dir: Path, index: int) -> tuple[datetime, datetime] | None:
+    """Wall window of ``production_<index>`` from its files.
+
+    The parameters JSON is written when the segment starts and the state-data
+    CSV on every report, so their mtimes bracket the segment. Unlike the
+    progress record, they survive rewrites of ``progress.json``.
+    """
+    seg = Path(engine_dir) / f"production_{index}"
+    try:
+        start = (seg / f"production_{index}_parameters.json").stat().st_mtime
+        end = (seg / f"production_{index}_state_data.csv").stat().st_mtime
+    except OSError:
+        return None
+    if end <= start:
+        return None
+    tz = timezone.utc
+    return datetime.fromtimestamp(start, tz), datetime.fromtimestamp(end, tz)
+
+
+def estimate_rate_ns_per_day(
+    progress,
+    now: datetime,
+    *,
+    live: bool,
+    window_fn: Callable[[int], tuple[datetime, datetime] | None] | None = None,
+) -> float | None:
     """Estimate throughput from the most recent informative segment.
 
     Preference order:
 
-    1. The newest segment with a ``finished_at`` timestamp and enough steps
-       (a completed or cleanly interrupted segment has a known wall window).
-    2. If *live* is true (SLURM reports a running job), the newest segment
-       without ``finished_at``, timed from ``started_at`` to *now*.
+    1. With ``window_fn`` (segment file times): a running last segment past an
+       hour of data when *live*, then the newest stopped segment.
+    2. The newest segment with a ``finished_at`` timestamp and enough steps.
+    3. If *live*, the newest segment without ``finished_at``, timed from
+       ``started_at`` to *now*.
 
     Returns ``None`` when no segment gives a trustworthy window.
     """
@@ -294,6 +378,27 @@ def estimate_rate_ns_per_day(progress, now: datetime, *, live: bool) -> float | 
             return None
         ns = steps * timestep_fs / 1e6
         return ns / (window.total_seconds() / 86400.0)
+
+    if window_fn is not None:
+        # File timestamps first. A live segment past an hour reflects the GPU
+        # the chain is on now, so it wins; otherwise use the newest stopped one.
+        last_running = bool(segments) and (
+            getattr(segments[-1].status, "value", segments[-1].status) == "running"
+        )
+        if live and last_running:
+            window = window_fn(segments[-1].index)
+            if window is not None and now - window[0] >= _MIN_LIVE_WINDOW:
+                rate = _rate(segments[-1].steps_completed, window[0], now)
+                if rate is not None:
+                    return rate
+        for seg in reversed(segments):
+            if getattr(seg.status, "value", seg.status) == "running":
+                continue
+            window = window_fn(seg.index)
+            if window is not None:
+                rate = _rate(seg.steps_completed, *window)
+                if rate is not None:
+                    return rate
 
     for seg in reversed(segments):
         start = _parse_iso(seg.started_at)
@@ -310,6 +415,8 @@ def estimate_rate_ns_per_day(progress, now: datetime, *, live: bool) -> float | 
                 continue
             start = _parse_iso(seg.started_at)
             if start is None:
+                continue
+            if now - start < _MIN_LIVE_WINDOW:
                 continue
             rate = _rate(seg.steps_completed, start, now)
             if rate is not None:
@@ -390,6 +497,13 @@ def last_error_line(log_path: Path | None) -> str | None:
                 break
     if best is None:
         return None
+    # A preemption or node failure explains the FATAL lines the job printed after it.
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("slurmstepd: error:") and (
+            "DUE TO PREEMPTION" in stripped or "DUE TO NODE FAILURE" in stripped
+        ):
+            best = (-1, stripped)
     text = best[1]
     if len(text) > _ERROR_MAX_CHARS:
         text = text[: _ERROR_MAX_CHARS - 1] + "…"
@@ -563,7 +677,12 @@ def build_system_report(
         rate = None
         eta = None
         if verdict != VERDICT_COMPLETED:
-            rate = estimate_rate_ns_per_day(progress, now, live=live)
+            rate = estimate_rate_ns_per_day(
+                progress,
+                now,
+                live=live,
+                window_fn=lambda idx, d=engine_dir: segment_window(d, idx),
+            )
             if verdict in (VERDICT_RUNNING, VERDICT_QUEUED):
                 eta = estimate_eta_days(total_ns - completed_ns, rate)
 
@@ -676,7 +795,23 @@ def render_replicate_line(rep: ReplicateReport, label_width: int) -> str:
             fields.append(f"last log {rep.last_log} (no error line found)")
         else:
             fields.append("no slurm log found")
+        if rep.action:
+            fields.append(f"action: {rep.action}")
     return "  ".join(fields)
+
+
+def _with_preset_exclude(nodes: str, preset: str | None) -> str:
+    """Join ``nodes`` with the preset's excluded nodes, since ``submit --exclude`` replaces them."""
+    names = [n for n in nodes.split(",") if n]
+    if preset:
+        try:
+            from polyzymd.workflow.slurm import SlurmConfig
+
+            configured = SlurmConfig.from_preset(preset).exclude or ""
+        except Exception:  # noqa: BLE001 - an unknown preset keeps the routing nodes only
+            configured = ""
+        names = [n for n in configured.split(",") if n] + names
+    return ",".join(dict.fromkeys(names))
 
 
 def render_agent(
@@ -739,16 +874,29 @@ def render_agent(
             lines.append(render_replicate_line(rep, width))
 
     dead = [(r, rep) for r in reports for rep in r.replicates if rep.verdict == VERDICT_DEAD]
-    if dead:
+    restart: dict[tuple[str, str], list[int]] = {}
+    inspect: list[str] = []
+    for report, rep in dead:
+        action = rep.action or ACTION_RESUBMIT
+        if action == ACTION_INSPECT:
+            inspect.append(f"{report.name} run{rep.replicate}")
+        else:
+            # A chain that failed CUDA routing names the nodes to leave out.
+            exclude = _EXCLUDE.search(rep.last_error or "")
+            key = (report.config_path, exclude.group(1) if exclude else "")
+            restart.setdefault(key, []).append(rep.replicate)
+    if restart:
         lines.append("")
         lines.append("# dead chains — resume from checkpoint with:")
-        by_cfg: dict[str, list[int]] = {}
-        for report, rep in dead:
-            by_cfg.setdefault(report.config_path, []).append(rep.replicate)
         preset = f" --preset {preset_hint}" if preset_hint else " --preset <preset>"
-        for cfg, reps in by_cfg.items():
+        for (cfg, nodes), reps in restart.items():
+            flag = f" --exclude {_with_preset_exclude(nodes, preset_hint)}" if nodes else ""
             rep_arg = ",".join(str(r) for r in sorted(reps))
-            lines.append(f"polyzymd submit -c {cfg} -r {rep_arg}{preset}")
+            lines.append(f"polyzymd submit -c {cfg} -r {rep_arg}{preset}{flag}")
+    if inspect:
+        lines.append("")
+        lines.append("# dead chains that need a look before restarting:")
+        lines.extend(inspect)
 
     stopped = [(r, rep) for r in reports for rep in r.replicates if rep.verdict == VERDICT_STOPPED]
     if stopped:

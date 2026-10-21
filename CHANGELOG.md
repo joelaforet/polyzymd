@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Seeded dynamics.**  The replicate number now seeds the initial velocities and the thermostat noise, on both engines. Each equilibration stage and production segment gets its own seed from `polyzymd.simulation.seeds.dynamics_seed(replicate, phase)`, so no stage repeats another's noise. OpenMM sets `integrator.setRandomNumberSeed` and `setVelocitiesToTemperature(T, seed)`; GROMACS MDP files get `gen_seed` and `ld_seed`. A replicate run again gives the same trajectory only on the same platform, precision and software versions.
 
+- **Dead chains in `polyzymd status` carry an action.**  `resubmit` or `inspect`, decided from the
+  last error line. The resubmit footer no longer suggests restarting chains that died on a NaN, a
+  build refusal or a missing package, and gives a chain that failed CUDA routing `--exclude` with
+  the preset's nodes and the ones it names. A preemption or node failure outranks the FATAL lines
+  a job prints after it, and the specific "Segment N failed" cause outranks the generic
+  "FATAL: run-segment failed" line.
+
 - **Systems without polymers.**
   - Co-solvents take `charge_method` (default `nagl`; `am1bcc` needs AmberTools), and the build asks you to check the default.
   - Co-solvents take `count:` for a number of molecules.
@@ -179,6 +186,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A user install of PolyzyMD shadowing the environment's.**  `polyzymd info` prints the folder `polyzymd` was imported from. Every command warns when that folder is a `pip install --user` copy (in `site.getusersitepackages()`, or put on `sys.path` by a `.pth` file there, as an editable user install does), which Python loads ahead of the pixi environment's own, and gives the fix: run with `PYTHONNOUSERSITE=1`, or `pip uninstall --user polyzymd`.
 
 - **Jobs that cannot activate their pixi environment stop.**  The OpenMM and GROMACS job scripts ran `eval "$(pixi shell-hook ...)"`, which hides a failed hook from `set -e`: on Blanca, 2 of 6 GROMACS quickstart jobs started while another job updated the environment, ran without it, wrote no `gromacs/progress.json` and still completed. The scripts now try the hook three times, ten seconds apart, and stop with `FATAL: cannot activate the pixi environment of <pixi.toml>` if it never succeeds. Both templates take the lines from `polyzymd.workflow.slurm.pixi_activation_block`.
+
+- **Status ETAs no longer spike after a wall-time rollover.**  OpenMM rates come from segment file
+  timestamps instead of the progress record, whose start time was rewritten at segment end. A job
+  that has not yet written its running record is not timed across the queue gap.
 
 - **Residue numbers of chains joined by disulfides.**  Chains linked by a disulfide load as one protein molecule (insulin A and B). The build numbered their residues by input number and name only, so residues of equal number and name in the two chains (insulin A7 and B7 CYS, A9 and B9 SER) became one residue in `solvated_system.pdb`: 51 residues got 49 numbers. The input chain is now part of the residue identity, so chain B follows chain A (insulin: 1-21, then 22-51), as for separate molecules.
 

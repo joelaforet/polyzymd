@@ -650,11 +650,11 @@ run4   354.2/1000ns   35%  QUEUED       job 28248423 PD ((Priority))  eta ?
 run5   708.2/1000ns   71%  RUNNING      job 28248388 R 39:13 bgpu-shirts2  324ns/d  eta 22h
 
 ## RML_ResorufinButyrate_none_1000ns_333K  (RML/noPoly_RML_water_333K/config.yaml)
-run3   393.4/1000ns   39%  DEAD         no job  last: FATAL: CUDA routing failed after 3 retries [RML_..._run3.28235208.out]
+run3   393.4/1000ns   39%  DEAD         no job  last: FATAL: resubmit manually with --exclude=bgpu-curc1 once a compatible node is available [RML_..._run3.28235208.out]  action: resubmit
 run4     0.0/1000ns    0%  NOT_STARTED  no job  last: Validation error: 354 polymer atom(s) lie within 1.00 A of the solute [build_r4_28214393.out]
 
 # dead chains — resume from checkpoint with:
-polyzymd submit -c RML/noPoly_RML_water_333K/config.yaml -r 3 --preset blanca-shirts
+polyzymd submit -c RML/noPoly_RML_water_333K/config.yaml -r 3 --preset blanca-shirts --exclude <preset nodes>,bgpu-curc1
 ```
 
 Each system header ends with `done/total completed`, which answers "does every condition have enough finished replicates" without reading the rows. When a `DEAD` replicate's newest log holds no error line, as after a node failure or power loss, its `last:` field shows the SLURM end state from one `sacct` call, for example `slurm: NODE_FAIL exit 0:0`.
@@ -672,11 +672,9 @@ Verdict vocabulary (the fourth column) is fixed so callers can branch on it:
 | `NOT_FOUND` | Expected replicate directory is missing from scratch |
 | `CORRUPT` | `progress.json` exists but cannot be read (empty, truncated or of the wrong shape). The `last:` field says why. `status` leaves the file as it is; fix or remove it by hand. |
 
-Throughput (`ns/d`) is measured from the newest segment with a known wall
-window (a finished or interrupted segment), falling back to the live segment
-timed from its start to now. Windows under 10 minutes or 1000 steps are
-ignored. The ETA is remaining nanoseconds divided by that rate and is only
-printed for `RUNNING` and `QUEUED` replicates.
+Each `DEAD` row ends with an action. `resubmit` means the cause leaves a valid checkpoint: a node failure, preemption, GPU fault, CUDA routing failure, a pixi environment that did not activate, a failed successor submission, or a duplicate chain whose twin has ended. `inspect` covers physics blow-ups, build refusals, a missing package and anything unrecognised. The footer prints submit commands only for `resubmit` chains and lists `inspect` chains separately. A chain that failed CUDA routing gets `--exclude` with the preset's excluded nodes and the nodes the job names, because `--exclude` replaces the preset's list (`<preset nodes>` in the example above stands for that list).
+
+Throughput (`ns/d`) of OpenMM runs comes from segment file timestamps: the parameters JSON written at segment start and the state-data CSV written on every report. A running segment that has run for at least an hour sets the rate, since it reflects the GPU the chain is on now; otherwise the newest stopped segment does. GROMACS runs, and OpenMM runs without those files, use the times in `progress.json`. The ETA is remaining nanoseconds divided by that rate and is only printed for `RUNNING` and `QUEUED` replicates.
 
 If `squeue` is unavailable the header carries a warning and every non-complete
 replicate falls back to `progress.json` alone; treat `DEAD` as unreliable in

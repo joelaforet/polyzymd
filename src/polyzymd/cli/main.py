@@ -3194,6 +3194,7 @@ def _status_report(
 
     from polyzymd.cli.status_report import (
         SystemReport,
+        assign_actions,
         build_system_report,
         fill_end_states,
         query_user_jobs,
@@ -3240,6 +3241,7 @@ def _status_report(
 
     if slurm_available:
         fill_end_states(reports)
+    assign_actions(reports)
 
     if output_format == "json":
         click.echo(

@@ -30,10 +30,10 @@ run1   361.6/1000ns   36%  RUNNING      job 28248421 R 5:27 bgpu-shirts3  176ns/
 run3   364.0/1000ns   36%  RUNNING      job 28248422 R 1:38 bgpu-biokem1  185ns/d  eta 3.4d
 run4   354.2/1000ns   35%  QUEUED       job 28248423 PD ((Priority))  eta ?
 run5   708.2/1000ns   71%  RUNNING      job 28248388 R 39:13 bgpu-shirts2  324ns/d  eta 22h
-run2   112.3/1000ns   11%  DEAD         no job  last: FATAL: CUDA routing failed after 3 retries [CALB_..._run2.28228845.out]
+run2   112.3/1000ns   11%  DEAD         no job  last: FATAL: resubmit manually with --exclude=bgpu-curc1 once a compatible node is available [CALB_..._run2.28228845.out]  action: resubmit
 
 # dead chains — resume from checkpoint with:
-polyzymd submit -c config.yaml -r 2 --preset blanca-shirts
+polyzymd submit -c config.yaml -r 2 --preset blanca-shirts --exclude <preset nodes>,bgpu-curc1
 ```
 
 Read the fourth column first. `RUNNING` and `QUEUED` mean a SLURM job with
@@ -74,11 +74,14 @@ directory that holds the config, with the correct scheduler module loaded.
 submission fails with `invalid partition specified`. Resubmission resumes from
 the last checkpoint; it never rebuilds the system.
 
-Some `last:` lines call for something other than a plain resubmit:
+Each `DEAD` row ends with `action: resubmit` or `action: inspect`. Only
+`resubmit` chains get a submit line; `inspect` chains are listed under "dead
+chains that need a look before restarting". Some `last:` lines call for
+something other than a plain resubmit:
 
 | `last:` line | Meaning | Action |
 |---|---|---|
-| `FATAL: CUDA routing failed after 3 retries` | The chain landed on nodes whose driver is too old for the pinned CUDA environment. | Resubmit. Presets exclude the known nodes; the terminal message names any others to add with `--exclude`. |
+| `FATAL: resubmit manually with --exclude=...` (after `FATAL: CUDA routing failed after 3 retries`) | The chain landed on nodes whose driver is too old for the pinned CUDA environment. | Resubmit with the footer's command, which excludes the preset's nodes (`<preset nodes>` above) and the ones the job names. |
 | `CONCURRENT: Another job is already running this replicate` | A duplicate chain exited to protect the running one. | Check whether the other chain is still alive before resubmitting. |
 | `Segment N failed: Particle coordinate is NaN` | The physics blew up. | Do not resubmit blindly; inspect the system. |
 | `Validation error: ... polymer atom(s) lie within ... of the solute` | The build refused the packed coordinates. | Rebuild the replicate. |
@@ -124,9 +127,9 @@ or ETA, run this first and answer from its output:
 
 Read the verdict column. COMPLETED and RUNNING/QUEUED need no action.
 DEAD means no job is driving the replicate; report the `last:` line
-verbatim and, unless it is a NaN or a validation error, run the
-`polyzymd submit` command from the footer (with the scheduler module
-loaded and from the config's directory). NOT_STARTED usually means the
+verbatim. For `action: resubmit`, run the `polyzymd submit` command from
+the footer (with the scheduler module loaded and from the config's
+directory); for `action: inspect`, report it and do not resubmit. NOT_STARTED usually means the
 build failed; report it and stop.
 
 Report: one summary line (counts and ETA range), a list of DEAD and
