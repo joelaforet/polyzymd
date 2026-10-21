@@ -61,11 +61,13 @@ _ERROR_PATTERNS: tuple[re.Pattern[str], ...] = (
 
 # What to do about a dead chain, decided from its last error line.
 ACTION_RESUBMIT = "resubmit"
-ACTION_SKIP_BUILD = "resubmit --skip-build"
 ACTION_INSPECT = "inspect"
 # Causes that leave a valid checkpoint behind: node, scheduler or GPU faults.
 _TRANSIENT_MARKERS = (
     "CUDA routing failed",
+    "resubmit manually with --exclude=",
+    "cannot activate the pixi environment",
+    "dependent successor submission failed",
     "CONCURRENT:",
     "CUDA_ERROR",
     "Stale file handle",
@@ -81,6 +83,7 @@ _RESUBMIT_SLURM_STATES = {
     "COMPLETED",
     "BOOT_FAIL",
 }
+_EXCLUDE = re.compile(r"--exclude=(\S+)")
 _LOG_TAIL_LINES = 80
 _LOG_HEAD_LINES = 200
 _ERROR_MAX_CHARS = 160
@@ -264,19 +267,15 @@ def query_end_states(job_ids: Sequence[str], timeout: int = 20) -> dict[str, str
 
 
 def death_action(last_error: str | None, directory: str | None) -> str:
-    """Map a dead chain's last error line to resubmit, skip-build or inspect.
+    """Map a dead chain's last error line to resubmit or inspect.
 
-    Only causes known to leave a valid checkpoint get ``resubmit``. A first
-    segment that crashed on the missing ``openff`` package is resubmitted with
-    ``--skip-build`` when the standalone build left its system files. Physics
-    blow-ups, build refusals and anything unrecognised need a person.
+    Only causes known to leave a valid checkpoint get ``resubmit``: node,
+    scheduler, GPU-routing and environment-activation faults. Physics
+    blow-ups, build refusals, a missing package and anything unrecognised
+    need a person. ``directory`` is kept for callers; the action does not
+    depend on it.
     """
     err = last_error or ""
-    if "No module named 'openff'" in err:
-        d = Path(directory) if directory else None
-        if d and (d / "system.xml").is_file() and (d / "solvated_system.pdb").is_file():
-            return ACTION_SKIP_BUILD
-        return ACTION_INSPECT
     if err.startswith("slurm: "):
         state = err.split()[1]
         return ACTION_RESUBMIT if state in _RESUBMIT_SLURM_STATES else ACTION_INSPECT
@@ -360,10 +359,11 @@ def estimate_rate_ns_per_day(
 
     Preference order:
 
-    1. The newest segment with a ``finished_at`` timestamp and enough steps
-       (a completed or cleanly interrupted segment has a known wall window).
-    2. If *live* is true (SLURM reports a running job), the newest segment
-       without ``finished_at``, timed from ``started_at`` to *now*.
+    1. With ``window_fn`` (segment file times): a running last segment past an
+       hour of data when *live*, then the newest stopped segment.
+    2. The newest segment with a ``finished_at`` timestamp and enough steps.
+    3. If *live*, the newest segment without ``finished_at``, timed from
+       ``started_at`` to *now*.
 
     Returns ``None`` when no segment gives a trustworthy window.
     """
@@ -382,7 +382,10 @@ def estimate_rate_ns_per_day(
     if window_fn is not None:
         # File timestamps first. A live segment past an hour reflects the GPU
         # the chain is on now, so it wins; otherwise use the newest stopped one.
-        if live and segments:
+        last_running = bool(segments) and (
+            getattr(segments[-1].status, "value", segments[-1].status) == "running"
+        )
+        if live and last_running:
             window = window_fn(segments[-1].index)
             if window is not None and now - window[0] >= _MIN_LIVE_WINDOW:
                 rate = _rate(segments[-1].steps_completed, window[0], now)
@@ -494,6 +497,13 @@ def last_error_line(log_path: Path | None) -> str | None:
                 break
     if best is None:
         return None
+    # A preemption or node failure explains the FATAL lines the job printed after it.
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("slurmstepd: error:") and (
+            "DUE TO PREEMPTION" in stripped or "DUE TO NODE FAILURE" in stripped
+        ):
+            best = (-1, stripped)
     text = best[1]
     if len(text) > _ERROR_MAX_CHARS:
         text = text[: _ERROR_MAX_CHARS - 1] + "…"
@@ -790,6 +800,20 @@ def render_replicate_line(rep: ReplicateReport, label_width: int) -> str:
     return "  ".join(fields)
 
 
+def _with_preset_exclude(nodes: str, preset: str | None) -> str:
+    """Join ``nodes`` with the preset's excluded nodes, since ``submit --exclude`` replaces them."""
+    names = [n for n in nodes.split(",") if n]
+    if preset:
+        try:
+            from polyzymd.workflow.slurm import SlurmConfig
+
+            configured = SlurmConfig.from_preset(preset).exclude or ""
+        except Exception:  # noqa: BLE001 - an unknown preset keeps the routing nodes only
+            configured = ""
+        names = [n for n in configured.split(",") if n] + names
+    return ",".join(dict.fromkeys(names))
+
+
 def render_agent(
     reports: Sequence[SystemReport],
     *,
@@ -857,13 +881,16 @@ def render_agent(
         if action == ACTION_INSPECT:
             inspect.append(f"{report.name} run{rep.replicate}")
         else:
-            restart.setdefault((report.config_path, action), []).append(rep.replicate)
+            # A chain that failed CUDA routing names the nodes to leave out.
+            exclude = _EXCLUDE.search(rep.last_error or "")
+            key = (report.config_path, exclude.group(1) if exclude else "")
+            restart.setdefault(key, []).append(rep.replicate)
     if restart:
         lines.append("")
         lines.append("# dead chains — resume from checkpoint with:")
         preset = f" --preset {preset_hint}" if preset_hint else " --preset <preset>"
-        for (cfg, action), reps in restart.items():
-            flag = " --skip-build" if action == ACTION_SKIP_BUILD else ""
+        for (cfg, nodes), reps in restart.items():
+            flag = f" --exclude {_with_preset_exclude(nodes, preset_hint)}" if nodes else ""
             rep_arg = ",".join(str(r) for r in sorted(reps))
             lines.append(f"polyzymd submit -c {cfg} -r {rep_arg}{preset}{flag}")
     if inspect:

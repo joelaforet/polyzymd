@@ -672,8 +672,12 @@ def test_death_action_mapping(tmp_path):
         ("slurm: OUT_OF_MEMORY exit 0:125", None, "inspect"),
         ("Segment 0 failed: Particle coordinate is NaN.", None, "inspect"),
         ("Validation error: 354 polymer atom(s) lie within 1.00 A", None, "inspect"),
-        (openff, str(built), "resubmit --skip-build"),
+        # submit always loads the build, so a missing package dies again on resubmit.
+        (openff, str(built), "inspect"),
         (openff, str(tmp_path / "empty"), "inspect"),
+        ("FATAL: resubmit manually with --exclude=bgpu-a,bgpu-b once a", None, "resubmit"),
+        ("FATAL: cannot activate the pixi environment of /p/pixi.toml", None, "resubmit"),
+        ("FATAL: dependent successor submission failed", None, "resubmit"),
         (None, None, "inspect"),
     ]
     for err, directory, expected in cases:
@@ -685,14 +689,14 @@ def test_footer_splits_restart_and_inspect():
         1, "dead", last_error="Segment 0 failed: Particle coordinate is NaN.", action="inspect"
     )
     gone = _rep(2, "dead", last_error="CONCURRENT: x", action="resubmit")
-    fresh = _rep(3, "dead", last_error="No module named 'openff'", action="resubmit --skip-build")
+    fresh = _rep(3, "dead", last_error="No module named 'openff'", action="inspect")
     text = render_agent(
         [SystemReport("SYS", "c.yaml", "/s", [nan, gone, fresh])], now=NOW, preset_hint="p"
     )
     assert "polyzymd submit -c c.yaml -r 2 --preset p\n" in text
-    assert "polyzymd submit -c c.yaml -r 3 --preset p --skip-build" in text
-    assert "# dead chains that need a look before restarting:\nSYS run1" in text
-    assert "-r 1" not in text
+    assert "--skip-build" not in text
+    assert "# dead chains that need a look before restarting:\nSYS run1\nSYS run3" in text
+    assert "-r 1" not in text and "-r 3" not in text
     assert "action: inspect" in text
 
 
@@ -765,3 +769,48 @@ def test_corrupt_row_shows_the_live_job():
     assert "job 555 R 2:00:00 nodeA" in line
     assert "no job" not in line
     assert "last: progress.json is unreadable" in line
+
+
+def test_a_cuda_routing_death_is_resubmitted_without_its_failed_nodes(tmp_path):
+    """The job prints two FATAL lines; the restart command leaves out the nodes it names."""
+    from polyzymd.cli.status_report import death_action, last_error_line
+    from polyzymd.workflow.slurm import SlurmConfig
+
+    log = tmp_path / "job.out"
+    log.write_text(
+        "FATAL: CUDA routing failed after 3 retries; incompatible nodes: bgpu-a,bgpu-b\n"
+        "FATAL: resubmit manually with --exclude=bgpu-a,bgpu-b once a compatible node is available\n"
+    )
+    err = last_error_line(log)
+    assert death_action(err, None) == "resubmit"
+    rep = _rep(4, "dead", last_error=err, action="resubmit")
+    text = render_agent(
+        [SystemReport("SYS", "c.yaml", "/s", [rep])], now=NOW, preset_hint="blanca-shirts"
+    )
+    preset_nodes = SlurmConfig.from_preset("blanca-shirts").exclude
+    assert (
+        f"polyzymd submit -c c.yaml -r 4 --preset blanca-shirts --exclude {preset_nodes},bgpu-a,bgpu-b"
+        in text
+    )
+
+
+def test_a_preemption_explains_the_fatal_lines_after_it(tmp_path):
+    """A GROMACS job killed by preemption prints a FATAL after slurmstepd's line; it is resubmitted."""
+    from polyzymd.cli.status_report import death_action, last_error_line
+
+    log = tmp_path / "job.out"
+    log.write_text(
+        "slurmstepd: error: *** JOB 42 ON bgpu-x CANCELLED AT 2026-10-20T01:00:00 DUE TO PREEMPTION ***\n"
+        "FATAL: production failed (exit code 143)\n"
+    )
+    err = last_error_line(log)
+    assert "DUE TO PREEMPTION" in err
+    assert death_action(err, None) == "resubmit"
+
+
+def test_live_rate_ignores_a_finished_last_segment():
+    """A job that has not yet written its running record does not time the queue gap."""
+    seg = SegmentRecord(index=0, steps_completed=86_400_000, status=SegmentStatus.INTERRUPTED)
+    windows = {0: (NOW - timedelta(hours=36), NOW - timedelta(hours=12))}  # 172.8 ns over 24 h
+    rate = estimate_rate_ns_per_day(_progress([seg]), NOW, live=True, window_fn=windows.get)
+    assert rate is not None and abs(rate - 172.8) < 1.0
